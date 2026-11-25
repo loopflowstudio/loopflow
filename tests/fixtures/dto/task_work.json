@@ -19,7 +19,7 @@
     "name": "feature",
     "control": {
       "action": "pause",
-      "label": "Running: implement"
+      "label": "build · implement"
     },
     "interactive_steps": [
       {

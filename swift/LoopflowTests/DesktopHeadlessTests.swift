@@ -410,7 +410,7 @@ struct DesktopHeadlessTests {
             run: { args, _ in
                 if args.prefix(2) == ["plan", "list"] { return String(decoding: planning, as: UTF8.self) }
                 if args.prefix(2) == ["task", "run"] || args.prefix(2) == ["task", "complete"]
-                    || args.contains("auto") {
+                    || args.prefix(2) == ["task", "reopen"] || args.contains("auto") {
                     await started.add(args)
                 }
                 return "{}"
@@ -443,7 +443,7 @@ struct DesktopHeadlessTests {
         let header = TaskWorkflowHeader(model: model, task: task, work: .available(try work()))
         #expect(try header.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-position").text().string()
             == "build is running implement. You are next needed at demo.")
-        _ = try running.inspect().find(text: "Running: implement")
+        _ = try running.inspect().find(text: "build · implement")
         _ = try running.inspect().find(button: "Interrupt step")
 
         // Stopped, it holds the Task and is offered again.
@@ -457,6 +457,8 @@ struct DesktopHeadlessTests {
         _ = try waiting.inspect().find(text: "Run: end")
         try next.tap()
         #expect(try await tapped(1) == ["task", "run", task.task.identifier, "--json"])
+        // The chip says the run is starting until the Machine answers.
+        for _ in 0..<200 where model.pendingChanges.controlRequest(for: task.task.identifier) != nil { try await Task.sleep(for: .milliseconds(5)) }
         // Auto-Ship sits in the Workflow bar, not in the detail page's Workflow header.
         #expect(throws: (any Error).self) {
             try header.inspect().find(viewWithAccessibilityIdentifier: "task-auto")
@@ -477,6 +479,7 @@ struct DesktopHeadlessTests {
             try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: wire))))
         try unstarted.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-primary").button().tap()
         #expect(try await tapped(3) == ["task", "run", task.task.identifier, "--json"])
+        for _ in 0..<200 where model.pendingChanges.controlRequest(for: task.task.identifier) != nil { try await Task.sleep(for: .milliseconds(5)) }
 
         // A direct step pick restarts the Graph at the chosen place.
         for step in ["start", "review-design", "demo"] {
@@ -484,20 +487,26 @@ struct DesktopHeadlessTests {
         }
         try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move-review-design").button().tap()
         #expect(try await tapped(4) == ["task", "run", task.task.identifier, "--from", "review-design", "--json"])
+        for _ in 0..<200 where model.pendingChanges.controlRequest(for: task.task.identifier) != nil { try await Task.sleep(for: .milliseconds(5)) }
 
         // Completion has its own operation and does not move the Workflow.
         model.completeTask(task)
+        // Completing says so in the click, with Undo, which reopens the Task.
+        let completed = try #require(model.navigation.notices.current)
+        #expect(completed.text == "\(task.task.identifier) completed")
         for _ in 0..<200 where await started.calls.last?.contains("complete") != true { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls.last == ["task", "complete", task.task.identifier, "--json"])
-
-        // Auto-Ship says it was requested, never that it shipped; its Undo is Stop Auto-Ship.
-        model.turnAutoOn(task)
-        let notice = try #require(model.navigation.notices.current)
-        #expect(notice.text == "\(task.task.identifier) Auto-Ship requested")
-        let view = NoticeView(center: model.navigation.notices)
         let sent = await started.calls.count
-        try view.inspect().find(viewWithAccessibilityIdentifier: "notice-action").button().tap()
+        try #require(completed.action).perform()
         for _ in 0..<200 where await started.calls.count == sent { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(await started.calls.last == ["task", "reopen", task.task.identifier, "--json"])
+
+        // The switch turns in the click with no Notice; turning it off sends lf task auto off.
+        model.navigation.notices.clear(key: "complete-\(task.task.identifier)")
+        model.turnAutoOff(task)
+        #expect(model.pendingChanges.autoRequest(for: task.task.identifier) == false)
+        #expect(model.navigation.notices.current?.text.contains("requested") != true)
+        for _ in 0..<200 where await started.calls.last?.contains("off") != true { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls.last == ["task", "auto", "off", task.task.identifier, "--json"])
     }
 
@@ -540,16 +549,17 @@ struct DesktopHeadlessTests {
         }
     }
 
-    @Test("The split menu holds steps and lifecycle actions, and the ellipsis holds metadata")
+    @Test("The chip's menu holds steps and lifecycle actions; metadata stays on right-click")
     func workflowBarMenus() throws {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: loadFixtureData("roadmap_snapshot.json"))
         let task = try #require(roadmap.waves.first?.tasks.items.first { !$0.isCompleted })
         let work = try JSONDecoder().decode(TaskOverview.self, from: loadFixtureData("task_work.json"))
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") })
         let bar = try TaskWorkflowBar(model: model, task: task, work: .available(work)).inspect()
-        let metadata = try bar.find(viewWithAccessibilityIdentifier: "task-actions")
-        _ = try metadata.find(button: "Copy Task ID")
-        #expect(throws: (any Error).self) { try metadata.find(button: "Abandon…") }
+        #expect(throws: (any Error).self) { try bar.find(viewWithAccessibilityIdentifier: "task-actions") }
+        // The running step is the chip; the others are steps to start from.
+        _ = try bar.find(viewWithAccessibilityIdentifier: "task-workflow-step-0")
+        #expect(throws: (any Error).self) { try bar.find(viewWithAccessibilityIdentifier: "task-workflow-step-2") }
         let steps = try bar.find(viewWithAccessibilityIdentifier: "task-workflow-move")
         for action in ["build", "demo", "Interrupt step", "Abandon…"] { _ = try steps.find(button: action) }
         #expect(throws: (any Error).self) { try steps.find(button: "Copy Task ID") }

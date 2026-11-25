@@ -55,6 +55,7 @@ final class TaskActionsTests: XCTestCase {
         }
     }
 
+    /// The track grows and folds between Auto and the transport button; the row keeps its width.
     func testPausingKeepsTheWorkflowControlsTheSameWidth() throws {
         func width(paused: Bool) throws -> CGFloat {
             guard case .value(let reading) = try reading(sessions: true, pausedAt: paused ? (.resume, "Paused: implement") : nil) else {
@@ -64,10 +65,10 @@ final class TaskActionsTests: XCTestCase {
             let row = try XCTUnwrap(reading.row)
             let controls = TaskWorkflowControls(task: row, actions: reading.actions(for: row), pending: nil,
                 run: { _ in }, pause: { _ in }, interrupt: {}, toggleAuto: {}, complete: {}) { EmptyView() }
-            return UIHostingController(rootView: controls.fixedSize()).sizeThatFits(in: CGSize(width: 400, height: 80)).width
+            return UIHostingController(rootView: controls).sizeThatFits(in: CGSize(width: 360, height: 80)).width
         }
         let running = try width(paused: false)
-        XCTAssertGreaterThan(running, 200)
+        XCTAssertLessThanOrEqual(running, 361)
         XCTAssertEqual(try width(paused: true), running)
     }
 

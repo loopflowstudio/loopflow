@@ -80,3 +80,16 @@ apps can open a Task that reads `wait`.
 ## Open questions (beyond LOO-1078)
 
 - **Holistic session-vs-worker availability:** A paused Task keeps its primary Task Session open, so sidebar rows can currently show `Available · inferred` while in the `Paused` Working group. The Task Session and the Graph worker are separate concepts, so leave `Available` intact in `LOO-1078` and think through availability semantics holistically in a dedicated design pass.
+
+## C1 track (Revision 5)
+
+The chip text is Rust's `WorkflowControl.label`, so Rust words it: running
+`build · implement` (the step alone when it is top-level), a human step
+`ship-review · next: deliver`. Paused, Pausing, Waiting, Run and Done keep
+their words. The bar no longer names the Graph; the track's hover shows Rust's
+sentence (or setup's reason).
+
+A pending Run or Interrupt changes no row; the chip reads Starting… or
+Interrupting… until a reading covers the answer. Auto patches the switch and
+the row's auto mark, and moves an Active Working row to Shipping; turning it
+off leaves the group for the Machine to say.

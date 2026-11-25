@@ -67,20 +67,16 @@ struct TaskWorkspaceView: View {
 
     @ViewBuilder private var header: some View {
         if case .value(let reading) = reading, let row = reading.row, feed.pendingChanges.acceptsChanges {
-            let actions = reading.actions(for: row, outline: outline)
+            let actions = reading.actions(for: row, outline: outline,
+                                          autoPending: feed.pendingChanges.autoRequest(for: row.task.identifier))
             VStack(alignment: .leading, spacing: Spacing.xs) {
-                if let graph = reading.work.graph {
-                    WorkflowLine(graph: graph, auto: actions.auto == .on, style: .steps)
-                        .accessibilityHint(graph.sentence)
-                }
                 if let machine = reading.machine(pairedWith: client.savedMachine.machineID) {
                     Label("On \(machine)", systemImage: "desktopcomputer")
                         .font(Typography.meta)
                         .foregroundStyle(theme.palette.textSecondary)
                         .accessibilityIdentifier("task-machine")
                 }
-                HStack {
-                    Spacer(minLength: 0)
+                HStack(spacing: Spacing.sm) {
                     controls(row, actions)
                     metadata(row, sessions: reading.work.sessions)
                 }
@@ -110,8 +106,8 @@ struct TaskWorkspaceView: View {
         let row: RoadmapTask?
         let execution: TaskExecution?
 
-        func actions(for row: RoadmapTask, outline: WorkflowOutline? = nil) -> TaskActions {
-            TaskActions(work: work, row: row, execution: execution, outline: outline)
+        func actions(for row: RoadmapTask, outline: WorkflowOutline? = nil, autoPending: Bool? = nil) -> TaskActions {
+            TaskActions(work: work, row: row, execution: execution, outline: outline, autoPending: autoPending)
         }
 
         /// The Machine whose checkout this is, by name, when it is not `paired`.
@@ -179,32 +175,44 @@ struct TaskWorkspaceView: View {
 
     private func controls(_ row: RoadmapTask, _ actions: TaskActions) -> some View {
         let (issue, directory) = (row.task.identifier, row.task.repo)
-        func send(_ name: String, _ write: ServedWrite) { feed.request(name, issue: issue, write: write) }
-        return TaskWorkflowControls(task: row, actions: actions, pending: feed.pendingChanges.pauseRequest(for: issue),
+        func change(_ command: PendingCommand, _ verb: String, _ write: ServedWrite) {
+            feed.change(command, issue: issue, verb: verb, write: write)
+        }
+        return TaskWorkflowControls(task: row, actions: actions, pending: feed.pendingChanges.controlRequest(for: issue),
             run: { step in
-                send("Run", .taskRun(directory: directory, issue: issue, graph: nil, from: step, agent: nil, approve: false))
+                change(.run(task: issue), "started",
+                       .taskRun(directory: directory, issue: issue, graph: nil, from: step, agent: nil, approve: false))
             }, pause: { action in
                 feed.pendingChanges.setPause(action, issue: issue, directory: directory, notices: feed.notices, show: nil) {
                     await feed.refresh()
                 }
-            }, interrupt: { send("Interrupt step", .taskInterrupt(directory: directory, issue: issue)) },
+            }, interrupt: { change(.interrupt(task: issue), "interrupted", .taskInterrupt(directory: directory, issue: issue)) },
             toggleAuto: {
                 guard let auto = actions.auto else { return }
-                send(auto.offer, auto == .on ? .taskAutoOff(directory: directory, issue: issue) : .taskAutoOn(directory: directory, issue: issue))
-            }, complete: { send("Complete", .taskComplete(directory: directory, issue: issue)) }) {
+                if auto == .on {
+                    change(.auto(task: issue, on: false), "taken off auto", .taskAutoOff(directory: directory, issue: issue))
+                } else {
+                    change(.auto(task: issue, on: true), "put on auto", .taskAutoOn(directory: directory, issue: issue))
+                }
+            }, complete: {
+                feed.notices.post(Notice("\(issue) completed", key: "complete-\(issue)", action: Notice.Action("Undo") {
+                    feed.change(.reopen(task: issue), issue: issue, verb: "reopened", write: .taskReopen(directory: directory, issue: issue))
+                }))
+                change(.complete(task: issue), "completed", .taskComplete(directory: directory, issue: issue))
+            }) {
                 if row.isCompleted {
-                    Button("Reopen Task") { send("Reopen", .taskReopen(directory: directory, issue: issue)) }
+                    Button("Reopen Task") { change(.reopen(task: issue), "reopened", .taskReopen(directory: directory, issue: issue)) }
                 } else {
                     if row.isUnassigned {
-                        Button("Claim Task") { send("Claim", .taskClaim(directory: directory, issue: issue)) }
+                        Button("Claim Task") { change(.claim(task: issue, owner: nil), "claimed", .taskClaim(directory: directory, issue: issue)) }
                     } else {
-                        Button("Unassign Task") { send("Unassign", .taskUnassign(directory: directory, issue: issue)) }
+                        Button("Unassign Task") { change(.unassign(task: issue), "unassigned", .taskUnassign(directory: directory, issue: issue)) }
                     }
                     Button("Abandon…", role: .destructive) { confirmingAbandon = true }
                 }
             }
             .confirmationDialog("Abandon \(issue)?", isPresented: $confirmingAbandon) {
-                Button("Abandon Task", role: .destructive) { send("Abandon", .taskAbandon(directory: directory, issue: issue)) }
+                Button("Abandon Task", role: .destructive) { change(.abandon(task: issue), "abandoned", .taskAbandon(directory: directory, issue: issue)) }
             } message: {
                 Text("Cancels the Task, closes its PRs and deletes its branches.")
             }
@@ -213,13 +221,9 @@ struct TaskWorkspaceView: View {
     private func metadata(_ row: RoadmapTask, sessions: [TaskSession]) -> some View {
         Menu("Task actions", systemImage: "ellipsis") {
             Menu("Move to Wave") {
-                Button("No Wave") {
-                    feed.request("Move", issue: row.task.identifier, write: .taskMove(directory: row.task.repo, issue: row.task.identifier, wave: nil, machine: nil))
-                }.disabled(row.task.waveId == nil)
+                Button("No Wave") { move(row, to: nil) }.disabled(row.task.waveId == nil)
                 ForEach(feed.waves.filter { $0.repo == row.task.repo }) { wave in
-                    Button(wave.displayName) {
-                        feed.request("Move", issue: row.task.identifier, write: .taskMove(directory: row.task.repo, issue: row.task.identifier, wave: wave.id, machine: nil))
-                    }.disabled(wave.id == row.task.waveId)
+                    Button(wave.displayName) { move(row, to: wave.id) }.disabled(wave.id == row.task.waveId)
                 }
             }
             if let wave = row.task.waveId {
@@ -242,6 +246,12 @@ struct TaskWorkspaceView: View {
         }
         .labelStyle(.iconOnly)
         .frame(width: 44, height: 44)
+    }
+
+    private func move(_ row: RoadmapTask, to wave: String?) {
+        let issue = row.task.identifier
+        feed.change(.move(task: issue, wave: wave), issue: issue, verb: "moved",
+                    write: .taskMove(directory: row.task.repo, issue: issue, wave: wave, machine: nil))
     }
 
     /// The Machine of the latest reading: Changes reads again when it moves.

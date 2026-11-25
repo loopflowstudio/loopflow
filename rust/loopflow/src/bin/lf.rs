@@ -1442,9 +1442,11 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                             println!("{text}");
                         }
                     }
-                    None if *run => println!(
-                        "It waits for you at its step; `lf task run {issue}` continues past it."
-                    ),
+                    None if *run => {
+                        if let Some(text) = loopflow_execution::ops::task::pause::parked(issue)? {
+                            println!("{text}");
+                        }
+                    }
                     None => {}
                 }
             }

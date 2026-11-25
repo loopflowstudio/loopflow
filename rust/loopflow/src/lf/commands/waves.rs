@@ -2467,6 +2467,11 @@ async fn snapshot_task_detail(
                 .as_deref()
                 .filter(|_| execution.state == TaskExecutionState::Running),
             pause_cleanup: facts.pause_cleanup.get(&task.id).copied(),
+            resumes_on_unpause: status == TaskState::Paused
+                && loopflow_execution::store::task_work::resumes_on_unpause(
+                    &store.sqlite,
+                    &task.id,
+                )?,
             // Shared completion withdraws an unstarted Task, never moves its Graph.
             plan_terminal_reason: loopflow_execution::linear::terminal_reason(
                 task.state.as_deref(),

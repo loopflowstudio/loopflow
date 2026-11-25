@@ -238,6 +238,19 @@ fn decode_row(row: SavedTaskGraphRow) -> StoreResult<TaskGraphRow> {
 pub fn task_graph_row(store: &SqliteStore, task: &TaskId) -> StoreResult<Option<TaskGraphRow>> {
     store.task_graph_row(task)?.map(decode_row).transpose()
 }
+
+/// Whether unpausing restarts the saved run: a Task waiting for a person, at
+/// a landing stop with auto off or at its end stays there. A Task with no
+/// Graph yet starts one.
+pub fn resumes_on_unpause(store: &SqliteStore, task: &TaskId) -> StoreResult<bool> {
+    Ok(task_graph_row(store, task)?.is_none_or(|row| {
+        row.graph.resumes_on_unpause(
+            &row.step,
+            row.run.as_ref().map(|(cursor, _)| cursor),
+            row.auto,
+        )
+    }))
+}
 pub(crate) fn task_graph_record(
     store: &SqliteStore,
     task: &TaskId,

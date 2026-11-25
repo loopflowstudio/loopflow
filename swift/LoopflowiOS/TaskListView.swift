@@ -84,9 +84,10 @@ final class TaskFeed {
         }
     }
 
-    /// Start, Run, Auto-Ship and Stop Auto-Ship: the Notice says the change was requested.
-    func request(_ name: String, issue: String, write: ServedWrite) {
-        pendingChanges.request(name, subject: issue, write: write, notices: notices) { [weak self] in
+    /// Show `command` on the Task now and send `write`; a refusal undoes it and
+    /// the Notice says "LOO-4 couldn't be `verb`: …".
+    func change(_ command: PendingCommand, issue: String, verb: String, write: ServedWrite) {
+        pendingChanges.make(command, subject: issue, verb: verb, write: write, notices: notices, show: nil) { [weak self] in
             try? await self?.observation?.refresh()
         }
     }

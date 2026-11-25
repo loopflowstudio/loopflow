@@ -189,6 +189,34 @@ pub fn unpause(issue: &str) -> OpsResult<()> {
     release(issue, false).map(drop)
 }
 
+/// Where a Task that `lf task unpause --run` left in place waits, and the
+/// command that moves it: past a human step, past a landing stop with auto
+/// off, or to completion at its end.
+pub fn parked(issue: &str) -> OpsResult<Option<String>> {
+    use crate::task_graph::WorkflowAction;
+    block_on_task(async {
+        let store = task_store().await?;
+        let Some(task) = store.get_task_by_issue(issue).await.map_err(task_error)? else {
+            return Ok(None);
+        };
+        let Some(graph) =
+            crate::store::task_work::task_graph(&store.sqlite, &task.id).map_err(task_error)?
+        else {
+            return Ok(None);
+        };
+        let id = &task.identifier;
+        let next = match graph.control.action {
+            WorkflowAction::Run => format!("`lf task run {id}` continues past it."),
+            WorkflowAction::Wait => format!("`lf task auto on {id}` lands it."),
+            WorkflowAction::Done => format!("`lf task complete {id}` finishes it."),
+            WorkflowAction::Pause | WorkflowAction::Unpause | WorkflowAction::Resume => {
+                return Ok(None)
+            }
+        };
+        Ok(Some(format!("{} {next}", graph.sentence)))
+    })
+}
+
 /// Keep admission through placement when the detached unpause carries on as the run.
 pub(super) fn release(issue: &str, resume: bool) -> OpsResult<Option<(TaskId, File)>> {
     block_on_task(async {
@@ -201,15 +229,8 @@ pub(super) fn release(issue: &str, resume: bool) -> OpsResult<Option<(TaskId, Fi
             );
         }
         let start = resume
-            && crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
-                .map_err(task_error)?
-                .is_none_or(|row| {
-                    row.graph.resumes_on_unpause(
-                        &row.step,
-                        row.run.as_ref().map(|(cursor, _)| cursor),
-                        row.auto,
-                    )
-                });
+            && crate::store::task_work::resumes_on_unpause(&store.sqlite, &task.id)
+                .map_err(task_error)?;
         store.sqlite.release_task_pause(&task.id).map_err(refused)?;
         Ok(start.then_some((task.id, admission)))
     })

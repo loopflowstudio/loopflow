@@ -17,6 +17,8 @@ pub struct TaskRunEvidence<'a> {
     pub issue: &'a str,
     pub running_step: Option<&'a str>,
     pub pause_cleanup: Option<PauseCleanup>,
+    /// Unpausing restarts the saved run rather than leaving it at a stop.
+    pub resumes_on_unpause: bool,
     pub plan_terminal_reason: Option<&'a str>,
     pub worktree_blocker: Option<&'a str>,
     pub launch_refusal: Option<&'a str>,
@@ -40,7 +42,14 @@ pub fn task_run_control(evidence: &TaskRunEvidence) -> TaskRunControl {
         return TaskRunControl {
             pausing: stopping.is_some(),
             unavailable: Some(stopping.unwrap_or_else(|| {
-                loopflow_storage::sqlite::task_pause::run_refusal(evidence.issue)
+                if evidence.resumes_on_unpause {
+                    format!(
+                        "Task is paused; run `lf task unpause --run {}` to resume it",
+                        evidence.issue
+                    )
+                } else {
+                    loopflow_storage::sqlite::task_pause::run_refusal(evidence.issue)
+                }
             })),
         };
     }
@@ -74,6 +83,7 @@ mod tests {
             pause_cleanup: Some(PauseCleanup {
                 worker_session: Some(42),
             }),
+            resumes_on_unpause: false,
             plan_terminal_reason: None,
             worktree_blocker: Some("checkout is initializing"),
             launch_refusal: None,
@@ -92,6 +102,11 @@ mod tests {
         assert_eq!(
             refusal(&evidence),
             "Task is paused; run `lf task unpause FIX-1` to lift the hold"
+        );
+        evidence.resumes_on_unpause = true;
+        assert_eq!(
+            refusal(&evidence),
+            "Task is paused; run `lf task unpause --run FIX-1` to resume it"
         );
     }
 
@@ -127,6 +142,7 @@ mod tests {
                 issue: "FIX-1",
                 running_step: None,
                 pause_cleanup: None,
+                resumes_on_unpause: false,
                 plan_terminal_reason: plan,
                 worktree_blocker: checkout,
                 launch_refusal: process,

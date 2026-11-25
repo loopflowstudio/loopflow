@@ -16,6 +16,12 @@ public enum PendingCommand: Equatable, Sendable {
     case claim(task: String, owner: TaskOwner?)
     case pause(task: String)
     case unpause(task: String)
+    /// The switch shows `on`; a Working row with auto on is Shipping.
+    case auto(task: String, on: Bool)
+    /// The workflow control says the run is starting or the step is stopping;
+    /// rows wait for the Machine.
+    case run(task: String)
+    case interrupt(task: String)
     /// Backlog.
     case unassign(task: String)
     /// Leaves every list filtered to another Wave; nil leaves it in none.
@@ -28,7 +34,8 @@ public enum PendingCommand: Equatable, Sendable {
     public var task: String? {
         switch self {
         case .complete(let task), .abandon(let task), .reopen(let task), .claim(let task, _), .unassign(let task),
-             .move(let task, _), .pause(let task), .unpause(let task): task
+             .move(let task, _), .pause(let task), .unpause(let task), .auto(let task, _), .run(let task),
+             .interrupt(let task): task
         case .renameSession, .reorder: nil
         }
     }
@@ -93,14 +100,30 @@ public final class PendingChanges {
 
     // MARK: Making changes
 
-    /// The Machine is settling this request. A second click waits for its answer.
-    public func pauseRequest(for issue: String) -> String? {
-        for change in changes where change.answer == nil && change.command.task == issue {
+    public static let pausing = "Pausing…"
+    public static let unpausing = "Unpausing…"
+    public static let starting = "Starting…"
+    public static let interrupting = "Interrupting…"
+
+    /// The workflow control's change the Machine is settling, or answered with
+    /// no reading showing it yet. A second click waits for that reading.
+    public func controlRequest(for issue: String) -> String? {
+        for change in changes where change.command.task == issue {
             switch change.command {
-            case .pause: return "Pausing…"
-            case .unpause: return "Unpausing…"
+            case .pause: return Self.pausing
+            case .unpause: return Self.unpausing
+            case .run: return Self.starting
+            case .interrupt: return Self.interrupting
             default: continue
             }
+        }
+        return nil
+    }
+
+    /// The auto setting the switch shows until a reading covers its change.
+    public func autoRequest(for issue: String) -> Bool? {
+        for change in changes.reversed() {
+            if case .auto(issue, let on) = change.command { return on }
         }
         return nil
     }
@@ -110,8 +133,9 @@ public final class PendingChanges {
         let change: (command: PendingCommand, write: ServedWrite, verb: String) = switch action {
         case .pause:
             (.pause(task: issue), .taskPause(directory: directory, issue: issue), "paused")
-        case .unpause, .unpauseWithoutRunning:
-            (.unpause(task: issue), .taskUnpause(directory: directory, issue: issue, run: action == .unpause), "unpaused")
+        case .unpause:
+            // The Machine reads the saved step: a run resumes, a human step keeps waiting.
+            (.unpause(task: issue), .taskUnpause(directory: directory, issue: issue, run: true), "unpaused")
         }
         make(change.command, subject: issue, verb: change.verb, write: change.write,
              notices: notices, show: show, answered: answered)
@@ -125,7 +149,8 @@ public final class PendingChanges {
     @discardableResult
     public func make(_ command: PendingCommand, subject: String, verb: String, write: ServedWrite, notices: NoticeCenter,
                      show: Notice.Action?,
-                     answered: @escaping @MainActor () async throws -> Void = {}) -> Task<Void, Never> {
+                     answered: @escaping @MainActor () async throws -> Void = {},
+                     refused: @escaping @MainActor () -> Void = {}) -> Task<Void, Never> {
         let requestID = UUID().uuidString
         changes.append(Change(requestID: requestID, command: command, answer: nil))
         let order = command.workingOrder
@@ -141,6 +166,7 @@ public final class PendingChanges {
             } catch {
                 let notice = Notice("\(subject) couldn't be \(verb): \(message(for: error))", key: requestID, action: show)
                 notices.post(notice)
+                refused()
                 let failure = error as? ServerError
                 if order != nil {
                     // Order edits commit atomically. Revisions on a definite refusal came from another write.
@@ -162,9 +188,9 @@ public final class PendingChanges {
         return task
     }
 
-    /// Start, Run and the two Auto-Ship requests change nothing on screen: the
-    /// Notice says "LOO-5 Auto-Ship requested" in the click and the Machine's readings
-    /// show the rest. A refusal posts over it.
+    /// A request with nothing to show on a row, such as answering a tracker: the
+    /// Notice says "LOO-5 Keep theirs requested" in the click and the Machine's
+    /// readings show the rest. A refusal posts over it.
     public func request(_ name: String, subject: String, write: ServedWrite, notices: NoticeCenter,
                         undo: Notice.Action? = nil, answered: @escaping @MainActor () async -> Void = {},
                         refused: @escaping @MainActor () -> Void = {}) {
@@ -339,7 +365,13 @@ public final class PendingChanges {
                 contents.updateStates(of: matches) { states in
                     states.unpausing().inSection(.backlog)
                 }
-            case .renameSession, .reorder:
+            case .auto(_, let on):
+                contents.updateStates(of: matches) { on ? $0.union([.auto]) : $0.subtracting([.auto]) }
+                for index in contents.indices where matches.contains(contents[index].work) && on
+                    && contents[index].workingGroup == .active {
+                    contents[index].workingGroup = .shipping
+                }
+            case .run, .interrupt, .renameSession, .reorder:
                 break
             }
             contents.removeAll { gone.contains($0.work) }
@@ -400,7 +432,10 @@ public final class PendingChanges {
             case .move(_, let target):
                 tasks[index].task.waveId = target
                 if let wave, wave != target { tasks.remove(at: index) }
-            case .renameSession, .reorder:
+            case .auto(_, let on):
+                if on { tasks[index].selectionStates.insert(.auto) } else { tasks[index].selectionStates.remove(.auto) }
+                if on, tasks[index].workingGroup == .active { tasks[index].workingGroup = .shipping }
+            case .run, .interrupt, .renameSession, .reorder:
                 break
             }
         }

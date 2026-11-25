@@ -393,25 +393,27 @@ your Ghostty configuration at launch, ignores its `theme =` setting and leaves
 the file untouched.
 Source and license notices ship offline with the catalogue.
 
-Under the jump bar, the Graph shows the Task’s current stage. The split button names the step.
+Under the jump bar, the workflow track shows the Task’s steps. The step it stands at
+grows into a chip that says what is happening there.
 
 ```text
-code  plan  build  👤ship-review  deliver  verify    [⏸ | Running: implement ▾]  Auto ◉  ✓  …
+[⏸]  plan  build · implement ▾  👤ship-review  deliver  verify            Auto ◉  ✓
 ```
 
-Click ⏸ to pause the worker and keep talking in the Task conversation. Click ▶ to resume
-the interrupted step. At a human stop, ▶ first lifts the hold. Once you finish the
-review, **Run** names the step that will follow it. A failed or interrupted run
-offers its saved step again.
+Click ⏸ to pause the worker and keep talking in the Task conversation; the chip reads
+**Paused: implement**. Click ▶ to resume the interrupted step. At a human stop, ▶ lifts
+the hold and the Task waits there for you. Once you finish the review, the chip reads
+**ship-review · next: deliver** and ▶ runs deliver. A failed or interrupted run offers
+its saved step again.
 
-Click the step label to pick a starting point, interrupt a running step, or pause at
-review. When ▶ would start work, the menu offers **Unpause without running**.
-The same menu has Claim or Unassign and
-**Abandon…**. The Auto switch runs through the remaining human steps when armed.
-You can switch it off while paused. The checkmark completes the Task and lights
-up when its PR merges or its Graph reaches the end. If verify stops after merge,
-**Run: verify** is still available beside the checkmark. **…** holds conversations,
-Wave moves, links and copy actions.
+Click any other step to start from it. Click the chip to pick a starting point,
+interrupt a running step, or pause at review; the same menu has Claim or Unassign and
+**Abandon…**. On a narrow pane only ▶, the chip and its menu stay. The Auto switch runs
+through the remaining human steps when armed. You can switch it off while paused.
+The checkmark completes the Task and lights up when its PR merges or its Graph reaches
+the end. If verify stops after merge, **Run: verify** is still available beside the
+checkmark. Right-click the Task in the sidebar for conversations, Wave moves, links and
+copy actions.
 
 ```text
 ⌘T          new shell tab in the Task’s Shell tool

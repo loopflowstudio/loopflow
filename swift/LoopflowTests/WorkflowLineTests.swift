@@ -79,7 +79,7 @@ struct WorkflowLineTests {
         #expect(line.sentence == sentence)
     }
 
-    @Test("An outline: every step ahead, where you take part under the steps; a Task's bar shows the name and no sentence")
+    @Test("An outline: every step ahead, where you take part under the steps")
     func outline() throws {
         let outline = WorkflowOutline(start: .init(action: .run, label: "Run: plan"), steps: Self.code, interactiveSteps: [],
                                       sentence: "You take part at ship-review.")
@@ -88,10 +88,6 @@ struct WorkflowLineTests {
         _ = try sheet.inspect().find(text: "ship-review")
         _ = try sheet.inspect().find(text: "You take part at ship-review.")
         #expect(throws: (any Error).self) { try sheet.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-name") }
-        let bar = WorkflowLine(name: "code", outline: outline)
-        #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-name").text().string() == "code")
-        _ = try bar.inspect().find(text: "deliver")
-        #expect(bar.sentence == nil)
     }
 
     @Test("At its end: every step is done")

@@ -2,7 +2,17 @@
 
 > i think we need a 'paused' state / action for tasks -- stops the task worker - and ideally e.g. any rust compiling happening becasue of it - , maybe closes the tasks session for now as well, but oesnt unassign
 
-## Revision 5 (after v3 demo + C1 surface explore — build now)
+## Revision 5 (after v3 demo + C1 surface explore)
+
+**Status (implement pass 1):** items 1–4 built; item 5 unchanged by design.
+- Item 1: `TaskWorkflowControls` is the C1 track on Mac and iPhone (fixed ▶/⏸, step buttons that start from their step, the current step grown into the menu chip, Auto + ✓ at the far end; folds to ▶ + chip when narrow). `TaskWorkflowBar` lost `···`, `newConversation` and `openSession`; `WorkflowLine` lost its bar-only `.steps` style and `name:outline:` init. Rust now words the chip: running reads `build · implement` (or the step alone), a human step reads `ship-review · next: deliver`. "Unpause without running" and `TaskActions.Pause.unpauseWithoutRunning` are gone.
+- Item 2: Auto, Run, Interrupt (Mac + iPhone) and iPhone Claim/Unassign/Reopen/Abandon/Move go through `PendingChanges.make` (`.auto`, `.run`, `.interrupt` commands). `pauseRequest` became `controlRequest` and holds until a reading covers the answer (closes the settle gap); a pending pause shows `pause.fill`. `PendingChanges.request` remains only for tracker answers.
+- Item 3: Complete posts `<ID> completed · Undo` (Undo reopens) on Mac and iPhone.
+- Item 4: `lf task unpause --run` that leaves the Task in place prints the Graph's sentence and the command that moves it (`lf task run`, `lf task auto on`, `lf task complete`). The board's paused refusal names `lf task unpause --run` when the saved step resumes (`store::task_work::resumes_on_unpause`, shared with release).
+- Checks on macOS: `cargo test -p loopflow-execution --lib -- task_graph::tests ops::task_run::tests` (10), `cargo test -p loopflow --test integration dto_fixtures::` (50) and `documented_commands::` (4) passed; `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `check_architecture.py` passed. `scripts/test_desktop.sh --skip-build --filter 'TaskActionsTests|PendingChangesTests|WorkflowLineTests|unstartedTaskBarDrawsItsWorkflow|WorkModelTests|DTOFixtureTests|TaskConceptTests|DesktopHeadlessTests|TaskHistoryFilterTests'` passed 172 tests. `scripts/test_ios.py -only-testing:LoopflowiOSTests/TaskActionsTests -only-testing:LoopflowiOSTests/TaskFeedTests` passed 11.
+- Gate: `test(lifecycle_tests::)` (its frozen fixture's labels changed), and a CLI check of `lf task unpause --run` at ship-review, at a landing stop with auto off and at end (`ops::task::pause::parked` has no test yet).
+- Next: live Dev-app walkthrough of the C1 track (hover, narrow fold, chip menu), then gate.
+
 
 See `scratch/demo-notes.md` for exact quotes and `scratch/explore.html` (`C1 · No Outer Pill`) for the interactive visual reference.
 

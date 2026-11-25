@@ -125,7 +125,7 @@ final class TaskFeedTests: XCTestCase {
         XCTAssertEqual(expression, "kind:task state:working")
         await server.refuse("land is still finishing")
         feed.pendingChanges.setPause(.unpause, issue: "LOO-2", directory: "/repo", notices: feed.notices, show: nil) {}
-        XCTAssertEqual(feed.pendingChanges.pauseRequest(for: "LOO-2"), "Unpausing…")
+        XCTAssertEqual(feed.pendingChanges.controlRequest(for: "LOO-2"), "Unpausing…")
         XCTAssertEqual(identifiers(feed), ["LOO-1", "LOO-2", "LOO-3"])
         XCTAssertTrue(feed.shownRepositories.first?.tasks[1].states.contains(.idle) == true)
         try await until { feed.notices.current != nil }

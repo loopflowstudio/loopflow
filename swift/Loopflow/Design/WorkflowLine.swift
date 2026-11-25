@@ -9,17 +9,16 @@ public struct WorkflowLine: View {
     let name: String?
     let steps: [TaskGraph.Step]
     let tones: [Tone]
-    /// Where the Task stands, or where you take part; nil in an unstarted
-    /// Task's bar, whose pane says it.
+    /// Where the Task stands, or where you take part.
     public let sentence: String?
     /// The Task's auto setting is on: its run takes the interactive steps.
     let auto: Bool
-    public enum Style { case steps, sentence, full }
+    public enum Style { case sentence, full }
     let style: Style
     @Environment(\.palette) private var palette
 
     /// How a step reads against where the Task stands.
-    public enum Tone: Equatable {
+    public enum Tone: Equatable, Sendable {
         case done, ahead
         /// The step a run carries the Task through now.
         case running
@@ -35,24 +34,11 @@ public struct WorkflowLine: View {
         tones = Self.tones(graph)
         sentence = if graph.position == .at(step: TaskGraph.start), let setup {
             setup
-        } else if style == .steps {
-            nil
         } else {
             graph.sentence
         }
         self.auto = auto
         self.style = style
-    }
-
-    /// The workflow an unstarted Task takes up, in its bar: the name, and the
-    /// steps once the catalog has them.
-    public init(name: String, outline: WorkflowOutline?) {
-        self.name = name
-        steps = outline?.steps ?? []
-        tones = Array(repeating: .ahead, count: steps.count)
-        sentence = nil
-        auto = false
-        style = .full
     }
 
     /// A workflow where its name is already said: the steps, wrapping, and
@@ -66,7 +52,7 @@ public struct WorkflowLine: View {
         style = .full
     }
 
-    public static func tones(_ graph: TaskGraph) -> [Tone] {
+    nonisolated public static func tones(_ graph: TaskGraph) -> [Tone] {
         let running = if case .run(_, _, _, true) = graph.position { true } else { false }
         let ended = graph.position == .at(step: TaskGraph.end)
         return graph.steps.indices.map { index in

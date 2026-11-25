@@ -55,8 +55,8 @@ The native macOS app reads the same local store as `lf`; it keeps no copy of its
   Tap ▶ to resume the interrupted step. At review, at a landing stop with Auto off,
   or at the end, ▶ lifts the hold and keeps the Task there. At **Waiting: land**,
   turn on Auto to land or choose a step from **Start from**.
-  When ▶ would start work, the step menu also offers **Unpause without running**.
-  The pill shows **Pausing…** or **Unpausing…** while the Machine answers.
+  The chip beside ▶ shows **Pausing…** or **Unpausing…** while the Machine answers.
+  `lf task unpause` without `--run` lifts the hold and starts nothing.
   The Auto switch can be turned off during a hold.
 - **Task workspace:** three resizable panes: `session` (conversation), `shell`
   (at the Task's worktree), and `browser` (Files, Graph log, local dev URLs).

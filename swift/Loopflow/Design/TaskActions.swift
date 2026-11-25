@@ -1,7 +1,7 @@
 /// The actions offered by the Task workspace on both Mac and iPhone.
 public struct TaskActions: Equatable {
     public enum Pause: Equatable, Sendable {
-        case pause, unpause, unpauseWithoutRunning
+        case pause, unpause
     }
 
     public let control: WorkflowControl?
@@ -11,13 +11,18 @@ public struct TaskActions: Equatable {
     public let auto: Auto?
     public let completeReady: Bool
     public let steps: [String]
+    /// The Graph's top-level steps as the workflow track draws them.
+    public let track: [TaskGraph.Step]
+    public let tones: [WorkflowLine.Tone]
+    /// Where the control's label stands in the track: the step it replaces,
+    /// or `track.count` past the last one at the end.
+    public let chip: Int
+    /// Rust's sentence for where the Task stands, or where you take part.
+    public let sentence: String?
 
-    /// The Task's auto setting, named in the Notice by the action it offers.
+    /// The Task's auto setting.
     public enum Auto: Equatable {
         case on, off
-
-        /// The button that changes it.
-        public var offer: String { self == .on ? "Stop Auto-Ship" : "Auto-Ship" }
 
         public func help(issue: String) -> String {
             self == .on
@@ -26,10 +31,12 @@ public struct TaskActions: Equatable {
         }
     }
 
-    public init(work: TaskOverview?, row: RoadmapTask, execution: TaskExecution?, outline: WorkflowOutline? = nil) {
+    /// `autoPending` is the switch's change the Machine has not shown yet.
+    public init(work: TaskOverview?, row: RoadmapTask, execution: TaskExecution?, outline: WorkflowOutline? = nil,
+                autoPending: Bool? = nil) {
         let graph = work?.graph
         let held = row.lifecycle == .paused
-        let on = execution.map { $0.auto?.state == .on } ?? row.selectionStates.contains(.auto)
+        let on = autoPending ?? execution.map { $0.auto?.state == .on } ?? row.selectionStates.contains(.auto)
         auto = on ? .on : row.isCompleted ? nil : .off
         runRefusal = row.runControl.unavailable
         pauseRefusal = row.runControl.pausing ? runRefusal : nil
@@ -51,6 +58,19 @@ public struct TaskActions: Equatable {
             control = outline?.start ?? WorkflowControl(action: .run, label: "Run")
         }
         pause = held ? .unpause : row.lifecycle.isWorking ? .pause : nil
+
+        if let graph {
+            track = graph.steps
+            tones = WorkflowLine.tones(graph)
+            let ended = graph.position == .at(step: TaskGraph.end) || control?.action == .done
+            chip = graph.currentStep ?? (ended ? graph.steps.count : 0)
+            sentence = graph.sentence
+        } else {
+            track = outline?.steps ?? []
+            tones = Array(repeating: control?.action == .done ? .done : .ahead, count: track.count)
+            chip = control?.action == .done ? track.count : 0
+            sentence = outline?.sentence
+        }
 
         var seen = Set<String>()
         let stages = graph?.steps ?? outline?.steps ?? []

@@ -69,7 +69,7 @@
     "name": "feature",
     "control": {
       "action": "run",
-      "label": "Run: end"
+      "label": "demo · next: end"
     },
     "interactive_steps": [
       {

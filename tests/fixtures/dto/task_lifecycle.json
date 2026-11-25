@@ -1442,7 +1442,7 @@
             "current_step": 1,
             "control": {
               "action": "pause",
-              "label": "Running: task complete FIX-1"
+              "label": "task complete FIX-1"
             },
             "interactive_steps": [],
             "name": "delivery",
@@ -1555,7 +1555,7 @@
           "current_step": 1,
           "control": {
             "action": "pause",
-            "label": "Running: task complete FIX-1"
+            "label": "task complete FIX-1"
           },
           "interactive_steps": [],
           "name": "delivery",
@@ -2381,7 +2381,7 @@
             "current_step": 1,
             "control": {
               "action": "pause",
-              "label": "Running: task complete FIX-1"
+              "label": "task complete FIX-1"
             },
             "interactive_steps": [],
             "name": "delivery",
@@ -2494,7 +2494,7 @@
           "current_step": 1,
           "control": {
             "action": "pause",
-            "label": "Running: task complete FIX-1"
+            "label": "task complete FIX-1"
           },
           "interactive_steps": [],
           "name": "delivery",

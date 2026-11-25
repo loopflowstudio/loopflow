@@ -29,18 +29,17 @@ struct TaskActionsTests {
         return try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: wire))
     }
 
-    @MainActor @Test func primaryUnpauseLetsTheMachineChooseAndOnlyResumeOffersAnOverride() async throws {
-        for (action, label, menu, runs) in [(WorkflowControl.Action.resume, "Paused: implement", false, true),
-                                             (.resume, "Paused: implement", true, false),
-                                             (.unpause, "Paused: ship-review", false, true),
-                                             (.unpause, "Paused: land", false, true),
-                                             (.unpause, "Paused: end", false, true)] {
+    @MainActor @Test func unpauseAlwaysLetsTheMachineChooseAndTheMenuOffersNoOverride() async throws {
+        for (action, label) in [(WorkflowControl.Action.resume, "Paused: implement"),
+                                (.unpause, "Paused: ship-review"),
+                                (.unpause, "Paused: land"),
+                                (.unpause, "Paused: end")] {
             let control = WorkflowControl(action: action, label: label)
             let row = try row(lifecycle: "paused", refusal: "Task is paused")
             let actions = TaskActions(work: try work(control), row: row, execution: nil)
             let machine = HeldMachine()
             let changes = PendingChanges { write, id in
-                #expect(write == .taskUnpause(directory: "/repo", issue: "W2-144", run: runs))
+                #expect(write == .taskUnpause(directory: "/repo", issue: "W2-144", run: true))
                 return try await machine.send(write, id)
             }
             var requested: TaskActions.Pause?
@@ -49,17 +48,43 @@ struct TaskActionsTests {
                 pause: { requested = $0 },
                 interrupt: {}, toggleAuto: {}, complete: {}) { EmptyView() }
             _ = try bar.inspect().find(text: label)
-            if action == .unpause {
-                #expect(throws: (any Error).self) { try bar.inspect().find(button: "Unpause without running") }
-            }
-            if menu {
-                try bar.inspect().find(button: "Unpause without running").tap()
-            } else {
-                try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-primary").button().tap()
-            }
+            #expect(throws: (any Error).self) { try bar.inspect().find(button: "Unpause without running") }
+            try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-primary").button().tap()
+            #expect(requested == .unpause)
             changes.setPause(try #require(requested), issue: row.task.identifier, directory: "/repo", notices: NoticeCenter(), show: nil) {}
             await machine.answer(nil)
         }
+    }
+
+    @MainActor @Test func theTrackGrowsTheCurrentStepIntoTheChipAndJumpsFromTheOthers() throws {
+        // The fixture runs implement inside build, the third of four steps.
+        let work = try work(.init(action: .pause, label: "build · implement"))
+        let row = try row(lifecycle: "moving")
+        let actions = TaskActions(work: work, row: row, execution: nil)
+        #expect(actions.track.map(\.name) == ["plan", "review-design", "build", "demo"] && actions.chip == 2)
+        var jumped: [String?] = []
+        let bar = try TaskWorkflowControls(task: row, actions: actions, pending: nil, run: { jumped.append($0) },
+            pause: { _ in }, interrupt: {}, toggleAuto: {}, complete: {}) { EmptyView() }.inspect()
+        _ = try bar.find(text: "build · implement")
+        #expect(throws: (any Error).self) { try bar.find(viewWithAccessibilityIdentifier: "task-workflow-step-2") }
+        // A running step holds the other steps until it stops.
+        #expect(try bar.find(viewWithAccessibilityIdentifier: "task-workflow-step-0").isDisabled())
+
+        let stopped = TaskActions(work: try self.work(.init(action: .run, label: "Run: implement")), row: try self.row(), execution: nil)
+        let idle = try TaskWorkflowControls(task: row, actions: stopped, pending: nil, run: { jumped.append($0) },
+            pause: { _ in }, interrupt: {}, toggleAuto: {}, complete: {}) { EmptyView() }.inspect()
+        try idle.find(viewWithAccessibilityIdentifier: "task-workflow-step-3").button().tap()
+        #expect(jumped == ["demo"])
+    }
+
+    @MainActor @Test func aPendingPauseShowsTheHeldGlyph() throws {
+        let row = try row(lifecycle: "moving")
+        let actions = TaskActions(work: try work(.init(action: .pause, label: "build · implement")), row: row, execution: nil)
+        let bar = try TaskWorkflowControls(task: row, actions: actions, pending: PendingChanges.pausing, run: { _ in },
+            pause: { _ in }, interrupt: {}, toggleAuto: {}, complete: {}) { EmptyView() }.inspect()
+        let primary = try bar.find(viewWithAccessibilityIdentifier: "task-workflow-primary")
+        #expect(try primary.find(ViewType.Image.self).actualImage().name() == "pause.fill")
+        _ = try bar.find(text: PendingChanges.pausing)
     }
 
     @Test func aMergedPRKeepsTheStoppedVerifyActionBesideComplete() throws {

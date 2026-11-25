@@ -73,13 +73,12 @@ the filter is empty, **Clear search** when the search matches nothing.
 ## Task
 
 Opening a Task fits its conversation to the phone. The workflow bar above it
-shows the Graph and a split button. Tap ⏸ beside **Running: implement** to
+shows ▶/⏸ and the step the Task stands at. Tap ⏸ beside **build · implement** to
 pause the worker while keeping the conversation open. Tap ▶ to resume the
 interrupted step. At a human step such as ship-review, ▶ lifts the hold and
-waits for you. The next tap runs the step named on the button.
+waits for you. The next tap runs the step the chip names after **next:**.
 
-Tap the step label to pick a starting point, pause at review, or interrupt the worker.
-When ▶ would start work, the menu also offers **Unpause without running**.
+Tap the chip to pick a starting point, pause at review, or interrupt the worker.
 Cleanup disables unpause until the worker stops.
 The **Auto** switch stays armed during a hold and can be switched off.
 Tap ✓ to complete the Task. **…** opens its PR, Sessions, Wave moves and copy actions.

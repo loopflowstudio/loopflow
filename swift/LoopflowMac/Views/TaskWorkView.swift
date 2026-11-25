@@ -83,50 +83,23 @@ struct TaskWorkflowBar: View {
     let task: RoadmapTask
     /// The Task part of the workspace stream, as last read.
     let work: Reading<TaskOverview>
-    var newConversation: (() -> Void)?
-    var openSession: ((SessionRecord) -> Void)?
     @Environment(\.palette) private var palette
 
     var body: some View {
         let actions = TaskActions(work: work.value, row: task, execution: model.taskExecution[task.id].value,
-                                  outline: model.workflowOutline(task.graphName))
-        HStack(spacing: Spacing.md) {
-            if let workflow = work.value?.graph {
-                let line = WorkflowLine(graph: workflow, auto: actions.auto == .on, setup: task.setupPosition, style: .steps)
-                line.lineLimit(1).truncationMode(.tail).help(line.sentence ?? workflow.sentence).accessibilityHint(workflow.sentence)
-            } else if work.value == nil {
-                Text(work.isLoading ? task.setupPosition ?? "Reading workflow…" : "")
-                    .lineLimit(1).truncationMode(.tail)
-                    .foregroundStyle(palette.textSecondary)
-                    .accessibilityIdentifier("task-workflow-bar-live")
-            } else if let name = task.graphName {
-                // Not started: the workflow its first run takes up, as the catalog outlines it.
-                WorkflowLine(name: name, outline: model.workflowOutline(name))
+                                  outline: model.workflowOutline(task.graphName),
+                                  autoPending: model.pendingChanges.autoRequest(for: task.task.identifier))
+        TaskWorkflowControls(task: task, actions: actions, pending: model.pendingChanges.controlRequest(for: task.task.identifier),
+                             run: { model.startTaskFromInput(nil, from: $0, task: task) },
+                             pause: { model.setPause($0, task: task) }, interrupt: { model.interruptStep(task) },
+                             toggleAuto: { if actions.auto == .on { model.turnAutoOff(task) } else { model.turnAutoOn(task) } },
+                             complete: { model.beginComplete(task) }) {
+            TaskLifecycleItems(model: model, task: task)
+            if let overview = work.value, overview.graph == nil, !task.isCompleted {
+                TaskStartGraphMenu(model: model, task: task)
             }
-            Spacer(minLength: 0)
-            TaskWorkflowControls(task: task, actions: actions, pending: model.pendingChanges.pauseRequest(for: task.task.identifier),
-                                 run: { model.startTaskFromInput(nil, from: $0, task: task) },
-                                 pause: { model.setPause($0, task: task) }, interrupt: { model.interruptStep(task) },
-                                 toggleAuto: { if actions.auto == .on { model.turnAutoOff(task) } else { model.turnAutoOn(task) } },
-                                 complete: { model.beginComplete(task) }) {
-                TaskLifecycleItems(model: model, task: task)
-                if let overview = work.value, overview.graph == nil, !task.isCompleted {
-                    TaskStartGraphMenu(model: model, task: task)
-                }
-            }
-            .disabled(model.changeRefusal != nil)
-            Menu {
-                TaskMetadataItems(model: model, task: task, wave: model.task(id: task.id)?.wave?.wave,
-                                  newConversation: newConversation, openSession: openSession)
-            } label: {
-                Image(systemName: "ellipsis").font(Typography.text)
-            }
-            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
-            .fixedSize()
-            .help("Task actions")
-            .accessibilityLabel("Task actions")
-            .accessibilityIdentifier("task-actions")
         }
+        .disabled(model.changeRefusal != nil)
         .padding(.horizontal, Spacing.md)
         .frame(height: 34)
         .font(Typography.text)
@@ -220,7 +193,7 @@ struct TaskActionItems: View {
             Button(action == .pause ? "Pause" : "Unpause") {
                 model.setPause(action, task: task)
             }
-            .disabled(model.changeRefusal != nil || model.pendingChanges.pauseRequest(for: task.task.identifier) != nil || task.runControl.pausing)
+            .disabled(model.changeRefusal != nil || model.pendingChanges.controlRequest(for: task.task.identifier) != nil || task.runControl.pausing)
         }
         TaskLifecycleItems(model: model, task: task)
         if !task.isCompleted {

@@ -115,7 +115,7 @@ struct PendingChangesTests {
         let row = try task("LOO-2")
         let started = try plan(["open", "working", "moving", "busy", "auto"])
         changes.setPause(.pause, issue: row.task.identifier, directory: "/repo", notices: notices, show: nil) {}
-        #expect(changes.pauseRequest(for: row.task.identifier) == "Pausing…")
+        #expect(changes.controlRequest(for: row.task.identifier) == "Pausing…")
         let held = try #require(changes.apply(to: [row], readAt: at(4)).first)
         #expect(held.section == .working && held.workingGroup == .paused && held.lifecycle == .paused && held.runtime?.owner == row.runtime?.owner)
         #expect(held.selectionStates.contains(.paused) && !held.selectionStates.contains(.moving))
@@ -135,6 +135,17 @@ struct PendingChangesTests {
         #expect(Set(unpaused[1].states) == [.open, .working, .busy, .idle, .auto])
         #expect(unpaused[1].workingGroup == .paused)
         await machine.answer(nil)
+    }
+
+    @Test func anAnsweredPauseStaysPendingUntilAReadingShowsIt() async throws {
+        let changes = changes()
+        changes.read("plan", try plan(at: 4))
+        changes.setPause(.pause, issue: "LOO-2", directory: "/repo", notices: notices, show: nil) {}
+        await machine.answer(at(5))
+        // Between the answer and the reading that shows the hold, the control stays settling.
+        #expect(changes.controlRequest(for: "LOO-2") == PendingChanges.pausing)
+        changes.read("plan", try plan(at: 5))
+        #expect(changes.controlRequest(for: "LOO-2") == nil)
     }
 
     @Test func completeHidesTheRowUntilACoveringReading() async throws {
@@ -308,10 +319,26 @@ struct PendingChangesTests {
 
     @Test func requestedShowsInTheClickAndARefusalPostsOverIt() async throws {
         let changes = changes()
-        changes.request("Auto-Ship", subject: "LOO-5", write: .taskAutoOn(directory: "/repo", issue: "LOO-5"), notices: notices)
-        #expect(notices.current?.text == "LOO-5 Auto-Ship requested")
+        changes.request("Keep theirs", subject: "LOO-5", write: .taskReopen(directory: "/repo", issue: "LOO-5"), notices: notices)
+        #expect(notices.current?.text == "LOO-5 Keep theirs requested")
         await machine.fail(ServerError(code: "conflict", message: "it has no checkout", data: .null))
-        #expect(notices.current?.text == "LOO-5 Auto-Ship couldn't be requested: it has no checkout")
+        #expect(notices.current?.text == "LOO-5 Keep theirs couldn't be requested: it has no checkout")
+    }
+
+    @Test func autoTurnsInTheClickAndARefusalTurnsItBack() async throws {
+        let changes = changes()
+        let row = try task("LOO-2")
+        changes.make(.auto(task: "LOO-2", on: true), subject: "LOO-2", verb: "put on auto",
+                     write: .taskAutoOn(directory: "/repo", issue: "LOO-2"), notices: notices, show: nil)
+        #expect(changes.autoRequest(for: "LOO-2") == true && notices.current == nil)
+        let shipping = try #require(changes.apply(to: [row], readAt: at(4)).first)
+        #expect(shipping.selectionStates.contains(.auto))
+        let contents = try #require(changes.apply(to: try plan())?.contents)
+        #expect(contents[1].states.contains(.auto) && contents[1].workingGroup == .shipping)
+        await machine.fail(ServerError(code: "conflict", message: "it has no checkout", data: .null))
+        #expect(changes.autoRequest(for: "LOO-2") == nil)
+        #expect(changes.apply(to: [row], readAt: at(4)) == [row])
+        #expect(notices.current?.text == "LOO-2 couldn't be put on auto: it has no checkout")
     }
 
     @Test func revisionsCoverOnlyWhenEveryDomainIsReached() {
@@ -330,7 +357,7 @@ struct PendingChangesTests {
 
     @Test func aNewEventReplacesTheLastAndARefreshedOneRestarts() {
         let center = NoticeCenter()
-        center.post(Notice("LOO-5 Auto-Ship requested"))
+        center.post(Notice("LOO-5 completed"))
         center.post(Notice("Tasks couldn't be read: offline", key: "task_list"))
         #expect(center.current?.text == "Tasks couldn't be read: offline")
         let posted = center.posted

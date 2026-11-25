@@ -2627,8 +2627,9 @@ final class WorkModel {
     }
 
     func startTask(_ graph: String?, from: String? = nil, task: RoadmapTask, refused: @escaping @MainActor () -> Void = {}) {
-        request(task, "Start", .taskRun(directory: directory(task), issue: task.task.identifier, graph: graph,
-                                        from: from, agent: nil, approve: false), refused: refused)
+        let issue = task.task.identifier
+        change(task, .run(task: issue), .taskRun(directory: directory(task), issue: issue, graph: graph,
+                                                 from: from, agent: nil, approve: false), "started", refused: refused)
     }
 
     /// The graph a new Task in each scope would take up, keyed by repository and
@@ -2748,18 +2749,16 @@ final class WorkModel {
         }
     }
 
-    /// Turn auto on and run the Task, as `lf task auto on` does: the Notice says Auto-Ship
-    /// was requested and its Undo turns auto off. The Task moves when the
-    /// Machine's reading says so.
+    /// Turn auto on and run the Task, as `lf task auto on` does. The switch
+    /// turns in the click; a refusal turns it back and the Notice says why.
     func turnAutoOn(_ task: RoadmapTask) {
-        request(task, TaskActions.Auto.off.offer, .taskAutoOn(directory: directory(task), issue: task.task.identifier),
-                      undo: Notice.Action("Undo", help: TaskActions.Auto.on.offer) { [weak self] in
-                          self?.turnAutoOff(task)
-                      })
+        let issue = task.task.identifier
+        change(task, .auto(task: issue, on: true), .taskAutoOn(directory: directory(task), issue: issue), "put on auto")
     }
 
     func interruptStep(_ task: RoadmapTask) {
-        request(task, "Interrupt step", .taskInterrupt(directory: directory(task), issue: task.task.identifier))
+        let issue = task.task.identifier
+        change(task, .interrupt(task: issue), .taskInterrupt(directory: directory(task), issue: issue), "interrupted")
     }
 
     func setPause(_ action: TaskActions.Pause, task: RoadmapTask) {
@@ -2770,7 +2769,8 @@ final class WorkModel {
     }
 
     func turnAutoOff(_ task: RoadmapTask) {
-        request(task, TaskActions.Auto.on.offer, .taskAutoOff(directory: directory(task), issue: task.task.identifier))
+        let issue = task.task.identifier
+        change(task, .auto(task: issue, on: false), .taskAutoOff(directory: directory(task), issue: issue), "taken off auto")
     }
 
     /// The Work the Machine control describes: the current started Task, else the
@@ -2902,12 +2902,14 @@ final class WorkModel {
         try? await confirmWorkUpdate(after: home)
     }
 
-    /// The row is gone and the next Task selected in the click; a refusal
-    /// brings the row back and the Notice says why.
+    /// The row is gone and the next Task selected in the click, and the Notice
+    /// says "LOO-4 completed · Undo"; a refusal brings the row back and says why.
     func completeTask(_ task: RoadmapTask) {
         let owner = navigation.performanceOwner
         let issue = task.task.identifier
         moveSelection(past: task)
+        navigation.notices.post(Notice("\(issue) completed", key: "complete-\(issue)",
+                                       action: Notice.Action("Undo") { [weak self] in self?.reopenTask(task) }))
         change(task, .complete(task: issue), .taskComplete(directory: directory(task), issue: issue), "completed") {
             Perf.completionAccepted(id: task.id, owner: owner)
         }
@@ -2927,7 +2929,7 @@ final class WorkModel {
 
     /// Why no run of `task` can be started now; nil when one can.
     func runRefusal(_ task: RoadmapTask) -> String? {
-        changeRefusal ?? pendingChanges.pauseRequest(for: task.task.identifier) ?? task.runControl.unavailable
+        changeRefusal ?? pendingChanges.controlRequest(for: task.task.identifier) ?? task.runControl.unavailable
     }
 
     /// Abandon… asks first: the window confirms before `abandonTask`.
@@ -3022,21 +3024,13 @@ final class WorkModel {
 
     /// Show `command` on every list now; the Machine's answer or refusal arrives through the Notice.
     private func change(_ task: RoadmapTask, _ command: PendingCommand, _ write: ServedWrite, _ verb: String,
-                        accepted: (() -> Void)? = nil) {
+                        refused: @escaping @MainActor () -> Void = {}, accepted: (() -> Void)? = nil) {
         let show = Notice.Action("Show") { [weak self] in self?.select(.task(id: task.id)) }
         pendingChanges.make(command, subject: task.task.identifier, verb: verb, write: write,
-                            notices: navigation.notices, show: show) { [weak self] in
+                            notices: navigation.notices, show: show, answered: { [weak self] in
             accepted?()
             try? await self?.confirmWorkUpdate()
-        }
-    }
-
-    /// Start, Auto-Ship and Stop Auto-Ship say "requested" in the click.
-    private func request(_ task: RoadmapTask, _ name: String, _ write: ServedWrite, undo: Notice.Action? = nil,
-                         refused: @escaping @MainActor () -> Void = {}) {
-        pendingChanges.request(name, subject: task.task.identifier, write: write, notices: navigation.notices,
-                               undo: undo, answered: { [weak self] in try? await self?.confirmWorkUpdate() },
-                               refused: refused)
+        }, refused: refused)
     }
 
     func beginSessionRename(_ record: SessionRecord) {

@@ -647,7 +647,13 @@ impl TaskGraph {
                             (
                                 Some(place),
                                 format!("Waiting for you at {step}."),
-                                WorkflowControl::run(next.as_deref().unwrap_or(END)),
+                                WorkflowControl {
+                                    action: WorkflowAction::Run,
+                                    label: format!(
+                                        "{step} · next: {}",
+                                        next.as_deref().unwrap_or(END)
+                                    ),
+                                },
                             )
                         }
                         None if auto == Some(AutoState::Off) => (
@@ -730,7 +736,11 @@ impl TaskGraph {
                 let control = if run.running {
                     WorkflowControl {
                         action: WorkflowAction::Pause,
-                        label: format!("Running: {at}"),
+                        label: if label == at {
+                            at.clone()
+                        } else {
+                            format!("{label} · {at}")
+                        },
                     }
                 } else {
                     WorkflowControl::run(&at)
@@ -939,12 +949,12 @@ pub(crate) mod tests {
         let graph = CapturedGraph::load("test", repo.path()).unwrap().unwrap();
         for (step, run, held, action, label) in [
             ("start", None, false, Run, "Run: implement"),
-            ("start", Some(true), false, Pause, "Running: implement"),
+            ("start", Some(true), false, Pause, "implement"),
             ("start", Some(false), false, Run, "Run: implement"),
             ("start", Some(false), true, Resume, "Paused: implement"),
             ("demo", None, true, Unpause, "Paused: demo"),
-            ("demo", None, false, Run, "Run: gate"),
-            ("verify", None, false, Run, "Run: end"),
+            ("demo", None, false, Run, "demo · next: gate"),
+            ("verify", None, false, Run, "verify · next: end"),
             ("end", None, true, Unpause, "Paused: end"),
             ("end", None, false, Done, "Done"),
         ] {
@@ -991,7 +1001,7 @@ pub(crate) mod tests {
         assert_eq!(start.control.label, "Run: plan");
         assert_eq!(
             read("ship-review", None, None).control.label,
-            "Run: deliver"
+            "ship-review · next: deliver"
         );
         let steps: Vec<_> = start
             .steps

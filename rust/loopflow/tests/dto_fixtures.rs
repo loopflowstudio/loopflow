@@ -1263,7 +1263,10 @@ fn task_overview_excludes_diagnostic_process_history() {
     let input = include_str!("../../../tests/fixtures/dto/task_overview.json");
     let overview: loopflow_execution::task_work::TaskOverview =
         serde_json::from_str(input).unwrap();
-    assert!(overview.graph.is_some());
+    assert_eq!(
+        overview.graph.as_ref().unwrap().control.action,
+        loopflow_execution::task_graph::WorkflowAction::Wait
+    );
     assert_eq!(
         serde_json::to_value(overview).unwrap(),
         serde_json::from_str::<serde_json::Value>(input).unwrap()

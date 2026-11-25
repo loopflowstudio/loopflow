@@ -187,15 +187,31 @@ pub(crate) fn before_unassign(store: &SqliteStore, task: &Task) -> OpsResult<()>
 }
 
 pub fn unpause(issue: &str) -> OpsResult<()> {
+    release(issue, false).map(drop)
+}
+
+/// Keep admission through placement when the detached unpause carries on as the run.
+pub(super) fn release(issue: &str, resume: bool) -> OpsResult<Option<(TaskId, File)>> {
     block_on_task(async {
         let (store, task, _cleanup) = resolve(issue, task_execution_route).await?;
         finish_if_jobs_exited(&store.sqlite, &task)?;
-        let _admission = admission(&task.id)?;
+        let admission = admission(&task.id)?;
         if let Some(run) = draining(&store.sqlite, &task.id)? {
             return Err(
                 Error::conflict(format!("{} is still finishing {run}", task.identifier)).into(),
             );
         }
-        store.sqlite.release_task_pause(&task.id).map_err(refused)
+        let start = resume
+            && crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
+                .map_err(task_error)?
+                .is_none_or(|row| {
+                    row.graph.resumes_on_unpause(
+                        &row.step,
+                        row.run.as_ref().map(|(cursor, _)| cursor),
+                        row.auto,
+                    )
+                });
+        store.sqlite.release_task_pause(&task.id).map_err(refused)?;
+        Ok(start.then_some((task.id, admission)))
     })
 }

@@ -102,7 +102,7 @@ The captured Graph supplies the label and primary action. Continuing from ship-r
 
 ## Concept-review pass (post-V4c, at `06bf0c058d`)
 
-Full review of Task pause, Working groups, automatic `verify`, and V4c workflow controls against stack base `3d57e2cdf1` (`scratch/concept-review.html`). The pause lifecycle, OS-session stop, open primary conversation, Working groups, automatic `verify`, and conflict refusals align. Four conceptual mismatches remain in the V4c control and smart-unpause contract and belong to the next implementation pass:
+Full review of Task pause, Working groups, automatic `verify`, and V4c workflow controls against stack base `3d57e2cdf1` (`scratch/concept-review.html`). The pause lifecycle, OS-session stop, open primary conversation, Working groups, automatic `verify`, and conflict refusals align. The review identified four mismatches in the V4c controls and smart-unpause contract:
 
 1. **Single owner for smart unpause in Rust (`task_graph.rs` + `ops::task::pause::unpause` + `engine::task::unpause`), plus landing-stop honesty.**
    - *Experience & model:* Unpausing from a play button or sidebar menu lifts the hold and resumes **only** when the Task's saved position is runnable automatic work (`At { start }`, no Graph row yet, or `Run { .. }` with a valid cursor place). At an interactive step (`ship-review`), a landing stop with `auto: off`, or `end`, unpause only lifts the hold — never skipping a human step, never bouncing off `stopped_landing()`, and never erroring at `end`. Bare `lf task unpause` always lifts without running.
@@ -112,7 +112,7 @@ Full review of Task pause, Working groups, automatic `verify`, and V4c workflow 
      - At a landing stop (`At { step }`, non-start, non-end, non-interactive, `auto == Some(AutoState::Off)`):
        - Paused: `resumes_on_unpause == false`, `WorkflowControl { action: WorkflowAction::Unpause, label: "Paused: <step>" }`, matching `sentence` (`"Paused at <step>. \`lf task unpause\` lifts the hold."`).
        - Unpaused: `sentence = "Waiting at <step>: auto is off."` and `WorkflowControl { action: WorkflowAction::Wait, label: "Waiting: <step>" }` — disabled primary button with help pointing to `Auto`, while `Start from…` and the `Auto` toggle beside it stay enabled (so clicking `▶` never launches a no-op carrier that bounces off `stopped_landing()`).
-     - `rust/loopflow-execution/src/ops/task/pause.rs` & `rust/loopflow-execution/src/engine/task.rs`: read `should_resume` atomically under the admission lock when releasing the pause; `engine::task::unpause(..., start: true)` launches `run(...)` only when `should_resume`, otherwise returns `Ok(None)`.
+     - `rust/loopflow-execution/src/ops/task/pause.rs` & `rust/loopflow-execution/src/engine/task.rs`: the detached unpause reads the cursor under admission, releases the hold and carries the run only when the saved position resumes. Otherwise it returns null.
      - `swift/LoopflowMac/WorkModel.swift` & `TaskWorkView.swift`: delete `WorkModel.unpause(_:)`'s async `query.taskPane` pre-fetch; sidebar context menu, Dashboard tile menu, and `⌘/` send `.resume` directly through `PendingChanges` (instant optimistic update, blip retry, zero stale-client skip).
      - `swift/Loopflow/Design/TaskWorkflowControls.swift`: show `"Unpause without running"` only when `actions.control?.action == .resume` (when `▶` would actually resume running, not when `▶` already only lifts the hold).
      - Update `docs/work.md`, `docs/surfaces.md`, `tests/fixtures/dto/` (`WorkflowAction::Wait` in schema/fixtures), and Rust/Swift tests.
@@ -128,13 +128,40 @@ Full review of Task pause, Working groups, automatic `verify`, and V4c workflow 
 4. **Align `sentence` and `control.label` inside composed Graphs (QA finding #1).**
    - `rust/loopflow-execution/src/task_graph.rs`: when `label != at` on a paused or stopped `Run`, format `"Paused in {label} at {at}. \`lf task unpause --run\` resumes it."` and `"Stopped in {label} at {at}. \`lf task run\` starts it again."` (matching `"{label} is running {at}."`).
 
+## Position-aware unpause
+
+The Machine reads the saved step under run admission. For `--run`, the detached
+unpause process owns that admission until it claims the cursor. A competing run
+cannot reach a new human step between release and placement. A parked Task
+returns null without a Graph run. Plain unpause still skips placement.
+
+`TaskGraph::read` shares the resume decision. A landing stop with auto off
+reads `Waiting: land`. Both apps decode the action, disable the primary button,
+and keep Auto and Start from available. Cleanup reads `Pausing: <step>`, and a
+paused or interrupted composed Graph names its inner step.
+
+On a 10,000-Task SQLite fixture with 30,520-byte Graphs and 1,000 holds, the
+saved Graph, pause, and auto reads used their Task primary keys. Together they
+took 18.03 µs per reading (median of seven 1,000-read batches, excluding JSON
+decoding).
+
+- Focused Rust checks on macOS exercised first launch, worker restart, review,
+  end, auto-off landing, and a pause during a local merge. A stale served
+  request from the laptop returned null while mini kept its ship-review cursor.
+  All 15 named Rust checks passed, including the schema, DTO round trip and
+  documented commands.
+- `scripts/test_desktop.sh --skip-build --filter 'waitingAtLandLeavesAutoAndStartFromAvailable|taskOverviewFixture'`
+  passed both headless tests. The shared control left Auto and Start from enabled.
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, the architecture
+  map and Swift module checks passed. The live app walkthrough and broader
+  suites remain with walkthrough and gate.
+
 ## Remaining, in order
 
-1. **Slice 1 (proves the model first): Rust position-aware unpause + `TaskGraph::read` alignment.** Implement `resumes_on_unpause`, `WorkflowAction::Wait` for `auto: off` landing stops, `"Pausing: <step>"`, `"Paused/Stopped in {label} at {at}"`, and atomic `unpause(..., start: true)` in Rust; update DTO fixtures, `server_schema.json`, and focused Rust tests (including pausing at `ship-review`, `land` with `auto: off`, `end`, and draining `lf land`).
-2. **Slice 2: Swift control & sidebar simplification.** Remove `WorkModel.unpause`'s `taskPane` pre-fetch, remove `TaskActions.swift`'s `completeReady && .run` override, gate `"Unpause without running"` on `.resume`, handle `WorkflowAction.wait` and optimistic `"Pausing…"` / `"Unpausing…"` labels, update Mac + iOS tests and docs (`docs/work.md`, `docs/surfaces.md`).
-3. **V4c walkthrough.** Try the split control live on a paused worker, at `ship-review`, at a landing stop with `auto: off`, and after merge (including an interrupted `verify`).
-4. **Named gaps for the PR.** Separate-session Codex 0.171.0 tool jobs can survive. A pause after a move’s payload is sent can require a retry on arrival.
-5. **Gate / CI.** Five-harness worker matrix, Linux session enumeration, lifeline/attachment/hosted-terminal suites.
+1. **Swift control and sidebar.** Send smart unpause from the play button and sidebar through PendingChanges. Delete the sidebar pane pre-fetch and the merged-PR override, gate “Unpause without running” on `.resume`, and show “Pausing…” or “Unpausing…” during a pending write. Update the Mac and iPhone interaction tests.
+2. **V4c walkthrough.** Try the split control live on a paused worker, at `ship-review`, at a landing stop with auto off, and after merge with an interrupted verify.
+3. **Named gaps for the PR.** Separate-session Codex 0.171.0 tool jobs can survive. A pause after a move’s payload is sent can require a retry on arrival.
+4. **Gate / CI.** Five-harness worker matrix, Linux session enumeration, lifeline/attachment/hosted-terminal suites.
 
 ## QA on a private Machine
 

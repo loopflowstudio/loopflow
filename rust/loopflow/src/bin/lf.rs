@@ -1418,6 +1418,11 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
             Ok(())
         }
+        TaskCommand::Unpause {
+            issue, run: true, ..
+        } if loopflow_execution::engine::launch::expected() => {
+            loopflow::lf::commands::graph::carry_unpaused_task(cli, repo, issue)
+        }
         TaskCommand::Unpause { issue, run, json } => {
             let receipt = loopflow_execution::engine::task::unpause(
                 repo,
@@ -2644,7 +2649,7 @@ fn dispatch_here(
         || matches!(
             cli.command,
             Some(Commands::Task {
-                cmd: TaskCommand::Run { .. }
+                cmd: TaskCommand::Run { .. } | TaskCommand::Unpause { run: true, .. }
             }) | Some(Commands::Sync(_))
                 | Some(Commands::Pr {
                     cmd: Some(loopflow::lf::PrCommand::Land { .. })

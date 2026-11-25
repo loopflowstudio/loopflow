@@ -2528,6 +2528,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     /// Lift the hold on a Task and optionally run its interrupted step
     Unpause {
         issue: String,
+        /// Resume automatic work. Keep review, an auto-off landing stop, and the end in place.
         #[arg(long)]
         run: bool,
         #[arg(long)]

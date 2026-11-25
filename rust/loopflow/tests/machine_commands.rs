@@ -5939,10 +5939,10 @@ fn served_pause_holds_the_remote_cursor_and_status_names_unpause() {
         directory: plan.local_path.clone(),
         issue: issue.to_owned(),
     };
-    let unpause = || Mutation::TaskUnpause {
+    let unpause = |run| Mutation::TaskUnpause {
         directory: plan.local_path.clone(),
         issue: task.to_string(),
-        run: false,
+        run,
     };
     let missing = send(pause("MISSING-9999"))
         .unwrap_err()
@@ -5968,7 +5968,7 @@ fn served_pause_holds_the_remote_cursor_and_status_names_unpause() {
     assert_eq!(status["task"]["reason"], refusal);
     assert_eq!(
         status["graph"]["sentence"],
-        "Paused at build. `lf task unpause --run` resumes it."
+        "Paused in build at implement. `lf task unpause --run` resumes it."
     );
     assert_eq!(status["graph"]["position"]["at"], "implement");
 
@@ -5997,22 +5997,34 @@ fn served_pause_holds_the_remote_cursor_and_status_names_unpause() {
     );
     assert_eq!(row["run_control"]["unavailable"], refusal);
     assert!(plan.local.task_pause(&task).unwrap().is_none());
-    assert!(send(unpause()).unwrap().result.is_null());
+    assert!(send(unpause(false)).unwrap().result.is_null());
     assert!(plan.remote.task_pause(&task).unwrap().is_none());
     // A refusal changes nothing, so clients don't warn that it may have happened.
-    let again = send(unpause())
+    let again = send(unpause(false))
         .unwrap_err()
         .downcast::<loopflow_execution::engine::Error>()
         .unwrap();
     assert_eq!(again.code, loopflow_execution::engine::ErrorCode::Conflict);
     assert_eq!(again.message, "Task is not paused");
 
+    // The caller last read an interrupted build. A smart unpause reads the
+    // owner's current stop even when the caller still expects a run receipt.
+    assert!(plan
+        .remote
+        .set_task_graph_step(&task, "ship-review")
+        .unwrap());
+    send(pause(task.as_str())).unwrap();
+    assert!(send(unpause(true)).unwrap().result.is_null());
+    let saved = plan.remote.task_graph_row(&task).unwrap().unwrap();
+    assert_eq!(saved.step, "ship-review");
+    assert!(saved.run.is_none() && saved.pause.is_none());
+
     send(pause(task.as_str())).unwrap();
     executable(
         &fixture.root.path().join("bin/ssh"),
         "#!/bin/sh\necho 'peer unavailable' >&2\nexit 255\n",
     );
-    let error = send(unpause()).unwrap_err();
+    let error = send(unpause(false)).unwrap_err();
     assert!(error.to_string().contains("unavailable"), "{error}");
     assert!(plan.remote.task_pause(&task).unwrap().is_some());
     assert!(plan.local.task_pause(&task).unwrap().is_none());

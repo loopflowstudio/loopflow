@@ -17335,6 +17335,7 @@
         "pause",
         "unpause",
         "resume",
+        "wait",
         "done"
       ],
       "type": "string"
@@ -18014,7 +18015,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Lift the hold. Returns the run when requested, otherwise null.",
+          "description": "Lift the hold. With run, resume automatic work. Return the run or null when the Task stays at its step.",
           "examples": [
             {
               "directory": "/repo",

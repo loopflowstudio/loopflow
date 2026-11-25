@@ -2406,9 +2406,11 @@ assert paused.returncode == 0, paused.stderr
 assert 'pausing' in paused.stdout and 'finishing' in paused.stdout, paused.stdout
 status = task('status', '--json')
 assert status.returncode == 0, status.stderr
-sentence = json.loads(status.stdout)['graph']['sentence']
+graph = json.loads(status.stdout)['graph']
+assert graph['control']['label'] == 'Pausing: pr land --local', graph
+sentence = graph['sentence']
 assert 'pr land --local is finishing' in sentence, sentence
-unpause = task('unpause')
+unpause = task('unpause', '--run')
 assert unpause.returncode != 0 and 'still finishing' in unpause.stderr, unpause"#,
     );
 
@@ -2737,6 +2739,38 @@ if (home / 'hold-turn').exists():
     assert_eq!(task.graph()["position"], review["position"]);
 }
 
+fn assert_unpause_stays_at(task: &GraphTask, step: &str) {
+    let graphs = support::recorded_graphs(task.home.path()).len();
+    let unpaused = task.run(&["task", "unpause", "INF-123", "--run", "--json"]);
+    assert!(unpaused.status.success(), "{unpaused:?}");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&unpaused.stdout).unwrap(),
+        serde_json::Value::Null
+    );
+    assert_ne!(task.state(), "paused");
+    assert_eq!(task.graph()["position"], at(step));
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), graphs);
+}
+
+#[test]
+fn smart_unpause_starts_an_uncaptured_graph_and_preserves_review_and_end() {
+    let task = GraphTask::new();
+    task.ok(&["task", "pause", "INF-123"]);
+    task.task_run_ok(&["task", "unpause", "INF-123", "--run"]);
+    assert_eq!(task.graph()["position"], at("review"));
+    task.ok(&["task", "pause", "INF-123"]);
+    assert_unpause_stays_at(&task, "review");
+    // An unmerged PR keeps the Task open after review advances to the end.
+    task.publish(false);
+    let completion = refusal(task.run(&["task", "run", "INF-123"]));
+    assert!(
+        completion.to_lowercase().contains("pull request"),
+        "{completion}"
+    );
+    task.ok(&["task", "pause", "INF-123"]);
+    assert_unpause_stays_at(&task, "end");
+}
+
 /// `lf task interrupt` ends a worker's turn while it runs: the turn is recorded
 /// interrupted, nothing starts the run again, and the next `lf task run` takes
 /// the step up and moves the Graph on.
@@ -3003,7 +3037,10 @@ fn a_stopped_run_is_started_again_at_the_step_that_failed() {
         ["failed", "failed", "failed"]
     );
     let status = task.text_status();
-    assert!(status.contains("Graph gated: Stopped at gate."), "{status}");
+    assert!(
+        status.contains("Graph gated: Stopped in gate at graph show late."),
+        "{status}"
+    );
 
     // The cause clears as the third attempt starts: an `lf` that defines
     // `late` the third time the gate asks for it.
@@ -3909,7 +3946,12 @@ fn auto_off_sticks_through_a_headless_relaunch() {
         "{held}"
     );
     assert!(!held.contains("auto on INF-123` lands it"), "{held}");
-    task.ok(&["task", "unpause", "INF-123"]);
+    assert_eq!(task.graph()["control"]["action"], "unpause");
+    assert_unpause_stays_at(&task, "pr land");
+    assert_eq!(
+        task.graph()["control"],
+        serde_json::json!({"action": "wait", "label": "Waiting: pr land"})
+    );
     // Standing at the landing step, a plain relaunch waits there again.
     let waiting = task.task_run(&["task", "run", "INF-123"]);
     assert!(waiting.success(), "{}", waiting.text);

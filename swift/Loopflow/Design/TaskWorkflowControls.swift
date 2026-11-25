@@ -120,6 +120,7 @@ public struct TaskWorkflowControls<Items: View>: View {
         case .pause: "Pause"
         case .unpause: "Unpause"
         case .resume: "Unpause and run"
+        case .wait: "Turn on Auto to land"
         default: control?.label ?? "Reading workflow"
         }
         return Button {
@@ -128,13 +129,13 @@ public struct TaskWorkflowControls<Items: View>: View {
             case .pause: pause(.pause)
             case .unpause: pause(.unpause)
             case .resume: pause(.resume)
-            case .done, nil: break
+            case .done, .wait, nil: break
             }
         } label: {
             Image(systemName: control?.action == .done ? "checkmark" : control?.action == .pause ? "pause.fill" : "play.fill")
                 .imageScale(.small).frame(width: controlHeight, height: controlHeight).contentShape(Rectangle())
         }
-        .disabled(control == nil || control?.action == .done || pending != nil || actions.primaryRefusal != nil)
+        .disabled(control == nil || control?.action == .done || control?.action == .wait || pending != nil || actions.primaryRefusal != nil)
         .help(pending ?? actions.primaryRefusal ?? title)
         .accessibilityLabel(title)
         .accessibilityIdentifier("task-workflow-primary")

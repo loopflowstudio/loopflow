@@ -68,3 +68,11 @@ Keep this Task's scratch files through the parent branch's scratch clear. On
 the phone, the Session pane opens the primary conversation by default.
 Choosing a recorded conversation in the metadata menu switches to that pane.
 The Shell pane keeps its own draft.
+
+## Position-aware unpause
+
+A separate `task run` can see a different cursor after the hold is released.
+The detached `task unpause --run` owns the admission lock from the decision
+through placement. At a waiting step it reports null before preparing a run.
+The Swift decoder and landing-stop button travel with the wire change so both
+apps can open a Task that reads `wait`.

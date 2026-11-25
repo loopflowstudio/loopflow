@@ -58,9 +58,9 @@ struct WorkflowLineTests {
     @Test("Stopped: the step it stopped in waits")
     func stopped() {
         let line = WorkflowLine(graph: graph(run(running: false), current: 1,
-                                             sentence: "Stopped at build. `lf task run` starts it again."), auto: false)
+                                             sentence: "Stopped in build at implement. `lf task run` starts it again."), auto: false)
         #expect(line.tones == [.done, .waiting, .ahead, .ahead, .ahead])
-        #expect(line.sentence == "Stopped at build. `lf task run` starts it again.")
+        #expect(line.sentence == "Stopped in build at implement. `lf task run` starts it again.")
     }
 
     @Test("Waiting at you: the interactive step waits")

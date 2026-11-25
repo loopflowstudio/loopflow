@@ -298,7 +298,7 @@ writes! {
         None => loopflow_execution::ops::task::pause::pause(issue)?,
     },
 
-    /// Lift the hold. Returns the run when requested, otherwise null.
+    /// Lift the hold. With run, resume automatic work. Return the run or null when the Task stays at its step.
     #[serde(rename = "task.unpause")]
     TaskUnpause { directory: PathBuf, issue: String, run: bool } => Option<task::TaskRun>;
     { issue, run, .. } => match remote {

@@ -3,6 +3,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use clap::Parser;
 use loopflow_execution::config::environment::EnvVarGuard;
+use loopflow_execution::engine::task::TaskRun;
 use loopflow_execution::graph::compile_graph;
 use loopflow_execution::graph::output::GraphOutput;
 use loopflow_execution::graph::return_target;
@@ -18,6 +19,7 @@ use loopflow_execution::graph::ConcreteStep;
 use loopflow_execution::graph::ConcreteXor;
 use loopflow_execution::graph::GraphDefinition;
 use loopflow_execution::journal::{self, LfEventFields, LfEventType, LfNode};
+use loopflow_execution::ops::task::{TaskRunMode, TaskRunStart};
 use loopflow_execution::ops::WorkBinding;
 use loopflow_execution::ops::{graph_process, tracker_events};
 use loopflow_execution::output::Colors;
@@ -379,22 +381,41 @@ pub fn carry_task_run(
     options: loopflow_execution::ops::task::TaskProcessOptions,
     json: bool,
 ) -> Result<()> {
-    use loopflow_execution::engine::task::TaskRun;
-    use loopflow_execution::ops::task::{TaskRunMode, TaskRunStart};
-    let mode = if cli.interactive {
+    let (task, start) = loopflow_execution::ops::task::task_place(
+        repo,
+        issue,
+        options,
+        task_run_mode(cli),
+        crate::lf::navigation::command_merges,
+    )?;
+    carry_placed_task(cli, task, start, json)
+}
+
+pub fn carry_unpaused_task(cli: &Cli, repo: &Path, issue: &str) -> Result<()> {
+    let placed = loopflow_execution::ops::task::unpause_task_run(
+        repo,
+        issue,
+        task_run_mode(cli),
+        crate::lf::navigation::command_merges,
+    )?;
+    let Some((task, start)) = placed else {
+        loopflow_execution::engine::launch::report(Ok(&None::<TaskRun>));
+        return Ok(());
+    };
+    carry_placed_task(cli, task, start, true)
+}
+
+fn task_run_mode(cli: &Cli) -> TaskRunMode {
+    if cli.interactive {
         TaskRunMode::InPlace
     } else if cli.batch {
         TaskRunMode::Headless
     } else {
         TaskRunMode::Stop
-    };
-    let (task, start) = loopflow_execution::ops::task::task_place(
-        repo,
-        issue,
-        options,
-        mode,
-        crate::lf::navigation::command_merges,
-    )?;
+    }
+}
+
+fn carry_placed_task(cli: &Cli, task: Task, start: TaskRunStart, json: bool) -> Result<()> {
     if !cli.interactive {
         loopflow_execution::ops::task::prepare_conversation_beside(&task);
     }

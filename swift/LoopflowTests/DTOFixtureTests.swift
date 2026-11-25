@@ -435,7 +435,7 @@ struct DTOFixtureTests {
     @Test("Task overview reads its graph without diagnostic history")
     func taskOverviewFixture() throws {
         let overview = try JSONDecoder().decode(TaskOverview.self, from: loadFixtureData("task_overview.json"))
-        #expect(overview.graph != nil)
+        #expect(overview.graph?.control == WorkflowControl(action: .wait, label: "Waiting: land"))
         #expect(overview.sessions.count == 2)
         #expect(overview.graphProcesses.count == 1)
     }

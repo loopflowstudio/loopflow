@@ -94,7 +94,7 @@ LOO-12 paused
 
 $ lf task status LOO-12
 LOO-12  paused
-  Graph code: Paused at build. `lf task unpause --run` resumes it.
+  Graph code: Paused in build at implement. `lf task unpause --run` resumes it.
 ```
 
 The worker and any subprocesses in its OS session stop. Other Tasks keep running.
@@ -114,8 +114,9 @@ Find held Tasks with `lf task list --state paused`. Plain `lf task unpause LOO-1
 lifts the hold. An interrupted step stays idle and ready for Run. If a step
 failed before pause, its failure stays in the execution history and shows
 in the Task’s condition again on unpause.
-The Mac and iPhone play button resumes an interrupted step and leaves a human stop waiting.
-To run from the saved step immediately in the CLI, use `lf task unpause LOO-12 --run`.
+Use `lf task unpause LOO-12 --run` to resume interrupted work or start a Graph that has yet to run.
+At a human step, at a landing step with auto off, or at the end, the command lifts
+the hold and leaves the Task there. Turn on Auto to continue from the landing stop.
 
 Unassign clears the hold once cleanup settles. Complete, abandon, and reopen
 also clear it. A move carries the hold to the destination, including a pause
@@ -152,9 +153,9 @@ LOO-12  moving
 ```
 
 With auto on, the second clause names auto: "Auto stands in next at
-ship-review." A stopped Graph reads "Stopped at build. `lf task run` starts it
+ship-review." A stopped Graph reads "Stopped in build at implement. `lf task run` starts it
 again." During cleanup the Task reads "Pausing at …". A paused run reads
-"Paused at build. `lf task unpause --run` resumes it." At an interactive step,
+"Paused in build at implement. `lf task unpause --run` resumes it." At an interactive step,
 it reads "Paused at ship-review. `lf task unpause` lifts the hold." `--json` carries the parts: `graph.steps` (each top-level step's
 `name` and `interactive`, true when a person takes part anywhere inside the
 step), `graph.current_step` (its index, null before the start and at the end)

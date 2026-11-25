@@ -123,7 +123,7 @@ public struct TaskOverview: Codable, Sendable, Equatable {
 /// The primary workflow button, read with the saved Graph cursor.
 public struct WorkflowControl: Codable, Sendable, Hashable {
     public enum Action: String, Codable, Sendable {
-        case run, pause, unpause, resume, done
+        case run, pause, unpause, resume, wait, done
     }
 
     public let action: Action

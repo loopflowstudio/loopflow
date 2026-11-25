@@ -58,6 +58,18 @@ struct TaskActionsTests {
         }
     }
 
+    @MainActor @Test func waitingAtLandLeavesAutoAndStartFromAvailable() throws {
+        let work = try JSONDecoder().decode(TaskOverview.self, from: loadFixtureData("task_overview.json"))
+        let row = try row()
+        let bar = TaskWorkflowControls(task: row, actions: TaskActions(work: work, row: row, execution: nil), pending: nil,
+            run: { _ in }, pause: { _ in }, interrupt: {}, toggleAuto: {}, complete: {}) { EmptyView() }
+        let view = try bar.inspect()
+        _ = try view.find(text: "Waiting: land")
+        #expect(try view.find(viewWithAccessibilityIdentifier: "task-workflow-primary").isDisabled())
+        #expect(try !view.find(viewWithAccessibilityIdentifier: "task-workflow-move-start").isDisabled())
+        #expect(try !view.find(viewWithAccessibilityIdentifier: "task-auto").isDisabled())
+    }
+
     @Test func cleanupBlocksUnpauseAndAnArmedSwitchCanStillTurnOff() throws {
         let actions = TaskActions(work: try work(.init(action: .resume, label: "Paused: land")),
                                   row: try row(lifecycle: "paused", auto: true, refusal: "land is finishing", pausing: true), execution: nil)

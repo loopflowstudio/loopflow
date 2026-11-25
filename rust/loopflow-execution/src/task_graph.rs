@@ -303,6 +303,22 @@ impl CapturedGraph {
         place.is_some_and(|place| !self.needs_review(&place, stop_at_landing, &mut merges))
     }
 
+    /// A run restarts at its saved cursor. A Task waiting for a person stays there.
+    pub(crate) fn resumes_on_unpause(
+        &self,
+        step: &str,
+        cursor: Option<&ExecutionCursor>,
+        auto: Option<AutoState>,
+    ) -> bool {
+        match cursor {
+            Some(cursor) => self.place_of(cursor).is_some(),
+            None if step == START => true,
+            None => {
+                step != END && auto != Some(AutoState::Off) && self.interactive_step(step).is_none()
+            }
+        }
+    }
+
     /// The place `cursor` stands at, if the graph has it.
     pub fn place_of(&self, cursor: &ExecutionCursor) -> Option<Place> {
         let mut path = Vec::new();
@@ -444,6 +460,7 @@ pub enum WorkflowAction {
     Pause,
     Unpause,
     Resume,
+    Wait,
     Done,
 }
 
@@ -455,14 +472,15 @@ impl WorkflowControl {
         }
     }
 
-    fn paused(step: &str, resume: bool) -> Self {
+    fn paused(step: &str, resume: bool, stopping: bool) -> Self {
+        let status = if stopping { "Pausing" } else { "Paused" };
         Self {
             action: if resume {
                 WorkflowAction::Resume
             } else {
                 WorkflowAction::Unpause
             },
-            label: format!("Paused: {step}"),
+            label: format!("{status}: {step}"),
         }
     }
 
@@ -592,14 +610,22 @@ impl TaskGraph {
             let index = place.path.first().map_or(place.index, |(index, _)| *index);
             indices[index]
         };
+        let resumes = pause.is_some()
+            && graph.resumes_on_unpause(&step, run.as_ref().map(|run| run.cursor), auto);
+        let pausing = pause == Some(PauseStage::Stopping)
+            || (pause.is_some() && run.as_ref().is_some_and(|run| run.running));
+        let unpause = if resumes {
+            "`lf task unpause --run` resumes it."
+        } else {
+            "`lf task unpause` lifts the hold."
+        };
         let (position, current_step, sentence, control) = match run {
             None => {
-                let (place, sentence, control, resume) = match step.as_str() {
+                let (place, sentence, control) = match step.as_str() {
                     START => (
                         None,
                         "Not started.".to_owned(),
                         WorkflowControl::start(&steps),
-                        true,
                     ),
                     END => (
                         None,
@@ -608,7 +634,6 @@ impl TaskGraph {
                             action: WorkflowAction::Done,
                             label: "Done".into(),
                         },
-                        false,
                     ),
                     step => match graph.interactive_step(step) {
                         Some(place) => {
@@ -623,26 +648,27 @@ impl TaskGraph {
                                 Some(place),
                                 format!("Waiting for you at {step}."),
                                 WorkflowControl::run(next.as_deref().unwrap_or(END)),
-                                false,
                             )
                         }
+                        None if auto == Some(AutoState::Off) => (
+                            graph.find(step),
+                            format!("Waiting at {step}: auto is off."),
+                            WorkflowControl {
+                                action: WorkflowAction::Wait,
+                                label: format!("Waiting: {step}"),
+                            },
+                        ),
                         None => (
                             graph.find(step),
                             format!("Waiting at {step}."),
                             WorkflowControl::run(step),
-                            true,
                         ),
                     },
-                };
-                let control = if pause.is_some() {
-                    WorkflowControl::paused(&step, resume)
-                } else {
-                    control
                 };
                 let sentence = match pause {
                     Some(PauseStage::Stopping) => format!("Pausing at {step}."),
                     Some(PauseStage::Held) => {
-                        format!("Paused at {step}. `lf task unpause` lifts the hold.")
+                        format!("Paused at {step}. {unpause}")
                     }
                     None => sentence,
                 };
@@ -660,8 +686,15 @@ impl TaskGraph {
                     .map_or_else(|| step.clone(), |place| graph.step_name(place));
                 let current = place.as_ref().map(top);
                 let label = current.map_or(at.as_str(), |index| &steps[index as usize].name);
-                let sentence = if let Some(pause) = pause {
-                    if run.running || pause == PauseStage::Stopping {
+                let location = || {
+                    if label == at {
+                        format!("at {at}")
+                    } else {
+                        format!("in {label} at {at}")
+                    }
+                };
+                let sentence = if pause.is_some() {
+                    if pausing {
                         let verb = if run.running
                             && place.as_ref().is_some_and(|place| {
                                 matches!(graph.step_at(place), ConcreteStep::Command(_))
@@ -672,10 +705,10 @@ impl TaskGraph {
                         };
                         format!("Pausing at {label} ({at} is {verb}).")
                     } else {
-                        format!("Paused at {label}. `lf task unpause --run` resumes it.")
+                        format!("Paused {}. {unpause}", location())
                     }
                 } else if !run.running {
-                    format!("Stopped at {label}. `lf task run` starts it again.")
+                    format!("Stopped {}. `lf task run` starts it again.", location())
                 } else {
                     let running = if label == at {
                         format!("{label} is running.")
@@ -694,9 +727,7 @@ impl TaskGraph {
                         (Some(next), _) => format!("{running} You are next needed at {next}."),
                     }
                 };
-                let control = if pause.is_some() {
-                    WorkflowControl::paused(&at, place.is_some())
-                } else if run.running {
+                let control = if run.running {
                     WorkflowControl {
                         action: WorkflowAction::Pause,
                         label: format!("Running: {at}"),
@@ -716,6 +747,15 @@ impl TaskGraph {
                     control,
                 )
             }
+        };
+        let control = if pause.is_some() {
+            let at = match &position {
+                TaskGraphPosition::At { step } => step,
+                TaskGraphPosition::Run { at, .. } => at,
+            };
+            WorkflowControl::paused(at, resumes, pausing)
+        } else {
+            control
         };
         Self {
             control,
@@ -992,7 +1032,7 @@ pub(crate) mod tests {
         let stopped = read("plan", Some(("implement", false)), None);
         assert_eq!(
             stopped.sentence,
-            "Stopped at build. `lf task run` starts it again."
+            "Stopped in build at implement. `lf task run` starts it again."
         );
         let review = read("ship-review", None, None);
         assert_eq!(review.current_step, Some(2));
@@ -1021,7 +1061,7 @@ pub(crate) mod tests {
                 "implement",
                 PauseStage::Held,
                 false,
-                "Paused at build. `lf task unpause --run` resumes it.",
+                "Paused in build at implement. `lf task unpause --run` resumes it.",
             ),
             (
                 "land --wait-and-fix",
@@ -1037,10 +1077,14 @@ pub(crate) mod tests {
                 lf_process_id: "carrier".into(),
                 running,
             };
-            assert_eq!(
-                TaskGraph::read(&graph, "start".into(), Some(run), None, Some(pause)).sentence,
-                sentence
-            );
+            let reading = TaskGraph::read(&graph, "start".into(), Some(run), None, Some(pause));
+            assert_eq!(reading.sentence, sentence);
+            let status = if pause == PauseStage::Stopping || running {
+                "Pausing"
+            } else {
+                "Paused"
+            };
+            assert_eq!(reading.control.label, format!("{status}: {step}"));
         }
         assert_eq!(
             TaskGraph::read(

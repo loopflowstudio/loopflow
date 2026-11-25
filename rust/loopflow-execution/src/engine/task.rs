@@ -269,18 +269,13 @@ pub fn unpause(
     approve: bool,
     environment: &[(String, String)],
 ) -> Result<Option<TaskRun>> {
-    crate::ops::task::pause::unpause(issue).map_err(written)?;
     if !start {
+        crate::ops::task::pause::unpause(issue).map_err(written)?;
         return Ok(None);
     }
-    run(directory, issue, None, None, agent, approve, environment)
-        .map(Some)
-        .map_err(|error| {
-            Error::new(
-                ErrorCode::OutcomeUnknown,
-                format!("{issue} unpaused; {error}"),
-            )
-        })
+    let mut args = run_flags(agent, approve);
+    args.extend(["task", "unpause", issue, "--run", "--json"].map(str::to_owned));
+    launch::start_with(directory, &args, environment)
 }
 
 /// `task.interrupt`: stop the Task's live Graph or Task run and its scheduled
@@ -346,13 +341,7 @@ pub(super) fn missing(issue: &str) -> Error {
         .with(serde_json::json!({ "task": issue }))
 }
 
-pub fn spell_run(
-    issue: &str,
-    from: Option<&str>,
-    graph: Option<&str>,
-    agent: Option<&str>,
-    approve: bool,
-) -> Vec<String> {
+fn run_flags(agent: Option<&str>, approve: bool) -> Vec<String> {
     let mut args = Vec::new();
     if approve {
         args.push("--batch".to_owned());
@@ -360,6 +349,17 @@ pub fn spell_run(
     if let Some(agent) = agent {
         args.extend(["--agent".to_owned(), agent.to_owned()]);
     }
+    args
+}
+
+pub fn spell_run(
+    issue: &str,
+    from: Option<&str>,
+    graph: Option<&str>,
+    agent: Option<&str>,
+    approve: bool,
+) -> Vec<String> {
+    let mut args = run_flags(agent, approve);
     args.extend(["task", "run", issue].map(str::to_owned));
     args.extend(graph.map(str::to_owned));
     if let Some(from) = from {

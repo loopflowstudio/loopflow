@@ -730,6 +730,47 @@ pub fn task_place(
     mode: TaskRunMode,
     merges: fn(&[String]) -> bool,
 ) -> OpsResult<(Task, TaskRunStart)> {
+    place_task_run(repo, issue, options, mode, merges, |store, task| {
+        pause::admit_launch(&store.sqlite, &task.id)
+    })
+}
+
+/// Lift the hold and claim the saved cursor under the same admission lock.
+pub fn unpause_task_run(
+    repo: &Path,
+    issue: &str,
+    mode: TaskRunMode,
+    merges: fn(&[String]) -> bool,
+) -> OpsResult<Option<(Task, TaskRunStart)>> {
+    let Some((id, admission)) = pause::release(issue, true)? else {
+        return Ok(None);
+    };
+    place_task_run(
+        repo,
+        id.as_str(),
+        TaskProcessOptions::default(),
+        mode,
+        merges,
+        |_, _| Ok(admission),
+    )
+    .map(Some)
+    .map_err(|error| {
+        crate::engine::Error::new(
+            crate::engine::ErrorCode::OutcomeUnknown,
+            format!("{issue} unpaused; {error}"),
+        )
+        .into()
+    })
+}
+
+fn place_task_run(
+    repo: &Path,
+    issue: &str,
+    options: TaskProcessOptions,
+    mode: TaskRunMode,
+    merges: fn(&[String]) -> bool,
+    admit: impl FnOnce(&SharedStore, &Task) -> OpsResult<std::fs::File>,
+) -> OpsResult<(Task, TaskRunStart)> {
     let TaskProcessOptions {
         graph,
         from,
@@ -738,10 +779,7 @@ pub fn task_place(
         ..
     } = options.clone();
     let source = remote::source_for_task(issue)?;
-    let (mut task, _admission) =
-        prepare_task_with(repo, issue, options, None, source, |store, task| {
-            pause::admit_launch(&store.sqlite, &task.id)
-        })?;
+    let (mut task, _admission) = prepare_task_with(repo, issue, options, None, source, admit)?;
     block_on_task(async {
         let store = task_store().await?;
         let reason = reason

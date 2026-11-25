@@ -336,6 +336,16 @@ verify with `query_plans.rs` (`EXPLAIN QUERY PLAN` against the 10k-Task fixture)
      removing `IdleReach::Terminal` fails `server::wake::tests::` and the README
      check, each naming Antigravity.
 
+## Docs updated
+
+Written before implementation so the next step implements against them:
+
+- `docs/sessions.md` — idle wake on all five harnesses (including Antigravity's pasted-prompt wake and draft guard), reopened work sessions taking waiting steers, and nested-session isolation for Antigravity.
+- `docs/config.md` — Antigravity section covering idle work session wake, draft guard, and reopen with waiting steers.
+- `rust/loopflow-execution/src/harness/README.md` — `Capabilities.idle_wake`, `<!-- parity:start -->` / `<!-- parity:end -->` generated parity table covering all 13 `Behavior` rows and `Verification::RealProvider`, and updated idle-wake/reopen prose.
+- `rust/loopflow/src/server/README.md` — `Capabilities.idle_wake` reach resolution, Antigravity held-terminal wake and draft guard, and reopened work sessions across all five harnesses.
+- `docs/dev/codebase.md` — "Add a provider" checklist updated for `Capabilities.idle_wake`, `harness::parity::support`, `HarnessKind::ALL` conformance suites, and parity-table regeneration.
+
 ## Acceptance at gate
 
 ```sh

@@ -122,7 +122,10 @@ declares.
 
 ```sh
 cargo test -p loopflow-harness <name>_decode                         # after steps 1-2
+cargo test -p loopflow-execution --lib harness::parity::             # after steps 3-4
 cargo test -p loopflow-execution --lib harness::launch_matrix        # after step 4
+cargo test -p loopflow-execution --lib harness::conformance_tests::  # after step 4
+cargo test -p loopflow --lib server::wake::tests::                   # after step 4
 ```
 
 1. In [`loopflow-harness`](../../rust/loopflow-harness/README.md), add the unit
@@ -135,13 +138,18 @@ cargo test -p loopflow-execution --lib harness::launch_matrix        # after ste
    omissions and finality. Captured output for normal, tool, error and retry
    turns goes in `src/testdata/` and `src/transcript/testdata/`.
 3. In execution, add `harness/<name>.rs` implementing `Launcher` on the same
-   struct: its `Capabilities`, `open` for the native interactive client and
-   `driver` for the headless stream, and `recognizes` when a running process
-   is its client by more than the command name. Add its line in
-   `harness::launcher`: the match is exhaustive, so execution does not compile
-   until the new variant has one. Its native client owns authentication.
-4. Add conformance fixtures; the `harness::launch_matrix` test picks the new
-   variant up from `HarnessKind::ALL`.
+   struct: its `Capabilities` (including `idle_wake`), `open` for the native
+   interactive client and `driver` for the headless stream, and `recognizes`
+   when a running process is its client by more than the command name. Add its
+   line in `harness::launcher` and declare every `Behavior` cell in
+   `harness::parity::support`: both matches are exhaustive, so execution does
+   not compile until the new variant fills them in. Its native client owns
+   authentication.
+4. Add conformance fixtures and regenerate the parity table in
+   `harness/README.md` (`cargo test -p loopflow-execution --lib harness::parity::tests::regenerate_readme_table -- --ignored`).
+   `harness::launch_matrix`, `harness::conformance_tests`, `server::wake::tests`,
+   and `task_graph_launch_tests` iterate `HarnessKind::ALL` and verify every
+   automated behavior against `harness::parity::support`.
 5. Map the new edge in the checked architecture reference.
 
 Do not add a collector daemon, mandatory telemetry store, or synthetic final

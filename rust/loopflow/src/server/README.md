@@ -845,9 +845,9 @@ takes messages while idle, and names which kind it is. From Claude it is
 `{"claude": key}`, the key file the conversation publishes for peers of its
 cross-session inbox, `sessions/<pid>.<sha256 of socket>.key` in its
 configuration directory, found from the `CLAUDE_CODE_MESSAGING_SOCKET` Claude
-gives its children. From an OpenCode or Pi work session it is
-`{"socket": path}`, the Unix socket its plugin or extension listens on. It is
-null from Codex and from workers.
+gives its children. From an OpenCode or Pi work session it is `{"socket": path}`, the Unix socket
+its plugin or extension listens on. It is null from Codex, Antigravity, and
+workers.
 
 Before answering, the server records what the boundary says: the native turn
 (started at a prompt, yielded at a turn end, with the open background tools and
@@ -911,20 +911,23 @@ and batches, prompt hooks are gated like tool hooks.
 
 The server keeps no list of conversations (`wake.rs`); it reads them from the
 store. A work session is idle when its last recorded native turn yielded
-(`session_activity`) and its AgentProcess is live, and reachable through its
-Codex app-server (`agent_sessions.agent_endpoint`) or what its boundaries
-saved: a Claude inbox key in `agent_sessions.agent_inbox`, where
-`sessions/<pid>.json` beside the key names the socket and must still name the
-conversation, or the socket an OpenCode plugin or Pi extension listens on in
-`agent_sessions.agent_socket`. One
-server thread waits on the store's change signal (`store::changes`) and reads
-the `task_updates` revision and the newest steer at start and whenever either
-moves; every idle conversation with news gets its unread steers, Task updates
-among them, in one message, and is recorded as in a turn until its next Stop.
-One with no news is not connected to. A turn end checks
-its own conversation the same way. The steers are claimed as a hook claims
-them and stamped once the message is sent, so a failed send leaves a claim
-that lapses for the next boundary:
+(`session_activity`) and its AgentProcess is live. SQL returns the raw stored
+columns (`agent_endpoint`, `agent_inbox`, `agent_socket`, `held_terminal_id`);
+`loopflow_execution::steer::idle_conversations` resolves reach from each
+harness's `Capabilities.idle_wake` so no harness can be dropped in SQL:
+Claude's inbox key (`agent_sessions.agent_inbox`, where `sessions/<pid>.json`
+beside the key names the socket and must still name the conversation), Codex's
+app-server (`agent_sessions.agent_endpoint`), OpenCode's or Pi's extension
+socket (`agent_sessions.agent_socket`), or Antigravity's held terminal
+(`agent_sessions.held_terminal_id`). One server thread waits on the store's
+change signal (`store::changes`) and reads the `task_updates` revision and the
+newest steer at start and whenever either moves; every idle conversation with
+news gets its unread steers, Task updates among them, in one message, and is
+recorded as in a turn until its next Stop. One with no news is not connected
+to. A turn end checks its own conversation the same way. Each channel checks
+readiness before claiming steers, and stamps `delivered_at` once the message is
+sent, so a busy or unready target leaves steers unclaimed rather than holding a
+15-second claim lock, and a failed send lapses for the next boundary:
 
 - Claude: a message in its cross-session inbox, from `loopflow`, which Claude
   runs as the conversation's next turn. Managed Claude launches set
@@ -940,22 +943,38 @@ that lapses for the next boundary:
   another conversation, or whose provider refuses, closes without answering.
   A turn already running takes the message as a steer. OpenCode's TUI shows
   the answer but not the message that caused it.
+- Antigravity: one sanitized bracketed paste (`ESC[200~ <text> ESC[201~\r`,
+  with `\x1b` and control bytes other than `\n` and `\t` stripped) into the
+  Session's held terminal, shown in the TUI like a typed prompt. Before
+  claiming and again before writing, the held terminal checks that bracketed
+  paste mode (`?2004h`) is on, no viewer is mid-paste, no unsubmitted user
+  draft is present (tracked on real user keystrokes — ignoring focus events,
+  terminal query replies, and mouse events — and cleared by bare Enter,
+  Ctrl-C, or Ctrl-U), and no user keystroke arrived after the server's recorded
+  yield `Instant`. When live output turns `?2004h` on (initial TUI readiness,
+  or returning from a `/` menu or editor), the terminal notifies `wake.rs` off
+  the `held-terminals` thread so waiting steers run without blocking terminal
+  I/O.
 
-A reopened work session takes steers saved while it was closed as a turn
-before anyone types. Without a steer or an opening prompt, it waits for input.
-The new provider process's first boundary records it idle
-(`record_first_boundary`). That boundary, or a later one naming a new inbox
-or socket, lets the server deliver waiting steers. Claude reports its start.
-Codex runs its start hook inside a turn, so lf reports the start once the
-app-server holds the conversation. If Codex has an opening prompt, lf reports
-the prompt before starting its turn. OpenCode names its socket when the plugin
-loads, and Pi names its socket at `session_start`. The next boundary claims
-any steers the server could not deliver.
+A reopened work session on any of the five harnesses takes steers saved while
+it was closed as a turn before anyone types. Without a steer or an opening
+prompt, it waits for input. The new provider process's first boundary records
+it idle (`record_first_boundary`). That boundary, or a later one naming a new
+inbox or socket (or `?2004h` turning on for a held terminal), lets the server
+deliver waiting steers. Claude reports its start. Codex and Antigravity only
+fire their hooks once a turn starts, so lf reports the launch start via
+`harness::common::report_first_boundary` (after recording the agent's process
+identity, or reporting `UserPromptSubmit` when an opening prompt is sent).
+OpenCode names its socket when the plugin loads, and Pi names its socket at
+`session_start`. The next boundary claims any steers the server could not
+deliver.
 
-A server that restarts reads the same conversations again. An unreachable
-Claude inbox or extension socket leaves its news unclaimed. After a failed
-send the steers arrive again. One watcher serves every Session, with a 60 s
-fallback for a missed checkpoint or a Machine's sleep.
+A server that restarts reads the same conversations again (adopted held
+terminals start with no pending draft, so idle Antigravity sessions wake right
+away). An unreachable inbox, socket, or unready terminal leaves its news
+unclaimed. After a failed send the steers arrive again. One watcher serves
+every Session, with a 60 s fallback for a missed checkpoint or a Machine's
+sleep.
 
 ### Starting a stopped conversation
 

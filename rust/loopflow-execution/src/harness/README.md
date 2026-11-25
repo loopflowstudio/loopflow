@@ -44,7 +44,7 @@ Each harness file answers the rest:
 
 | method | answers |
 |---|---|
-| `capabilities()` | who names the thread, initial prompt on resume, native skills, turn limit, output schema, respawn after crash, install hint |
+| `capabilities()` | who names the thread, initial prompt on resume, idle wake (`IdleWake`), native skills, turn limit, output schema, respawn after crash, install hint |
 | `classify_failure(code, message)` | what an error its decoder reported means for the run: next agent, retry, or nothing lf acts on |
 | `hook_callback(payload, declared, thread_file)` | what a hook callback from its provider means: the moment, and whether the conversation is one a person's input reached; Antigravity keeps the thread file on the conversation the person is in |
 | `hook_reply(event, text)` | the reply that puts text in front of the model, in the provider's shape |
@@ -104,23 +104,39 @@ rewrites the launch's thread file and is a start. In a
 worktree lf created, the terminal is trusted for that session through
 `--settings`, so the folder dialog does not stop the launch.
 
-## What a Task step does on each harness
+## Harness parity
 
-`lf task run LOO-12 -a <harness>` runs a step the same way on all five. Each
-row names the test that shows it; "no" is a gap with its owner.
+```sh
+cargo test -p loopflow-execution --lib harness::parity::             # verifies the table below against parity::support
+cargo test -p loopflow-execution --lib harness::parity::tests::regenerate_readme_table -- --ignored
+```
 
-| a Task step | Claude | Codex | OpenCode | Pi | Antigravity | test |
+`lf task run LOO-12 -a <harness>`, `lf steer LOO-12 …`, and `lf resume --task LOO-12`
+behave the same way across all five harnesses. `harness::parity::support` is an
+exhaustive match over `(HarnessKind, Behavior)` returning `Support::Yes` or
+`Support::Gap { why, owner }`. Every automated behavior test loops over
+`HarnessKind::ALL` and checks both ways (`Yes` passes; `Gap` still exhibits the
+gap), and `parity::tests::readme_table_matches_support` checks the table below
+against code. Behaviors whose real-provider failure cannot be reproduced by a
+stand-in script are tracked as `Verification::RealProvider`.
+
+<!-- parity:start -->
+| behavior | Claude | Codex | OpenCode | Pi | Antigravity | verification |
 |---|---|---|---|---|---|---|
-| starts as a worker, settles, records its answer and native thread; the Graph advances | yes | yes | yes | yes | yes | `task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness` |
-| records its usage in the Task's history | yes | yes | yes | yes | yes | same test; `transcript::facts::tests::a_pi_turn_loopflow_recorded_takes_the_session_files_usage`; `transcript::antigravity::tests::` |
-| receives the step's context | yes | yes | yes | yes | yes | same test; `harness::context::tests::`; `harness::antigravity::tests::` |
-| hears a steer sent while it runs, after its next tool | yes | yes | yes | yes | yes | same test; `harness::context::tests::`; `harness::antigravity::tests::` |
-| never asks permission, whatever `yolo` says | yes | yes | yes | yes | yes | `harness::launch_matrix` |
-| is passed over when its CLI is not installed, or named once when it was the only choice | yes | yes | yes | yes | yes | `task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again` |
-| fails the turn, with the question as its reason, when it asks one and nobody is there; the run stops after that one attempt | no: not read (Task 48edb9) | no: not read (Task 48edb9) | yes | yes | no: not read (Task 48edb9) | `task_graph_launch_tests::a_question_with_nobody_there_ends_the_step` |
-| stops on `lf task interrupt` with its turn recorded interrupted; the next `lf task run` starts the step again | yes | yes | yes | yes | yes | `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_claude_and_codex`, `…_on_opencode_and_pi`, `…_on_antigravity` |
-| moves to the next agent on a usage limit, a revoked login or a model the provider does not serve | yes | yes | yes | yes | yes | `harness::conformance_tests::each_harness_classifies_its_own_refusals`; `agent::tests::` fallthrough tests |
-| as an idle work session, hears a steer | yes | yes | yes | yes | no: next turn only (Task 540073) | `server::wake::tests::`; `harness::context::tests::` |
+| starts as a worker, settles, records its answer and native thread; the Graph advances | yes | yes | yes | yes | yes | automated (`task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness`) |
+| records its usage in the Task's history | yes | yes | yes | yes | yes | automated (`task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness`) |
+| receives the step's context | yes | yes | yes | yes | yes | automated (`task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness`) |
+| hears a steer sent while it runs, after its next tool | yes | yes | yes | yes | yes | automated (`task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness`) |
+| never asks permission, whatever `yolo` says | yes | yes | yes | yes | yes | automated (`harness::launch_matrix`) |
+| is passed over when its CLI is not installed, or named once when it was the only choice | yes | yes | yes | yes | yes | automated (`task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again`) |
+| fails the turn, with the question as its reason, when it asks one and nobody is there; the run stops after that one attempt | no: not read (Task 48edb9) | no: not read (Task 48edb9) | yes | yes | no: not read (Task 48edb9) | automated (`task_graph_launch_tests::a_question_with_nobody_there_ends_the_step`) |
+| stops on `lf task interrupt` with its turn recorded interrupted; the next `lf task run` starts the step again | yes | yes | yes | yes | yes | automated (`task_graph_launch_tests::a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again`) |
+| moves to the next agent on a usage limit, a revoked login or a model the provider does not serve | yes | yes | yes | yes | yes | automated (`harness::conformance_tests::each_harness_classifies_its_own_refusals`) |
+| as an idle work session, hears a steer | yes | yes | yes | yes | yes | automated (`server::wake::tests::every_harness_wakes_its_idle_work_session`) |
+| reopened work session takes waiting steers as a turn | yes | yes | yes | yes | yes | automated (`server::wake::tests::every_harness_takes_waiting_steers_on_reopen`) |
+| lists synced skills and Graphs | yes | yes | yes | yes | yes | automated (`harness::conformance_tests::every_harness_reads_a_synced_skill`) |
+| opening in another viewer keeps the conversation | yes | yes | yes | yes | no: second viewer closes first (LOO-1097) | real provider (`transport_tests` proves held-terminal sharing; provider TUI checked live) |
+<!-- parity:end -->
 
 Context and steers reach every harness the same way: it runs
 `lf __context-block` when the conversation starts and after each tool. Claude
@@ -151,16 +167,17 @@ On all five harnesses, `lf task interrupt` ends the worker with exit 130,
 records its turn as interrupted, and leaves the Graph at that step. The next
 `lf task run` starts the step in a new conversation.
 
-An idle work session is woken through the provider's own way in
+An idle work session is woken through each harness's declared
+`Capabilities.idle_wake`
 ([Waking an idle conversation](../../../loopflow/src/server/README.md#waking-an-idle-conversation)):
-Claude's inbox, Codex's app-server, and for OpenCode and Pi a socket their
-plugin or extension listens on, which asks the provider to start the turn.
-An OpenCode work session reports each turn's first request and its end, so the
-server knows when it is idle; Pi reports every event. Both name their socket
-as they start. A work session reopened on any of the four takes the steers
-saved while it was closed as a turn; Codex's launch reports the start its
-app-server's hook would only report inside a turn.
-Antigravity takes queued steers on its next turn.
+Claude's inbox, Codex's app-server, an OpenCode plugin or Pi extension socket,
+or Antigravity's held terminal. An OpenCode work session reports each turn's
+first request and its end, so the server knows when it is idle; Pi reports
+every event. Both name their socket as they start. A work session reopened on
+any of the five harnesses takes the steers saved while it was closed as a turn;
+Codex and Antigravity report their launch start through
+`harness::common::report_first_boundary` since their hooks only report once a
+turn begins.
 
 Each harness's decoder reports a provider failure as an error event, and
 `drive::run` asks that harness what it means (`classify_failure`), once, at the

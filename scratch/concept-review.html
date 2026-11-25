@@ -1,754 +1,1819 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Concept review: LOO-1109 review pages across hosts</title>
+<title>Do the built review-page concepts line up?</title>
 <style>
+/* Loopflow repository review page theme (DESIGN.md / Loopflow Light & Dark tokens). */
+:root {
+  --lf-bg: #faf8f5;
+  --lf-surface: #fffdf9;
+  --lf-surface-muted: #f3eee7;
+  --lf-surface-element: #ece6dd;
+  --lf-border: #e6dfd6;
+  --lf-border-strong: #d6ccc0;
+  --lf-text: #2a2624;
+  --lf-text-secondary: #5f5752;
+  --lf-text-tertiary: #65605d;
+  --lf-accent: #722f37;
+  --lf-accent-hover: #5e2630;
+  --lf-accent-text: #faf8f5;
+  --lf-working-ink: #2f629f;
+  --lf-working-fill: #d5dde6;
+  --lf-warning-ink: #7f5a19;
+  --lf-warning-fill: #e4dccd;
+  --lf-failure-ink: #a64038;
+  --lf-failure-fill: #ecd9d5;
+  --lf-success-ink: #386c48;
+  --lf-success-fill: #d7dfd6;
+  --lf-highlight: rgba(114, 47, 55, 0.16);
+  --lf-font-serif: "Old Standard TT", Georgia, "Times New Roman", serif;
+  --lf-font-sans: "Atkinson Hyperlegible Next", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --lf-font-mono: "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
   :root {
-    --background: #faf8f5;
-    --surface: #fffdf9;
-    --surface-muted: #f3eee7;
-    --surface-element: #ece6dd;
-    --border: #e6dfd6;
-    --border-strong: #d6ccc0;
-    --border-active: #8b8277;
-    --text: #2a2624;
-    --text-secondary: #5f5752;
-    --text-tertiary: #65605d;
-    --accent: #722f37;
-    --accent-hover: #5e2630;
-    --accent-text: #faf8f5;
-    --accent-soft: #f3e8e9;
-    --working-ink: #2f629f;
-    --working-fill: #e2eaf2;
-    --warning-ink: #7f5a19;
-    --warning-fill: #efe7d8;
-    --failure-ink: #a64038;
-    --failure-fill: #f3e2df;
-    --success-ink: #386c48;
-    --success-fill: #e1ebe3;
-    --serif: "Old Standard TT", Georgia, "Times New Roman", serif;
-    --sans: "Atkinson Hyperlegible Next", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    --mono: "Spline Sans Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --lf-bg: #181615;
+    --lf-surface: #201d1b;
+    --lf-surface-muted: #282422;
+    --lf-surface-element: #312c29;
+    --lf-border: #38322e;
+    --lf-border-strong: #4a423d;
+    --lf-text: #efeae4;
+    --lf-text-secondary: #b9afa6;
+    --lf-text-tertiary: #8f857d;
+    --lf-accent: #c96b76;
+    --lf-accent-hover: #d8838d;
+    --lf-accent-text: #181615;
+    --lf-working-ink: #7eb2f0;
+    --lf-working-fill: #203147;
+    --lf-warning-ink: #e0b25c;
+    --lf-warning-fill: #3d311c;
+    --lf-failure-ink: #e67c73;
+    --lf-failure-fill: #452422;
+    --lf-success-ink: #7cc490;
+    --lf-success-fill: #213828;
+    --lf-highlight: rgba(201, 107, 118, 0.28);
   }
+}
 
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --background: #161413;
-      --surface: #1e1b19;
-      --surface-muted: #26221f;
-      --surface-element: #302b27;
-      --border: #322d29;
-      --border-strong: #463f3a;
-      --border-active: #968b80;
-      --text: #ede9e3;
-      --text-secondary: #b0a79f;
-      --text-tertiary: #8f867e;
-      --accent: #c46b75;
-      --accent-hover: #d4828b;
-      --accent-text: #161413;
-      --accent-soft: #2e1d20;
-      --working-ink: #7bb0eb;
-      --working-fill: #1f2b38;
-      --warning-ink: #dfb464;
-      --warning-fill: #302819;
-      --failure-ink: #e07b72;
-      --failure-fill: #331e1c;
-      --success-ink: #79b88b;
-      --success-fill: #1c2c21;
-    }
-  }
-  :root[data-theme="dark"] {
-    --background: #161413;
-    --surface: #1e1b19;
-    --surface-muted: #26221f;
-    --surface-element: #302b27;
-    --border: #322d29;
-    --border-strong: #463f3a;
-    --border-active: #968b80;
-    --text: #ede9e3;
-    --text-secondary: #b0a79f;
-    --text-tertiary: #8f867e;
-    --accent: #c46b75;
-    --accent-hover: #d4828b;
-    --accent-text: #161413;
-    --accent-soft: #2e1d20;
-    --working-ink: #7bb0eb;
-    --working-fill: #1f2b38;
-    --warning-ink: #dfb464;
-    --warning-fill: #302819;
-    --failure-ink: #e07b72;
-    --failure-fill: #331e1c;
-    --success-ink: #79b88b;
-    --success-fill: #1c2c21;
-  }
+/* Base layout and component styles for compiled Loopflow review pages. */
+*, *::before, *::after { box-sizing: border-box; }
 
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body {
-    margin: 0;
-    background: var(--background);
-    color: var(--text);
-    font-family: var(--sans);
-    font-size: 15px;
-    line-height: 1.58;
-    -webkit-font-smoothing: antialiased;
-  }
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--lf-bg);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
 
-  .column {
-    max-width: 880px;
-    margin: 0 auto;
-    padding: 36px 20px 84px;
-  }
+main.lf-page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 36px 24px 120px;
+}
 
-  .page-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 16px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 20px;
-  }
-  h1 {
-    margin: 0 0 8px;
-    font-family: var(--serif);
-    font-weight: 400;
-    font-size: 32px;
-    line-height: 1.15;
-    letter-spacing: -0.03em;
-    font-variant-ligatures: none;
-  }
-  .lede {
-    margin: 0;
-    font-size: 15px;
-    color: var(--text-secondary);
-    max-width: 68ch;
-  }
+h1 {
+  font-family: var(--lf-font-serif);
+  font-size: 32px;
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  font-variant-ligatures: no-common-ligatures;
+  margin: 0 0 12px;
+}
 
-  h2 {
-    margin: 40px 0 10px;
-    font-family: var(--sans);
-    font-weight: 600;
-    font-size: 19px;
-    line-height: 1.3;
-    padding-bottom: 6px;
-    border-bottom: 1px solid var(--border);
-  }
-  h3 {
-    margin: 22px 0 6px;
-    font-family: var(--sans);
-    font-weight: 600;
-    font-size: 15.5px;
-    line-height: 1.35;
-  }
-  p { margin: 0 0 12px; }
-  ul, ol { margin: 0 0 14px; padding-left: 20px; }
-  li { margin-bottom: 6px; }
+h2 {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 32px 0 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--lf-border);
+}
 
-  .small { font-size: 13.5px; color: var(--text-secondary); }
-  code {
-    font-family: var(--mono);
-    font-size: 12.5px;
-    background: var(--surface-muted);
-    padding: 1px 4px;
-    border-radius: 3px;
-  }
-  pre {
-    margin: 8px 0 12px;
-    font-family: var(--mono);
-    font-size: 12px;
-    line-height: 1.5;
-    background: var(--surface-muted);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 10px 12px;
-    overflow-x: auto;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
+h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 20px 0 8px;
+}
 
-  button {
-    font-family: var(--sans);
-    font-size: 13px;
-    line-height: 1.2;
-    padding: 5px 11px;
-    border-radius: 4px;
-    border: 1px solid var(--border-strong);
-    background: var(--surface);
-    color: var(--text);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  button:hover { background: var(--surface-muted); border-color: var(--border-active); }
-  button[aria-pressed="true"] {
-    background: var(--accent-soft);
-    border-color: var(--accent);
-    color: var(--accent);
-    font-weight: 600;
-  }
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 22px; }
+li { margin-bottom: 4px; }
 
-  .status {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-  .status::before {
-    content: "";
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: currentColor;
-    flex-shrink: 0;
-  }
-  .status.yes { color: var(--success-ink); }
-  .status.no { color: var(--failure-ink); }
-  .status.proposed { color: var(--accent); }
-  .status.existing { color: var(--text-secondary); }
-  .status.work { color: var(--working-ink); }
+code, pre {
+  font-family: var(--lf-font-mono);
+  font-size: 12.5px;
+}
 
-  .jump-bar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 14px;
-    font-size: 13.5px;
-    margin: 0 0 22px;
-  }
-  .jump-bar a {
-    color: var(--text-secondary);
-    text-decoration: none;
-    border-bottom: 1px solid var(--border-strong);
-    padding-bottom: 1px;
-  }
-  .jump-bar a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+code {
+  background: var(--lf-surface-muted);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
 
-  .state-band {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-    padding: 14px 16px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    margin: 14px 0 22px;
-    font-size: 14px;
-  }
-  @media (max-width: 680px) { .state-band { grid-template-columns: 1fr; } }
-  .state-band > div + div { border-left: 1px solid var(--border); padding-left: 16px; }
-  @media (max-width: 680px) {
-    .state-band > div + div { border-left: none; padding-left: 0; border-top: 1px solid var(--border); padding-top: 12px; }
-  }
+pre {
+  background: var(--lf-surface);
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
 
-  .table-wrap { overflow-x: auto; margin: 12px 0 20px; }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13.5px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-  th, td {
-    text-align: left;
-    vertical-align: top;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--border);
-  }
-  th {
-    background: var(--surface-muted);
-    font-weight: 600;
-    font-size: 13px;
-    color: var(--text-secondary);
-  }
-  tr:last-child td { border-bottom: none; }
+pre code {
+  background: none;
+  padding: 0;
+}
 
-  .compare {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 14px;
-    margin: 14px 0 22px;
-  }
-  @media (max-width: 720px) { .compare { grid-template-columns: 1fr; } }
-  .panel {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 14px 16px;
-    font-size: 14px;
-  }
-  .panel-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 10px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--border);
-  }
-  .panel-title { font-weight: 600; font-size: 14.5px; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 16px;
+  font-size: 14px;
+}
 
-  .trace {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin: 8px 0;
-  }
-  .step {
-    background: var(--surface-muted);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 8px 10px;
-    font-size: 13.5px;
-  }
-  .step.bad {
-    background: var(--failure-fill);
-    border-color: var(--failure-ink);
-  }
-  .step.good {
-    background: var(--success-fill);
-    border-color: var(--success-ink);
-  }
+th, td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--lf-border);
+  vertical-align: top;
+}
 
-  .sim-bar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-    margin: 12px 0;
-  }
+th {
+  color: var(--lf-text-secondary);
+  font-weight: 600;
+  font-size: 12.5px;
+}
 
-  .callout {
-    background: var(--surface);
-    border: 1px solid var(--border-strong);
-    border-radius: 8px;
-    padding: 14px 16px;
-    margin: 14px 0 20px;
-  }
+::highlight(lf-note) {
+  background-color: var(--lf-highlight);
+}
 
-  .q-list { list-style: none; padding-left: 0; }
-  .q-item {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 14px 16px;
-    margin-bottom: 12px;
-  }
-  .q-title { font-weight: 600; margin-bottom: 8px; }
-  .q-opts { list-style: none; padding-left: 0; margin: 0; }
-  .q-opts li { margin-bottom: 6px; font-size: 14px; }
-  .q-key { font-weight: 600; color: var(--accent); margin-right: 4px; }
+/* Meta bar */
+.lf-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: var(--lf-text-secondary);
+  font-size: 12.5px;
+  margin-bottom: 24px;
+}
+
+.lf-meta code {
+  font-size: 12px;
+}
+
+/* Banner (server restart / host warnings) */
+.lf-banner {
+  background: var(--lf-warning-fill);
+  color: var(--lf-warning-ink);
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 13.5px;
+}
+
+/* Diff and File blocks */
+.lf-codeblock {
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  background: var(--lf-surface);
+  margin: 14px 0;
+  overflow: hidden;
+}
+
+.lf-codeblock-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--lf-surface-muted);
+  border-bottom: 1px solid var(--lf-border);
+  font-size: 12.5px;
+}
+
+.lf-codeblock-path {
+  font-family: var(--lf-font-mono);
+  color: var(--lf-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lf-codeblock-scroll {
+  overflow-x: auto;
+}
+
+.lf-code-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+  font-family: var(--lf-font-mono);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.lf-code-table td {
+  border: 0;
+  padding: 0 8px;
+  white-space: pre;
+}
+
+.lf-code-table td.lf-ln {
+  width: 1%;
+  min-width: 38px;
+  text-align: right;
+  color: var(--lf-text-tertiary);
+  user-select: none;
+  border-right: 1px solid var(--lf-border);
+  font-variant-numeric: tabular-nums;
+}
+
+.lf-code-table td.lf-sign {
+  width: 18px;
+  text-align: center;
+  user-select: none;
+  padding: 0 2px;
+}
+
+.lf-code-table tr.lf-add { background: var(--lf-success-fill); }
+.lf-code-table tr.lf-add td.lf-sign { color: var(--lf-success-ink); }
+.lf-code-table tr.lf-del { background: var(--lf-failure-fill); }
+.lf-code-table tr.lf-del td.lf-sign { color: var(--lf-failure-ink); }
+.lf-code-table tr.lf-hunk td {
+  background: var(--lf-surface-muted);
+  color: var(--lf-text-secondary);
+  padding: 3px 10px;
+}
+
+.lf-code-table tr.lf-line-note td {
+  white-space: normal;
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  background: var(--lf-surface-element);
+  color: var(--lf-text);
+  padding: 6px 12px;
+  border-top: 1px solid var(--lf-border);
+  border-bottom: 1px solid var(--lf-border);
+}
+
+.lf-codeblock.lf-notes-hidden tr.lf-line-note {
+  display: none;
+}
+
+/* Builtin components */
+.lf-decision {
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  background: var(--lf-surface);
+  padding: 14px 16px;
+  margin: 14px 0;
+}
+
+.lf-decision-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.lf-decision-title {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.lf-decision-rec {
+  font-size: 12px;
+  color: var(--lf-text-secondary);
+}
+
+.lf-before-after {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.lf-before-after-pane {
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  background: var(--lf-surface);
+  padding: 12px 14px;
+}
+
+.lf-before-after-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--lf-text-secondary);
+  margin-bottom: 8px;
+}
+
+/* Controls: choices, questions, direct actions */
+[data-choice], [data-multiselect] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* A control's `data-label` is its question; a decision card shows its title instead. */
+[data-choice][data-label]::before,
+[data-multiselect][data-label]::before,
+[data-question][data-label]::before {
+  content: attr(data-label);
+  display: block;
+  flex-basis: 100%;
+  margin: 10px 0 2px;
+  font-weight: 600;
+}
+
+.lf-decision [data-choice]::before {
+  content: none;
+}
+
+button {
+  appearance: none;
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  line-height: 1.2;
+  padding: 6px 11px;
+  border-radius: 4px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--lf-surface-muted);
+}
+
+button.is-selected, button[aria-pressed="true"] {
+  background: var(--lf-accent);
+  border-color: var(--lf-accent);
+  color: var(--lf-accent-text);
+}
+
+button.lf-btn-accent {
+  background: var(--lf-accent);
+  border-color: var(--lf-accent);
+  color: var(--lf-accent-text);
+}
+
+button.lf-btn-accent:hover {
+  background: var(--lf-accent-hover);
+  border-color: var(--lf-accent-hover);
+}
+
+button.lf-btn-quiet {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-color: var(--lf-border);
+  color: var(--lf-text-secondary);
+}
+
+[data-question] {
+  margin: 14px 0;
+}
+
+[data-question] textarea, [data-question] input[type="text"] {
+  width: 100%;
+  min-height: 60px;
+  padding: 8px 10px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 4px;
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 14px;
+  resize: vertical;
+}
+
+/* Direct action confirmation & receipt */
+.lf-action-confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 6px;
+  background: var(--lf-surface-muted);
+  font-size: 13px;
+}
+
+.lf-action-summary {
+  font-family: var(--lf-font-mono);
+  font-size: 12px;
+  color: var(--lf-text-secondary);
+}
+
+.lf-action-receipt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 4px;
+  background: var(--lf-success-fill);
+  color: var(--lf-success-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.lf-action-error {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 4px;
+  background: var(--lf-failure-fill);
+  color: var(--lf-failure-ink);
+  font-size: 13px;
+}
+
+/* Highlight-to-comment popover */
+.lf-note-popover {
+  position: fixed;
+  z-index: 900;
+  background: var(--lf-surface);
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 260px;
+  max-width: 360px;
+}
+
+.lf-note-popover textarea {
+  width: 100%;
+  min-height: 54px;
+  padding: 6px 8px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 4px;
+  background: var(--lf-bg);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+}
+
+.lf-note-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.lf-notes-tray {
+  margin-top: 24px;
+  padding-top: 12px;
+  border-top: 1px solid var(--lf-border);
+}
+
+.lf-note-chip {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--lf-border);
+  border-radius: 6px;
+  background: var(--lf-surface);
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+/* Fixed reply strip (hidden in Loopflow Desktop) */
+.lf-strip {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(820px, calc(100vw - 24px));
+  padding: 8px 12px;
+  background: var(--lf-surface);
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+  font-size: 13px;
+}
+
+.lf-strip[hidden] { display: none; }
+
+.lf-strip-status {
+  color: var(--lf-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lf-strip-status.is-error { color: var(--lf-failure-ink); }
+.lf-strip-status.is-ok { color: var(--lf-success-ink); }
+
 </style>
 </head>
 <body>
-<div class="column">
-  <header class="page-head">
-    <div>
-      <h1>Do the review-page concepts line up?</h1>
-      <p class="lede">
-        Pre-implementation concept review for <code>LOO-1109</code>. Area reviewed:
-        review pages end-to-end — compiling with <code>lf page build</code>, opening
-        across hosts with <code>lf page open</code>, annotating and triggering
-        <code>data-lf</code> actions, and delivering replies into Rex, Loopflow
-        Desktop, and offline <code>file://</code>.
-      </p>
-    </div>
-    <button type="button" id="theme-toggle">Dark</button>
-  </header>
+<main class="lf-page">
+<h1>Do the built review-page concepts line up?</h1>
 
-  <nav class="jump-bar" aria-label="Sections">
-    <a href="#status">Build status</a>
-    <a href="#pairings">Concept pairings</a>
-    <a href="#biggest">Biggest mismatches</a>
-    <a href="#walkthrough">Failure walkthrough</a>
-    <a href="#plan-changes">Updated plan</a>
-    <a href="#questions">Open questions</a>
-  </nav>
-
-  <section id="status">
-    <div class="state-band">
-      <div>
-        <span class="status existing">Built and committed today</span>
-        <p class="small" style="margin-top:6px;">
-          No production code for <code>LOO-1109</code> has been written yet. This
-          branch sits on <code>LOO-1104</code> (skill inheritance) and holds only
-          <code>scratch/explore.html</code>, <code>scratch/review-infra-notes.md</code>,
-          <code>scratch/questions.md</code>, and <code>scratch/plan.md</code>.
-          Existing code it builds on: <code>server/remote.rs</code>,
-          <code>lf desktop files</code> (#2034), <code>TaskHTMLView</code>,
-          <code>ReviewCommentsStrip</code>, and <code>task.steer</code>.
-        </p>
-      </div>
-      <div>
-        <span class="status proposed">Proposed by this review</span>
-        <p class="small" style="margin-top:6px;">
-          Six conceptual mismatches were found in the kickoff plan and fixed
-          directly in <code>scratch/plan.md</code> before Pass 1 starts: steer
-          targeting, separating <code>data-lf</code> from the reply queue,
-          single-owner Desktop draft state, quiet headless <code>lf page open</code>,
-          dropping unused loopback <code>/ticket</code>, and reusing Loopflow's
-          diff machinery with an explicit component contract.
-        </p>
-      </div>
-    </div>
-  </section>
-
-  <section id="pairings">
-    <h2>Product concepts vs. code concepts</h2>
-    <p class="small">
-      Each row pairs what a person understands and does with the representation
-      proposed in the kickoff plan. Every <strong>No</strong> was revised in
-      <code>scratch/plan.md</code>.
-    </p>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th style="width:20%;">Product concept</th>
-            <th style="width:28%;">Kickoff plan code concept</th>
-            <th style="width:9%;">Match</th>
-            <th style="width:43%;">What was wrong and how the plan now fixes it</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><strong>Answering the work</strong><br><span class="small">Press <code>⌘↩</code> and the right agent gets it</span></td>
-            <td>Page stamp stores the building agent's <code>session</code>; runtime sends <code>session.steer</code> first, else <code>task.steer</code>.</td>
-            <td><span class="status no">No</span></td>
-            <td><strong>Silent data loss on every Graph-built page.</strong> A headless <code>concept-review</code>, <code>qa</code>, or <code>ship-review</code> worker exits right after building the page. <code>session.steer</code> returns OK and writes into that dead worker Session (<code>engine/session.rs:34-46</code>) where nothing ever reads it. <strong>Fix:</strong> stamp <code>work</code> (<code>task</code> / <code>wave</code> / interactive <code>session</code> / <code>repository</code>); Task pages always send <code>task.steer</code>, which reaches live work, wakes the primary Session, forwards to peer Machines, and returns <code>delivery.sentence</code>.</td>
-          </tr>
-          <tr>
-            <td><strong>Reply queue vs. direct action</strong><br><span class="small">Notes &amp; choices wait for <code>⌘↩</code>; action buttons run one thing now</span></td>
-            <td><code>data-lf</code> runs on click + confirm, then appends <code>"Ran task.create → LOO-1200"</code> to the unsent queue; authored as raw wire JSON.</td>
-            <td><span class="status no">No</span></td>
-            <td><strong>One name for two lifecycles + unauthorable wire JSON.</strong> (1) Pushing an already-executed action into the unsent queue pops the reply strip when nothing is left to steer, puts a fake comment in Desktop's <code>ReviewCommentsStrip</code>, and makes Clear lie. (2) Wire <code>Operation</code>s use <code>deny_unknown_fields</code> with zero defaults (10 required keys for <code>task.create</code>). <strong>Fix:</strong> keep <code>decision</code> cards as <code>data-choice</code>; keep <code>data-lf</code> strictly in-place with a durable receipt (appending <code>[already ran: …]</code> only if the person also sends a queued reply); let <code>lf page build</code> expand and validate partial <code>data-lf</code> JSON into strict wire JSON, with per-click UUID <code>request_id</code>.</td>
-          </tr>
-          <tr>
-            <td><strong>Drafts in Desktop</strong><br><span class="small">Notes &amp; choices sit beside Diff comments, survive switching files, clear once sent</span></td>
-            <td>JS runtime owns drafts in <code>localStorage</code> and pushes <code>items</code> one-way to Swift; bridge wired into both <code>TaskFileReadingView</code> and <code>ReviewRenderedView</code>.</td>
-            <td><span class="status no">No</span></td>
-            <td><strong>Two state owners + peer-Machine crash + Diff collision.</strong> (1) Peer Tasks load HTML on <code>about:blank</code>, where WebKit throws <code>SecurityError</code> on <code>localStorage</code>. (2) Switching to a code file unmounts <code>TaskHTMLView</code>; sending <code>⌘↩</code> clears Swift without clearing <code>localStorage</code>, so returning resurrects sent comments. (3) <code>ReviewRenderedView</code> mounts two WebViews (old &amp; new) for the same path. <strong>Fix:</strong> Swift <code>ReviewComments</code> is the sole draft owner in Desktop (<code>ready</code> / <code>sync</code> / clear on send, keyed by <code>path + build_id</code>); <code>ReviewRenderedView</code> stays read-only.</td>
-          </tr>
-          <tr>
-            <td><strong>Opening a page where you work</strong><br><span class="small">Desktop in Desktop, browser beside Rex, quiet when headless</span></td>
-            <td><code>lf page open</code>: "Desktop when the conversation is viewed there, else the browser." No <code>--host</code> flag.</td>
-            <td><span class="status no">No</span></td>
-            <td><strong>Focus theft during headless Graph steps.</strong> A background Graph run has no viewer, so "else the browser" opens a surprise browser tab on the person's desktop on every auto run. <strong>Fix:</strong> headless agent calls print the URL and never pop a window; direct CLI calls and interactive non-Desktop viewers open the browser; add <code>--host auto|desktop|browser</code>; refuse raw <code>.page.html</code> sources with the build command.</td>
-          </tr>
-          <tr>
-            <td><strong>Loopback carrier</strong><br><span class="small">Local browser talks to <code>lf server</code> safely</span></td>
-            <td><code>loopback.rs</code> serves <code>/f/&lt;path&gt;</code>, <code>/machine</code>, and <code>/ticket</code>; <code>ServerOperation::PageUrl</code> returns the URL.</td>
-            <td><span class="status no">No</span></td>
-            <td><strong>Unused route + carrier-authority gap.</strong> Nothing in a page speaks the &gt;1 MB bulk/terminal ticket protocol, so <code>/ticket</code> is dead code. And <code>ServerOperation::PageUrl</code> must be local-Unix-socket-only (like <code>mobile.status</code>), never exposed to Tailscale peers or loopback pages. <strong>Fix:</strong> drop <code>/ticket</code>; restrict <code>page.url</code> to local Unix socket connections.</td>
-          </tr>
-          <tr>
-            <td><strong>Compiling a page with real diffs</strong><br><span class="small">Short source fragment with real hunks and repo components</span></td>
-            <td>Raw <code>git diff &lt;base&gt;</code> with mandatory <code>lines</code> and ambiguous <code>line</code>; <code>&lt;lf-component&gt;</code> with no specified slot/attribute contract; drafts keyed by <code>head</code>.</td>
-            <td><span class="status no">No</span></td>
-            <td><strong>Untracked files fail + deleted-line ambiguity + unspecified template engine.</strong> Raw <code>git diff</code> drops newly created untracked files and renames; <code>line="22"</code> cannot name a deleted line; keying drafts by <code>head</code> leaks <code>explore</code> round 1 drafts into round 2. <strong>Fix:</strong> reuse <code>ops::task::snapshot::diff_snapshot</code>; make <code>lines</code> optional and add <code>old-line</code>; fix <code>&lt;lf-component&gt;</code> to <code>{{attr}}</code> + <code>&lt;slot&gt;</code> with zero control flow; stamp <code>build_id</code> (compiled body hash).</td>
-          </tr>
-          <tr>
-            <td><strong>One message format</strong><br><span class="small">Same reply text from browser, Desktop, and clipboard</span></td>
-            <td>Single one-line formatter in runtime; Desktop joins with Diff comments.</td>
-            <td><span class="status yes">Yes</span></td>
-            <td>Matches <code>GhosttyTerminalView.insertText</code> (no control characters or newlines) and existing <code>(1) … (2) …</code> Diff comment format.</td>
-          </tr>
-          <tr>
-            <td><strong>Shared skill kit</strong><br><span class="small">Five skills share rules and compose with <code>extends:</code></span></td>
-            <td>Shared authoring rules in <code>lf help page</code>; skills say only what their page must show; <code>tour</code> untouched.</td>
-            <td><span class="status yes">Yes</span></td>
-            <td>Removes duplicated HTML crafting prose across five skills and composes cleanly with <code>LOO-1104</code>.</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-  <section id="biggest">
-    <h2>The three biggest mismatches, before and after</h2>
-    <p class="small">
-      These three directly break real workflows on the first day if left as drafted.
-    </p>
-
-    <h3>1. Steer target: dead Graph worker vs. live Task</h3>
-    <div class="compare">
-      <div class="panel">
-        <div class="panel-head">
-          <span class="panel-title">Before (kickoff plan)</span>
-          <span class="status no">Drops reviews</span>
-        </div>
-        <div class="trace">
-          <div class="step">1. Headless Graph step runs <code>ship-review</code> in worker <code>session_9f1a</code> and calls <code>lf page build</code>.</div>
-          <div class="step">2. Stamp records <code>"session": "session_9f1a"</code>. Worker finishes and exits.</div>
-          <div class="step">3. Person opens <code>scratch/ship-review.html</code> beside Rex, writes 3 notes, presses <code>⌘↩</code>.</div>
-          <div class="step bad">4. Page sends <code>session.steer(session_9f1a)</code> → server saves steer and returns OK. Page clears the queue. <strong>Nothing ever reads <code>session_9f1a</code> again.</strong></div>
-        </div>
-      </div>
-      <div class="panel">
-        <div class="panel-head">
-          <span class="panel-title">After (revised plan)</span>
-          <span class="status proposed">Proposed</span>
-        </div>
-        <div class="trace">
-          <div class="step">1. <code>lf page build</code> stamps <code>"work": {"kind": "task", "issue": "LOO-1109"}</code> (never a finished worker ID).</div>
-          <div class="step">2. Person opens page beside Rex, writes 3 notes, presses <code>⌘↩</code>.</div>
-          <div class="step good">3. Page sends <code>task.steer(LOO-1109)</code> → reaches the live Rex agent (or wakes the Task's primary Session, or forwards to a peer Machine).</div>
-          <div class="step good">4. Strip shows the server's exact <code>delivery.sentence</code> (e.g. <code>session_4b2c reads it at its next boundary</code>).</div>
-        </div>
-      </div>
-    </div>
-
-    <h3>2. Desktop state ownership: split-brain <code>localStorage</code> vs. single owner in Swift</h3>
-    <div class="compare">
-      <div class="panel">
-        <div class="panel-head">
-          <span class="panel-title">Before (kickoff plan)</span>
-          <span class="status no">Resurrects &amp; crashes</span>
-        </div>
-        <div class="trace">
-          <div class="step">1. Person highlights 2 notes on <code>scratch/ship-review.html</code> in Desktop Files. Saved in WebView <code>localStorage</code> and copied to <code>ReviewComments</code>.</div>
-          <div class="step">2. Person opens <code>loopback.rs</code> to verify a line (<code>TaskHTMLView</code> unmounts), adds 1 code comment, hits <code>Send to conversation ⌘↩</code>.</div>
-          <div class="step bad">3. Swift sends all 3 comments and empties <code>ReviewComments</code>. Unmounted WebView never learns the queue is spent.</div>
-          <div class="step bad">4. Person clicks back to <code>ship-review.html</code> → <code>localStorage</code> reloads the 2 sent notes and re-posts them into <code>ReviewCommentsStrip</code>. On peer Tasks (<code>about:blank</code>), <code>localStorage</code> throws <code>SecurityError</code> immediately.</div>
-        </div>
-      </div>
-      <div class="panel">
-        <div class="panel-head">
-          <span class="panel-title">After (revised plan)</span>
-          <span class="status proposed">Proposed</span>
-        </div>
-        <div class="trace">
-          <div class="step">1. Under Desktop's bridge, the runtime never touches <code>localStorage</code>. Every edit posts <code>{type: "sync", path, build_id, state, items}</code> to Swift.</div>
-          <div class="step">2. Person switches to <code>loopback.rs</code>, adds a code comment, presses <code>⌘↩</code>.</div>
-          <div class="step good">3. <code>ReviewComments.insert</code> sends all 3 on one line and wipes both <code>items</code> and stored page <code>state</code> — even while <code>TaskHTMLView</code> is unmounted.</div>
-          <div class="step good">4. Clicking back sends <code>ready(path, build_id)</code> → Swift replies <code>null</code> (clean). Works identically on peer Machines (<code>about:blank</code>); <code>ReviewRenderedView</code> stays read-only.</div>
-        </div>
-      </div>
-    </div>
-
-    <h3>3. Direct actions (<code>data-lf</code>) vs. queued reply</h3>
-    <div class="compare">
-      <div class="panel">
-        <div class="panel-head">
-          <span class="panel-title">Before (kickoff plan)</span>
-          <span class="status no">Mixed lifecycles</span>
-        </div>
-        <pre>&lt;button data-lf='{"kind":"task.create",
-  "directory":"/Users/jack/src/...",
-  "request_id":"...", "title":null,
-  "request":"Retry bind", "wave":null,
-  "parent":null, "graph":null,
-  "session":null, "run":false}'&gt;
-  File Task
-&lt;/button&gt;</pre>
-        <p class="small">
-          Author must spell all 10 strict DTO fields. Clicking runs
-          <code>task.create</code> immediately, then adds
-          <code>"Ran task.create → LOO-1200"</code> to the unsent reply queue —
-          popping Desktop's <code>1 comment · Send to conversation ⌘↩</code>
-          bar for something already done.
-        </p>
-      </div>
-      <div class="panel">
-        <div class="panel-head">
-          <span class="panel-title">After (revised plan)</span>
-          <span class="status proposed">Proposed</span>
-        </div>
-        <pre>&lt;!-- In source .page.html --&gt;
-&lt;button data-lf='{"kind":"task.create",
-  "request":"Retry loopback bind"}'&gt;
-  File Task now
-&lt;/button&gt;</pre>
-        <p class="small">
-          <code>lf page build</code> expands and validates the partial JSON into
-          a complete strict wire <code>Operation</code> (runtime fills per-click
-          UUID <code>request_id</code>). Clicking confirms inline, runs, and
-          becomes an in-place receipt <code>Filed LOO-1200</code>. Never enters
-          the unsent queue or Desktop's comments strip; rides along as
-          <code>[already ran: …]</code> only if you also send a steer.
-        </p>
-      </div>
-    </div>
-  </section>
-
-  <section id="walkthrough">
-    <h2>Interactive failure &amp; recovery check</h2>
-    <p class="small">
-      Switch scenarios to compare how the kickoff plan and the revised plan
-      handle each failure or recovery path.
-    </p>
-    <div class="sim-bar" role="group" aria-label="Scenarios">
-      <button type="button" class="sc-btn" data-sc="headless" aria-pressed="true">Headless Graph step</button>
-      <button type="button" class="sc-btn" data-sc="round2" aria-pressed="false">Explore round 2 (same HEAD)</button>
-      <button type="button" class="sc-btn" data-sc="untracked" aria-pressed="false">Untracked file in &lt;lf-diff&gt;</button>
-      <button type="button" class="sc-btn" data-sc="restart" aria-pressed="false">lf server restarted</button>
-    </div>
-    <div class="compare" id="sc-view"></div>
-  </section>
-
-  <section id="plan-changes">
-    <h2>What changed in <code>scratch/plan.md</code></h2>
-    <p class="small">
-      The plan is updated in place with zero contradictions left from the
-      earlier draft. Pass order stays the same (Pass 1 still proves the riskiest
-      piece: the loopback carrier + answering page).
-    </p>
-    <ul>
-      <li><strong>Work-scoped stamp &amp; <code>task.steer</code> first:</strong> <code>lf-page</code> stamps <code>work</code> (<code>task</code> / <code>wave</code> / interactive <code>session</code> / <code>repository</code>) plus <code>build_id</code>. Task pages steer with <code>task.steer</code> and display <code>delivery.sentence</code>.</li>
-      <li><strong><code>data-lf</code> separated and compiled:</strong> partial JSON in <code>.page.html</code> expands into validated strict wire JSON at build time; runtime generates per-click <code>request_id</code>; receipts stay in place and never pollute the reply queue or Desktop comments strip.</li>
-      <li><strong>Swift sole owner of Desktop drafts:</strong> <code>ready</code>/<code>sync</code>/<code>operation</code> bridge on <code>TaskFileReadingView</code> only; no <code>localStorage</code> in Desktop; <code>ReviewRenderedView</code> stays read-only.</li>
-      <li><strong>Quiet headless <code>lf page open</code>:</strong> background Graph steps print the URL without opening a browser window; adds <code>--host auto|desktop|browser</code> and rejects raw <code>.page.html</code> inputs.</li>
-      <li><strong>Leaner loopback carrier:</strong> drops unused <code>/&lt;token&gt;/ticket</code>; restricts <code>ServerOperation::PageUrl</code> to local Unix socket connections.</li>
-      <li><strong><code>lf page build</code> grounded in Loopflow:</strong> reuses <code>diff_snapshot</code> / <code>task_diff_base</code>, makes <code>lines</code> optional, adds <code>old-line</code> for deleted lines, and defines <code>&lt;lf-component&gt;</code> strictly as <code>{{attr}}</code> + <code>&lt;slot&gt;</code>.</li>
-    </ul>
-  </section>
-
-  <section id="questions">
-    <h2>Questions for review</h2>
-    <p class="small">
-      All choices below are reversible and already recorded in
-      <code>scratch/plan.md</code> and <code>scratch/questions.md</code> so
-      implementation can proceed. Reply with codes like <code>1b, 2a</code> if
-      you want any of them changed.
-    </p>
-    <ol class="q-list">
-      <li class="q-item">
-        <div class="q-title">1. When you click an action button like "File Task now" on a review page, should it run immediately or wait for ⌘↩?</div>
-        <ul class="q-opts">
-          <li><span class="q-key">1a.</span> <strong>Chosen in plan:</strong> Finding choices ("Fix here", "File Task", "Drop") stay in the <code>⌘↩</code> reply queue; explicit action buttons confirm inline, run immediately, show their result on the button, and stay out of the reply queue.</li>
-          <li><span class="q-key">1b.</span> Queue every action button into the bottom strip so nothing executes until one final <code>⌘↩</code> (requires handling partial failure if one of three actions fails mid-batch).</li>
-        </ul>
-      </li>
-      <li class="q-item">
-        <div class="q-title">2. When you press ⌘↩ on a page open in the browser beside Rex, what should happen to your reply?</div>
-        <ul class="q-opts">
-          <li><span class="q-key">2a.</span> <strong>Chosen in plan:</strong> Send it immediately to the Task (waking or steering the agent right away, with a status line saying who reads it).</li>
-          <li><span class="q-key">2b.</span> Type it into your Rex terminal's unsent input box without pressing Enter so you can edit it first, falling back to immediate steer only when no interactive session is open.</li>
-        </ul>
-      </li>
-      <li class="q-item">
-        <div class="q-title">3. Where should a review page open when an interactive agent in Rex presents it?</div>
-        <ul class="q-opts">
-          <li><span class="q-key">3a.</span> <strong>Chosen in plan:</strong> Open in your Mac's default browser beside Rex (and stay silent during background/headless runs, printing only the URL).</li>
-          <li><span class="q-key">3b.</span> Launch or attach a dedicated browser tool (such as <code>agent-browser</code>, if installed) instead of the OS default browser.</li>
-        </ul>
-      </li>
-      <li class="q-item">
-        <div class="q-title">4. Should review pages keep two files in <code>scratch/</code> (source fragment + compiled page)?</div>
-        <ul class="q-opts">
-          <li><span class="q-key">4a.</span> <strong>Chosen in plan:</strong> Agents write short <code>scratch/&lt;name&gt;.page.html</code> fragments and compile to <code>scratch/&lt;name&gt;.html</code>; Desktop hides <code>.page.html</code> from the page list so you only see the finished page.</li>
-          <li><span class="q-key">4b.</span> Keep compiled output in a hidden cache directory (or compile on the fly when serving) so <code>scratch/</code> holds only one file per page (trade-off: you lose a double-clickable offline <code>scratch/&lt;name&gt;.html</code>).</li>
-        </ul>
-      </li>
-    </ol>
-  </section>
+<div class="lf-meta">
+  <span>Task <code>LOO-1109</code></span>
+  <span>Post-build concept review at <code>c04a60309d</code> against <code>6d617de686</code></span>
+  <span>Built with <code>lf page build</code></span>
 </div>
 
+<p><strong>Area reviewed:</strong> review pages end-to-end — compiling body fragments with <code>lf page build</code>, serving and routing them across hosts with <code>server/loopback.rs</code> and <code>lf page open</code>, interacting in the browser and offline with <code>runtime.js</code> + <code>base.css</code>, bridging into Loopflow Desktop via <code>TaskHTMLBridge</code> + <code>ReviewComments</code>, and authoring from the five review skills. Everything in the branch touches this single loop, so it is reviewed whole against <code>origin/main</code> rather than only the last QA commit.</p>
+
+<h2>Built today vs. proposed for Pass 5</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Status</th>
+      <th>What stands at <code>c04a60309d</code></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Built and committed</strong></td>
+      <td>Loopback carrier (<code>server/loopback.rs</code>, local-only <code>page.url</code>, shared <code>Messages&lt;S&gt;</code>), <code>lf page build</code> compiler (<code>lf/commands/page/{build,components,diff,operations,html}.rs</code>), <code>lf page open</code>, shared runtime &amp; theme (<code>builtins/page/</code>, <code>.lf/theme.css</code>), Desktop bridge (<code>TaskHTMLBridge</code>, <code>ReviewComment.Anchor</code>, <code>ServerLink.sendRawOperation</code>, read-only <code>ReviewRenderedView</code>), five updated skills, user docs, and Chrome QA fixes.</td>
+    </tr>
+    <tr>
+      <td><strong>Proposed for Pass 5 (written into <code>scratch/plan.md</code>)</strong></td>
+      <td>Four conceptual/lifecycle leaks found by walking real failure and recovery paths: (1) <code>lf page open</code> treating interactive plain-terminal sessions as headless, (2) <code>data-label</code> serving two conflicting roles and breaking <code>scratch/ship-review.html</code>, (3) <code>runtime.js</code> hardcoding protocol <code>revision: 10</code> and silently hiding handshake/disconnect failures, and (4) the browser <strong>Clear</strong> button marking unreported <code>data-lf</code> receipts as already reported.</td>
+    </tr>
+    <tr>
+      <td><strong>Outside this work</strong></td>
+      <td>Native browser split inside Rex / <code>agent-browser</code> host (Rex currently has no browser block type; would require a Rex browser block or dedicated host adapter); raw UUID in server's <code>task.steer</code> <code>delivery.sentence</code> (owned by server steer presentation, outside the page kit).</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Domain concepts vs. code concepts</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Domain concept</th>
+      <th>Code concept at <code>c04a60309d</code></th>
+      <th>Match</th>
+      <th>What holds or is wrong</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Page source vs. compiled page</strong><br>Author writes a short fragment; person opens one self-contained file</td>
+      <td><code>lf page build</code> (<code>*.page.html</code> → <code>*.html</code>); <code>is_scratch_page</code> in Rust (<code>ops/task/find.rs</code>) and Swift (<code>TaskFilesStore.swift</code>); <code>lf page open</code> refuses <code>.page.html</code></td>
+      <td><strong>Yes</strong></td>
+      <td>Clean boundary. Untracked files and renames reuse <code>checkout_file_diff</code>; <code>data-lf</code> expands against <code>server::schema::describe()</code> and validates via <code>Operation</code>; <code>build_id</code> hashes the compiled body so round 2 on the same <code>HEAD</code> starts clean.</td>
+    </tr>
+    <tr>
+      <td><strong>Answering the work (<code>⌘↩</code>)</strong><br>Notes, choices, and answers reach active work even when a headless worker built the page</td>
+      <td><code>PageStamp.work</code> (<code>task</code> / <code>wave</code> / standalone interactive <code>session</code> / <code>repository</code>); <code>runtime.js</code> sends <code>task.steer</code> for Tasks, else <code>session.steer</code></td>
+      <td><strong>Yes</strong></td>
+      <td>Pre-build dead-worker bug is gone. Task pages stamp the readable identifier (<code>LOO-1109</code>), steer through <code>task.steer</code>, and show the server's <code>delivery.sentence</code>.</td>
+    </tr>
+    <tr>
+      <td><strong>Opening a page where you work</strong><br>Desktop in Files, interactive terminal/Rex in browser, headless Graph steps quiet</td>
+      <td><code>lf page open</code> (<code>lf/commands/page.rs</code>) routes via <code>agent_caller()</code> + <code>viewed_placement()</code> (<code>open.rs:918</code>)</td>
+      <td><strong>No</strong></td>
+      <td><strong>Wrong proxy for "headless".</strong> <code>viewed_placement()</code> only knows <code>desktop</code>, <code>rex</code>, <code>cmux</code>, <code>herdr</code>, and <code>tmux</code>. An interactive <code>lf</code> session in a plain terminal (Ghostty, iTerm, Terminal.app) has <code>session.interactive == true</code> in SQLite, yet <code>viewed_placement()</code> returns <code>None</code> — so <code>lf page open</code> classifies it as headless and never opens the browser. <code>page/build.rs</code> already reads <code>session.interactive</code>; <code>page.rs</code> ignores it.</td>
+    </tr>
+    <tr>
+      <td><strong>Question prompt vs. reply label</strong><br>Readable, highlightable question on the page; concise label in the one-line steer</td>
+      <td><code>data-label</code> read by <code>runtime.js</code> for steer formatting AND drawn by CSS <code>::before { content: attr(data-label) }</code> in <code>base.css</code></td>
+      <td><strong>No</strong></td>
+      <td><strong>One attribute for two jobs.</strong> Pass 4 wrote <code>&lt;div data-choice="q1" data-label="1. Browser host beside Rex"&gt;&lt;p&gt;&lt;strong&gt;1.&lt;/strong&gt; When opening…&lt;/p&gt;…</code> in <code>scratch/ship-review.page.html</code>. After QA added <code>::before</code>, the page renders <code>1.</code> twice, puts <code>&lt;p&gt;</code> inside a button flex row without <code>flex-basis: 100%</code>, and makes the <code>::before</code> heading unselectable for highlight-to-comment.</td>
+    </tr>
+    <tr>
+      <td><strong>Loopback carrier &amp; connection health</strong><br>Browser talks safely to <code>lf server</code>, stays in sync with protocol version, and explains disconnects</td>
+      <td><code>server/loopback.rs</code> (<code>Host</code> + <code>Origin</code> + constant-time 32-byte token, local-only <code>page.url</code>) + <code>runtime.js</code> (hardcoded <code>revision: 10</code>, <code>welcomed</code> boolean)</td>
+      <td><strong>No</strong></td>
+      <td><strong>Duplicated version constant + silent handshake failure.</strong> Server admission is solid, but <code>runtime.js</code> hardcodes <code>revision: 10, min_revision: 10</code> instead of reading <code>wire::REVISION</code> from the stamp. Any protocol bump, stale bookmark, or stopped server on reload fails before <code>welcome</code>; <code>runtime.js</code> ignores un-ID'd <code>error</code> frames and suppresses the banner whenever <code>welcomed == false</code>, silently degrading to clipboard copy. When a live server stops, the banner also claims it "restarted".</td>
+    </tr>
+    <tr>
+      <td><strong>Direct actions (<code>data-lf</code>) vs. reply queue</strong><br>Choices queue for <code>⌘↩</code>; action buttons confirm, run now, keep receipts, and ride once on the next reply</td>
+      <td><code>runtime.js</code> <code>state.receipts</code> + <code>clearDrafts()</code>; <code>ReviewDiff.swift</code> <code>sentPageState</code> + <code>pageReceipts()</code></td>
+      <td><strong>No</strong></td>
+      <td><strong>One function conflates Clear and Send.</strong> Receipts now survive reload and Desktop send, but clicking <strong>Clear</strong> in the browser strip calls the same <code>clearDrafts()</code> as <code>submitReply()</code>, flipping <code>reported: true</code> on receipts that were never sent. Discarding a typo'd note silently drops <code>[already ran: …]</code> from the next steer.</td>
+    </tr>
+    <tr>
+      <td><strong>Desktop draft ownership &amp; read-only Diff</strong><br>Page notes join Diff comments, survive file switches and peer Machines, and never touch HTML Diff</td>
+      <td><code>TaskHTMLBridge</code> attached only in <code>TaskFileReadingView</code>; <code>ReviewComments</code> owns <code>pageStates</code> keyed by <code>(path, buildID)</code>; <code>ReviewRenderedView</code> has <code>bridge == nil</code>; <code>ServerLink.sendRawOperation</code></td>
+      <td><strong>Yes</strong></td>
+      <td>Clean single owner in Swift; zero <code>localStorage</code> in Desktop (safe on peer-Machine <code>about:blank</code>); no redundant <code>ServerOperation</code> case. (Live Dev Desktop QA still deferred; covered by headless Swift tests.)</td>
+    </tr>
+    <tr>
+      <td><strong>Shared skill kit &amp; extensibility</strong><br>Five review skills share one contract and compose with <code>extends:</code>, <code>.lf/theme.css</code>, <code>.lf/components/</code></td>
+      <td><code>lf help page</code> (<code>lf/mod.rs</code>), five updated skills, <code>LOOPFLOW.md</code>, <code>tour</code> untouched</td>
+      <td><strong>Yes</strong></td>
+      <td>Single source of truth for authoring rules; no duplicated HTML recipes across skills; clean composition with <code>LOO-1104</code>.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>The four mismatches, before and after</h2>
+
+<h3>1. Interactive plain-terminal sessions misclassified as headless</h3>
+
+<p>Walking the interaction: a person starts an interactive <code>lf explore</code> in Ghostty or iTerm2. The agent compiles <code>scratch/explore.page.html</code> and runs <code>lf page open scratch/explore.html</code>. Because <code>viewed_placement()</code> only recognizes multiplexer IDs (<code>desktop:</code>, <code>rex:</code>, <code>cmux:</code>, <code>herdr:</code>, <code>tmux:</code>), it returns <code>None</code> and <code>route_for</code> prints a URL without opening the browser — even though SQLite already knows <code>session.interactive == true</code>.</p>
+
+<div class="lf-codeblock" data-path="rust/loopflow/src/lf/commands/page.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow/src/lf/commands/page.rs:70-105</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,212 @@</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">70</td><td class="lf-sign">+</td><td>fn decide_open_route(host: PageHost) -&gt; OpenRoute {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">71</td><td class="lf-sign">+</td><td>    let has_agent_caller = loopflow_execution::journal::agent_caller().is_some();</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">72</td><td class="lf-sign">+</td><td>    let in_desktop_env = std::env::var_os(&quot;LF_DESKTOP&quot;).is_some_and(|value| !value.is_empty());</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">73</td><td class="lf-sign">+</td><td>    let placement = has_agent_caller</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Only checks multiplexer viewed_placement(), ignoring session.interactive in SQLite.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">74</td><td class="lf-sign">+</td><td>        .then(viewed_placement)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">75</td><td class="lf-sign">+</td><td>        .flatten()</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">76</td><td class="lf-sign">+</td><td>        .map(|(host, _)| host);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">77</td><td class="lf-sign">+</td><td>    route_for(host, has_agent_caller, in_desktop_env, placement)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">78</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">79</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">80</td><td class="lf-sign">+</td><td>fn route_for(</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">81</td><td class="lf-sign">+</td><td>    host: PageHost,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">82</td><td class="lf-sign">+</td><td>    has_agent_caller: bool,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">83</td><td class="lf-sign">+</td><td>    in_desktop_env: bool,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">84</td><td class="lf-sign">+</td><td>    viewed_host: Option&lt;OpenHost&gt;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">85</td><td class="lf-sign">+</td><td>) -&gt; OpenRoute {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">86</td><td class="lf-sign">+</td><td>    match host {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">87</td><td class="lf-sign">+</td><td>        PageHost::Desktop =&gt; OpenRoute::Desktop,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">88</td><td class="lf-sign">+</td><td>        PageHost::Browser =&gt; OpenRoute::Browser,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">89</td><td class="lf-sign">+</td><td>        PageHost::Auto =&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">90</td><td class="lf-sign">+</td><td>            if !has_agent_caller {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">91</td><td class="lf-sign">+</td><td>                if in_desktop_env {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">92</td><td class="lf-sign">+</td><td>                    OpenRoute::Desktop</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">93</td><td class="lf-sign">+</td><td>                } else {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">94</td><td class="lf-sign">+</td><td>                    OpenRoute::Browser</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">95</td><td class="lf-sign">+</td><td>                }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">96</td><td class="lf-sign">+</td><td>            } else {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">97</td><td class="lf-sign">+</td><td>                match viewed_host {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">98</td><td class="lf-sign">+</td><td>                    Some(OpenHost::Desktop) =&gt; OpenRoute::Desktop,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">99</td><td class="lf-sign">+</td><td>                    Some(_) =&gt; OpenRoute::Browser,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">100</td><td class="lf-sign">+</td><td>                    None =&gt; OpenRoute::PrintQuiet,</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Plain-terminal interactive sessions hit None here and silently fall into PrintQuiet.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">101</td><td class="lf-sign">+</td><td>                }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">102</td><td class="lf-sign">+</td><td>            }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">103</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">104</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">105</td><td class="lf-sign">+</td><td>}</td></tr>
+</tbody></table></div></div>
+
+<div class="lf-before-after">
+  <div class="lf-before-after-pane">
+    <div class="lf-before-after-label">Before</div>
+    
+    <p><code>decide_open_route</code> checks only <code>viewed_placement()</code>. Any interactive agent outside Desktop/Rex/cmux/herdr/tmux returns <code>None</code> → <code>PrintQuiet</code>, breaking "Browser beside Rex or any terminal" in <code>docs/surfaces.md</code>.</p>
+  
+  </div>
+  <div class="lf-before-after-pane">
+    <div class="lf-before-after-label">After</div>
+    
+    <p>Look up <code>caller.session_id</code> in SQLite (the same pattern <code>page/build.rs:248</code> uses): if <code>session.interactive == false</code> → <code>PrintQuiet</code>; if <code>session.interactive == true</code> → <code>Desktop</code> when viewed in Desktop (or <code>LF_DESKTOP</code> set), else <code>Browser</code>. If the session row is absent (test fixtures), fall back to <code>viewed_placement()</code> so unknown callers stay quiet.</p>
+  
+  </div>
+</div>
+
+
+<h3>2. <code>data-label</code> doing two jobs breaks <code>scratch/ship-review.html</code></h3>
+
+<p>On this branch's own compiled <code>scratch/ship-review.html</code>, Question 1 has both a short <code>data-label</code> (for the steer line) and a fuller <code>&lt;p&gt;</code> question. Because <code>base.css</code> unconditionally renders <code>::before { content: attr(data-label) }</code>, the page prints <code>1.</code> twice, lays out <code>&lt;p&gt;</code> inside a flex row without <code>flex-basis: 100%</code>, and makes the <code>::before</code> text unselectable for highlight-to-comment.</p>
+
+<div class="lf-codeblock" data-path="rust/loopflow-definitions/src/builtins/page/base.css"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-definitions/src/builtins/page/base.css:262-284</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,468 @@</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">262</td><td class="lf-sign">+</td><td>/* Controls: choices, questions, direct actions */</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">263</td><td class="lf-sign">+</td><td>[data-choice], [data-multiselect] {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">264</td><td class="lf-sign">+</td><td>  display: flex;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">265</td><td class="lf-sign">+</td><td>  flex-wrap: wrap;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">266</td><td class="lf-sign">+</td><td>  gap: 6px;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">267</td><td class="lf-sign">+</td><td>  margin-top: 8px;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">268</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">269</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">270</td><td class="lf-sign">+</td><td>/* A control&#39;s `data-label` is its question; a decision card shows its title instead. */</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">271</td><td class="lf-sign">+</td><td>[data-choice][data-label]::before,</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Always draws data-label via ::before, even when the author wrote a selectable &lt;p&gt; prompt inside the control.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">272</td><td class="lf-sign">+</td><td>[data-multiselect][data-label]::before,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">273</td><td class="lf-sign">+</td><td>[data-question][data-label]::before {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">274</td><td class="lf-sign">+</td><td>  content: attr(data-label);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">275</td><td class="lf-sign">+</td><td>  display: block;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">276</td><td class="lf-sign">+</td><td>  flex-basis: 100%;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">277</td><td class="lf-sign">+</td><td>  margin: 10px 0 2px;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">278</td><td class="lf-sign">+</td><td>  font-weight: 600;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">279</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">280</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">281</td><td class="lf-sign">+</td><td>.lf-decision [data-choice]::before {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">282</td><td class="lf-sign">+</td><td>  content: none;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">283</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">284</td><td class="lf-sign">+</td><td></td></tr>
+</tbody></table></div></div>
+
+<div class="lf-codeblock" data-path="scratch/ship-review.page.html"><div class="lf-codeblock-header"><span class="lf-codeblock-path">scratch/ship-review.page.html:139-144</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,154 @@</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">139</td><td class="lf-sign">+</td><td>&lt;div data-choice=&quot;q1&quot; data-label=&quot;1. Browser host beside Rex&quot;&gt;</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">data-label is the concise reply key; the &lt;p&gt; on line 140 is the visible question — currently both render stacked.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">140</td><td class="lf-sign">+</td><td>  &lt;p&gt;&lt;strong&gt;1.&lt;/strong&gt; When opening a review page beside Rex, is opening the OS default browser the right default for now, or did you have a specific browser/split tool in mind?&lt;/p&gt;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">141</td><td class="lf-sign">+</td><td>  &lt;button type=&quot;button&quot; data-value=&quot;1a: Keep OS default browser&quot;&gt;1a. Keep OS default browser&lt;/button&gt;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">142</td><td class="lf-sign">+</td><td>  &lt;button type=&quot;button&quot; data-value=&quot;1b: Wire a specific browser split&quot;&gt;1b. Wire a specific browser split (add note)&lt;/button&gt;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">143</td><td class="lf-sign">+</td><td>&lt;/div&gt;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">144</td><td class="lf-sign">+</td><td></td></tr>
+</tbody></table></div></div>
+
+<div class="lf-before-after">
+  <div class="lf-before-after-pane">
+    <div class="lf-before-after-label">Before</div>
+    
+    <p>Bare controls (<code>&lt;div data-choice="q1" data-label="1. Keep?"&gt;&lt;button&gt;Yes&lt;/button&gt;&lt;/div&gt;</code>) work, but rich controls with a <code>&lt;p&gt;</code> prompt double-render the heading and break flex wrapping.</p>
+  
+  </div>
+  <div class="lf-before-after-pane">
+    <div class="lf-before-after-label">After</div>
+    
+    <p>Render <code>::before</code> only when the control has no direct prose/heading child (<code>:not(:has(&gt; p, &gt; label, &gt; h3, &gt; h4, &gt; legend))</code>), and give direct <code>&lt;p&gt;</code> children <code>flex-basis: 100%</code>. Short bare controls still render <code>data-label</code> automatically; rich questions show only their selectable <code>&lt;p&gt;</code> while keeping <code>data-label</code> concise in the steer reply.</p>
+  
+  </div>
+</div>
+
+
+<h3>3. Hardcoded protocol revision and silent loopback handshake failure</h3>
+
+<p>Walking failure and recovery: when <code>wire::REVISION</code> bumps from 10 to 11 (or a person reloads a stale loopback tab after <code>lf server</code> restarts or stops), the WebSocket closes before <code>welcome</code>. Today <code>runtime.js</code> hardcodes <code>10</code>, drops un-ID'd <code>error</code> frames, and hides the banner unless <code>welcomed</code> was already true — so the page silently falls back to clipboard copy with no explanation.</p>
+
+<div class="lf-codeblock" data-path="rust/loopflow-definitions/src/builtins/page/runtime.js"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-definitions/src/builtins/page/runtime.js:222-274</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,919 @@</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">222</td><td class="lf-sign">+</td><td>    let welcomed = false;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">223</td><td class="lf-sign">+</td><td>    ws.addEventListener(&quot;open&quot;, () =&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">224</td><td class="lf-sign">+</td><td>      ws.send(</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">225</td><td class="lf-sign">+</td><td>        JSON.stringify({</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">226</td><td class="lf-sign">+</td><td>          type: &quot;hello&quot;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">227</td><td class="lf-sign">+</td><td>          revision: 10,</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Hardcoded magic revision instead of wire::REVISION / wire::MIN_REVISION stamped by lf page build.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">228</td><td class="lf-sign">+</td><td>          min_revision: 10,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">229</td><td class="lf-sign">+</td><td>          client: {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">230</td><td class="lf-sign">+</td><td>            kind: &quot;page&quot;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">231</td><td class="lf-sign">+</td><td>            platform: &quot;browser&quot;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">232</td><td class="lf-sign">+</td><td>            name: &quot;review-page&quot;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">233</td><td class="lf-sign">+</td><td>            version: &quot;1&quot;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">234</td><td class="lf-sign">+</td><td>          },</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">235</td><td class="lf-sign">+</td><td>        })</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">236</td><td class="lf-sign">+</td><td>      );</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">237</td><td class="lf-sign">+</td><td>    });</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">238</td><td class="lf-sign">+</td><td>    ws.addEventListener(&quot;message&quot;, (event) =&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">239</td><td class="lf-sign">+</td><td>      let msg;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">240</td><td class="lf-sign">+</td><td>      try {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">241</td><td class="lf-sign">+</td><td>        msg = JSON.parse(event.data);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">242</td><td class="lf-sign">+</td><td>      } catch (_) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">243</td><td class="lf-sign">+</td><td>        return;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">244</td><td class="lf-sign">+</td><td>      }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">245</td><td class="lf-sign">+</td><td>      if (msg.type === &quot;welcome&quot;) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">246</td><td class="lf-sign">+</td><td>        welcomed = true;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">247</td><td class="lf-sign">+</td><td>        socket = ws;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">248</td><td class="lf-sign">+</td><td>        hostMode = &quot;loopback&quot;;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">249</td><td class="lf-sign">+</td><td>        serverRestarted = false;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">250</td><td class="lf-sign">+</td><td>        hideBanner();</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">251</td><td class="lf-sign">+</td><td>        renderStrip();</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">252</td><td class="lf-sign">+</td><td>        return;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">253</td><td class="lf-sign">+</td><td>      }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">254</td><td class="lf-sign">+</td><td>      if ((msg.type === &quot;response&quot; || msg.type === &quot;error&quot;) &amp;&amp; msg.id &amp;&amp; pending.has(msg.id)) {</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Un-ID'd server error on hello (such as incompatible revision) is silently ignored.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">255</td><td class="lf-sign">+</td><td>        const entry = pending.get(msg.id);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">256</td><td class="lf-sign">+</td><td>        pending.delete(msg.id);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">257</td><td class="lf-sign">+</td><td>        if (msg.type === &quot;response&quot;) entry.resolve(msg.result);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">258</td><td class="lf-sign">+</td><td>        else entry.reject(new Error(msg.message || msg.code || &quot;Server error&quot;));</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">259</td><td class="lf-sign">+</td><td>      }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">260</td><td class="lf-sign">+</td><td>    });</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">261</td><td class="lf-sign">+</td><td>    ws.addEventListener(&quot;close&quot;, () =&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">262</td><td class="lf-sign">+</td><td>      if (socket === ws) socket = null;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">263</td><td class="lf-sign">+</td><td>      for (const [, entry] of pending) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">264</td><td class="lf-sign">+</td><td>        entry.reject(new Error(&quot;Connection closed&quot;));</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">265</td><td class="lf-sign">+</td><td>      }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">266</td><td class="lf-sign">+</td><td>      pending.clear();</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">267</td><td class="lf-sign">+</td><td>      if (welcomed) {</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">If handshake fails before welcome, no banner appears; if server stopped, banner inaccurately says "restarted".</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">268</td><td class="lf-sign">+</td><td>        hostMode = &quot;clipboard&quot;;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">269</td><td class="lf-sign">+</td><td>        serverRestarted = true;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">270</td><td class="lf-sign">+</td><td>        showBanner(&quot;lf server restarted; run lf page open &quot; + pagePath);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">271</td><td class="lf-sign">+</td><td>        renderStrip();</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">272</td><td class="lf-sign">+</td><td>      }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">273</td><td class="lf-sign">+</td><td>    });</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">274</td><td class="lf-sign">+</td><td>    window.addEventListener(&quot;pagehide&quot;, () =&gt; {</td></tr>
+</tbody></table></div></div>
+
+<div class="lf-before-after">
+  <div class="lf-before-after-pane">
+    <div class="lf-before-after-label">Before</div>
+    
+    <p>Protocol bump breaks every browser review page silently; stale loopback URLs and stopped servers on reload show no banner; live disconnect says "restarted" even when the server is stopped.</p>
+  
+  </div>
+  <div class="lf-before-after-pane">
+    <div class="lf-before-after-label">After</div>
+    
+    <p><code>lf page build</code> stamps <code>protocol: { revision, min_revision }</code> from <code>crate::server::wire</code>. <code>runtime.js</code> sends those values, records any un-ID'd handshake <code>error</code> message, and on <code>close</code> for any loopback URL shows either that error or <code>Loopflow server disconnected — run lf page open &lt;path&gt;</code> while switching the button to <code>Copy reply ⌘↩</code>.</p>
+  
+  </div>
+</div>
+
+
+<h3>4. Browser Clear discards unreported <code>data-lf</code> receipts</h3>
+
+<p>Walking recovery: a reviewer clicks <strong>File Task now</strong> (<code>Filed LOO-1200</code>), adds a note, hits <strong>Clear</strong> to rewrite the note, and then presses <code>⌘↩</code>. Because <strong>Clear</strong> shares <code>clearDrafts()</code> with <code>submitReply()</code>, it flips <code>reported: true</code> on the receipt even though nothing was sent — so <code>[already ran: task.create → LOO-1200]</code> disappears from the steer.</p>
+
+<div class="lf-codeblock" data-path="rust/loopflow-definitions/src/builtins/page/runtime.js"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-definitions/src/builtins/page/runtime.js:779-785</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,919 @@</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">779</td><td class="lf-sign">+</td><td>  // After a reply is sent: drafts go, receipts stay drawn and stop riding on replies.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">780</td><td class="lf-sign">+</td><td>  function clearDrafts() {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">781</td><td class="lf-sign">+</td><td>    const receipts = state.receipts.map((r) =&gt; Object.assign({}, r, { reported: true }));</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Marks every receipt reported even when invoked from the strip's Clear button rather than a successful send.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">782</td><td class="lf-sign">+</td><td>    state = emptyState();</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">783</td><td class="lf-sign">+</td><td>    state.receipts = receipts;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">784</td><td class="lf-sign">+</td><td>    refresh(true);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">785</td><td class="lf-sign">+</td><td>  }</td></tr>
+</tbody></table></div></div>
+
+<div class="lf-before-after">
+  <div class="lf-before-after-pane">
+    <div class="lf-before-after-label">Before</div>
+    
+    <p><code>clearDrafts()</code> always marks receipts <code>reported: true</code>, conflating "sent to agent" with "discarded unsent draft".</p>
+  
+  </div>
+  <div class="lf-before-after-pane">
+    <div class="lf-before-after-label">After</div>
+    
+    <p><code>clearDrafts({ markReported })</code> marks receipts reported only on actual send (<code>submitReply</code> success and Desktop <code>__lfDesktopApplyState(null)</code>); clicking <strong>Clear</strong> drops unsent notes/choices while keeping unreported receipts ready for the next reply.</p>
+  
+  </div>
+</div>
+
+
+<h2>Open product choices (built, reversible, waiting for review)</h2>
+
+<p>All four mismatches above have clear fixes written into <code>scratch/plan.md</code> as Pass 5. The choices below are already built and reversible — answer with codes like <code>1b, 2a</code> if you want any changed.</p>
+
+<div data-choice="q1" data-label="1. Browser host beside Rex">
+  <p><strong>1.</strong> When an interactive agent in Rex opens a review page, it currently opens your Mac's default browser (and prints only the URL when headless). Keep the OS default browser until Rex has a browser block, or target a specific browser/split tool?</p>
+  <button type="button" data-value="1a: Keep OS default browser">1a. Keep OS default browser (built)</button>
+  <button type="button" data-value="1b: Target a specific browser/split tool">1b. Target a specific browser/split tool</button>
+</div>
+
+<div data-choice="q2" data-label="2. Direct data-lf actions vs reply queue">
+  <p><strong>2.</strong> Finding choices (<code>Fix here</code> / <code>File Task</code> / <code>Drop</code>) queue for <code>⌘↩</code>, while explicit <code>data-lf</code> action buttons confirm inline, execute immediately, keep their in-place receipt, and only append <code>[already ran: …]</code> if you also send a reply. Keep that split, or batch action buttons into <code>⌘↩</code>?</p>
+  <button type="button" data-value="2a: Keep immediate confirm + in-place receipt">2a. Keep immediate confirm + receipt (built)</button>
+  <button type="button" data-value="2b: Batch action buttons into ⌘↩">2b. Batch action buttons into ⌘↩</button>
+</div>
+
+<div data-choice="q3" data-label="3. Browser ⌘↩ delivery beside Rex">
+  <p><strong>3.</strong> Pressing <code>⌘↩</code> in a browser beside Rex sends <code>task.steer</code> immediately and shows the server's delivery line. Keep immediate steering, or type the message into Rex's unsent input box without pressing Enter?</p>
+  <button type="button" data-value="3a: Immediate task.steer">3a. Immediate task.steer (built)</button>
+  <button type="button" data-value="3b: Type into Rex unsent input">3b. Type into Rex unsent input</button>
+</div>
+
+<div data-question="q4" data-label="4. Other concept or UX notes">
+  <p><strong>4.</strong> Anything else in the built page kit, Desktop bridge, or loopback carrier that feels off?</p>
+  <textarea rows="3" placeholder="Optional notes…"></textarea>
+</div>
+</main>
+<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1109"},"directory":"/Users/jack/src/loopflow.loo-1109-human-comprehension-review","base":"6d617de68638439a144601b3cb8cbaf6ec678630","head":"c04a60309d","path":"scratch/concept-review.html","build_id":"f556e8106beed295"}</script>
 <script>
 (function () {
-  const root = document.documentElement;
-  const themeBtn = document.getElementById("theme-toggle");
-  function isDark() {
-    const t = root.getAttribute("data-theme");
-    if (t === "dark") return true;
-    if (t === "light") return false;
-    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-  }
-  function syncTheme() { themeBtn.textContent = isDark() ? "Light" : "Dark"; }
-  syncTheme();
-  themeBtn.addEventListener("click", function () {
-    root.setAttribute("data-theme", isDark() ? "light" : "dark");
-    syncTheme();
-  });
+  "use strict";
 
-  const scenarios = {
-    headless: {
-      before: [
-        "Background Graph step runs concept-review or ship-review with nobody watching.",
-        "Skill runs lf page open scratch/ship-review.html.",
-        "viewed_placement() is None, so 'Desktop else browser' pops a Safari/Chrome tab over whatever you are doing.",
-        "Later, pressing ⌘↩ steers the dead worker session and vanishes."
-      ],
-      after: [
-        "Background Graph step runs with agent_caller() and no viewer.",
-        "lf page open prints the loopback URL to the log and exits 0 — zero focus stolen.",
-        "If Desktop has the Task open, its scratch_pages watcher shows the quiet 'Updated' notice.",
-        "When you open the page later and press ⌘↩, task.steer wakes or steers the Task's primary Session."
-      ]
-    },
-    round2: {
-      before: [
-        "Round 1 of /explore writes scratch/explore.html on HEAD abc1234. You select 2b and add a note.",
-        "You steer the agent for Round 2. No code is committed yet, so HEAD is still abc1234.",
-        "Round 2 overwrites scratch/explore.html. Browser reloads.",
-        "Drafts are keyed by path + head (unchanged) — Round 1's stale choice and broken highlight reappear on Round 2."
-      ],
-      after: [
-        "lf page build stamps build_id = short hash of the compiled body HTML.",
-        "Reloading Round 1 or switching tabs in Desktop keeps the same build_id, preserving every draft.",
-        "Round 2 produces a new build_id even on the same HEAD.",
-        "Both browser localStorage and Desktop's ReviewComments start Round 2 clean automatically."
-      ]
-    },
-    untracked: {
-      before: [
-        "Agent creates a brand-new file rust/loopflow/src/server/loopback.rs (not yet git-added).",
-        "Page source includes <lf-diff path=\"rust/loopflow/src/server/loopback.rs\">.",
-        "Raw git diff <base> -- path returns empty for untracked files.",
-        "lf page build fails with 'path not in diff', blocking every pre-commit review page."
-      ],
-      after: [
-        "lf page build reuses Loopflow's diff_snapshot (which diffs untracked files via git diff --no-index and preserves renames).",
-        "lines is optional, so <lf-diff path=\"...\"> renders the whole new file or any slice.",
-        "<lf-note line=\"12\"> attaches to new-side line 12; <lf-note old-line=\"8\"> attaches to deleted lines."
-      ]
-    },
-    restart: {
-      before: [
-        "lf server restarts (upgrade or reboot); port and in-memory token rotate.",
-        "Open browser page loses its WebSocket, shows a banner with lf page open <path>, and ⌘↩ copies to clipboard.",
-        "Survives cleanly — same in both plans."
-      ],
-      after: [
-        "Same recovery: WebSocket closes → banner shows lf page open <path> → ⌘↩ falls back to clipboard copy.",
-        "Draft notes and choices remain intact in localStorage under path + build_id while you reopen or paste."
-      ]
+  const stampEl = document.getElementById("lf-page");
+  if (!stampEl) return;
+  let stamp;
+  try {
+    stamp = JSON.parse(stampEl.textContent || "{}");
+  } catch (_) {
+    return;
+  }
+
+  const pagePath = String(stamp.path || "scratch/page.html");
+  const buildId = String(stamp.build_id || "0");
+  const work = stamp.work || { kind: "repository" };
+  const directory = String(stamp.directory || "");
+  const storageKey = "lf-page:" + pagePath + ":" + buildId;
+
+  const desktopHandler =
+    window.webkit &&
+    window.webkit.messageHandlers &&
+    window.webkit.messageHandlers.loopflow;
+
+  let hostMode = desktopHandler ? "desktop" : "clipboard";
+  let socket = null;
+  let nextReqId = 1;
+  const pending = new Map();
+  let serverRestarted = false;
+
+  // Draft & receipt state.
+  // Notes, choices, multiselects, questions, and offline actions enter the reply queue.
+  // Executed direct `data-lf` receipts stay separate and only ride as a suffix on ⌘↩.
+  function emptyState() {
+    return {
+      notes: [],
+      choices: {},
+      multiselects: {},
+      questions: {},
+      offlineActions: [],
+      receipts: [],
+    };
+  }
+
+  let state = emptyState();
+
+  function oneLine(text) {
+    return String(text || "")
+      .replace(/[\r\n\t\x00-\x1f]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function buttonValue(btn) {
+    return btn.getAttribute("data-value") || oneLine(btn.textContent);
+  }
+
+  function resultTaskId(result) {
+    return result && ((result.task && result.task.identifier) || result.identifier);
+  }
+
+  function randomId() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return window.crypto.randomUUID();
     }
+    return "lf-" + Math.random().toString(16).slice(2) + "-" + Date.now().toString(16);
+  }
+
+  function nearestSection(node) {
+    let el = node && node.nodeType === 1 ? node : node && node.parentElement;
+    while (el && el !== document.body) {
+      let prev = el.previousElementSibling;
+      while (prev) {
+        if (/^H[1-4]$/.test(prev.tagName)) return oneLine(prev.textContent);
+        prev = prev.previousElementSibling;
+      }
+      el = el.parentElement;
+    }
+    const h1 = document.querySelector("h1");
+    return h1 ? oneLine(h1.textContent) : "Top";
+  }
+
+  function queueItems() {
+    const items = [];
+    for (const note of state.notes) {
+      const ref =
+        "`" +
+        pagePath +
+        "` § " +
+        oneLine(note.section) +
+        ' › "' +
+        oneLine(note.quote) +
+        '" ' +
+        oneLine(note.text);
+      items.push({ id: "note:" + note.id, reference: ref, text: oneLine(note.text) });
+    }
+    for (const [group, entry] of Object.entries(state.choices)) {
+      if (!entry || !entry.value) continue;
+      const label = oneLine(entry.label || group);
+      const ref = "`" + pagePath + "` § " + label + ": " + oneLine(entry.value);
+      items.push({ id: "choice:" + group, reference: ref, text: oneLine(entry.value) });
+    }
+    for (const [group, entry] of Object.entries(state.multiselects)) {
+      if (!entry || !Array.isArray(entry.values) || entry.values.length === 0) continue;
+      const label = oneLine(entry.label || group);
+      const joined = entry.values.map(oneLine).join(", ");
+      const ref = "`" + pagePath + "` § " + label + ": " + joined;
+      items.push({ id: "multi:" + group, reference: ref, text: joined });
+    }
+    for (const [qid, entry] of Object.entries(state.questions)) {
+      if (!entry || !oneLine(entry.answer)) continue;
+      const label = oneLine(entry.label || qid);
+      const ans = oneLine(entry.answer);
+      const ref = "`" + pagePath + "` § " + label + ": " + ans;
+      items.push({ id: "question:" + qid, reference: ref, text: ans });
+    }
+    for (const act of state.offlineActions) {
+      const ref = "`" + pagePath + "` Run: " + oneLine(act.summary);
+      items.push({ id: "offline:" + act.id, reference: ref, text: oneLine(act.summary) });
+    }
+    return items;
+  }
+
+  function formatReplyMessage(items) {
+    if (!items.length) return "";
+    const parts = items.map((item, idx) => "(" + (idx + 1) + ") " + oneLine(item.reference));
+    let message = parts.join(" ");
+    const unreported = state.receipts.filter((r) => !r.reported);
+    if (unreported.length > 0) {
+      const ran = unreported
+        .map((r) => oneLine(r.kind + (r.summary ? " → " + r.summary : "")))
+        .join("; ");
+      message += " [already ran: " + ran + "]";
+    }
+    return oneLine(message);
+  }
+
+  function saveState() {
+    if (desktopHandler) {
+      const items = queueItems();
+      try {
+        desktopHandler.postMessage({
+          type: "sync",
+          path: pagePath,
+          build_id: buildId,
+          state: state,
+          items: items,
+        });
+      } catch (_) {}
+      return;
+    }
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(state));
+    } catch (_) {}
+  }
+
+  function loadBrowserState() {
+    if (desktopHandler) return;
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        applyState(parsed);
+      }
+    } catch (_) {}
+  }
+
+  function refresh(persist) {
+    syncControlsFromState();
+    renderNotesTray();
+    renderHighlights();
+    if (persist) saveState();
+    renderStrip();
+  }
+
+  function applyState(loaded) {
+    if (!loaded || typeof loaded !== "object") {
+      state = emptyState();
+    } else {
+      state = {
+        notes: Array.isArray(loaded.notes) ? loaded.notes : [],
+        choices: loaded.choices && typeof loaded.choices === "object" ? loaded.choices : {},
+        multiselects:
+          loaded.multiselects && typeof loaded.multiselects === "object" ? loaded.multiselects : {},
+        questions: loaded.questions && typeof loaded.questions === "object" ? loaded.questions : {},
+        offlineActions: Array.isArray(loaded.offlineActions) ? loaded.offlineActions : [],
+        receipts: Array.isArray(loaded.receipts) ? loaded.receipts : [],
+      };
+    }
+    refresh(false);
+  }
+
+  // Desktop calls this with `null` after `ReviewComments.insert(into:)` sends the page's items.
+  window.__lfDesktopApplyState = function (loaded) {
+    if (loaded) applyState(loaded);
+    else clearDrafts();
   };
 
-  const view = document.getElementById("sc-view");
-  function renderScenario(key) {
-    const s = scenarios[key];
-    view.innerHTML =
-      '<div class="panel"><div class="panel-head"><span class="panel-title">Before (kickoff plan)</span><span class="status ' +
-      (key === "restart" ? "yes" : "no") + '">' + (key === "restart" ? "Works" : "Breaks") +
-      '</span></div><div class="trace">' +
-      s.before.map(function (line, i) {
-        const cls = key !== "restart" && i >= s.before.length - 2 ? "step bad" : "step";
-        return '<div class="' + cls + '">' + line.replace(/</g, "&lt;") + "</div>";
-      }).join("") +
-      '</div></div><div class="panel"><div class="panel-head"><span class="panel-title">After (revised plan)</span><span class="status yes">Holds</span></div><div class="trace">' +
-      s.after.map(function (line, i) {
-        const cls = i >= s.after.length - 2 ? "step good" : "step";
-        return '<div class="' + cls + '">' + line.replace(/</g, "&lt;") + "</div>";
-      }).join("") +
-      "</div></div>";
+  // --- Loopback WebSocket carrier ---
+
+  function loopbackWsUrl() {
+    if (window.location.protocol !== "http:" && window.location.protocol !== "https:") {
+      return null;
+    }
+    const parts = window.location.pathname.split("/").filter(Boolean);
+    if (parts.length < 3 || parts[1] !== "f") return null;
+    const token = parts[0];
+    const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return wsProto + "//" + window.location.host + "/" + token + "/machine";
   }
 
-  document.querySelectorAll(".sc-btn").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      document.querySelectorAll(".sc-btn").forEach(function (b) {
-        b.setAttribute("aria-pressed", String(b === btn));
-      });
-      renderScenario(btn.getAttribute("data-sc"));
+  function connectLoopback() {
+    if (desktopHandler) return;
+    const url = loopbackWsUrl();
+    if (!url) return;
+    let ws;
+    try {
+      ws = new WebSocket(url);
+    } catch (_) {
+      return;
+    }
+    let welcomed = false;
+    ws.addEventListener("open", () => {
+      ws.send(
+        JSON.stringify({
+          type: "hello",
+          revision: 10,
+          min_revision: 10,
+          client: {
+            kind: "page",
+            platform: "browser",
+            name: "review-page",
+            version: "1",
+          },
+        })
+      );
     });
+    ws.addEventListener("message", (event) => {
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch (_) {
+        return;
+      }
+      if (msg.type === "welcome") {
+        welcomed = true;
+        socket = ws;
+        hostMode = "loopback";
+        serverRestarted = false;
+        hideBanner();
+        renderStrip();
+        return;
+      }
+      if ((msg.type === "response" || msg.type === "error") && msg.id && pending.has(msg.id)) {
+        const entry = pending.get(msg.id);
+        pending.delete(msg.id);
+        if (msg.type === "response") entry.resolve(msg.result);
+        else entry.reject(new Error(msg.message || msg.code || "Server error"));
+      }
+    });
+    ws.addEventListener("close", () => {
+      if (socket === ws) socket = null;
+      for (const [, entry] of pending) {
+        entry.reject(new Error("Connection closed"));
+      }
+      pending.clear();
+      if (welcomed) {
+        hostMode = "clipboard";
+        serverRestarted = true;
+        showBanner("lf server restarted; run lf page open " + pagePath);
+        renderStrip();
+      }
+    });
+    window.addEventListener("pagehide", () => {
+      try {
+        ws.close();
+      } catch (_) {}
+    });
+  }
+
+  function sendOperation(operation, requestId) {
+    if (desktopHandler) {
+      try {
+        return Promise.resolve(
+          desktopHandler.postMessage({
+            type: "operation",
+            operation: operation,
+            request_id: requestId || null,
+          })
+        ).then((result) => {
+          if (result && result.error) throw new Error(result.error);
+          return result && result.result !== undefined ? result.result : result;
+        });
+      } catch (err) {
+        return Promise.reject(err);
+      }
+    }
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error("Loopflow server is not connected"));
+    }
+    return new Promise((resolve, reject) => {
+      const id = "req-" + nextReqId++;
+      pending.set(id, { resolve, reject });
+      socket.send(
+        JSON.stringify({
+          type: "request",
+          id: id,
+          operation: operation,
+          select: null,
+          sender: null,
+          request_id: requestId || null,
+        })
+      );
+    });
+  }
+
+  // --- Banner ---
+
+  let bannerEl = null;
+  function showBanner(text) {
+    if (!bannerEl) {
+      bannerEl = document.createElement("div");
+      bannerEl.className = "lf-banner";
+      const main = document.querySelector("main") || document.body;
+      main.insertBefore(bannerEl, main.firstChild);
+    }
+    bannerEl.textContent = text;
+    bannerEl.hidden = false;
+  }
+
+  function hideBanner() {
+    if (bannerEl) bannerEl.hidden = true;
+  }
+
+  // --- Controls ---
+
+  function wireControls() {
+    // Toggle line notes
+    document.querySelectorAll("[data-notes-toggle]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const block = btn.closest(".lf-codeblock");
+        if (!block) return;
+        const hidden = block.classList.toggle("lf-notes-hidden");
+        btn.textContent = hidden ? "Show line notes" : "Hide line notes";
+      });
+    });
+
+    // Single select (`data-choice`)
+    document.querySelectorAll("[data-choice]").forEach((groupEl) => {
+      const group = groupEl.getAttribute("data-choice");
+      const label = groupEl.getAttribute("data-label") || group;
+      groupEl.querySelectorAll("button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const value = buttonValue(btn);
+          if (state.choices[group] && state.choices[group].value === value) {
+            delete state.choices[group];
+          } else {
+            state.choices[group] = { label, value };
+          }
+          syncControlsFromState();
+          saveState();
+          renderStrip();
+        });
+      });
+    });
+
+    // Multi select (`data-multiselect`)
+    document.querySelectorAll("[data-multiselect]").forEach((groupEl) => {
+      const group = groupEl.getAttribute("data-multiselect");
+      const label = groupEl.getAttribute("data-label") || group;
+      groupEl.querySelectorAll("button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const value = buttonValue(btn);
+          const current = (state.multiselects[group] && state.multiselects[group].values) || [];
+          const idx = current.indexOf(value);
+          const next = idx >= 0 ? current.filter((v) => v !== value) : current.concat([value]);
+          if (next.length === 0) delete state.multiselects[group];
+          else state.multiselects[group] = { label, values: next };
+          syncControlsFromState();
+          saveState();
+          renderStrip();
+        });
+      });
+    });
+
+    // Questions (`data-question`)
+    document.querySelectorAll("[data-question]").forEach((box) => {
+      const qid = box.getAttribute("data-question");
+      const label = box.getAttribute("data-label") || qid;
+      const input = box.querySelector("textarea, input");
+      if (!input) return;
+      input.addEventListener("input", () => {
+        const answer = input.value;
+        if (!oneLine(answer)) delete state.questions[qid];
+        else state.questions[qid] = { label, answer };
+        saveState();
+        renderStrip();
+      });
+    });
+
+    // Direct actions (`data-lf`)
+    document.querySelectorAll("[data-lf]").forEach((btn, idx) => {
+      let template;
+      try {
+        template = JSON.parse(btn.getAttribute("data-lf") || "{}");
+      } catch (_) {
+        return;
+      }
+      const action = { key: btn.getAttribute("data-lf-id") || "action-" + idx, btn, template, slot: btn };
+      actions.push(action);
+      btn.addEventListener("click", () => {
+        openActionConfirm(action);
+      });
+    });
+  }
+
+  // Each `data-lf` button and the element now standing in its place.
+  const actions = [];
+
+  function showInSlot(action, el) {
+    if (action.slot !== el) action.slot.replaceWith(el);
+    action.slot = el;
+  }
+
+  function actionNote(className, text) {
+    const el = document.createElement("span");
+    el.className = className;
+    el.textContent = text;
+    return el;
+  }
+
+  // Receipts and offline-queued actions outlive reloads; an action with neither shows its button.
+  function syncActionsFromState() {
+    for (const action of actions) {
+      const receipt = state.receipts.find((r) => r.key === action.key);
+      const offline = state.offlineActions.find((a) => a.key === action.key);
+      if (receipt) showInSlot(action, actionNote("lf-action-receipt", receipt.text || receipt.summary));
+      else if (offline) showInSlot(action, actionNote("lf-action-summary", "Offline — added to reply"));
+      else if (action.slot.classList.contains("lf-action-receipt") || action.slot.classList.contains("lf-action-summary")) {
+        showInSlot(action, action.btn);
+      }
+    }
+  }
+
+  function syncControlsFromState() {
+    syncActionsFromState();
+    document.querySelectorAll("[data-choice]").forEach((groupEl) => {
+      const group = groupEl.getAttribute("data-choice");
+      const selected = state.choices[group] && state.choices[group].value;
+      groupEl.querySelectorAll("button").forEach((btn) => {
+        const active = selected === buttonValue(btn);
+        btn.classList.toggle("is-selected", active);
+        btn.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+    });
+    document.querySelectorAll("[data-multiselect]").forEach((groupEl) => {
+      const group = groupEl.getAttribute("data-multiselect");
+      const values = (state.multiselects[group] && state.multiselects[group].values) || [];
+      groupEl.querySelectorAll("button").forEach((btn) => {
+        const active = values.includes(buttonValue(btn));
+        btn.classList.toggle("is-selected", active);
+        btn.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+    });
+    document.querySelectorAll("[data-question]").forEach((box) => {
+      const qid = box.getAttribute("data-question");
+      const input = box.querySelector("textarea, input");
+      if (!input) return;
+      const saved = state.questions[qid] ? state.questions[qid].answer : "";
+      if (input.value !== saved) input.value = saved;
+    });
+  }
+
+  // --- Direct `data-lf` actions ---
+
+  function summarizeOperation(op) {
+    const parts = [op.kind || "operation"];
+    for (const [k, v] of Object.entries(op)) {
+      if (k === "kind" || k === "directory" || k === "request_id" || v === null || v === false || v === "") {
+        continue;
+      }
+      if (Array.isArray(v) && v.length === 0) continue;
+      parts.push(k + "=" + (typeof v === "string" ? v : JSON.stringify(v)));
+    }
+    return parts.join(" ");
+  }
+
+  function materializeOperation(template, requestId) {
+    const copy = JSON.parse(JSON.stringify(template));
+    if (copy.request_id === "__LF_REQUEST_ID__") {
+      copy.request_id = requestId;
+    }
+    return copy;
+  }
+
+  function formatReceipt(kind, result) {
+    if (result && typeof result === "object") {
+      const taskId = resultTaskId(result);
+      if (kind === "task.create" && taskId) return "Filed " + taskId;
+      if (result.delivery && result.delivery.sentence) return result.delivery.sentence;
+      if (taskId) return kind + " → " + taskId;
+      if (result.sentence) return result.sentence;
+    }
+    return "Ran " + kind;
+  }
+
+  function openActionConfirm(action) {
+    const template = action.template;
+    if (hostMode === "clipboard") {
+      state.offlineActions.push({ id: randomId(), key: action.key, summary: summarizeOperation(template) });
+      refresh(true);
+      return;
+    }
+
+    const requestId = randomId();
+    const wrap = document.createElement("span");
+    wrap.className = "lf-action-confirm";
+
+    const summary = actionNote("lf-action-summary", summarizeOperation(template));
+
+    const runBtn = document.createElement("button");
+    runBtn.type = "button";
+    runBtn.className = "lf-btn-accent";
+    runBtn.textContent = "Run";
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.textContent = "Cancel";
+
+    wrap.append(summary, runBtn, cancelBtn);
+    showInSlot(action, wrap);
+
+    cancelBtn.addEventListener("click", () => {
+      showInSlot(action, action.btn);
+    });
+
+    function execute() {
+      showInSlot(action, wrap);
+      runBtn.disabled = true;
+      runBtn.textContent = "Running…";
+      const op = materializeOperation(template, requestId);
+      sendOperation(op, requestId).then(
+        (result) => {
+          const text = formatReceipt(op.kind, result);
+          state.receipts.push({ key: action.key, kind: op.kind, summary: resultTaskId(result) || text, text });
+          refresh(true);
+        },
+        (err) => {
+          const errWrap = document.createElement("span");
+          errWrap.className = "lf-action-error";
+          const retryBtn = document.createElement("button");
+          retryBtn.type = "button";
+          retryBtn.textContent = "Retry";
+          retryBtn.addEventListener("click", execute);
+          errWrap.append(actionNote("", String(err && err.message ? err.message : err)), retryBtn);
+          showInSlot(action, errWrap);
+        }
+      );
+    }
+
+    runBtn.addEventListener("click", execute);
+  }
+
+  // --- Highlight-to-comment ---
+
+  let popover = null;
+
+  function dismissPopover() {
+    if (popover) {
+      popover.remove();
+      popover = null;
+    }
+  }
+
+  function wireSelectionNotes() {
+    document.addEventListener("mouseup", (event) => {
+      if (popover && popover.contains(event.target)) return;
+      if (stripEl && stripEl.contains(event.target)) return;
+      if (event.target.closest("button, textarea, input, .lf-action-confirm")) return;
+
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) {
+        dismissPopover();
+        return;
+      }
+      const quote = oneLine(sel.toString());
+      if (!quote) {
+        dismissPopover();
+        return;
+      }
+      const range = sel.getRangeAt(0).cloneRange();
+      const rect = range.getBoundingClientRect();
+      const section = nearestSection(range.commonAncestorContainer);
+      showNoteTrigger(rect, section, quote);
+    });
+  }
+
+  function showNoteTrigger(rect, section, quote) {
+    dismissPopover();
+    popover = document.createElement("div");
+    popover.className = "lf-note-popover";
+    popover.style.top = Math.max(8, Math.min(window.innerHeight - 120, rect.bottom + 8)) + "px";
+    popover.style.left = Math.max(8, Math.min(window.innerWidth - 280, rect.left)) + "px";
+
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "lf-btn-accent";
+    trigger.textContent = "Note";
+    trigger.addEventListener("click", () => {
+      popover.innerHTML = "";
+      const ta = document.createElement("textarea");
+      ta.placeholder = "Add note…";
+      const actions = document.createElement("div");
+      actions.className = "lf-note-popover-actions";
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", dismissPopover);
+      const save = document.createElement("button");
+      save.type = "button";
+      save.className = "lf-btn-accent";
+      save.textContent = "Save note";
+      function commit() {
+        const text = oneLine(ta.value);
+        if (!text) return;
+        state.notes.push({ id: randomId(), section, quote: quote.slice(0, 140), text });
+        dismissPopover();
+        try {
+          window.getSelection().removeAllRanges();
+        } catch (_) {}
+        renderNotesTray();
+        renderHighlights();
+        saveState();
+        renderStrip();
+      }
+      save.addEventListener("click", commit);
+      ta.addEventListener("keydown", (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+          e.preventDefault();
+          commit();
+        } else if (e.key === "Escape") {
+          dismissPopover();
+        }
+      });
+      actions.append(cancel, save);
+      popover.append(ta, actions);
+      ta.focus();
+    });
+    popover.append(trigger);
+    document.body.append(popover);
+  }
+
+  let trayEl = null;
+  function renderNotesTray() {
+    if (!state.notes.length) {
+      if (trayEl) trayEl.remove();
+      trayEl = null;
+      return;
+    }
+    if (!trayEl) {
+      trayEl = document.createElement("section");
+      trayEl.className = "lf-notes-tray";
+      const main = document.querySelector("main") || document.body;
+      main.append(trayEl);
+    }
+    trayEl.innerHTML = "";
+    const heading = document.createElement("h3");
+    heading.textContent = "Your notes";
+    trayEl.append(heading);
+    for (const note of state.notes) {
+      const chip = document.createElement("div");
+      chip.className = "lf-note-chip";
+      const body = document.createElement("span");
+      body.textContent = note.section + ' › "' + note.quote + '" — ' + note.text;
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "lf-btn-quiet";
+      del.textContent = "Remove";
+      del.addEventListener("click", () => {
+        state.notes = state.notes.filter((n) => n.id !== note.id);
+        renderNotesTray();
+        renderHighlights();
+        saveState();
+        renderStrip();
+      });
+      chip.append(body, del);
+      trayEl.append(chip);
+    }
+  }
+
+  function renderHighlights() {
+    if (typeof Highlight === "undefined" || !CSS || !CSS.highlights) return;
+    if (!state.notes.length) {
+      CSS.highlights.delete("lf-note");
+      return;
+    }
+    const ranges = [];
+    const main = document.querySelector("main") || document.body;
+    const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
+    let n;
+    while ((n = walker.nextNode())) {
+      if (n.parentElement && n.parentElement.closest(".lf-notes-tray, .lf-strip, .lf-note-popover")) {
+        continue;
+      }
+      textNodes.push(n);
+    }
+    for (const note of state.notes) {
+      const needle = note.quote;
+      if (!needle) continue;
+      for (const node of textNodes) {
+        const idx = node.nodeValue.indexOf(needle);
+        if (idx >= 0) {
+          const r = document.createRange();
+          r.setStart(node, idx);
+          r.setEnd(node, idx + needle.length);
+          ranges.push(r);
+          break;
+        }
+      }
+    }
+    if (ranges.length) CSS.highlights.set("lf-note", new Highlight(...ranges));
+    else CSS.highlights.delete("lf-note");
+  }
+
+  // --- Bottom reply strip ---
+
+  let stripEl = null;
+  let stripStatusText = "";
+  let stripStatusKind = "";
+
+  function steerTargetLabel() {
+    if (work.kind === "task" && work.issue) return work.issue;
+    if (work.kind === "wave" && work.wave) return "wave " + work.wave;
+    if (work.kind === "session" && work.session) return "session";
+    return "repository";
+  }
+
+  function buildSteerOperation(message) {
+    if (work.kind === "task" && work.issue) {
+      return {
+        kind: "task.steer",
+        directory: directory,
+        issue: work.issue,
+        message: message,
+      };
+    }
+    return {
+      kind: "session.steer",
+      directory: directory,
+      session: work.kind === "session" ? work.session || null : null,
+      wave: work.kind === "wave" ? work.wave || null : null,
+      message: message,
+    };
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise((resolve, reject) => {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.append(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+        resolve();
+      } catch (err) {
+        reject(err);
+      } finally {
+        ta.remove();
+      }
+    });
+  }
+
+  // After a reply is sent: drafts go, receipts stay drawn and stop riding on replies.
+  function clearDrafts() {
+    const receipts = state.receipts.map((r) => Object.assign({}, r, { reported: true }));
+    state = emptyState();
+    state.receipts = receipts;
+    refresh(true);
+  }
+
+  function submitReply() {
+    if (desktopHandler) return;
+    const items = queueItems();
+    if (!items.length) return;
+    const message = formatReplyMessage(items);
+
+    if (hostMode === "loopback") {
+      stripStatusText = "Sending…";
+      stripStatusKind = "";
+      renderStrip();
+      const op = buildSteerOperation(message);
+      sendOperation(op, randomId()).then(
+        (result) => {
+          const sentence =
+            (result && result.delivery && result.delivery.sentence) ||
+            "Steer saved.";
+          stripStatusText = sentence;
+          stripStatusKind = "ok";
+          clearDrafts();
+        },
+        (err) => {
+          stripStatusText = String(err && err.message ? err.message : err);
+          stripStatusKind = "error";
+          renderStrip();
+        }
+      );
+      return;
+    }
+
+    copyText(message).then(
+      () => {
+        stripStatusText = serverRestarted
+          ? "Copied reply (server restarted)"
+          : "Copied reply";
+        stripStatusKind = "ok";
+        renderStrip();
+      },
+      (err) => {
+        stripStatusText = "Copy failed: " + String(err && err.message ? err.message : err);
+        stripStatusKind = "error";
+        renderStrip();
+      }
+    );
+  }
+
+  function renderStrip() {
+    if (desktopHandler) {
+      if (stripEl) stripEl.hidden = true;
+      return;
+    }
+    const items = queueItems();
+    if (!items.length && !stripStatusText) {
+      if (stripEl) stripEl.hidden = true;
+      return;
+    }
+    if (!stripEl) {
+      stripEl = document.createElement("div");
+      stripEl.className = "lf-strip";
+      document.body.append(stripEl);
+    }
+    stripEl.hidden = false;
+    stripEl.innerHTML = "";
+
+    const count = document.createElement("span");
+    count.textContent =
+      items.length === 1 ? "1 item" : items.length + " items";
+    if (items.length > 0) stripEl.append(count);
+
+    if (stripStatusText) {
+      const status = document.createElement("span");
+      status.className =
+        "lf-strip-status" +
+        (stripStatusKind === "error"
+          ? " is-error"
+          : stripStatusKind === "ok"
+          ? " is-ok"
+          : "");
+      status.textContent = stripStatusText;
+      stripEl.append(status);
+    }
+
+    if (items.length > 0) {
+      const clearBtn = document.createElement("button");
+      clearBtn.type = "button";
+      clearBtn.className = "lf-btn-quiet";
+      clearBtn.textContent = "Clear";
+      clearBtn.addEventListener("click", () => {
+        stripStatusText = "";
+        stripStatusKind = "";
+        clearDrafts();
+      });
+
+      const sendBtn = document.createElement("button");
+      sendBtn.type = "button";
+      sendBtn.className = "lf-btn-accent";
+      sendBtn.textContent =
+        hostMode === "loopback"
+          ? "Steer " + steerTargetLabel() + " ⌘↩"
+          : "Copy reply ⌘↩";
+      sendBtn.addEventListener("click", submitReply);
+      stripEl.append(clearBtn, sendBtn);
+    }
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      if (popover && popover.contains(document.activeElement)) return;
+      if (!desktopHandler && queueItems().length > 0) {
+        event.preventDefault();
+        submitReply();
+      }
+    }
   });
-  renderScenario("headless");
+
+  wireControls();
+  wireSelectionNotes();
+
+  if (desktopHandler) {
+    try {
+      const reply = desktopHandler.postMessage({
+        type: "ready",
+        path: pagePath,
+        build_id: buildId,
+      });
+      if (reply && typeof reply.then === "function") {
+        reply.then((loaded) => applyState(loaded), () => {});
+      }
+    } catch (_) {}
+  } else {
+    loadBrowserState();
+    connectLoopback();
+  }
 })();
+
 </script>
 </body>
 </html>

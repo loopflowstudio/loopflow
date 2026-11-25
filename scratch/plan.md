@@ -176,14 +176,17 @@ lf page open <page> [--host auto|desktop|browser] [--print]     # open where you
 1. **Direct CLI call** (`agent_caller().is_none()`): if `LF_DESKTOP` is set,
    present in Desktop Files (`lf desktop files <page>`); otherwise open the
    loopback URL in the OS default browser and print it.
-2. **Interactive agent call** (`agent_caller()` present and conversation has a
-   viewer): if `viewed_placement()` is `OpenHost::Desktop`, present via
-   `lf desktop files <page>`; if viewed in Rex / cmux / tmux / herdr (or an
-   interactive terminal), open the loopback URL in the browser and print it.
-3. **Headless agent call** (`agent_caller()` present, no active viewer — e.g.
-   background Graph step or `lf -b`): **never pop a browser window**; print the
-   loopback URL and exit 0. Desktop's `scratch_pages` watcher surfaces the
-   quiet `Updated` notice if the Task is open there.
+2. **Interactive agent call** (`agent_caller()` present, session is interactive
+   — `session.interactive == true` in SQLite, or a live `viewed_placement()`):
+   if `viewed_placement()` is `OpenHost::Desktop` (or `LF_DESKTOP` is set),
+   present via `lf desktop files <page>`; otherwise (Rex, cmux, tmux, herdr,
+   or a plain terminal like Ghostty/iTerm/Terminal.app) open the loopback URL
+   in the browser and print it.
+3. **Headless agent call** (`agent_caller()` present, `session.interactive ==
+   false` — or session missing from the store with no `viewed_placement()` —
+   e.g. background Graph step or `lf -b`): **never pop a browser window**;
+   print the loopback URL and exit 0. Desktop's `scratch_pages` watcher
+   surfaces the quiet `Updated` notice if the Task is open there.
 4. **`--host desktop` / `--host browser`**: explicit override; fails cleanly
    without falling back to another host.
 5. **`--print`**: prints the loopback URL without opening anything (starts
@@ -242,7 +245,9 @@ properties only, covering light and dark.
   an interactive standalone Session, never a headless worker/batch) |
   `{ "kind": "repository" }`
 - `directory`, `base`, `head`, `path`, `build_id` (short SHA-256 prefix of the
-  compiled body HTML).
+  compiled body HTML), `protocol`: `{ "revision": <wire::REVISION>, "min_revision": <wire::MIN_REVISION> }`
+  so the runtime speaks the server's compiled revision without hardcoding a
+  magic number.
 
 Kit assets (runtime JS, base CSS, builtin components) live in
 `rust/loopflow-definitions/src/builtins/page/` and are embedded like skills.
@@ -258,14 +263,24 @@ One small script, inlined by `lf page build`. No page writes JavaScript.
   Highlight API (`::highlight(lf-note)`).
 - **Controls**: `data-choice` (single select per group), `data-multiselect`,
   `data-question` (free text). Each contributes one item to the reply queue.
+  `data-label` names the item in the formatted reply; when a control has no
+  direct prose/heading child (`<p>`, `<label>`, `<h3>`, `<h4>`, `<legend>`),
+  `base.css` renders `data-label` as the prompt above the inputs; when it does
+  have one (such as a fuller numbered question `<p>`), CSS suppresses the
+  `::before` pseudo-element and gives the `<p>` full row width
+  (`flex-basis: 100%`) so the prompt is never duplicated and stays selectable
+  for highlight-to-comment.
 - **Reply strip**: fixed at the bottom while the reply queue is non-empty
   (hidden in Desktop, where `ReviewCommentsStrip` is the one strip): count,
   Clear, and one action button named for the host (`Steer <target> ⌘↩` in
   loopback browser, `Copy reply ⌘↩` offline). `⌘↩` triggers it.
   - On loopback submit: sends `task.steer` when `work.kind == "task"`, else
     `session.steer` scoped to `wave` / `session` / repository. Shows the
-    server's `delivery.sentence` (or error) in the strip; clears the queue only
-    on success.
+    server's `delivery.sentence` (or error) in the strip; clears the queue and
+    marks receipts `reported` only on success.
+  - Clicking **Clear** drops unsent notes, choices, answers, and offline
+    actions without marking unreported `data-lf` receipts as `reported`, so
+    `[already ran: …]` still rides along on the next reply.
 - **Direct actions (`data-lf`)**: separate from the reply queue. Click → inline
   confirm showing `kind` and non-null fields → runtime injects a fresh
   `crypto.randomUUID()` `request_id` when required (reused on retry of the same
@@ -287,8 +302,13 @@ One small script, inlined by `lf page build`. No page writes JavaScript.
   comments using the same one-line formatter.
 
 Host detection runs once at load: `window.webkit?.messageHandlers?.loopflow` →
-Desktop; `http:` origin whose `/<token>/machine` WebSocket completes
-`hello`/`welcome` → loopback; else clipboard.
+Desktop; `http:` origin with `/<token>/f/…` whose `/<token>/machine` WebSocket
+completes `hello` (using `stamp.protocol`) / `welcome` → loopback; else
+clipboard. On a loopback URL, if the WebSocket fails during handshake (e.g.
+un-ID'd `error` such as protocol mismatch, or stale token 404) or closes after
+`welcome` (server stopped or restarted), the runtime shows a truthful banner
+(the server's error message, or `Loopflow server disconnected — run lf page
+open <path>`) and falls back to `Copy reply ⌘↩`.
 
 ### Desktop bridge
 
@@ -376,7 +396,7 @@ button).
 | State | What the person sees |
 | --- | --- |
 | `lf server` not running at `lf page open` | command starts it as every client does; `--print` likewise |
-| Server restarted under an open page | banner with `lf page open <path>`; `⌘↩` copies |
+| Server stopped or restarted under an open page (or stale URL / protocol mismatch) | banner with server error or `Loopflow server disconnected — run lf page open <path>`; `⌘↩` copies |
 | Steer target finished or unavailable | server's `delivery.sentence` or error in the strip; queue stays on error |
 | `data-lf` operation fails | inline error on the button; retryable with same `request_id` |
 | Desktop, no conversation open | `ReviewCommentsStrip`'s existing disabled state and help text |
@@ -495,18 +515,48 @@ button).
    now enforces the kit contract across all five review skills and `LOOPFLOW.md`.
    Realign check: `cargo test -p loopflow-definitions --lib builtins::` 13/13 pass.
 
-### Remaining (later Graph steps, not implement)
+5. **Next — Post-build concept-review alignment.** Four conceptual/lifecycle
+   mismatches found against `origin/main` in `scratch/concept-review.html`:
+   - **`lf page open` interactivity routing (`rust/loopflow/src/lf/commands/page.rs`):**
+     check `session.interactive` from SQLite (reusing the store lookup pattern
+     in `page/build.rs`) instead of inferring headless solely from
+     `viewed_placement().is_none()`. Interactive sessions in plain terminals
+     (Ghostty, iTerm, Terminal.app) open the browser instead of silently
+     printing a URL; `session.interactive == false` (and test fixtures with no
+     session row and no placement) stay `PrintQuiet`. Add unit + integration
+     coverage for an interactive plain-terminal session vs. a headless worker.
+   - **Control prompt vs. reply label (`rust/loopflow-definitions/src/builtins/page/base.css`,
+     `rust/loopflow/src/lf/mod.rs`):** keep `data-label` as the concise reply
+     key; draw `[data-choice][data-label]::before` (and `data-multiselect`,
+     `data-question`) only when the control has no direct prose/heading child
+     (`:not(:has(> p, > label, > h3, > h4, > legend))`), and give
+     `[data-choice] > p, [data-multiselect] > p` `flex-basis: 100%` so rich
+     questions never print duplicate headings, never wrap beside buttons, and
+     stay selectable for highlight-to-comment. Document both forms in
+     `lf help page` and rebuild `scratch/ship-review.html`.
+   - **Loopback protocol single source of truth & truthful disconnect banner
+     (`rust/loopflow/src/lf/commands/page/build.rs`,
+     `rust/loopflow-definitions/src/builtins/page/runtime.js`):** stamp
+     `protocol: { revision, min_revision }` from `crate::server::wire` into
+     `PageStamp` so `runtime.js` drops hardcoded `10`; capture un-ID'd `error`
+     frames during `hello`; on `ws.close` for any loopback URL (even before
+     `welcome`), show the handshake error or
+     `Loopflow server disconnected — run lf page open <path>` and fall back to
+     `Copy reply ⌘↩`.
+   - **Separate `Clear` from `Send` on receipts
+     (`rust/loopflow-definitions/src/builtins/page/runtime.js`):**
+     `clearDrafts({ markReported })` marks receipts `reported: true` only when
+     a reply is actually sent (`submitReply` / Desktop `__lfDesktopApplyState(null)`),
+     not when the user clicks **Clear** in the bottom strip.
+   - Rebuild `scratch/ship-review.html` and `scratch/concept-review.html` with
+     the updated `lf` binary, and re-verify in `qa`.
 
-- **compress:** split `lf/commands/page_build.rs` (1434 lines) along its
-  expansions (components, diffs, `data-lf`, checks); split
-  `TaskFilesTests/reviewPageBridgeOwnsStateClearsAfterSendAndForwardsOperations`
-  along its numbered steps; `builtins::tests::review_page_skills_use_lf_page_kit`
-  asserts prompt substrings (including a negative `"visual language"` check) and
-  would not fail if a page broke — keep only what guards a real regression.
-- **qa (Chrome done, `scratch/qa.html`):** fixed missing `data-label` questions,
-  `data-lf` receipts lost on reload/send (browser and Desktop), and opaque
-  `data-lf` field errors. Still open: Dev Desktop live (switch files before
-  sending, `data-lf` click, receipt after remount).
+### Remaining (later Graph steps)
+
+- **qa (Chrome pass 2 + Dev Desktop):** verify Pass 5 fixes in Chrome (plain
+  `data-label` control + rich `<p>` question without duplicate heading, `Clear`
+  preserving `[already ran: …]`, truthful disconnect/stale-token banner) and
+  Dev Desktop live if reachable.
 - Open questions 1–8 in `scratch/questions.md` stay for review (notably which
   browser "an agent-browser split" meant).
 

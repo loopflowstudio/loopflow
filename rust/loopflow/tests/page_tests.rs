@@ -292,3 +292,249 @@ fn loopback_serves_page_enforces_admission_and_steers_task() {
         let _ = ws.close(None).await;
     });
 }
+
+#[test]
+fn page_build_expands_diffs_components_data_lf_and_rejects_broken_references() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir_in("/tmp").unwrap();
+
+    // Seed a tracked file, commit it, then modify it and create an untracked file.
+    fs::write(
+        repo.path().join("tracked.rs"),
+        "fn main() {\n    let old = 1;\n}\n",
+    )
+    .unwrap();
+    let add = Command::new("git")
+        .current_dir(repo.path())
+        .args(["add", "tracked.rs"])
+        .status()
+        .unwrap();
+    assert!(add.success());
+    let commit = Command::new("git")
+        .current_dir(repo.path())
+        .args(["commit", "-m", "seed tracked file"])
+        .status()
+        .unwrap();
+    assert!(commit.success());
+
+    let head_sha = String::from_utf8(
+        Command::new("git")
+            .current_dir(repo.path())
+            .args(["rev-parse", "--short=10", "HEAD"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+
+    // Modify tracked.rs and add an untracked file.
+    fs::write(
+        repo.path().join("tracked.rs"),
+        "fn main() {\n    let updated = 2;\n    let extra = 3;\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("new_file.rs"),
+        "pub fn hello() -> &'static str {\n    \"hi\"\n}\n",
+    )
+    .unwrap();
+
+    // Add a repository theme and a custom component override.
+    fs::create_dir_all(repo.path().join(".lf/components/callout")).unwrap();
+    fs::write(
+        repo.path().join(".lf/theme.css"),
+        ":root { --lf-accent: #123456; }\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join(".lf/components/callout/template.html"),
+        "<aside class=\"custom-callout\"><strong>{{label}}</strong><slot></slot></aside>",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join(".lf/components/callout/style.css"),
+        ".custom-callout { border-left: 2px solid var(--lf-accent); }",
+    )
+    .unwrap();
+
+    // Bind a Task to this checkout so the stamp carries `work.kind = "task"`.
+    let created = lf_cmd(repo.path(), home.path())
+        .args(["task", "create", "Build page test", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        created.status.success(),
+        "task create failed: {}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    let task_json: serde_json::Value = serde_json::from_slice(&created.stdout).unwrap();
+    let issue = task_json["task"]["identifier"].as_str().unwrap().to_owned();
+
+    let scratch = repo.path().join("scratch");
+    fs::create_dir_all(&scratch).unwrap();
+    let source = scratch.join("ship-review.page.html");
+    fs::write(
+        &source,
+        format!(
+            r#"<h1>Retry budget</h1>
+<p>Built on <code>{head_sha}</code> with a <code data-no-check>deadbeef12</code> literal.</p>
+
+<lf-component name="callout" label="Invariant">
+  <p>One write path.</p>
+</lf-component>
+
+<lf-diff path="tracked.rs">
+  <lf-note old-line="2">Removed legacy constant.</lf-note>
+  <lf-note line="3">Added extra counter.</lf-note>
+</lf-diff>
+
+<lf-diff path="new_file.rs"></lf-diff>
+
+<lf-file path="tracked.rs" lines="1-2"></lf-file>
+
+<lf-component name="decision" id="f1" title="Prune retry log" recommendation="File Task">
+  <p>Rows grow unbounded on long Tasks.</p>
+</lf-component>
+
+<button data-lf='{{"kind":"task.create","title":"Prune retry log"}}'>File Task now</button>
+"#
+        ),
+    )
+    .unwrap();
+
+    let built = lf_cmd(repo.path(), home.path())
+        .args([
+            "--task",
+            &issue,
+            "page",
+            "build",
+            "scratch/ship-review.page.html",
+            "--base",
+            "HEAD",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "lf page build failed: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+
+    let output_path = scratch.join("ship-review.html");
+    assert!(output_path.is_file());
+    let html = fs::read_to_string(&output_path).unwrap();
+
+    // Real diff lines (including untracked file `+` lines) and both line notes.
+    assert!(
+        html.contains("let updated = 2;"),
+        "missing updated diff line"
+    );
+    assert!(html.contains("let old = 1;"), "missing deleted diff line");
+    assert!(
+        html.contains("Removed legacy constant."),
+        "missing old-line note"
+    );
+    assert!(
+        html.contains("Added extra counter."),
+        "missing new-line note"
+    );
+    assert!(html.contains("Hide line notes"), "missing notes toggle");
+    assert!(
+        html.contains("pub fn hello()"),
+        "missing untracked file diff"
+    );
+
+    // Theme, component override, and builtin decision component.
+    assert!(
+        html.contains("--lf-accent: #123456;"),
+        "missing repo .lf/theme.css"
+    );
+    assert!(
+        html.contains("custom-callout"),
+        "missing repo component override"
+    );
+    assert!(
+        html.contains("data-choice=\"f1\""),
+        "missing builtin decision choice"
+    );
+
+    // Strict expanded `data-lf` operation JSON.
+    assert!(
+        html.contains("__LF_REQUEST_ID__"),
+        "missing request_id sentinel"
+    );
+    assert!(
+        html.contains("\"kind\":\"task.create\""),
+        "missing task.create kind"
+    );
+    assert!(
+        html.contains("\"run\":false"),
+        "missing expanded run default"
+    );
+
+    // Work stamp (`work.kind = "task"` + `build_id`) and runtime script.
+    let stamp_start = html
+        .find(r#"<script type="application/json" id="lf-page">"#)
+        .expect("missing stamp script");
+    let stamp_json_start = stamp_start + r#"<script type="application/json" id="lf-page">"#.len();
+    let stamp_json_end = html[stamp_json_start..].find("</script>").unwrap() + stamp_json_start;
+    let stamp: serde_json::Value =
+        serde_json::from_str(&html[stamp_json_start..stamp_json_end]).unwrap();
+    assert_eq!(stamp["work"]["kind"], "task");
+    assert_eq!(stamp["work"]["issue"], issue);
+    assert_eq!(stamp["path"], "scratch/ship-review.html");
+    assert_eq!(stamp["build_id"].as_str().unwrap().len(), 16);
+    assert!(
+        html.contains("window.__lfDesktopApplyState"),
+        "missing runtime JS"
+    );
+
+    // Negative build checks: each fails non-zero naming element and line.
+    for (name, body, expected_elem, expected_line) in [
+        (
+            "missing-path",
+            "<h1>T</h1>\n<lf-file path=\"does/not/exist.rs\"></lf-file>\n",
+            "lf-file",
+            "line 2",
+        ),
+        (
+            "unknown-sha",
+            "<h1>T</h1>\n<p>See <code>0badc0ffee12</code></p>\n",
+            "<code>",
+            "line 2",
+        ),
+        (
+            "invalid-op",
+            "<h1>T</h1>\n<button data-lf='{\"kind\":\"task.create\",\"bogus\":true}'>Go</button>\n",
+            "<button",
+            "line 2",
+        ),
+        (
+            "forbidden-script",
+            "<h1>T</h1>\n\n<script>console.log(1)</script>\n",
+            "<script>",
+            "line 3",
+        ),
+    ] {
+        let bad_path = scratch.join(format!("{name}.page.html"));
+        fs::write(&bad_path, body).unwrap();
+        let res = lf_cmd(repo.path(), home.path())
+            .args([
+                "page",
+                "build",
+                &format!("scratch/{name}.page.html"),
+                "--base",
+                "HEAD",
+            ])
+            .output()
+            .unwrap();
+        assert!(!res.status.success(), "{name} should have failed");
+        let err = String::from_utf8_lossy(&res.stderr);
+        assert!(
+            err.contains(expected_elem) && err.contains(expected_line),
+            "{name}: expected {expected_elem} and {expected_line}, got: {err}"
+        );
+    }
+}

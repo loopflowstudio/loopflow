@@ -11,13 +11,13 @@ use crate::server::wire::{Operation, PageUrl, ServerOperation};
 
 pub fn run(cli: &Cli, cmd: &PageCommand) -> Result<()> {
     match cmd {
-        PageCommand::Build { source, base } => build(source, base.as_deref()),
+        PageCommand::Build { source, base } => {
+            let output = super::page_build::build(cli, source, base.as_deref())?;
+            println!("{}", output.display());
+            Ok(())
+        }
         PageCommand::Open { page, host, print } => open(cli, page, *host, *print),
     }
-}
-
-fn build(_source: &Path, _base: Option<&str>) -> Result<()> {
-    bail!("`lf page build` is not implemented yet")
 }
 
 /// Open a compiled HTML review page in Desktop Files or the browser, or print

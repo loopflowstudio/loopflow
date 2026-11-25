@@ -542,6 +542,26 @@ pub fn task_diff(
     }
 }
 
+/// Diff one checkout-relative file path against `base_commit`, reusing
+/// Loopflow's rename detection and untracked-file `--no-index` logic.
+pub fn checkout_file_diff(
+    worktree: &Path,
+    base_commit: &str,
+    path: &str,
+) -> OpsResult<TaskDiffSnapshot> {
+    let task_id = loopflow_storage::work::task::TaskId::new();
+    let workspace = TaskComparison {
+        checkout: TaskWorkspace {
+            issue_identifier: "",
+            task_id: &task_id,
+            worktree,
+        },
+        base_commit,
+        head_commit: None,
+    };
+    diff_snapshot(workspace, Some(path))
+}
+
 pub(super) fn diff_snapshot(
     workspace: TaskComparison<'_>,
     path: Option<&str>,

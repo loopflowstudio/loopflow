@@ -168,6 +168,21 @@ pub(super) fn is_scratch_page(path: &Path) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("html"))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::is_scratch_page;
+    use std::path::Path;
+
+    #[test]
+    fn scratch_pages_include_compiled_html_and_exclude_page_sources() {
+        assert!(is_scratch_page(Path::new("scratch/ship-review.html")));
+        assert!(is_scratch_page(Path::new("scratch/notes.md")));
+        assert!(!is_scratch_page(Path::new("scratch/ship-review.page.html")));
+        assert!(!is_scratch_page(Path::new("scratch/EXPLORE.PAGE.HTML")));
+        assert!(!is_scratch_page(Path::new("docs/index.html")));
+    }
+}
+
 fn match_span(path: &str, query: &str) -> Option<usize> {
     let mut positions = path.char_indices();
     let mut first = None;

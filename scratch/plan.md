@@ -69,7 +69,19 @@ Mounted focus, scroll and the 360/620-point layouts continue to gate and display
 
 **Demo fixes, November 24.** The live demo ([demo notes](demo-notes.md), [design](design.md#demo-feedback--fixes-2026-11-24)) found that ⌘-click and word underlines did nothing: selectable text took the click before the reader's tap gesture. The reader now watches its window's mouse events, counts a press released within 3 points as a click, maps it onto the row frames it records, and leaves drags to selection. Find scrolls to its match with the Grep anchor instead of the middle of the widest line. The rail uses the Diff sidebar's headings and padding, open and changed rows show name, directory and colored counts, and the tree steps 8 points per level. Find and the picker search are bordered fields under a divider; placeholders and the symbol peek read on dark themes.
 
-Next: main-thread stalls on large files (design fix 6). The demo log showed `main thread stalled ms=2011` and `ms=1059` around `swift/LoopflowMac/WorkModel.swift` (3,765 lines, 189 KB). Measure before changing anything: a headless test that opens that file in Read, then runs ⌘F, a click and a scroll, timing main-thread work for each. Fix the largest cost it finds (candidates: per-row comment filtering, repeated `AttributedString` or Tree-sitter painting, synchronous work on selection or Find), and keep the test as the timing guard. Display QA checks the new rail and fields in a dark theme and Loopflow Light, and a physical ⌘-click.
+**Large-file stall (design fix 6).** `LargeFileReaderTests` opens `swift/LoopflowMac/WorkModel.swift` (3,766 lines) in Read headlessly. It times main-thread work, layout included, for opening, ⌘F, a far Find step, a click and 60 scroll frames. A profile showed every built row repainting its `AttributedString` and SwiftUI comparing the result whenever any store value a row read changed. Each scroll frame also rebuilt the whole Files pane, because the breadcrumb read the reading line. Each line is now one equatable `NumberedLine` taking its marks as values, and the breadcrumb symbol is its own view. Measured on November 24–25 with load averages of 120–650, so the numbers are approximate:
+
+| Action | Before | After |
+|---|---:|---:|
+| Far Find step (first) | 1,127–1,695 ms | 271–600 ms |
+| Far Find step (repeated, median) | not measured | 89 ms |
+| Click | 140–180 ms | 60–120 ms (31 ms median when repeated) |
+| Scroll frame, median | 126 ms | 23–45 ms |
+| Longest frame while opening | not measured | 255–425 ms |
+
+The test fails if the scroll median exceeds 90 ms. It reports the other timings without asserting them: under this load they overlap the old values. It mounts Files unfocused because a focused Find field starts AppKit's one-time-code autofill, which calls `exit(0)` in a process denied the WindowServer and would silently end a headless suite.
+
+Next for large files, only if display QA still feels a stall: the first far jump and opening still build every row of a per-line SwiftUI `LazyVStack`. Removing `.textSelection` showed no measurable gain under load. The structural option is one TextKit view for the whole reader, with gutter, comments and peek as overlays. Opening takes 3–5 s of wall time, mostly the background Tree-sitter parse and the width measurement (the reader shows a spinner meanwhile). Display QA checks the new rail and fields in a dark theme and Loopflow Light, and a physical ⌘-click.
 
 Main's #2040 merged in (`8423d1360b`); `swift build --build-tests --package-path swift` passed on the merged tree on November 24.
 
@@ -83,6 +95,10 @@ November 23 presentation and navigation checks:
 - The cropped Unicode hit test and both picker cases passed. The local and peer browser journeys passed in 14.4 seconds with the source-built CLI.
 - Display QA checks mounted focus, horizontal scrolling in the reader and pane strip, distinct rail rows for an open changed file, and the 360/620-point layouts.
 
+
+**Large-file checks on November 25**
+
+- `scripts/test_desktop.sh --skip-build --filter` over `findClickAndScrollStayResponsiveInALargeSourceFile` plus eight reader, Find, gutter and comment tests passed all nine. Timings are in the large-file section above. `DiffScrollMeasurement` now uses the same frame timer and needs a display; it was compiled but not run.
 
 **Demo fix checks on November 24**
 

@@ -12,17 +12,12 @@
     --border: #e2e0d8;
     --text: #1c1b18;
     --muted: #5f5c53;
-    --accent: #1d4ed8;
-    --accent-soft: #eff6ff;
     --yes-bg: #ecfdf5;
     --yes-fg: #065f46;
     --yes-border: #a7f3d0;
     --no-bg: #fef2f2;
     --no-fg: #991b1b;
     --no-border: #fecaca;
-    --prop-bg: #fffbeb;
-    --prop-fg: #92400e;
-    --prop-border: #fde68a;
     --built-bg: #eef2ff;
     --built-fg: #3730a3;
     --built-border: #c7d2fe;
@@ -36,17 +31,12 @@
       --border: #33322c;
       --text: #eceae2;
       --muted: #a19e93;
-      --accent: #60a5fa;
-      --accent-soft: #172554;
       --yes-bg: #052e16;
       --yes-fg: #6ee7b7;
       --yes-border: #065f46;
       --no-bg: #3b0d0c;
       --no-fg: #fca5a5;
       --no-border: #7f1d1d;
-      --prop-bg: #2e2005;
-      --prop-fg: #fcd34d;
-      --prop-border: #78350f;
       --built-bg: #1e1b4b;
       --built-fg: #c7d2fe;
       --built-border: #3730a3;
@@ -97,7 +87,6 @@
   }
   .badge.yes { background: var(--yes-bg); color: var(--yes-fg); border-color: var(--yes-border); }
   .badge.no { background: var(--no-bg); color: var(--no-fg); border-color: var(--no-border); }
-  .badge.proposed { background: var(--prop-bg); color: var(--prop-fg); border-color: var(--prop-border); }
   .badge.built { background: var(--built-bg); color: var(--built-fg); border-color: var(--built-border); }
   code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
@@ -148,7 +137,6 @@
     padding: 16px 18px;
     margin: 14px 0;
   }
-  .card.mismatch { border-left: 4px solid var(--no-fg); }
   .card.resolved { border-left: 4px solid var(--yes-fg); }
   .grid-2 {
     display: grid;
@@ -216,14 +204,6 @@
   .opts { margin: 8px 0 0; padding-left: 20px; }
   .opts li { margin-bottom: 6px; }
   .muted { color: var(--muted); }
-  .counterexample {
-    background: var(--surface-alt);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 12px;
-    margin: 8px 0;
-    font-size: 13.5px;
-  }
 </style>
 </head>
 <body>
@@ -232,28 +212,28 @@
     <div class="kicker">Concept Review &middot; LOO-1104 &middot; Full diff against base <code>23ce1a69f9</code></div>
     <h1>Builtin Task Graphs, Skill Ownership &amp; Named Skill Inheritance</h1>
     <p class="lead">
-      <strong>Area reviewed:</strong> Builtin Task Graphs (<code>plan</code>, <code>build</code>, <code>quick</code>, and the workflows that compose them), builtin skill ownership contracts (<code>implement</code>, <code>concept-review</code>, <code>realign</code>, <code>verify</code>, <code>ship-review</code>, <code>kickoff</code>, <code>advance</code>, <code>write-docs</code>, <code>reflect</code>, <code>wave-session</code>), and the <strong>skill inheritance &amp; customization model</strong> added since the last review (<code>extends: &lt;name&gt;</code>, <code>extends: lf:&lt;name&gt;</code>, temporary <code>extends: builtin</code>, <code>SkillCatalog</code> resolution/merging, <code>lf skill customize</code>, and <code>lf list skill</code> / <code>Entry</code> wire DTO).
+      <strong>Area reviewed:</strong> Builtin Task Graphs (<code>plan</code>, <code>build</code>, <code>quick</code>, and the workflows that compose them), builtin skill ownership contracts (<code>implement</code>, <code>concept-review</code>, <code>realign</code>, <code>verify</code>, <code>ship-review</code>, <code>kickoff</code>, <code>advance</code>, <code>write-docs</code>, <code>reflect</code>, <code>wave-session</code>), and the <strong>named skill inheritance &amp; customization model</strong> (<code>extends: &lt;name&gt;</code>, <code>extends: lf:&lt;name&gt;</code>, temporary <code>extends: builtin</code>, <code>SkillCatalog</code> resolution/merging, <code>lf skill customize</code>, and <code>lf list skill</code> / <code>Entry</code> wire DTO).
     </p>
     <p class="lead" style="margin-top:8px;">
-      <strong>State on <code>HEAD</code> (<code>00c7f89698</code>):</strong> All 7 Graph and skill-ownership pairings remain clean and verified. Named skill inheritance (<code>b51d7711a8</code>, compressed in <code>be73184b3b</code>, QA'd in <code>00c7f89698</code>) works on the happy path, but full-diff review exposes <strong>3 concrete mismatches</strong> in its frontmatter merge, dialect boundary, and listing/error model. Recommended next pass written into <code>scratch/plan.md</code>; iterating back to <code>implement</code>.
+      <strong>State on <code>HEAD</code> (<code>6ea1775cae</code>):</strong> All 11 domain-to-code pairings line up. The three skill-inheritance mismatches flagged in pass 1 (<code>00c7f89698</code>) were fixed in <code>093386a924</code>, simplified in <code>143bbffecd</code>, and verified end to end by <code>skills::</code> unit tests (43/43) and live CLI QA (<code>6ea1775cae</code>, <code>scratch/qa.html</code>). Nothing remains to change in the plan or code; ready to advance.
     </p>
     <div class="status-strip">
-      <span class="badge built">Built on HEAD: 00c7f89698</span>
-      <span class="badge yes">8 of 11 pairings line up</span>
-      <span class="badge no">3 mismatches in skill inheritance</span>
-      <span class="badge proposed">1 focused fix pass queued in scratch/plan.md</span>
+      <span class="badge built">Built on HEAD: 6ea1775cae</span>
+      <span class="badge yes">11 of 11 pairings line up</span>
+      <span class="badge yes">0 mismatches</span>
+      <span class="badge built">4 reversible choices built for review</span>
     </div>
   </header>
 
   <h2>1. Do the concepts people work with and the code's concepts line up?</h2>
-  <p>Evaluated across the complete diff on <code>HEAD</code> (<code>23ce1a69f9..00c7f89698</code>): builtin Task Graphs, builtin skills, <code>SkillCatalog</code>, <code>skills::listing::Entry</code>, <code>config::settings</code>, <code>lf skill customize</code>, <code>lf list skill</code>, user docs, and Swift wire tests.</p>
+  <p>Evaluated across the complete branch diff against base (<code>23ce1a69f9..6ea1775cae</code>): builtin Task Graphs, builtin skills, <code>SkillCatalog</code>, <code>skills::listing::Entry</code>, <code>config::settings</code>, <code>lf skill customize</code>, <code>lf list skill</code>, user docs, DTO schema, and Swift wire tests.</p>
 
   <table>
     <thead>
       <tr>
         <th style="width:20%">Domain concept</th>
-        <th style="width:25%">Code / Skill / Graph concept</th>
-        <th style="width:10%">State</th>
+        <th style="width:26%">Code / Skill / Graph concept</th>
+        <th style="width:9%">State</th>
         <th style="width:10%">Lines up?</th>
         <th>Assessment on <code>HEAD</code></th>
       </tr>
@@ -278,7 +258,7 @@
         <td><code>concept-review.md</code> (HTML only) &rarr; <code>realign.md</code> (sole owner of <code>scratch/plan.md</code> and outer-loop decision)</td>
         <td><span class="badge built">Built</span></td>
         <td><span class="badge yes">Yes</span></td>
-        <td>Single owner for each job across both <code>plan</code> and <code>build</code>; verified on live haiku runs.</td>
+        <td>Single owner for each job across both <code>plan</code> and <code>build</code>; verified on live runs.</td>
       </tr>
       <tr>
         <td><strong>Fast unattended small change</strong></td>
@@ -313,107 +293,71 @@
         <td><code>extends: &lt;name&gt;</code>, <code>extends: lf:&lt;name&gt;</code>, temporary <code>extends: builtin</code> (LOO-1107), <code>lf skill customize</code></td>
         <td><span class="badge built">Built</span></td>
         <td><span class="badge yes">Yes</span></td>
-        <td>Resolution order, repo-overlay chaining (<code>card-implement &rarr; implement &rarr; lf:implement</code>), explicit raw builtin escape hatch, and cycle detection on multi-file loops all match the requested contract.</td>
+        <td>Resolution order, repo-overlay chaining (<code>card-implement &rarr; implement &rarr; lf:implement</code>), explicit raw builtin escape hatch, and cycle detection all match the contract.</td>
       </tr>
       <tr>
         <td><strong>Native provider metadata stays native</strong><br>Claude/Codex declarations never become Loopflow launch settings.</td>
-        <td><code>SkillCatalog::resolve_parent</code> + <code>merge_extension</code> (<code>catalog.rs:169-190, 320-386</code>)</td>
+        <td><code>SkillCatalog::resolve_parent</code> &rarr; <code>(String, SkillDialect)</code> + <code>merge_extension</code> (<code>catalog.rs:127-181, 352-385</code>)</td>
         <td><span class="badge built">Built</span></td>
-        <td><span class="badge no">No</span></td>
-        <td><strong>Dialect leak:</strong> <code>merge_extension</code> copies raw YAML from a native parent (<code>.claude/skills/.../SKILL.md</code>) into a Loopflow child's frontmatter. Claude's <code>context: fork</code> crashes <code>parse_skill</code> with <code>InvalidSkill</code>, and Claude's <code>agent: Explore</code> is parsed as a Loopflow harness name—breaking <code>agent_defaults_belong_only_to_loopflow_metadata</code>.</td>
+        <td><span class="badge yes">Yes</span></td>
+        <td><strong>Resolved in <code>093386a924</code>:</strong> non-Loopflow parents contribute only their body and string <code>description</code> (when child omits it). Claude's <code>context: fork</code> and <code>agent: Explore</code> stay out of Loopflow launch settings across direct and multi-hop chains; verified in unit tests and live QA.</td>
       </tr>
       <tr>
         <td><strong>Child frontmatter settings override parent settings</strong><br>Any setting a child sets wins over its parent without erasing sibling settings.</td>
-        <td><code>merge_extension</code> shallow <code>merged.extend(child_meta)</code> (<code>catalog.rs:169-190</code>)</td>
+        <td><code>merge_extension</code> using <code>config::normalize_context</code> + <code>agent</code>/<code>default_agent</code> mutual clearing + <code>config::files::overlay</code> (<code>catalog.rs:127-181</code>)</td>
         <td><span class="badge built">Built</span></td>
-        <td><span class="badge no">No</span></td>
-        <td><strong>One concept under raw YAML keys:</strong> (1) child <code>docs:</code> loses to parent <code>context.docs</code> when <code>normalize_context</code> runs <code>or_insert</code>; (2) child <code>context: { diff_files: false }</code> wipes parent <code>context.docs</code>; (3) child <code>default_agent:</code> loses to parent's pinned <code>agent:</code> because both stay in merged YAML.</td>
+        <td><span class="badge yes">Yes</span></td>
+        <td><strong>Resolved in <code>093386a924</code>:</strong> flat <code>docs:</code> overrides parent <code>context.docs</code>; nested <code>context</code> and <code>context.budgets</code> merge recursively; child <code>default_agent:</code> clears parent pinned <code>agent:</code> (and vice versa); <code>extends</code> is stripped before merge.</td>
       </tr>
       <tr>
         <td><strong>See what a Skill extends &amp; why a broken extension failed</strong></td>
-        <td><code>SkillSource::relations()</code> + <code>Entry::source_label()</code> + <code>resolve_parent()</code> (<code>catalog.rs:110-167, 365-382</code>; <code>listing.rs:28-39</code>)</td>
+        <td><code>SkillCatalog::relations()</code> + <code>resolve_extends_target()</code> + <code>chain_extends_builtin()</code> + <code>Entry::source_label()</code> (<code>catalog.rs:312-460</code>; <code>listing.rs:28-39</code>)</td>
         <td><span class="badge built">Built</span></td>
-        <td><span class="badge no">No</span></td>
-        <td><strong>Raw spelling vs. resolved parent:</strong> (1) <code>.lf/skills/implement.md</code> with <code>extends: implement</code> lists as circular <code>extends implement</code> instead of <code>extends lf:implement</code>; (2) transitive builtin extension (<code>qa &rarr; base-qa &rarr; lf:qa</code>) falsely reports <code>replaces builtin</code> because <code>relations()</code> only checks one hop; (3) non-builtin <code>selfie.md</code> with <code>extends: selfie</code> reports <code>skill inheritance cycle: selfie -&gt; selfie</code> instead of <code>no builtin skill is named "selfie"</code>.</td>
+        <td><span class="badge yes">Yes</span></td>
+        <td><strong>Resolved in <code>093386a924</code> &amp; <code>143bbffecd</code>:</strong> same-name and legacy builtin extensions report <code>extends lf:&lt;canonical&gt;</code>; transitive chains (<code>qa &rarr; base-qa &rarr; lf:qa</code>) report <code>Extends</code> instead of <code>replaces builtin</code>; non-builtin self-extension reports <code>no builtin skill is named "..."</code>; lookup runs once per entry.</td>
       </tr>
     </tbody>
   </table>
 
-  <h2>2. Biggest mismatch on <code>HEAD</code> (Before &rarr; Proposed After)</h2>
+  <h2>2. Pass 1 mismatches &rarr; verified resolution on <code>HEAD</code></h2>
 
-  <div class="card mismatch">
-    <h3><code>merge_extension</code> merges raw YAML strings instead of Loopflow's skill metadata concepts</h3>
-    <p>
-      The inheritance feature promises two clear rules: a Loopflow skill can extend any skill (builtin, repo, or native) and child frontmatter wins over parent frontmatter. Because <code>merge_extension</code> joins raw YAML maps without respecting <code>SkillDialect</code>, <code>context</code> normalization, or the <code>agent</code>/<code>default_agent</code> pair, three ordinary skills fail silently or crash at load time.
-    </p>
-
-    <div class="counterexample">
-      <strong>Counterexample 1 &mdash; Extending a real Claude skill (<code>.claude/skills/audit/SKILL.md</code>):</strong>
-      Claude skills legitimately use <code>agent: Explore</code> and <code>context: fork</code> (listed in <code>invocation.rs:208-209</code>). On <code>HEAD</code>, a Loopflow file <code>.lf/skills/my-audit.md</code> with <code>extends: audit</code> merges both keys into Loopflow frontmatter: <code>context: fork</code> crashes immediately with <code>LoadError::InvalidSkill</code>, and <code>agent: Explore</code> tries to launch harness <code>"Explore"</code>.
-    </div>
-    <div class="counterexample">
-      <strong>Counterexample 2 &mdash; Child overrides <code>docs</code> or a sibling <code>context</code> key:</strong>
-      Parent <code>.lf/skills/implement.md</code> sets <code>context: { docs: [scripts/testing.md] }</code>.
-      If child <code>card-implement.md</code> sets <code>docs: [docs/cards.md]</code>, <code>merged</code> keeps both keys and <code>normalize_context</code>'s <code>or_insert</code> keeps the <em>parent's</em> <code>scripts/testing.md</code> and drops the child's <code>docs/cards.md</code>.
-      If child sets <code>context: { diff_files: false }</code>, shallow <code>extend</code> wipes the parent's <code>context.docs</code>.
-    </div>
-    <div class="counterexample">
-      <strong>Counterexample 3 &mdash; Child relaxes parent's pinned <code>agent:</code> to <code>default_agent:</code>:</strong>
-      Parent sets <code>agent: codex</code>; child sets <code>default_agent: claude:opus</code>. Both keys stay in merged frontmatter, so parent's pinned <code>agent: codex</code> overrides child's <code>default_agent: claude:opus</code>.
-    </div>
-
+  <div class="card resolved">
+    <h3>All 3 skill-inheritance mismatches resolved and QA'd (<code>093386a924</code>, <code>143bbffecd</code>, <code>6ea1775cae</code>)</h3>
     <div class="grid-2">
       <div>
-        <span class="badge no">Before (HEAD 00c7f89698)</span>
-        <pre><code>// catalog.rs — merges raw YAML regardless of dialect or key semantics
-let parent_content = self.resolve_parent(...)?; // String only, dialect lost
-let mut merged = parse_mapping(parent_frontmatter);
-merged.extend(child_meta); // shallow!
-// - Claude `context: fork` / `agent: Explore` leak into Loopflow child
-// - child `docs:` loses to parent `context.docs`
-// - child `context: { diff_files: false }` wipes parent `context.docs`
-// - child `default_agent:` loses to parent `agent:`</code></pre>
+        <span class="badge no">Before (Pass 1 at 00c7f89698)</span>
+        <pre><code>// 1. Native parent metadata leaked into Loopflow child
+.claude/skills/audit/SKILL.md (agent: Explore, context: fork)
+  &rarr; my-audit crashed with InvalidSkill / launched "Explore"
+
+// 2. Shallow raw-YAML frontmatter merge
+child `docs:` lost to parent `context.docs`
+child `context: { diff_files: false }` wiped `context.docs`
+child `default_agent:` lost to parent `agent:`
+
+// 3. Single-file listing &amp; misleading self-extension error
+implement (.lf/skills/implement.md, extends implement)
+qa        (.lf/skills/qa.md, extends base-qa, replaces builtin)
+selfie    unavailable: ... skill inheritance cycle: selfie -&gt; selfie</code></pre>
       </div>
       <div>
-        <span class="badge proposed">Proposed (next pass in scratch/plan.md)</span>
-        <pre><code>// resolve_parent returns (content, dialect)
-// 1. Non-Loopflow parent: carry only `description` (if child omits it) + body
-// 2. Loopflow parent: normalize_context on parent &amp; child before merge
-//    - deep-merge nested mappings (context, context.budgets, claude, codex)
-//    - child scalar/list replaces parent value
-//    - if child sets `agent` or `default_agent`, clear parent's opposing key
-//    - strip `extends`</code></pre>
+        <span class="badge built">Built &amp; verified on HEAD (6ea1775cae)</span>
+        <pre><code>// 1. Dialect boundary enforced in resolve_parent + merge_extension
+my-audit inherits only `description` + body; no `Explore` or `fork`
+
+// 2. Semantic Loopflow merge (normalize_context + overlay)
+child `docs:` replaces `context.docs`; sibling context/budgets preserved
+child `default_agent:` clears parent `agent:` (and vice versa)
+
+// 3. One-pass SkillCatalog::relations + honest self-extension error
+implement (.lf/skills/implement.md, extends lf:implement)
+qa        (.lf/skills/qa.md, extends base-qa)
+selfie    unavailable: ... no builtin skill is named "selfie"</code></pre>
       </div>
     </div>
   </div>
 
-  <div class="card mismatch">
-    <h3>Listing &amp; self-extension honesty: report resolved parent and transitive builtin relation</h3>
-    <p>
-      <code>SkillSource::relations()</code> inspects one file in isolation and stores the raw <code>extends:</code> string. Meanwhile <code>listing::discover</code> already has the <code>SkillCatalog</code> in hand. Moving <code>relations(source)</code> onto <code>SkillCatalog</code> makes three user-visible cases honest without changing the wire schema:
-    </p>
-    <div class="grid-2">
-      <div>
-        <span class="badge no">Before (HEAD 00c7f89698)</span>
-        <pre><code>$ lf list skill
-  implement     (.lf/skills/implement.md, extends implement)   # looks circular!
-  qa            (.lf/skills/qa.md, extends base-qa, replaces builtin)  # wrong when base-qa extends lf:qa!
-  selfie        unavailable: ... skill inheritance cycle: selfie -&gt; selfie</code></pre>
-      </div>
-      <div>
-        <span class="badge proposed">Proposed (next pass in scratch/plan.md)</span>
-        <pre><code>$ lf list skill
-  implement     (.lf/skills/implement.md, extends lf:implement) # shows real parent
-  qa            (.lf/skills/qa.md, extends base-qa)             # transitive builtin -&gt; Extends
-  selfie        unavailable: ... no builtin skill is named "selfie"</code></pre>
-      </div>
-    </div>
-    <p class="muted" style="margin:6px 0 0;font-size:13.5px;">
-      Note: temporary <code>extends: builtin</code> (0.16.0 compatibility alias) either normalizes to <code>lf:&lt;canonical&gt;</code> or stays <code>builtin</code>—normalizing same-name builtin targets to <code>lf:&lt;canonical&gt;</code> in <code>extends</code> makes every builtin extension consistent across <code>extends: lf:&lt;name&gt;</code>, same-name <code>extends: &lt;name&gt;</code>, and <code>extends: builtin</code>.
-    </p>
-  </div>
-
-  <h2>3. What is already settled &amp; verified on <code>HEAD</code></h2>
+  <h2>3. What ships on <code>HEAD</code></h2>
   <div class="grid-2">
     <div>
       <h3>Desktop Start menu (<code>StartFlow</code>, <span class="badge built">Built</span>)</h3>
@@ -431,7 +375,7 @@ merged.extend(child_meta); // shallow!
   task-design  Draft the Task design                      never stops</div>
     </div>
     <div>
-      <h3>Builtin Graph flows (<span class="badge built">Built</span>)</h3>
+      <h3>Builtin Graph &amp; Skill flows (<span class="badge built">Built</span>)</h3>
       <div class="card" style="margin:0;">
         <div class="muted" style="font-size:12px;margin-bottom:4px;">plan</div>
         <div class="flow">
@@ -453,7 +397,7 @@ merged.extend(child_meta); // shallow!
           <span class="loop-box"><span class="loop-tag">loop</span><span class="step">sync</span><span class="arrow">&rarr;</span><span class="step">implement</span></span>
           <span class="arrow">&rarr;</span><span class="step">qa</span><span class="arrow">&rarr;</span><span class="step">gate</span><span class="arrow">&rarr;</span><span class="step add">land --wait-and-fix</span>
         </div>
-        <div class="muted" style="font-size:12px;margin:10px 0 4px;">Skill inheritance chains (<span class="badge built">Built</span> + <span class="badge proposed">Fixes queued</span>)</div>
+        <div class="muted" style="font-size:12px;margin:10px 0 4px;">Skill inheritance chain</div>
         <div class="flow">
           <span class="step">card-implement.md</span><span class="arrow">&rarr;</span>
           <span class="step">implement.md</span><span class="arrow">&rarr;</span>
@@ -463,8 +407,8 @@ merged.extend(child_meta); // shallow!
     </div>
   </div>
 
-  <h2>4. Open reversible choices (confirm or change)</h2>
-  <p class="muted">Items 1&ndash;3 are already built on <code>HEAD</code>; item 4 is the choice written into <code>scratch/plan.md</code> for the upcoming fix pass. Answer by number and letter (e.g. "4b") only if you want any changed.</p>
+  <h2>4. Reversible choices built for review</h2>
+  <p class="muted">All four choices are built and committed on <code>HEAD</code> (<code>6ea1775cae</code>). None is irreversible once shipped. Answer by number and letter (e.g. "4b") only if you want any changed.</p>
 
   <ol class="q-list">
     <li>
@@ -491,7 +435,7 @@ merged.extend(child_meta); // shallow!
     <li>
       <div class="q-title">4. When a repository Skill overrides a builtin using its own name (e.g. <code>.lf/skills/implement.md</code> with <code>extends: implement</code> or legacy <code>extends: builtin</code>), what should <code>lf list skill</code> show as its parent?</div>
       <ol class="opts" type="a">
-        <li><span class="badge proposed">Proposed in plan</span> <strong>The resolved builtin target (<code>extends lf:implement</code>)</strong> &mdash; makes it obvious where the inherited text actually comes from instead of printing a circular-looking <code>extends implement</code>.</li>
+        <li><span class="badge built">Built on HEAD</span> <strong>The resolved builtin target (<code>extends lf:implement</code>)</strong> &mdash; makes it obvious where the inherited text actually comes from instead of printing a circular-looking <code>extends implement</code>.</li>
         <li><strong>The literal text written in the file (<code>extends implement</code> / <code>extends builtin</code>)</strong> &mdash; mirrors the file's frontmatter verbatim even when a same-name file implicitly resolves to <code>lf:&lt;name&gt;</code>.</li>
       </ol>
     </li>

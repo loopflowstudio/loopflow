@@ -373,6 +373,18 @@ empty; the tests pass, including the new Pass 1 tests below. CI runs the suites.
    `docs/dev/*`, `scripts/testing.md`, `scripts/test.py`, README guides,
    prototype HTML) and regenerated `docs/dev/index.html`.
 
+Nothing remains to build. On merged head `95c5cb1357` (2026-11-25):
+the acceptance `git grep` is empty, `deliver`/`quick` read as the Demo shows,
+`gate.md`/`queue.yaml` are gone. `scripts/test.py` stopped at its resource
+preflight (`resource_envelope.py --recover` timed out after 300s), so the
+acceptance filter ran through `cargo nextest` directly: 191 passed, 2 failed —
+`pr_tests::task_snapshot_reads_its_current_parent_project` and
+`pr_tests::task_pr_missing_cached_linear_url_refuses_before_remote_mutation`,
+both panicking at `loopflow-test-support/src/lib.rs:483` ("retained fixture
+input: QueryReturnedNoRows", a `tracker_items` Linear fixture row). This branch
+does not touch those tests, the fixture, or tracker code; CI decides whether
+they are pre-existing or Machine-local.
+
 ## User docs written (`write-docs`)
 
 Already updated in place to describe the shipped behavior:

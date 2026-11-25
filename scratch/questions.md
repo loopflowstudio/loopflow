@@ -98,3 +98,7 @@ off leaves the group for the Machine to say.
 
 - Undo after Complete reselects the reopened Task on Mac; iPhone swipe-to-complete posts the same Undo.
 - A `cmd:` step drained by pause records exit 0 as finished, so the cursor advances past it and `unpause --run` never runs it twice. A non-zero exit stays a failure.
+
+## From the natural-stop QA (700ffb4b5c)
+
+- A final step drained under a pause arrives at `Paused: end` without completing. After `unpause --run` the Task reads "At its end. `lf task complete <id>` finishes it." and stays in Working. The same Graph with no pause auto-completed. Option A: unpause requests the completion the hold withheld, so a pause only delays the outcome. Option B: keep the explicit complete. Left as B.

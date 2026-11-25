@@ -148,3 +148,19 @@ timer stops while an `NSMenu` tracks).
 
 `sips --cropOffset` crops from the center on macOS. To cut the bar out of a
 snapshot, use a small Swift `CGImage.cropping(to:)` tool.
+
+# Natural stops from the CLI
+
+To reach every natural stop without an app, use three command-only Graphs
+behind the hold wrapper: `- cmd: help graph`, `- interactive: demo`,
+`- cmd: help task` for an interactive stop; `- cmd: help task`,
+`- cmd: help graph` for `end`; and `- cmd: help graph`, `- cmd: land`,
+`- cmd: help task` with `lf task auto off <id>` right after `create --run`
+for a landing stop. Start the pause in the background (`( lf task pause <id> & )`):
+it waits for the drain, and macOS has no `timeout`. Touch the go file, then read
+`lf task status <id> --json` at `graph.control` and `graph.sentence`. For a run
+that never paused, make a second Task on the same Graph: an unset auto completes
+it at `end`. For the auto-on case, run `lf checkout <id>` and then `lf task auto on <id>`
+on a `create` without `--run`. Primaries on a `exec sleep 900` stand-in are
+reparented to launchd when the server stops, so find them with
+`lsof -a -d cwd -p <pid>` (cwd `<repo>.agent`) and stop them by PID.

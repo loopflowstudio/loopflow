@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LOO-1102 — Concept Review</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #ffffff;
+      --surface: #f6f8fa;
+      --border: #d0d7de;
+      --text: #1f2328;
+      --muted: #59636e;
+      --warn-bg: #fff8c5;
+      --warn-border: #d4a72c;
+      --code-bg: #eff1f3;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d1117;
+        --surface: #161b22;
+        --border: #30363d;
+        --text: #e6edf3;
+        --muted: #8b949e;
+        --warn-bg: #2b230f;
+        --warn-border: #9e6a03;
+        --code-bg: #21262d;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 2rem 1.25rem 3rem;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    }
+    main {
+      max-width: 760px;
+      margin: 0 auto;
+    }
+    h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
+    h2 { font-size: 1.1rem; margin: 1.75rem 0 0.5rem; }
+    p { margin: 0.5rem 0; }
+    .meta {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-bottom: 1.5rem;
+    }
+    .callout {
+      background: var(--warn-bg);
+      border: 1px solid var(--warn-border);
+      border-radius: 6px;
+      padding: 0.9rem 1rem;
+      margin: 1rem 0;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.9rem 1rem;
+      margin: 0.75rem 0;
+    }
+    .tag {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 0.1rem 0.45rem;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--muted);
+      margin-bottom: 0.4rem;
+    }
+    dl {
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 0.35rem 1rem;
+      margin: 0;
+    }
+    dt { color: var(--muted); font-weight: 600; }
+    dd { margin: 0; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9em;
+      background: var(--code-bg);
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+    }
+    ol { padding-left: 1.25rem; }
+    li { margin: 0.5rem 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>LOO-1102 — Concept Review</h1>
+    <div class="meta">
+      Branch <code>jack-heart/bdd78b-123</code> · Base <code>3c9f1979fc</code> · HEAD <code>05b1994f44</code>
+    </div>
+
+    <div class="callout">
+      <strong>Area: none.</strong> Task LOO-1102 has no product area or outcome to review.
+      Nothing was changed in <code>scratch/plan.md</code> or in the repository.
+    </div>
+
+    <h2>What exists on this branch</h2>
+    <div class="card">
+      <div class="tag">Existing</div>
+      <dl>
+        <dt>Task title &amp; brief</dt>
+        <dd>Literal text <code>123</code></dd>
+        <dt>Wave</dt>
+        <dd>None</dd>
+        <dt>Code diff vs. base</dt>
+        <dd>None</dd>
+        <dt>Scratch files</dt>
+        <dd><code>scratch/plan.md</code> (committed at <code>05b1994f44</code>), recording that no outcome is specified and nothing should be built</dd>
+      </dl>
+    </div>
+
+    <h2>Product vs. code concepts</h2>
+    <p>
+      No product concepts, user actions, or code models are named by the Task or touched by the branch.
+      Evaluating alignment or proposing a design here would mean inventing scope rather than reviewing it.
+    </p>
+
+    <h2>Question needed to proceed</h2>
+    <ol>
+      <li>
+        <strong>What should be different in Loopflow when LOO-1102 is done, and who would notice?</strong><br>
+        Add the intended outcome via <code>lf steer LOO-1102 '&lt;outcome&gt;'</code> or by editing the Task description, then re-run kickoff and concept review.
+      </li>
+    </ol>
+  </main>
+</body>
+</html>

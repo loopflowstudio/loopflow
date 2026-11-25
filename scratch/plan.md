@@ -560,6 +560,8 @@ button).
   `data-label` control + rich `<p>` question without duplicate heading, `Clear`
   preserving `[already ran: …]`, truthful disconnect/stale-token banner) and
   Dev Desktop live if reachable.
+- **gate:** `cargo test -p loopflow --test page_tests` and the `page.rs` unit
+  tests added in Pass 5 were not rerun at realign; gate/CI runs them.
 - Open questions 1–8 in `scratch/questions.md` stay for review (notably which
   browser "an agent-browser split" meant).
 

@@ -450,7 +450,8 @@ fn execute_target(
                     }
                     // Shared contributions leave checkpoint composition to the caller.
                     if !shared
-                        && !loopflow_execution::journal::has_caller()
+                        && loopflow_execution::transport::skill_checkpoint()
+                            .unwrap_or_else(|| !loopflow_execution::journal::has_caller())
                         && loopflow_execution::repo::discover_repo_root(&repo_root)?.is_some()
                     {
                         // Best-effort: the skill ran whether or not its edits commit.
@@ -3037,12 +3038,17 @@ fn dispatch_launch(
     args: &[String],
     binding: Option<&loopflow_execution::ops::WorkBinding>,
 ) -> anyhow::Result<()> {
-    if matches!(cli.command, None | Some(Commands::Inline { .. }))
-        && loopflow_execution::transport::delegate_chat(kind)?
+    let target = resolve_cli_target(cli)?;
+    let skill = matches!(
+        target,
+        Some((loopflow_execution::definition::Target::Skill(_), _))
+    );
+    if (skill || matches!(cli.command, None | Some(Commands::Inline { .. })))
+        && loopflow_execution::transport::delegate_chat(kind, skill)?
     {
         return Ok(());
     }
-    match resolve_cli_target(cli)? {
+    match target {
         Some((target, message)) => {
             execute_target(kind, target, message.as_deref(), cli, args, binding)
         }

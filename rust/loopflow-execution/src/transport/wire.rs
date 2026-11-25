@@ -240,6 +240,11 @@ pub enum Request {
         #[serde(skip_serializing_if = "Option::is_none")]
         ready: Option<String>,
     },
+    /// A Skill launcher waits for its provider so it can finish the step.
+    SkillSession {
+        key: String,
+        session: String,
+    },
     /// Transfer the direct child's exit recording to its host before exec.
     ExitRecord {
         key: String,

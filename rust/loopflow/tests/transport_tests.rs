@@ -780,6 +780,68 @@ fn direct_chat_keeps_one_agy_and_its_draft_across_viewers_and_server_restart() {
 }
 
 #[test]
+fn standalone_skill_commits_and_completes_after_its_last_view_detaches() {
+    use loopflow_execution::journal::{read_events, traces_root, LfEventType, LfNode};
+
+    let fixture = Fixture::new();
+    fixture
+        .repo
+        .create_file(".lf/skills/write-note.md", "Write a note.\n");
+    fixture.repo.stage_all();
+    fixture.repo.commit("Define the note Skill");
+    fixture.named_provider(
+        "agy",
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '1.5.13'; exit; fi
+printf '%s:%s\n' "$$" "$LF_CAPTURE_KEY" >> "$HOME/launches"
+printf 'skill ready\n'
+while [ ! -f "$HOME/finish" ]; do sleep 0.05; done
+printf 'written after detach\n' > note.txt
+"#,
+    );
+    // Pin the independent commit-message run to a fixture executable too.
+    fixture.provider(&support::answering_claude_script(
+        r#"{"title":"Write the note","body":""}"#,
+        &fixture.home.path().join("commit-prompt"),
+    ));
+    let path = format!("{}/bin:/usr/bin:/bin", fixture.home.path().display());
+    let configured = fixture
+        .command(&["set", "--global", "default_agent", "claude"])
+        .output()
+        .unwrap();
+    assert!(configured.status.success(), "{configured:?}");
+    let _server = fixture.machine_server();
+    let mut pane = fixture.chat(&path, &["-a", "agy", "write-note"]);
+    pane.wait_text("skill ready");
+    let session = session_of(&fixture.sql(), &fixture.launches(1)[0]);
+    let held = fixture.terminal_of(&session);
+    let mut second = fixture.chat(&path, &["resume", &session]);
+    second.wait_text("skill ready");
+    second.type_keys(b"\x1d");
+    assert!(second.wait_exit().success());
+    pane.type_keys(b"\x1d");
+    assert!(pane.wait_exit().success());
+    std::fs::write(fixture.home.path().join("finish"), "").unwrap();
+    fixture.held_ends(&held);
+
+    let note = Command::new("git")
+        .current_dir(fixture.repo.path())
+        .args(["show", "HEAD:note.txt"])
+        .output()
+        .unwrap();
+    assert!(note.status.success(), "{note:?}");
+    assert_eq!(note.stdout, b"written after detach\n");
+    let events: Vec<_> = std::fs::read_dir(traces_root(fixture.repo.path()))
+        .unwrap()
+        .flat_map(|trace| read_events(&trace.unwrap().path()).unwrap())
+        .filter(|event| event.node == LfNode::Skill && event.skill.as_deref() == Some("write-note"))
+        .map(|event| event.event)
+        .collect();
+    assert_eq!(events, [LfEventType::Started, LfEventType::Completed]);
+    assert_eq!(fixture.launches(1).len(), 1);
+}
+
+#[test]
 fn standalone_chat_retires_only_after_detach_and_turn_completion() {
     let fixture = Fixture::new();
     let server = fixture.machine_server();

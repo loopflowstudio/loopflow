@@ -160,6 +160,8 @@ struct Handoff {
     terminal: TerminalId,
     key: String,
     parent: u32,
+    // A delegated Skill owns completion. Its original caller decides who commits.
+    checkpoint_skill: Option<bool>,
 }
 
 impl Handoff {
@@ -172,6 +174,10 @@ impl Handoff {
             .ok()
             .and_then(|id| TerminalId::parse(&id).ok());
         let key = std::env::var(CONTROL_ENV).ok();
+        let checkpoint_skill = std::env::var(SKILL_CHECKPOINT_ENV)
+            .ok()
+            .and_then(|value| value.parse().ok());
+        std::env::remove_var(SKILL_CHECKPOINT_ENV);
         std::env::remove_var(CONTROL_ENV);
         std::env::remove_var(PARENT_ENV);
         std::env::remove_var(HELD_ENV);
@@ -181,6 +187,7 @@ impl Handoff {
             terminal: terminal?,
             key: key?,
             parent,
+            checkpoint_skill,
         })
     }
 
@@ -275,8 +282,15 @@ impl LaunchInput {
     }
 }
 
-/// A standalone chat shares its PTY when the local server is already up.
-pub fn delegate_chat(kind: LaunchKind) -> Result<bool> {
+const SKILL_CHECKPOINT_ENV: &str = "LF_SKILL_CHECKPOINT";
+
+/// Whether this held Skill's original invocation owns its checkpoint.
+pub fn skill_checkpoint() -> Option<bool> {
+    HANDOFF.get()?.checkpoint_skill
+}
+
+/// A standalone chat or Skill shares its PTY when the local server is already up.
+pub fn delegate_chat(kind: LaunchKind, skill: bool) -> Result<bool> {
     if kind != LaunchKind::Chat || !can_delegate_command() {
         return Ok(false);
     }
@@ -284,7 +298,14 @@ pub fn delegate_chat(kind: LaunchKind) -> Result<bool> {
         return Ok(false);
     };
     let (argv, cwd) = replay_current()?;
-    let terminal = start_held_on(server, &argv, &cwd, None, &|_| {})?;
+    let terminal = start_held_on(server, &argv, &cwd, None, &|command| {
+        if skill {
+            command.env(
+                SKILL_CHECKPOINT_ENV,
+                (!crate::journal::has_caller()).to_string(),
+            );
+        }
+    })?;
     attach(&terminal, None, ViewerOptions::default())?;
     Ok(true)
 }
@@ -2515,8 +2536,8 @@ fn write_output(terminal: &mut Option<ViewerTerminal>, stream: u8, bytes: &[u8])
 }
 
 /// Hand the terminal's host what to record when this process, about to exec
-/// into its provider, exits. A nested launcher keeps its own wait and returns
-/// false.
+/// into its provider, exits. A delegated Skill registers its Session and keeps
+/// its wait for checkpoint and completion. Nested launchers keep their wait too.
 pub(crate) fn hand_exit_record(record: &NativeExit) -> Result<bool> {
     let handoff = HANDOFF
         .get()
@@ -2525,16 +2546,22 @@ pub(crate) fn hand_exit_record(record: &NativeExit) -> Result<bool> {
     socket.set_write_timeout(Some(Duration::from_secs(1)))?;
     // A delayed reply does not undo the host's acceptance. Wait for its
     // decision or a closed connection before choosing who records the exit.
-    send(
-        &mut socket,
+    let launcher_waits = handoff.checkpoint_skill.is_some();
+    let request = if launcher_waits {
+        Request::SkillSession {
+            key: handoff.key.clone(),
+            session: record.session.clone(),
+        }
+    } else {
         Request::ExitRecord {
             key: handoff.key.clone(),
             pid: std::process::id(),
             record: Box::new(record.clone()),
-        },
-    )?;
+        }
+    };
+    send(&mut socket, request)?;
     match receive_reply(&mut socket)? {
-        Reply::Accepted => Ok(true),
+        Reply::Accepted => Ok(!launcher_waits),
         Reply::Busy => Ok(false),
         other => bail!("held terminal refused the exit record: {other:?}"),
     }
@@ -2760,6 +2787,9 @@ pub fn configure_child(command: &mut Command) {
 pub(crate) fn carry_across_exec(command: &mut Command) {
     if let Some(handoff) = HANDOFF.get() {
         handoff.pass(command, handoff.parent);
+        if let Some(checkpoint) = handoff.checkpoint_skill {
+            command.env(SKILL_CHECKPOINT_ENV, checkpoint.to_string());
+        }
     }
     pass_open(command);
 }

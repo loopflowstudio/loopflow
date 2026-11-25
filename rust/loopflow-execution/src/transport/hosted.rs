@@ -388,6 +388,10 @@ impl Hosted {
                                 *exit_record = Some(record);
                                 viewer.reply(answers, Reply::Accepted);
                             }
+                            Request::SkillSession { key, session } if key == *control_key => {
+                                bind_session(&session);
+                                viewer.reply(answers, Reply::Accepted);
+                            }
                             Request::DropExitRecord { key } if key == *control_key => {
                                 *exit_record = None;
                                 attachment.set(None);

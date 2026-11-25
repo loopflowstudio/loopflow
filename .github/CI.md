@@ -133,7 +133,7 @@ Rust partitions wait for one shared build; the other suites run independently.
 | `website-test` | ubuntu-latest | `cd website && uv run python dev.py test` |
 | `e2e-smoke` | ubuntu-latest | both planning-reconnect proofs, then `tests/e2e/test_smoke.sh` |
 | `task-installation` | ubuntu-latest | `uv run python scripts/test_task_installation.py` |
-| `swift-test` | macos-26 | app build, complementary headless model/view and transport/CLI groups (six minutes each on PRs), launch-and-quit check, boundary check |
+| `swift-test` | macos-26 | app build, complementary headless model/view, transport/CLI and two-Machine groups (six minutes each on PRs), launch-and-quit check, boundary check |
 | `macos-process-test` | macos-15, macos-26 | deleted-executable and exact process-authority regression |
 | `loopflow-ui-test` | macos-26 | Desktop app/test-runner compile; native iOS model tests on a disposable Simulator |
 

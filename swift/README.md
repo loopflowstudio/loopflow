@@ -681,12 +681,14 @@ Task headers show the recorded checkout;
 terminal and files follow that Task without a separate worktree selector.
 Changing Work assignment leaves the recorded checkout Machine and path intact.
 The browser retains its opening location through Close/Undo, including a first open
-without a Session link. New shell tabs use the Task's recorded location;
-existing tabs and file drafts keep their original locations.
-Unknown or changed owners stay unavailable without redirecting retained drafts.
-Remote paths are never opened or subscribed on the presentation Mac. Filesystem events
-on the execution Machine refresh retained documents, including hidden drafts. Disconnects
-retain drafts and show an error; Refresh reconnects. Stale owner readings are discarded.
+without a Session link. Files reads and saves by Task through the local server,
+which answers from wherever the Task runs. A checkout on this Mac is watched with
+FSEvents; any other Machine's through `task.files.watch`, whose readings name the
+Machine and checkout. A reading that names another one moves the same store there
+and re-reads everything open; drafts stay keyed by Task, path and base revision, so
+Save writes them only while the file there is still at that base. Remote paths are
+never opened on the presentation Mac. An outage keeps drafts and shows the
+Machine's error; an unstarted Task shows **Not started**.
 Switching files, hiding Files and returning to the Task keeps the draft.
 Files reached through symlinks remain readable within the checkout and show a
 read-only explanation. If a regular file becomes a symlink, its retained draft
@@ -1099,7 +1101,7 @@ Session or explicit zoom without acquiring a provider.
 - `LoopflowMac/Views/WaveDetailPane.swift` — streamed Wave plan and Tasks
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
-- `LoopflowMac/Services/RegistryQueryLocal.swift` — shared Work through the local server; terminal launches and remote file streams through the CLI
+- `LoopflowMac/Services/RegistryQueryLocal.swift` — shared Work through the local server, which routes each Task to its Machine; terminal launches through the CLI
 
 The shared `Loopflow` target contains models, queries, and reusable views. The
 `LoopflowMac` target contains AppKit, process management, menus, and other
@@ -1220,8 +1222,8 @@ which return typed values. Each served mutation runs in a request-scoped worker
 with its directory and `CommandIo`; it creates no Process row for the request.
 Its response trace correlates diagnostics and effects in `logs/lf.log`.
 Task run and ship dispatch detached execution under existing Graph owners.
-Terminal launches and remote Task file streams retain their CLI transports;
-Desktop's UI automation remains app-owned.
+Terminal launches retain their CLI transports; Desktop's UI automation remains
+app-owned.
 
 Task changes answer once their write commits; planning sync to Linear runs
 after the reply. Each answer carries the store revisions it moved, and each
@@ -1282,9 +1284,6 @@ Local subscriptions share a server connection off the main actor. Cancellation
 ends only that watch; connection loss resumes its retained reading and queued
 frames. See [Reconnect a watch](../rust/loopflow/src/server/README.md#reconnect-a-watch)
 for checkpoint and recovery behavior.
-Remote Task file subscriptions retain their CLI pipes, drained off the main actor;
-cancellation closes stdin, then terminates and reaps only the owned reader if
-necessary. A subscription that speaks only on change is not stalled merely by silence.
 
 ## Headless checks
 
@@ -1373,13 +1372,12 @@ Each receipt has a revision so a repeated request cannot consume its previous
 result. Session panes report attachment separately from native surface existence.
 Failed panes can reconnect in
 place, while a pending attachment stays with its current viewer.
-These are transient receipts, not opening history or Work identity. Remote Task links
-retain the local repository window and re-observe the named execution Machine before
-opening its Session. A remote link without `--session` shows the Task without
-creating or connecting a Session. Missing, changed or unavailable recorded locations
-never prepare another checkout. The CLI transports native Session argv over SSH,
-keeping the owner's data directory and takeover behavior. Local panes and
-drafts remain retained; no remote planning tree or execution record is imported.
+These are transient receipts, not opening history or Work identity. A Task link
+names the Task; the local server prepares its Session wherever the Task runs and
+answers `lf open --here` naming the Task and Session, which attaches through the
+same server. A link's Machine is not a second address, and a link without
+`--session` shows the Task without creating or connecting a Session. Local panes
+and drafts remain retained; no remote planning tree or execution record is imported.
 
 Every Desktop gesture is a `DesktopAction` in `LoopflowMac/DesktopActions.swift`:
 name (the `lf desktop` verb), title, arguments, default keys and `perform`.
@@ -1416,9 +1414,9 @@ targets. `files`, `graph-log` and `browse` select browser
 tabs without changing focus or zoom. Each web page tab retains its `WKWebView`
 until the tab closes; `page-back`, `page-forward` and `reload`
 (⌘R, the page's toolbar) act on the addressed page. ⌘[ and ⌘] stay Desktop
-navigation. Remote shells run on the recorded execution
-Machine; changed or missing checkouts refuse launch without opening a local
-shell. Disconnects never replay shell commands.
+navigation. A shell tab runs `lf desktop shell <task> --id <tab>`, which the local
+server starts wherever the Task runs; the tab keeps that Machine after a move,
+and Close names it (`--started-on`). Disconnects never replay shell commands.
 
 `lf desktop capture -p shell:1 --region selection --json` validates the retained
 pane and native surface without following focus or retiring an exited surface.

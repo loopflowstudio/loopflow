@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskExecutionRoute {
     pub task_id: TaskId,
+    /// The tracker key shared by both Machines, or the trackerless Task ID.
+    pub peer_selector: String,
     pub checkout: Option<String>,
     pub repository_id: RepositoryId,
     pub machine_id: MachineId,

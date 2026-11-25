@@ -4,7 +4,7 @@ pub use adoption::TaskAdoptionOptions;
 pub mod remote;
 pub use remote::TASK_SOURCE_ENV;
 mod workspace;
-pub use workspace::{watch_task_files, TaskFilesFrame};
+pub use workspace::{TaskFilesRevision, TaskFilesWatch};
 mod planning_explain;
 pub use planning_explain::{
     explain_task_planning, TaskPlanningAction, TaskPlanningExplanation, TaskPlanningRequest,
@@ -383,7 +383,13 @@ pub fn file_context(store: &SqliteStore, issue: &str) -> OpsResult<TaskCheckout>
     let checkout = store
         .task_checkout(&task_id)
         .map_err(|error| task_error(format!("cannot read Task checkout: {error}")))?
-        .ok_or_else(|| task_error(format!("Task {issue:?} is not checked out on this Machine")))?;
+        .ok_or_else(|| {
+            crate::engine::Error::new(
+                crate::engine::ErrorCode::NotFound,
+                format!("Task {issue} is not started"),
+            )
+            .with(serde_json::json!({"reason":"not_started", "task_id":task_id}))
+        })?;
     Ok(checkout)
 }
 
@@ -2800,13 +2806,19 @@ pub fn registered_task(store: &SqliteStore, repo: &Path, selector: &str) -> OpsR
         .ok_or_else(|| task_error(format!("Task {selector} is not registered")))
 }
 
-pub async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResult<TaskStatus> {
+pub async fn registered_task_status(store: &SharedStore, mut task: Task) -> OpsResult<TaskStatus> {
     let tracker_state = store
         .sqlite
         .task_tracker_state(&task.id)
         .map_err(task_error)?;
     let (overview, graph_processes) =
         crate::store::task_work::task_overview(&store.sqlite, &task.id).map_err(task_error)?;
+    let ownership =
+        crate::store::ownership::task_ownership(&store.sqlite, &task.id).map_err(task_error)?;
+    let local = store.local_machine().await.map_err(task_error)?.id;
+    if ownership.owner_elsewhere(&local).is_some() {
+        task.worktree = None;
+    }
     let mut result = TaskStatus {
         sync: Some(store.task_tracker_sync(&task.id).map_err(task_error)?),
         project: match &task.project_id {
@@ -2816,10 +2828,8 @@ pub async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResul
         tracker_state,
         planning_error: None,
         planning_stale: false,
-        execution: Some(read_task_snapshot(store, task.clone()).await?),
-        ownership: Some(
-            crate::store::ownership::task_ownership(&store.sqlite, &task.id).map_err(task_error)?,
-        ),
+        execution: Some(snapshot::snapshot_here(store, task.clone(), local).await?),
+        ownership: Some(ownership),
         overview: Some(overview),
         graph_processes,
         comments: Some(store.task_comments(&task.id).map_err(task_error)?),

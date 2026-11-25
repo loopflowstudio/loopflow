@@ -121,6 +121,8 @@ const REQUESTS: &[&str] = &[
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_page.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_continue.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_create.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_shell_start.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_shell_attach.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/upload.json"),
 ];
 

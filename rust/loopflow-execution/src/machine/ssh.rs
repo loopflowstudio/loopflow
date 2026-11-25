@@ -86,6 +86,13 @@ pub async fn request(
         .await
         .context("Machine command unavailable: peer timed out")??;
     let said = String::from_utf8_lossy(&output.stderr);
+    // SSH's own failure: no `lf` ran, and what SSH said names the check.
+    if matches!(output.status.code(), Some(255) | None) {
+        return Err(super::connection::transport_failure(
+            &machine.route,
+            said.trim(),
+        ));
+    }
     anyhow::ensure!(
         output.status.success(),
         "Machine command unavailable: {}",
@@ -109,21 +116,27 @@ pub struct Pipe {
 }
 
 impl Pipe {
-    /// The pipe and its two ends: what the destination's server sends, and
-    /// where this side writes.
-    pub fn open(
-        machine: &loopflow_model::durable::Machine,
-    ) -> anyhow::Result<(Self, std::process::ChildStdout, std::process::ChildStdin)> {
-        let command = ["lf", "server", "connect"].map(str::to_owned);
-        let preamble = build_preamble(&command, &[(EXPECTED_MACHINE_ID_ENV, machine.id.as_str())]);
-        let mut child = Command::new("ssh")
+    pub fn command(machine: &loopflow_model::durable::Machine) -> anyhow::Result<Command> {
+        let args = ["lf", "server", "connect"].map(str::to_owned);
+        let preamble = build_preamble(&args, &[(EXPECTED_MACHINE_ID_ENV, machine.id.as_str())]);
+        let mut command = Command::new("ssh");
+        command
             .args(crate::machine_route::bounded_ssh_args(
                 &machine.route,
                 false,
             )?)
             .arg(preamble)
             .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
+            .stdout(Stdio::piped());
+        Ok(command)
+    }
+
+    /// The pipe and its two ends: what the destination's server sends, and
+    /// where this side writes.
+    pub fn open(
+        machine: &loopflow_model::durable::Machine,
+    ) -> anyhow::Result<(Self, std::process::ChildStdout, std::process::ChildStdin)> {
+        let mut child = Self::command(machine)?
             .stderr(Stdio::piped())
             .spawn()
             .context("could not start ssh")?;

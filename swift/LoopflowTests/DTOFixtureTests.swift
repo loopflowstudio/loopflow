@@ -119,24 +119,6 @@ struct DTOFixtureTests {
         #expect(renamed.summary.count == 1)
     }
 
-    @Test func taskFilesFramesKeepInvalidationSeparateFromHeartbeat() throws {
-        let data = try loadFixtureData("task_files_frames.json")
-        let frames = try JSONDecoder().decode([TaskFilesFrame].self, from: data)
-        #expect(frames.map(\.paths) == [["note.txt", ".git/index", ""], []])
-        #expect(frames[0].request == frames[1].request)
-        #expect(frames[0].checkout == "/repo/task")
-        #expect(try JSONDecoder().decode([TaskFilesFrame].self, from: JSONEncoder().encode(frames)) == frames)
-    }
-
-    @Test func taskLocationsRetainFreshnessAndUnavailableEvidence() throws {
-        let data = try loadFixtureData("task_locations.json")
-        let readings = try JSONDecoder().decode([TaskLocationObservation].self, from: data)
-        #expect(readings[0].location == .recorded(taskID: readings[0].taskID, checkout: "/repo/task"))
-        #expect(readings[1].location == .recorded(taskID: readings[1].taskID, checkout: nil))
-        #expect(readings[2].location == .unrecorded)
-        #expect(readings[3].location == .unavailable(reason: "peer unreachable"))
-        #expect(try JSONDecoder().decode([TaskLocationObservation].self, from: JSONEncoder().encode(readings)) == readings)
-    }
 
     @Test func repositoryIdentityPreservesExplicitLocalLocators() throws {
         let data = try loadFixtureData("repository_identity.json")

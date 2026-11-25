@@ -4,11 +4,12 @@
 //! presentation host. Opening resolves its conversation through the shared
 //! owners. `?repository=<id>` qualifies a short name shared by several
 //! registered repositories. `session` is an explicit CLI selector carried to
-//! Desktop; ordinary emitted links never include it.
+//! Desktop. An exact Session on another Machine can also carry `machine`.
+//! An ordinary Work link omits both selectors.
 
 use anyhow::{bail, ensure, Result};
 
-use loopflow_model::durable::RepositoryId;
+use loopflow_model::durable::{MachineId, RepositoryId};
 
 const SCHEME: &str = "loopflow";
 
@@ -26,6 +27,7 @@ pub struct WorkUrl {
     pub qualifier: Option<RepositoryId>,
     pub target: WorkTarget,
     pub session: Option<String>,
+    pub machine: Option<MachineId>,
 }
 
 impl WorkUrl {
@@ -35,6 +37,7 @@ impl WorkUrl {
             qualifier: None,
             target,
             session: None,
+            machine: None,
         }
     }
 
@@ -82,9 +85,15 @@ impl WorkUrl {
             match name {
                 "repository" => url.qualifier = Some(RepositoryId::parse(&value)?),
                 "session" => url.session = Some(value),
-                _ => bail!("Work links accept only repository and session queries; got `{name}`"),
+                "machine" => url.machine = Some(MachineId::parse(&value)?),
+                _ => bail!("Unknown Work link query `{name}`"),
             }
         }
+        ensure!(
+            url.machine.is_none()
+                || (url.session.is_some() && url.target == WorkTarget::Repository),
+            "A Machine link names an exact Session"
+        );
         Ok(url)
     }
 
@@ -92,6 +101,7 @@ impl WorkUrl {
     pub fn work(&self) -> Self {
         Self {
             session: None,
+            machine: None,
             ..self.clone()
         }
     }
@@ -113,6 +123,9 @@ impl std::fmt::Display for WorkUrl {
         };
         if let Some(qualifier) = &self.qualifier {
             query(f, "repository", qualifier.as_str())?;
+        }
+        if let Some(machine) = &self.machine {
+            query(f, "machine", machine.as_str())?;
         }
         if let Some(session) = &self.session {
             query(f, "session", session)?;
@@ -195,6 +208,7 @@ mod tests {
             "loopflow://loopflow/wave/product",
             "loopflow://loopflow/task/LOO-426",
             "loopflow://loopflow?session=s",
+            "loopflow://loopflow?machine=home_11111111111111111111111111111111&session=s",
             "loopflow://loopflow/wave/product?session=s",
             &qualified,
             "loopflow://loopflow/task/LOO-1?session=a%2Bb%26c",

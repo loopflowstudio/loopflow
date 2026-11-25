@@ -557,6 +557,28 @@ mod tests {
     }
 
     #[test]
+    fn task_workspace_selectors_resolve_by_index() {
+        let (_home, store, task, _viewer) = fixture();
+        let repository = store.task(&task).unwrap().unwrap().repository_id;
+        let traced = statements(&store, || {
+            assert_eq!(
+                store.repository_task_id(&repository, "PLAN-1").unwrap(),
+                Some(task.clone())
+            );
+            assert!(store
+                .repository_task_id(&loopflow_model::durable::RepositoryId::new(), "PLAN-1")
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                store.resolve_task_id(task.as_str(), None).unwrap(),
+                Some(task)
+            );
+        });
+        let scans = growing_scans(&store, &traced);
+        assert!(scans.is_empty(), "{}", scans.join("\n"));
+    }
+
+    #[test]
     fn a_move_in_flight_reads_its_row_and_the_ownership_log_by_index() {
         let (_home, store, task, _viewer) = fixture();
         let mini = loopflow_model::durable::MachineId::new();

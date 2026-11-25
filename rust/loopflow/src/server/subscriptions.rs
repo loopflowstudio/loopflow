@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
+use std::time::Duration;
 
 use anyhow::Result;
 use serde_json::Value;
@@ -13,18 +14,24 @@ use super::outbox::{Materializing, Outbox, Retained};
 use super::service::{deliver, lock, reading_checkpoint, unavailable};
 use super::wire::{ServerMessage, SubscriptionEvent, MAX_BULK};
 use crate::lf::commands::read::Read;
-use loopflow_execution::engine::Error;
+use loopflow_execution::engine::{Error, ErrorCode};
+use loopflow_execution::machine::{client, wire::Sender};
 use loopflow_execution::read_stream::Subscription;
+use loopflow_model::durable::Machine;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Key {
+    follow: bool,
     read: Vec<u8>,
     database: PathBuf,
     directory: PathBuf,
 }
 
 #[derive(Debug, Default)]
-pub(super) struct Subscriptions(Mutex<HashMap<Key, Arc<Demand>>>);
+pub(super) struct Subscriptions {
+    demands: Mutex<HashMap<Key, Arc<Demand>>>,
+    planning: Mutex<Weak<watch::Receiver<Option<i64>>>>,
+}
 
 #[derive(Debug, Default)]
 struct Requested {
@@ -94,15 +101,17 @@ impl Subscriptions {
         id: &str,
         query: Read,
         select: Option<Vec<String>>,
+        follow: bool,
     ) -> Result<(Member, Delivery)> {
         // Reads are isolated from request attribution. The service's process
         // environment is fixed; paths and all wire arguments distinguish demand.
         let key = Key {
+            follow,
             read: serde_json::to_vec(&(&query, &select))?,
             database: loopflow_execution::store::database_path_from_env()?,
             directory: std::env::current_dir()?,
         };
-        let mut entries = lock(&self.0);
+        let mut entries = lock(&self.demands);
         let demand = entries
             .entry(key.clone())
             .or_insert_with(|| {
@@ -122,7 +131,11 @@ impl Subscriptions {
                         latest,
                         events: events.clone(),
                     }
-                    .run(query, select),
+                    .run(
+                        query,
+                        select,
+                        follow.then(|| self.planning(&key.database)),
+                    ),
                 );
                 Arc::new(Demand {
                     requested,
@@ -166,8 +179,42 @@ impl Subscriptions {
         ))
     }
 
+    // Ownership entries and Task moves advance the planning revision. One
+    // watcher serves every routed demand, including while its peer is quiet.
+    fn planning(&self, database: &std::path::Path) -> Arc<watch::Receiver<Option<i64>>> {
+        let mut shared = lock(&self.planning);
+        if let Some(revisions) = shared.upgrade() {
+            return revisions;
+        }
+        let database = database.to_owned();
+        let (send, receive) = watch::channel(None);
+        let revisions = Arc::new(receive);
+        *shared = Arc::downgrade(&revisions);
+        std::thread::spawn(move || {
+            let mut changes = loopflow_storage::changes::StoreChanges::watch(&database);
+            let mut store = None;
+            while !send.is_closed() {
+                if store.is_none() {
+                    store = loopflow_execution::store::read_existing_registry()
+                        .ok()
+                        .flatten();
+                }
+                let revision = store
+                    .as_ref()
+                    .and_then(|store| store.sqlite.revisions().ok());
+                if revision.is_none() {
+                    store = None;
+                }
+                let next = revision.map(|revision| revision.planning);
+                send.send_if_modified(|value| std::mem::replace(value, next) != next);
+                changes.wait(Duration::from_secs(1));
+            }
+        });
+        revisions
+    }
+
     fn retire(&self, key: &Key, cancelled: &Arc<AtomicBool>) {
-        let mut entries = lock(&self.0);
+        let mut entries = lock(&self.demands);
         if entries
             .get(key)
             .is_some_and(|entry| Arc::ptr_eq(&entry.cancelled, cancelled))
@@ -195,7 +242,7 @@ impl Member {
 
 impl Drop for Member {
     fn drop(&mut self) {
-        let mut entries = lock(&self.registry.0);
+        let mut entries = lock(&self.registry.demands);
         if self.demand.consumers.fetch_sub(1, Ordering::Relaxed) == 1 {
             self.demand.cancelled.store(true, Ordering::Release);
             self.demand.task.abort();
@@ -398,8 +445,16 @@ struct Producer {
 }
 
 impl Producer {
-    async fn run(self, query: Read, select: Option<Vec<String>>) {
-        let result = self.production(query, select).await;
+    async fn run(
+        self,
+        query: Read,
+        select: Option<Vec<String>>,
+        planning: Option<Arc<watch::Receiver<Option<i64>>>>,
+    ) {
+        let result = match planning {
+            Some(revisions) => self.follow(query, select, revisions.as_ref().clone()).await,
+            None => self.here(query, select).await,
+        };
         if let Some(registry) = self.registry.upgrade() {
             registry.retire(&self.key, &self.cancelled);
         }
@@ -414,7 +469,7 @@ impl Producer {
     // gets a new Subscription and an old checkpoint is no longer admitted.
     fn finish(&self, generation: u64) -> bool {
         let registry = self.registry.upgrade();
-        let mut entries = registry.as_ref().map(|registry| lock(&registry.0));
+        let mut entries = registry.as_ref().map(|registry| lock(&registry.demands));
         let mut requested = lock(&self.requested);
         if requested.generation != generation {
             return false;
@@ -431,7 +486,179 @@ impl Producer {
         true
     }
 
-    async fn production(&self, query: Read, select: Option<Vec<String>>) -> Result<()> {
+    async fn follow(
+        &self,
+        query: Read,
+        select: Option<Vec<String>>,
+        mut planning: watch::Receiver<Option<i64>>,
+    ) -> Result<()> {
+        let resolve = || {
+            let mut query = query.clone();
+            tokio::task::spawn_blocking(move || query.peer_route())
+        };
+        planning.borrow_and_update();
+        let mut route = resolve().await??;
+        loop {
+            let generation = lock(&self.requested).generation;
+            let current = route.clone();
+            let active = async {
+                match current {
+                    Some(route) => {
+                        let mut placed = query.clone();
+                        let (placed, machine, sender, route) =
+                            tokio::task::spawn_blocking(move || {
+                                let (machine, sender) = placed.address_peer(route.clone())?;
+                                anyhow::Ok((placed, machine, sender, route))
+                            })
+                            .await??;
+                        self.peer(&machine, sender, placed, select.clone(), &route)
+                            .await
+                            .map_err(|error| client::unavailable_on(&machine, error))
+                    }
+                    None => self.here(query.clone(), select.clone()).await,
+                }
+            };
+            tokio::pin!(active);
+            let next = loop {
+                tokio::select! {
+                    biased;
+                    changed = planning.changed() => {
+                        changed?;
+                        let next = resolve().await??;
+                        if next != route { break next; }
+                    }
+                    result = &mut active => {
+                        let failure = match result {
+                            Err(failure) if route.is_some()
+                                && Error::refused(&failure, ErrorCode::Unavailable).code
+                                    == ErrorCode::Unavailable => failure,
+                            other => return other,
+                        };
+                        self.peer_unavailable(failure, generation).await?;
+                        tokio::select! {
+                            changed = planning.changed() => changed?,
+                            _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+                        }
+                        break resolve().await??;
+                    }
+                }
+            };
+            route = next;
+        }
+    }
+
+    async fn peer_unavailable(&self, failure: anyhow::Error, generation: u64) -> Result<()> {
+        let frame = own_frame(Some(failure.to_string()), None)?;
+        let room = Materializing::reserve().await?;
+        // Keep checkpoints answered by the lost stream. A newer checkpoint
+        // needs a reading from the next attempt.
+        let generation = self
+            .latest
+            .borrow()
+            .reading
+            .as_ref()
+            .map_or(generation, |reading| reading.generation.max(generation));
+        self.latest.send_modify(|latest| latest.ready = true);
+        self.publish(Some(frame), Vec::new(), generation, room)
+    }
+
+    async fn peer(
+        &self,
+        machine: &Machine,
+        sender: Sender,
+        query: Read,
+        select: Option<Vec<String>>,
+        route: &loopflow_execution::durable::TaskExecutionRoute,
+    ) -> Result<()> {
+        let mut generation = lock(&self.requested).generation;
+        let mut asked = generation;
+        let placed = query.clone();
+        let mut peer = super::peers::PeerSubscription::open(machine, sender, query, select).await?;
+        self.latest.send_modify(|latest| latest.ready = true);
+        loop {
+            let requested = lock(&self.requested).generation;
+            if requested > asked {
+                peer.checkpoint(requested).await?;
+                asked = requested;
+            }
+            let message = tokio::select! {
+                _ = self.wake.notified() => continue,
+                message = peer.receive() => message?,
+            };
+            let room = Materializing::reserve().await?;
+            let message = match message {
+                ServerMessage::Bulk { ticket, .. } => {
+                    let machine = machine.clone();
+                    tokio::task::spawn_blocking(move || {
+                        client::Connection::fetch_peer(machine, &ticket)
+                    })
+                    .await??
+                }
+                message => message,
+            };
+            match message {
+                ServerMessage::Reading { mut frame, .. } => {
+                    if let Some(answer) = frame["answers"].as_u64() {
+                        generation = answer;
+                    }
+                    if let Some(body) = frame.get_mut("body") {
+                        placed.localize_peer_reading(body, machine, route)?;
+                    }
+                    self.publish(Some(frame), Vec::new(), generation, room)?;
+                }
+                ServerMessage::Event { event, .. } => {
+                    self.publish(None, vec![event], generation, room)?
+                }
+                ServerMessage::Ended { .. } => return Ok(()),
+                _ => anyhow::bail!("unexpected message on peer subscription"),
+            }
+        }
+    }
+
+    // A Task with no checkout here yet reads null and waits on the planning
+    // revision, which a recorded checkout advances; the same ID then goes live.
+    async fn files(&self, issue: String, select: Option<Vec<String>>) -> Result<()> {
+        let wake = self.wake.clone();
+        let mut planning = match self.registry.upgrade() {
+            Some(registry) => registry.planning(&self.key.database).as_ref().clone(),
+            None => return Ok(()),
+        };
+        planning.borrow_and_update();
+        let mut files = tokio::task::spawn_blocking(move || {
+            loopflow_execution::ops::task::TaskFilesWatch::open(&issue, move || wake.notify_one())
+        })
+        .await??;
+        self.latest.send_modify(|latest| latest.ready = true);
+        loop {
+            let generation = lock(&self.requested).generation;
+            let room = Materializing::reserve().await?;
+            let (returned, body) = tokio::task::spawn_blocking(move || {
+                let body = serde_json::to_value(files.reading()?)?;
+                anyhow::Ok((files, body))
+            })
+            .await??;
+            files = returned;
+            let body = match &select {
+                Some(paths) => loopflow_execution::engine::select::select(&body, paths),
+                None => body,
+            };
+            self.publish(
+                Some(own_frame(None, Some(&body))?),
+                Vec::new(),
+                generation,
+                room,
+            )?;
+            tokio::select! {
+                _ = self.wake.notified() => {}
+                changed = planning.changed() => changed?,
+            }
+        }
+    }
+
+    async fn here(&self, query: Read, select: Option<Vec<String>>) -> Result<()> {
+        if let Read::TaskFilesWatch { issue } = query {
+            return self.files(issue, select).await;
+        }
         let Self {
             id: _id,
             requested,
@@ -529,51 +756,10 @@ impl Producer {
                     statements: 0,
                     rows: 0,
                 };
-            }
-            let mut bytes = frame
-                .as_ref()
-                .map(serde_json::to_vec)
-                .transpose()?
-                .map_or(0, |bytes| bytes.len());
-            for event in &update.events {
-                bytes += serde_json::to_vec(event)?.len() + 1024;
-                anyhow::ensure!(
-                    bytes <= MAX_BULK,
-                    "subscription event batch exceeds retained bytes; subscribe again for current state"
-                );
-            }
-            let retained = Arc::new(headroom.retain(bytes)?);
-            let mut reading = None;
-            if let Some(mut frame) = frame {
                 reason = frame["unavailable"].as_str().map(str::to_owned);
                 last = ends.ends_after(&frame["body"]);
-                // Internal generations never appear in a consumer's envelope.
-                let identity = loopflow_execution::read_stream::identity(
-                    reason.as_deref(),
-                    frame.get("body"),
-                )?;
-                frame["answers"] = Value::Null;
-                reading = Some(Arc::new(Reading {
-                    generation,
-                    frame,
-                    identity,
-                    _retained: retained.clone(),
-                }));
             }
-            if reading.is_some() || !update.events.is_empty() {
-                latest.send_modify(|latest| {
-                    if let Some(reading) = reading {
-                        latest.reading = Some(reading);
-                    }
-                    if !update.events.is_empty() {
-                        let _ = self.events.send(Arc::new(Events {
-                            items: update.events,
-                            _retained: retained,
-                        }));
-                        latest.events += 1;
-                    }
-                });
-            }
+            self.publish(frame, update.events, generation, headroom)?;
             if subscription.ended() {
                 anyhow::bail!(
                     "{}",
@@ -585,6 +771,69 @@ impl Producer {
             }
         }
     }
+
+    fn publish(
+        &self,
+        frame: Option<Value>,
+        events: Vec<SubscriptionEvent>,
+        generation: u64,
+        headroom: Materializing,
+    ) -> Result<()> {
+        let mut bytes = frame
+            .as_ref()
+            .map(serde_json::to_vec)
+            .transpose()?
+            .map_or(0, |bytes| bytes.len());
+        for event in &events {
+            bytes += serde_json::to_vec(event)?.len() + 1024;
+            anyhow::ensure!(
+                bytes <= MAX_BULK,
+                "subscription event batch exceeds retained bytes; subscribe again for current state"
+            );
+        }
+        let retained = Arc::new(headroom.retain(bytes)?);
+        let mut reading = None;
+        if let Some(mut frame) = frame {
+            let reason = frame["unavailable"].as_str();
+            // Internal generations never appear in a consumer's envelope.
+            let identity = loopflow_execution::read_stream::identity(reason, frame.get("body"))?;
+            frame["answers"] = Value::Null;
+            reading = Some(Arc::new(Reading {
+                generation,
+                frame,
+                identity,
+                _retained: retained.clone(),
+            }));
+        }
+        if reading.is_some() || !events.is_empty() {
+            self.latest.send_modify(|latest| {
+                if let Some(reading) = reading {
+                    latest.reading = Some(reading);
+                }
+                if !events.is_empty() {
+                    let _ = self.events.send(Arc::new(Events {
+                        items: events,
+                        _retained: retained,
+                    }));
+                    latest.events += 1;
+                }
+            });
+        }
+        Ok(())
+    }
+}
+
+/// A reading this server makes itself rather than from a store subscription.
+fn own_frame(unavailable: Option<String>, body: Option<&Value>) -> Result<Value> {
+    Ok(serde_json::to_value(
+        loopflow_execution::read_stream::SubscriptionFrame {
+            answers: None,
+            unavailable,
+            body,
+            work: None,
+            read_at: None,
+        },
+    )?)
 }
 
 #[cfg(test)]
@@ -635,7 +884,7 @@ mod tests {
             read: Read,
             select: Option<Vec<String>>,
         ) -> Self {
-            let (member, delivery) = registry.join(id, read, select).unwrap();
+            let (member, delivery) = registry.join(id, read, select, false).unwrap();
             Self::from_join(member, delivery, id)
         }
         fn from_join(member: Member, delivery: Delivery, id: &str) -> Self {
@@ -1084,7 +1333,7 @@ mod tests {
                 assert_eq!(second.reading().await["answers"], 7);
                 drop(second);
                 drop(quiet);
-                assert!(super::lock(&registry.0).is_empty());
+                assert!(super::lock(&registry.demands).is_empty());
             })
         });
     }
@@ -1203,7 +1452,7 @@ mod tests {
                 drop(first);
                 drop(different_arguments);
                 drop(different_select);
-                assert!(super::lock(&registry.0).is_empty());
+                assert!(super::lock(&registry.demands).is_empty());
                 other.member.checkpoint(1);
                 assert_eq!(other.reading().await["answers"], 1);
             })
@@ -1226,7 +1475,7 @@ mod tests {
                     assert!(sibling.member.checkpoint(4));
                     assert_eq!(sibling.reading().await["answers"], 4);
                     drop(sibling);
-                    assert!(super::lock(&registry.0).is_empty());
+                    assert!(super::lock(&registry.demands).is_empty());
 
                     let held = pause("old", stage_name);
                     let first = Consumer::new(&registry, "old", sessions(), None);
@@ -1338,7 +1587,7 @@ mod tests {
                 assert!(matches!(first.next().await, ServerMessage::Ended { .. }));
                 assert!(matches!(joined.next().await, ServerMessage::Ended { .. }));
                 assert!(!first.member.checkpoint(9));
-                assert!(super::lock(&registry.0).is_empty());
+                assert!(super::lock(&registry.demands).is_empty());
                 let mut replacement =
                     Consumer::new(&registry, "terminal", read, Some(vec!["task.title".into()]));
                 drop(first);
@@ -1360,14 +1609,14 @@ mod tests {
                 for _ in 0..4 {
                     let mut refused = Consumer::new(&registry, "reuse", Read::MachineSelf, None);
                     assert!(matches!(refused.next().await, ServerMessage::Error { .. }));
-                    assert!(super::lock(&registry.0).is_empty());
+                    assert!(super::lock(&registry.demands).is_empty());
                     let mut valid = Consumer::new(&registry, "reuse", sessions(), None);
                     valid.initial().await;
                     drop(refused);
                     valid.member.checkpoint(1);
                     assert_eq!(valid.reading().await["answers"], 1);
                     drop(valid);
-                    assert!(super::lock(&registry.0).is_empty());
+                    assert!(super::lock(&registry.demands).is_empty());
                 }
             })
         });

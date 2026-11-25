@@ -68,9 +68,9 @@ struct PullRequestTests {
         let now = Date()
         let pr = try JSONDecoder().decode(GitHubPullRequest.self, from: Data(Self.reading.utf8))
         func describe(_ record: PrSnapshot?, reading: GitHubPullRequest? = nil, error: String? = nil,
-                      readAt: Date? = nil, head: String? = "head") -> TaskDelivery {
+                      readAt: Date? = nil, head: String? = "head", runsOn: String? = nil) -> TaskDelivery {
             TaskDelivery.describe(record: record, taskOpen: true, reading: reading, error: error,
-                                  readAt: readAt, localHead: head, now: now)
+                                  readAt: readAt, localHead: head, runsOn: runsOn, now: now)
         }
         let none = describe(nil)
         let working = describe(try record("working"))
@@ -83,6 +83,10 @@ struct PullRequestTests {
         let abandoned = describe(try record("abandoned"))
 
         #expect(none.headline == "No pull request yet. Changes below are local.")
+        // A Task another Machine runs never calls its changes local.
+        #expect(describe(nil, runsOn: "mini").headline == "No pull request yet. Changes below are on mini.")
+        #expect(describe(try record("open"), reading: pr, readAt: now.addingTimeInterval(-20), head: "newer",
+                         runsOn: "mini").detail == "The checkout on mini is ahead of the PR")
         #expect(working == none)
         #expect(publishing.headline == "Publishing… · requested 2026-11-14T10:00:00Z")
         #expect(open.headline == "Open #12 · 1 passed · read 20 s ago")

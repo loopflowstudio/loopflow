@@ -254,14 +254,15 @@ Peer observation routes nothing; the ownership log alone selects the Machine.
 Added peers are not a complete global inventory, and an observation reserves
 nothing. No execution-location cache exists.
 
-Task-run, checkout and Desktop opening explanations share one location
-projection, including local/peer provenance and unavailable checkout paths for
-retained execution. Desktop opens recorded remote Tasks in the existing local
-repository window through the owner's Session/Files transport. Shells recheck the
-recorded Task/Machine/checkout before launch; file invalidations use the same
-owned-line transport and retain drafts on disconnect. Missing or stale ownership
-prepares nothing and never falls back to local paths. Headless fixtures cover
-these paths; configured SSH and mounted native usability remain unproved.
+`lf task location` is a diagnostic; no client routes by it. Desktop, the phone
+and `lf open` name a Task, and the local `lf server` sends its reads, saves,
+shells and Session attachments to the Machine `task_execution_route` names,
+over pooled `lf server connect` connections
+([Tasks on another Machine](../../rust/loopflow/src/server/README.md#tasks-on-another-machine)).
+No client runs `ssh` or holds an owner of its own. A `task_checkouts` row on a
+Machine that no longer owns the Task is history: `task.get` and `task.status`
+there report no workspace. An unreachable owner is `unavailable` naming it, and
+nothing falls back to a local path.
 
 An entry another Machine wrote never ends this Machine's own open claim; only a
 later entry this Machine wrote does. If another Machine claims later, every other Machine shows the

@@ -23,11 +23,13 @@ use super::usage;
 use super::waves::list as list_waves;
 use crate::lf::SessionListArgs;
 use loopflow_execution::engine::{Error, ErrorCode};
+use loopflow_execution::machine::client::{Connection, Response};
 use loopflow_execution::machine::connection::local_machine;
+use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
 use loopflow_execution::ops::task::{task_changes, task_diff, task_file, task_files};
 use loopflow_execution::read_stream::{Subscription, Transport};
 use loopflow_execution::session::SessionFilter;
-use loopflow_model::durable::RepositoryId;
+use loopflow_model::durable::{Machine, RepositoryId};
 
 fn words(words: &[&str]) -> Vec<String> {
     words.iter().map(|word| word.to_string()).collect()
@@ -87,7 +89,13 @@ pub enum Read {
     /// Look up a creation without starting or retrying it. Null confirms absence.
     #[serde(rename = "creation.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<Option<loopflow_storage::sqlite::creation::CreationReceipt>>()))]
-    CreationGet { request_id: String },
+    CreationGet {
+        request_id: String,
+        /// The Task the creation was for: a Task another Machine runs keeps
+        /// its receipt there, as `--task <task>` reads it.
+        #[serde(deserialize_with = "Option::deserialize")]
+        task: Option<String>,
+    },
     /// `lf --cwd <directory> desktop view list`: the plans a repository window shows.
     #[serde(rename = "desktop.view.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<loopflow_storage::work::selection::ViewPlan>>()))]
@@ -175,6 +183,10 @@ pub enum Read {
         cursor: Option<String>,
         show_ignored: bool,
     },
+    /// Subscribe to changes in a Task checkout. A new revision invalidates the file tree.
+    #[serde(rename = "task.files.watch")]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::task::TaskFilesRevision>()))]
+    TaskFilesWatch { issue: String },
     /// `lf wave list --all`: every Wave on this Machine that is not removed.
     #[serde(rename = "wave.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::waves::WaveSnapshot>>()))]
@@ -400,7 +412,12 @@ impl Read {
     pub fn argv(&self) -> Vec<String> {
         match self {
             Self::SessionHistoryGet { id } => words(&["session", "history", "show", id]),
-            Self::CreationGet { request_id } => words(&["server", "receipt", request_id, "--json"]),
+            Self::CreationGet { request_id, task } => {
+                let mut argv = words(&["server", "receipt", request_id]);
+                argv.extend(optional("--task", task.as_ref()));
+                argv.push("--json".into());
+                argv
+            }
             Self::DesktopViewList { directory } => {
                 at(directory, &["desktop", "view", "list", "--json"])
             }
@@ -490,6 +507,8 @@ impl Read {
                 }
                 argv
             }
+            // No command streams it; this is the read each revision repeats.
+            Self::TaskFilesWatch { issue } => words(&["task", "files", issue, ".", "--json"]),
             Self::WaveList => words(&["wave", "list", "--all", "--json"]),
             Self::MachineSelf => words(&["machine", "self", "--json"]),
             Self::DesktopPortfolio => words(&["desktop", "portfolio", "--json"]),
@@ -691,11 +710,147 @@ impl Read {
 
     /// What `lf <argv>` prints, as a JSON value, read on the caller's thread.
     /// A Task another Machine runs is read by that Machine's server.
-    pub fn read(&self) -> anyhow::Result<serde_json::Value> {
-        if let Self::TaskStatus { directory, issue } = self {
+    pub fn read(self) -> anyhow::Result<serde_json::Value> {
+        self.read_with(|machine, sender, read| {
+            Connection::open_on(machine, sender, None)?.query(read)
+        })
+    }
+
+    pub(crate) fn read_with(
+        mut self,
+        query: impl FnOnce(&Machine, Sender, &Read) -> anyhow::Result<Response>,
+    ) -> anyhow::Result<serde_json::Value> {
+        // A status asks whichever Machine claims the Task and reads here
+        // when that Machine cannot answer.
+        if let Self::TaskStatus { directory, issue } = &self {
             return value(&super::waves::read_task_detail(directory, issue, true)?);
         }
+        if let Some(route) = self.peer_route()? {
+            let (machine, sender) = self.address_peer(route.clone())?;
+            let mut result = query(&machine, sender, &self)?.result;
+            self.localize_peer_reading(&mut result, &machine, &route)?;
+            return Ok(result);
+        }
         self.read_here()
+    }
+
+    /// What `machine` answered for this read, as this Machine names it: the
+    /// Task by this Machine's ID and repository checkout, the owner by this
+    /// Machine's label for it, and Sessions opened with this Machine's
+    /// `lf open`. The owner's checkout path stays: it is where the files are.
+    /// `reading` may be a selected one; keys it lacks stay absent.
+    pub(crate) fn localize_peer_reading(
+        &self,
+        reading: &mut serde_json::Value,
+        machine: &Machine,
+        route: &loopflow_execution::durable::TaskExecutionRoute,
+    ) -> anyhow::Result<()> {
+        let task = serde_json::Value::from(route.task_id.to_string());
+        let label = serde_json::Value::from(machine.label.clone());
+        match self {
+            Self::SessionList { .. } => {
+                super::ssh::localize_remote_sessions(reading, machine, route)?;
+            }
+            Self::TaskGet { .. } | Self::TaskStatus { .. } | Self::TaskDetail { .. } => {
+                for pointer in ["/task/id", "/row/task/id", "/row/runtime/work_id"] {
+                    replace_present(reading, pointer, &task);
+                }
+                // Unbound here, the owner's path is the only one there is.
+                if let Ok(repo) = super::work_route::repository_path(&route.repository_id) {
+                    let repo = serde_json::Value::from(repo.display().to_string());
+                    for pointer in ["/task/repo", "/row/task/repo"] {
+                        replace_present(reading, pointer, &repo);
+                    }
+                }
+                replace_present(reading, "/row/reference/workspace/machine_label", &label);
+                // The owner names itself by its own hostname; here it has this Machine's label.
+                for pointer in ["/row/runtime/owner/machine", "/ownership/owner/machine"] {
+                    if let Some(owner) = reading
+                        .pointer_mut(pointer)
+                        .filter(|owner| owner["id"] == machine.id.as_str())
+                    {
+                        owner["label"] = label.clone();
+                    }
+                }
+                if let Some(session) = reading.pointer_mut("/current_session") {
+                    super::ssh::localize_remote_session(session, machine, Some(route))?;
+                }
+            }
+            Self::CreationGet { .. } => {
+                if let Some(id) = reading.get_mut("task_id").filter(|id| !id.is_null()) {
+                    *id = task;
+                }
+                // A Reset's receipt carries the Session as the direct answer did.
+                let reset = reading["kind"] == "session.new";
+                if let Some(session) = reading.get_mut("result").filter(|r| reset && r.is_object())
+                {
+                    super::ssh::localize_remote_session(session, machine, Some(route))?;
+                }
+            }
+            Self::TaskFilesWatch { .. } => {
+                replace_present(reading, "/task_id", &task);
+                replace_present(reading, "/machine_label", &label);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub(crate) fn follows_task(&self) -> bool {
+        matches!(
+            self,
+            Self::TaskGet { .. } | Self::TaskStatus { .. } | Self::TaskFilesWatch { .. }
+        )
+    }
+
+    pub(crate) fn workspace_task_mut(&mut self) -> Option<&mut String> {
+        match self {
+            Self::TaskGet { issue, .. }
+            | Self::TaskDetail { issue, .. }
+            | Self::TaskRuns { task: issue, .. }
+            | Self::SessionList {
+                task: Some(issue), ..
+            }
+            | Self::CreationGet {
+                task: Some(issue), ..
+            }
+            | Self::TaskChanges { issue, .. }
+            | Self::TaskDiff { issue, .. }
+            | Self::TaskFile { issue, .. }
+            | Self::TaskFilesWatch { issue }
+            | Self::TaskFiles { issue, .. }
+            | Self::TaskStatus { issue, .. } => Some(issue),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn peer_route(
+        &mut self,
+    ) -> anyhow::Result<Option<loopflow_execution::durable::TaskExecutionRoute>> {
+        use loopflow_execution::machine::task;
+        let status = matches!(self, Self::TaskStatus { .. });
+        let directory = self.directory_mut().cloned();
+        let Some(issue) = self.workspace_task_mut() else {
+            return Ok(None);
+        };
+        // While a move is in flight the source still reports its progress. File
+        // operations always follow the execution route, even if that peer is down.
+        if status {
+            task::remote_ownership_writer(issue, directory.as_deref())
+        } else {
+            task::remote_task(issue, directory.as_deref())
+        }
+    }
+
+    pub(crate) fn address_peer(
+        &mut self,
+        route: loopflow_execution::durable::TaskExecutionRoute,
+    ) -> anyhow::Result<(Machine, Sender)> {
+        let (machine, sender) = peer_of(&route)?;
+        *self
+            .workspace_task_mut()
+            .expect("only Task reads have peer routes") = route.peer_selector;
+        Ok((machine, sender))
     }
 
     /// `read` on this Machine, never sent on: what a request another Machine
@@ -709,7 +864,7 @@ impl Read {
                 None,
                 super::session_history::SessionView::Summary,
             )?),
-            Self::CreationGet { request_id } => {
+            Self::CreationGet { request_id, .. } => {
                 value(&loopflow_execution::engine::creation::lookup(request_id)?)
             }
             Self::PlanBoard {
@@ -777,6 +932,9 @@ impl Read {
                 cursor,
                 show_ignored,
             } => value(&task_files(issue, path, cursor.as_deref(), *show_ignored)?),
+            Self::TaskFilesWatch { .. } => {
+                Err(invalid("task.files.watch requires a subscription").into())
+            }
             Self::WaveList => {
                 let waves = block_on(list_waves(true))??;
                 value(&waves.unwrap_or_default())
@@ -1000,6 +1158,7 @@ impl Read {
             | Self::TaskChanges { .. }
             | Self::TaskDiff { .. }
             | Self::TaskFile { .. }
+            | Self::TaskFilesWatch { .. }
             | Self::TaskFiles { .. }
             | Self::WaveList
             | Self::MachineSelf
@@ -1156,6 +1315,27 @@ fn value(value: &impl Serialize) -> anyhow::Result<serde_json::Value> {
     Ok(serde_json::to_value(value)?)
 }
 
+/// Set `pointer` in `reading` to `value` when `reading` carries it.
+fn replace_present(reading: &mut serde_json::Value, pointer: &str, value: &serde_json::Value) {
+    if let Some(slot) = reading.pointer_mut(pointer) {
+        *slot = value.clone();
+    }
+}
+
+/// The Machine a Task route names and the sender its repository sends as.
+pub(crate) fn peer_of(
+    route: &loopflow_execution::durable::TaskExecutionRoute,
+) -> anyhow::Result<(Machine, Sender)> {
+    let machine = super::write::find_machine(route.machine_id.as_str())?;
+    let directory = super::work_route::repository_path(&route.repository_id)?;
+    let sender = Sender {
+        repository: route.repository_id.clone(),
+        selection: Selection::capture(&directory, None)?,
+        secrets: Secrets::default(),
+    };
+    Ok((machine, sender))
+}
+
 #[cfg(test)]
 mod tests {
     use super::Read;
@@ -1267,6 +1447,10 @@ mod tests {
                 "--json"
             ]
         );
+        assert_eq!(
+            read(r#"{"kind":"creation.get","request_id":"reset","task":"LOO-1"}"#),
+            ["server", "receipt", "reset", "--task", "LOO-1", "--json"]
+        );
     }
 
     #[test]
@@ -1344,5 +1528,175 @@ mod tests {
     fn a_read_without_a_subscription_cannot_be_subscribed() {
         let error = Read::MachineDoctor.subscribe(None, || {}).unwrap_err();
         assert!(error.to_string().contains("--subscribe"), "{error}");
+    }
+
+    mod peer_readings {
+        use super::Read;
+        use loopflow_execution::durable::{TaskExecutionRoute, TaskExecutionSource};
+        use loopflow_model::durable::{Machine, MachineId, RepositoryId, TaskId};
+        use serde_json::json;
+        use std::path::PathBuf;
+
+        fn mini() -> Machine {
+            Machine {
+                label: Some("mini".into()),
+                id: MachineId::new(),
+                route: "mini.local".into(),
+                created_at: time::OffsetDateTime::UNIX_EPOCH,
+                observed_at: time::OffsetDateTime::UNIX_EPOCH,
+            }
+        }
+
+        fn route_on(machine: &Machine) -> TaskExecutionRoute {
+            TaskExecutionRoute {
+                task_id: TaskId::new(),
+                peer_selector: "LOO-7".into(),
+                checkout: None,
+                // Bound on no Machine this test can see.
+                repository_id: RepositoryId::from_raw("github.com/acme/unbound"),
+                machine_id: machine.id.clone(),
+                source: TaskExecutionSource::Owner,
+            }
+        }
+
+        fn task_get() -> Read {
+            Read::TaskGet {
+                directory: PathBuf::from("/src/app"),
+                issue: "LOO-7".into(),
+            }
+        }
+
+        #[test]
+        fn a_task_pane_names_the_task_and_owner_as_this_machine_does() {
+            let machine = mini();
+            let route = route_on(&machine);
+            let mut pane = json!({
+                "task": { "id": "TASK_PEER", "identifier": "LOO-7" },
+                "row": {
+                    "task": { "id": "TASK_PEER", "repo": "/workspace/app" },
+                    "runtime": {
+                        "work_id": "TASK_PEER",
+                        "owner": { "machine": { "id": machine.id.as_str(), "label": "self" } },
+                    },
+                    "reference": { "workspace": { "machine_label": "self", "worktree": "/workspace/app.loo-7" } },
+                },
+                "ownership": { "owner": { "machine": { "id": "home_other", "label": "other" } } },
+            });
+            task_get()
+                .localize_peer_reading(&mut pane, &machine, &route)
+                .unwrap();
+            let local = route.task_id.to_string();
+            assert_eq!(pane["task"]["id"], local.as_str());
+            assert_eq!(pane["row"]["task"]["id"], local.as_str());
+            assert_eq!(pane["row"]["runtime"]["work_id"], local.as_str());
+            assert_eq!(
+                pane["row"]["reference"]["workspace"]["machine_label"],
+                "mini"
+            );
+            assert_eq!(pane["row"]["runtime"]["owner"]["machine"]["label"], "mini");
+            // A Machine other than the route's keeps the label it came with.
+            assert_eq!(pane["ownership"]["owner"]["machine"]["label"], "other");
+            // The files live in the owner's checkout; an unbound repository
+            // has no path here but the owner's.
+            assert_eq!(
+                pane["row"]["reference"]["workspace"]["worktree"],
+                "/workspace/app.loo-7"
+            );
+            assert_eq!(pane["row"]["task"]["repo"], "/workspace/app");
+        }
+
+        #[test]
+        fn a_reset_receipt_opens_its_session_with_this_machines_lf_open() {
+            let machine = mini();
+            let route = route_on(&machine);
+            let mut receipt = json!({
+                "kind": "session.new",
+                "task_id": null,
+                "result": {
+                    "id": "abc123",
+                    "open_argv": ["/peer/lf", "session", "resume", "abc123"],
+                    "action": { "help": "Continue with: lf resume abc123" },
+                },
+            });
+            Read::CreationGet {
+                request_id: "r1".into(),
+                task: Some("LOO-7".into()),
+            }
+            .localize_peer_reading(&mut receipt, &machine, &route)
+            .unwrap();
+            assert_eq!(receipt["task_id"], serde_json::Value::Null);
+            let argv: Vec<&str> = receipt["result"]["open_argv"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|arg| arg.as_str().unwrap())
+                .collect();
+            assert_eq!(
+                argv[1..],
+                ["open", "--task", "LOO-7", "--session", "abc123", "--here"]
+            );
+            assert_eq!(
+                receipt["result"]["action"]["help"],
+                "Continue with: lf open --task LOO-7 --session abc123"
+            );
+        }
+
+        #[test]
+        fn a_selected_reading_gains_no_keys() {
+            let machine = mini();
+            let route = route_on(&machine);
+            let mut selected =
+                json!({ "row": { "task": { "identifier": "LOO-7" } }, "task": null });
+            task_get()
+                .localize_peer_reading(&mut selected, &machine, &route)
+                .unwrap();
+            assert_eq!(
+                selected,
+                json!({ "row": { "task": { "identifier": "LOO-7" } }, "task": null })
+            );
+        }
+
+        #[test]
+        fn a_task_detail_opens_its_current_session_with_this_machines_lf_open() {
+            let machine = mini();
+            let route = route_on(&machine);
+            let mut detail = json!({
+                "task": { "id": "TASK_PEER" },
+                "current_session": {
+                    "id": "session_1",
+                    "task_ids": ["TASK_PEER"],
+                    "outlook": { "command": "lf resume --task LOO-7" },
+                },
+            });
+            Read::TaskDetail {
+                directory: PathBuf::from("/src/app"),
+                issue: "LOO-7".into(),
+            }
+            .localize_peer_reading(&mut detail, &machine, &route)
+            .unwrap();
+            let local = route.task_id.to_string();
+            assert_eq!(detail["task"]["id"], local.as_str());
+            assert_eq!(
+                detail["current_session"]["outlook"]["command"],
+                "lf open --task LOO-7"
+            );
+            assert_eq!(detail["current_session"]["task_ids"][0], local.as_str());
+        }
+
+        #[test]
+        fn a_files_watch_names_the_owner_by_this_machines_label() {
+            let machine = mini();
+            let route = route_on(&machine);
+            let mut files = json!({ "task_id": "TASK_PEER", "machine_label": null, "root": "/workspace/app.loo-7" });
+            Read::TaskFilesWatch {
+                issue: "LOO-7".into(),
+            }
+            .localize_peer_reading(&mut files, &machine, &route)
+            .unwrap();
+            assert_eq!(
+                files,
+                json!({ "task_id": route.task_id.to_string(), "machine_label": "mini", "root": "/workspace/app.loo-7" })
+            );
+        }
     }
 }

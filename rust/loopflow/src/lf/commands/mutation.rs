@@ -246,8 +246,19 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
             revision,
             json,
         } => {
-            let content = read_task_draft(io.input)?;
-            let saved = loopflow_execution::ops::task::task_save(issue, path, revision, &content)?;
+            // Saved on the Machine that runs the Task.
+            let saved = match (super::write::Write::TaskSave {
+                directory: repo.to_owned(),
+                issue: issue.clone(),
+                path: path.clone(),
+                revision: revision.clone(),
+                content: read_task_draft(io.input)?,
+            })
+            .run()?
+            {
+                super::write::WriteResult::TaskSave(saved) => *saved,
+                _ => unreachable!("task.save answers a save"),
+            };
             if *json {
                 writeln!(io.output, "{}", serde_json::to_string_pretty(&saved)?)?;
             } else {

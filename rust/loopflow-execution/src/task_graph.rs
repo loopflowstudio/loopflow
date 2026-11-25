@@ -405,7 +405,12 @@ fn workflow(steps: &[ConcreteStep]) -> (Vec<WorkflowStep>, Vec<u32>) {
     let mut line: Vec<WorkflowStep> = Vec::new();
     let mut indices = Vec::with_capacity(steps.len());
     for step in steps {
-        let name = workflow_step_name(step);
+        let sources = match step {
+            ConcreteStep::Skill(skill) => &skill.sources,
+            ConcreteStep::Command(command) => &command.sources,
+            ConcreteStep::Xor(branch) => &branch.sources,
+        };
+        let name = sources.get(1).cloned().unwrap_or_else(|| step_name(step));
         let interactive = !interactive_steps(std::slice::from_ref(step)).is_empty();
         match line.last_mut() {
             Some(last) if last.name == name => last.interactive |= interactive,
@@ -414,15 +419,6 @@ fn workflow(steps: &[ConcreteStep]) -> (Vec<WorkflowStep>, Vec<u32>) {
         indices.push(u32::try_from(line.len() - 1).expect("a graph has few steps"));
     }
     (line, indices)
-}
-
-fn workflow_step_name(step: &ConcreteStep) -> String {
-    let sources = match step {
-        ConcreteStep::Skill(skill) => &skill.sources,
-        ConcreteStep::Command(command) => &command.sources,
-        ConcreteStep::Xor(branch) => &branch.sources,
-    };
-    sources.get(1).cloned().unwrap_or_else(|| step_name(step))
 }
 
 /// What a person calls `step`; an operation by the display name its Graph
@@ -470,12 +466,8 @@ impl WorkflowControl {
         }
     }
 
-    fn start(steps: &[ConcreteStep]) -> Self {
-        Self::run(
-            &steps
-                .first()
-                .map_or_else(|| END.to_owned(), workflow_step_name),
-        )
+    fn start(steps: &[WorkflowStep]) -> Self {
+        Self::run(steps.first().map_or(END, |step| step.name.as_str()))
     }
 }
 
@@ -505,9 +497,10 @@ impl WorkflowOutline {
             [only] => format!("You take part at {only}."),
             [rest @ .., last] => format!("You take part at {} and {last}.", rest.join(", ")),
         };
+        let steps = workflow(steps).0;
         Self {
-            start: WorkflowControl::start(steps),
-            steps: workflow(steps).0,
+            start: WorkflowControl::start(&steps),
+            steps,
             interactive_steps,
             sentence,
         }
@@ -601,11 +594,12 @@ impl TaskGraph {
         };
         let (position, current_step, sentence, control) = match run {
             None => {
-                let (place, sentence, control) = match step.as_str() {
+                let (place, sentence, control, resume) = match step.as_str() {
                     START => (
                         None,
                         "Not started.".to_owned(),
-                        WorkflowControl::start(&graph.steps),
+                        WorkflowControl::start(&steps),
+                        true,
                     ),
                     END => (
                         None,
@@ -614,6 +608,7 @@ impl TaskGraph {
                             action: WorkflowAction::Done,
                             label: "Done".into(),
                         },
+                        false,
                     ),
                     step => match graph.interactive_step(step) {
                         Some(place) => {
@@ -628,20 +623,19 @@ impl TaskGraph {
                                 Some(place),
                                 format!("Waiting for you at {step}."),
                                 WorkflowControl::run(next.as_deref().unwrap_or(END)),
+                                false,
                             )
                         }
                         None => (
                             graph.find(step),
                             format!("Waiting at {step}."),
                             WorkflowControl::run(step),
+                            true,
                         ),
                     },
                 };
                 let control = if pause.is_some() {
-                    let human = place
-                        .as_ref()
-                        .is_some_and(|place| graph.interactive_at(place).is_some());
-                    WorkflowControl::paused(&step, step != END && !human)
+                    WorkflowControl::paused(&step, resume)
                 } else {
                     control
                 };

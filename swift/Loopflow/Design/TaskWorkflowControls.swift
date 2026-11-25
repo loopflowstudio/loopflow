@@ -46,11 +46,10 @@ public struct TaskWorkflowControls<Items: View>: View {
                         if task.lifecycle == .paused {
                             Button("Unpause without running") { pause(.unpause) }
                                 .disabled(pending != nil || actions.pauseRefusal != nil)
-                        } else if actions.pause == .pause && actions.control?.action != .pause {
-                            Button("Pause") { pause(.pause) }.disabled(pending != nil)
-                        }
-                        if actions.control?.action == .pause {
+                        } else if actions.control?.action == .pause {
                             Button("Interrupt step") { interrupt() }.disabled(pending != nil)
+                        } else if actions.pause == .pause {
+                            Button("Pause") { pause(.pause) }.disabled(pending != nil)
                         }
                     }
                     items()

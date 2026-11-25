@@ -2762,12 +2762,8 @@ final class WorkModel {
         request(task, "Interrupt step", .taskInterrupt(directory: directory(task), issue: task.task.identifier))
     }
 
-    /// A sidebar row can be opened before its Task workspace has been read.
-    func unpause(_ task: RoadmapTask, work: TaskOverview?) {
-        if let action = TaskActions(work: work, row: task, execution: nil).pause {
-            setPause(action, task: task)
-            return
-        }
+    /// A sidebar row can be unpaused before its Task workspace has been read.
+    func unpause(_ task: RoadmapTask) {
         Task {
             do {
                 let reading = try await query.taskPane(issue: task.task.identifier, directory: directory(task))

@@ -64,8 +64,17 @@ pub(super) async fn snapshot_here(
     let pr = store.active_task_pr(&task.id).await.map_err(task_error)?;
     let active = pr.as_ref().filter(|pr| pr.is_active());
     let status = store.task_state(&task.id).await.map_err(task_error)?;
-    let mut execution = crate::ops::task_execution::task_execution(&store.sqlite, &task, status)
+    let latest_graph = store
+        .sqlite
+        .latest_task_graph(&task.id)
         .map_err(task_error)?;
+    let mut execution = crate::ops::task_execution::task_execution(
+        &store.sqlite,
+        &task,
+        status,
+        latest_graph.as_ref(),
+    )
+    .map_err(task_error)?;
     let work_set =
         crate::store::task_work::task_work(&store.sqlite, &task.id).map_err(task_error)?;
     let auto = store.sqlite.task_auto(&task.id).map_err(task_error)?;
@@ -165,10 +174,8 @@ pub(super) async fn snapshot_here(
     let starter = |session: Option<&loopflow_model::id::LfSessionId>| {
         super::auto::starter(&store.sqlite, &repo, session).map_err(task_error)
     };
-    let started_by = store
-        .sqlite
-        .latest_task_graph(&task.id)
-        .map_err(task_error)?
+    let started_by = latest_graph
+        .as_ref()
         .map(|graph| starter(graph.caller_session.as_ref()))
         .transpose()?;
     Ok(TaskSnapshot {

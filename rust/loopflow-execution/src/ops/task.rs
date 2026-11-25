@@ -3564,15 +3564,11 @@ fn live_execution(store: &SqliteStore, task: &Task) -> OpsResult<Option<String>>
                 != ProcessIdentityEvidence::Dead
         });
     if let Some(graph) = graph {
-        let facts = store
-            .graph_execution_facts([&graph], &[&task.id])
-            .map_err(task_error)?;
-        let execution = crate::ops::task_execution::execution_of_latest_graph(
+        let execution = crate::ops::task_execution::task_execution(
             store,
             task,
             store.task_state(&task.id).map_err(task_error)?,
             Some(&graph),
-            &facts,
         )
         .map_err(task_error)?;
         let step = execution.step.unwrap_or_default();

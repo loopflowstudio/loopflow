@@ -110,7 +110,7 @@ struct TaskWorkflowBar: View {
                                  toggleAuto: { if actions.auto == .on { model.turnAutoOff(task) } else { model.turnAutoOn(task) } },
                                  complete: { model.beginComplete(task) }) {
                 TaskLifecycleItems(model: model, task: task)
-                if work.value != nil && work.value?.graph == nil && !task.isCompleted {
+                if let overview = work.value, overview.graph == nil, !task.isCompleted {
                     TaskStartGraphMenu(model: model, task: task)
                 }
             }
@@ -217,9 +217,8 @@ struct TaskActionItems: View {
             TaskStartGraphMenu(model: model, task: task)
         }
         if task.lifecycle.isWorking {
-            let held = task.lifecycle == .paused
-            Button(held ? "Unpause" : "Pause") {
-                if held { model.unpause(task, work: work) } else { model.setPause(.pause, task: task) }
+            Button(task.lifecycle == .paused ? "Unpause" : "Pause") {
+                if let action = actions.pause { model.setPause(action, task: task) } else { model.unpause(task) }
             }
             .disabled(model.changeRefusal != nil || model.pendingChanges.pauseRequest(for: task.task.identifier) != nil || task.runControl.pausing)
         }

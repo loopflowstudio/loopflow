@@ -67,10 +67,10 @@ pub fn task_execution(
     sqlite: &SqliteStore,
     task: &Task,
     status: TaskState,
+    graph: Option<&GraphExecution>,
 ) -> StoreResult<TaskExecutionSnapshot> {
-    let graph = sqlite.latest_task_graph(&task.id)?;
-    let facts = sqlite.graph_execution_facts(&graph, &[&task.id])?;
-    execution_of_latest_graph(sqlite, task, status, graph.as_ref(), &facts)
+    let facts = sqlite.graph_execution_facts(graph, &[&task.id])?;
+    execution_of_latest_graph(sqlite, task, status, graph, &facts)
 }
 
 /// Execution of a Task whose latest Graph is already

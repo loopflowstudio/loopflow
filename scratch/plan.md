@@ -42,6 +42,12 @@ catches this loss. The Pass 2 reopen path still sends plain system messages.
 
 ### Remaining decision
 
+Open choice: (a) show steers as SDK `userMessage` steps on Antigravity only,
+and teach the transcript reader that `SYSTEM_SDK` `USER_INPUT` rows are lf
+deliveries rather than turns from the person; (b) wait for a
+display-only provider field and ship this Task with the existing system-message delivery,
+filing display as its own Task; (c) another shape.
+
 Inline steer and Task update display still needs a design. A provider-supported
 display-only message would retain today's model input and turn history. Using
 a visible SDK user message changes model input and requires a decision about

@@ -15,7 +15,7 @@ enum GraphNodeState: Equatable {
     case stalled
     case stopped
     case unknown
-    case pendingHuman
+    case pendingBreakpoint
     case pending
 }
 
@@ -33,7 +33,7 @@ func graphNodeStates(_ compiled: CompiledGraph, latest: GraphProcessDetail?) -> 
 }
 
 private func state(of node: GraphNode, latest: GraphProcessDetail?) -> GraphNodeState {
-    guard let latest else { return node.interactive ? .pendingHuman : .pending }
+    guard let latest else { return node.kind == .breakpoint ? .pendingBreakpoint : .pending }
     let isCurrent = latest.current.map { node.contains($0) } ?? false
     if isCurrent {
         switch latest.presentation.execution {
@@ -46,7 +46,7 @@ private func state(of node: GraphNode, latest: GraphProcessDetail?) -> GraphNode
         }
     }
     if latest.completed.contains(node.key) { return .completed }
-    return node.interactive ? .pendingHuman : .pending
+    return node.kind == .breakpoint ? .pendingBreakpoint : .pending
 }
 
 // MARK: - Diagram
@@ -587,7 +587,6 @@ private struct GraphNodeDetail: View {
     private var facts: [String] {
         var facts: [String] = []
         switch node.kind {
-        case .skill where node.interactive: facts.append("Interactive step")
         case .breakpoint: facts.append("Breakpoint")
         case .op: facts.append("Operation")
         case .xor: facts.append("Chooses one path")
@@ -613,7 +612,7 @@ enum GraphPalette {
         switch state {
         case .completed: .done
         case .running: .running
-        case .pendingHuman: .available
+        case .pendingBreakpoint: .available
         case .blocked, .stalled: .warning
         case .stopped, .unknown: .stopped
         case .pending: .neutral
@@ -628,7 +627,7 @@ enum GraphPalette {
         case .stalled: "stalled"
         case .stopped: "stopped here"
         case .unknown: "current, worker state unknown"
-        case .pendingHuman: "interactive step, pending"
+        case .pendingBreakpoint: "breakpoint, pending"
         case .pending: "pending"
         }
     }

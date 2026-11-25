@@ -293,7 +293,9 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public var need: TaskConditionState? {
         switch condition.state {
         case .clear: nil
-        case .waiting: isCompleted || (!graphHasRun && actions.recommended == .run) ? nil : .waiting
+        case .waiting:
+            isCompleted || (!selectionStates.contains(.breakpoint) && !graphHasRun && actions.recommended == .run)
+                ? nil : .waiting
         case .blocked: .blocked
         case .unknown: .unknown
         }

@@ -1623,8 +1623,8 @@ fn server_operations_match_their_lf_commands() {
         | Write::TaskUnassign { .. }
         | Write::TaskAutoOff { .. }
         | Write::TaskMove { .. }
-        // Starting a run or a ship starts Processes; task_run_waits_at_an_interactive_step
-        // compares the run, and comments differ by their saved IDs.
+        // Starting a run or a ship starts Processes; the Task Graph launch tests
+        // cover parking at a breakpoint, and comments differ by their saved IDs.
         | Write::TaskRun { .. }
         | Write::TaskAutoOn { .. }
         | Write::TaskSteer { .. }

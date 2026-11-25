@@ -10,7 +10,6 @@
         "id": null,
         "label": "review",
         "kind": "skill",
-        "interactive": false,
         "returns_to": null,
         "paths": [],
         "sources": [
@@ -22,7 +21,6 @@
         "id": null,
         "label": "review",
         "kind": "skill",
-        "interactive": false,
         "returns_to": null,
         "paths": [],
         "sources": [
@@ -34,7 +32,6 @@
         "id": null,
         "label": "xor-route",
         "kind": "xor",
-        "interactive": false,
         "returns_to": null,
         "paths": [
           {
@@ -46,7 +43,6 @@
                 "id": null,
                 "label": "implement",
                 "kind": "skill",
-                "interactive": false,
                 "returns_to": null,
                 "paths": [],
                 "sources": [
@@ -70,7 +66,6 @@
         "id": null,
         "label": "implement",
         "kind": "skill",
-        "interactive": false,
         "returns_to": null,
         "paths": [],
         "sources": [
@@ -82,7 +77,6 @@
         "id": null,
         "label": "loop-or-next",
         "kind": "skill",
-        "interactive": false,
         "returns_to": 4,
         "paths": [],
         "sources": [
@@ -94,7 +88,6 @@
         "id": null,
         "label": "demo",
         "kind": "skill",
-        "interactive": false,
         "returns_to": null,
         "paths": [],
         "sources": [
@@ -106,7 +99,6 @@
         "id": null,
         "label": "loop-or-next",
         "kind": "skill",
-        "interactive": false,
         "returns_to": 4,
         "paths": [],
         "sources": [
@@ -205,30 +197,30 @@
     "steps": [
       {
         "name": "review",
-        "interactive": false
+        "breakpoint": false
       },
       {
         "name": "xor-route",
-        "interactive": false
+        "breakpoint": false
       },
       {
         "name": "implement",
-        "interactive": false
+        "breakpoint": false
       },
       {
         "name": "loop-or-next",
-        "interactive": false
+        "breakpoint": false
       },
       {
         "name": "demo",
-        "interactive": false
+        "breakpoint": false
       },
       {
         "name": "loop-or-next",
-        "interactive": false
+        "breakpoint": false
       }
     ],
-    "interactive_steps": [],
+    "breakpoints": [],
     "sentence": "Runs on its own."
   }
 }

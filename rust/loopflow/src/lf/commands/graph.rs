@@ -785,10 +785,20 @@ fn print_pipeline_header(graph_name: &str, items: &[ConcreteStep]) {
 
 fn render_pipeline_lines(items: &[ConcreteStep]) -> Vec<String> {
     let mut lines = Vec::new();
-    for item in items {
+    for (index, item) in items.iter().enumerate() {
+        let suffix = return_target(items, index).map(|target| {
+            let label = match &items[target] {
+                ConcreteStep::Skill(skill) => skill.skill.name.clone(),
+                ConcreteStep::Breakpoint(stop) => stop.name.clone(),
+                ConcreteStep::Command(command) => command.item.display_name(),
+                ConcreteStep::Xor(branch) => branch.router.name.clone(),
+            };
+            format!(" (returns to {label})")
+        });
+        let suffix = suffix.as_deref().unwrap_or("");
         match item {
-            ConcreteStep::Skill(skill) => lines.push(skill.skill.name.clone()),
-            ConcreteStep::Breakpoint(stop) => lines.push(format!("break: {}", stop.name)),
+            ConcreteStep::Skill(skill) => lines.push(format!("{}{suffix}", skill.skill.name)),
+            ConcreteStep::Breakpoint(stop) => lines.push(format!("break: {}{suffix}", stop.name)),
             ConcreteStep::Command(command) => lines.push(command.item.to_string()),
             ConcreteStep::Xor(branch) => lines.extend(render_branch_lines(branch)),
         }
@@ -1832,6 +1842,17 @@ mod tests {
         assert!(render_pipeline_lines(&items)
             .iter()
             .any(|line| line.contains("explore → break: after-review_choice")));
+
+        let research = loopflow_execution::graph::load_graph("research", repo.path()).unwrap();
+        let research_items =
+            loopflow_execution::graph::compile_graph(&research, repo.path()).unwrap();
+        assert_eq!(
+            render_pipeline_lines(&research_items),
+            vec![
+                "research".to_string(),
+                "break: after-research (returns to research)".to_string(),
+            ]
+        );
     }
 
     #[test]

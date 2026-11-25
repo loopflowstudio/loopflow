@@ -17,17 +17,9 @@
   ],
   "graph": {
     "name": "feature",
-    "interactive_steps": [
-      {
-        "name": "review-design",
-        "skill": "review-design",
-        "description": "you review the plan"
-      },
-      {
-        "name": "demo",
-        "skill": "demo",
-        "description": "you try the change"
-      }
+    "breakpoints": [
+      "review-design",
+      "demo"
     ],
     "position": {
       "kind": "run",
@@ -39,19 +31,19 @@
     "steps": [
       {
         "name": "plan",
-        "interactive": false
+        "breakpoint": false
       },
       {
         "name": "review-design",
-        "interactive": true
+        "breakpoint": true
       },
       {
         "name": "build",
-        "interactive": false
+        "breakpoint": false
       },
       {
         "name": "demo",
-        "interactive": true
+        "breakpoint": true
       }
     ],
     "current_step": 2,

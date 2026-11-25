@@ -67,17 +67,9 @@
   "conversation": "session_5e55105e000040008000000000000002",
   "graph": {
     "name": "feature",
-    "interactive_steps": [
-      {
-        "name": "explore",
-        "skill": "explore",
-        "description": "you choose a direction"
-      },
-      {
-        "name": "demo",
-        "skill": "demo",
-        "description": "you try the change"
-      }
+    "breakpoints": [
+      "explore",
+      "demo"
     ],
     "position": {
       "kind": "at",
@@ -86,15 +78,15 @@
     "steps": [
       {
         "name": "explore",
-        "interactive": true
+        "breakpoint": true
       },
       {
         "name": "build",
-        "interactive": false
+        "breakpoint": false
       },
       {
         "name": "demo",
-        "interactive": true
+        "breakpoint": true
       }
     ],
     "current_step": 2,

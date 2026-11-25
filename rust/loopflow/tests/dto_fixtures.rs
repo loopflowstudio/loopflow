@@ -506,6 +506,8 @@ fn a_parked_task_names_the_arrival_its_conversation_can_continue() {
     let graph: loopflow_execution::task_graph::TaskGraph =
         serde_json::from_value(wire.clone()).unwrap();
     assert_eq!(graph.step(), "after-research");
+    assert_eq!(graph.breakpoints, ["after-research"]);
+    assert_eq!(graph.waiting_step(), Some("after-research"));
     assert_eq!(serde_json::to_value(graph).unwrap(), wire);
 }
 
@@ -526,11 +528,12 @@ fn task_work_preserves_sessions_graph_runs_and_graph() {
         }
     );
     assert_eq!(graph.step(), "review-design");
+    assert_eq!(graph.breakpoints, ["review-design", "demo"]);
     assert!(graph.waiting_step().is_none());
     let line: Vec<_> = graph
         .steps
         .iter()
-        .map(|step| (step.name.as_str(), step.interactive))
+        .map(|step| (step.name.as_str(), step.breakpoint))
         .collect();
     assert_eq!(
         line,
@@ -927,11 +930,11 @@ fn task_run_explanations_preserve_actions_and_missing_evidence() {
     let reports: Vec<TaskRunExplanation> = serde_json::from_str(json).unwrap();
     assert!(matches!(
         &reports[0].action,
-        Some(TaskRunAction::Run { take_up: true, stops_at: Some(step), .. }) if step == "explore"
+        Some(TaskRunAction::Run { take_up: true, stops_at: Some(step), .. }) if step == "after-explore"
     ));
     assert!(matches!(
         &reports[1].action,
-        Some(TaskRunAction::Wait { take_up: false, step, .. }) if step == "demo"
+        Some(TaskRunAction::Run { take_up: false, from, stops_at: Some(step), .. }) if from == "demo" && step == "after-demo"
     ));
     assert!(matches!(
         &reports[2].action,

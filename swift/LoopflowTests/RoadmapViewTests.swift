@@ -29,6 +29,12 @@ struct RoadmapViewTests {
         #expect(roadmapTaskAction(tasks[2]) == .run)
         #expect(RoadmapTaskAction.run.label(tasks[2]) == "Start")
         #expect(roadmapTaskAction(tasks[3]) == nil)
+
+        let parked = try roadmapTask(condition: "waiting", reason: "At breakpoint after-explore.",
+                                     lifecycle: "active", recommended: "run",
+                                     selectionStates: ["open", "active", "working", "breakpoint"])
+        #expect(roadmapTaskAction(parked) == .run)
+        #expect(RoadmapTaskAction.run.label(parked) == "Continue")
     }
 
     @Test("The recommended action explains itself")

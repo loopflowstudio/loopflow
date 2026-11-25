@@ -78,9 +78,9 @@ struct TaskWorkflowHeader: View {
 }
 
 /// Auto-Ship at the right of the Workflow bar: an ordinary button. Off, it is
-/// `lf task auto on`, which also runs the Task: its run takes the interactive
-/// steps and lands it. On, it is `lf task auto off`. Rust decides whether auto
-/// can start. Sidebar rows and menus carry no auto control.
+/// `lf task auto on`, which also runs the Task: its run continues through
+/// breakpoints and lands it. On, it is `lf task auto off`. Rust decides whether
+/// auto can start. Sidebar rows and menus carry no auto control.
 struct TaskAutoControl: View {
     let model: WorkModel
     let task: RoadmapTask
@@ -226,9 +226,9 @@ struct TaskActionItems: View {
 
     var body: some View {
         if let workflow = work?.graph {
-            // Start the next run at a step: back, ahead, or waiting at an interactive step.
+            // Start the next run at a step: back, ahead, or at a breakpoint.
             Menu("Start from…") {
-                ForEach([TaskGraph.start] + workflow.interactiveSteps.map(\.name), id: \.self) { step in
+                ForEach([TaskGraph.start] + workflow.breakpoints, id: \.self) { step in
                     Button(step) { model.startTaskFromInput(nil, from: step, task: task) }
                         .accessibilityIdentifier("task-workflow-move-\(step)")
                 }

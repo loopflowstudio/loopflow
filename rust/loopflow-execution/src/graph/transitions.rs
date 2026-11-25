@@ -175,12 +175,13 @@ mod tests {
     }
 
     #[test]
-    fn iterate_requires_an_explicit_edge_even_for_interactive_steps() {
-        for interactive in [false, true] {
-            let mut review = step("review", None);
-            if let ConcreteStep::Skill(skill) = &mut review {
-                skill.interactive = interactive;
-            }
+    fn iterate_requires_an_explicit_edge_even_for_breakpoints() {
+        let breakpoint = ConcreteStep::Breakpoint(crate::graph::Breakpoint {
+            name: "review".into(),
+            returns: None,
+            sources: vec![],
+        });
+        for review in [step("review", None), breakpoint] {
             let steps = [step("work", None), review];
             let mut progress = GraphProgress::default();
             decide(&mut progress, GraphDecision::Iterate, "revise the design");

@@ -20,12 +20,6 @@ pub enum TaskRunAction {
         from: String,
         stops_at: Option<String>,
     },
-    /// A released preview stopped before running the interactive worker.
-    Wait {
-        graph: String,
-        take_up: bool,
-        step: String,
-    },
     /// Nothing remains: the Task reaches `end`, requesting completion.
     End { graph: String, take_up: bool },
 }
@@ -58,11 +52,6 @@ impl TaskRunExplanation {
                     None => "to the end".into(),
                 }
             ),
-            Some(TaskRunAction::Wait {
-                graph,
-                take_up,
-                step,
-            }) => format!("{}: wait at {step}; run nothing", take(graph, *take_up)),
             Some(TaskRunAction::End { graph, take_up }) => {
                 format!("{}: nothing remains; reach end", take(graph, *take_up))
             }

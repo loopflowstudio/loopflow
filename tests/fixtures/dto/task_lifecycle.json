@@ -36,7 +36,6 @@
           "steps": [
             {
               "id": null,
-              "interactive": false,
               "key": 0,
               "kind": "op",
               "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
@@ -48,7 +47,6 @@
             },
             {
               "id": null,
-              "interactive": false,
               "key": 1,
               "kind": "op",
               "label": "task complete FIX-1",
@@ -431,7 +429,7 @@
         "work": {
           "graph": {
             "current_step": null,
-            "interactive_steps": [],
+            "breakpoints": [],
             "name": "delivery",
             "position": {
               "kind": "at",
@@ -440,11 +438,11 @@
             "sentence": "At its end.",
             "steps": [
               {
-                "interactive": false,
+                "breakpoint": false,
                 "name": "hold"
               },
               {
-                "interactive": false,
+                "breakpoint": false,
                 "name": "task complete FIX-1"
               }
             ]
@@ -476,7 +474,6 @@
             "steps": [
               {
                 "id": null,
-                "interactive": false,
                 "key": 0,
                 "kind": "op",
                 "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
@@ -488,7 +485,6 @@
               },
               {
                 "id": null,
-                "interactive": false,
                 "key": 1,
                 "kind": "op",
                 "label": "task complete FIX-1",
@@ -553,7 +549,7 @@
       "overview": {
         "graph": {
           "current_step": null,
-          "interactive_steps": [],
+          "breakpoints": [],
           "name": "delivery",
           "position": {
             "kind": "at",
@@ -562,11 +558,11 @@
           "sentence": "At its end.",
           "steps": [
             {
-              "interactive": false,
+              "breakpoint": false,
               "name": "hold"
             },
             {
-              "interactive": false,
+              "breakpoint": false,
               "name": "task complete FIX-1"
             }
           ]
@@ -664,7 +660,6 @@
             "steps": [
               {
                 "id": null,
-                "interactive": false,
                 "key": 0,
                 "kind": "op",
                 "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
@@ -676,7 +671,6 @@
               },
               {
                 "id": null,
-                "interactive": false,
                 "key": 1,
                 "kind": "op",
                 "label": "task complete FIX-1",
@@ -1045,7 +1039,6 @@
           "steps": [
             {
               "id": null,
-              "interactive": false,
               "key": 0,
               "kind": "op",
               "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
@@ -1057,7 +1050,6 @@
             },
             {
               "id": null,
-              "interactive": false,
               "key": 1,
               "kind": "op",
               "label": "task complete FIX-1",
@@ -1424,7 +1416,7 @@
         "work": {
           "graph": {
             "current_step": 1,
-            "interactive_steps": [],
+            "breakpoints": [],
             "name": "delivery",
             "position": {
               "at": "task complete FIX-1",
@@ -1436,11 +1428,11 @@
             "sentence": "task complete FIX-1 is running.",
             "steps": [
               {
-                "interactive": false,
+                "breakpoint": false,
                 "name": "hold"
               },
               {
-                "interactive": false,
+                "breakpoint": false,
                 "name": "task complete FIX-1"
               }
             ]
@@ -1472,7 +1464,6 @@
             "steps": [
               {
                 "id": null,
-                "interactive": false,
                 "key": 0,
                 "kind": "op",
                 "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
@@ -1484,7 +1475,6 @@
               },
               {
                 "id": null,
-                "interactive": false,
                 "key": 1,
                 "kind": "op",
                 "label": "task complete FIX-1",
@@ -1533,7 +1523,7 @@
       "overview": {
         "graph": {
           "current_step": 1,
-          "interactive_steps": [],
+          "breakpoints": [],
           "name": "delivery",
           "position": {
             "at": "task complete FIX-1",
@@ -1545,11 +1535,11 @@
           "sentence": "task complete FIX-1 is running.",
           "steps": [
             {
-              "interactive": false,
+              "breakpoint": false,
               "name": "hold"
             },
             {
-              "interactive": false,
+              "breakpoint": false,
               "name": "task complete FIX-1"
             }
           ]
@@ -1647,7 +1637,6 @@
             "steps": [
               {
                 "id": null,
-                "interactive": false,
                 "key": 0,
                 "kind": "op",
                 "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
@@ -1659,7 +1648,6 @@
               },
               {
                 "id": null,
-                "interactive": false,
                 "key": 1,
                 "kind": "op",
                 "label": "task complete FIX-1",
@@ -2012,7 +2000,6 @@
           "steps": [
             {
               "id": null,
-              "interactive": false,
               "key": 0,
               "kind": "op",
               "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
@@ -2024,7 +2011,6 @@
             },
             {
               "id": null,
-              "interactive": false,
               "key": 1,
               "kind": "op",
               "label": "task complete FIX-1",
@@ -2349,7 +2335,7 @@
         "work": {
           "graph": {
             "current_step": 1,
-            "interactive_steps": [],
+            "breakpoints": [],
             "name": "delivery",
             "position": {
               "at": "task complete FIX-1",
@@ -2361,11 +2347,11 @@
             "sentence": "task complete FIX-1 is running.",
             "steps": [
               {
-                "interactive": false,
+                "breakpoint": false,
                 "name": "hold"
               },
               {
-                "interactive": false,
+                "breakpoint": false,
                 "name": "task complete FIX-1"
               }
             ]
@@ -2397,7 +2383,6 @@
             "steps": [
               {
                 "id": null,
-                "interactive": false,
                 "key": 0,
                 "kind": "op",
                 "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
@@ -2409,7 +2394,6 @@
               },
               {
                 "id": null,
-                "interactive": false,
                 "key": 1,
                 "kind": "op",
                 "label": "task complete FIX-1",
@@ -2458,7 +2442,7 @@
       "overview": {
         "graph": {
           "current_step": 1,
-          "interactive_steps": [],
+          "breakpoints": [],
           "name": "delivery",
           "position": {
             "at": "task complete FIX-1",
@@ -2470,11 +2454,11 @@
           "sentence": "task complete FIX-1 is running.",
           "steps": [
             {
-              "interactive": false,
+              "breakpoint": false,
               "name": "hold"
             },
             {
-              "interactive": false,
+              "breakpoint": false,
               "name": "task complete FIX-1"
             }
           ]
@@ -2572,7 +2556,6 @@
             "steps": [
               {
                 "id": null,
-                "interactive": false,
                 "key": 0,
                 "kind": "op",
                 "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
@@ -2584,7 +2567,6 @@
               },
               {
                 "id": null,
-                "interactive": false,
                 "key": 1,
                 "kind": "op",
                 "label": "task complete FIX-1",

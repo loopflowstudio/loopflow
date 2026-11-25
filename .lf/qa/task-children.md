@@ -6,7 +6,7 @@ No lf-world and no login needed for most of it. Build the fake GitHub
 repository of `stacked-tasks.md` (bare origin, `gh-standin.py` as `gh`), and
 add `.lf/qa/claude-standin.py` to the same `bin` as `claude`,
 `default_agent: claude` and `graph: qa` in `.lf/config.yaml`, and
-`.lf/graphs/qa.yaml` (`- cmd: help task`, `- interactive: demo`), committed and
+`.lf/graphs/qa.yaml` (`- cmd: help task`, `- break: demo`), committed and
 pushed. Isolate `HOME` (with a `.gitconfig` identity), `LF_HOME`,
 `CLAUDE_CONFIG_DIR` and `CODEX_HOME`, set `LF_BIN`, and start `lf server run`.
 

@@ -243,9 +243,13 @@ final class WorkNavigation {
     var showsSlotHints = false
     var sidebarSortByStatus = false
     enum StatusGroup: CaseIterable {
-        case blocked, error, available, idle, busy
+        case breakpoint, blocked, error, available, idle, busy
 
         init(_ states: [WorkSelectionState]) {
+            if states.contains(.breakpoint) {
+                self = .breakpoint
+                return
+            }
             self = switch states.programState {
             case .blocked: .blocked
             case .error: .error

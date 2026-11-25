@@ -47,7 +47,7 @@
       "graph": "feature",
       "take_up": true,
       "from": "start",
-      "stops_at": "explore"
+      "stops_at": "after-explore"
     },
     "impediments": [],
     "unavailable": [
@@ -98,10 +98,11 @@
       "tracker_synced_at": null
     },
     "action": {
-      "kind": "wait",
+      "kind": "run",
       "graph": "feature",
       "take_up": false,
-      "step": "demo"
+      "from": "demo",
+      "stops_at": "after-demo"
     },
     "impediments": [],
     "unavailable": [

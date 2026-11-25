@@ -236,7 +236,6 @@ fn nodes(steps: &[ConcreteStep], next: &mut u32) -> Vec<GraphNode> {
                 id: skill.id.clone(),
                 label: skill.skill.name.clone(),
                 kind: GraphNodeKind::Skill,
-                interactive: skill.interactive,
                 sources: skill.sources.clone(),
                 paths: Vec::new(),
             },
@@ -245,7 +244,6 @@ fn nodes(steps: &[ConcreteStep], next: &mut u32) -> Vec<GraphNode> {
                 id: Some(stop.name.clone()),
                 label: stop.name.clone(),
                 kind: GraphNodeKind::Breakpoint,
-                interactive: true,
                 returns_to: return_target(steps, index).map(|target| result[target].key),
                 sources: stop.sources.clone(),
                 paths: Vec::new(),
@@ -255,7 +253,6 @@ fn nodes(steps: &[ConcreteStep], next: &mut u32) -> Vec<GraphNode> {
                 id: None,
                 label: op.item.display_name(),
                 kind: GraphNodeKind::Op,
-                interactive: false,
                 returns_to: None,
                 sources: op.sources.clone(),
                 paths: Vec::new(),
@@ -275,7 +272,6 @@ fn nodes(steps: &[ConcreteStep], next: &mut u32) -> Vec<GraphNode> {
                     id: None,
                     label: branch.router.name.clone(),
                     kind: GraphNodeKind::Xor,
-                    interactive: false,
                     returns_to: None,
                     sources: branch.sources.clone(),
                     paths,
@@ -393,7 +389,7 @@ mod tests {
         let steps: Vec<_> = code
             .steps
             .iter()
-            .map(|step| (step.name.as_str(), step.interactive))
+            .map(|step| (step.name.as_str(), step.breakpoint))
             .collect();
         assert_eq!(
             steps,
@@ -407,9 +403,14 @@ mod tests {
                 ("after-verify", true)
             ]
         );
+        assert_eq!(code.breakpoints, ["after-ship-review", "after-verify"]);
         assert_eq!(
             code.sentence,
             "You take part at after-ship-review and after-verify."
+        );
+        assert_eq!(
+            outline("feature").unwrap().breakpoints,
+            ["after-explore", "after-ship-review", "after-verify"]
         );
         assert_eq!(
             outline("feature").unwrap().sentence,
@@ -417,13 +418,14 @@ mod tests {
         );
 
         let conditional = outline("conditional").unwrap();
-        let interactive: Vec<_> = conditional
+        let stops: Vec<_> = conditional
             .steps
             .iter()
-            .filter(|step| step.interactive)
+            .filter(|step| step.breakpoint)
             .map(|step| step.name.as_str())
             .collect();
-        assert_eq!(interactive, ["xor-route"]);
+        assert_eq!(stops, ["xor-route"]);
+        assert_eq!(conditional.breakpoints, ["after-demo"]);
         assert_eq!(conditional.sentence, "You take part at after-demo.");
 
         assert_eq!(outline("alone").unwrap().sentence, "Runs on its own.");
@@ -435,7 +437,7 @@ mod tests {
             let task = TaskGraph::read(&captured, "start".into(), None, None, None);
             let outline = outline(name).unwrap();
             assert_eq!(task.steps, outline.steps, "{name}");
-            assert_eq!(task.interactive_steps, outline.interactive_steps, "{name}");
+            assert_eq!(task.breakpoints, outline.breakpoints, "{name}");
         }
     }
 
@@ -581,28 +583,39 @@ mod tests {
     }
 
     #[test]
-    fn retained_graph_nodes_preserve_review_stages_after_field_rename() {
-        let node: super::GraphNode = serde_json::from_str(
+    fn retained_graph_nodes_ignore_retired_per_skill_flags_and_project_breakpoints() {
+        for legacy in [
             r#"{"key":0,"id":"review","label":"demo","kind":"skill","human":true,
                 "returns_to":null,"sources":["code"],"paths":[]}"#,
-        )
-        .unwrap();
-        assert!(node.interactive);
-        let current = serde_json::to_value(&node).unwrap();
-        assert_eq!(current["interactive"], true);
-        assert!(current.get("human").is_none());
-        assert_eq!(
-            serde_json::from_value::<super::GraphNode>(current).unwrap(),
-            node
-        );
+            r#"{"key":0,"id":"review","label":"demo","kind":"skill","interactive":true,
+                "returns_to":null,"sources":["code"],"paths":[]}"#,
+        ] {
+            let node: super::GraphNode = serde_json::from_str(legacy).unwrap();
+            assert_eq!(node.kind, GraphNodeKind::Skill);
+            let current = serde_json::to_value(&node).unwrap();
+            assert!(current.get("interactive").is_none());
+            assert!(current.get("human").is_none());
+            assert_eq!(
+                serde_json::from_value::<super::GraphNode>(current).unwrap(),
+                node
+            );
+        }
 
-        let missing = r#"{"key":0,"id":null,"label":"demo","kind":"skill",
-            "returns_to":null,"sources":[],"paths":[]}"#;
-        assert!(serde_json::from_str::<super::GraphNode>(missing).is_err());
+        let repo = tempfile::tempdir().unwrap();
+        let graph = load_graph("research", repo.path()).unwrap();
+        let compiled = crate::graph::compiled::compile(
+            &graph.name,
+            &compile_graph(&graph, repo.path()).unwrap(),
+        );
+        assert_eq!(compiled.steps.len(), 2);
+        assert_eq!(compiled.steps[0].kind, GraphNodeKind::Skill);
+        assert_eq!(compiled.steps[1].kind, GraphNodeKind::Breakpoint);
+        assert_eq!(compiled.steps[1].label, "after-research");
+        assert_eq!(compiled.steps[1].returns_to, Some(compiled.steps[0].key));
     }
 
     #[test]
-    fn builtin_graphs_keep_their_delivery_boundaries_without_review_steps() {
+    fn builtin_graphs_keep_their_delivery_boundaries_without_breakpoints() {
         let repo = tempfile::tempdir().unwrap();
         let cases: &[(&str, &[&str], &[usize], usize)] = &[
             ("queue", &["compress", "sync", "realign", "gate"], &[], 0),
@@ -639,7 +652,7 @@ mod tests {
             ),
             ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[], 0),
         ];
-        for (name, labels, interactive, returns) in cases {
+        for (name, labels, breakpoints, returns) in cases {
             let graph = load_graph(name, repo.path()).unwrap();
             let compiled = crate::graph::compiled::compile(
                 *name,
@@ -659,9 +672,9 @@ mod tests {
                     .steps
                     .iter()
                     .enumerate()
-                    .filter_map(|(i, s)| s.interactive.then_some(i))
+                    .filter_map(|(i, s)| (s.kind == GraphNodeKind::Breakpoint).then_some(i))
                     .collect::<Vec<_>>(),
-                *interactive,
+                *breakpoints,
                 "{name}"
             );
             assert_eq!(
@@ -736,7 +749,10 @@ mod tests {
             ]
         );
         // Review and landing are the conversation's to launch, not this Graph's.
-        assert!(compiled.steps.iter().all(|node| !node.interactive));
+        assert!(compiled
+            .steps
+            .iter()
+            .all(|node| node.kind != GraphNodeKind::Breakpoint));
         assert!(compiled
             .steps
             .iter()

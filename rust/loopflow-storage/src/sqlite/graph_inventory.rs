@@ -801,7 +801,6 @@ impl SqliteStore {
                     id: None,
                     label: (*label).into(),
                     kind: crate::graph::GraphNodeKind::Skill,
-                    interactive: false,
                     returns_to: None,
                     sources: Vec::new(),
                     paths: Vec::new(),
@@ -1195,7 +1194,6 @@ mod tests {
                 sources: vec![],
                 paths: vec![],
                 label: "implement".into(),
-                interactive: false,
                 kind: crate::graph::GraphNodeKind::Skill,
             }],
         };

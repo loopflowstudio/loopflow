@@ -392,6 +392,7 @@ impl Parser {
                 "working" => SelectionState::Working,
                 "done" => SelectionState::Done,
                 "auto" => SelectionState::Auto,
+                "breakpoint" => SelectionState::Breakpoint,
                 _ => return Err(invalid(format!("unknown state {value}"))),
             }),
             _ => return Err(invalid(format!("unknown filter {key}"))),

@@ -3218,9 +3218,6 @@
             "null"
           ]
         },
-        "interactive": {
-          "type": "boolean"
-        },
         "key": {
           "format": "uint32",
           "minimum": 0,
@@ -3230,7 +3227,7 @@
           "$ref": "#/$defs/GraphNodeKind"
         },
         "label": {
-          "description": "Literal skill name, operation, or XOR router.",
+          "description": "Literal skill name, operation, breakpoint, or XOR router.",
           "type": "string"
         },
         "paths": {
@@ -3262,7 +3259,6 @@
         "id",
         "label",
         "kind",
-        "interactive",
         "returns_to",
         "sources",
         "paths"
@@ -3773,30 +3769,6 @@
         "skill",
         "occurrence",
         "settings"
-      ],
-      "type": "object"
-    },
-    "InteractiveStep": {
-      "description": "A step where a person takes part.",
-      "properties": {
-        "description": {
-          "description": "One line saying what the person does here: the skill's first line of prose.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "name": {
-          "type": "string"
-        },
-        "skill": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "skill",
-        "description"
       ],
       "type": "object"
     },
@@ -8833,6 +8805,11 @@
           "const": "auto",
           "description": "Setting axis: the open Task's auto setting is on.",
           "type": "string"
+        },
+        {
+          "const": "breakpoint",
+          "description": "Graph axis: the open Active Task is parked at a Graph breakpoint.",
+          "type": "string"
         }
       ]
     },
@@ -13733,6 +13710,13 @@
     "TaskGraph": {
       "description": "One Task's Graph as `lf task status --json` carries it.",
       "properties": {
+        "breakpoints": {
+          "description": "Every breakpoint in order, including composed Graphs and XOR paths.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "current_step": {
           "description": "The index in `steps` of the step the Task stands in; null at `start`\nand at `end`.",
           "format": "uint32",
@@ -13742,12 +13726,6 @@
             "null"
           ]
         },
-        "interactive_steps": {
-          "items": {
-            "$ref": "#/$defs/InteractiveStep"
-          },
-          "type": "array"
-        },
         "name": {
           "type": "string"
         },
@@ -13755,7 +13733,7 @@
           "$ref": "#/$defs/TaskGraphPosition"
         },
         "sentence": {
-          "description": "Where the Task stands, in one sentence: \"build is running implement.\nYou are next needed at ship-review.\"",
+          "description": "Where the Task stands, in one sentence: \"build is running implement.\nYou are next needed at after-ship-review.\"",
           "type": "string"
         },
         "steps": {
@@ -13768,7 +13746,7 @@
       },
       "required": [
         "name",
-        "interactive_steps",
+        "breakpoints",
         "position",
         "steps",
         "current_step",
@@ -13779,7 +13757,7 @@
     "TaskGraphPosition": {
       "oneOf": [
         {
-          "description": "The Task stands at `start`, at `end`, or at this interactive step,\nwaiting on a person in the Task conversation.",
+          "description": "The Task stands at `start`, at `end`, at a landing wait (`auto: off`),\nor at an unconverted released wait (LOO-1100).",
           "properties": {
             "kind": {
               "const": "at",
@@ -13796,6 +13774,7 @@
           "type": "object"
         },
         {
+          "description": "The Task is parked at breakpoint `step` for visit `arrival`.",
           "properties": {
             "arrival": {
               "$ref": "#/$defs/LfProcessId"
@@ -14460,7 +14439,7 @@
           "type": "string"
         },
         "step": {
-          "description": "The step it stands at (`start`, `end` or an interactive step); `null` while a run carries it.",
+          "description": "The step it stands at (`start`, `end`, a breakpoint or a landing wait); `null` while a run carries it.",
           "type": [
             "string",
             "null"
@@ -14515,7 +14494,7 @@
               ]
             },
             "merges": {
-              "description": "The run may merge the PR: auto is on, or no interactive step is\nleft ahead, and nobody turned auto off.",
+              "description": "The run may merge the PR: auto is on, or no breakpoint is\nleft ahead, and nobody turned auto off.",
               "type": "boolean"
             },
             "run": {
@@ -14539,7 +14518,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Nothing runs: the Task now waits at this interactive step.",
+          "description": "Nothing runs: the Task now waits at this breakpoint.",
           "properties": {
             "issue": {
               "type": "string"
@@ -16475,15 +16454,15 @@
     "WorkflowOutline": {
       "description": "A Graph as the workflow line shows it before any Task stands on it.",
       "properties": {
-        "interactive_steps": {
-          "description": "Every step where a person takes part, as `TaskGraph` carries them.",
+        "breakpoints": {
+          "description": "Every breakpoint in order, including composed Graphs and XOR paths.",
           "items": {
-            "$ref": "#/$defs/InteractiveStep"
+            "type": "string"
           },
           "type": "array"
         },
         "sentence": {
-          "description": "\"You take part at explore, ship-review and verify.\" or \"Runs on its own.\"",
+          "description": "\"You take part at after-explore, after-ship-review and after-verify.\" or \"Runs on its own.\"",
           "type": "string"
         },
         "steps": {
@@ -16496,7 +16475,7 @@
       },
       "required": [
         "steps",
-        "interactive_steps",
+        "breakpoints",
         "sentence"
       ],
       "type": "object"
@@ -16504,8 +16483,8 @@
     "WorkflowStep": {
       "description": "One top-level step of a Task's Graph.",
       "properties": {
-        "interactive": {
-          "description": "A person takes part somewhere inside it, XOR paths included.",
+        "breakpoint": {
+          "description": "This step is a breakpoint or contains one, composed Graphs and XOR paths included.",
           "type": "boolean"
         },
         "name": {
@@ -16514,7 +16493,7 @@
       },
       "required": [
         "name",
-        "interactive"
+        "breakpoint"
       ],
       "type": "object"
     },

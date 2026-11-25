@@ -180,7 +180,6 @@ mod tests {
                 id: None,
                 label: "review".into(),
                 kind: crate::graph::GraphNodeKind::Skill,
-                interactive: false,
                 returns_to: Some(0),
                 sources: Vec::new(),
                 paths: Vec::new(),

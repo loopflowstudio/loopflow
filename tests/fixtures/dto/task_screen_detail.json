@@ -84,7 +84,6 @@
             "id": null,
             "label": "implement",
             "kind": "skill",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "pursue"
@@ -96,7 +95,6 @@
             "id": null,
             "label": "compress",
             "kind": "skill",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "pursue"
@@ -108,7 +106,6 @@
             "id": null,
             "label": "sync",
             "kind": "op",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "pursue",
@@ -121,7 +118,6 @@
             "id": null,
             "label": "realign",
             "kind": "skill",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "pursue",
@@ -134,7 +130,6 @@
             "id": null,
             "label": "loop-or-next",
             "kind": "skill",
-            "interactive": false,
             "returns_to": 0,
             "sources": [
               "pursue"
@@ -146,7 +141,6 @@
             "id": null,
             "label": "pr-publish",
             "kind": "skill",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "pursue"

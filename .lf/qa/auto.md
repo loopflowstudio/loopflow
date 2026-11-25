@@ -12,10 +12,10 @@ If the private Machine registers a launchd job, use the label in
 `$LF_HOME/server.plist` to boot it out at cleanup. End the holders and providers
 belonging to that private home as described in [resume](resume.md).
 
-Graph: `.lf/graphs/qaship.yaml` with `- implement`, `- interactive:
-ship-review`, `- cmd: land`, `- interactive: verify`; commit, push, then
+Graph: `.lf/graphs/qaship.yaml` with `- implement`, `- ship-review`, `- break`,
+`- cmd: land`, `- verify`, `- break`; commit, push, then
 `git merge origin/main` in each Task checkout (the graph is read from the
-checkout). For a run with no interactive step ahead, `- implement` then
+checkout). For a run with no breakpoint ahead, `- implement` then
 `- cmd: land`, on a fresh `lf task create '<words>' --json`.
 `lf task auto on <id> --graph qaship` takes it up; the served `task.auto.on`
 takes no graph, so for it set `graph: qaship` in `.lf/config.yaml` (committed,
@@ -52,8 +52,8 @@ carries it as `execution.auto`). Served: hello from
 "issue":…},"select":null,"sender":null,"request_id":"<uuid>"}`; `task.auto.on`
 takes nothing else (a never-run Task takes up the repository's graph), and
 `task.auto.off` takes `"reason":null` beside them and answers `{issue, was_on}`.
-Check `lf task auto on` on a Task waiting at `ship-review` (it stands in
-there) and on a never-run Task (one Graph run); `lf ship` names no command ("skill or graph not found: ship").
+Check `lf task auto on` on a Task parked at `after-ship-review` (it continues
+past the breakpoint) and on a never-run Task (one Graph run); `lf ship` names no command ("skill or graph not found: ship").
 With `--json` the run is the only thing on stdout; "standing in at …" goes to
 stderr. Two at the same moment on a never-run Task leave one run:
 both print it and exit 0, and `lf task status` shows one Graph run. The losing
@@ -64,10 +64,10 @@ Graph run, and `graph_processes` holds one row for the Task. Two bare
 `lf task run` at once leave one run and one "is running graph …" refusal.
 
 To check a blocked decision after a successful step, give the Graph a loop with
-`cmd: help commit` followed by an interactive decision skill. Ask the skill to
+`cmd: help commit`, a decision skill, and `- break`. Ask the skill to
 check for an ignored artifact in the Task checkout and block with a reason if
-it is missing. With a real provider, `lf task run <id>` waits at the interactive
-step. `lf -b task auto on <id>` then exits 3, and `lf task status <id>` shows the
+it is missing. With a real provider, `lf task run <id>` parks at the breakpoint
+with the blocked verdict. `lf -b task auto on <id>` then exits 3, and `lf task status <id>` shows the
 reason. Put the artifact in the checkout and repeat `lf -b task auto on <id>`.
 `lf graph show <run-id>` lists the decision alone in both auto runs.
 
@@ -89,7 +89,7 @@ An unknown ID answers `no Task exists for …`
 
 Before a first run: `lf task auto off <id>` on a fresh `lf task create`, then
 `lf config set auto on` and a bare `lf task run <id> <graph>` stops at the
-interactive step with no `merges:` line. `lf task complete` then `lf task
+breakpoint with no `merges:` line. `lf task complete` then `lf task
 reopen` clears the mark (`auto` null in `--json`; the row is in `task_auto`).
 Across Machines (the two homes of `.lf/qa/machine-moves.md`): the mark arrives
 with the Task, set or not, and replaces what the receiver held; the laptop

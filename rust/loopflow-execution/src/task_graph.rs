@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use crate::error::LoadError;
 use crate::graph::runner::{ExecutionCursor, NestedCursor};
 use crate::graph::{compile_graph, load_authored_graph, ConcreteSkill, ConcreteStep};
-use loopflow_definitions::text::first_prose_line;
 use loopflow_storage::sqlite::{Auto, AutoState};
 
 pub use loopflow_storage::sqlite::task_work::{END, START};
@@ -136,9 +135,14 @@ impl CapturedGraph {
         }))
     }
 
-    /// Its interactive steps in order, each XOR path's in name order.
-    pub fn interactive_steps(&self) -> Vec<(Place, &ConcreteSkill)> {
+    /// LOO-1100: interactive skills retained on an unconverted released capture.
+    pub(crate) fn interactive_steps(&self) -> Vec<(Place, &ConcreteSkill)> {
         interactive_steps(&self.steps)
+    }
+
+    /// Breakpoints in order (including composed Graphs and XOR paths), each once.
+    pub fn breakpoints(&self) -> Vec<String> {
+        breakpoints(&self.steps)
     }
 
     /// The first step answering to `name`; `start` is the first step.
@@ -160,8 +164,8 @@ impl CapturedGraph {
         found
     }
 
-    /// The interactive step named `step`.
-    pub fn interactive_step(&self, step: &str) -> Option<Place> {
+    /// LOO-1100: the unconverted interactive step named `step` on a released capture.
+    pub(crate) fn interactive_step(&self, step: &str) -> Option<Place> {
         self.interactive_steps()
             .into_iter()
             .find(|(_, skill)| skill.interactive_step() == Some(step))
@@ -193,7 +197,7 @@ impl CapturedGraph {
         }
     }
 
-    /// The first interactive step a run from `place` reaches, looking into
+    /// The first breakpoint a run from `place` reaches, looking into
     /// every XOR path in name order; `None` when it runs to the end.
     pub fn next_breakpoint(&self, place: &Place) -> Option<&str> {
         fn scan(body: &[ConcreteStep], from: usize) -> Option<&str> {
@@ -277,7 +281,7 @@ impl CapturedGraph {
     }
 }
 
-/// The interactive steps of `steps` in order, each XOR path's in name order.
+/// LOO-1100: interactive skills retained on an unconverted released capture.
 fn interactive_steps(steps: &[ConcreteStep]) -> Vec<(Place, &ConcreteSkill)> {
     let mut out = Vec::new();
     walk(steps, &[], &mut |place, step| {
@@ -290,24 +294,42 @@ fn interactive_steps(steps: &[ConcreteStep]) -> Vec<(Place, &ConcreteSkill)> {
     out
 }
 
-fn interactive_summary(steps: &[ConcreteStep]) -> Vec<InteractiveStep> {
-    interactive_steps(steps)
-        .into_iter()
-        .map(|(_, skill)| InteractiveStep {
-            name: skill
-                .interactive_step()
-                .expect("interactive steps have a name")
-                .into(),
-            skill: skill.skill.name.clone(),
-            description: skill.skill.content.as_deref().and_then(first_prose_line),
-        })
-        .collect()
+/// Every breakpoint name in order (including composed Graphs and XOR paths),
+/// each once. Unconverted released captures still project their interactive
+/// skills as stops until claimed (LOO-1100).
+fn breakpoints(steps: &[ConcreteStep]) -> Vec<String> {
+    let mut out = Vec::new();
+    walk(steps, &[], &mut |_, step| {
+        let name = match step {
+            ConcreteStep::Breakpoint(stop) => Some(stop.name.as_str()),
+            ConcreteStep::Skill(skill) => skill.interactive_step(),
+            _ => None,
+        };
+        if let Some(name) = name.filter(|name| !out.iter().any(|seen| seen == name)) {
+            out.push(name.to_owned());
+        }
+    });
+    out
+}
+
+/// The one sentence every surface prints when a Task is parked at a breakpoint.
+pub fn breakpoint_sentence(
+    step: &str,
+    stop: &crate::store::task_work::BreakpointArrival,
+) -> String {
+    let mut sentence = format!("At breakpoint {step}.");
+    if let Some(verdict) = &stop.cursor.leaf().progress.verdict {
+        if verdict.decision == crate::graph::transitions::GraphDecision::Blocked {
+            sentence.push_str(&format!(" Blocked: {}", verdict.summary));
+        }
+    }
+    sentence
 }
 
 /// The top-level steps as a person reads them, consecutive repeats collapsed,
 /// with the index in them of each top-level place. A composed step reads as
-/// the graph it came from, and a step is interactive when a person takes part
-/// anywhere inside it.
+/// the graph it came from, and `breakpoint` marks a breakpoint or a step that
+/// contains one (including composed Graphs and XOR paths).
 fn workflow(steps: &[ConcreteStep]) -> (Vec<WorkflowStep>, Vec<u32>) {
     let mut line: Vec<WorkflowStep> = Vec::new();
     let mut indices = Vec::with_capacity(steps.len());
@@ -319,14 +341,14 @@ fn workflow(steps: &[ConcreteStep]) -> (Vec<WorkflowStep>, Vec<u32>) {
             ConcreteStep::Xor(branch) => &branch.sources,
         };
         let name = sources.get(1).cloned().unwrap_or_else(|| step_name(step));
-        let mut interactive = false;
+        let mut breakpoint = false;
         walk(std::slice::from_ref(step), &[], &mut |_, node| {
-            interactive |= matches!(node, ConcreteStep::Breakpoint(_))
+            breakpoint |= matches!(node, ConcreteStep::Breakpoint(_))
                 || matches!(node, ConcreteStep::Skill(skill) if skill.interactive);
         });
         match line.last_mut() {
-            Some(last) if last.name == name => last.interactive |= interactive,
-            _ => line.push(WorkflowStep { name, interactive }),
+            Some(last) if last.name == name => last.breakpoint |= breakpoint,
+            _ => line.push(WorkflowStep { name, breakpoint }),
         }
         indices.push(u32::try_from(line.len() - 1).expect("a graph has few steps"));
     }
@@ -347,53 +369,34 @@ pub fn step_name(step: &ConcreteStep) -> String {
 pub struct WorkflowOutline {
     /// The Graph's top-level steps in order, as `TaskGraph.steps` carries them.
     pub steps: Vec<WorkflowStep>,
-    /// Every step where a person takes part, as `TaskGraph` carries them.
-    pub interactive_steps: Vec<InteractiveStep>,
-    /// "You take part at explore, ship-review and verify." or "Runs on its own."
+    /// Every breakpoint in order, including composed Graphs and XOR paths.
+    pub breakpoints: Vec<String>,
+    /// "You take part at after-explore, after-ship-review and after-verify." or "Runs on its own."
     pub sentence: String,
 }
 
 impl WorkflowOutline {
     pub fn of(steps: &[ConcreteStep]) -> Self {
-        let interactive_steps = interactive_summary(steps);
-        let mut names: Vec<&str> = Vec::new();
-        walk(steps, &[], &mut |_, step| {
-            let name = match step {
-                ConcreteStep::Breakpoint(stop) => Some(stop.name.as_str()),
-                ConcreteStep::Skill(skill) => skill.interactive_step(),
-                _ => None,
-            };
-            if let Some(name) = name.filter(|name| !names.contains(name)) {
-                names.push(name);
-            }
-        });
-        let sentence = match names.as_slice() {
+        let breakpoints = breakpoints(steps);
+        let sentence = match breakpoints.as_slice() {
             [] => "Runs on its own.".to_owned(),
             [only] => format!("You take part at {only}."),
             [rest @ .., last] => format!("You take part at {} and {last}.", rest.join(", ")),
         };
         Self {
             steps: workflow(steps).0,
-            interactive_steps,
+            breakpoints,
             sentence,
         }
     }
-}
-
-/// A step where a person takes part.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct InteractiveStep {
-    pub name: String,
-    pub skill: String,
-    /// One line saying what the person does here: the skill's first line of prose.
-    pub description: Option<String>,
 }
 
 /// One Task's Graph as `lf task status --json` carries it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskGraph {
     pub name: String,
-    pub interactive_steps: Vec<InteractiveStep>,
+    /// Every breakpoint in order, including composed Graphs and XOR paths.
+    pub breakpoints: Vec<String>,
     pub position: TaskGraphPosition,
     /// The Graph's top-level steps in order, as the workflow line shows them.
     pub steps: Vec<WorkflowStep>,
@@ -410,16 +413,17 @@ pub struct TaskGraph {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkflowStep {
     pub name: String,
-    /// A person takes part somewhere inside it, XOR paths included.
-    pub interactive: bool,
+    /// This step is a breakpoint or contains one, composed Graphs and XOR paths included.
+    pub breakpoint: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskGraphPosition {
-    /// The Task stands at `start`, at `end`, or at this interactive step,
-    /// waiting on a person in the Task conversation.
+    /// The Task stands at `start`, at `end`, at a landing wait (`auto: off`),
+    /// or at an unconverted released wait (LOO-1100).
     At { step: String },
+    /// The Task is parked at breakpoint `step` for visit `arrival`.
     Breakpoint {
         step: String,
         arrival: loopflow_model::id::LfProcessId,
@@ -454,8 +458,9 @@ pub struct TaskGraphRun<'a> {
 }
 
 impl TaskGraph {
-    /// Where the Task stands on `graph`: waiting at `step`, or carried on from
-    /// it by `run`. `auto` on names auto, not a person, as the next to take part.
+    /// Where the Task stands on `graph`: waiting at `step`, parked at a
+    /// breakpoint, or carried on from it by `run`. `auto` on names auto, not a
+    /// person, as the next to take part.
     pub fn read(
         graph: &CapturedGraph,
         step: String,
@@ -471,12 +476,7 @@ impl TaskGraph {
         let (position, current_step, sentence) = match (breakpoint, run) {
             (Some(stop), None) => {
                 let place = graph.place_of(&stop.cursor);
-                let mut sentence = format!("At breakpoint {step}.");
-                if let Some(verdict) = &stop.cursor.leaf().progress.verdict {
-                    if verdict.decision == crate::graph::transitions::GraphDecision::Blocked {
-                        sentence.push_str(&format!(" Blocked: {}", verdict.summary));
-                    }
-                }
+                let sentence = breakpoint_sentence(&step, stop);
                 (
                     TaskGraphPosition::Breakpoint {
                         step,
@@ -542,7 +542,7 @@ impl TaskGraph {
         };
         Self {
             name: graph.name.clone(),
-            interactive_steps: interactive_summary(&graph.steps),
+            breakpoints: breakpoints(&graph.steps),
             position,
             steps,
             current_step,
@@ -555,18 +555,22 @@ impl TaskGraph {
         self.position.step()
     }
 
-    /// The interactive step a person takes part at now, such as `explore`.
-    pub fn waiting_step(&self) -> Option<&InteractiveStep> {
+    /// The breakpoint where a person takes part now (or a released capture's
+    /// interactive wait before conversion).
+    pub fn waiting_step(&self) -> Option<&str> {
         match &self.position {
-            TaskGraphPosition::At { step } => {
-                self.interactive_steps.iter().find(|s| &s.name == step)
-            }
-            TaskGraphPosition::Breakpoint { .. } | TaskGraphPosition::Run { .. } => None,
+            TaskGraphPosition::Breakpoint { step, .. } => Some(step.as_str()),
+            TaskGraphPosition::At { step } => self
+                .breakpoints
+                .iter()
+                .find(|name| name.as_str() == step.as_str())
+                .map(String::as_str),
+            TaskGraphPosition::Run { .. } => None,
         }
     }
 
     /// Why the Task waits here and what lands it, when it stands at a step
-    /// that is neither `start`, `end` nor interactive: it stopped before
+    /// that is neither `start`, `end` nor a breakpoint: it stopped before
     /// merging, which only an off does.
     pub fn waiting_to_land(&self, auto: Option<&Auto>, issue: &str) -> Option<String> {
         let off = auto.filter(|mark| mark.state == AutoState::Off)?;
@@ -574,8 +578,8 @@ impl TaskGraph {
             return None;
         };
         let ends = step == START || step == END;
-        let interactive = self.interactive_steps.iter().any(|s| &s.name == step);
-        (!ends && !interactive).then(|| crate::ops::task::auto::landing_wait(step, off, issue))
+        let stop = self.breakpoints.iter().any(|name| name == step);
+        (!ends && !stop).then(|| crate::ops::task::auto::landing_wait(step, off, issue))
     }
 }
 
@@ -606,23 +610,17 @@ mod tests {
     }
 
     #[test]
-    fn builtin_graphs_name_their_interactive_steps() {
+    fn builtin_graphs_name_their_breakpoints() {
         let repo = tempfile::tempdir().unwrap();
         let feature = CapturedGraph::load("feature", repo.path())
             .unwrap()
             .unwrap();
-        let mut steps = Vec::new();
-        super::walk(&feature.steps, &[], &mut |_, step| {
-            if let crate::graph::ConcreteStep::Breakpoint(stop) = step {
-                steps.push(stop.name.as_str());
-            }
-        });
         assert_eq!(
-            steps,
+            feature.breakpoints(),
             ["after-explore", "after-ship-review", "after-verify"]
         );
         let pursue = CapturedGraph::load("pursue", repo.path()).unwrap().unwrap();
-        assert!(pursue.interactive_steps().is_empty());
+        assert!(pursue.breakpoints().is_empty());
         assert!(CapturedGraph::load("no-such-graph", repo.path())
             .unwrap()
             .is_none());
@@ -729,7 +727,7 @@ mod tests {
         let steps: Vec<_> = start
             .steps
             .iter()
-            .map(|step| (step.name.as_str(), step.interactive))
+            .map(|step| (step.name.as_str(), step.breakpoint))
             .collect();
         assert_eq!(
             steps,
@@ -743,6 +741,7 @@ mod tests {
                 ("after-verify", true)
             ]
         );
+        assert_eq!(start.breakpoints, ["after-ship-review", "after-verify"]);
         assert_eq!(
             (start.current_step, start.sentence.as_str()),
             (None, "Not started.")
@@ -769,9 +768,42 @@ mod tests {
             stopped.sentence,
             "Stopped at build. `lf task run` starts it again."
         );
-        let review = read("ship-review", None, None);
-        assert_eq!(review.current_step, Some(2));
-        assert_eq!(review.sentence, "Waiting at ship-review.");
+        let merge_wait = read("land", None, None);
+        assert_eq!(merge_wait.current_step, Some(4));
+        assert_eq!(merge_wait.sentence, "Waiting at land.");
+        assert_eq!(merge_wait.waiting_step(), None);
+
+        let arrival = crate::store::task_work::BreakpointArrival {
+            id: loopflow_model::id::LfProcessId::new(),
+            cursor: graph.find("after-ship-review").unwrap().cursor(),
+        };
+        let parked = TaskGraph::read(
+            &graph,
+            "after-ship-review".into(),
+            Some(&arrival),
+            None,
+            None,
+        );
+        assert_eq!(parked.current_step, Some(3));
+        assert_eq!(parked.sentence, "At breakpoint after-ship-review.");
+        assert_eq!(parked.waiting_step(), Some("after-ship-review"));
+        let mut blocked_arrival = arrival;
+        blocked_arrival.cursor.leaf_mut().progress.verdict =
+            Some(crate::graph::transitions::GraphVerdict {
+                decision: crate::graph::transitions::GraphDecision::Blocked,
+                summary: "needs a layout decision".into(),
+            });
+        let blocked = TaskGraph::read(
+            &graph,
+            "after-ship-review".into(),
+            Some(&blocked_arrival),
+            None,
+            None,
+        );
+        assert_eq!(
+            blocked.sentence,
+            "At breakpoint after-ship-review. Blocked: needs a layout decision"
+        );
     }
 
     #[test]

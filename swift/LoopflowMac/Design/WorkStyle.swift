@@ -98,7 +98,7 @@ private struct WorkPanel: ViewModifier {
 struct AutoBadge: View {
     var body: some View {
         WorkChip(text: "Auto", tone: .done)
-            .help("Auto is on: the run takes the interactive steps and lands the Task")
+            .help("Auto is on: the run continues through breakpoints and lands the Task")
             .accessibilityLabel("Auto on")
     }
 }

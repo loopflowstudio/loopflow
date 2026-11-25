@@ -582,3 +582,40 @@ fn working_tasks_are_the_working_section_and_the_others_have_their_own_queries()
         ["moving"]
     );
 }
+
+#[test]
+fn breakpoint_selection_state_parses_and_enters_attention() {
+    let parked = key("parked", WorkWorkspaceKind::Task);
+    let clear = key("clear", WorkWorkspaceKind::Task);
+    let work = vec![
+        SelectionWork {
+            key: parked.clone(),
+            parent_wave: None,
+            name: "LOO-1".into(),
+            states: BTreeSet::from([
+                SelectionState::Open,
+                SelectionState::Active,
+                SelectionState::Working,
+                SelectionState::Breakpoint,
+            ]),
+            activity_known: true,
+        },
+        SelectionWork {
+            key: clear,
+            parent_wave: None,
+            name: "LOO-2".into(),
+            states: BTreeSet::from([
+                SelectionState::Open,
+                SelectionState::Active,
+                SelectionState::Working,
+            ]),
+            activity_known: true,
+        },
+    ];
+    let resolved = Selection::parse("state:breakpoint", None)
+        .unwrap()
+        .resolve("repo", &work, &BTreeMap::new())
+        .unwrap();
+    assert_eq!(resolved.task_ids(), ["parked"]);
+    assert!(resolved.attention.contains(&parked));
+}

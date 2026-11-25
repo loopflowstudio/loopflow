@@ -11,12 +11,9 @@ pub struct GraphNode {
     pub key: u32,
     /// Authored occurrence id, when the definition names one.
     pub id: Option<String>,
-    /// Literal skill name, operation, or XOR router.
+    /// Literal skill name, operation, breakpoint, or XOR router.
     pub label: String,
     pub kind: GraphNodeKind,
-    // Retained Graph records predate the public field rename.
-    #[serde(alias = "human")]
-    pub interactive: bool,
     /// Key of the earlier node this deciding occurrence can return to.
     pub returns_to: Option<u32>,
     /// Composed Graphs this occurrence was compiled from, outermost first.

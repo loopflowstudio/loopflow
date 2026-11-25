@@ -133,8 +133,8 @@ crash that lost one, move that file away. Read which thread a start used from
 each fresh start adds one input to the Session. The notice prints on the starting terminal: a person's `lf
 resume` shows it, a viewer attaching to the pass's terminal later does not.
 
-A Task run: add `.lf/graphs/qarun.yaml` (`- implement` then `- interactive:
-ship-review`), commit it, and `lf task run <task> qarun`. Its headless step
+A Task run: add `.lf/graphs/qarun.yaml` (`- implement`, `- ship-review`,
+`- break`), commit it, and `lf task run <task> qarun`. Its headless step
 needs a stand-in `claude` first on both the server's and the CLI's
 private `PATH` that, for `-p`, reads one line, waits for a marker file, prints a
 stream-json `result` line, and otherwise reads and echoes terminal input. Kill
@@ -146,4 +146,9 @@ With the server up the death is noticed on the minute tick; a server start
 reads at once, after its start-up retention has cleared the dead carrier's
 pid (`task_graphs.run_died_at` keeps that it died). The headless stand-in is
 `lf --batch`'s child, in its own group: kill it by pid as well.
-`lf task run <task> qarun` at the interactive step passes it and ends the run.
+`lf task run <task> qarun` at the breakpoint continues past it and ends the run.
+For the end-to-end `feature` walkthrough (`docs/orchestration.md#where-a-person-takes-part`),
+configure different agents for `explore` and the Task conversation, quit the
+conversation during `explore`, reopen from **Now** or `lf resume --task <ID>`,
+open `scratch/explore.html`, and reply with the non-recommended layout so
+`kickoff` receives both the recommendation and the chosen direction.

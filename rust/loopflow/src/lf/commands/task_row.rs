@@ -52,7 +52,7 @@ pub struct TaskRow {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskRowGraph {
     pub name: String,
-    /// The step it stands at (`start`, `end` or an interactive step); `null` while a run carries it.
+    /// The step it stands at (`start`, `end`, a breakpoint or a landing wait); `null` while a run carries it.
     pub step: Option<String>,
 }
 

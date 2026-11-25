@@ -30,7 +30,7 @@ pub enum TaskRun {
         issue: String,
         /// The graph and where the run set out: `code from implement`.
         run: String,
-        /// The run may merge the PR: auto is on, or no interactive step is
+        /// The run may merge the PR: auto is on, or no breakpoint is
         /// left ahead, and nobody turned auto off.
         merges: bool,
         graph_process: LfProcessId,
@@ -38,7 +38,7 @@ pub enum TaskRun {
         /// terminal (`-b`, `-i`) keeps it.
         log: Option<PathBuf>,
     },
-    /// Nothing runs: the Task now waits at this interactive step.
+    /// Nothing runs: the Task now waits at this breakpoint.
     Waiting { issue: String, step: String },
     /// Nothing remained: the Task is at `end`.
     Ended { issue: String },
@@ -96,7 +96,7 @@ pub struct Waited {
 /// `task.run`: start the Task's run detached, as `lf [-b] [-a <agent>] task
 /// run <issue> [--from <step>]` does, and return once it is known. `approve`
 /// runs every step headless to `end`, as `-b` does, and writes no auto;
-/// without it the run stops before the next interactive step. With no
+/// without it the run stops at the next breakpoint. With no
 /// `agent`, each step's harness is the repository's configured default.
 pub fn run(
     directory: &Path,

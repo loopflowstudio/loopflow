@@ -27,9 +27,9 @@ struct TaskBriefTests {
     }
 
     @Test func stateNamesTheTopLevelStepTheBarMakesStrong() throws {
-        let steps: [TaskGraph.Step] = [.init(name: "plan", interactive: false), .init(name: "build", interactive: false),
-                                       .init(name: "ship-review", interactive: true)]
-        let building = TaskGraph(name: "code", interactiveSteps: [],
+        let steps: [TaskGraph.Step] = [.init(name: "plan", breakpoint: false), .init(name: "build", breakpoint: false),
+                                       .init(name: "after-ship-review", breakpoint: true)]
+        let building = TaskGraph(name: "code", breakpoints: ["after-ship-review"],
             position: .run(step: "plan", at: "implement", lfProcessId: "p", running: true),
             steps: steps, currentStep: 1, sentence: "build is running implement.")
         let moving = try roadmapTask(condition: "clear", reason: "ready", lifecycle: "moving",
@@ -40,7 +40,7 @@ struct TaskBriefTests {
         // Parked at a step it waits on someone: the row's word, not the runtime's.
         let parked = try roadmapTask(condition: "waiting", reason: "ready", lifecycle: "active", recommended: "run")
         #expect(TaskBrief.state(parked, graph: building).lead == "Waiting, at build.")
-        let unstarted = TaskGraph(name: "code", interactiveSteps: [], position: .at(step: TaskGraph.start),
+        let unstarted = TaskGraph(name: "code", breakpoints: ["after-ship-review"], position: .at(step: TaskGraph.start),
             steps: steps, currentStep: nil, sentence: "Not started.")
         let fresh = try roadmapTask(condition: "waiting", reason: "ready", lifecycle: "unstarted", recommended: "run",
                                     nextMove: "", graphHasRun: false)

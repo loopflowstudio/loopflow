@@ -46,9 +46,10 @@ public struct NowSection: Identifiable, Sendable, Hashable {
 }
 
 /// Flatten the roadmap into the NOW shape: every Task that needs someone
-/// across every visible Wave, bucketed by the word its row says, oldest-first
-/// within each bucket, with empty buckets dropped. Age uses the Work record's `updated_at` (RFC3339, so lexical order
-/// is chronological); NOW rows always have runtime evidence.
+/// across every visible Wave, bucketed by the word its row says, breakpoints
+/// first and oldest-first among peers, with empty buckets dropped. Age uses
+/// the Work record's `updated_at` (RFC3339, so lexical order is chronological);
+/// NOW rows always have runtime evidence.
 public func nowSections(from tasks: [RoadmapTask], waves: [WaveRoadmap]) -> [NowSection] {
     var rowsByGroup: [TaskConditionState: [NowRow]] = [:]
     for task in tasks {
@@ -59,7 +60,10 @@ public func nowSections(from tasks: [RoadmapTask], waves: [WaveRoadmap]) -> [Now
     return [TaskConditionState.blocked, .waiting, .unknown].compactMap { group in
         guard let rows = rowsByGroup[group], !rows.isEmpty else { return nil }
         let sorted = rows.sorted {
-            ($0.task.runtime?.updatedAt ?? "") < ($1.task.runtime?.updatedAt ?? "")
+            let lhsBreakpoint = $0.task.selectionStates.contains(.breakpoint)
+            let rhsBreakpoint = $1.task.selectionStates.contains(.breakpoint)
+            if lhsBreakpoint != rhsBreakpoint { return lhsBreakpoint }
+            return ($0.task.runtime?.updatedAt ?? "") < ($1.task.runtime?.updatedAt ?? "")
         }
         return NowSection(group: group, rows: sorted)
     }

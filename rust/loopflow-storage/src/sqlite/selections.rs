@@ -101,6 +101,7 @@ fn work_in(
                 task.section(),
                 task.owned || published.contains(&task.id),
                 auto_on.contains(&task.id),
+                task.at_breakpoint,
                 activity,
             ),
             parent_wave: task.wave_id,
@@ -138,6 +139,7 @@ struct SelectionTask {
     lifecycle: TaskState,
     owned: bool,
     runs_elsewhere: bool,
+    at_breakpoint: bool,
 }
 
 impl SelectionTask {
@@ -158,7 +160,8 @@ fn ordered_tasks_in(
     include: impl Fn(&SelectionTask) -> bool,
 ) -> StoreResult<Vec<SelectionTask>> {
     let mut query = conn.prepare(&format!(
-        "SELECT t.id,t.planning_rank,p.wave_id,t.planning_state,{}
+        "SELECT t.id,t.planning_rank,p.wave_id,t.planning_state,{},
+                EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id=t.id AND tg.run_start IS NULL AND tg.breakpoint IS NOT NULL)
          FROM tasks t LEFT JOIN projects p ON p.id=t.project_id
          WHERE t.repository_id=?1 AND {TASK_VISIBLE}",
         super::durable::task_state_sql("t")
@@ -176,6 +179,7 @@ fn ordered_tasks_in(
             lifecycle: runtime.lifecycle(row.get::<_, Option<String>>(3)?.as_deref()),
             owned: false,
             runs_elsewhere: false,
+            at_breakpoint: row.get(5)?,
         });
     }
     let ids: Vec<_> = rows.iter().map(|row| row.id.clone()).collect();
@@ -286,6 +290,7 @@ pub fn task_selection_states(
     section: TaskSection,
     claimed_or_published: bool,
     auto: bool,
+    at_breakpoint: bool,
     activity: Option<&TaskActivity>,
 ) -> BTreeSet<SelectionState> {
     let mut states = activity.map_or_else(BTreeSet::new, |activity| activity.states.clone());
@@ -295,6 +300,9 @@ pub fn task_selection_states(
     }
     if auto && open {
         states.insert(SelectionState::Auto);
+    }
+    if at_breakpoint && open && state == Some(TaskState::Active) {
+        states.insert(SelectionState::Breakpoint);
     }
     states.extend(state.map(|state| match state {
         TaskState::Unstarted => SelectionState::Unstarted,
@@ -1019,17 +1027,36 @@ mod tests {
 
     #[test]
     fn task_selection_states_show_only_observed_runtime_states() {
-        use SelectionState::{Auto, Open, Working};
+        use SelectionState::{Active, Auto, Breakpoint, Open, Working};
         for state in [TaskState::Unstarted, TaskState::Idle, TaskState::Active] {
             let states = task_selection_states(
                 state.observed_here(true),
                 TaskSection::Working,
                 true,
                 true,
+                true,
                 None,
             );
             assert_eq!(states, BTreeSet::from([Open, Working, Auto]));
         }
+        let parked = task_selection_states(
+            Some(TaskState::Active),
+            TaskSection::Working,
+            true,
+            false,
+            true,
+            None,
+        );
+        assert_eq!(parked, BTreeSet::from([Open, Working, Active, Breakpoint]));
+        let idle = task_selection_states(
+            Some(TaskState::Idle),
+            TaskSection::Working,
+            true,
+            false,
+            true,
+            None,
+        );
+        assert!(!idle.contains(&Breakpoint));
         for (state, expected) in [
             (TaskState::Moving, SelectionState::Moving),
             (TaskState::Done, SelectionState::Done),
@@ -1037,8 +1064,9 @@ mod tests {
         ] {
             let section = TaskSection::of(state, true, true);
             let states =
-                task_selection_states(state.observed_here(true), section, true, true, None);
+                task_selection_states(state.observed_here(true), section, true, true, true, None);
             assert!(states.contains(&expected));
+            assert!(!states.contains(&Breakpoint));
         }
     }
 }

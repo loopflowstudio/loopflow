@@ -28,12 +28,12 @@ use loopflow_storage::work::task::Task;
 
 const GRAPHS: [(&str, &str); 5] = [
     ("proof", "- cmd: task sync --plan\n"),
-    ("feature", "- graph: proof\n- interactive: {name: demo, id: review}\n"),
-    ("findings", "- graph: proof\n- interactive: {name: research, id: findings}\n"),
-    ("captured", "- implement\n- interactive: {name: demo, id: review}\n"),
+    ("feature", "- graph: proof\n- step: {name: demo, id: review}\n- break: after-review\n"),
+    ("findings", "- graph: proof\n- step: {name: research, id: findings}\n- break: after-findings\n"),
+    ("captured", "- implement\n- step: {name: demo, id: review}\n- break: after-review\n"),
     (
         "conditional",
-        "- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - interactive: demo\n      skip:\n        description: Nothing to review\n",
+        "- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - demo\n          - break: after-demo\n      skip:\n        description: Nothing to review\n",
     ),
 ];
 
@@ -231,7 +231,7 @@ fn run_takes_up_the_named_else_waves_else_repositorys_else_code_graph() {
     let none = none_options();
     let rows: [(&str, &TaskProcessOptions, bool, Expected); 4] = [
         (
-            "Wave default stops at its interactive step",
+            "Wave default stops at its breakpoint",
             &none,
             false,
             Ok(run("feature", true, "sync --plan", Some("after-review"))),
@@ -292,21 +292,21 @@ fn run_on_a_captured_graph_waits_runs_or_ends_from_its_position() {
             Err("--from <step>"),
         ),
         (
-            "--from an interactive step waits there",
+            "--from a worker before a breakpoint runs it then stops there",
             "end",
             from("review"),
             false,
             Ok(run("captured", false, "review", Some("after-review"))),
         ),
         (
-            "--from a step that runs stops before the next interactive one",
+            "--from a step that runs stops at the next breakpoint",
             "end",
             from("implement"),
             false,
             Ok(run("captured", false, "implement", Some("after-review"))),
         ),
         (
-            "-b --from an interactive step runs through it",
+            "-b --from a worker before a breakpoint runs through it",
             "end",
             from("review"),
             true,

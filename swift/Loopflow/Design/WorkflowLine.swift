@@ -115,7 +115,7 @@ public struct WorkflowLine: View {
     private var stepViews: some View {
         ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
             HStack(spacing: Spacing.xxs) {
-                if step.interactive {
+                if step.breakpoint {
                     Image(systemName: "person.fill").font(Typography.meta)
                         .accessibilityLabel("you take part")
                 }

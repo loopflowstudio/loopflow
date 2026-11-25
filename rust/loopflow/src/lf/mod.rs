@@ -2041,12 +2041,12 @@ pub struct SyncArgs {
 /// `lf task auto on|off`.
 #[derive(Subcommand, Debug)]
 pub enum AutoCommand {
-    /// Run the Task with nobody waited for: stand in at each interactive step, and merge
+    /// Run the Task with nobody waited for: continue through breakpoints, and merge
     #[command(
         after_help = "Prints what `lf task run` prints and returns once the run registers (`-b` \
-waits for it). A Task waiting at an interactive step is stood in for there; a Task already running \
-carries on and stands in from its next one. With no ISSUE, the checkout's Task, or a new one for \
-its branch."
+waits for it). A Task parked at a breakpoint continues on its worker's proposed path; a Task already \
+running carries on through its next breakpoints. With no ISSUE, the checkout's Task, or a new one \
+for its branch."
     )]
     On {
         issue: Option<String>,
@@ -2060,9 +2060,9 @@ its branch."
         #[arg(long)]
         json: bool,
     },
-    /// Take the interactive steps and the merge back: the run waits at its next one
+    /// Take the breakpoints and the merge back: the run waits at its next one
     #[command(
-        after_help = "Nothing is killed: the run waits at its next interactive step, or before a \
+        after_help = "Nothing is killed: the run waits at its next breakpoint, or before a \
 step that merges, and auto-merge Loopflow armed is disarmed. With no ISSUE, the checkout's Task."
     )]
     Off {
@@ -2232,7 +2232,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     },
     /// Complete a Task without moving its Graph; open children need --children
     #[command(
-        after_help = "A Task with open children refuses to complete, writing nothing, and lists every open descendant. Pass --children rehome to move its direct open children up to the nearest open ancestor (or to the top level) where they stay open, or --children abandon to mark merged descendants done and abandon the rest, closing their PRs and deleting their branches. --children abandon refuses while a descendant it would abandon has a running Graph, headless run or active turn; a conversation idle at an interactive step is closed. `lf task reopen` reopens a done or abandoned Task."
+        after_help = "A Task with open children refuses to complete, writing nothing, and lists every open descendant. Pass --children rehome to move its direct open children up to the nearest open ancestor (or to the top level) where they stay open, or --children abandon to mark merged descendants done and abandon the rest, closing their PRs and deleting their branches. --children abandon refuses while a descendant it would abandon has a running Graph, headless run or active turn; a conversation idle at a breakpoint is closed. `lf task reopen` reopens a done or abandoned Task."
     )]
     Complete {
         issue: String,
@@ -2478,7 +2478,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Turn the Task's auto setting on or off: who takes its interactive steps
+    /// Turn the Task's auto setting on or off: whether runs continue through breakpoints
     Auto {
         #[command(subcommand)]
         cmd: AutoCommand,

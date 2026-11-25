@@ -632,7 +632,7 @@ struct SidebarStatusToggle: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(isOn ? "Sorted by status. Click to restore saved order." : "Sort by status: Blocked, Error, Available, Idle, Busy.")
+        .help(isOn ? "Sorted by status. Click to restore saved order." : "Sort by status: Breakpoint, Blocked, Error, Available, Idle, Busy.")
         .accessibilityValue(isOn ? "On" : "Off")
     }
 }

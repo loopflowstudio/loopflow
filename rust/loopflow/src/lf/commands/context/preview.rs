@@ -268,6 +268,9 @@ impl GraphContextPreview {
         fn labels(nodes: &[GraphNode], text: &mut String) {
             for node in nodes {
                 text.push_str(&format!("\n{}: {}", node.key, node.label));
+                if node.kind == GraphNodeKind::Breakpoint {
+                    text.push_str(" [break]");
+                }
                 if let Some(target) = node.returns_to {
                     text.push_str(&format!(" (returns to {target})"));
                 }
@@ -289,7 +292,18 @@ impl GraphContextPreview {
                 GraphInput::Unavailable { reason } => {
                     text.push_str(&format!("unavailable: {reason}"))
                 }
-                GraphInput::NotAgent => text.push_str("not an agent prompt (command not executed)"),
+                GraphInput::NotAgent => {
+                    let detail = if self
+                        .compiled
+                        .node_at(node.node)
+                        .is_some_and(|n| n.kind == GraphNodeKind::Breakpoint)
+                    {
+                        "breakpoint"
+                    } else {
+                        "command not executed"
+                    };
+                    text.push_str(&format!("not an agent prompt ({detail})"));
+                }
             }
         }
         text

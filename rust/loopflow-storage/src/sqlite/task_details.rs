@@ -33,6 +33,8 @@ pub struct TaskDetailFacts {
     pub graph_names: HashMap<TaskId, String>,
     /// The step each Task stands at on its graph; absent while a run carries it.
     pub steps: HashMap<TaskId, String>,
+    /// Each Task parked at a breakpoint: its breakpoint name and saved arrival JSON.
+    pub breakpoints: HashMap<TaskId, (String, String)>,
     /// Tasks with auto on.
     pub auto_on: HashSet<TaskId>,
     pub tracker_actions: HashMap<TaskId, TrackerActions>,
@@ -49,6 +51,24 @@ impl SqliteStore {
         let ids: Vec<TaskId> = tasks.iter().map(|task| task.id.clone()).collect();
         let json = ids_json(ids.iter().map(TaskId::as_str));
         let (local, ownership) = super::task_ownership::ownerships_in(&snapshot, &ids)?;
+        let (steps, breakpoints) = {
+            let mut steps = HashMap::new();
+            let mut breakpoints = HashMap::new();
+            let mut statement = snapshot.prepare(
+                "SELECT task_id,step,breakpoint FROM task_graphs
+                     WHERE task_id IN (SELECT value FROM json_each(?1)) AND run_start IS NULL",
+            )?;
+            let mut rows = statement.query([&json])?;
+            while let Some(row) = rows.next()? {
+                let id = TaskId::from_raw(row.get::<_, String>(0)?);
+                let step: String = row.get(1)?;
+                if let Some(breakpoint) = row.get::<_, Option<String>>(2)? {
+                    breakpoints.insert(id.clone(), (step.clone(), breakpoint));
+                }
+                steps.insert(id, step);
+            }
+            (steps, breakpoints)
+        };
         let facts = TaskDetailFacts {
             states: states_in(&snapshot, &json)?,
             open_children: keyed(
@@ -119,13 +139,8 @@ impl SqliteStore {
                 &json,
                 |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
             )?,
-            steps: keyed(
-                &snapshot,
-                "SELECT task_id,step FROM task_graphs
-                 WHERE task_id IN (SELECT value FROM json_each(?1)) AND run_start IS NULL",
-                &json,
-                |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
-            )?,
+            steps,
+            breakpoints,
             auto_on: auto_on_in(&snapshot, &json)?,
             tracker_actions: super::planning_sync::task_tracker_actions_in(&snapshot, &ids)?,
             repository_paths: repository_paths_in(&snapshot)?,

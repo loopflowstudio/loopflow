@@ -21,7 +21,7 @@ public struct TaskActions: Equatable {
 
         public func help(issue: String) -> String {
             self == .on
-                ? "lf task auto off \(issue): the run waits at its next interactive step for you, and auto-merge is disarmed"
+                ? "lf task auto off \(issue): the run waits at its next breakpoint for you, and auto-merge is disarmed"
                 : "lf task auto on \(issue): run every remaining step and land it"
         }
     }

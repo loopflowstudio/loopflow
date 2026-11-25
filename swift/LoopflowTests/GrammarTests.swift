@@ -116,11 +116,12 @@ struct GrammarTests {
     @Test func plainTextAtTheFileSizeLimitKeepsEveryLine() {
         let line = String(repeating: "x", count: 98)
         let text = String(repeating: line + "\r\n", count: 10_000)
-        let lines = CodeLine.read(text, grammar: Grammar.named("notes.txt"))
-        #expect(lines.count == 10_001)
-        #expect(lines.first?.text == line)
-        #expect(lines.last?.text == "")
-        #expect(lines.allSatisfy { $0.highlights.isEmpty })
+        let index = CodeLineIndex(text)
+        let source = text as NSString
+        #expect(index.count == 10_001)
+        #expect(index.text(ofLine: 1, in: source) == line)
+        #expect(index.text(ofLine: 10_001, in: source) == "")
+        #expect(Grammar.named("notes.txt") == nil)
     }
 
     /// A hunk that opens inside a docstring colors as a docstring once the

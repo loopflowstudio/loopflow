@@ -905,9 +905,12 @@ struct TaskFilesTests {
         #expect(document.saveMessage == "Updated from disk")
         let view = TaskFilesView(store: store, checkoutBase: nil)
         let reader = try view.inspect().find(TaskCodeReader.self).actualView()
-        let lines = CodeLine.read(reader.text, grammar: Grammar.named(reader.path))
-        #expect(lines.map(\.text) == ["// 😀", "struct NewStore {}"])
-        #expect(lines[1].highlights.contains { $0.ink == .keyword && $0.range == NSRange(location: 0, length: 6) })
+        let index = CodeLineIndex(reader.text)
+        let source = reader.text as NSString
+        #expect((1...index.count).map { index.text(ofLine: $0, in: source) } == ["// 😀", "struct NewStore {}"])
+        let highlights = Grammar.named(reader.path)?.highlights(of: reader.text) ?? []
+        let line2Start = try #require(index.line(at: 2)).location
+        #expect(highlights.contains { $0.ink == .keyword && $0.range == NSRange(location: line2Start, length: 6) })
 
         func bracket(_ key: String) throws -> DesktopAction {
             try #require(DesktopAction.binding(characters: key, modifiers: .command, context: context)?.0)
@@ -965,7 +968,7 @@ struct TaskFilesTests {
         let field = try view.inspect().find(PaletteSearchField.self).actualView()
         field.text = "read"
         let reader = try view.inspect().find(TaskCodeReader.self).actualView()
-        await find.search(lines: CodeLine.read(reader.text, grammar: nil))
+        await find.search(text: reader.text)
         #expect(find.label == "1 of 3")
         #expect(find.current?.range == NSRange(location: 6, length: 4))
         field.submit()

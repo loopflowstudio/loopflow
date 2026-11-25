@@ -249,24 +249,7 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
     private func paintSyntax() {
         guard let theme, let colored, colored.version == editVersion, !composing,
               let storage = editor.textStorage, let font = editor.font else { return }
-        let inks = SyntaxInks.of(theme)
-        let whole = NSRange(location: 0, length: storage.length)
-        storage.beginEditing()
-        storage.addAttribute(.foregroundColor, value: NSColor(theme.palette.text), range: whole)
-        storage.addAttribute(.font, value: font, range: whole)
-        let bold = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
-        let italic = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
-        for highlight in colored.highlights where NSMaxRange(highlight.range) <= storage.length {
-            guard let ink = highlight.ink else { continue }
-            switch ink {
-            case .emphasis: storage.addAttribute(.font, value: italic, range: highlight.range)
-            case .strong: storage.addAttribute(.font, value: bold, range: highlight.range)
-            default:
-                if ink == .heading { storage.addAttribute(.font, value: bold, range: highlight.range) }
-                if let color = inks.color(ink) { storage.addAttribute(.foregroundColor, value: NSColor(color), range: highlight.range) }
-            }
-        }
-        storage.endEditing()
+        storage.paint(colored.highlights, theme: theme, font: font)
     }
 
     /// Storage cannot change inside its own editing callback, and `editVersion`

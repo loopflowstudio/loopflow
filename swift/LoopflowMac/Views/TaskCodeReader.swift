@@ -108,10 +108,8 @@ struct TaskCodeReader: View {
         }
     }
 
-    nonisolated static func monoFont() -> NSFont {
-        NSFont(name: Typography.monoFace, size: Typography.monoSize)
-            ?? .monospacedSystemFont(ofSize: Typography.monoSize, weight: .regular)
-    }
+    static let monoFont: NSFont = NSFont(name: Typography.monoFace, size: Typography.monoSize)
+        ?? .monospacedSystemFont(ofSize: Typography.monoSize, weight: .regular)
 }
 
 // MARK: Line index
@@ -187,10 +185,6 @@ struct CodeLineIndex: Sendable {
         return low + 1
     }
 
-    func contentRange(forLine number: Int) -> NSRange? {
-        line(at: number).map { NSRange(location: $0.location, length: $0.contentLength) }
-    }
-
     func paragraphRange(forLine number: Int) -> NSRange? {
         line(at: number).map { NSRange(location: $0.location, length: $0.fullLength) }
     }
@@ -204,8 +198,8 @@ struct CodeLineIndex: Sendable {
     }
 
     func text(ofLine number: Int, in source: NSString) -> String {
-        guard let range = contentRange(forLine: number), NSMaxRange(range) <= source.length else { return "" }
-        return source.substring(with: range)
+        guard let line = line(at: number), line.location + line.contentLength <= source.length else { return "" }
+        return source.substring(with: NSRange(location: line.location, length: line.contentLength))
     }
 }
 
@@ -216,6 +210,8 @@ struct CodeLineIndex: Sendable {
 /// underline, and full-line background highlights.
 @MainActor
 final class CodeReaderTextView: NSTextView {
+    private static let nonIdentifier = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_$")).inverted
+
     var isInteractive = true
     var lineIndex = CodeLineIndex("")
     var filePath = ""
@@ -228,16 +224,48 @@ final class CodeReaderTextView: NSTextView {
     var onPlainClick: ((Int?, FileJumps.Target?) -> Void)?
     var onCommandClick: ((Int, FileJumps.Target?) -> Void)?
 
-    private var defaultLineHeight: CGFloat {
-        let font = self.font ?? TaskCodeReader.monoFont()
+    var defaultLineHeight: CGFloat {
+        let font = self.font ?? TaskCodeReader.monoFont
         return ceil(font.ascender - font.descender + font.leading)
+    }
+
+    func lineNumber(for fragment: NSTextLayoutFragment) -> Int? {
+        guard let contentManager = textContentStorage else { return nil }
+        let offset = contentManager.offset(from: contentManager.documentRange.location, to: fragment.rangeInElement.location)
+        return offset == NSNotFound ? nil : lineIndex.lineNumber(forUTF16Offset: offset)
+    }
+
+    func layoutFragment(forLine line: Int) -> NSTextLayoutFragment? {
+        guard let layoutManager = textLayoutManager, let contentManager = textContentStorage,
+              let info = lineIndex.line(at: line),
+              let location = contentManager.location(contentManager.documentRange.location, offsetBy: info.location)
+        else { return nil }
+        layoutManager.ensureLayout(for: NSTextRange(location: location))
+        return layoutManager.textLayoutFragment(for: location)
+    }
+
+    func textRange(for nsRange: NSRange) -> NSTextRange? {
+        guard let contentManager = textContentStorage,
+              let start = contentManager.location(contentManager.documentRange.location, offsetBy: nsRange.location),
+              let end = contentManager.location(start, offsetBy: nsRange.length) else { return nil }
+        return NSTextRange(location: start, end: end)
+    }
+
+    /// The 1-based line and fragments whose text line covers `containerY` (nil inside an inline slot gap or past EOF).
+    func lineHit(atContainerY y: CGFloat) -> (line: Int, fragment: NSTextLayoutFragment, lineFragment: NSTextLineFragment)? {
+        guard y >= 0, let layoutManager = textLayoutManager else { return nil }
+        layoutManager.ensureLayout(for: CGRect(x: 0, y: max(0, y - 32), width: max(bounds.width, 1), height: 64))
+        guard let fragment = layoutManager.textLayoutFragment(for: CGPoint(x: 0, y: y)) else { return nil }
+        let localY = y - fragment.layoutFragmentFrame.minY
+        guard let lineFragment = fragment.textLineFragments.first(where: {
+            localY >= $0.typographicBounds.minY && localY <= $0.typographicBounds.maxY
+        }), let number = lineNumber(for: fragment) else { return nil }
+        return (number, fragment, lineFragment)
     }
 
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
-        guard !highlightedLines.isEmpty,
-              let layoutManager = textLayoutManager,
-              let contentManager = textContentStorage else { return }
+        guard !highlightedLines.isEmpty, let layoutManager = textLayoutManager else { return }
         let insetY = textContainerOrigin.y
         let searchY = max(0, rect.minY - insetY)
         let startLocation = layoutManager.textLayoutFragment(for: CGPoint(x: 0, y: searchY))?.rangeInElement.location
@@ -246,13 +274,9 @@ final class CodeReaderTextView: NSTextView {
         layoutManager.enumerateTextLayoutFragments(from: startLocation, options: []) { fragment in
             let y = fragment.layoutFragmentFrame.minY + insetY
             if y > rect.maxY { return false }
-            let offset = contentManager.offset(from: contentManager.documentRange.location, to: fragment.rangeInElement.location)
-            if offset != NSNotFound {
-                let line = self.lineIndex.lineNumber(forUTF16Offset: offset)
-                if self.highlightedLines.contains(line) {
-                    let height = fragment.textLineFragments.first?.typographicBounds.height ?? self.defaultLineHeight
-                    NSRect(x: rect.minX, y: y, width: rect.width, height: height).fill()
-                }
+            if let line = self.lineNumber(for: fragment), self.highlightedLines.contains(line) {
+                let height = fragment.textLineFragments.first?.typographicBounds.height ?? self.defaultLineHeight
+                NSRect(x: rect.minX, y: y, width: rect.width, height: height).fill()
             }
             return true
         }
@@ -286,18 +310,8 @@ final class CodeReaderTextView: NSTextView {
 
     /// Resolve the 1-based line number and identifier under `point` (in view coordinates).
     func hitTestIdentifier(at point: CGPoint) -> (line: Int?, target: FileJumps.Target?) {
-        guard let layoutManager = textLayoutManager, let contentManager = textContentStorage else { return (nil, nil) }
         let containerPoint = CGPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
-        guard containerPoint.y >= 0 else { return (nil, nil) }
-        layoutManager.ensureLayout(for: CGRect(x: 0, y: max(0, containerPoint.y - 32), width: max(bounds.width, 1), height: 64))
-        guard let fragment = layoutManager.textLayoutFragment(for: containerPoint) else { return (nil, nil) }
-        let localY = containerPoint.y - fragment.layoutFragmentFrame.minY
-        guard let lineFragment = fragment.textLineFragments.first(where: {
-            localY >= $0.typographicBounds.minY && localY <= $0.typographicBounds.maxY
-        }) else { return (nil, nil) }
-        let fragOffset = contentManager.offset(from: contentManager.documentRange.location, to: fragment.rangeInElement.location)
-        guard fragOffset != NSNotFound else { return (nil, nil) }
-        let number = lineIndex.lineNumber(forUTF16Offset: fragOffset)
+        guard let (number, fragment, lineFragment) = lineHit(atContainerY: containerPoint.y) else { return (nil, nil) }
         let localX = containerPoint.x - fragment.layoutFragmentFrame.minX
         guard localX >= 0, localX < lineFragment.typographicBounds.maxX else { return (number, nil) }
         var indexInLine = lineFragment.characterIndex(for: CGPoint(x: localX, y: lineFragment.typographicBounds.midY))
@@ -319,7 +333,6 @@ final class CodeReaderTextView: NSTextView {
     static func identifier(in lineText: String, path: String, line number: Int, at utf16Index: Int) -> FileJumps.Target? {
         let source = lineText as NSString
         guard utf16Index >= 0, utf16Index < source.length else { return nil }
-        let nonIdentifier = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_$")).inverted
         guard source.rangeOfCharacter(from: nonIdentifier, options: [], range: NSRange(location: utf16Index, length: 1)).location == NSNotFound else {
             return nil
         }
@@ -346,7 +359,7 @@ final class CodeReaderGutterView: NSView {
     var palette: LoopflowPalette? {
         didSet { needsDisplay = true }
     }
-    var font: NSFont = TaskCodeReader.monoFont() {
+    var font: NSFont = TaskCodeReader.monoFont {
         didSet { cachedDigitAdvance = nil; needsDisplay = true }
     }
     var selectedLines = IndexSet() {
@@ -404,40 +417,25 @@ final class CodeReaderGutterView: NSView {
 
     /// 1-based line number whose text line covers `y` (nil inside an inline slot gap or past EOF).
     func lineNumber(atY y: CGFloat) -> Int? {
-        guard let scrollView, let textView,
-              let layoutManager = textView.textLayoutManager,
-              let contentManager = textView.textContentStorage else { return nil }
-        let scrollY = scrollView.contentView.bounds.minY
-        let containerY = y + scrollY - textView.textContainerOrigin.y
-        guard containerY >= 0 else { return nil }
-        layoutManager.ensureLayout(for: CGRect(x: 0, y: max(0, containerY - 32), width: max(textView.bounds.width, 1), height: 64))
-        guard let fragment = layoutManager.textLayoutFragment(for: CGPoint(x: 0, y: containerY)) else { return nil }
-        let localY = containerY - fragment.layoutFragmentFrame.minY
-        guard let lineFragment = fragment.textLineFragments.first,
-              localY >= lineFragment.typographicBounds.minY,
-              localY <= lineFragment.typographicBounds.maxY else { return nil }
-        let offset = contentManager.offset(from: contentManager.documentRange.location, to: fragment.rangeInElement.location)
-        guard offset != NSNotFound else { return nil }
-        return textView.lineIndex.lineNumber(forUTF16Offset: offset)
+        guard let scrollView, let textView else { return nil }
+        let containerY = y + scrollView.contentView.bounds.minY - textView.textContainerOrigin.y
+        return textView.lineHit(atContainerY: containerY)?.line
     }
 
     override func draw(_ dirtyRect: NSRect) {
         guard let palette else { return }
         NSColor(palette.background).setFill()
         dirtyRect.fill()
-        guard let scrollView, let textView,
-              let layoutManager = textView.textLayoutManager,
-              let contentManager = textView.textContentStorage else { return }
+        guard let scrollView, let textView, let layoutManager = textView.textLayoutManager else { return }
         let scrollY = scrollView.contentView.bounds.minY
         let insetY = textView.textContainerOrigin.y
         let searchY = max(0, dirtyRect.minY + scrollY - insetY)
         let startLocation = layoutManager.textLayoutFragment(for: CGPoint(x: 0, y: searchY))?.rangeInElement.location
             ?? layoutManager.documentRange.location
 
-        let trailingPad = Spacing.xs
-        let defaultHeight = ceil(font.ascender - font.descender + font.leading)
+        let defaultHeight = textView.defaultLineHeight
         let advance = digitAdvance
-        let rightEdge = bounds.width - trailingPad
+        let rightEdge = bounds.width - Spacing.xs
         let secondaryInk = NSColor(palette.textSecondary)
         let primaryInk = NSColor(palette.text)
         let tertiaryInk = NSColor(palette.textTertiary)
@@ -446,9 +444,7 @@ final class CodeReaderGutterView: NSView {
         layoutManager.enumerateTextLayoutFragments(from: startLocation, options: []) { fragment in
             let y = fragment.layoutFragmentFrame.minY + insetY - scrollY
             if y > dirtyRect.maxY { return false }
-            let offset = contentManager.offset(from: contentManager.documentRange.location, to: fragment.rangeInElement.location)
-            guard offset != NSNotFound else { return true }
-            let line = textView.lineIndex.lineNumber(forUTF16Offset: offset)
+            guard let line = textView.lineNumber(for: fragment) else { return true }
             let lineBounds = fragment.textLineFragments.first?.typographicBounds
                 ?? CGRect(x: 0, y: 0, width: 0, height: defaultHeight)
             let rowRect = NSRect(x: 0, y: y + lineBounds.minY, width: self.bounds.width, height: lineBounds.height)
@@ -521,7 +517,7 @@ final class CodeReaderContainerView: NSView {
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = true
         textView.autoresizingMask = []
-        textView.font = TaskCodeReader.monoFont()
+        textView.font = TaskCodeReader.monoFont
         textView.textContainerInset = NSSize(width: Spacing.md, height: Spacing.sm)
         textView.textContainer?.widthTracksTextView = false
         textView.textContainer?.heightTracksTextView = false
@@ -633,7 +629,6 @@ final class CodeReaderCoordinator {
     private var lastRenderSignature: RenderSignature?
     private var slotHosts: [Int: SlotHost] = [:]
     private var appliedSpacings: [Int: CGFloat] = [:]
-    private var extraBottomInset: CGFloat = 0
 
     private struct ScrollTarget: Equatable {
         let visitID: UUID?
@@ -648,16 +643,15 @@ final class CodeReaderCoordinator {
     private var lastScrollY: CGFloat = 0
 
     private weak var store: TaskFilesStore?
-    private var addToConversation: ((String) -> Bool)?
 
     func attach(to container: CodeReaderContainerView) {
         self.container = container
         container.onLayout = { [weak self] in self?.handleLayout() }
         container.textView.onPlainClick = { [weak self] line, target in
-            self?.handlePlainClick(line: line, target: target)
+            self?.handleClick(line: line, target: target, lookup: false)
         }
         container.textView.onCommandClick = { [weak self] line, target in
-            self?.handleCommandClick(line: line, target: target)
+            self?.handleClick(line: line, target: target, lookup: true)
         }
         container.gutterView.onSelectLine = { [weak self] line, extend in
             self?.handleGutterSelect(line: line, extend: extend)
@@ -683,10 +677,9 @@ final class CodeReaderCoordinator {
 
     fileprivate func update(container: CodeReaderContainerView, state: CodeReaderRepresentable) {
         store = state.store
-        addToConversation = state.addToConversation
         let textView = container.textView
         let gutterView = container.gutterView
-        let font = TaskCodeReader.monoFont()
+        let font = TaskCodeReader.monoFont
 
         let textChanged = currentPath != state.path || currentText != state.text
         let themeChanged = currentTheme != state.theme
@@ -709,7 +702,7 @@ final class CodeReaderCoordinator {
             let index = CodeLineIndex(state.text)
             textView.lineIndex = index
             textView.filePath = state.path
-            applyPalette(to: container, palette: state.palette, font: font, recolorStorage: false)
+            applyPalette(to: container, palette: state.palette, recolorStorage: false)
             textView.font = font
             textView.string = state.text
             currentTheme = state.theme
@@ -728,9 +721,9 @@ final class CodeReaderCoordinator {
             scheduleParse(path: state.path, text: state.text, store: state.store)
         } else if themeChanged {
             currentTheme = state.theme
-            applyPalette(to: container, palette: state.palette, font: font, recolorStorage: highlights.isEmpty)
+            applyPalette(to: container, palette: state.palette, recolorStorage: highlights.isEmpty)
             if !highlights.isEmpty {
-                paintSyntax(in: textView, highlights: highlights, theme: state.theme, font: font)
+                textView.textStorage?.paint(highlights, theme: state.theme, font: font)
             }
         }
 
@@ -768,24 +761,17 @@ final class CodeReaderCoordinator {
         if scrollTarget != lastScrollTarget {
             lastScrollTarget = scrollTarget
             if let location = state.location {
-                let rangeInLine: NSRange?
-                if let hit = location.hit, hit.revision == state.revision {
-                    let lineText = textView.lineIndex.text(ofLine: location.line, in: textView.string as NSString)
-                    rangeInLine = hit.range(in: lineText)
-                } else {
-                    rangeInLine = nil
-                }
+                let rangeInLine = hitRange(for: location.hit, revision: state.revision, in: textView)
                 scroll(container: container, toLine: location.line, rangeInLine: rangeInLine)
             }
         }
     }
 
-    private func applyPalette(to container: CodeReaderContainerView, palette: LoopflowPalette, font: NSFont, recolorStorage: Bool) {
+    private func applyPalette(to container: CodeReaderContainerView, palette: LoopflowPalette, recolorStorage: Bool) {
         let textView = container.textView
         textView.applyPalette(palette)
         container.scrollView.backgroundColor = NSColor(palette.background)
         container.gutterView.palette = palette
-        container.gutterView.font = font
         if recolorStorage, let storage = textView.textStorage, storage.length > 0 {
             let whole = NSRange(location: 0, length: storage.length)
             storage.beginEditing()
@@ -812,33 +798,14 @@ final class CodeReaderCoordinator {
             if let outline = result.1, let version { document?.receive(outline, version: version) }
             self.highlights = result.0
             if let container = self.container, let activeTheme = self.currentTheme {
-                self.paintSyntax(in: container.textView, highlights: result.0, theme: activeTheme, font: TaskCodeReader.monoFont())
+                container.textView.textStorage?.paint(result.0, theme: activeTheme, font: TaskCodeReader.monoFont)
             }
         }
     }
 
-    private func paintSyntax(in textView: CodeReaderTextView, highlights: [Grammar.Highlight], theme: ThemeDefinition, font: NSFont) {
-        guard let storage = textView.textStorage, storage.length > 0 else { return }
-        let inks = SyntaxInks.of(theme)
-        let whole = NSRange(location: 0, length: storage.length)
-        let bold = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
-        let italic = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
-        storage.beginEditing()
-        storage.addAttribute(.foregroundColor, value: NSColor(theme.palette.text), range: whole)
-        storage.addAttribute(.font, value: font, range: whole)
-        for highlight in highlights where NSMaxRange(highlight.range) <= storage.length {
-            guard let ink = highlight.ink else { continue }
-            switch ink {
-            case .emphasis: storage.addAttribute(.font, value: italic, range: highlight.range)
-            case .strong: storage.addAttribute(.font, value: bold, range: highlight.range)
-            default:
-                if ink == .heading { storage.addAttribute(.font, value: bold, range: highlight.range) }
-                if let color = inks.color(ink) {
-                    storage.addAttribute(.foregroundColor, value: NSColor(color), range: highlight.range)
-                }
-            }
-        }
-        storage.endEditing()
+    private func hitRange(for hit: TaskGrepHit?, revision: String?, in textView: CodeReaderTextView) -> NSRange? {
+        guard let hit, hit.revision == revision else { return nil }
+        return hit.range(in: textView.lineIndex.text(ofLine: hit.line, in: textView.string as NSString))
     }
 
     private func updateRenderingAttributes(in textView: CodeReaderTextView, state: CodeReaderRepresentable) {
@@ -853,8 +820,7 @@ final class CodeReaderCoordinator {
         guard signature != lastRenderSignature else { return }
         lastRenderSignature = signature
 
-        guard let layoutManager = textView.textLayoutManager,
-              let contentManager = textView.textContentStorage else { return }
+        guard let layoutManager = textView.textLayoutManager else { return }
 
         for range in previousRenderedRanges {
             layoutManager.removeRenderingAttribute(.underlineStyle, for: range)
@@ -863,34 +829,25 @@ final class CodeReaderCoordinator {
         }
         previousRenderedRanges.removeAll()
 
-        func textRange(_ nsRange: NSRange) -> NSTextRange? {
-            let docStart = contentManager.documentRange.location
-            guard let start = contentManager.location(docStart, offsetBy: nsRange.location),
-                  let end = contentManager.location(start, offsetBy: nsRange.length) else { return nil }
-            return NSTextRange(location: start, end: end)
-        }
-
         if let target = state.target,
            let docRange = textView.lineIndex.documentRange(line: target.line, rangeInLine: target.range),
-           let range = textRange(docRange) {
+           let range = textView.textRange(for: docRange) {
             layoutManager.addRenderingAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, for: range)
             layoutManager.addRenderingAttribute(.underlineColor, value: NSColor(state.palette.actionInk), for: range)
             previousRenderedRanges.append(range)
         }
 
-        if let hit = state.location?.hit, hit.revision == state.revision {
-            let lineText = textView.lineIndex.text(ofLine: hit.line, in: textView.string as NSString)
-            if let inLine = hit.range(in: lineText),
-               let docRange = textView.lineIndex.documentRange(line: hit.line, rangeInLine: inLine),
-               let range = textRange(docRange) {
-                layoutManager.addRenderingAttribute(.backgroundColor, value: NSColor(state.palette.keyboardFocus.opacity(0.3)), for: range)
-                previousRenderedRanges.append(range)
-            }
+        if let hit = state.location?.hit,
+           let inLine = hitRange(for: hit, revision: state.revision, in: textView),
+           let docRange = textView.lineIndex.documentRange(line: hit.line, rangeInLine: inLine),
+           let range = textView.textRange(for: docRange) {
+            layoutManager.addRenderingAttribute(.backgroundColor, value: NSColor(state.palette.keyboardFocus.opacity(0.3)), for: range)
+            previousRenderedRanges.append(range)
         }
 
         if let match = state.findMatch, case .line(let line) = match.cell,
            let docRange = textView.lineIndex.documentRange(line: line, rangeInLine: match.range),
-           let range = textRange(docRange) {
+           let range = textView.textRange(for: docRange) {
             layoutManager.addRenderingAttribute(.backgroundColor, value: NSColor(state.palette.keyboardFocus.opacity(0.45)), for: range)
             previousRenderedRanges.append(range)
         }
@@ -920,10 +877,7 @@ final class CodeReaderCoordinator {
             setParagraphSpacing(0, onLine: line, in: textView)
         }
 
-        guard !activeLines.isEmpty else {
-            updateLastLineBottomInset(in: textView)
-            return
-        }
+        guard !activeLines.isEmpty else { return }
 
         let viewportWidth = max(200, container.scrollView.contentView.bounds.width)
         let source = textView.string as NSString
@@ -969,7 +923,6 @@ final class CodeReaderCoordinator {
                 setParagraphSpacing(measured, onLine: line, in: textView)
             }
         }
-        updateLastLineBottomInset(in: textView)
         positionSlots(in: container)
     }
 
@@ -980,7 +933,6 @@ final class CodeReaderCoordinator {
         slot.height = rounded
         slotHosts[line] = slot
         setParagraphSpacing(rounded, onLine: line, in: container.textView)
-        updateLastLineBottomInset(in: container.textView)
         positionSlots(in: container)
         container.gutterView.needsDisplay = true
     }
@@ -1003,36 +955,16 @@ final class CodeReaderCoordinator {
         storage.endEditing()
     }
 
-    /// Ensure an inline slot anchored on the very last line of a file without a trailing newline has room below it.
-    private func updateLastLineBottomInset(in textView: CodeReaderTextView) {
-        let lastLine = textView.lineIndex.count
-        let needed = slotHosts[lastLine]?.height ?? 0
-        if abs(needed - extraBottomInset) >= 0.5 {
-            extraBottomInset = needed
-            textView.textContainerInset = NSSize(width: Spacing.md, height: Spacing.sm)
-            let desiredMinHeight = max(textView.minSize.height, textView.frame.height + needed)
-            if needed > 0 {
-                textView.minSize.height = desiredMinHeight
-            }
-        }
-    }
-
     private func positionSlots(in container: CodeReaderContainerView) {
         guard !slotHosts.isEmpty else { return }
         let textView = container.textView
-        guard let layoutManager = textView.textLayoutManager,
-              let contentManager = textView.textContentStorage else { return }
         let clipBounds = container.scrollView.contentView.bounds
         let width = max(160, clipBounds.width)
         let insetY = textView.textContainerOrigin.y
-        let defaultHeight = ceil(TaskCodeReader.monoFont().ascender - TaskCodeReader.monoFont().descender)
+        let defaultHeight = textView.defaultLineHeight
 
         for (line, slot) in slotHosts {
-            guard let info = textView.lineIndex.line(at: line),
-                  let loc = contentManager.location(contentManager.documentRange.location, offsetBy: info.location)
-            else { continue }
-            layoutManager.ensureLayout(for: NSTextRange(location: loc))
-            guard let fragment = layoutManager.textLayoutFragment(for: loc) else { continue }
+            guard let fragment = textView.layoutFragment(forLine: line) else { continue }
             let textHeight = fragment.textLineFragments.first?.typographicBounds.height ?? defaultHeight
             let y = fragment.layoutFragmentFrame.minY + insetY + textHeight
             let frame = NSRect(x: clipBounds.minX, y: y, width: width, height: slot.height)
@@ -1056,7 +988,6 @@ final class CodeReaderCoordinator {
         }
         slotHosts.removeAll()
         appliedSpacings.removeAll()
-        extraBottomInset = 0
     }
 
     // MARK: Scrolling & interaction
@@ -1072,16 +1003,10 @@ final class CodeReaderCoordinator {
         }
         pendingScroll = nil
         let textView = container.textView
-        guard let layoutManager = textView.textLayoutManager,
-              let contentManager = textView.textContentStorage,
-              let info = textView.lineIndex.line(at: line),
-              let loc = contentManager.location(contentManager.documentRange.location, offsetBy: info.location)
-        else { return }
-        layoutManager.ensureLayout(for: NSTextRange(location: loc))
-        guard let fragment = layoutManager.textLayoutFragment(for: loc) else { return }
+        guard let fragment = textView.layoutFragment(forLine: line) else { return }
 
         let insetY = textView.textContainerOrigin.y
-        let lineHeight = fragment.textLineFragments.first?.typographicBounds.height ?? 16
+        let lineHeight = fragment.textLineFragments.first?.typographicBounds.height ?? textView.defaultLineHeight
         let lineMidY = fragment.layoutFragmentFrame.minY + insetY + lineHeight / 2
         let maxY = max(0, textView.frame.height - visibleHeight)
         let targetY = min(maxY, max(0, lineMidY - visibleHeight / 2))
@@ -1126,40 +1051,23 @@ final class CodeReaderCoordinator {
         let scrollY = container.scrollView.contentView.bounds.minY
         guard !isProgrammaticScroll, abs(scrollY - lastScrollY) > 0.5 else { return }
         lastScrollY = scrollY
-        guard let store,
-              let layoutManager = container.textView.textLayoutManager,
-              let contentManager = container.textView.textContentStorage else { return }
+        guard let store, let layoutManager = container.textView.textLayoutManager else { return }
         let topY = max(0, scrollY - container.textView.textContainerOrigin.y + 4)
-        if let fragment = layoutManager.textLayoutFragment(for: CGPoint(x: 0, y: topY)) {
-            let offset = contentManager.offset(from: contentManager.documentRange.location, to: fragment.rangeInElement.location)
-            if offset != NSNotFound {
-                let line = container.textView.lineIndex.lineNumber(forUTF16Offset: offset)
-                if store.jumps.readingLine != line {
-                    store.jumps.readingLine = line
-                }
-            }
-        }
-    }
-
-    private func handlePlainClick(line: Int?, target: FileJumps.Target?) {
-        guard let store, store.filePicker == nil else { return }
-        if store.browser.visit?.highlight != nil {
-            store.browser.visit?.highlight = nil
-        }
-        if let line {
+        if let fragment = layoutManager.textLayoutFragment(for: CGPoint(x: 0, y: topY)),
+           let line = container.textView.lineNumber(for: fragment),
+           store.jumps.readingLine != line {
             store.jumps.readingLine = line
         }
-        store.jumps.target = target
     }
 
-    private func handleCommandClick(line: Int, target: FileJumps.Target?) {
+    private func handleClick(line: Int?, target: FileJumps.Target?, lookup: Bool) {
         guard let store, store.filePicker == nil else { return }
         if store.browser.visit?.highlight != nil {
             store.browser.visit?.highlight = nil
         }
-        store.jumps.readingLine = line
+        if let line { store.jumps.readingLine = line }
         store.jumps.target = target
-        if let target {
+        if lookup, let line, let target {
             store.jumps.search(.definition(target.word), line: line, in: store)
         }
     }

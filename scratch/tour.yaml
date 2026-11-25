@@ -1,4 +1,4 @@
-at: bcd59171af536ad0a1f2bba17b0a929fa18efe86
+at: d0252ffd06f836ade484c2b27f003238dc599682
 first:
   - path: swift/README.md
     why: Files walkthrough, rail, shortcuts and presentation
@@ -11,15 +11,15 @@ first:
   - path: tests/fixtures/dto/task_files.json
     why: Checkout inventory, matches, declarations and working-tree counts
   - path: swift/Loopflow/Models/TaskWorkspace.swift
-    why: Source and excerpt coordinates in Desktop search hits
+    why: Search hits, scratch page stamps and working-tree models
   - path: swift/LoopflowMac/TaskFilesStore.swift
     why: Coordinate file transport, watching, scratch and working changes
   - path: swift/LoopflowMac/FilesBrowserState.swift
     why: Open tabs, per-file modes and dismissible rail notices
   - path: swift/LoopflowMac/FileJumps.swift
-    why: Clicked occurrences, lookup results and return history
+    why: Clicked occurrences, explicit visit highlights and return history
   - path: swift/LoopflowMac/ComparisonReading.swift
-    why: Changed files and sides indexed within each comparison
+    why: Changed files, sides and badges indexed per comparison
   - path: swift/LoopflowMac/DiffReviewState.swift
     why: Whole Task and step readings share the review stream
   - path: swift/LoopflowMac/CheckoutTree.swift
@@ -27,15 +27,17 @@ first:
   - path: swift/LoopflowMac/ReviewDiff.swift
     why: Line references keep their source through edits
   - path: swift/LoopflowMac/FileFind.swift
-    why: Match coordinates, stepping, input chrome and Grep promotion
+    why: Shared text search, stepping, input chrome and Grep promotion
   - path: swift/LoopflowMac/FileOutline.swift
     why: Live declarations from the reader’s syntax tree
+  - path: swift/LoopflowMac/Grammar.swift
+    why: Tree-sitter parses, line splits and shared text-storage painting
   - path: swift/LoopflowMac/TaskFileDocument.swift
     why: Lazy native editor, merge and draft retention
   - path: rust/loopflow-execution/src/ops/task/workspace.rs
-    why: Peer watch invalidates on ignored scratch pages
+    why: Peer watch tracks scratch_pages apart from tree revisions
   - path: rust/loopflow-execution/src/ops/task/snapshot.rs
-    why: Line totals from the Task patch
+    why: Patch line totals and prefix-sniffed oversize file reads
   - path: rust/loopflow-execution/src/ops/task/find.rs
     why: Git membership, scratch inventory and fuzzy ranking
   - path: rust/loopflow-execution/src/ops/task/grep.rs
@@ -53,7 +55,7 @@ first:
   - path: swift/LoopflowMac/Views/TaskFilePicker.swift
     why: Preview checkout files, grep matches and Task changes
   - path: swift/LoopflowMac/Views/TaskCodeReader.swift
-    why: Equatable source lines, clicks, horizontal reveals and review gutters
+    why: TextKit 2 reader, pinned gutter, direct clicks and inline slots
   - path: swift/LoopflowMac/Views/ReviewStreamView.swift
     why: Visible Diff sides and the shared comment editor
   - path: swift/LoopflowMac/Views/ReviewRenderedView.swift
@@ -65,7 +67,7 @@ first:
   - path: swift/LoopflowTests/TaskFilesTests.swift
     why: Mixed review batch, Find routing, clicks and peer reads
   - path: swift/LoopflowTests/LargeFileReaderTests.swift
-    why: Large-file Find, click and scroll frame timings
+    why: Large-file open, Find, click and scroll frame timings
   - path: swift/LoopflowTests/DesktopPaneControlTests.swift
     why: Route a presentation during editing or review
   - path: rust/loopflow/tests/machine_commands.rs

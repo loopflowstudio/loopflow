@@ -106,7 +106,7 @@ struct TaskFileBrowserJourneyTests {
         try binding("f").perform(context)
         let find = try #require(files.find)
         find.query = "read()"
-        await find.search(lines: CodeLine.read(doc.text, grammar: nil))
+        await find.search(text: doc.text)
         #expect(find.current?.cell == .line(3))
         files.find = nil
         let monitor = DesktopActionMonitor(context: { context }, failed: { Issue.record($0) }).makeCoordinator()

@@ -18,6 +18,7 @@ final class ComparisonReading {
         }
     }
     private(set) var filesByPath: [String: TaskChangedFile] = [:]
+    private(set) var changeBadges: [String: CheckoutChange] = [:]
     private(set) var error: String?
     /// The Task has no checkout on its Machine yet.
     private(set) var notStarted = false
@@ -42,11 +43,13 @@ final class ComparisonReading {
                 let next = try await query.taskChanges(issue: issue, base: comparison.base, head: comparison.head)
                 changes = next
                 filesByPath = Dictionary(next.files.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+                changeBadges = CheckoutChange.badges(next.files)
                 error = nil
                 notStarted = false
             } catch {
                 changes = nil
                 filesByPath = [:]
+                changeBadges = [:]
                 notStarted = (error as? ServerError)?.notStarted == true
                 self.error = error.localizedDescription
             }

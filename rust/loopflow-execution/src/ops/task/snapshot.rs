@@ -727,15 +727,18 @@ pub(super) fn file_snapshot(
             .map_err(|error| task_error(format!("cannot read Task file {relative:?}: {error}")))
     };
     // Sniff only a short prefix for >1 MB files so oversize text never buffers 1 MB in observe::Cache.
-    if std::fs::metadata(&absolute).is_ok_and(|metadata| metadata.len() > MAX_FILE_BYTES as u64) {
+    let (size, bytes) = if std::fs::metadata(&absolute)
+        .is_ok_and(|metadata| metadata.len() > MAX_FILE_BYTES as u64)
+    {
         let (size, prefix) = read(BINARY_SNIFF_BYTES)?;
         if size > MAX_FILE_BYTES as u64 {
-            snapshot.size_bytes = size;
-            read_oversize_contents(&mut snapshot, prefix, || Ok(read(MAX_BINARY_DATA_BYTES)?.1))?;
-            return Ok(snapshot);
+            (size, prefix)
+        } else {
+            read(MAX_FILE_BYTES + 1)?
         }
-    }
-    let (size, bytes) = read(MAX_FILE_BYTES + 1)?;
+    } else {
+        read(MAX_FILE_BYTES + 1)?
+    };
     snapshot.size_bytes = size;
     read_contents(&mut snapshot, bytes, || Ok(read(MAX_BINARY_DATA_BYTES)?.1))?;
     Ok(snapshot)
@@ -772,39 +775,20 @@ pub(super) fn committed_file_snapshot(
     snapshot.size_bytes = size
         .parse()
         .map_err(|_| task_error(format!("Git listed no size for {relative:?}")))?;
-    if snapshot.size_bytes > MAX_FILE_BYTES as u64 {
-        let prefix = git_blob_prefix(workspace.worktree, object, BINARY_SNIFF_BYTES)?;
-        read_oversize_contents(&mut snapshot, prefix, || {
-            git_output_bytes(workspace.worktree, &["cat-file", "blob", object])
-        })?;
+    let limit = if snapshot.size_bytes > MAX_FILE_BYTES as u64 {
+        BINARY_SNIFF_BYTES
     } else {
-        let bytes = git_blob_prefix(workspace.worktree, object, MAX_FILE_BYTES + 1)?;
-        read_contents(&mut snapshot, bytes, || {
-            git_output_bytes(workspace.worktree, &["cat-file", "blob", object])
-        })?;
-    }
+        MAX_FILE_BYTES + 1
+    };
+    let bytes = git_blob_prefix(workspace.worktree, object, limit)?;
+    read_contents(&mut snapshot, bytes, || {
+        git_output_bytes(workspace.worktree, &["cat-file", "blob", object])
+    })?;
     Ok(snapshot)
 }
 
-/// Classifies a file known to exceed `MAX_FILE_BYTES` from its sniffed prefix.
-fn read_oversize_contents(
-    snapshot: &mut TaskFileSnapshot,
-    prefix: Vec<u8>,
-    whole: impl FnOnce() -> OpsResult<Vec<u8>>,
-) -> OpsResult<()> {
-    if prefix.contains(&0) {
-        snapshot.state = TaskFileState::Binary;
-        if snapshot.size_bytes <= MAX_BINARY_DATA_BYTES as u64 {
-            snapshot.data = Some(base64::engine::general_purpose::STANDARD.encode(whole()?));
-        }
-    } else {
-        snapshot.state = TaskFileState::Truncated;
-    }
-    Ok(())
-}
-
-/// Classifies a file from its first bytes (at most `MAX_FILE_BYTES + 1`).
-/// `whole` reads the rest of a binary file small enough to carry in `data`.
+/// Classifies a file from its prefix (`BINARY_SNIFF_BYTES` when `size_bytes > MAX_FILE_BYTES`,
+/// else at most `MAX_FILE_BYTES + 1`). `whole` reads a binary file small enough to carry in `data`.
 fn read_contents(
     snapshot: &mut TaskFileSnapshot,
     bytes: Vec<u8>,
@@ -820,7 +804,7 @@ fn read_contents(
             };
             snapshot.data = Some(base64::engine::general_purpose::STANDARD.encode(bytes));
         }
-    } else if bytes.len() > MAX_FILE_BYTES {
+    } else if snapshot.size_bytes > MAX_FILE_BYTES as u64 || bytes.len() > MAX_FILE_BYTES {
         snapshot.state = TaskFileState::Truncated;
     } else if let Ok(content) = String::from_utf8(bytes) {
         snapshot.revision = Some(hex::encode(Sha256::digest(content.as_bytes())));

@@ -46,59 +46,51 @@ final class FileFind {
         index = (index + offset + matches.count) % matches.count
     }
 
-    func search(lines: [CodeLine]) async {
-        await search(lines.enumerated().map { (.line($0.offset + 1), $0.element.text) })
-    }
-
     func search(text: String) async {
-        let needle = query
-        guard !needle.isEmpty else { return }
-        let scan = Task.detached(priority: .userInitiated) {
+        await runSearch { needle in
             var hits: [Match] = []
             var lineNumber = 1
             for raw in text.utf8.split(separator: 10, omittingEmptySubsequences: false) {
-                if Task.isCancelled { return [] as [Match] }
+                if Task.isCancelled { return [] }
                 let slice = raw.last == 13 ? raw.dropLast() : raw
-                let line = String(decoding: slice, as: UTF8.self) as NSString
-                var start = 0
-                while start < line.length {
-                    let hit = line.range(of: needle, options: .caseInsensitive,
-                                         range: NSRange(location: start, length: line.length - start))
-                    guard hit.location != NSNotFound, hit.length > 0 else { break }
-                    hits.append(Match(cell: .line(lineNumber), range: hit))
-                    start = NSMaxRange(hit)
-                }
+                Self.appendMatches(of: needle, in: String(decoding: slice, as: UTF8.self) as NSString,
+                                   cell: .line(lineNumber), into: &hits)
                 lineNumber += 1
             }
             return hits
         }
+    }
+
+    func search(_ cells: [(Cell, String)]) async {
+        await runSearch { needle in
+            var hits: [Match] = []
+            for (cell, string) in cells {
+                if Task.isCancelled { return [] }
+                Self.appendMatches(of: needle, in: string as NSString, cell: cell, into: &hits)
+            }
+            return hits
+        }
+    }
+
+    private func runSearch(_ work: @escaping @Sendable (String) -> [Match]) async {
+        let needle = query
+        guard !needle.isEmpty else { return }
+        let scan = Task.detached(priority: .userInitiated) { work(needle) }
         let hits = await withTaskCancellationHandler { await scan.value } onCancel: { scan.cancel() }
         guard !Task.isCancelled, query == needle else { return }
         receive(hits)
     }
 
-    func search(_ cells: [(Cell, String)]) async {
-        let needle = query
-        guard !needle.isEmpty else { return }
-        let scan = Task.detached(priority: .userInitiated) {
-            var hits: [Match] = []
-            for (cell, string) in cells {
-                let text = string as NSString
-                var start = 0
-                while start < text.length {
-                    if Task.isCancelled { return [] as [Match] }
-                    let hit = text.range(of: needle, options: .caseInsensitive,
-                                         range: NSRange(location: start, length: text.length - start))
-                    guard hit.location != NSNotFound, hit.length > 0 else { break }
-                    hits.append(Match(cell: cell, range: hit))
-                    start = NSMaxRange(hit)
-                }
-            }
-            return hits
+    private nonisolated static func appendMatches(of needle: String, in text: NSString, cell: Cell, into hits: inout [Match]) {
+        var start = 0
+        while start < text.length {
+            if Task.isCancelled { return }
+            let hit = text.range(of: needle, options: .caseInsensitive,
+                                 range: NSRange(location: start, length: text.length - start))
+            guard hit.location != NSNotFound, hit.length > 0 else { break }
+            hits.append(Match(cell: cell, range: hit))
+            start = NSMaxRange(hit)
         }
-        let hits = await withTaskCancellationHandler { await scan.value } onCancel: { scan.cancel() }
-        guard !Task.isCancelled, query == needle else { return }
-        receive(hits)
     }
 
     /// Two rendered HTML sides finish independently. Publish their total together.

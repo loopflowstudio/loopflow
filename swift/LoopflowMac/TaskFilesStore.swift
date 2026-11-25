@@ -50,14 +50,18 @@ final class TaskFilesStore {
         ["md", "html"].contains((path as NSString).pathExtension.lowercased())
     }
 
+    private static func showsRendered(_ path: String, mode: Mode, visit: FileVisit?) -> Bool {
+        mode == .read && isRenderablePage(path) && visit?.showsSource != true
+    }
+
     func isShowingRendered(_ path: String) -> Bool {
-        mode == .read && Self.isRenderablePage(path) && visit?.showsSource != true
+        Self.showsRendered(path, mode: mode, visit: visit)
     }
 
     /// History traversal has no origin to record. A path without a source visit opens rendered.
     func reveal(_ path: String, at visit: FileVisit?, mode: Mode = .read, from origin: FilePosition? = nil) {
         let line = visit?.line ?? 1
-        let destinationLine: Int? = (mode == .read && Self.isRenderablePage(path) && visit?.showsSource != true) ? nil : line
+        let destinationLine: Int? = Self.showsRendered(path, mode: mode, visit: visit) ? nil : line
         jumps.record(FilePosition(path: path, line: destinationLine), from: origin)
         jumps.dismiss()
         browser.open(path, automatically: true)
@@ -93,7 +97,7 @@ final class TaskFilesStore {
     }
 
     static func isScratchPage(_ path: String) -> Bool {
-        path.hasPrefix("scratch/") && ["md", "html"].contains((path as NSString).pathExtension.lowercased())
+        path.hasPrefix("scratch/") && isRenderablePage(path)
     }
 
     var openAndScratch: [String] {
@@ -148,7 +152,7 @@ final class TaskFilesStore {
 
     let tree: CheckoutTree
 
-    var changeBadges: [String: CheckoutChange] { CheckoutChange.badges(workingChanges?.files ?? []) }
+    var changeBadges: [String: CheckoutChange] { workingTree.changeBadges }
 
     enum Mode: String, CaseIterable {
         case read = "Read"
@@ -344,7 +348,7 @@ final class TaskFilesStore {
         }
         machineLabel = revision.machineLabel
         let checkoutChanged = revision.checkout != nil && revision.checkout != cwd
-        if let checkout = revision.checkout, checkout != cwd {
+        if checkoutChanged, let checkout = revision.checkout {
             cwd = checkout
             seenScratchStamps = nil
         }
@@ -366,19 +370,17 @@ final class TaskFilesStore {
             return
         }
 
-        var changedScratch = Set<String>()
+        let previousStamps = seenScratchStamps
+        seenScratchStamps = incomingStamps
         var touchedScratch = Set<String>()
-        if let previous = seenScratchStamps {
-            let removed = Set(previous.keys).subtracting(incomingStamps.keys)
-            changedScratch = Set(incomingStamps.compactMap { path, stamp in previous[path] != stamp ? path : nil })
-            touchedScratch = removed.union(changedScratch)
-            seenScratchStamps = incomingStamps
+        if let previousStamps {
+            let removed = Set(previousStamps.keys).subtracting(incomingStamps.keys)
+            let changed = Set(incomingStamps.compactMap { path, stamp in previousStamps[path] != stamp ? path : nil })
+            touchedScratch = removed.union(changed)
             if !touchedScratch.isEmpty {
-                scratchPaths = Set(scratchPaths).subtracting(removed).union(changedScratch).sorted()
-                browser.noteWrites(touchedScratch, present: changedScratch)
+                scratchPaths = Set(scratchPaths).subtracting(removed).union(changed).sorted()
+                browser.noteWrites(touchedScratch, present: changed)
             }
-        } else {
-            seenScratchStamps = incomingStamps
         }
 
         if treeChanged {

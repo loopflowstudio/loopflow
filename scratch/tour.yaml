@@ -1,17 +1,23 @@
-at: 201172c7798578d83c4b8b11376605e9571c59d8
+at: 413882030b19a0eeae77d035a4bce33c05aba87a
 first:
   - path: docs/sessions.md
-    why: Opening a running conversation from another terminal
-  - path: scratch/plan.md
-    why: Implemented launches and remaining work
-  - path: rust/loopflow-execution/src/transport.rs
-    why: Choose the holder or the caller's terminal
+    why: Opening, detaching and resuming a shared conversation
+  - path: rust/loopflow-execution/src/transport/README.md
+    why: Who owns the provider and Skill completion
+  - path: rust/loopflow-storage/src/sqlite/task_retirement.rs
+    why: Find overdue chats and exclude scoped Sessions
   - path: rust/loopflow/src/bin/lf.rs
-    why: Default and inline chat entry points
+    why: Delegate direct launches and finish a Skill
+  - path: rust/loopflow-execution/src/transport.rs
+    why: Choose the host and pass checkpoint ownership
   - path: rust/loopflow-execution/src/transport/registry.rs
-    why: Associate new Sessions with running terminals
+    why: Find the running terminal by Session after restart
+  - path: rust/loopflow-execution/src/ops/task/retirement.rs
+    why: Recheck scope and active work before closing
+  - path: rust/loopflow-execution/src/transport/hosted.rs
+    why: Honor returning viewers before retiring the terminal
   - path: rust/loopflow/tests/transport_tests.rs
-    why: Two viewers share an unfinished agy draft
+    why: Shared drafts, detached commits and both retirement paths
 hide:
   - path: docs/dev/index.html
     why: Generated from the architecture guide

@@ -183,7 +183,7 @@ Use `uv` for Python. Never use pip directly.
 uv run python scripts/test.py --list                     # suites this branch reaches
 cargo test -p loopflow-execution --lib skills::catalog::           # one focused Rust module
 uv run pytest python/tests/test_gate_bounded.py          # one focused Python file
-uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalog::)'  # gate: a few named tests; CI runs the suites
+uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalog::)'  # a few named tests; CI runs the suites
 cargo fmt
 cargo clippy --all-targets -- -D warnings
 uv sync
@@ -445,15 +445,15 @@ function pointer.
 - **realign:** reconcile the plan; test only a repair or a real doubt.
 - **lint:** formatting and static analysis.
 - **rebase:** no tests when conflict-free; one focused test after conflicts.
-- **gate:** publish first so CI runs the suites, then review. A few named tests locally: feedback on a fix, a CI failure, a risk no suite covers.
+- **land:** clears scratch and pushes once; CI runs the suites, `ci-fix` repairs.
 - **CI / release:** the full matrix and deployment checks.
 - **qa / demo / review:** the real product, as people use it.
 
 Required checks run headless, with no display, permission dialog or person.
 Desktop uses app builds and view tests. A check that can't run here goes to
-gate or CI; it never blocks an earlier step. Real failures still get fixed.
-Scratch keeps one line per check: command, result, and who runs it later;
-once gate clears scratch, the PR body keeps them.
+CI; it never blocks an earlier step. Real failures still get fixed.
+CI shows automated test and lint results; only post-merge checks and
+unrecoverable facts move into the PR body before landing.
 
 A served subscription suppresses identical readings. After a write, use a
 checkpoint on the same subscription when the next edit needs the saved value.

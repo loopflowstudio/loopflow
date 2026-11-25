@@ -42,7 +42,7 @@ check mailbox delivery and cancellation without WindowServer. Label this as a
 component probe: it does not establish mounted panes, hidden-pane rendering,
 focus or copy/Find. Keep display diagnostics optional in
 headless runs; record those limits and leave the full Swift suite and Xcode
-fallback build to gate. See `swift/README.md` for the supported checks.
+fallback build to CI. See `swift/README.md` for the supported checks.
 
 # Launching Loopflow Desktop
 

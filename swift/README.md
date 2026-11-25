@@ -1273,7 +1273,7 @@ scripts/test_desktop.sh --filter DesktopHeadlessTests
 uv run python scripts/test.py --swift
 ```
 
-Gate and CI build the app and inspect production views and controls without
+CI builds the app and inspects production views and controls without
 launching a window. Display/terminal integration is opt-in with
 `LOOPFLOW_NATIVE_TESTS=1`; use it for configured-host diagnostics or demo.
 See [Testing](#testing) for the full commands and CLI prerequisite.
@@ -1457,7 +1457,7 @@ runs model and production-view tests through `scripts/test_desktop.sh`, which
 denies WindowServer connections even on a logged-in host. No Automation
 permission is needed. Only macOS's setuid `/bin/ps` leaves the sandbox so CLI
 process observation still works. `DesktopHeadlessTests` checks the four Work states and
-selection through the real button action. Gate and CI use this same suite.
+selection through the real button action. CI uses this same suite.
 
 Window/Metal/PTY integration tests are optional display-session diagnostics:
 
@@ -1491,7 +1491,7 @@ After upgrading GhosttyKit or its bundled shell integration, run
 shell output for prompt headers, command boundaries and exit status.
 
 `scripts/prove_wave_surface_states.sh` is an optional demo capture: it launches
-windows and therefore needs a display session. It is not in gate or CI.
+windows and therefore needs a display session. It is not in CI.
 
 `scripts/test_desktop.sh` runs `swift test` under `scripts/swift_test_limit.py`,
 which reads the event stream and ends the whole run, naming the test, when one

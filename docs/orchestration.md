@@ -236,19 +236,16 @@ compresses and re-measures. Compose it with `deliver` to ship the win:
 ## Where a person takes part
 
 Mark any step `interactive:` to pause for human input; every other step runs
-headless. Built-in `feature` puts you in the loop at three high-leverage
-moments:
+headless. Built-in `feature` puts you in the loop at two high-leverage moments:
 
 ```yaml
 # feature (builtin)
 - interactive: explore      # choose what to build
 - graph: plan               # kickoff, concept-review, realign, write-docs
 - loop:
-    - loop:
-        - graph: build      # sync/implement, concept-review, realign, compress, qa, publish PR
-        - interactive: ship-review  # read one summary page; iterate sends feedback back to build
-    - graph: deliver        # reflect, gate, land --wait-and-fix
-    - interactive: verify   # check it on main; finish or fix forward
+    - graph: build          # sync/implement, concept-review, realign, compress, qa, publish PR
+    - interactive: ship-review  # read one summary page; iterate sends feedback back to build
+- graph: deliver            # reflect, gate, land --wait-and-fix
 ```
 
 ```bash
@@ -266,7 +263,8 @@ trade-offs and invariants to know going forward, findings as `Fix here` /
 `File Task` / `Drop` choices, and numbered questions—without passing-test
 counts or routine CI status. Open it with `lf page open scratch/ship-review.html`
 (or in Desktop Files), highlight text to comment, pick your choices, and press
-`⌘↩` to steer the Task directly, or move on to `deliver`.
+`⌘↩` to steer the Task directly, or move on to `deliver`, which merges the PR
+and completes the Task.
 
 ### Build and customize review pages
 
@@ -353,7 +351,7 @@ lf task run LOO-13 quick    # builds from the brief, runs qa and gate, and lands
 
 | Graph | What it does |
 |---|---|
-| `feature` | `explore` (interactive) → `plan` → `build` ↔ `ship-review` (interactive) → `deliver` → `verify` (interactive) |
+| `feature` | `explore` (interactive) → `plan` → `build` ↔ `ship-review` (interactive) → `deliver` |
 | `code` | Same as `feature`, starting at `plan` (default when no Graph is configured) |
 | `quick` | loop(`sync` → `implement`) → `qa` → `gate` → `land --wait-and-fix` |
 | `pursue` | `plan` then `build` with no interactive stops: request to published PR |
@@ -386,7 +384,7 @@ steps:
 
 ```console
 $ lf graph list
-code       Build, deliver and verify. You review the change, then check it on main.
+code       Build and deliver. You review the change before it merges.
 my-graph
 ship-api   Build the endpoint, audit it, then deliver.
 ```
@@ -407,11 +405,10 @@ $ lf graph list --json | jq '.[] | select(.name=="code") | .workflow'
     {"name": "plan", "interactive": false},
     {"name": "build", "interactive": false},
     {"name": "ship-review", "interactive": true},
-    {"name": "deliver", "interactive": false},
-    {"name": "verify", "interactive": true}
+    {"name": "deliver", "interactive": false}
   ],
   "interactive_steps": [...],
-  "sentence": "You take part at ship-review and verify."
+  "sentence": "You take part at ship-review."
 }
 ```
 
@@ -444,8 +441,10 @@ lf task auto off LOO-12             # LOO-12: auto off
 - Off stands: only `lf task auto on` turns it back on; an `auto: on` in
   configuration never does. `lf -b task run` stands in for its own run and
   writes no auto, so with auto off it still waits at the landing step.
-- Never set, a run that reaches a merging step lands; `lf task run` says so on
-  its `merges:` line. A failing run leaves auto alone.
+- Never set, a run that can reach a merging step before stopping lands;
+  `lf task run` prints ``merges: this run may merge the PR; `lf task auto off <ID>` stops it``
+  (runs on non-merging Graphs such as `pursue` omit it). A failing run leaves
+  auto alone.
 - `auto: on` beside `graph:` in a Wave's config turns auto on for every Task
   that takes the Graph up. Reopening a Task clears it.
 

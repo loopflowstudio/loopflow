@@ -177,14 +177,15 @@ set and no login, Task actions stay `queued`. Nothing queues a Project
 in the tracker before they return; `lf wave sync` (and served `wave.sync`,
 Desktop's five-minute clock) never makes one and succeeds with no login. With
 no login, `lf wave create x` exits 1 with "wave/x has no tracker Project yet:
-No Linear credential found… Run `lf wave plan connect x` to make it", yet the
+No Linear credential found… Run `lf wave create x` to make it", yet the
 Wave is recorded and committed, its Project unbound. `lf wave status x` then
-prints "not in Linear yet; `lf wave plan connect x` makes it" under the
+prints "not in Linear yet; `lf wave create x` makes it" under the
 Project line (also for a Wave made before the team was set, renamed, or
 upgraded); the same sentence is `project.value.unbound` in `--json`,
-`wave.sync`, `wave.plan` and `plan.list`, null with no tracker. In an Asana
-repository (`repo.tracker.asana.team "'1209'"`) both name `lf wave create x`,
-since connect is Linear's; a second create makes no second commit. Rename
+`wave.sync`, `wave.plan` and `plan.list`, null with no tracker. An Asana
+repository (`repo.tracker.asana.team "'1209'"`) reads the same with "Asana";
+`lf wave plan connect` there asks for a Linear login. A second create makes
+no second commit. Rename
 and removal of an unbound Wave leave no Project rows in `tracker_actions`.
 Served `wave.create` returns the same message as `outcome_unknown` with ";
 inspect the affected work before retrying" appended. Copy `loopflow.db` to

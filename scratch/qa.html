@@ -433,3 +433,37 @@ $ (upgraded home) tracker_actions
 <li>A failed <code>lf wave plan connect</code> on the CLI also appends "; inspect the affected work before retrying" (".;"), though it wrote nothing (already in <code>scratch/questions.md</code>).</li>
 <li><code>lf wave status</code> prints <code>machine      unplaced</code> with wider padding than the lines around it.</li>
 </ol>
+
+<h2>Thirteenth run, 2026-11-24: slice 15 (one retry verb: <code>lf wave create</code>)</h2>
+<p>Branch lf (debug build of ccf4d12b4) on a private home under <code>/tmp/lf-qa-995/s15</code>: three fresh repositories with local bare origins (Linear team QA, Asana team 1209, none), no tracker login, no LF_*, stdin closed. A private <code>lf server run</code> for the served reads, stopped by PID afterwards.</p>
+<table>
+<tr><th>Scenario</th><th>Result</th></tr>
+<tr><td><code>lf wave create billing</code> (Linear, no login)</td><td>Exit 1, "… Run `lf wave create billing` to make it." Wave committed once, Project unbound; status prints "not in Linear yet; `lf wave create billing` makes it".</td></tr>
+<tr><td>The advised retry, <code>lf wave create billing</code> again</td><td>Same error, no second commit.</td></tr>
+<tr><td><code>lf wave sync billing</code> offline</td><td>Exit 0, same sentence.</td></tr>
+<tr><td>Task into the unbound Wave</td><td>Saved locally, create queued with the credential reason; <code>lf repo tracker</code> lists it.</td></tr>
+<tr><td>Asana repository</td><td>Create error and sentence read the same with "Asana" and <code>lf wave create ops</code>. <code>lf wave plan connect ops</code> asks for a Linear login and leaves <code>.lf/config.yaml</code> untouched.</td></tr>
+<tr><td>No tracker</td><td>Create succeeds; no sentence.</td></tr>
+<tr><td>Rename and child</td><td><code>lf wave rename billing payments</code>: sentence names payments. <code>payments/refunds</code>: error and sentence name the full path.</td></tr>
+<tr><td>Desktop's path: served <code>wave.sync</code>, <code>wave.create</code></td><td><code>project.value.unbound</code> names <code>lf wave create &lt;wave&gt;</code> for Linear and Asana, null with no tracker; served create's error names the same retry.</td></tr>
+</table>
+<h3>Transcript</h3>
+<pre>$ lf wave create billing
+Error: wave/billing has no tracker Project yet: No Linear credential found. Run `doppler run -- lf machine login linear`. Run `lf wave create billing` to make it.
+$ lf wave status billing
+  Project   billing (local) · started
+    not in Linear yet; `lf wave create billing` makes it
+$ (asana) lf wave plan connect ops
+Error: No Linear credential found. Run `doppler run -- lf machine login linear`.; inspect the affected work before retrying
+$ served wave.sync payments
+  .result.project.value.unbound = "not in Linear yet; `lf wave create payments` makes it"</pre>
+<h3>Fixed</h3>
+<p><code>.lf/qa/tracker.md</code>: the unbound paragraph still quoted slice 14's <code>lf wave plan connect x</code> wording.</p>
+<h3>Not reached</h3>
+<p>A successful create or connect: no Linear or Asana login on a private home, and it would make real Projects. Desktop's mounted Wave pane: no display; the served sentence is what it prints.</p>
+<h3>Still wrong, worst first</h3>
+<ul>
+<li><code>lf wave plan connect</code> in an Asana repository goes to Linear (recorded in scratch/questions.md); a person following the old docs would be asked for a Linear login.</li>
+<li>A failed CLI connect still appends "; inspect the affected work before retrying" after a period (".;"), though it wrote nothing.</li>
+<li><code>machine      unplaced</code> padding in <code>lf wave status</code>.</li>
+</ul>

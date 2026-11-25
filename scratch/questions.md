@@ -85,8 +85,8 @@ apps can open a Task that reads `wait`.
 
 The chip text is Rust's `WorkflowControl.label`, so Rust words it: running
 `build · implement` (the step alone when it is top-level), a human step
-`ship-review · next: deliver`. Paused, Pausing, Waiting, Run and Done keep
-their words. The bar no longer names the Graph; the track's hover shows Rust's
+`ship-review · next: deliver`. Paused, Pausing, Waiting and Run prefix the same
+step words (`Paused: build · implement`); Done keeps its word. The bar no longer names the Graph; the track's hover shows Rust's
 sentence (or setup's reason).
 
 A pending Run or Interrupt changes no row; the chip reads Starting… or
@@ -94,7 +94,7 @@ Interrupting… until a reading covers the answer. Auto patches the switch and
 the row's auto mark, and moves an Active Working row to Shipping; turning it
 off leaves the group for the Machine to say.
 
-## From the C1 walkthrough (open)
+## From the C1 walkthrough (choices taken in 2d9b3ca205)
 
-- Should Undo after Complete reselect the reopened Task? Today the window stays on the Task that Complete moved to.
-- A `cmd:` step drained by pause runs again on `unpause --run`, because the cursor stays on it. That is harmless for `land`; should a non-idempotent `cmd:` step advance past itself once it exits 0?
+- Undo after Complete reselects the reopened Task on Mac; iPhone swipe-to-complete posts the same Undo.
+- A `cmd:` step drained by pause records exit 0 as finished, so the cursor advances past it and `unpause --run` never runs it twice. A non-zero exit stays a failure.

@@ -11,7 +11,8 @@ During a build, `lf task pause INF-123` stops the worker, every subprocess in th
 ## Remaining, in order
 
 ### 1. Gate & CI
-- Run gate (`scripts/test.py` with focused Rust filter, Swift Mac & iOS, architecture, documented commands).
+- Run gate (`scripts/test.py` with focused Rust filter, Swift Mac & iOS, architecture, documented commands) on the branch merged with #1997.
+- The C1 fixes from 2d9b3ca205 (step-prefixed chip, amber Pausing, single-run drained `cmd:`, Undo reselection, iPhone toolbar `···`) have headless coverage only; the Mac Dev app and iPhone get a live look in review.
 - CI covers the five-harness worker matrix, Linux session enumeration, and full lifeline/attachment/hosted-terminal suites.
 
 ### 2. Named gaps for the PR
@@ -38,7 +39,7 @@ Paused sidebar rows may still show `Available · inferred` from the open primary
 
 ### C1 walkthrough on the Mac Dev app (`8ad26dbb89`, `scratch/qa.html`)
 - ▶/⏸, step buttons, narrow fold (1000/700/560 pt), Auto on/off, and ✓ with `completed · Undo` all worked on a private Machine.
-- Surfaced the gaps folded into Remaining §1: `Paused: help graph` dropped the top-level step (`forge`/`finish`/`settle`), `Pausing` showed a dimmed ▶, draining `cmd:` stayed on the finished step and ran twice on `unpause --run`, and `Complete → Undo` did not reselect the reopened Task.
+- Surfaced four gaps, fixed in 2d9b3ca205: `Paused: help graph` dropped the top-level step, `Pausing` showed a dimmed ▶, a draining `cmd:` ran twice on `unpause --run`, and `Complete → Undo` did not reselect the reopened Task.
 
 ### V4c Task controls (since replaced by C1)
 

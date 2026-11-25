@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Concept Review — LOO-1104: Builtin Task Graphs &amp; Skill Ownership (Post-Build)</title>
+<title>Concept Review — LOO-1106: Delivery Readiness &amp; Scratch Cleanup (Pre-Build)</title>
 <style>
   :root {
     --bg: #fafaf8;
@@ -23,9 +23,12 @@
     --prop-bg: #fffbeb;
     --prop-fg: #92400e;
     --prop-border: #fde68a;
-    --built-bg: #eef2ff;
-    --built-fg: #3730a3;
-    --built-border: #c7d2fe;
+    --exist-bg: #eef2ff;
+    --exist-fg: #3730a3;
+    --exist-border: #c7d2fe;
+    --out-bg: #f3f4f6;
+    --out-fg: #374151;
+    --out-border: #d1d5db;
     --code-bg: #f4f3ef;
   }
   @media (prefers-color-scheme: dark) {
@@ -47,9 +50,12 @@
       --prop-bg: #2e2005;
       --prop-fg: #fcd34d;
       --prop-border: #78350f;
-      --built-bg: #1e1b4b;
-      --built-fg: #c7d2fe;
-      --built-border: #3730a3;
+      --exist-bg: #1e1b4b;
+      --exist-fg: #c7d2fe;
+      --exist-border: #3730a3;
+      --out-bg: #27272a;
+      --out-fg: #d4d4d8;
+      --out-border: #3f3f46;
       --code-bg: #24231e;
     }
   }
@@ -63,7 +69,7 @@
     font-size: 15px;
   }
   main {
-    max-width: 1020px;
+    max-width: 1040px;
     margin: 0 auto;
     padding: 36px 24px 72px;
   }
@@ -84,7 +90,9 @@
   h2 { font-size: 19px; margin: 36px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
   h3 { font-size: 15.5px; margin: 18px 0 8px; }
   p { margin: 0 0 12px; }
-  .lead { color: var(--muted); font-size: 15.5px; max-width: 80ch; }
+  ul, ol { margin: 0 0 14px; padding-left: 22px; }
+  li { margin-bottom: 6px; }
+  .lead { color: var(--muted); font-size: 15.5px; max-width: 82ch; }
   .status-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
   .badge {
     display: inline-block;
@@ -94,11 +102,13 @@
     border-radius: 999px;
     border: 1px solid var(--border);
     vertical-align: middle;
+    white-space: nowrap;
   }
   .badge.yes { background: var(--yes-bg); color: var(--yes-fg); border-color: var(--yes-border); }
   .badge.no { background: var(--no-bg); color: var(--no-fg); border-color: var(--no-border); }
   .badge.proposed { background: var(--prop-bg); color: var(--prop-fg); border-color: var(--prop-border); }
-  .badge.built { background: var(--built-bg); color: var(--built-fg); border-color: var(--built-border); }
+  .badge.existing { background: var(--exist-bg); color: var(--exist-fg); border-color: var(--exist-border); }
+  .badge.outside { background: var(--out-bg); color: var(--out-fg); border-color: var(--out-border); }
   code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
     font-size: 13px;
@@ -120,12 +130,12 @@
   table {
     width: 100%;
     border-collapse: collapse;
-    margin: 14px 0 22px;
+    margin: 14px 0 20px;
+    font-size: 14px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 8px;
     overflow: hidden;
-    font-size: 13.5px;
   }
   th, td {
     text-align: left;
@@ -137,322 +147,316 @@
     background: var(--surface-alt);
     font-size: 12px;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.05em;
     color: var(--muted);
   }
   tr:last-child td { border-bottom: none; }
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin: 16px 0;
+  }
+  .callout.warn {
+    border-left-color: #d97706;
+  }
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+    gap: 14px;
+    margin: 14px 0 18px;
+  }
   .card {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 16px 18px;
-    margin: 14px 0;
+    border-radius: 8px;
+    padding: 14px 16px;
   }
-  .card.callout { border-left: 4px solid var(--no-fg); }
-  .card.resolved { border-left: 4px solid var(--yes-fg); }
-  .grid-2 {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 14px;
+  .card h3 { margin-top: 0; }
+  .path-label {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .question {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
     margin: 12px 0;
   }
-  .flow {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-    margin: 8px 0;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 12.5px;
-  }
-  .step {
-    padding: 4px 8px;
+  .question h3 { margin: 0 0 8px; font-size: 15px; }
+  .opts { list-style: none; padding-left: 0; margin: 8px 0 0; }
+  .opts li {
+    padding: 6px 10px;
     border-radius: 6px;
-    border: 1px solid var(--border);
     background: var(--surface-alt);
+    margin-bottom: 6px;
   }
-  .step.stop {
-    background: var(--accent-soft);
-    border-color: var(--accent);
-    color: var(--accent);
-    font-weight: 600;
-  }
-  .step.add {
-    background: var(--yes-bg);
-    color: var(--yes-fg);
-    border-color: var(--yes-border);
-    font-weight: 600;
-  }
-  .arrow { color: var(--muted); }
-  .loop-box {
-    display: inline-flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 5px;
-    padding: 4px 8px;
-    border: 1px dashed var(--muted);
-    border-radius: 8px;
-  }
-  .loop-tag {
-    font-size: 10.5px;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    margin-right: 2px;
-  }
-  .menu-preview {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 12.5px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 12px 14px;
-    white-space: pre;
-    overflow-x: auto;
-  }
-  .q-list { list-style: none; padding: 0; margin: 12px 0; }
-  .q-list > li {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px 16px;
-    margin-bottom: 12px;
-  }
-  .q-title { font-weight: 600; margin-bottom: 6px; }
-  .opts { margin: 8px 0 0; padding-left: 20px; }
-  .opts li { margin-bottom: 6px; }
+  .opts li strong { margin-right: 4px; }
   .muted { color: var(--muted); }
 </style>
 </head>
 <body>
 <main>
-  <header>
-    <div class="kicker">Concept Review &middot; LOO-1104 &middot; Post-build against base <code>23ce1a69f9</code></div>
-    <h1>Builtin Task Graphs &amp; Skill Ownership Contracts</h1>
-    <p class="lead">
-      <strong>Area reviewed:</strong> Builtin Task Graphs (<code>plan</code>, <code>build</code>, <code>ui</code>, <code>fix</code>, and the workflows that compose them: <code>code</code>, <code>feature</code>, <code>pursue</code>, <code>redesign</code>, <code>refresh</code>) and the ownership contracts of the builtin skills behind them (<code>implement</code>, <code>concept-review</code>, <code>realign</code>, <code>demo</code>, <code>verify</code>, <code>ship-review</code>, <code>kickoff</code>, <code>advance</code>, <code>write-docs</code>, <code>wave-session</code> / <code>wave-operate</code>).
-    </p>
-    <p class="lead" style="margin-top:8px;">
-      <strong>State on <code>HEAD</code> (<code>73abaa380c</code>):</strong> Built (<code>78bde1d766</code>), compressed (<code>c6eab6e222</code>), and QA'd with real Claude haiku decider runs (<code>73abaa380c</code>). All six conceptual mismatches from the pre-build review are fixed and committed. One narrow prose seam remains in the <code>concept-review &rarr; realign</code> handoff (marked <span class="badge proposed">Proposed</span> below), plus four reversible product choices already built on <code>HEAD</code> waiting for your confirmation at ship-review.
-    </p>
-    <div class="status-strip">
-      <span class="badge built">Built on HEAD: 73abaa380c</span>
-      <span class="badge yes">7 of 8 pairings line up</span>
-      <span class="badge no">1 small handoff seam in realign.md</span>
-      <span class="badge proposed">Proposed small fix at ship-review / gate</span>
-    </div>
-  </header>
 
-  <h2>1. Do product concepts and code concepts line up?</h2>
-  <p>Evaluated against the full diff on <code>HEAD</code> (<code>23ce1a69f9..73abaa380c</code>) and the surrounding builtin Graphs, skills, docs, and Desktop menu logic.</p>
+<header>
+  <div class="kicker">Concept Review · Pre-Build · LOO-1106</div>
+  <h1>Delivery Readiness &amp; Scratch Cleanup</h1>
+  <p class="lead">
+    <strong>Area taken:</strong> how a reviewed branch moves from work-in-progress to a CI-tested, merged PR — the <code>deliver</code> and <code>quick</code> Graphs, the split between checkpoint PRs (<code>lf pr publish</code>) and landing candidates (<code>lf land</code>, <code>lf arm</code>, <code>lf pr submit</code>), <code>lf scratch clear</code>, and <code>sync</code> / conflict recovery during delivery.
+    Taken as one area because removing <code>gate</code> hands its mechanical contract (clear working notes, push one clean head, trigger full CI) directly to delivery.
+  </p>
+  <div class="status-strip">
+    <span class="badge existing">Existing = HEAD (3cf61b5832, plan only — no code built yet)</span>
+    <span class="badge proposed">Proposed = revised scratch/plan.md (updated by this review)</span>
+    <span class="badge outside">Outside this Task = separate future outcome</span>
+  </div>
+</header>
 
+<section>
+  <h2>1. Do the product concepts and code concepts line up?</h2>
+  <p>
+    Every pairing in this area as it stands on <code>HEAD</code>, and what is wrong wherever the answer is <strong>NO</strong>.
+  </p>
   <table>
     <thead>
       <tr>
-        <th style="width:20%">Product concept</th>
-        <th style="width:24%">Code / Skill / Graph concept</th>
-        <th style="width:10%">State</th>
-        <th style="width:10%">Lines up?</th>
-        <th>What is right or wrong on <code>HEAD</code></th>
+        <th style="width: 24%">Product concept</th>
+        <th style="width: 26%">Code / definitions behind it</th>
+        <th style="width: 10%">Aligned?</th>
+        <th style="width: 40%">What is wrong (on HEAD) &amp; proposed fix</th>
       </tr>
     </thead>
     <tbody>
       <tr>
-        <td><strong>Build passes until done, then polish once</strong><br>Finish planned passes, settle concepts, then simplify and QA once.</td>
-        <td><code>build.yaml</code>: <code>loop(loop(sync &rarr; implement) &rarr; concept-review &rarr; realign) &rarr; compress &rarr; qa &rarr; pr-publish</code></td>
-        <td><span class="badge built">Built</span></td>
-        <td><span class="badge yes">Yes</span></td>
-        <td>Eliminates the measured repeat-QA/compress loop. Verified in Rust graph tests (<code>compiled.rs</code>, <code>graph/mod.rs</code>) and live haiku inner-loop QA (<code>scratch/qa.html</code> scenario 5: pass 1 collapses its plan line with its commit and iterates; pass 2 advances).</td>
+        <td><strong>Review-to-merge Graph path</strong><br><span class="muted">After <code>ship-review</code> (or <code>qa</code> on <code>quick</code>), go straight to CI and merge.</span></td>
+        <td><code>deliver.yaml</code>, <code>quick.yaml</code>, <code>gate.md</code>, <code>.lf/skills/gate.md</code>, <code>queue.yaml</code>, <code>.lf/graphs/finish-queue.yaml</code>, <code>.lf/graphs/pursue-auto.yaml</code></td>
+        <td><span class="badge no">NO</span></td>
+        <td><strong>Extra middle step nobody wants:</strong> <code>gate</code> is a generic LLM turn between review and <code>land</code>. <code>queue</code> and <code>finish-queue</code> exist only to run <code>gate</code>; <code>pursue-auto</code> has an outer loop only <code>gate</code> steers.<br><span class="badge proposed">Proposed</span> Delete <code>gate</code>, <code>queue</code>, <code>finish-queue</code>; <code>deliver</code> becomes <code>reflect → cmd: land --wait-and-fix</code>; <code>quick</code> drops <code>gate</code>; <code>pursue-auto</code> drops its outer loop.</td>
       </tr>
       <tr>
-        <td><strong>Plan before coding</strong><br>Write the plan, critique it read-only, reconcile it, then draft docs.</td>
-        <td><code>plan.yaml</code>: <code>kickoff &rarr; concept-review &rarr; realign &rarr; write-docs</code></td>
-        <td><span class="badge built">Built</span></td>
-        <td><span class="badge yes">Yes</span></td>
-        <td>Composes cleanly into <code>code</code>, <code>feature</code>, <code>pursue</code>, and <code>redesign</code> with no edits to those four Graphs.</td>
+        <td><strong>Checkpoint PR vs Landing Candidate</strong><br><span class="muted"><code>pr publish</code> shows WIP with notes (CI deferred); <code>submit</code>/<code>arm</code>/<code>land</code> push a clean head (full CI runs).</span></td>
+        <td><code>ops/pr.rs</code> (<code>create_or_update_pr</code>, <code>consume_gate_artifacts</code>, <code>read_cached_pr_copy</code>), <code>ops/land.rs</code> (<code>prepare_pr</code>), <code>.github/workflows/ci.yml</code> (<code>scratch-clear</code>)</td>
+        <td><span class="badge no">NO</span></td>
+        <td><strong>Dead file-based handoff:</strong> <code>ops/pr.rs</code> and <code>ops/land.rs</code> still read and delete <code>scratch/pr-title.txt</code>, <code>pr-body.md</code>, and <code>.pr-copy-ref</code>, which nothing writes anymore.<br><span class="badge proposed">Proposed</span> Delete <code>consume_gate_artifacts</code>, <code>read_cached_pr_copy</code>, and their 3 tests; keep <code>published_pr_copy</code> (same-head reuse) and <code>generate_pr_copy</code>.</td>
       </tr>
       <tr>
-        <td><strong>Critique vs. plan change</strong><br>A review shows what is wrong; a separate step changes the plan and decides whether to rework.</td>
-        <td><code>concept-review.md</code> (read-only HTML) &rarr; <code>realign.md</code> (owns <code>scratch/plan.md</code>, fixes small mismatches inline, defers separate outcomes, decides outer loop)</td>
-        <td><span class="badge built">Built</span></td>
-        <td><span class="badge no">No (1 seam)</span></td>
-        <td><strong>Reversible product choices drop between the two skills.</strong> <code>concept-review.md</code> is strictly read-only (verified in QA scenario 6) and shows reversible choices as recommendations. <code>realign.md</code> handles irreversible choices (<code>blocked</code> in a loop, <code>scratch/questions.md</code> outside), but line 25&ndash;26 still says <em>"Nothing goes into the plan as settled unless someone said so"</em> and <code>## After a review</code> has no rule for adopting a recommended reversible choice as "made for review".</td>
+        <td><strong>Delivery owns the clean pushed head</strong><br><span class="muted"><code>land</code>, <code>arm</code>, and <code>submit</code> push one head with no branch-added notes, even through conflicts or stacked merges.</span></td>
+        <td><code>ops/land.rs</code> (<code>prepare_pr</code>, <code>sync_land</code>, <code>accept_completed_integration</code>), <code>ops/sync.rs</code> (<code>start_owned_sync</code>, <code>finish_sync</code>), <code>ops/sync_execution.rs</code> (<code>with_sync_retry</code>)</td>
+        <td><span class="badge no">NO</span></td>
+        <td><strong>Biggest mismatch — no single owner, 6 cracks:</strong> (1) clears before sync, never after <code>sync-conflicts</code>; (2) stacked child clears against parent head and hits <code>UD scratch/plan.md</code> conflict; (3) clearing before sync deletes <code>scratch/plan.md</code> before <code>sync-conflicts</code> can read it and mutates the branch if sync aborts; (4) <code>SyncStrategy::Noop</code> hardcodes <code>push = false</code> so delivery skips pushing; (5) <code>sync_land</code> hardcodes <code>push: true</code> even on <code>--local</code>; (6) non-Task <code>resync == false</code> empty-tree check and standalone already-armed checkpoint shortcut can leak.<br><span class="badge proposed">Proposed</span> Single-owner delivery clear (Section 2).</td>
       </tr>
       <tr>
-        <td><strong>UI workflow</strong><br>Build UI, try it live each pass, simplify, deliver.</td>
-        <td><code>ui.yaml</code>: <code>kickoff &rarr; loop(sync &rarr; implement &rarr; qa &rarr; interactive: demo) &rarr; compress &rarr; deliver</code> + <code>demo.md</code> headless stand-in</td>
-        <td><span class="badge built">Built</span></td>
-        <td><span class="badge yes">Yes</span></td>
-        <td>No double PR publish (<code>deliver</code>'s <code>gate</code> publishes once); <code>sync</code> runs before <code>implement</code>; Desktop Start menu reads <code>Build and try a UI change, then deliver it &middot; 1 stop</code>; Auto-Ship <code>demo</code> inspects <code>scratch/qa.html</code> honestly instead of inventing reactions.</td>
+        <td><strong>"Branch-added scratch"</strong><br><span class="muted">Working notes added on this work, not existing repository files or files moved into <code>scratch/</code>.</span></td>
+        <td><code>ops/scratch.rs::clear(repo)</code> hardcoding <code>task_diff_base</code> else <code>git::scratch::base</code>; <code>git/scratch.rs::added(base, tree)</code></td>
+        <td><span class="badge no">NO</span></td>
+        <td><strong>One function conflating two bases:</strong> while stacked on a live parent, <code>lf scratch clear</code> should keep parent notes out of the child's diff (<code>task_diff_base</code>). At delivery, everything the integration target lacks must clear (<code>target_sha</code> / <code>merge_base(HEAD, integration_base)</code>).<br><span class="badge proposed">Proposed</span> <code>ops::scratch::clear(repo, base)</code> takes its base explicitly.</td>
       </tr>
       <tr>
-        <td><strong>Fast unattended bug-fix</strong><br>Fix a bounded bug from the brief and merge when checks pass.</td>
-        <td><code>fix.yaml</code>: <code>loop(sync &rarr; implement) &rarr; qa &rarr; gate &rarr; cmd: land --wait-and-fix</code> + no-plan guard in <code>implement.md</code></td>
-        <td><span class="badge built">Built</span></td>
-        <td><span class="badge yes">Yes</span></td>
-        <td>Desktop Start menu reads <code>merges without asking</code>; <code>lf task auto off</code> still holds before <code>land</code>. Live QA (scenarios 4&prime; &amp; 7&prime;) proved a bounded bug builds in 1 pass with no <code>scratch/</code>, while an oversized brief blocks immediately with zero files or commits.</td>
+        <td><strong>Sync mode: ordinary sync vs delivery sync</strong><br><span class="muted">Plain <code>lf sync</code> keeps working notes; delivery sync prepares a clean, non-empty pushed head.</span></td>
+        <td><code>SyncExpectation.require_changes: bool</code> in <code>ops/sync.rs:64-68</code></td>
+        <td><span class="badge no">NO</span></td>
+        <td><strong>Name hides the concept:</strong> <code>require_changes</code> names one check instead of the delivery contract (drop pure stacked-scratch conflicts, clear notes against <code>target_sha</code>, refuse empty tree, push on <code>Noop</code>).<br><span class="badge proposed">Proposed</span> Rename to <code>delivery: bool</code>.</td>
       </tr>
       <tr>
-        <td><strong>Curate Wave memory</strong><br>One owner for <code>.lf/wave/&lt;w&gt;/MEMORY.md</code> direction and token budget.</td>
-        <td><code>wave_session.md</code> owns curation; <code>wave_operate.md</code> stays pure Task operator; <code>realign.md</code> leaves one-line pointer</td>
-        <td><span class="badge built">Built</span></td>
-        <td><span class="badge yes">Yes</span></td>
-        <td>Matches <code>build.rs</code> composition (<code>wave_session.md</code> + <code>wave_operate.md</code>) with zero self-contradiction or duplicated rules. <code>docs/work.md</code> and <code>AGENTS.md</code> match.</td>
+        <td><strong>Stack base after delivery merge</strong><br><span class="muted">A stacked child whose parent squash-merged detaches onto <code>main</code> once it integrates.</span></td>
+        <td><code>finish_sync</code> → <code>record_control_task_state</code> (<code>sync.rs:441</code>), PLUS <code>sync_land</code> (<code>land.rs:411</code>), PLUS <code>accept_completed_integration</code> reading <code>HEAD^2</code> (<code>land.rs:419</code>)</td>
+        <td><span class="badge no">NO</span></td>
+        <td><strong>Three writers for one transition, and one breaks:</strong> <code>finish_sync</code> already calls <code>record_stack_sync(target_sha, clear_parent=true)</code>. <code>sync_land</code> duplicates it, and <code>accept_completed_integration</code> assumes <code>HEAD</code> is a 2-parent merge commit (<code>HEAD^2</code>), which fails once a clear commit sits on top.<br><span class="badge proposed">Proposed</span> Delete both extra callers; <code>finish_sync</code> is the single owner.</td>
       </tr>
       <tr>
-        <td><strong>Fast-path verification after merge</strong><br>Skip rebuilding <code>main</code> when the exact files QA tested are what merged and CI is green.</td>
-        <td><code>verify.md</code>: <code>git diff &lt;qa head&gt; &lt;merge SHA&gt; -- . ':!scratch'</code> empty + green post-merge CI + no post-merge-only claims</td>
-        <td><span class="badge built">Built</span></td>
-        <td><span class="badge yes">Yes</span></td>
-        <td>Sound on both counterexamples (catches post-QA edits/syncs, ignores <code>scratch/</code> cleared by <code>lf land</code>). Minor polish noted in QA #3: state that <code>&lt;qa head&gt;</code> is the branch's <code>lf qa:</code> commit.</td>
+        <td><strong>PR body vs CI check results</strong><br><span class="muted">CI shows test/lint/QA results; the PR body keeps why it changed and only checks that wait for post-merge.</span></td>
+        <td><code>pr-message.md:25</code> vs <code>AGENTS.md:455-456</code></td>
+        <td><span class="badge no">NO</span></td>
+        <td><strong>Contradiction in instructions:</strong> <code>pr-message.md</code> forbids test/lint/QA lines in the PR body, while <code>AGENTS.md</code> says check lines move from <code>scratch/</code> into the PR body when cleared (and <code>generate_pr_copy</code> never reads <code>scratch/</code>).<br><span class="badge proposed">Proposed</span> Align <code>AGENTS.md:454-456</code> with <code>pr-message.md</code>.</td>
       </tr>
       <tr>
-        <td><strong>Generic builtin skills</strong><br>Builtins work for any tracker and any terminal/editor.</td>
-        <td><code>kickoff.md</code>, <code>advance.md</code>, <code>write-docs.md</code></td>
-        <td><span class="badge built">Built</span></td>
-        <td><span class="badge yes">Yes</span></td>
-        <td>No <code>Linear</code>, <code>Loopflow Desktop</code>, or <code>--host desktop</code> leakage remains in task skills; <code>write-docs.md</code> uses host-neutral <code>lf open --file &lt;path&gt;</code>.</td>
+        <td><strong>Manual cleanup (<code>lf scratch clear</code>)</strong><br><span class="muted">Clear this branch's committed notes on demand (e.g. before a manual <code>lf pr publish</code> to trigger CI without arming).</span></td>
+        <td><code>lf.rs:3298</code> → <code>ops/scratch.rs</code></td>
+        <td><span class="badge yes">YES</span></td>
+        <td>Clean 1:1 pairing. Keeps today's base (<code>task_diff_base</code> else <code>git::scratch::base</code>).</td>
+      </tr>
+      <tr>
+        <td><strong>CI check deferral &amp; repair loop</strong><br><span class="muted">Checkpoint PRs skip the matrix; clean PRs run it; <code>land --wait-and-fix</code> + <code>ci-fix</code> repair failures.</span></td>
+        <td><code>.github/workflows/ci.yml</code> (<code>scratch-clear</code>), <code>ops/pr_landing.rs</code> (<code>decide_merge</code>, <code>admit_ci_fix</code>), <code>ci-fix.md</code></td>
+        <td><span class="badge yes">YES</span></td>
+        <td>No change needed once delivery cannot push a head with branch-added notes.</td>
       </tr>
     </tbody>
   </table>
+</section>
 
-  <h2>2. Remaining mismatch &amp; proposed fix (Before &rarr; After)</h2>
+<section>
+  <h2>2. Biggest mismatch: split ownership of the clean pushed head</h2>
+  <p>
+    Both <code>HEAD</code> and the first kickoff draft cleared <code>scratch/</code> <em>before</em> merging upstream changes in <code>prepare_pr</code>.
+    Walking real paths exposes why that split breaks down — and why moving to one clear at the push boundary is smaller and cleaner.
+  </p>
 
-  <div class="card callout">
-    <h3>Reversible product choices drop between <code>concept-review</code> and <code>realign</code></h3>
-    <p>
-      Walk a headless <code>plan</code> run (<code>kickoff &rarr; concept-review &rarr; realign &rarr; write-docs</code>) on a Task where <code>concept-review</code> finds a conceptual issue that turns on a <strong>reversible product choice</strong> (such as choosing between two Graph layouts or two skill homes):
-    </p>
-    <div class="grid-2">
-      <div>
-        <span class="badge no">Before (current HEAD)</span>
-        <pre><code>concept-review.md:48
-  Shows option A recommended over B on
-  scratch/concept-review.html (cannot edit plan).
-
-realign.md:25-26
-  "A change that needs a product decision is
-   written as the exact open choice. Nothing
-   goes into the plan as settled unless
-   someone said so; quote them."
-
-realign.md:48-63 (## After a review)
-  Lists: small fix | rework pass | deferred.
-  No rule for reversible recommendations!
-  &rarr; plan stays a menu, or realign breaks line 26.</code></pre>
-      </div>
-      <div>
-        <span class="badge proposed">Proposed (2-3 sentences in realign.md)</span>
-        <pre><code>realign.md (## After a review)
-  Add one bullet:
-  - Reversible product choice (headless):
-    adopt the recommended direction into
-    scratch/plan.md marked "made for review"
-    with what was passed over, never as
-    "settled" &mdash; so write-docs and implement
-    build one coherent design and ship-review
-    surfaces the choice.
-  - Irreversible choice: blocked in a loop;
-    scratch/questions.md outside a loop.
-
-+ verify.md:18: note &lt;qa head&gt; is the lf qa: commit.
-+ regenerate tests/goldens/builtin_realign.md.</code></pre>
-      </div>
-    </div>
-    <p class="muted" style="margin-top:8px;">
-      This is a 3-sentence prose seam rather than a broken Graph model. Recorded in <code>scratch/plan.md</code> so it can be applied cleanly at <code>ship-review</code> or <code>gate</code> without re-running the 6-step build loop.
-    </p>
+  <div class="callout warn">
+    <strong>What the kickoff draft missed (caught by walking failure and edge paths):</strong>
+    <ol style="margin-top:8px; margin-bottom:0;">
+      <li><strong>Real code conflict loses <code>scratch/plan.md</code>:</strong> clearing before <code>sync_land</code> deletes <code>scratch/plan.md</code> from disk right before <code>sync-conflicts</code> starts — even though <code>sync-conflicts.md:9</code> tells the resolver to read <code>scratch/</code>. If the resolver stops or runs <code>lf sync --abort</code>, the failed <code>lf land</code> leaves a <code>"Clear added scratch files"</code> commit and wiped notes on the branch.</li>
+      <li><strong><code>SyncStrategy::Noop</code> never pushes:</strong> <code>ops/sync.rs:292</code> hardcodes <code>finish_sync(..., false)</code> for <code>Noop</code>. A persistent worktree or already-integrated stacked child hits <code>Noop</code> in <code>sync_land</code> and skips pushing its clear commit entirely.</li>
+      <li><strong><code>lf land --local</code> still pushes:</strong> <code>ops/land.rs:406</code> hardcodes <code>push: true</code> in <code>sync_land</code> even when <code>options.local</code> is set.</li>
+      <li><strong>Two smaller leaks:</strong> non-Task notes-only PRs on <code>resync == false</code> bypass <code>require_task_pr_range_nonempty</code>, and the standalone already-armed shortcut (<code>land.rs:97-113</code>) can return early on a manually armed checkpoint head without clearing notes.</li>
+    </ol>
   </div>
 
-  <h2>3. What a person sees (built on <code>HEAD</code>)</h2>
   <div class="grid-2">
-    <div>
-      <h3>Desktop Start menu (verified via <code>lf graph list --json</code>)</h3>
-      <div class="menu-preview">&#x2713; feature      Explore, build, deliver and verify              3 stops
-  code         Build, deliver and verify                       2 stops
-  redesign     Rethink a started Task                          1 stop
-  research     Investigate and report, with no PR              1 stop
-  ui           Build and try a UI change, then deliver it      1 stop
-  More &rsaquo;
-  Run without stopping
-  deep-clean   Delete what an area no longer needs             never stops
-  fix          Fix a bounded bug or small tweak and land it    merges without asking
-  incident     Restore first, then fix the cause               never stops
-  optimize     Move one number                                 never stops
-  queue        Compress, integrate upstream changes            never stops
-  task-design  Draft the Task design                           never stops</div>
+    <div class="card">
+      <div class="path-label"><span class="badge existing">Before (HEAD)</span></div>
+      <h3>Pre-sync clear + unguarded push</h3>
+      <pre><code>prepare_pr(Required):
+  resolve_pr_copy()      # reads dead scratch/pr-title.txt
+  scratch::clear(task_diff_base)  # misses parent notes!
+                                  # deletes plan.md pre-conflict!
+  if resync:
+    sync_land(push: true)         # pushes even on --local!
+      Noop   -&gt; finish_sync(push=false)  # drops push!
+      Merge  -&gt; UD scratch/plan.md -&gt; launches LLM agent!
+      Agent  -&gt; may restore scratch/ -&gt; pushed as-is!
+  else:
+    push_with_upstream_if_needed() # no non-Task empty check
+
+prepare_pr(Completed):            # retry after conflict
+  accept_completed_integration()  # reads HEAD^2 (fragile)
+  # scratch::clear skipped!</code></pre>
     </div>
-    <div>
-      <h3>Reordered <code>plan</code> + <code>build</code> &amp; live QA results</h3>
-      <div class="card" style="margin:0;">
-        <div class="muted" style="font-size:12px;margin-bottom:4px;">plan (built)</div>
-        <div class="flow">
-          <span class="step">kickoff</span><span class="arrow">&rarr;</span>
-          <span class="step">concept-review</span><span class="arrow">&rarr;</span>
-          <span class="step add">realign</span><span class="arrow">&rarr;</span>
-          <span class="step">write-docs</span>
-        </div>
-        <div class="muted" style="font-size:12px;margin:10px 0 4px;">build (built)</div>
-        <div class="flow">
-          <span class="loop-box"><span class="loop-tag">outer</span>
-            <span class="loop-box"><span class="loop-tag">inner</span><span class="step">sync</span><span class="arrow">&rarr;</span><span class="step">implement</span></span>
-            <span class="arrow">&rarr;</span><span class="step">concept-review</span><span class="arrow">&rarr;</span><span class="step add">realign</span>
-          </span>
-          <span class="arrow">&rarr;</span><span class="step">compress</span><span class="arrow">&rarr;</span><span class="step">qa</span><span class="arrow">&rarr;</span><span class="step">pr-publish</span>
-        </div>
-        <div class="muted" style="font-size:12px;margin:10px 0 4px;">Live QA highlights (<code>scratch/qa.html</code>)</div>
-        <ul style="margin:4px 0 0;padding-left:18px;font-size:13px;">
-          <li><strong>Two-pass plan:</strong> pass 1 collapsed its line with commit SHA and iterated; pass 2 advanced.</li>
-          <li><strong>Read-only review:</strong> <code>scratch/plan.md</code> SHA identical before and after headless <code>concept-review</code>.</li>
-          <li><strong>Oversized no-plan brief:</strong> blocked immediately (exit 3), zero files written, zero commits.</li>
-        </ul>
-      </div>
+
+    <div class="card">
+      <div class="path-label"><span class="badge proposed">After (Revised Plan)</span></div>
+      <h3>Single-owner clear at the push boundary</h3>
+      <pre><code>prepare_pr(Required):
+  # standalone armed shortcut checks added scratch == empty
+  resolve_pr_copy()               # published_pr_copy | generate
+  if resync:
+    sync_land(push: !local)       # delivery: true; notes stay on disk
+      Noop  -&gt; finish_sync(push = options.push &amp;&amp; delivery)
+      Merge -&gt; if all rerere_remaining are branch-added scratch
+               absent from target_sha:
+                 git rm -f &amp;&amp; continue_merge  # 0 agents!
+               else:
+                 sync-conflicts reads scratch/plan.md on disk;
+                 lf sync --abort leaves 0 clear commits!
+      finish_sync:
+        verify_integrated_head + 0 unmerged paths
+        scratch::clear(repo, target_sha)       # ONE clear
+        refuse if HEAD^{tree} == target^{tree} # before push
+        push once (skip if remote == HEAD)
+        record_control_task_state(target_sha)  # ONE stack write
+  else:
+    base = merge_base(HEAD, integration_base)
+    scratch::clear(repo, base)                 # ONE clear
+    refuse if empty (Task or non-Task)
+    push_with_upstream_if_needed()
+
+prepare_pr(Completed):
+  get_default_branch()            # no HEAD^2, already cleared &amp; pushed</code></pre>
     </div>
   </div>
+</section>
 
-  <h2>4. Open choices waiting for your confirmation</h2>
-  <p class="muted">Items 1&ndash;3 are already built on <code>HEAD</code> as reversible defaults; item 4 is the small prose seam proposed above. Answer by number and letter (e.g. "1a, 2b") if you want any changed.</p>
+<section>
+  <h2>3. Concrete walkthroughs (normal, failure, recovery, edge)</h2>
 
-  <ol class="q-list">
-    <li>
-      <div class="q-title">1. Where should Wave memory (<code>MEMORY.md</code>) get curated now that <code>realign</code> no longer owns it?</div>
-      <ol class="opts" type="a">
-        <li><span class="badge built">Built on HEAD</span> <strong>In the Wave conversation (<code>wave-session</code>)</strong> &mdash; when you talk to a Wave, that conversation updates, promotes, and trims <code>MEMORY.md</code> and publishes it. Unattended Wave runs (<code>wave-operate</code>) stay strictly focused on checking and moving Tasks without editing Wave files.</li>
-        <li><strong>In unattended Wave runs (<code>wave-operate</code>) too</strong> &mdash; allows scheduled or unattended Wave passes to edit <code>MEMORY.md</code> automatically, dropping the rule that Wave runs leave Wave files untouched.</li>
-      </ol>
-    </li>
-    <li>
-      <div class="q-title">2. When you turn Auto-Ship on for a <code>ui</code> Task (nobody at the keyboard), what should happen at <code>demo</code>?</div>
-      <ol class="opts" type="a">
-        <li><span class="badge built">Built on HEAD</span> <strong>Stand in using the QA report</strong> &mdash; the agent inspects <code>scratch/qa.html</code> screenshots and transcripts, loops back to implement only if the UI is visibly broken or missing promised behavior, and otherwise notes that no person tried it and ships (matching how Auto-Ship handles <code>ship-review</code> in <code>code</code>).</li>
-        <li><strong>Always pause for a person</strong> &mdash; refuse to pass <code>demo</code> without human eyes, even when Auto-Ship is turned on.</li>
-      </ol>
-    </li>
-    <li>
-      <div class="q-title">3. Should <code>fix</code> merge as soon as checks pass with no human stop?</div>
-      <ol class="opts" type="a">
-        <li><span class="badge built">Built on HEAD</span> <strong>Zero stops</strong> &mdash; builds from the brief, runs QA and gate, and merges once CI passes. Desktop's Start menu marks it <code>merges without asking</code>, and turning Auto off on a Task still pauses before merge.</li>
-        <li><strong>Pause once after merge to verify</strong> &mdash; keeps the unattended build and merge, then stops at <code>verify</code> on <code>main</code> before closing the Task.</li>
-      </ol>
-    </li>
-    <li>
-      <div class="q-title">4. Should <code>realign</code> explicitly adopt a headless review's reversible product choice into the plan as "made for review"?</div>
-      <ol class="opts" type="a">
-        <li><span class="badge proposed">Proposed (small edit at ship-review / gate)</span> <strong>Yes</strong> &mdash; when a review recommends a reversible choice, <code>realign</code> writes that chosen direction into the plan marked "made for review" (with what was passed over) so docs and implementation build one coherent design and <code>ship-review</code> flags the choice for you; irreversible choices still stop or record an open question.</li>
-        <li><strong>Keep <code>realign</code> leaving open choices undecided</strong> &mdash; never adopt a product recommendation into the plan without a person's reply.</li>
-      </ol>
-    </li>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 24%">Scenario</th>
+        <th style="width: 38%">What a person sees</th>
+        <th style="width: 38%">What survives / what changes on purpose</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>1. Normal <code>code</code> Task</strong><br><span class="muted"><code>build</code> → <code>ship-review</code> → <code>deliver</code></span></td>
+        <td><code>pr-publish</code> opens a checkpoint PR (notes kept, CI deferred during <code>ship-review</code>). After approval, <code>deliver</code> runs <code>reflect</code> then <code>lf land --wait-and-fix</code>: clears notes, pushes 1 clean head, full CI runs, merges.</td>
+        <td>Published PR copy reused if no new local commits; checkpoint history kept in git; <code>scratch/.gitkeep</code> and any existing repo docs under <code>scratch/</code> survive.</td>
+      </tr>
+      <tr>
+        <td><strong>2. Stacked child, parent squash-merged</strong><br><span class="muted">Parent added <code>scratch/plan.md</code>, child edited it.</span></td>
+        <td><code>lf land</code> merges <code>origin/main</code> via fork comparison, sees only <code>UD scratch/plan.md</code> in <code>rerere remaining</code>, drops it mechanically (0 agents launched), clears any other child notes in <code>finish_sync</code>, detaches stack, pushes once.</td>
+        <td>Child commits and commit identities survive; parent link clears in store and PR retargets to <code>main</code>; remote head has only <code>scratch/.gitkeep</code>.</td>
+      </tr>
+      <tr>
+        <td><strong>3. Real code conflict during <code>lf land</code></strong><br><span class="muted"><code>src/foo.rs</code> conflicts with <code>main</code>.</span></td>
+        <td><code>sync-conflicts</code> launches with <code>scratch/plan.md</code> still on disk. If it resolves <code>src/foo.rs</code> (even if it writes <code>scratch/notes.md</code>), <code>finish_sync</code> clears notes and pushes once. If it aborts (<code>lf sync --abort</code>), branch is untouched.</td>
+        <td>On abort: zero clear commits, all notes intact. On recovery: conflict resolution survives, notes cleared before push, 1 push total.</td>
+      </tr>
+      <tr>
+        <td><strong>4. <code>Noop</code> delivery or <code>--local</code></strong><br><span class="muted">Already-integrated stack, persistent worktree, or origin-less <code>--local</code>.</span></td>
+        <td><code>Noop</code> delivery still clears committed notes and pushes the new head (skipping push only if remote already matches). <code>lf land --local</code> clears and merges locally without touching <code>origin</code>.</td>
+        <td>Untracked notes and unstaged edits in a persistent worktree survive untouched (<code>git::scratch::added</code> inspects committed <code>HEAD</code> only).</td>
+      </tr>
+      <tr>
+        <td><strong>5. Renamed repo doc in <code>scratch/</code></strong><br><span class="muted"><code>git mv research.md scratch/research.md</code></span></td>
+        <td><code>git::scratch::added</code> uses <code>--find-renames</code> across the whole tree, so both auto-drop and <code>finish_sync</code> leave the moved file alone.</td>
+        <td>Repository content is never mistaken for a disposable note.</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>4. Choices made for review (recorded in <code>scratch/plan.md</code>)</h2>
+  <p>
+    Every choice below is reversible; none is irreversible once shipped, so the plan commits to the boldest, simplest option and records what was passed over.
+  </p>
+  <ol>
+    <li><strong>Single-owner delivery clear (no pre-sync clear when <code>resync == true</code>).</strong> Keeps <code>scratch/plan.md</code> readable during real code conflicts and avoids mutating the branch on abort, while auto-dropping pure stacked-scratch <code>UD</code> conflicts with zero agent launches. <em>Passed over:</em> clearing before sync in <code>prepare_pr</code> and clearing again in <code>finish_sync</code>.</li>
+    <li><strong>Delete builtin <code>queue</code> Graph and <code>.lf/graphs/finish-queue.yaml</code>.</strong> Without <code>gate</code>, <code>queue</code> is just <code>compress</code> + <code>refresh</code> with no caller outside tests and one doc row. <em>Passed over:</em> keeping an unused two-step Graph.</li>
+    <li><strong>Delete cached PR copy (<code>scratch/pr-title.txt</code>, <code>pr-body.md</code>, <code>.pr-copy-ref</code>).</strong> Nothing writes it anymore; it was <code>gate</code>'s handoff. <em>Passed over:</em> leaving dead readers for a separate cleanup.</li>
+    <li><strong>Drop <code>pursue-auto</code>'s outer loop with <code>gate</code>.</strong> The outer loop had no step other than the inner loop plus <code>gate</code> + <code>loop-or-next</code>. <em>Passed over:</em> keeping a degenerate outer loop.</li>
+    <li><strong>Keep <code>lf scratch clear</code> as a standalone command</strong> with today's base (<code>task_diff_base</code> else <code>git::scratch::base</code>) so someone can still trigger CI on a manual <code>lf pr publish</code> without arming auto-merge. <em>Passed over:</em> deleting the CLI command.</li>
   </ol>
+</section>
 
+<section>
   <h2>5. Outside this Task</h2>
-  <div class="card">
-    <ul style="margin:0; padding-left:20px;">
-      <li><strong>Update <code>.lf/wave/intelligence/MEMORY.md</code></strong> (read-only in a Task checkout): its 2026-09-28 entry says <code>realign</code> owns memory curation. Update in an intelligence Wave session once LOO-1104 lands.</li>
-      <li><strong><code>lf commit --step</code> ignoring run-level <code>-a</code></strong> (found in <code>scratch/qa.html</code> #1): when a private home has no <code>default_agent</code>, step commits fall back to <code>lf &lt;skill&gt;: checkpoint</code>. Documented in <code>.lf/qa/skills.md</code>; separate CLI bug if worth fixing.</li>
-      <li><strong>Repo-local <code>.lf/graphs/pursue-auto.yaml</code></strong>: uses custom loops with <code>loop-or-next</code>; separate repo cleanup if desired.</li>
-      <li><strong>Automatic Graph selection</strong> (choosing <code>ui</code> or <code>fix</code> from Task content): separate feature; today a person or Wave default picks the Graph.</li>
+  <ul>
+    <li><span class="badge outside">Outside</span> <strong>Opt-in tailored review skills</strong> (<code>security-review</code>, <code>performance-review</code>): named in the Task brief as dedicated opt-in skills later.</li>
+    <li><span class="badge outside">Outside</span> <strong>Local test runner naming</strong> (<code>scripts/test.py</code>'s <code>.lf/tmp/gate</code> directory and <code>python/tests/test_gate_bounded.py</code>): repo-internal test runner vocabulary, not the <code>gate</code> skill. Renaming would touch CI/test-runner scripts and evidence schemas for no user-facing change.</li>
+    <li><span class="badge outside">Outside</span> <strong>Plain <code>lf sync</code> stacked-scratch modify/delete conflicts:</strong> a stacked child running ordinary <code>lf sync</code> (not delivery) after its parent squash-merged still wants to <em>keep</em> its edited <code>scratch/plan.md</code>, which is a different rule from delivery's discard. Worth a small follow-up if it bites in practice.</li>
+    <li><span class="badge outside">Outside</span> <strong>Wave <code>MEMORY.md</code> files</strong> mentioning <code>gate</code> as a historical phase (read-only in a Task checkout; updated by <code>wave-session</code>).</li>
+  </ul>
+</section>
+
+<section>
+  <h2>6. Open questions for review</h2>
+  <p class="muted">Answer with a number and letter (for example, <code>1a 2b</code>). Nothing here blocks building the plan as written.</p>
+
+  <div class="question">
+    <h3>1. When <code>lf land</code> hits a real merge conflict, should your <code>scratch/</code> notes stay in the checkout until the conflict is resolved?</h3>
+    <ul class="opts">
+      <li><strong>1a (Chosen in plan):</strong> Yes — notes stay on disk so the conflict resolver can read your plan, and aborting the conflict leaves your branch and notes untouched. Notes clear only when the merge finishes and is about to push.</li>
+      <li><strong>1b:</strong> No — clear notes before attempting the merge, then clear again after conflict resolution. Simpler merge path, but the resolver cannot read <code>scratch/plan.md</code> on disk and an aborted land leaves a "Clear added scratch files" commit behind.</li>
     </ul>
   </div>
+
+  <div class="question">
+    <h3>2. Should <code>lf scratch clear</code> stay as a command you can run by hand?</h3>
+    <ul class="opts">
+      <li><strong>2a (Chosen in plan):</strong> Keep it — useful if you want to trigger full CI on a manual <code>lf pr publish</code> without arming auto-merge or submitting.</li>
+      <li><strong>2b:</strong> Remove the command — only <code>lf land</code>, <code>lf arm</code>, and <code>lf pr submit</code> clear working notes.</li>
+    </ul>
+  </div>
+
+  <div class="question">
+    <h3>3. Should the unused <code>queue</code> Graph disappear with <code>gate</code>?</h3>
+    <ul class="opts">
+      <li><strong>3a (Chosen in plan):</strong> Delete <code>queue</code> (and <code>.lf/graphs/finish-queue.yaml</code>) — without <code>gate</code> it is only <code>compress</code> + <code>refresh</code> and nothing invokes it.</li>
+      <li><strong>3b:</strong> Keep <code>queue</code> as <code>compress</code> → <code>refresh</code>.</li>
+    </ul>
+  </div>
+</section>
+
 </main>
 </body>
 </html>

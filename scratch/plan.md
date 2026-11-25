@@ -1,4 +1,4 @@
-# LOO-1106: remove `gate`; `lf land` clears `scratch/` on the head it pushes
+# LOO-1106: remove `gate`; `lf land` owns the clean pushed head
 
 Stacked on LOO-1104 (PR #2047). LOO-1105 (PR #2046) stays separate. The
 parent's plan is in its branch (`git show 26de21885e:scratch/plan.md`).
@@ -15,9 +15,14 @@ opt-in skills later, outside this Task."
 - A Task on `code`, `feature` or `quick` goes from its last review step
   straight to `lf land --wait-and-fix`. No agent runs between them.
 - `lf land`, `lf arm` and `lf pr submit` push one head, and that head has no
-  branch-added file under `scratch/`, whether the sync merged cleanly, reused
-  a recorded resolution, or handed conflicts to `sync-conflicts`. CI therefore
-  runs the full matrix on the first head delivery pushes.
+  branch-added file under `scratch/`, whether delivery skipped sync
+  (`resync == false`), took `SyncStrategy::Noop`, merged cleanly, reused a
+  recorded resolution, auto-dropped stacked-scratch conflicts, or handed real
+  code conflicts to `sync-conflicts`. CI therefore runs the full matrix on the
+  first head delivery pushes.
+- During a real code conflict, `scratch/` notes stay on disk so `sync-conflicts`
+  can read `scratch/plan.md`, and an aborted conflict leaves the branch
+  untouched with no clear commit.
 - A checkpoint PR from `pr-publish` keeps its notes, so CI stays deferred
   while `ship-review` is open. Nothing here changes `lf pr publish`.
 - `lf gate`, `lf list graph`'s `queue` row and `lf skill customize gate` are
@@ -49,7 +54,8 @@ only `scratch/.gitkeep`, and the remote's `update` hook logged one push.
   with no list to edit.
 - "Branch-added scratch": `git::scratch::added(base, tree)`
   (`rust/loopflow-execution/src/git/scratch.rs`), unchanged. What changes is
-  the base delivery hands it, and when.
+  the base delivery hands it, and that delivery clears once on the head it is
+  about to push.
 - CI's own predicate, unchanged: `.github/workflows/ci.yml:88-117`
   (`find scratch -mindepth 1 ! -path 'scratch/.gitkeep'`).
 
@@ -65,26 +71,40 @@ only `scratch/.gitkeep`, and the remote's `update` hook logged one push.
    "A sync can restore notes retained during conflict resolution after an
    earlier cleanup."
 
-2. **A stacked child always takes that path.** `scratch::clear` measures
-   against `task_diff_base` (`ops/scratch.rs:8-11`), which for a stacked Task
-   is the parent's head, so the parent's notes are not "added" and survive
-   the clear. The stacked merge then compares against a synthetic commit of
-   main's tree on the fork base (`git/mod.rs:1236-1257`). Probe, temp repo,
-   parent adds `scratch/plan.md` + `scratch/qa.html`, child edits `plan.md`,
-   parent squash-lands without them:
+2. **A stacked child hits a modify/delete conflict on inherited notes.**
+   `scratch::clear` measures against `task_diff_base` (`ops/scratch.rs:8-11`),
+   which for a stacked Task is the parent's head, so the parent's notes are not
+   "added". When the parent squash-lands without them, merging main via the
+   synthetic comparison commit (`git/mod.rs:1236-1257`) stops with
+   `CONFLICT (modify/delete): scratch/plan.md` (`git diff --diff-filter=U` and
+   `git rerere remaining` both report `scratch/plan.md`). Every stacked child
+   that edited an inherited note pays a `sync-conflicts` agent to land, and the
+   resolver may keep the file.
 
-   ```text
-   added vs merge-base(HEAD, main): child.txt parent.txt scratch/plan.md scratch/qa.html
-   added vs parent head:            child.txt
-   CONFLICT (modify/delete): scratch/plan.md deleted in <cmp> and modified in HEAD.
-   UD scratch/plan.md
-   D  scratch/qa.html
-   ```
+3. **Clearing before sync breaks real conflict resolution and aborts.**
+   Deleting `scratch/` in `prepare_pr` before `sync_land` removes
+   `scratch/plan.md` from disk before `sync-conflicts` runs (despite
+   `sync-conflicts.md:9` instructing the resolver to read `scratch/`), and
+   leaves a `"Clear added scratch files"` commit and deleted notes behind if
+   the conflict aborts.
 
-   So every stacked child that touched an inherited note pays a
-   `sync-conflicts` agent to land, and the resolver may keep the file.
+4. **`SyncStrategy::Noop` skips the push during delivery.**
+   `start_owned_sync` (`ops/sync.rs:291-293`) hardcodes `push = false` for
+   `SyncStrategy::Noop`. When a persistent worktree or an already-integrated
+   stacked Task enters `sync_land` (`plan_sync` lines 142-144 pick `Noop`),
+   delivery never pushes the cleared (or newly committed) head.
 
-3. **A PR head with notes is not a failing head.** `tests-result` is skipped
+5. **Three smaller boundary leaks on the same delivery path:**
+   - `sync_land` (`ops/land.rs:406`) hardcodes `push: true` even when
+     `options.local` is true.
+   - On `prepare_pr`'s `resync == false` path, `require_task_pr_range_nonempty`
+     is a no-op for non-Task branches, so clearing a notes-only non-Task PR
+     could push an empty tree.
+   - The standalone already-armed shortcut (`ops/land.rs:97-113`) returns early
+     without checking whether `HEAD` still carries branch-added `scratch/`
+     files (a manually armed checkpoint PR would be evicted by the merge queue).
+
+6. **A PR head with notes is not a failing head.** `tests-result` is skipped
    for a checkpoint (`ci.yml:449`), GitHub counts a skipped required check as
    satisfied, and `scratch-clear` fails only on `merge_group`. Auto-merge
    would queue it, the queue would evict it, and `ci-fix` (an agent) would
@@ -92,61 +112,106 @@ only `scratch/.gitkeep`, and the remote's `update` hook logged one push.
    delivery cannot push such a head: `ci-fix` re-arms through `lf arm`, which
    is `prepare_pr`.
 
-4. **`finish_sync` is the one place every delivery sync ends**: clean merge,
-   rerere reuse (`sync.rs:308-311`) and agent recovery (`recover_sync`,
-   `sync.rs:245-254`) all call it with the `SyncExpectation` built at the
-   start, and only delivery sets `require_changes` (`sync_for_delivery`,
-   `sync.rs:210-216`).
+7. **`finish_sync` is the one place every delivery sync ends**: clean merge,
+   `Noop`, `rerere` reuse (`sync.rs:308-311`), auto-dropped scratch conflicts,
+   and agent recovery (`recover_sync`, `sync.rs:245-254`) all call it with the
+   `SyncExpectation` built at the start, and only delivery sets it
+   (`sync_for_delivery`, `sync.rs:210-216`).
 
 ## The landing design
 
-One rule: **delivery clears scratch files the integration target lacks, on
-the head it is about to push, and pushes after.**
+One rule: **delivery clears branch-added `scratch/` files once, on the head it
+is about to push, measured against the integration target (`target_sha` after
+sync, or `merge_base(HEAD, integration_base)` when no sync runs).**
 
-- `ops::scratch::clear(repo, base)` takes its base. `lf scratch clear` passes
-  what it passes today (`task_diff_base`, else `git::scratch::base`), so a
-  stacked child with a live parent keeps the parent's notes out of its diff.
-- Delivery passes `merge_base(HEAD, <integration target>)`:
-  - before the sync (`land.rs:171`), which removes inherited notes so finding
-    2's conflict never forms, and covers the no-resync path (a CI repair on a
-    mergeable PR, `needs_resync` false) where no sync runs;
-  - inside `finish_sync`, when the expectation is a delivery, before
-    `verify_sync` and the push. After a merge the base is the pinned
-    `target_sha`, so the same call removes anything a resolver restored or
-    wrote. `require_changes` then also sees a notes-only branch as empty.
-- The clear commit sits on top of the merge commit, so
-  `accept_completed_integration`'s `HEAD^2` read (`land.rs:419-427`) goes.
-  `finish_sync` already records the stack base from the pinned target
-  (`record_control_task_state`, `sync.rs:441-468`); pass 1's stacked test
-  shows whether `sync_land`'s second `record_stack_sync` (`land.rs:411-415`)
-  is redundant too, and deletes it if so.
-- `SyncExpectation.require_changes` becomes the name for what it now means
-  (delivery), one field, not a second flag beside it.
-- PR copy is still resolved before the first clear (`land.rs:156-169`), so a
-  generated body can read the notes.
-- `Integration::Completed` keeps refusing a dirty tree and adds nothing: the
-  head it receives was cleared and pushed by `finish_sync`.
-  `release.rs:1701` calls `finish_arm_after_sync` with no sync before it and
-  is unaffected.
+- **`ops::scratch::clear(repo, base)`** takes its base explicitly.
+  `lf scratch clear` passes today's base (`task_diff_base`, else
+  `git::scratch::base`), so a stacked child with a live parent keeps the
+  parent's notes out of its diff.
+- **`SyncExpectation.require_changes` becomes `delivery: bool`**: one field
+  naming the mode (`sync_for_delivery` sets `true`; plain `lf sync` sets
+  `false` and keeps notes untouched).
+- **When `resync == true` (`sync_land` runs):**
+  - `prepare_pr` does **not** clear `scratch/` before `sync_land`. Notes stay
+    on disk through the merge and any `sync-conflicts` session.
+  - `sync_land` passes `push: !options.local` to `sync_for_delivery`.
+  - In `start_owned_sync`:
+    - `SyncStrategy::Noop`: passes `options.push && expected.delivery` (instead
+      of hardcoded `false`) to `finish_sync`, so delivery still clears scratch,
+      checks non-empty, and pushes when remote differs from `HEAD`.
+    - `SyncStrategy::MergeTarget` conflict path (`intervention_state == Some("merge")`):
+      after `git::merge`, read `remaining = rerere_remaining(repo)?`. When
+      `expected.delivery && !remaining.is_empty()`, compute
+      `merge_base = git::merge_base(repo, "HEAD", &target_sha)?` and
+      `added = git::scratch::added(repo, &merge_base, "HEAD")?`. If **every**
+      path in `remaining` is in `added` and absent from `target_sha`
+      (`git cat-file -e <target_sha>:<path>` fails), remove those paths with
+      `git --literal-pathspecs rm -f -- <remaining>` and call
+      `continue_merge(repo, None)`. That resolves both pure stacked-scratch
+      `UD` conflicts and `rerere`-resolved code + scratch conflicts with zero
+      agent launches, while preserving renamed repository documents (not in
+      `added`) and leaving `scratch/` intact on disk whenever a real code
+      conflict goes to `sync-conflicts`.
+  - In `finish_sync`:
+    1. Verify integrated head (`verify_integrated_head`) and zero unresolved
+       paths (`git diff --diff-filter=U --name-only` empty) first, so cleanup
+       never mutates a broken merge or wrong branch.
+    2. When `expected.delivery`: run `ops::scratch::clear(repo, target_sha)` to
+       remove any remaining branch-added `scratch/` files (including anything
+       `sync-conflicts` kept or wrote).
+    3. When `expected.delivery`: refuse if
+       `HEAD^{tree} == target_sha^{tree}` ("no authored changes remain after
+       integration; refusing to publish an empty PR") before any push.
+    4. Read the post-clear `HEAD` into `SyncVerification`, validate Task PR
+       range (`!expected.stacked`), push once if `push` (skipping a no-op push
+       if `origin/<branch>` already matches `verification.head`), and run
+       `record_control_task_state` (which already records `target_sha` and
+       clears `parent_pr_id` on stacked Tasks).
+  - Because `finish_sync` always records the stack base from `target_sha` and
+    the clear commit may sit on top of the merge commit, delete both
+    `accept_completed_integration`'s `HEAD^2` read (`land.rs:419-427`) and
+    `sync_land`'s redundant second `record_stack_sync` (`land.rs:411-415`).
+- **When `resync == false` (`prepare_pr` pushes without syncing):**
+  - `prepare_pr` clears `scratch/` against `base = git::scratch::base(&repo_root)?`
+    (`merge_base(HEAD, integration_base)`), checks non-empty for both Task
+    (`require_task_pr_range_nonempty`) and non-Task
+    (`HEAD^{tree} != base^{tree}` -> same refusal before push), and calls
+    `push_with_upstream_if_needed`.
+- **Standalone already-armed shortcut (`land.rs:97-113`):**
+  - Only return early when `git::scratch::added(&repo_root, &git::scratch::base(&repo_root)?, "HEAD")?.is_empty()`, so a manually armed checkpoint PR is cleared and re-pushed instead of evicted by the merge queue.
+- **PR copy stays before integration (`land.rs:156-169`):**
+  - `published_pr_copy` must compare `HEAD` against GitHub's `headRefOid`
+    before pushing so a local commit generates fresh copy while an unchanged
+    published PR reuses its copy without an LLM call.
+- **`Integration::Completed`** keeps refusing a dirty tree and adds nothing:
+  the head it receives was cleared and pushed by `finish_sync`.
+  `release.rs:1701` calls `finish_arm_after_sync` with no sync before it and is
+  unaffected.
 
-Passed over: clearing in `prepare_pr` after the sync returns (needs the sync
-not to push, then a second push site with sync's force-with-lease rules, and
-still misses the push `recover_sync` makes); teaching `sync-conflicts` to
-delete notes (the hole stays open to any resolver); a `pr_landing` repair for
-a `scratch-clear` failure (unreachable once the push is clean).
+Passed over: clearing in `prepare_pr` before every sync plus a second clear in
+`finish_sync` (deletes `scratch/plan.md` before `sync-conflicts` can read it
+and leaves a clear commit on aborted conflicts); clearing in `prepare_pr` after
+sync returns (needs sync not to push, duplicates push/force-with-lease logic,
+and misses `recover_sync`'s push); teaching `sync-conflicts` to delete notes
+(hole stays open to any resolver); a `pr_landing` repair for `scratch-clear`
+(unreachable once delivery cannot push notes).
 
 Sibling variants: `arm`, `submit`, `finish_arm_after_sync`,
 `finish_submit_after_sync` all go through `prepare_pr`; `lf land --local`
-syncs through the same `sync_land` and gets the same clear with no push.
-Plain `lf sync` (not delivery) keeps notes, as today.
+syncs through `sync_land` with `push: false` and gets the same clear with no
+push. Plain `lf sync` (`delivery: false`) keeps notes, as today.
 
 ## Absent and error states
 
 - No `scratch/` files added: no clear commit, head unchanged, an armed exact
   head stays armed (`land.rs:83-113` returns before any of this).
-- Existing scratch content the target has (edited or renamed on the branch):
-  kept, as `land_cleans_added_scratch_and_retains_existing_edits` asserts.
-- Clearing leaves no authored change: refused before any push, as
+- Existing scratch content the target has (edited or renamed into `scratch/`
+  on the branch): kept, as `land_cleans_added_scratch_and_retains_existing_edits`
+  and `clear_preserves_existing_files_moved_into_scratch` assert.
+- Real code conflict aborted (`lf sync --abort`): zero `"Clear added scratch
+  files"` commit created, all `scratch/` notes intact.
+- Clearing leaves no authored change (Task or non-Task, `resync` true or
+  false): refused before any push, as
   `land_refuses_when_clearing_scratch_leaves_no_authored_change` asserts.
 - A repository without CI's `scratch-clear` job is unaffected; `.github/CI.md`
   keeps "repositories retaining it must define their own candidate policy".
@@ -186,9 +251,12 @@ Prose that names the skill (each line rewritten to say CI, or deleted):
   `wave_operate.md:68`. Golden: `tests/goldens/builtin_implement.md`
   (`uv run python tests/goldens/update_goldens.py`).
 - Engine strings: `graph/output.rs:19`, `graph/instructions.rs:73`.
-- `AGENTS.md:186,448,454,456`: the cadence line becomes land's ("**land:**
-  clears scratch and pushes once; CI runs the suites, `ci-fix` repairs"), and
-  the check lines move to the PR body when `lf land` writes it.
+- `AGENTS.md:186,448,454-456`: line 186 drops `gate:` from the focused test
+  example; line 448 becomes land's ("**land:** clears scratch and pushes once;
+  CI runs the suites, `ci-fix` repairs"); lines 454-456 align with
+  `pr-message.md:25` and `pr-land.md` — checks that can't run locally go to CI,
+  CI shows automated test/lint results, and only post-merge checks and
+  unrecoverable facts move into the PR body before landing.
 - `.github/CI.md:5-31`: delivery clears on the pushed head; the manual
   "after the final `lf sync`, run `lf scratch clear`" procedure and the
   "sync can restore notes" warning go. Lines 115-116 (`.lf/tmp/gate`, the
@@ -229,10 +297,10 @@ gate, release gate, merge gate (`MergeGateReading`), `UI_HOST_GATE`; release
 notes and applied migrations; `.lf/wave/*/MEMORY.md` (read-only in a Task
 checkout).
 
-Must survive: `lf scratch clear` as a command with today's base;
+Must survive: `lf scratch clear` as a standalone command with today's base;
 `lf pr publish` keeping notes; one push per land
 (`land_preserves_checkpoint_history_and_pushes_the_final_tree_once`);
-exact-head re-arm without a push; existing scratch content.
+exact-head re-arm without a push; existing and moved-in scratch content.
 
 ## Costs of dropping the step
 
@@ -243,19 +311,28 @@ exact-head re-arm without a push; existing scratch content.
 - No agent picks "two to five tests" or confirms CI started for the head.
   `land --wait-and-fix` reads the head's checks (`decide_merge`,
   `pr_landing.rs:175-263`) and holds until merge.
-- Nothing copies check results from `scratch/` into the PR body by hand;
-  generated PR copy reads the notes before they are cleared.
+- Nothing copies check results from `scratch/` into the PR body by hand; CI
+  shows automated checks and `pr-message` keeps only post-merge checks.
 
 ## Choices made for review
 
-1. **`queue` and `finish-queue` are deleted**, not kept as `compress` +
+1. **Single-owner delivery clear (no pre-sync clear when `resync == true`).**
+   Delivery clears scratch once, right before pushing (`finish_sync` when
+   syncing, `prepare_pr` when `resync == false`), and auto-drops pure
+   stacked-scratch `UD` merge conflicts inside `start_owned_sync` so
+   `scratch/plan.md` stays on disk for `sync-conflicts` on real code conflicts
+   and an aborted conflict leaves the branch untouched. Passed over: clearing
+   in `prepare_pr` before sync plus a second clear in `finish_sync`.
+2. **`queue` and `finish-queue` are deleted**, not kept as `compress` +
    `refresh`. Passed over: keeping `queue` as a two-step Graph nobody runs.
-2. **The cached PR copy code is deleted here**, as gate's leftover. Passed
+3. **The cached PR copy code is deleted here**, as gate's leftover. Passed
    over: leaving it for a later cleanup.
-3. **The post-sync clear lives in `finish_sync`**, so sync owns the pushed
-   head for delivery. Passed over: a second push site in `land.rs`.
 4. **`pursue-auto` loses its outer loop** with `gate`. Passed over: keeping a
    loop whose only step is another loop plus `loop-or-next`.
+5. **`lf scratch clear` stays as a standalone CLI command** with today's base
+   (`task_diff_base` else `git::scratch::base`), useful for triggering CI on a
+   manual `lf pr publish` without arming auto-merge. Passed over: deleting the
+   CLI subcommand.
 
 ## Acceptance check
 
@@ -272,31 +349,43 @@ uv run python scripts/test.py --reuse-passing --rust-filter \
 
 Expected: `deliver` prints `reflect`, `cmd: land --wait-and-fix`; `quick`
 prints `cmd: sync`, `implement`, `qa`, `cmd: land --wait-and-fix`; the grep is
-empty; the tests pass, including the two new ones below. CI runs the suites.
+empty; the tests pass, including the new Pass 1 tests below. CI runs the suites.
 
 ## Passes
 
-1. **Landing, the pass that could prove the plan wrong.** `scratch::clear`
-   takes a base; delivery clears before the sync and in `finish_sync`; the
-   `HEAD^2` read goes. New tests in `rust/loopflow/tests/land_tests.rs`, each
-   with the remote `update` hook counting pushes:
-   - a conflicting sync whose resolver (the fixture's `agent_script`) resolves
-     the conflict and writes `scratch/notes.md` back: the remote head has no
-     `scratch/notes.md`, one push, `lf pr submit` and `lf land` both;
-   - a stacked child that edited an inherited `scratch/plan.md`, parent
-     squash-landed: no agent launched, remote head has only `.gitkeep`, the
-     recorded stack base is the target, one push.
-   It shows whether a commit on top of the merge survives `verify_sync`, the
-   stack record and the Task PR range checks. If it does not, the plan is
-   wrong here and realign takes it.
+1. **Landing, the pass that could prove the plan wrong.** `ops::scratch::clear`
+   takes a base; `SyncExpectation.require_changes` becomes `delivery`;
+   `sync_land` passes `push: !options.local`; `prepare_pr` clears only when
+   `resync == false` (plus non-Task empty check and standalone shortcut guard);
+   `start_owned_sync` pushes on `Noop` when `options.push && expected.delivery`
+   and auto-drops target-absent branch-added `scratch/` conflicts when no real
+   conflict remains; `finish_sync` clears scratch against `target_sha` before
+   the empty-tree check and push; delete `accept_completed_integration`'s
+   `HEAD^2` read and `sync_land`'s duplicate `record_stack_sync`. New tests in
+   `rust/loopflow/tests/land_tests.rs`, each with the remote `update` hook
+   counting pushes:
+   - a conflicting sync whose resolver (`agent_script`) verifies
+     `scratch/plan.md` is still readable on disk, resolves the code conflict,
+     and writes `scratch/notes.md`: the remote head has neither `plan.md` nor
+     `notes.md`, one push, `lf pr submit` and `lf land` both;
+   - a stacked child that edited an inherited `scratch/plan.md` (plus a second
+     `scratch/child.md`), parent squash-landed: no agent launched, remote head
+     has only `.gitkeep`, the recorded stack base is the target, one push;
+   - a `SyncStrategy::Noop` delivery (already-integrated stacked child or
+     persistent worktree with a committed scratch note): clears and pushes the
+     clean head once.
+   It shows whether single-owner delivery clear survives `verify_sync`,
+   `rerere`, the stack record and the Task PR range checks. If it does not, the
+   plan is wrong here and realign takes it.
 2. **Remove `gate`.** The skill, overlay, Graph steps, `queue`,
    `finish-queue`, cached PR copy, builtin skill prose, engine strings, test
    expectations and the golden.
 3. **Docs.** Everything under "Prose that names the skill" outside the
-   builtins, plus `.github/CI.md` and `AGENTS.md` describing the land that
-   pass 1 built.
+   builtins, plus `.github/CI.md` and `AGENTS.md` (aligned with
+   `pr-message.md`) describing the land that pass 1 built.
 
 Done when `lf graph show deliver` and `lf graph show quick` print no `gate`;
 `lf gate` and the `queue` Graph are unknown; a land through a conflicting
-sync and a stacked child's land each push one head with no branch-added
-`scratch/` file; and the acceptance check passes.
+sync, a stacked child's land, and a `Noop` delivery each push one head with no
+branch-added `scratch/` file while keeping notes readable during real code
+conflicts; and the acceptance check passes.

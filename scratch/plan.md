@@ -469,7 +469,11 @@ button).
    tickets without adding a `ServerOperation` case or touching `ServerProtocolTests`;
    and `TaskFilesStore.isScratchPage` also needed the `*.page.html` filter so local
    FSEvents match Rust's `ops/task/find.rs`.
-   Open shape question for compress: `page_build.rs` is 1434 lines in one file.
+   Open shape questions for compress: `page_build.rs` is 1434 lines in one
+   file; `TaskFilesTests/reviewPageBridgeOwnsStateClearsAfterSendAndForwardsOperations`
+   checks eight behaviors in one test and could split along its numbered steps.
+   Deferred to qa: the runtime against `__lfDesktopApplyState` in Dev Desktop
+   (switch files before sending, click a `data-lf` button); no JS runs in CI.
 4. **Next — Skills and docs.** The five skills, `lf help page` alignment,
    `LOOPFLOW.md`, `server/README.md`, goldens, and keeping the pre-written user
    docs in sync with any CLI/behavior adjustments. LOO-1109's own

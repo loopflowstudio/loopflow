@@ -29,9 +29,6 @@ for review.
 plan wrong: the join between two parts, the data shape everything depends on,
 the step nobody has tried.
 
-**Let the slice change the plan.** If the pieces don't fit, say so in the plan
-and stop building on the part that broke.
-
 A small plan is one slice; inside a Task, every slice goes end to end.
 
 ## Build it well
@@ -104,7 +101,9 @@ read, write its reading order as `lf help tour` describes.
   When a counterexample breaks the plan, note what broke in `scratch/plan.md`
   and return `advance` so review and realign can replan rather than iterating
   onto a broken plan.
-- **With no `scratch/plan.md`:** the brief is the plan. Build the outcome in
-  one pass and return `advance` (iterating only when a concrete remaining piece
-  stays within the brief). If the brief is contradicted or outgrows a bounded
-  change, return `blocked` with what broke so the Graph stops before shipping.
+- **With no `scratch/plan.md`:** the brief is the plan; don't write one. First
+  judge whether it is one bounded change a reviewer reads in a sitting. If it
+  isn't, or a counterexample contradicts it, return `blocked` before building,
+  saying what it would take, so the Graph stops before shipping. Otherwise
+  build it in one pass and return `advance`, iterating only for a concrete
+  remaining piece within the brief.

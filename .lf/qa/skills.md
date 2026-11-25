@@ -5,10 +5,10 @@ clone it, push `main`, work on a branch) and a private `LF_HOME` is enough; keep
 the real `HOME` so `claude` answers on the account's login. Repository skills
 from `~/.codex/skills` still show in `lf list skill` under that `HOME`.
 
-A private home has no `default_agent`. With only `-a claude:haiku` on the run,
-the step commit gets its message only because the run's `-a` reaches the child
-`lf commit --step`; a home without either commits `lf <skill>: checkpoint`,
-which is also the quickest way to see the fallback.
+A private home has no `default_agent`. With only `-a claude:haiku` on
+`lf graph <name> --batch` or `lf -b <skill>`, the step commit printed
+`load error: No agent selected` and committed `lf <skill>: checkpoint`
+(2026-11-25); set `default_agent` in the private home to see a written message.
 
 `lf -b implement` usually commits its own work, so its step commit only pushes.
 To see a message written, use a throwaway repository skill that edits a file and
@@ -32,3 +32,15 @@ invalid report to repeat even on correction, such as
 `{"decision":"advance","summary":"passed","reason":"failed"}`. With Codex,
 run `lf -b --task <id> graph <name>` from the disposable Task checkout. Three
 rejected turns leave the Graph's diagnostic in `lf task status <id>`.
+
+To check a builtin loop decider's wording (`implement` in `build`'s inner loop
+and in `fix`), copy the loop into the fixture repository as
+`.lf/graphs/<name>.yaml` (`- loop:` over `- cmd: sync` and `- implement`) and
+run `lf -a claude:haiku graph <name> --batch '<brief>'` from a branch with a
+bare origin: no GitHub, a minute or two per pass. Read each pass's decision
+from the `StructuredOutput` tool call in the newest
+`~/.claude/projects/-private-tmp-<repo path>/*.jsonl`; a blocked loop exits 3
+with `Error: Graph is blocked: <reason>`. Plan wording steers the decider
+("each pass is reviewed before the next" made it advance after pass 1), so
+write the plan the way kickoff would. An oversized brief may install and start
+services (Postgres under `/tmp`): stop what the run started by PID.

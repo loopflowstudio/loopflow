@@ -225,11 +225,12 @@ longer than it is now (110 lines) with the new section in it.
     built. When a counterexample breaks the plan, note what broke in
     `scratch/plan.md` and return `advance` so review/realign can replan rather
     than iterating onto a broken plan.
-  - With no `scratch/plan.md` (the brief is the plan, e.g. `fix`): build the
-    outcome in one pass and `advance` (iterating only if a concrete remaining
-    piece stays within the brief); if the brief is contradicted or outgrows a
-    bounded change, return `blocked` with what broke so the Graph stops before
-    shipping.
+  - With no `scratch/plan.md` (the brief is the plan, e.g. `fix`): don't
+    write one; judge first whether the brief is one bounded change, and if not
+    (or contradicted) return `blocked` before building. Otherwise build it in
+    one pass and `advance`. (qa: without "judge first" and "don't write one",
+    haiku wrote its own four-pass plan for an oversized brief and iterated
+    through OAuth and billing.)
 - Pass closeout and context headroom, from a comment on the Task (Jack Heart,
   2026-11-25), word for word:
   > Keep #2037 substantial-pass sizing, and add: do not start another planned

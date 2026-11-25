@@ -270,7 +270,9 @@ each `qa` pass; iterate sends your notes back to `sync` → `implement` (with au
 on, `demo` inspects `scratch/qa.html` and iterates only if visibly broken).
 `fix` takes a bounded bug or small tweak straight from the brief to a merged PR
 with no interactive step—Desktop's Start menu marks it **merges without
-asking**, and `lf task auto off <ID>` still pauses before `land`.
+asking**, and `lf task auto off <ID>` still pauses before `land`. A brief
+bigger than one bounded change stops `fix` at `implement`, blocked, before
+anything is built.
 
 Copy any builtin to customize it for your team:
 

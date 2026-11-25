@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Explore (Round 5) · Refining V4 — One Vocabulary, Zero Jump (LOO-1078)</title>
+<title>Explore · Vision C: Pill vs Borderless Track (LOO-1078)</title>
 <style>
   :root {
     --bg: #faf8f5;
@@ -15,7 +15,7 @@
     --border-active: #8b8277;
     --text: #2a2624;
     --text-2: #5f5752;
-    --text-3: #65605d;
+    --text-3: #78706a;
     --accent: #722f37;
     --accent-hover: #5e2630;
     --accent-text: #faf8f5;
@@ -24,19 +24,13 @@
     --titlebar-text: #ffffff;
     --titlebar-text-2: rgba(255,255,255,0.74);
     --working: #24579e;
-    --working-bg: rgba(36,87,158,0.10);
-    --working-bg-h: rgba(36,87,158,0.16);
-    --warning: #79520d;
-    --warning-bg: rgba(121,82,13,0.12);
-    --warning-bg-h: rgba(121,82,13,0.18);
-    --success: #31633e;
-    --success-bg: rgba(49,99,62,0.13);
-    --success-bg-h: rgba(49,99,62,0.20);
+    --working-bg: rgba(36,87,158,0.11);
+    --warning: #8a5a08;
+    --warning-bg: rgba(138,90,8,0.13);
+    --success: #2f6c42;
+    --success-bg: rgba(47,108,66,0.14);
     --failure: #a02e25;
-    --paused: #5f5752;
-    --paused-bg: rgba(95,87,82,0.13);
-    --paused-bg-h: rgba(95,87,82,0.20);
-    --shadow: 0 8px 24px rgba(0,0,0,0.11), 0 1px 3px rgba(0,0,0,0.08);
+    --shadow: 0 10px 28px rgba(0,0,0,0.12), 0 1px 3px rgba(0,0,0,0.08);
     --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
     --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
   }
@@ -52,24 +46,18 @@
       --border-active: #8c8c8b;
       --text: #f5f1ea;
       --text-2: #c9c6c1;
-      --text-3: #9e9b97;
+      --text-3: #96938f;
       --accent: #8a3a44;
       --accent-hover: #722f37;
       --accent-text: #faf8f5;
       --accent-ink: #eba8ac;
       --working: #9bafc8;
       --working-bg: rgba(155,175,200,0.16);
-      --working-bg-h: rgba(155,175,200,0.24);
       --warning: #e8c594;
       --warning-bg: rgba(232,197,148,0.16);
-      --warning-bg-h: rgba(232,197,148,0.24);
       --success: #abb97b;
-      --success-bg: rgba(171,185,123,0.17);
-      --success-bg-h: rgba(171,185,123,0.25);
+      --success-bg: rgba(171,185,123,0.18);
       --failure: #e89888;
-      --paused: #c9c6c1;
-      --paused-bg: rgba(201,198,193,0.15);
-      --paused-bg-h: rgba(201,198,193,0.23);
       --shadow: 0 12px 32px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.35);
     }
   }
@@ -84,517 +72,336 @@
     --border-active: #8c8c8b;
     --text: #f5f1ea;
     --text-2: #c9c6c1;
-    --text-3: #9e9b97;
+    --text-3: #96938f;
     --accent: #8a3a44;
     --accent-hover: #722f37;
     --accent-text: #faf8f5;
     --accent-ink: #eba8ac;
     --working: #9bafc8;
     --working-bg: rgba(155,175,200,0.16);
-    --working-bg-h: rgba(155,175,200,0.24);
     --warning: #e8c594;
     --warning-bg: rgba(232,197,148,0.16);
-    --warning-bg-h: rgba(232,197,148,0.24);
     --success: #abb97b;
-    --success-bg: rgba(171,185,123,0.17);
-    --success-bg-h: rgba(171,185,123,0.25);
+    --success-bg: rgba(171,185,123,0.18);
     --failure: #e89888;
-    --paused: #c9c6c1;
-    --paused-bg: rgba(201,198,193,0.15);
-    --paused-bg-h: rgba(201,198,193,0.23);
     --shadow: 0 12px 32px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.35);
   }
 
   * { box-sizing: border-box; }
   body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font: 14px/1.55 var(--font-sans);
-    -webkit-font-smoothing: antialiased;
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.55 var(--font-sans); -webkit-font-smoothing: antialiased;
   }
-  main {
-    max-width: 880px;
-    margin: 0 auto;
-    padding: 36px 20px 88px;
-  }
+  main { max-width: 900px; margin: 0 auto; padding: 32px 20px 88px; }
   .top-meta {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
-    margin-bottom: 10px;
-    font-size: 12px;
-    color: var(--text-2);
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 12px; flex-wrap: wrap; margin-bottom: 10px; font-size: 12px; color: var(--text-2);
   }
   code { font-family: var(--font-mono); font-size: 12px; }
-  h1 { font-size: 25px; line-height: 1.2; letter-spacing: -0.02em; margin: 0 0 10px; }
-  h2 { font-size: 17px; line-height: 1.3; margin: 0; }
-  p { margin: 0 0 12px; }
+  h1 { font-size: 24px; line-height: 1.2; letter-spacing: -0.02em; margin: 0 0 10px; }
+  h2 { font-size: 16px; line-height: 1.3; margin: 0; }
+  p { margin: 0 0 10px; }
   .muted { color: var(--text-2); }
   .small { font-size: 12.5px; }
 
   .lead-box {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--accent);
-    border-radius: 6px;
-    padding: 13px 16px;
-    margin: 14px 0 20px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-left: 3px solid var(--accent); border-radius: 6px;
+    padding: 12px 15px; margin: 12px 0 18px;
   }
   .lead-box p:last-child { margin-bottom: 0; }
 
-  .vocab-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin: 10px 0 4px;
-    font-size: 12.5px;
-  }
-  .vocab-col {
-    background: var(--surface-muted);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 9px 11px;
-  }
-  .vocab-col strong { display: block; margin-bottom: 4px; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-3); }
-  .vocab-col.good strong { color: var(--success); }
-
   .tag {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 10.5px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    padding: 2px 7px;
-    border-radius: 4px;
+    display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 600;
+    letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 7px; border-radius: 4px;
   }
-  .tag-proposed { background: var(--working-bg); color: var(--working); }
-  .tag-best { background: var(--success-bg); color: var(--success); }
+  .tag-rec { background: var(--success-bg); color: var(--success); }
+  .tag-alt { background: var(--working-bg); color: var(--working); }
+  .tag-pill { background: var(--surface-el); color: var(--text-2); border: 1px solid var(--border-strong); }
 
-  /* Sticky controller */
   .state-dock {
-    position: sticky;
-    top: 0;
-    z-index: 40;
-    background: var(--bg);
-    border-bottom: 1px solid var(--border);
-    padding: 10px 20px;
-    margin: 0 -20px 24px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    flex-wrap: wrap;
+    position: sticky; top: 0; z-index: 40;
+    background: var(--bg); border-bottom: 1px solid var(--border);
+    padding: 10px 20px; margin: 0 -20px 22px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; flex-wrap: wrap;
   }
   .state-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .state-label { font-size: 11.5px; font-weight: 600; color: var(--text-2); margin-right: 2px; }
   .seg-btn {
-    appearance: none;
-    border: 1px solid var(--border-strong);
-    background: var(--surface);
-    color: var(--text-2);
-    font: 12px/1 var(--font-sans);
-    padding: 6px 9px;
-    border-radius: 5px;
-    cursor: pointer;
+    appearance: none; border: 1px solid var(--border-strong);
+    background: var(--surface); color: var(--text-2);
+    font: 12px/1 var(--font-sans); padding: 6px 9px; border-radius: 5px; cursor: pointer;
   }
   .seg-btn:hover { background: var(--surface-el); color: var(--text); }
   .seg-btn[aria-pressed="true"] {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--accent-text);
-    font-weight: 500;
+    background: var(--accent); border-color: var(--accent);
+    color: var(--accent-text); font-weight: 500;
   }
   .seg-btn.subtle[aria-pressed="true"] {
-    background: var(--surface-el);
-    border-color: var(--border-active);
-    color: var(--text);
+    background: var(--surface-el); border-color: var(--border-active); color: var(--text);
   }
 
   .panel {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 18px 18px 16px;
-    margin: 22px 0;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 17px 18px 15px; margin: 20px 0;
   }
   .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin-bottom: 6px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; flex-wrap: wrap; margin-bottom: 5px;
   }
   .panel-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .one-liner { color: var(--text-2); font-size: 13.5px; margin-bottom: 12px; }
+  .one-liner { color: var(--text-2); font-size: 13px; margin-bottom: 11px; }
 
-  /* Loopflow Window Chrome */
   .window-frame {
-    border: 1px solid var(--border-strong);
-    border-radius: 8px;
-    overflow: visible;
-    background: var(--surface-muted);
-    margin: 8px 0 12px;
+    border: 1px solid var(--border-strong); border-radius: 8px;
+    overflow: visible; background: var(--surface-muted); margin: 8px 0 11px;
   }
   .window-frame.narrow { max-width: 560px; }
 
   .lf-titlebar {
-    background: var(--titlebar);
-    color: var(--titlebar-text);
-    height: 32px;
-    padding: 0 10px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    border-radius: 7px 7px 0 0;
-    font-size: 12.5px;
-    font-weight: 500;
+    background: var(--titlebar); color: var(--titlebar-text);
+    height: 32px; padding: 0 10px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; border-radius: 7px 7px 0 0; font-size: 12.5px; font-weight: 500;
   }
   .lf-titlebar-left {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
+    display: flex; align-items: center; gap: 7px; min-width: 0;
+    overflow: hidden; white-space: nowrap;
   }
   .traffic { display: inline-flex; gap: 5px; margin-right: 4px; opacity: 0.7; }
   .traffic i { width: 9px; height: 9px; border-radius: 50%; background: rgba(255,255,255,0.45); display: inline-block; }
   .crumb-sep, .crumb-dim { color: var(--titlebar-text-2); font-weight: 400; }
 
   .lf-wfbar {
-    background: var(--bg);
-    border-bottom: 1px solid var(--border);
-    min-height: 38px;
-    padding: 5px 12px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    font-size: 12.5px;
-    position: relative;
+    background: var(--bg); border-bottom: 1px solid var(--border);
+    height: 36px; padding: 0 12px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 14px; font-size: 12.5px; position: relative;
   }
-  .lf-wfline {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    flex: 1 1 auto;
+  .lf-left {
+    display: flex; align-items: center; gap: 6px;
+    min-width: 0; flex: 1 1 auto; white-space: nowrap;
   }
-  .wf-name { font-family: var(--font-mono); font-size: 12px; color: var(--text); flex-shrink: 0; }
-  .wf-steps { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
-  .wf-step {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    font-size: 12px;
-    color: var(--text-3);
-    padding: 2px 4px;
-    border-radius: 4px;
-  }
-  .wf-step.done { color: var(--text-2); }
-  .wf-step.running { color: var(--working); font-weight: 600; }
-  .wf-step.running.auto-on { color: var(--success); }
-  .wf-step.waiting { color: var(--warning); font-weight: 600; }
-  .wf-step.paused { color: var(--paused); font-weight: 600; }
-  .wf-step.pill-echo {
-    background: var(--working-bg);
-    padding: 2px 6px;
-    border-radius: 999px;
-  }
-  .wf-step.pill-echo.auto-on { background: var(--success-bg); }
-  .wf-step.pill-echo.waiting { background: var(--warning-bg); }
-  .wf-step.pill-echo.paused { background: var(--paused-bg); color: var(--text); }
-  .wf-step.pill-echo.merged { background: var(--success-bg); color: var(--success); font-weight: 600; }
-  .wf-hint { color: var(--text-3); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-
-  .live-dot {
-    width: 6px; height: 6px; border-radius: 50%; background: currentColor; display: inline-block; flex-shrink: 0;
-  }
-  .live-dot.pulsing { animation: pulse 2s ease-out infinite; }
-  @keyframes pulse {
-    0% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.4; transform: scale(0.84); }
-    100% { opacity: 1; transform: scale(1); }
+  .lf-right {
+    display: inline-flex; align-items: center; gap: 12px; flex-shrink: 0;
   }
 
-  /* Right controls — locked geometry, zero jump */
-  .lf-controls {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    flex-shrink: 0;
-    position: relative;
-  }
-  .show-guides .lf-controls > * {
-    outline: 1px dashed rgba(114,47,55,0.45);
-    outline-offset: 2px;
-  }
+  .wf-arrow { color: var(--text-3); opacity: 0.42; font-size: 10px; user-select: none; }
 
-  /* Step-aware Status Pill (V4 core) */
-  .v4-pill {
-    appearance: none;
-    height: 25px;
-    min-width: 148px;
-    padding: 0 9px;
-    border-radius: 999px;
-    border: none;
-    font: 500 12px/1 var(--font-sans);
-    display: inline-flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 6px;
-    cursor: pointer;
-    white-space: nowrap;
+  /* C1: Full borderless toolbar track (no outer pill!) */
+  .bare-play {
+    appearance: none; border: none;
+    width: 24px; height: 24px; border-radius: 6px;
+    display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer; background: var(--surface-el); color: var(--text);
     transition: background 120ms, color 120ms;
   }
-  .v4-pill.wide { min-width: 164px; }
-  .v4-pill .p-left { display: inline-flex; align-items: center; gap: 5px; }
-  .v4-pill .p-step { opacity: 0.78; font-weight: 400; }
-  .v4-pill.st-unstarted { background: var(--surface-el); color: var(--text-2); }
-  .v4-pill.st-moving { background: var(--working-bg); color: var(--working); }
-  .v4-pill.st-moving.auto-on { background: var(--success-bg); color: var(--success); }
-  .v4-pill.st-waiting { background: var(--warning-bg); color: var(--warning); }
-  .v4-pill.st-paused { background: var(--paused-bg); color: var(--text); }
-  .v4-pill.st-merged { background: var(--success-bg); color: var(--success); }
-  .v4-pill:hover { filter: brightness(0.95); }
+  .bare-play.round { border-radius: 999px; }
+  .bare-play.tone-moving { background: var(--working-bg); color: var(--working); }
+  .bare-play.tone-moving.auto-on { background: var(--success-bg); color: var(--success); }
+  .bare-play.tone-paused { background: var(--warning-bg); color: var(--warning); }
+  .bare-play.tone-merged { background: var(--success-bg); color: var(--success); }
+  .bare-play:hover { filter: brightness(0.92); }
 
-  /* Compact flat icon triggers — locked widths */
-  .ic-btn {
-    appearance: none;
-    height: 25px;
-    width: 26px;
-    padding: 0;
-    border-radius: 6px;
-    border: none;
-    background: transparent;
-    color: var(--text-2);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    cursor: pointer;
-    font: 500 12px/1 var(--font-sans);
-    transition: background 100ms, color 100ms;
+  .bare-steps {
+    display: inline-flex; align-items: center; gap: 3px;
   }
-  .ic-btn:hover { background: var(--surface-el); color: var(--text); }
-  .ic-btn.lit-play { background: var(--working-bg); color: var(--working); }
-  .ic-btn.lit-play:hover { background: var(--working-bg-h); }
-  .ic-btn.lit-pause { background: var(--paused-bg); color: var(--text); }
-  .ic-btn.lit-pause:hover { background: var(--paused-bg-h); }
-  .ic-btn.ready-icon { background: var(--accent); color: var(--accent-text); }
-  .ic-btn.ready-icon:hover { background: var(--accent-hover); color: var(--accent-text); }
-  .ic-btn.ready-labeled {
-    width: auto;
-    padding: 0 9px;
-    background: var(--accent);
-    color: var(--accent-text);
+  .bare-chev {
+    appearance: none; border: none; background: transparent;
+    width: 22px; height: 24px; border-radius: 5px;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--text-2); cursor: pointer;
   }
-  .ic-btn.ready-labeled:hover { background: var(--accent-hover); color: var(--accent-text); }
+  .bare-chev:hover { background: var(--surface-el); color: var(--text); }
 
-  /* Physical Auto Switch — locked width */
+  /* Shared step button inside track */
+  .t-step {
+    appearance: none; border: none; background: transparent;
+    color: var(--text-3); font: 12px/1 var(--font-sans);
+    padding: 4px 7px; border-radius: 5px;
+    display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+    white-space: nowrap; transition: background 110ms, color 110ms;
+  }
+  .t-step.pill-chip { border-radius: 999px; padding: 4px 8px; }
+  .t-step:hover { background: var(--surface-el); color: var(--text); }
+  .t-step.done { color: var(--text-2); }
+  .t-step.active-moving { background: var(--working-bg); color: var(--working); font-weight: 600; }
+  .t-step.active-moving.auto-on { background: var(--success-bg); color: var(--success); }
+  .t-step.active-paused { background: var(--warning-bg); color: var(--warning); font-weight: 600; }
+  .t-step.active-waiting { background: var(--surface-el); color: var(--text); font-weight: 600; }
+  .t-step.active-merged { background: var(--success-bg); color: var(--success); font-weight: 600; }
+
+  /* C2: Soft macOS rounded-rect tray (6px, muted surface, no outer stroke) */
+  .tray {
+    display: inline-flex; align-items: stretch; height: 26px;
+    border-radius: 7px; background: var(--surface-muted);
+    overflow: hidden; font: 12px/1 var(--font-sans);
+  }
+  .tray-play {
+    appearance: none; border: none;
+    width: 28px; display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer; background: var(--surface-el); color: var(--text);
+  }
+  .tray.tone-moving .tray-play { background: var(--working-bg); color: var(--working); }
+  .tray.tone-moving.auto-on .tray-play { background: var(--success-bg); color: var(--success); }
+  .tray.tone-paused .tray-play { background: var(--warning-bg); color: var(--warning); }
+  .tray.tone-merged .tray-play { background: var(--success-bg); color: var(--success); }
+  .tray-play:hover { filter: brightness(0.92); }
+  .tray-steps {
+    display: inline-flex; align-items: center; gap: 3px; padding: 0 6px;
+  }
+  .tray-chev {
+    appearance: none; border: none; background: transparent;
+    width: 24px; display: inline-flex; align-items: center; justify-content: center;
+    color: var(--text-2); cursor: pointer;
+  }
+  .tray-chev:hover { background: var(--surface-el); color: var(--text); }
+
+  /* C3: Full outer pill capsule (original Vision C for comparison) */
+  .track-capsule {
+    display: inline-flex; align-items: stretch; height: 26px;
+    border-radius: 999px; border: 1px solid var(--border);
+    background: var(--surface); overflow: hidden;
+    font: 12px/1 var(--font-sans); max-width: 100%;
+  }
+  .track-capsule.tone-moving { border-color: rgba(36,87,158,0.32); }
+  .track-capsule.tone-moving.auto-on { border-color: rgba(47,108,66,0.38); }
+  .track-capsule.tone-paused { border-color: rgba(138,90,8,0.38); }
+  .track-cap-play {
+    appearance: none; border: none; border-right: 1px solid var(--border);
+    width: 30px; display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer; background: transparent; color: var(--text);
+  }
+  .track-capsule.tone-moving .track-cap-play { background: var(--working-bg); color: var(--working); }
+  .track-capsule.tone-moving.auto-on .track-cap-play { background: var(--success-bg); color: var(--success); }
+  .track-capsule.tone-paused .track-cap-play { background: var(--warning-bg); color: var(--warning); }
+  .track-capsule.tone-merged .track-cap-play { background: var(--success-bg); color: var(--success); }
+  .track-cap-steps {
+    display: inline-flex; align-items: center; gap: 3px; padding: 0 7px; overflow: hidden;
+  }
+  .track-cap-chev {
+    appearance: none; border: none; border-left: 1px solid var(--border);
+    width: 24px; display: inline-flex; align-items: center; justify-content: center;
+    background: transparent; color: var(--text-2); cursor: pointer;
+  }
+  .track-cap-chev:hover { background: var(--surface-el); color: var(--text); }
+
+  /* Right controls */
   .auto-switch {
-    appearance: none;
-    height: 25px;
-    width: 66px;
-    padding: 0 6px 0 8px;
-    border-radius: 6px;
-    border: none;
-    background: transparent;
-    color: var(--text-2);
+    appearance: none; height: 26px; padding: 0 4px; border-radius: 6px;
+    border: none; background: transparent; color: var(--text-2);
     font: 500 12px/1 var(--font-sans);
-    display: inline-flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 5px;
-    cursor: pointer;
-    transition: background 120ms, color 120ms, opacity 120ms;
+    display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
   }
-  .auto-switch:hover { background: var(--surface-el); color: var(--text); }
-  .auto-switch.on { background: var(--success-bg); color: var(--success); }
-  .auto-switch.on:hover { background: var(--success-bg-h); }
-  .auto-switch.held { opacity: 0.56; }
+  .auto-switch:hover { color: var(--text); }
+  .auto-switch.on { color: var(--success); }
+  .auto-switch.held { opacity: 0.58; }
   .sw-track {
-    width: 21px; height: 12px; border-radius: 999px; background: var(--border-strong);
-    position: relative; transition: background 140ms; flex-shrink: 0;
+    width: 28px; height: 16px; border-radius: 999px;
+    background: var(--border-strong); position: relative; transition: background 140ms;
   }
   .auto-switch.on .sw-track { background: var(--success); }
   .sw-track::after {
-    content: ""; position: absolute; width: 8px; height: 8px; border-radius: 50%;
+    content: ""; position: absolute; width: 12px; height: 12px; border-radius: 50%;
     background: #fff; top: 2px; left: 2px; transition: transform 140ms;
   }
-  .auto-switch.on .sw-track::after { transform: translateX(9px); }
+  .auto-switch.on .sw-track::after { transform: translateX(12px); }
 
-  /* Popovers */
-  .menu-wrap { position: relative; display: inline-flex; }
+  .chk-btn {
+    appearance: none; width: 26px; height: 26px; border-radius: 999px;
+    border: none; background: transparent; color: var(--text-2);
+    display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+  .chk-btn:hover { background: var(--surface-el); color: var(--text); }
+  .chk-btn.ready { background: var(--accent); color: var(--accent-text); }
+
+  /* Popover */
+  .menu-wrap { position: relative; display: inline-flex; align-items: center; }
   .popover {
-    position: absolute;
-    top: calc(100% + 5px);
-    right: 0;
-    min-width: 248px;
-    background: var(--surface);
-    border: 1px solid var(--border-strong);
-    border-radius: 7px;
-    box-shadow: var(--shadow);
-    padding: 4px;
-    z-index: 60;
-    display: none;
+    position: absolute; top: calc(100% + 6px); left: 0;
+    min-width: 230px; background: var(--surface);
+    border: 1px solid var(--border-strong); border-radius: 8px;
+    box-shadow: var(--shadow); padding: 5px; z-index: 60; display: none;
   }
   .popover.open { display: block; }
   .menu-head {
-    padding: 5px 8px 2px;
-    font-size: 10.5px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--text-3);
+    padding: 5px 8px 3px; font-size: 10.5px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-3);
   }
   .menu-item {
-    width: 100%;
-    appearance: none;
-    border: none;
-    background: transparent;
-    color: var(--text);
-    font: 12.5px/1.3 var(--font-sans);
-    padding: 6px 8px;
-    border-radius: 4px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    text-align: left;
-    cursor: pointer;
+    width: 100%; appearance: none; border: none; background: transparent;
+    color: var(--text); font: 12.5px/1.3 var(--font-sans);
+    padding: 6px 8px; border-radius: 5px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; text-align: left; cursor: pointer;
   }
   .menu-item:hover { background: var(--surface-el); }
   .menu-item .m-left { display: inline-flex; align-items: center; gap: 7px; }
-  .menu-item .m-sub { font-size: 11px; color: var(--text-3); font-family: var(--font-mono); }
   .menu-item.danger { color: var(--failure); }
-  .menu-item.selected { font-weight: 600; color: var(--accent-ink); }
   .menu-sep { height: 1px; background: var(--border); margin: 4px 2px; }
 
-  .step-pills-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    padding: 4px 6px 6px;
-  }
-  .step-jump {
-    appearance: none;
-    border: 1px solid var(--border);
-    background: var(--surface-muted);
-    color: var(--text-2);
-    font: 11.5px/1 var(--font-sans);
-    padding: 4px 7px;
-    border-radius: 4px;
-    cursor: pointer;
-  }
-  .step-jump:hover { background: var(--surface-el); color: var(--text); border-color: var(--border-strong); }
-  .step-jump.current { border-color: var(--accent-ink); color: var(--accent-ink); font-weight: 600; }
-
   .pane-body {
-    padding: 9px 12px;
-    font-size: 12px;
-    color: var(--text-2);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    flex-wrap: wrap;
-    border-radius: 0 0 7px 7px;
+    padding: 8px 12px; font-size: 12px; color: var(--text-2);
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; flex-wrap: wrap; border-radius: 0 0 7px 7px;
   }
   .cmd-log {
-    font-family: var(--font-mono);
-    font-size: 11.5px;
-    color: var(--text);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    padding: 3px 8px;
-    border-radius: 4px;
+    font-family: var(--font-mono); font-size: 11.5px; color: var(--text);
+    background: var(--surface); border: 1px solid var(--border);
+    padding: 3px 8px; border-radius: 4px;
+  }
+  .undo-toast {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--text); color: var(--bg);
+    padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 500;
+  }
+  .undo-toast button {
+    appearance: none; border: none; background: rgba(255,255,255,0.18);
+    color: inherit; font: 600 11.5px/1 var(--font-sans);
+    padding: 3px 7px; border-radius: 4px; cursor: pointer;
   }
 
   .meta-cols {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 12px;
-    margin-top: 10px;
-    padding-top: 10px;
-    border-top: 1px solid var(--border);
-    font-size: 12.5px;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px; margin-top: 9px; padding-top: 9px;
+    border-top: 1px solid var(--border); font-size: 12.5px;
   }
   .meta-cols h4 {
-    margin: 0 0 3px;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--text-3);
+    margin: 0 0 3px; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--text-3);
   }
   .meta-cols p { margin: 0; color: var(--text-2); line-height: 1.48; }
-
-  .questions {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 18px 20px;
-    margin-top: 28px;
-  }
-  .questions ol { margin: 10px 0 0; padding-left: 18px; }
-  .questions li { margin-bottom: 14px; }
-  .questions li:last-child { margin-bottom: 0; }
-  .opts { margin-top: 5px; display: grid; gap: 3px; font-size: 13px; color: var(--text-2); }
-  .opts b { color: var(--text); font-family: var(--font-mono); font-size: 12px; }
 
   svg.ic { width: 13px; height: 13px; flex-shrink: 0; stroke: currentColor; fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
   svg.ic-fill { width: 11px; height: 11px; flex-shrink: 0; fill: currentColor; stroke: none; }
 
-  @media (max-width: 620px) {
-    .wf-hint { display: none; }
-    .vocab-grid { grid-template-columns: 1fr; }
-    main { padding: 20px 14px 64px; }
-  }
+  .window-frame.narrow .hide-narrow { display: none; }
 </style>
 </head>
 <body>
 <main>
   <div class="top-meta">
-    <span><code>LOO-1078</code> · Explore (Round 5) · V4 with one vocabulary &amp; zero jump</span>
+    <span><code>LOO-1078</code> · Vision C Surface Study · Pill vs Borderless Track</span>
     <div class="state-group">
-      <button class="seg-btn subtle" id="guide-toggle" aria-pressed="false">Slot guides</button>
       <button class="seg-btn subtle" id="width-toggle" aria-pressed="false">Narrow pane</button>
       <button class="seg-btn subtle" id="theme-toggle" aria-pressed="false">Dark</button>
     </div>
   </div>
 
-  <h1>Refining V4: one vocabulary, tied to the step, zero jump</h1>
+  <h1>Vision C: should the track still be a pill?</h1>
 
   <div class="lead-box">
-    <p><strong>What changed from Round 3's V4:</strong> Collapsed four overlapping words (<em>Moving / Run / Start / Start from…</em>) into one plain Graph vocabulary, fixed every slot width so rapid-clicking <code>⏸ ↔ ▶</code> moves <strong>0px</strong>, and stripped the redundant sentence off the left.</p>
-    <div class="vocab-grid">
-      <div class="vocab-col">
-        <strong>Before (too many words)</strong>
-        <code>Moving</code> · <code>Ship Review</code> · <code>Run</code> · <code>Start</code> · <code>Start from…</code> · <code>Unpause</code>
-      </div>
-      <div class="vocab-col good">
-        <strong>Now (one verb + step name)</strong>
-        <code>Running · build</code> · <code>Paused at build</code> · <code>Waiting · ship-review</code> · <code>Run</code> / <code>Pause</code> + direct step chips inside the pill
-      </div>
-    </div>
+    <p><strong>Same layout, three levels of chrome.</strong> Because the workflow bar is already a 36px strip with a bottom hairline, wrapping five steps in a full outer pill can look double-boxed. Compare borderless (<code>C1</code>), borderless soft tray (<code>C2</code>), and full capsule pill (<code>C3</code>) across all states.</p>
   </div>
 
   <div class="state-dock">
     <div class="state-group" id="state-switcher">
       <span class="state-label">State:</span>
-      <button class="seg-btn" data-state="unstarted" aria-pressed="false">Not started</button>
-      <button class="seg-btn" data-state="moving" aria-pressed="true">Running · build</button>
-      <button class="seg-btn" data-state="waiting" aria-pressed="false">Waiting · ship-review</button>
-      <button class="seg-btn" data-state="paused" aria-pressed="false">Paused at build</button>
+      <button class="seg-btn" data-state="unstarted" aria-pressed="false">Unstarted</button>
+      <button class="seg-btn" data-state="moving" aria-pressed="false">Running: implement</button>
+      <button class="seg-btn" data-state="waiting" aria-pressed="false">At ship-review</button>
+      <button class="seg-btn" data-state="paused" aria-pressed="true">Paused: implement</button>
       <button class="seg-btn" data-state="merged" aria-pressed="false">PR merged</button>
     </div>
     <div class="state-group">
@@ -602,170 +409,99 @@
     </div>
   </div>
 
-  <!-- V4a -->
+  <!-- C1: Borderless -->
   <section class="panel">
     <div class="panel-head">
       <div class="panel-title">
-        <h2>V4a · Pill Names the Stage (<code>Running · build</code> / <code>Paused at build</code>) + Locked Icons</h2>
-        <span class="tag tag-proposed">Strict 0px jump</span>
+        <h2>C1 · No Outer Pill (Borderless Toolbar Track)</h2>
+        <span class="tag tag-rec">Lightest</span>
       </div>
     </div>
-    <p class="one-liner">Fixed-width Status Pill (<code>150px</code>) speaks in plain Graph language. One single toggle icon beside it flips <code>⏸ ↔ ▶</code> in place (never spawns a second button), followed by fixed <code>Auto [●]</code> and fixed <code>✓</code> (lights burgundy on merge).</p>
-    <div class="window-frame" id="frame-v4a"></div>
+    <p class="one-liner">Drop the outer capsule completely. A compact tinted <code>▶/⏸</code> button pins to the far left; the steps sit directly on the bar with only the active step highlighted (and clicking the active step or <code>▾</code> opens lifecycle/jump actions).</p>
+    <div class="window-frame" id="frame-c1"></div>
     <div class="meta-cols">
       <div>
-        <h4>Click the pill to check the menu</h4>
-        <p>One verb (<code>Run</code> / <code>Pause</code>), direct step chips (<code>plan</code> <code>build</code> <code>ship-review</code> <code>deliver</code> <code>verify</code>) instead of a nested "Start from…" submenu, then <code>Unassign</code>, <code>Complete</code>, <code>Abandon…</code>.</p>
+        <h4>Why it works</h4>
+        <p>No box-inside-a-box inside a 34px macOS bar. The eye goes straight to two tinted anchors: the <code>▶/⏸</code> button and the active step chip. Inactive steps read as quiet breadcrumbs until hovered.</p>
       </div>
       <div>
         <h4>Trade-off</h4>
-        <p>Literally <strong>0px movement</strong> across every state and every click. Because <code>✓</code> stays icon-sized even when merged (just turns burgundy), nothing ever shifts — though a new user learns <code>✓ = Complete</code> from its tooltip or the pill menu.</p>
+        <p>Slightly softer visual grouping between <code>▶/⏸</code> and the trailing <code>▾</code>, though proximity keeps them clearly one unit.</p>
       </div>
     </div>
   </section>
 
-  <!-- V4b -->
+  <!-- C2: Soft tray -->
   <section class="panel">
     <div class="panel-head">
       <div class="panel-title">
-        <h2>V4b · Pill Names the Substep (<code>Running · implement</code> / <code>Paused at implement</code>)</h2>
-        <span class="tag tag-best">Zero repetition with Graph</span>
+        <h2>C2 · Borderless Soft Tray (6–7px macOS Control Group, No Stroke)</h2>
+        <span class="tag tag-alt">Balanced</span>
       </div>
     </div>
-    <p class="one-liner">Left Graph highlights the top-level stage (<code>build</code>); right pill names the <strong>exact inner step</strong> (<code>Running · implement</code>, <code>Paused at implement</code>, <code>Waiting · ship-review</code>, <code>Merged · verify</code>) — so left and right <em>complement</em> each other instead of both saying <code>build</code>.</p>
-    <div class="window-frame" id="frame-v4b"></div>
+    <p class="one-liner">Replace the round pill border with a quiet tinted <code>7px</code> rounded-rect tray (like macOS Finder/Xcode segmented toolbars) — no outer hairline stroke, still clearly one connected control.</p>
+    <div class="window-frame" id="frame-c2"></div>
     <div class="meta-cols">
       <div>
-        <h4>Why this is neat</h4>
-        <p>You see <em>where in the arc</em> on the left (<code>build</code> highlighted with a live dot) and <em>what's actually executing</em> in the pill (<code>Running · implement</code> / <code>Paused at implement</code>). Zero word duplication, and <code>Complete</code> expands cleanly to burgundy <code>✓ Complete</code> only when PR is merged (and the <code>▶/⏸</code> icon drops away, keeping total width steady).</p>
+        <h4>Why it works</h4>
+        <p>Reads like a single native macOS toolbar group without the heavy "giant sausage pill" silhouette. Clean in both light and dark modes.</p>
       </div>
       <div>
         <h4>Trade-off</h4>
-        <p>For single-step stages like <code>ship-review</code> or <code>verify</code>, the substep and stage have the same name (<code>Waiting · ship-review</code>), which still reads naturally.</p>
+        <p>Adds one subtle background fill layer compared to <code>C1</code>.</p>
       </div>
     </div>
   </section>
 
-  <!-- V4c -->
+  <!-- C3: Original capsule pill -->
   <section class="panel">
     <div class="panel-head">
       <div class="panel-title">
-        <h2>V4c · Pill IS the Toggle + Step Selector (<code>[⏸ | Running · implement ▾]</code>) + <code>Auto</code> + <code>✓</code></h2>
-        <span class="tag tag-proposed">Even cleaner V4</span>
+        <h2>C3 · Full Capsule Pill (Outlined)</h2>
+        <span class="tag tag-pill">Original C</span>
       </div>
     </div>
-    <p class="one-liner">Merges V4's standalone <code>⏸/▶</code> icon straight into the left edge of the pill as a soft split capsule — click <code>⏸</code> to pause in place, click <code>Running · implement ▾</code> to jump steps or change state. Right edge shrinks to just <code>Auto [●]</code> · <code>✓</code> · <code>···</code>.</p>
-    <div class="window-frame" id="frame-v4c"></div>
+    <p class="one-liner">Original Vision C with the full-height pill border and inner vertical dividers around <code>▶/⏸</code>, the steps, and <code>▾</code>.</p>
+    <div class="window-frame" id="frame-c3"></div>
     <div class="meta-cols">
       <div>
-        <h4>Why this is neat</h4>
-        <p>Removes the loose floating icon between the pill and the Auto switch: the pause/play icon is visually bound directly to the <code>Running · implement</code> / <code>Paused at implement</code> label it controls, with <strong>0px jump</strong> on every click.</p>
+        <h4>Why it works</h4>
+        <p>Loudest "this whole strip is a single button/control" affordance; mirrors iOS-style capsule pills.</p>
       </div>
       <div>
         <h4>Trade-off</h4>
-        <p>The split pill needs a crisp hover split so it's obvious the icon on the left pauses/resumes while the text + chevron opens the menu.</p>
+        <p>Most visual weight in a 34px bar — especially on long graphs where a 450px-wide bordered pill dominates the header.</p>
       </div>
     </div>
-  </section>
-
-  <!-- QUESTIONS -->
-  <section class="questions">
-    <h2 style="margin-top:0">Ready to pick a V4 direction?</h2>
-    <p class="small muted">Click the pills in all three to compare the simplified menu too.</p>
-    <ol>
-      <li>
-        <strong>Which V4 refinement feels right?</strong>
-        <div class="opts">
-          <span><b>1a</b> V4a — Stage-named pill (<code>Running · build</code> / <code>Paused at build</code>) + separate locked <code>⏸/▶</code> &amp; <code>✓</code> icons</span>
-          <span><b>1b</b> V4b — Substep-named pill (<code>Running · implement</code> / <code>Paused at implement</code>) + <code>✓ Complete</code> expands on merge</span>
-          <span><b>1c</b> V4c — Split capsule pill (<code>[⏸ | Running · implement ▾]</code>) + <code>Auto [●]</code> + <code>✓</code></span>
-        </div>
-      </li>
-      <li>
-        <strong>Should the pill say <code>Running · implement</code> (inner skill) or <code>Running · build</code> (top-level stage)?</strong>
-        <div class="opts">
-          <span><b>2a</b> Inner skill when inside a group (<code>Running · implement</code>, <code>Paused at implement</code>) — zero duplication with <code>build</code> on the left</span>
-          <span><b>2b</b> Top-level stage (<code>Running · build</code>, <code>Paused at build</code>) — simpler, fewer names to track</span>
-        </div>
-      </li>
-      <li>
-        <strong>What should happen next?</strong>
-        <div class="opts">
-          <span><b>3a</b> File a dedicated Desktop/iOS Task for this bar redesign (clean follow-up after [LOO-1078] ships <code>lf task pause</code>)</span>
-          <span><b>3b</b> Steer this exact bar design into <code>LOO-1078</code> right now</span>
-          <span><b>3c</b> One more quick tweak on a specific detail</span>
-        </div>
-      </li>
-    </ol>
   </section>
 </main>
 
 <script>
 const STATES = {
   unstarted: {
-    pillClass: "st-unstarted",
-    stepIdx: -1,
-    stage: "plan",
-    substep: "kickoff",
-    running: false,
-    paused: false,
-    merged: false,
-    v4aLabel: ["Not started", ""],
-    v4bLabel: ["Not started", "plan"],
-    hint: "Ready to run code",
-    paneHint: "No checkout yet · branch not created"
+    tone: "tone-waiting", stepIdx: -1, stage: "plan", substep: "plan",
+    running: false, paused: false, merged: false,
+    pillStep: "plan", sentence: "Ready to start code (next human stop: ship-review)"
   },
   moving: {
-    pillClass: "st-moving",
-    stepIdx: 1,
-    stage: "build",
-    substep: "implement",
-    running: true,
-    paused: false,
-    merged: false,
-    v4aLabel: ["Running", "build"],
-    v4bLabel: ["Running", "implement"],
-    hint: "cargo test compiling",
-    paneHint: "codex running implement · cargo test active in worktree"
+    tone: "tone-moving", stepIdx: 1, stage: "build", substep: "implement",
+    running: true, paused: false, merged: false,
+    pillStep: "implement", sentence: "build is running implement · next human stop: ship-review"
   },
   waiting: {
-    pillClass: "st-waiting",
-    stepIdx: 2,
-    stage: "ship-review",
-    substep: "ship-review",
-    running: false,
-    paused: false,
-    merged: false,
-    v4aLabel: ["Waiting", "ship-review"],
-    v4bLabel: ["Waiting", "ship-review"],
-    hint: "PR #2041 green",
-    paneHint: "Interactive stop: ship-review · review what ships, then run deliver"
+    tone: "tone-waiting", stepIdx: 2, stage: "ship-review", substep: "ship-review",
+    running: false, paused: false, merged: false,
+    pillStep: "deliver", sentence: "Waiting for you at ship-review · PR #2036 open"
   },
   paused: {
-    pillClass: "st-paused",
-    stepIdx: 1,
-    stage: "build",
-    substep: "implement",
-    running: false,
-    paused: true,
-    merged: false,
-    v4aLabel: ["Paused at", "build"],
-    v4bLabel: ["Paused at", "implement"],
-    hint: "worker & builds stopped",
-    paneHint: "Checkout, dirty files & PR #2041 kept · conversation closed (resumable)"
+    tone: "tone-paused", stepIdx: 1, stage: "build", substep: "implement",
+    running: false, paused: true, merged: false,
+    pillStep: "implement", sentence: "Paused in build at implement · ▶ resumes it"
   },
   merged: {
-    pillClass: "st-merged",
-    stepIdx: 4,
-    stage: "verify",
-    substep: "verify",
-    running: false,
-    paused: false,
-    merged: true,
-    v4aLabel: ["Merged", "verify"],
-    v4bLabel: ["Merged", "verify"],
-    hint: "PR #2041 landed",
-    paneHint: "deliver landed PR #2041 · verify and complete"
+    tone: "tone-merged", stepIdx: 4, stage: "verify", substep: "verify",
+    running: false, paused: false, merged: true,
+    pillStep: "", sentence: "PR #2036 merged and verified · ready to complete"
   }
 };
 
@@ -774,7 +510,7 @@ const STEPS = [
   { name: "build", interactive: false },
   { name: "ship-review", interactive: true },
   { name: "deliver", interactive: false },
-  { name: "verify", interactive: true }
+  { name: "verify", interactive: false }
 ];
 
 const IC = {
@@ -782,19 +518,18 @@ const IC = {
   pause: `<svg class="ic-fill" viewBox="0 0 16 16"><rect x="3.5" y="2.5" width="3.3" height="11" rx="0.9"/><rect x="9.2" y="2.5" width="3.3" height="11" rx="0.9"/></svg>`,
   check: `<svg class="ic" viewBox="0 0 16 16"><path d="M3 8.5l3.2 3.3L13 4.5"/></svg>`,
   chev: `<svg class="ic" viewBox="0 0 16 16"><path d="M4.5 6.2L8 9.8l3.5-3.6"/></svg>`,
-  more: `<svg class="ic-fill" viewBox="0 0 16 16"><circle cx="3.2" cy="8" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="12.8" cy="8" r="1.4"/></svg>`,
   person: `<svg class="ic-fill" viewBox="0 0 16 16" style="width:10px;height:10px"><circle cx="8" cy="4.6" r="2.6"/><path d="M3 13.4c.5-2.6 2.5-4 5-4s4.5 1.4 5 4z"/></svg>`
 };
 
 const app = {
-  state: "moving",
+  state: "paused",
   auto: false,
   narrow: false,
-  guides: false,
+  completedNotice: null,
   logs: {
-    v4a: "Click the pill to inspect the unified menu · rapid-click ⏸ / ▶ to test 0px shift",
-    v4b: "Left shows stage (build), pill shows inner step (implement) · zero repetition",
-    v4c: "Click ⏸ on the left of the pill to pause, or the label to pick a step / state"
+    c1: "No outer pill · tinted ▶/⏸ + flat step track + active chip",
+    c2: "Soft 7px macOS tray · no outer stroke",
+    c3: "Full outlined capsule pill"
   }
 };
 
@@ -811,198 +546,149 @@ function renderTitlebar() {
     </div>`;
 }
 
-function renderSteps(st, pillEcho = false) {
-  return STEPS.map((s, idx) => {
-    let cls = "wf-step";
-    let dot = "";
-    if (st.stepIdx >= 0) {
-      if (idx < st.stepIdx) cls += " done";
-      else if (idx === st.stepIdx) {
-        if (st.paused) { cls += " paused" + (pillEcho ? " pill-echo" : ""); dot = IC.pause; }
-        else if (st.running) { cls += " running" + (app.auto ? " auto-on" : "") + (pillEcho ? " pill-echo" : ""); dot = `<span class="live-dot pulsing"></span>`; }
-        else if (st.merged) { cls += (pillEcho ? " pill-echo merged" : " done"); dot = `<span class="live-dot"></span>`; }
-        else { cls += " waiting" + (pillEcho ? " pill-echo" : ""); dot = `<span class="live-dot"></span>`; }
-      }
-    }
-    const person = s.interactive ? IC.person : "";
-    return `<span class="${cls}">${dot}${person}${s.name}</span>`;
-  }).join("");
-}
-
-function renderUnifiedMenu(id, st, stepWord) {
-  const stepChips = STEPS.map((s, idx) => `
-    <button class="step-jump ${idx === st.stepIdx ? "current" : ""}" data-act="jump" data-v="${id}" data-step="${s.name}">${s.name}</button>
-  `).join("");
-
-  return `
-    <div class="popover" id="menu-status-${id}">
-      <div class="menu-head">Run</div>
-      ${st.paused
-        ? `<button class="menu-item" data-act="unpause-run" data-v="${id}"><span class="m-left">${IC.play} Resume ${stepWord}</span><span class="m-sub">R</span></button>`
-        : !st.running
-          ? `<button class="menu-item" data-act="run" data-v="${id}"><span class="m-left">${IC.play} Run ${st.stage === "ship-review" ? "deliver" : stepWord}</span><span class="m-sub">R</span></button>`
-          : `<button class="menu-item selected" data-act="pause" data-v="${id}"><span class="m-left">${IC.pause} Pause at ${stepWord}</span><span class="m-sub">P</span></button>`}
-      <div class="step-pills-row" title="Jump and run from any step">${stepChips}</div>
-      <div class="menu-sep"></div>
-      <div class="menu-head">Hold</div>
-      ${!st.paused
-        ? `<button class="menu-item" data-act="pause" data-v="${id}"><span class="m-left">${IC.pause} Pause (stop worker &amp; builds)</span><span class="m-sub">P</span></button>`
-        : `<button class="menu-item" data-act="unpause" data-v="${id}"><span class="m-left">${IC.play} Unpause (stay idle)</span><span class="m-sub">P</span></button>`}
-      <button class="menu-item" data-act="cmd" data-v="${id}" data-cmd="lf task unassign LOO-1078"><span class="m-left">Unassign (back to Backlog)</span></button>
-      <div class="menu-sep"></div>
-      <div class="menu-head">Done</div>
-      <button class="menu-item" data-act="complete" data-v="${id}"><span class="m-left">${IC.check} Complete Task</span><span class="m-sub">⇧C</span></button>
-      <button class="menu-item danger" data-act="cmd" data-v="${id}" data-cmd="lf task abandon LOO-1078"><span class="m-left">Abandon…</span></button>
-    </div>`;
-}
-
 function renderAutoSwitch(id, st) {
   const held = st.paused && app.auto;
-  const tip = held
-    ? "Auto-Ship armed (held while paused) — click to turn off"
-    : app.auto ? "Auto-Ship ON (lf task auto off)" : "Auto-Ship off (lf task auto on)";
   return `
-    <button class="auto-switch ${app.auto ? "on" : ""} ${held ? "held" : ""}" data-act="toggle-auto" data-v="${id}" title="${tip}">
+    <button class="auto-switch ${app.auto ? "on" : ""} ${held ? "held" : ""}" data-act="toggle-auto" data-v="${id}">
       <span>Auto</span><span class="sw-track"></span>
     </button>`;
 }
 
-function renderMoreMenu(id) {
+function renderCompleteBtn(id, st) {
+  return `<button class="chk-btn ${st.merged ? "ready" : ""}" data-act="complete" data-v="${id}" title="Complete Task">${IC.check}</button>`;
+}
+
+function renderMenu(id, st) {
   return `
-    <span class="menu-wrap">
-      <button class="ic-btn" data-menu="more-${id}" title="More">${IC.more}</button>
-      <div class="popover" id="menu-more-${id}">
-        <button class="menu-item" data-act="cmd" data-v="${id}" data-cmd="lf session new --task LOO-1078"><span class="m-left">New conversation</span></button>
-        <button class="menu-item" data-act="cmd" data-v="${id}" data-cmd="lf task move LOO-1078 --wave desktop"><span class="m-left">Move to Wave</span></button>
-        <div class="menu-sep"></div>
-        <button class="menu-item" data-act="cmd" data-v="${id}" data-cmd="pbcopy ← LOO-1078"><span class="m-left">Copy Task ID</span></button>
-        <button class="menu-item" data-act="cmd" data-v="${id}" data-cmd="pbcopy ← jack-heart/aa0dad-lf-task-pause"><span class="m-left">Copy branch</span></button>
-      </div>
-    </span>`;
-}
-
-function pillDot(st) {
-  if (st.running) return `<span class="live-dot pulsing"></span>`;
-  if (st.paused) return IC.pause;
-  if (st.merged) return IC.check;
-  return `<span class="live-dot"></span>`;
-}
-
-function formatPillText([verb, step]) {
-  if (!step) return `<span>${verb}</span>`;
-  const sep = verb.endsWith("at") ? " " : " · ";
-  return `<span>${verb}</span><span class="p-step">${sep}${step}</span>`;
-}
-
-/* V4a: Stage-named pill + locked 0px-jump icons */
-function renderV4a(st) {
-  const toggleAct = st.running ? "pause" : st.paused ? "unpause-run" : "run";
-  const toggleIc = st.running ? IC.pause : IC.play;
-  const toggleTitle = st.running ? `Pause at ${st.stage}` : st.paused ? `Resume ${st.stage}` : `Run ${st.stage}`;
-
-  return `
-    ${renderTitlebar()}
-    <div class="lf-wfbar">
-      <div class="lf-wfline">
-        <span class="wf-name">code</span>
-        <span class="wf-steps">${renderSteps(st, false)}</span>
-        <span class="wf-hint">${st.hint}</span>
-      </div>
-      <div class="lf-controls">
-        <span class="menu-wrap">
-          <button class="v4-pill ${st.pillClass} ${app.auto ? "auto-on" : ""}" data-menu="status-v4a">
-            <span class="p-left">${pillDot(st)}${formatPillText(st.v4aLabel)}</span>${IC.chev}
-          </button>
-          ${renderUnifiedMenu("v4a", st, st.stage)}
-        </span>
-        <button class="ic-btn" data-act="${toggleAct}" data-v="v4a" title="${toggleTitle}">${toggleIc}</button>
-        ${renderAutoSwitch("v4a", st)}
-        <button class="ic-btn ${st.merged ? "ready-icon" : ""}" data-act="complete" data-v="v4a" title="Complete Task">${IC.check}</button>
-        ${renderMoreMenu("v4a")}
-      </div>
-    </div>
-    <div class="pane-body">
-      <span>${st.paneHint}</span>
-      <span class="cmd-log">${app.logs.v4a}</span>
+    <div class="popover" id="menu-${id}">
+      <div class="menu-head">Start from</div>
+      ${STEPS.map(s => `<button class="menu-item" data-act="jump" data-v="${id}" data-step="${s.name}"><span class="m-left">${s.interactive ? IC.person : ""}${s.name}</span></button>`).join("")}
+      <div class="menu-sep"></div>
+      ${st.running ? `<button class="menu-item" data-act="cmd" data-v="${id}" data-cmd="lf task interrupt LOO-1078"><span class="m-left">Interrupt step</span></button>` : ""}
+      ${!st.running && !st.paused && !st.merged ? `<button class="menu-item" data-act="pause" data-v="${id}"><span class="m-left">${IC.pause} Pause</span></button>` : ""}
+      <button class="menu-item" data-act="cmd" data-v="${id}" data-cmd="lf task unassign LOO-1078"><span class="m-left">Unassign Task</span></button>
+      <div class="menu-sep"></div>
+      <button class="menu-item danger" data-act="cmd" data-v="${id}" data-cmd="lf task abandon LOO-1078"><span class="m-left">Abandon…</span></button>
     </div>`;
 }
 
-/* V4b: Substep-named pill (zero repetition with stage on left) + Complete expands on merge */
-function renderV4b(st) {
-  const toggleAct = st.running ? "pause" : st.paused ? "unpause-run" : "run";
-  const toggleIc = st.running ? IC.pause : IC.play;
-  const toggleTitle = st.running ? `Pause at ${st.substep}` : st.paused ? `Resume ${st.substep}` : `Run ${st.stage}`;
+function renderSteps(id, st, pillChip = false) {
+  return STEPS.map((s, idx) => {
+    const isActive = (st.stepIdx === idx) || (st.stepIdx < 0 && idx === 0);
+    const isDone = st.stepIdx >= 0 && idx < st.stepIdx;
+    let cls = "t-step" + (pillChip ? " pill-chip" : "");
+    let label = s.name;
+    if (isActive) {
+      if (st.paused) { cls += " active-paused"; label = `Paused: ${st.substep}`; }
+      else if (st.running) { cls += " active-moving" + (app.auto ? " auto-on" : ""); label = s.name === "build" ? `build · ${st.substep}` : s.name; }
+      else if (st.merged) { cls += " active-merged"; label = "Done"; }
+      else if (st.stepIdx < 0) { cls += " active-waiting"; label = `Run: ${s.name}`; }
+      else { cls += " active-waiting"; label = `${s.name} · next: ${st.pillStep}`; }
+    } else {
+      cls += " hide-narrow";
+      if (isDone) cls += " done";
+    }
+    const arrow = idx > 0 ? `<span class="wf-arrow hide-narrow">›</span>` : "";
+    const actAttr = isActive ? `data-menu="${id}"` : `data-act="jump" data-v="${id}" data-step="${s.name}"`;
+    return `${arrow}<button class="${cls}" ${actAttr} title="${isActive ? "Workflow & lifecycle menu" : "Start from " + s.name}">${s.interactive && !isActive ? IC.person : ""}${label}</button>`;
+  }).join("");
+}
 
-  return `
-    ${renderTitlebar()}
-    <div class="lf-wfbar">
-      <div class="lf-wfline">
-        <span class="wf-name">code</span>
-        <span class="wf-steps">${renderSteps(st, true)}</span>
-      </div>
-      <div class="lf-controls">
-        <span class="menu-wrap">
-          <button class="v4-pill wide ${st.pillClass} ${app.auto ? "auto-on" : ""}" data-menu="status-v4b">
-            <span class="p-left">${pillDot(st)}${formatPillText(st.v4bLabel)}</span>${IC.chev}
-          </button>
-          ${renderUnifiedMenu("v4b", st, st.substep)}
+function renderPaneBody(id, st) {
+  if (app.completedNotice === id) {
+    return `
+      <div class="pane-body">
+        <span class="undo-toast">
+          <span>LOO-1078 completed</span>
+          <button data-act="undo-complete" data-v="${id}">Undo</button>
         </span>
-        ${st.merged ? "" : `<button class="ic-btn" data-act="${toggleAct}" data-v="v4b" title="${toggleTitle}">${toggleIc}</button>`}
-        ${renderAutoSwitch("v4b", st)}
-        <button class="ic-btn ${st.merged ? "ready-labeled" : ""}" data-act="complete" data-v="v4b" title="Complete Task">${IC.check}${st.merged ? "<span>Complete</span>" : ""}</button>
-        ${renderMoreMenu("v4b")}
-      </div>
-    </div>
+        <span class="cmd-log">lf task complete LOO-1078</span>
+      </div>`;
+  }
+  return `
     <div class="pane-body">
-      <span>${st.paneHint}</span>
-      <span class="cmd-log">${app.logs.v4b}</span>
+      <span>${st.sentence}</span>
+      <span class="cmd-log">${app.logs[id]}</span>
     </div>`;
 }
 
-/* V4c: Split capsule pill ([⏸ | Running · implement ▾]) + Auto + ✓ */
-function renderV4c(st) {
-  const toggleAct = st.running ? "pause" : st.paused ? "unpause-run" : "run";
-  const toggleIc = st.running ? IC.pause : IC.play;
-  const toggleTitle = st.running ? `Pause at ${st.substep}` : st.paused ? `Resume ${st.substep}` : `Run ${st.stage}`;
-
+function renderC1(st) {
+  const act = st.running ? "pause" : st.paused ? "unpause-run" : st.merged ? "none" : "run";
+  const ic = st.merged ? IC.check : st.running ? IC.pause : IC.play;
   return `
     ${renderTitlebar()}
     <div class="lf-wfbar">
-      <div class="lf-wfline">
-        <span class="wf-name">code</span>
-        <span class="wf-steps">${renderSteps(st, true)}</span>
+      <div class="lf-left">
+        <span class="menu-wrap" style="gap:6px">
+          <button class="bare-play ${st.tone} ${app.auto ? "auto-on" : ""}" data-act="${act}" data-v="c1" title="${st.running ? "Pause" : st.paused ? "Unpause & resume" : "Run"}">${ic}</button>
+          <span class="bare-steps">${renderSteps("c1", st, false)}</span>
+          <button class="bare-chev" data-menu="c1" title="Workflow & lifecycle">${IC.chev}</button>
+          ${renderMenu("c1", st)}
+        </span>
       </div>
-      <div class="lf-controls">
+      <div class="lf-right">
+        ${renderAutoSwitch("c1", st)}
+        ${renderCompleteBtn("c1", st)}
+      </div>
+    </div>
+    ${renderPaneBody("c1", st)}`;
+}
+
+function renderC2(st) {
+  const act = st.running ? "pause" : st.paused ? "unpause-run" : st.merged ? "none" : "run";
+  const ic = st.merged ? IC.check : st.running ? IC.pause : IC.play;
+  return `
+    ${renderTitlebar()}
+    <div class="lf-wfbar">
+      <div class="lf-left">
         <span class="menu-wrap">
-          <span class="v4-pill wide ${st.pillClass} ${app.auto ? "auto-on" : ""}" style="padding:0;overflow:hidden;gap:0;min-width:178px">
-            <button data-act="${toggleAct}" data-v="v4c" title="${toggleTitle}" style="appearance:none;border:none;background:transparent;color:inherit;height:25px;width:28px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;border-right:1px solid rgba(128,128,128,0.22)">${toggleIc}</button>
-            <button data-menu="status-v4c" style="appearance:none;border:none;background:transparent;color:inherit;height:25px;flex:1;padding:0 8px;display:inline-flex;align-items:center;justify-content:space-between;gap:5px;font:inherit;cursor:pointer">
-              <span class="p-left">${formatPillText(st.v4bLabel)}</span>${IC.chev}
-            </button>
+          <span class="tray ${st.tone} ${app.auto ? "auto-on" : ""}">
+            <button class="tray-play" data-act="${act}" data-v="c2" title="${st.running ? "Pause" : st.paused ? "Unpause & resume" : "Run"}">${ic}</button>
+            <span class="tray-steps">${renderSteps("c2", st, false)}</span>
+            <button class="tray-chev" data-menu="c2" title="Workflow & lifecycle">${IC.chev}</button>
           </span>
-          ${renderUnifiedMenu("v4c", st, st.substep)}
+          ${renderMenu("c2", st)}
         </span>
-        ${renderAutoSwitch("v4c", st)}
-        <button class="ic-btn ${st.merged ? "ready-icon" : ""}" data-act="complete" data-v="v4c" title="Complete Task">${IC.check}</button>
-        ${renderMoreMenu("v4c")}
+      </div>
+      <div class="lf-right">
+        ${renderAutoSwitch("c2", st)}
+        ${renderCompleteBtn("c2", st)}
       </div>
     </div>
-    <div class="pane-body">
-      <span>${st.paneHint}</span>
-      <span class="cmd-log">${app.logs.v4c}</span>
-    </div>`;
+    ${renderPaneBody("c2", st)}`;
+}
+
+function renderC3(st) {
+  const act = st.running ? "pause" : st.paused ? "unpause-run" : st.merged ? "none" : "run";
+  const ic = st.merged ? IC.check : st.running ? IC.pause : IC.play;
+  return `
+    ${renderTitlebar()}
+    <div class="lf-wfbar">
+      <div class="lf-left">
+        <span class="menu-wrap">
+          <span class="track-capsule ${st.tone} ${app.auto ? "auto-on" : ""}">
+            <button class="track-cap-play" data-act="${act}" data-v="c3" title="${st.running ? "Pause" : st.paused ? "Unpause & resume" : "Run"}">${ic}</button>
+            <span class="track-cap-steps">${renderSteps("c3", st, true)}</span>
+            <button class="track-cap-chev" data-menu="c3" title="Workflow & lifecycle">${IC.chev}</button>
+          </span>
+          ${renderMenu("c3", st)}
+        </span>
+      </div>
+      <div class="lf-right">
+        ${renderAutoSwitch("c3", st)}
+        ${renderCompleteBtn("c3", st)}
+      </div>
+    </div>
+    ${renderPaneBody("c3", st)}`;
 }
 
 function renderAll() {
   const st = STATES[app.state];
-  document.getElementById("frame-v4a").innerHTML = renderV4a(st);
-  document.getElementById("frame-v4b").innerHTML = renderV4b(st);
-  document.getElementById("frame-v4c").innerHTML = renderV4c(st);
+  document.getElementById("frame-c1").innerHTML = renderC1(st);
+  document.getElementById("frame-c2").innerHTML = renderC2(st);
+  document.getElementById("frame-c3").innerHTML = renderC3(st);
 
-  document.querySelectorAll(".window-frame").forEach(el => {
-    el.classList.toggle("narrow", app.narrow);
-    el.classList.toggle("show-guides", app.guides);
-  });
+  document.querySelectorAll(".window-frame").forEach(el => el.classList.toggle("narrow", app.narrow));
   document.querySelectorAll("#state-switcher .seg-btn").forEach(btn => {
     btn.setAttribute("aria-pressed", String(btn.dataset.state === app.state));
   });
@@ -1032,30 +718,20 @@ document.addEventListener("click", (e) => {
     const act = actEl.dataset.act;
     const v = actEl.dataset.v;
     closeMenus();
-    if (act === "pause") {
-      app.state = "paused";
-      app.logs[v] = "lf task pause LOO-1078  # worker, builds & session stopped; claim kept";
-    } else if (act === "unpause") {
-      app.state = "waiting";
-      app.logs[v] = "lf task unpause LOO-1078  # hold lifted";
-    } else if (act === "unpause-run") {
-      app.state = "moving";
-      app.logs[v] = "lf task unpause LOO-1078 && lf task run LOO-1078";
-    } else if (act === "run") {
-      app.state = "moving";
-      app.logs[v] = "lf task run LOO-1078";
-    } else if (act === "jump") {
+    app.completedNotice = null;
+    if (act === "pause") { app.state = "paused"; app.logs[v] = "lf task pause LOO-1078"; }
+    else if (act === "unpause-run") { app.state = "moving"; app.logs[v] = "lf task unpause LOO-1078 --run"; }
+    else if (act === "run") { app.state = "moving"; app.logs[v] = "lf task run LOO-1078"; }
+    else if (act === "jump") {
       const step = actEl.dataset.step;
-      app.state = step === "ship-review" ? "waiting" : "moving";
+      app.state = step === "ship-review" ? "waiting" : step === "verify" ? "merged" : "moving";
       app.logs[v] = `lf task run LOO-1078 --from ${step}`;
     } else if (act === "toggle-auto") {
       app.auto = !app.auto;
       app.logs[v] = app.auto ? "lf task auto on LOO-1078" : "lf task auto off LOO-1078";
-    } else if (act === "complete") {
-      app.logs[v] = "lf task complete LOO-1078  # marked done";
-    } else if (act === "cmd") {
-      app.logs[v] = actEl.dataset.cmd;
-    }
+    } else if (act === "complete") { app.completedNotice = v; }
+    else if (act === "undo-complete") { app.completedNotice = null; app.logs[v] = "lf task reopen LOO-1078 (Undo)"; }
+    else if (act === "cmd") { app.logs[v] = actEl.dataset.cmd; }
     renderAll();
     return;
   }
@@ -1063,20 +739,15 @@ document.addEventListener("click", (e) => {
   const stateBtn = e.target.closest("#state-switcher .seg-btn");
   if (stateBtn) {
     app.state = stateBtn.dataset.state;
+    app.completedNotice = null;
     closeMenus();
     renderAll();
     return;
   }
-
   if (!e.target.closest(".popover")) closeMenus();
 });
 
 document.getElementById("auto-seed").addEventListener("click", () => { app.auto = !app.auto; renderAll(); });
-document.getElementById("guide-toggle").addEventListener("click", (e) => {
-  app.guides = !app.guides;
-  e.currentTarget.setAttribute("aria-pressed", String(app.guides));
-  renderAll();
-});
 document.getElementById("width-toggle").addEventListener("click", (e) => {
   app.narrow = !app.narrow;
   e.currentTarget.setAttribute("aria-pressed", String(app.narrow));

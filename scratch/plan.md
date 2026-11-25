@@ -2,6 +2,36 @@
 
 > i think we need a 'paused' state / action for tasks -- stops the task worker - and ideally e.g. any rust compiling happening becasue of it - , maybe closes the tasks session for now as well, but oesnt unassign
 
+## Revision 5 (after v3 demo + C1 surface explore — build now)
+
+See `scratch/demo-notes.md` for exact quotes and `scratch/explore.html` (`C1 · No Outer Pill`) for the interactive visual reference.
+
+1. **Vision C1 — Borderless unified workflow track on `TaskWorkflowBar` (replacing the split right-hand pill + separate `WorkflowLine`).**
+   - Anchor the entire workflow track on the left side of `TaskWorkflowBar`, with **no outer pill border** (avoiding box-inside-a-box inside the 34px bar):
+     - **Fixed left `▶/⏸` transport button** (`24×24`, rounded `6px`, semantic fill: blue when moving, green when moving with Auto on, amber when paused, green checkmark when done/merged, neutral when unstarted/waiting). Pinned to the exact same left-most pixel across every step.
+     - **Inline clickable step track** directly beside the `▶/⏸` button (`plan › build · implement › 👤ship-review › deliver › verify`), showing each top-level step:
+       - Clicking an **inactive step** jumps straight there (`startTaskFromInput(nil, from: step)`), with subtle hover highlight.
+       - The **active step** grows into a soft tinted chip (no outer capsule): `build · <substep>` (or step name) while running, `Paused: <substep>` while paused, `Pausing: <substep>` while draining, `Run: <first step>` when unstarted, `<step> · next: <next>` when waiting at a human step (`ship-review`), `Waiting: <step>` at an auto-off landing stop, `Done` when at `end`. Clicking the active chip or the trailing compact `▾` opens the workflow & lifecycle menu (`Start from`, `Interrupt step` when moving, `Pause` when waiting/idle, `Unassign Task`, `Abandon…`, `Start with…` when unstarted).
+       - On narrow panes (and iPhone), inactive steps fold cleanly away leaving `[▶/⏸]  [active chip]  ▾`.
+     - **Far right of `TaskWorkflowBar`** holds only calm Task-level controls with generous spacing (`Spacing.md`): physical `Auto` switch + `✓` Complete button.
+   - **Drop `"Unpause without running"`** from the workflow menu and `TaskActions` (bare CLI `lf task unpause` remains unchanged; the UI only uses smart unpause).
+   - **Delete `···` (`ellipsis`) completely from `TaskWorkflowBar`** in code — remove the `Menu`, remove unused `newConversation` / `openSession` parameters from `TaskWorkflowBar` and its call sites (`SessionsView.swift`, tests), and update `DesktopHeadlessTests.swift`. Keep `TaskMetadataItems` on right-click context menus (`TaskActionItems`) and Dashboard tiles. (Keep iPhone's toolbar `···` since iPhone has no right-click.)
+
+2. **Full `PendingChanges` audit — make all Task actions optimistic (no `"requested"` toast / UI lag).**
+   - Move `turnAutoOn` / `turnAutoOff` (Mac `WorkModel.swift` + iPhone `TaskWorkspaceView.swift`) onto optimistic `PendingChanges.make` (e.g., `.auto(task:on:)`), so flipping the `Auto` switch updates immediately on click with no `"Stop Auto-Ship requested"` / `"Auto-Ship requested"` toast and rolls back cleanly on refusal/error.
+   - Move `startTaskFromInput` (`taskRun`) and `interruptStep` (`taskInterrupt`) on Mac and iPhone, plus iPhone `Move to Wave` / `Claim` / `Unassign` (`TaskWorkspaceView.swift`), onto optimistic `PendingChanges.make` so every interactive Task control responds immediately and reconciles on the next stream frame or rolls back on failure.
+   - Fix the 1-frame `PendingChanges.pauseRequest` settle gap and make the `Pausing…` button icon show `pause.fill` (not `play.fill`).
+
+3. **`<ID> completed · Undo` notice on Complete (`✓`).**
+   - Completing a Task from `✓` (or menu) completes optimistically via `PendingChanges` and displays a dismissible notice (`"<ID> completed"`) with an **Undo** button that calls `reopenTask(task)`.
+
+4. **F1 CLI copy polish.**
+   - `rust/loopflow/src/lf.rs` (~L1445): when paused at a landing stop or `end`, avoid printing generic `lf task run` next-step guidance.
+   - `rust/loopflow-execution/src/ops/task_pause.rs` (~L53): refusal text should name `lf task unpause --run` when paused mid-step vs `lf task unpause` when paused at a human step.
+
+5. **Keep `Available` on paused sidebar rows as-is.**
+   - Do not suppress `Available` on paused rows (the open Task Session and paused worker are separate concepts; holistic availability semantics are recorded in `scratch/questions.md`).
+
 ## Revision after demo & ship-review
 
 Stacked on `LOO-1063` (Working sidebar order + status sort). Keep the `stopping_sessions` rename and the documented Codex 0.171.0 / post-send move limits; revise the implementation as follows:

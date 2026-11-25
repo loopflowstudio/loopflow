@@ -76,3 +76,7 @@ The detached `task unpause --run` owns the admission lock from the decision
 through placement. At a waiting step it reports null before preparing a run.
 The Swift decoder and landing-stop button travel with the wire change so both
 apps can open a Task that reads `wait`.
+
+## Open questions (beyond LOO-1078)
+
+- **Holistic session-vs-worker availability:** A paused Task keeps its primary Task Session open, so sidebar rows can currently show `Available · inferred` while in the `Paused` Working group. The Task Session and the Graph worker are separate concepts, so leave `Available` intact in `LOO-1078` and think through availability semantics holistically in a dedicated design pass.

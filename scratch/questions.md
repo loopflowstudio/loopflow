@@ -41,3 +41,13 @@ to `c3742012`. That conversation may show those two sends.
 
 - Native QA ruled out `metadata.user_markdown` on 1.5.16 and 1.5.17.
   Kept plain system-message delivery. See the remaining decision in the plan.
+
+# Ship-review direction — fold live idle agy wake back into LOO-1098 (2026-11-25)
+
+- Jack Heart:
+  - `"b"` (for inline display → filed as LOO-1103)
+  - `"wait this was deferred? isnt this the main thing i asked for? Already-open idle agy wakeLive idle agy work sessions do not wake until a typed turn or reopen; blocked on a safe provider route."`
+  - `"Test the sidecar route now ( and then Revisit held-terminal wake if necessary"`
+  - `"yes A"`
+  - `"do it in 1098 and abandon 1099"`
+- Option A: VT-guarded held-terminal wake pasting the short trigger prompt (`"Read the waiting steers and Task updates for this Session."`) + `\r` so `PreInvocation` claims and stamps steers only after `agy` invokes the hook. LOO-1099 abandoned.

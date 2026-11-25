@@ -1,25 +1,25 @@
-at: 2f057b6970806a7c05899800a788520d1236fd22
+at: 89b2c33aa54f0fb5e3fbe0593dc7f03fb20caf4a
 first:
   - path: docs/sessions.md
-    why: When an open or reopened conversation hears a steer
-  - path: scratch/plan.md
-    why: What the live Antigravity probes showed
-  - path: rust/loopflow-execution/src/harness/parity.rs
-    why: Every behavior, gap owner and verification method
+    why: When open and reopened conversations receive steers
+  - path: docs/dev/codebase.md
+    why: What adding a provider requires
+  - path: rust/loopflow-harness/src/lib.rs
+    why: Required caller markers, driver recognition and sign-in advice
   - path: rust/loopflow-execution/src/harness/mod.rs
-    why: How each harness starts its resumed turn
+    why: Idle reach, reopen delivery and empty-thread replay
+  - path: rust/loopflow-storage/src/sqlite/steers.rs
+    why: Endpoints recorded for each idle candidate
+  - path: rust/loopflow-execution/src/steer.rs
+    why: How the hook and server select the same endpoint
   - path: rust/loopflow-execution/src/harness/native_session.rs
-    why: Waiting news starts Antigravity's prompt hook
-  - path: rust/loopflow-execution/src/agent/mod.rs
-    why: Parent conversation markers removed before launch
+    why: Waiting news starts the Antigravity prompt hook
   - path: rust/loopflow/tests/session_launch_contract.rs
-    why: Public resume, delivery receipt and quiet reopen
+    why: Resume delivers once and stays quiet afterward
   - path: rust/loopflow/src/server/wake.rs
-    why: Queued steer and provider message on each route
+    why: Receipts and addressed messages on each wake route
+  - path: rust/loopflow-execution/src/harness/launch_matrix.rs
+    why: Four launch kinds under both permission settings
   - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
-    why: Worker behavior through real Task commands
-  - path: scripts/test_network.py
-    why: How the runner hides installed provider executables
-  - path: rust/loopflow-execution/src/harness/README.md
-    why: Generated parity table and harness notes
+    why: Worker outcomes through Task commands
 hide: []

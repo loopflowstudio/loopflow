@@ -546,10 +546,11 @@ crosses storage, auth, or public APIs.
 ```
 
 `MEMORY.md` beside it holds what later Tasks need: decisions, dead ends and facts.
-Agents update it as work ships, and `realign` keeps
-plan, code, and memory in sync. Both files are ordinary Markdown in Git,
-reviewed in PRs. Check each file's context footprint with
-`lf context --wave billing`.
+The Wave's conversation (`wave-session`, opened with `lf resume --wave billing`)
+curates it—promoting lessons from child Waves, replacing stale guidance, and
+retiring the largest stale sections when `lf context --wave billing` exceeds its
+limit. Both `GOAL.md` and `MEMORY.md` are ordinary Markdown in Git, reviewed in
+PRs.
 
 ### Defaults per Wave
 

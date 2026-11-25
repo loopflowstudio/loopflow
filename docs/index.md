@@ -78,9 +78,9 @@ lf task run <ID> ship-api       # run a Task through it, pausing at design
 lf -b task run <ID> ship-api    # run every step headless to a merged PR
 ```
 
-Built-in Graphs (`feature`, `code`, `auto`, `research`, `optimize`) work out of
+Built-in Graphs (`feature`, `code`, `quick`, `research`, `optimize`) work out of
 the box and are templates you can customize (`lf graph customize feature`).
-Extend built-in Skills with `extends: builtin` instead of forking them.
+Extend built-in or repository Skills with `extends: lf:<name>` or `extends: <name>` instead of forking them.
 
 **3. Organize Tasks into Waves.** A Wave is an area of work with its own goal
 (`GOAL.md`), memory (`MEMORY.md`) and plan, and its own setup for every Task in
@@ -119,7 +119,7 @@ lf resume                                  # return to this checkout's conversat
   steps move to the next agent in your `agents` list, or wait and try again.
 - **Workflows are files in your repository.** Skills are Markdown and Graphs
   are YAML under `.lf/`, reviewed like code. A Graph can loop
-  (`implement → sync → realign`), branch (`xor`), write the docs before the
+  (`sync → implement` inside `concept-review → realign`), branch (`xor`), write the docs before the
   code (`write-docs`), keep QA playbooks (`.lf/qa/`), and stop for you with
   one summary page (`ship-review`).
 - **Your team keeps its tools.** Teammates review PRs on GitHub and comment in
@@ -137,7 +137,7 @@ lf resume                                  # return to this checkout's conversat
 | Parallel Tasks, steering, stacking PRs, and team sync (Git, Linear, Asana) | [Work](work.md) |
 | Persistent conversations, multi-terminal views, and crash/reboot recovery | [Sessions](sessions.md) |
 | Mixing Claude, Codex, OpenCode, Pi, and Antigravity + automatic usage-limit failover | [Configuration](config.md#keep-going-when-a-provider-runs-out) · [Native authentication](subscriptions.md) |
-| Custom Skills (`extends: builtin`), Graphs, loops, `ship-review`, and `qa` | [Orchestration](orchestration.md) |
+| Custom Skills (`extends:`), Graphs, loops, `ship-review`, and `qa` | [Orchestration](orchestration.md) |
 | Auto-merge, CI repair (`lf land --wait-and-fix`), stacked PRs, and releases | [Ops](ops.md) |
 | Running on SSH machines, pools, or rented Daytona/Modal/RunPod/AWS boxes | [Machines](ops.md#machines) · [Sign in on any Machine](subscriptions.md#sign-in-on-any-machine) |
 | Loopflow Desktop, Rex, cmux, Herdr, tmux, or building a custom UI | [Surfaces](surfaces.md) · [Workspaces](workspaces.md) |

@@ -49,10 +49,6 @@ struct Export {
     inputs: BTreeMap<String, String>,
 }
 
-/// What `lf skill customize` writes for a builtin: the builtin stays in force
-/// and the repository's section is appended to it.
-const EXTENSION: &str = "---\nextends: builtin\n---\n## In this repository\n";
-
 /// Give the repository its own file for a builtin skill when it has none: an
 /// extension of the builtin, or with `full` the builtin's whole text.
 pub fn customize(name: &str, repo: &Path, full: bool) -> Result<PathBuf, LoadError> {
@@ -66,7 +62,8 @@ pub fn customize(name: &str, repo: &Path, full: bool) -> Result<PathBuf, LoadErr
         .ok_or_else(|| LoadError::SkillNotFound(name.to_string()))?;
     let path = repo.join(format!(".lf/skills/{name}.md"));
     fs::create_dir_all(path.parent().expect("definition has a parent"))?;
-    fs::write(&path, if full { content } else { EXTENSION })?;
+    let extension = format!("---\nextends: lf:{name}\n---\n## In this repository\n");
+    fs::write(&path, if full { content } else { &extension })?;
     Ok(path)
 }
 
@@ -143,7 +140,7 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
         skill_exports.insert(
             name.clone(),
             Export {
-                content: render_skill(skill, name)?,
+                content: render_skill(skill, name, &catalog)?,
                 ..Export::default()
             },
         );
@@ -509,8 +506,12 @@ fn remove_owned_input(directory: &Path, name: &str) -> Result<(), LoadError> {
     Ok(())
 }
 
-fn render_skill(skill: &SkillSource, name: &str) -> Result<String, LoadError> {
-    let content = skill.read()?;
+fn render_skill(
+    skill: &SkillSource,
+    name: &str,
+    catalog: &SkillCatalog,
+) -> Result<String, LoadError> {
+    let content = catalog.read_source(skill)?;
     let (original_frontmatter, body) = split_frontmatter(&content).unwrap_or(("", &content));
     let description = skill_description(&content)
         .unwrap_or_else(|| format!("Run the loopflow {} skill.", skill.name));
@@ -698,6 +699,9 @@ mod tests {
         let builtin = loaded("implement");
         let path = customize("implement", repo.path(), false).unwrap();
         assert_eq!(path, repo.path().join(".lf/skills/implement.md"));
+        assert!(fs::read_to_string(&path)
+            .unwrap()
+            .contains("extends: lf:implement"));
         let extended = loaded("implement");
         assert_eq!(
             extended.content.unwrap(),
@@ -871,14 +875,14 @@ mod tests {
             .find(|path| {
                 let input: crate::skills::invocation::SkillInvocation =
                     serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
-                input.skill.name == "implement"
+                input.skill.name == "compress"
             })
             .unwrap();
         fs::create_dir_all(repo.path().join(".lf/skills")).unwrap();
-        let source = repo.path().join(".lf/skills/implement.md");
+        let source = repo.path().join(".lf/skills/compress.md");
         fs::write(
             &source,
-            "---\nagent: claude:repo\n---\nRepository implementation.",
+            "---\nagent: claude:repo\n---\nRepository compression.",
         )
         .unwrap();
         let selected = crate::skills::invocation::SkillInvocation::read(
@@ -889,7 +893,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             selected.skill.content.as_deref(),
-            Some("Repository implementation.")
+            Some("Repository compression.")
         );
         assert_eq!(selected.skill.agent.as_deref(), Some("claude:repo"));
         assert_eq!(selected.skill.occurrence.as_ref().unwrap().graph, "build");

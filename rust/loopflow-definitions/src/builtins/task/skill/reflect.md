@@ -23,10 +23,10 @@ next Task.
 **Put the lesson where the step that missed it will read it.**
 
 - One skill's method goes in this repository's addition to that skill,
-  `.lf/skills/<name>.md`. A file that opens with `extends: builtin` in its
-  frontmatter is appended to the builtin, so write only the lesson. Copy the
-  whole skill with `lf skill customize <name>` only to change what it already
-  says.
+  `.lf/skills/<name>.md`. A file with `extends: lf:<name>` (or `extends: <skill>`)
+  in its frontmatter appends to the parent, so write only the lesson. Copy the
+  whole skill with `lf skill customize <name> --full` only to change what it
+  already says.
 - A rule for every agent in this repository goes in the agent guide.
 
 Write it as the instruction the step needed, in the skill's own voice, not as

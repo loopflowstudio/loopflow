@@ -15,12 +15,12 @@ verifies, `gate` reviews and publishes. Chain Skills in a Graph rather than
 cramming everything into one prompt; steps pass work through Git commits and
 notes in `scratch/`.
 
-### Extend or replace a builtin
+### Extend or replace a Skill
 
 ```bash
-lf skill customize pr-message    # creates .lf/skills/pr-message.md extending the builtin
+lf skill customize pr-message    # creates .lf/skills/pr-message.md extending lf:pr-message
 lf skill customize gate --full   # copies the full builtin text to replace it
-lf list skill                    # shows which Skills extend vs. replace builtins
+lf list skill                    # shows which Skills extend or replace others
 ```
 
 Extending a builtin lets you add repo-specific instructions while still
@@ -29,15 +29,33 @@ receiving upstream improvements to the builtin:
 ```markdown
 <!-- .lf/skills/gate.md -->
 ---
-extends: builtin
+extends: lf:gate
 ---
 ## In this repository
 
 Run `make e2e` before publishing.
 ```
 
-A Skill without `extends: builtin` replaces the builtin of the same name for
-everyone on your team.
+You can also extend another Skill by name to build specialized variants on top
+of your repository's version (or the builtin when no repository file overrides
+it):
+
+```markdown
+<!-- .lf/skills/card-implement.md -->
+---
+extends: implement
+agent: claude:opus
+---
+## Card rules
+
+Verify every state transition against the spec before committing.
+```
+
+Frontmatter merges parent under child (child keys win), and the child's body
+appends after the parent's. Use `extends: lf:<name>` to inherit Loopflow's raw
+builtin directly and skip any repository overlay; using `extends: <name>` in a
+file of the same name also falls through to the builtin. A Skill without
+`extends:` replaces the builtin of the same name for everyone on your team.
 
 ### Automatic commits per step
 
@@ -124,19 +142,19 @@ Mix Skills and mechanical `cmd:` steps:
 ### Loops (`loop:`)
 
 A `loop:` block repeats when its final step returns `iterate`. The built-in
-`build` Graph puts implementation in an inner loop so the outer loop reviews
-the whole change.
+`build` Graph puts implementation in an inner loop and design review in an
+outer loop, then runs `compress` and `qa` once after the design settles.
 
 ```yaml
 # build (builtin)
 - loop:
     - loop:
-        - implement        # build one substantial pass of the plan
         - cmd: sync
-        - realign          # decides: next pass (iterate) or move on (advance)
-    - compress             # simplify what the branch touched
-    - qa                   # exercise the real change end to end
-    - concept-review       # decides: ship whole change or loop back
+        - implement        # decides: another planned pass (iterate) or ready for review (advance)
+    - concept-review       # read-only: writes scratch/concept-review.html
+    - realign              # decides: take review into plan and loop back, or move on
+- compress                 # simplify what the branch touched
+- qa                       # exercise the real change end to end
 - pr-publish
 ```
 
@@ -145,18 +163,25 @@ Any Skill can be the deciding step of a loop: it returns `advance`, `iterate`
 
 During a Graph run, each `iterate` launches the loop’s Skills again in fresh conversations.
 For work that needs several passes, `kickoff` groups it into 2–4 substantial
-end-to-end passes, aiming for no more than 5. After each pass, `realign`
-regroups what remains. Within a pass, `implement` keeps building while the
-next item is the same kind of work. It pauses when the next item needs a
-decision or review, or when what it learned could change the plan.
-Aim for one diff a person can review in a sitting. Around 2,000 lines of
-non-test change is a soft ceiling.
+end-to-end passes, aiming for no more than 5. Within a pass, `implement` keeps
+building while the next item is the same kind of work, and stops cleanly rather
+than starting another pass when context is already heavy. Before iterating, it
+collapses the finished pass in `scratch/plan.md` to one line with its commit and
+names the next pass; if a counterexample breaks the plan, it notes what broke
+and advances so review can replan.
+
+Once planned passes are built, `concept-review` reviews the whole change
+read-only (`scratch/concept-review.html`) and `realign` reconciles those
+findings into `scratch/plan.md`—fixing small mismatches inline, deferring
+separate outcomes under `## Deferred findings`, or regrouping remaining passes
+and iterating back to `sync`. Aim for one diff a person can review in a sitting.
+Around 2,000 lines of non-test change is a soft ceiling.
 
 The deciding step sees which pass it is on and how many steps the loop
 repeats, including the decision itself.
 
 ```text
-Decision pass 3. Iterating repeats 3 steps, back to implement.
+Decision pass 3. Iterating repeats 2 steps, back to sync.
 ```
 
 It keeps iterating past 5 when real work is left, and returns `blocked` when
@@ -211,19 +236,16 @@ compresses and re-measures. Compose it with `deliver` to ship the win:
 ## Where a person takes part
 
 Mark any step `interactive:` to pause for human input; every other step runs
-headless. Built-in `feature` puts you in the loop at three high-leverage
-moments:
+headless. Built-in `feature` puts you in the loop at two high-leverage moments:
 
 ```yaml
 # feature (builtin)
 - interactive: explore      # choose what to build
-- graph: plan               # kickoff, concept-review, write-docs
+- graph: plan               # kickoff, concept-review, realign, write-docs
 - loop:
-    - loop:
-        - graph: build      # implement, compress, qa, publish PR
-        - interactive: ship-review  # read one summary page; iterate sends feedback back to build
-    - graph: deliver        # reflect, gate, land --wait-and-fix
-    - interactive: verify   # check it on main; finish or fix forward
+    - graph: build          # sync/implement, concept-review, realign, compress, qa, publish PR
+    - interactive: ship-review  # read one summary page; iterate sends feedback back to build
+- graph: deliver            # reflect, gate, land --wait-and-fix
 ```
 
 ```bash
@@ -239,17 +261,27 @@ what ships, in your terms, and everything the run left outside the PR, each
 with a proposal to fix it here, give it its own Task, or drop it. It is not a
 code review; concept review and gate already answered whether the change is
 right. Ask for changes in the Task conversation to loop back to `build`, or
-move on to `deliver`.
+move on to `deliver`, which merges the PR and completes the Task.
 
 ### Built-in Graphs
 
+```bash
+lf task run LOO-13 quick    # builds from the brief, runs qa and gate, and lands when CI passes
+```
+
 | Graph | What it does |
 |---|---|
-| `feature` | `explore` (interactive) → `plan` → `build` ↔ `ship-review` (interactive) → `deliver` → `verify` (interactive) |
+| `feature` | `explore` (interactive) → `plan` → `build` ↔ `ship-review` (interactive) → `deliver` |
 | `code` | Same as `feature`, starting at `plan` (default when no Graph is configured) |
+| `quick` | loop(`sync` → `implement`) → `qa` → `gate` → `land --wait-and-fix` |
 | `pursue` | `plan` then `build` with no interactive stops: request to published PR |
 | `research` | Investigate and report findings without opening a PR |
 | `optimize` | Iterative measure → change → keep/revert loop |
+
+`quick` takes a small, clear change straight from the brief to a merged PR with
+no interactive step—Desktop's Start menu marks it **merges without asking**, and
+`lf task auto off <ID>` still pauses before `land`. A brief bigger than one
+bounded change stops `quick` at `implement`, blocked, before anything is built.
 
 Copy any builtin to customize it for your team:
 
@@ -272,7 +304,7 @@ steps:
 
 ```console
 $ lf graph list
-code       Build, deliver and verify. You review the change, then check it on main.
+code       Build and deliver. You review the change before it merges.
 my-graph
 ship-api   Build the endpoint, audit it, then deliver.
 ```
@@ -293,11 +325,10 @@ $ lf graph list --json | jq '.[] | select(.name=="code") | .workflow'
     {"name": "plan", "interactive": false},
     {"name": "build", "interactive": false},
     {"name": "ship-review", "interactive": true},
-    {"name": "deliver", "interactive": false},
-    {"name": "verify", "interactive": true}
+    {"name": "deliver", "interactive": false}
   ],
   "interactive_steps": [...],
-  "sentence": "You take part at ship-review and verify."
+  "sentence": "You take part at ship-review."
 }
 ```
 
@@ -330,8 +361,10 @@ lf task auto off LOO-12             # LOO-12: auto off
 - Off stands: only `lf task auto on` turns it back on; an `auto: on` in
   configuration never does. `lf -b task run` stands in for its own run and
   writes no auto, so with auto off it still waits at the landing step.
-- Never set, a run that reaches a merging step lands; `lf task run` says so on
-  its `merges:` line. A failing run leaves auto alone.
+- Never set, a run that can reach a merging step before stopping lands;
+  `lf task run` prints ``merges: this run may merge the PR; `lf task auto off <ID>` stops it``
+  (runs on non-merging Graphs such as `pursue` omit it). A failing run leaves
+  auto alone.
 - `auto: on` beside `graph:` in a Wave's config turns auto on for every Task
   that takes the Graph up. Reopening a Task clears it.
 

@@ -279,7 +279,7 @@ does; one good example beats three; no preamble; write for users; update when
 user-facing behavior changes.
 
 **`scratch/`:** what's left to build, not what's done. `lf realign` updates the
-plan, code and memory and keeps open findings with the work.
+plan and code and keeps open findings with the work.
 
 **SQLite schema:**
 - Shallow checkouts lack first-parent migration history. For local builds set
@@ -405,7 +405,7 @@ def open_warp(path: Path) -> None:
 ```
 
 Start features with a design doc under `scratch/`; after implementation,
-`lf realign` reconciles plan, code and memory.
+`lf realign` reconciles plan and code.
 
 User docs use the shortest command that resolves (`lf land`, `lf wt create`);
 keep canonical paths in command references. `documented_commands` checks

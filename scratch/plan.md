@@ -247,25 +247,13 @@ Remaining for gate/CI:
 - Swift view tests (`WorkflowLineTests`, `BacklogViewTests`, `AppBootstrapResourceTests`) and DTO fixture tests (`ServerProtocolTests`).
 - Note on `return_target`: `ConcreteSkill.returns` is a relative back-offset, not an absolute index; `reaches_landing` uses `crate::graph::return_target(body, index)` so loop back-edges resolve accurately in `body`.
 
-## One pass
+## Remaining
 
-1. Delete both `verify.md` files, update `code.yaml`, `feature.yaml`, and
-   `builtins.rs`.
-2. Add `CapturedGraph::reaches_landing` and switch `ops/task.rs`,
-   `engine/task.rs`, and `commands/graph.rs` off `reaches_end`.
-3. Update Rust tests, Swift comments/tests, DTO fixtures, and docs/copy.
-4. Run focused checks (with `LF_*` unset and `< /dev/null` where needed):
-
-```bash
-cargo test -p loopflow-definitions --lib builtins::
-cargo test -p loopflow-execution --lib task_graph::
-cargo test -p loopflow-execution --lib graph::compiled::
-cargo test -p loopflow-execution --lib skills::catalog::
-cargo test -p loopflow --lib task_graph_launch_tests::
-```
-
-Swift view tests (`WorkflowLineTests`, `BacklogViewTests`,
-`AppBootstrapResourceTests`) and the DTO fixture tests run in CI at gate.
+Implementation is done; nothing remains for implement. Gate runs CI (Swift
+view and DTO fixture tests above), then the demo below against the built `lf`.
+Review note for the PR: `TaskRunStart::Live` computes `merges` with
+`through = true` from the live cursor; auto off on a live run is enforced at
+the landing step at runtime, as before.
 
 ## Demo and acceptance at gate
 

@@ -75,9 +75,12 @@ def test_every_page_has_the_same_bar_and_footer(page: Page, base_url: str, width
 GRAPHS = Path(__file__).resolve().parents[3] / "rust/loopflow-definitions/src/builtins/task/graph"
 
 
-def _graph_steps(items: list[dict]) -> list[tuple[str, bool]]:
+def _graph_steps(items: list[dict | str]) -> list[tuple[str, bool]]:
     steps = []
     for item in items:
+        if isinstance(item, str):
+            steps.append((item, False))
+            continue
         ((kind, value),) = item.items()
         if kind == "loop":
             steps += _graph_steps(value)

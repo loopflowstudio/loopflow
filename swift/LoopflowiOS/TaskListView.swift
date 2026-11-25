@@ -89,6 +89,10 @@ final class TaskFeed {
     }
 
     func complete(issue: String, directory: String, children: TaskChildPolicy? = nil, show: Notice.Action? = nil) {
+        if children == nil, let parent = content(for: issue), (parent.openChildren ?? 0) > 0 {
+            completing = parent
+            return
+        }
         notices.post(Notice("\(issue) completed", key: "complete-\(issue)", action: Notice.Action("Undo") { [weak self] in
             self?.change(.reopen(task: issue), issue: issue, verb: "reopened",
                          write: .taskReopen(directory: directory, issue: issue))
@@ -98,6 +102,10 @@ final class TaskFeed {
                             show: show) { [weak self] in
             try? await self?.observation?.refresh()
         }
+    }
+
+    private func content(for issue: String) -> WorkViewPlan.Content? {
+        repositories.lazy.flatMap(\.tasks).first { $0.identifier == issue || $0.work.id == issue }
     }
 
     /// Show `command` on the Task now and send `write`; a refusal undoes it and

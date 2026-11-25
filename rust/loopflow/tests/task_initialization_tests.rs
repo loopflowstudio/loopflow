@@ -546,10 +546,14 @@ fn reopen_archives_the_closed_pr_and_checks_out_from_current_main() {
     let reopened = read(&["task", "reopen", "INF-123", "--json"]);
     assert_eq!(reopened["state"], "started");
     assert!(reopened["worktree"].is_null());
-    let status = task_status(repo.path(), Some("INF-123"))
-        .unwrap()
-        .execution
-        .unwrap();
+    let status = task_status(
+        repo.path(),
+        Some("INF-123"),
+        loopflow::lf::navigation::command_merges,
+    )
+    .unwrap()
+    .execution
+    .unwrap();
     assert!(status.pr.is_none());
     assert_eq!(
         status.actions.recommended,
@@ -561,7 +565,10 @@ fn reopen_archives_the_closed_pr_and_checks_out_from_current_main() {
     let row = &plan["tasks"]["items"][0];
     assert_eq!(row["task"]["identifier"], "INF-123");
     assert_eq!(row["actions"]["recommended"], "run");
-    assert_eq!(row["run_control"], serde_json::json!({"unavailable": null}));
+    assert_eq!(
+        row["run_control"],
+        serde_json::json!({"pausing": false, "unavailable": null})
+    );
 
     repo.create_file("after-abandon.txt", "main moved");
     repo.stage_all();
@@ -694,10 +701,14 @@ fn reopen_keeps_surviving_checkout_or_branch_and_allows_completion() {
         close_fixture_pr(&fixture, &checkout);
         if keep_checkout {
             // A PR closed externally stays current while the Task itself is open.
-            let status = task_status(repo.path(), Some("INF-123"))
-                .unwrap()
-                .execution
-                .unwrap();
+            let status = task_status(
+                repo.path(),
+                Some("INF-123"),
+                loopflow::lf::navigation::command_merges,
+            )
+            .unwrap()
+            .execution
+            .unwrap();
             assert_eq!(status.actions.recommended, Some(TaskAction::NoAction));
             assert!(
                 status.actions.reason.contains("PR closed without merge"),
@@ -721,10 +732,14 @@ fn reopen_keeps_surviving_checkout_or_branch_and_allows_completion() {
             );
         }
         task::task_complete(repo.path(), "INF-123", None, None).unwrap();
-        let status = task_status(repo.path(), Some("INF-123"))
-            .unwrap()
-            .execution
-            .unwrap();
+        let status = task_status(
+            repo.path(),
+            Some("INF-123"),
+            loopflow::lf::navigation::command_merges,
+        )
+        .unwrap()
+        .execution
+        .unwrap();
         assert_eq!(status.status, loopflow_execution::durable::TaskState::Done);
         assert!(status.pr.is_none());
     }

@@ -199,6 +199,14 @@ final class TaskFeedTests: XCTestCase {
         let unasked = await server.writes
         XCTAssertEqual(unasked, [], "nothing is written before the answer")
 
+        // Completing from the workspace checkmark asks the same question.
+        feed.completing = nil
+        feed.complete(issue: "LOO-2", directory: "/repo")
+        XCTAssertEqual(feed.completing?.identifier, "LOO-2")
+        XCTAssertNil(feed.notices.current)
+        let stillUnasked = await server.writes
+        XCTAssertEqual(stillUnasked, [], "workspace checkmark writes nothing before the answer")
+
         feed.complete(parent, children: .rehome) {}
         XCTAssertNil(feed.completing)
         XCTAssertEqual(identifiers(feed), ["LOO-1", "LOO-3"])

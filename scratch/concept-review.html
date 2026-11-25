@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-1067 · Concept Review (Post-Demo &amp; #2040 Merge) — Task Inspector &amp; File Browser</title>
+<title>LOO-1067 · Concept Review (Pass 2, Built) — Task Inspector &amp; File Browser</title>
 <style>
   :root {
     --bg: #ffffff;
@@ -111,8 +111,8 @@
     margin: 14px 0 0;
   }
   .verdict-box {
-    background: var(--no-bg);
-    border: 1px solid var(--no-border);
+    background: var(--ok-bg);
+    border: 1px solid var(--ok-border);
     border-radius: 8px;
     padding: 12px 16px;
     margin: 14px 0 0;
@@ -135,9 +135,9 @@
     vertical-align: middle;
   }
   .badge-yes { background: var(--ok-bg); color: var(--ok); }
-  .badge-no { background: var(--no-bg); color: var(--no); }
-  .badge-existing { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border); }
-  .badge-proposed { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent-border); }
+  .badge-fixed { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent-border); }
+  .badge-before { background: var(--no-bg); color: var(--no); border: 1px solid var(--no-border); }
+  .badge-built { background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-border); }
   .badge-choice { background: var(--warn-bg); color: var(--warn); }
 
   .table-wrap {
@@ -158,7 +158,7 @@
     border-bottom: 1px solid var(--border);
   }
   tr:last-child td { border-bottom: none; }
-  tr.row-no { background: var(--no-bg); }
+  tr.row-fixed { background: var(--ok-bg); }
   th {
     background: var(--surface);
     font: 600 11px/1.3 var(--mono);
@@ -166,7 +166,7 @@
     letter-spacing: 0.05em;
     color: var(--text-2);
   }
-  td.status { width: 58px; white-space: nowrap; }
+  td.status { width: 92px; white-space: nowrap; }
   td.prod { width: 22%; font-weight: 600; }
   td.code-col { width: 28%; color: var(--text-2); }
   .sub { display: block; margin-top: 4px; font-weight: 400; font-size: 12px; color: var(--text-2); }
@@ -186,11 +186,11 @@
     border-radius: 8px;
     padding: 14px 16px;
   }
-  .card.proposed {
-    border-color: var(--accent-border);
-    background: linear-gradient(180deg, var(--accent-bg), var(--surface) 44px);
+  .card.built {
+    border-color: var(--ok-border);
+    background: linear-gradient(180deg, var(--ok-bg), var(--surface) 44px);
   }
-  .card.existing-bad {
+  .card.before {
     border-color: var(--no-border);
     background: linear-gradient(180deg, var(--no-bg), var(--surface) 44px);
   }
@@ -276,7 +276,7 @@
     padding: 8px 10px;
     border-radius: 6px;
     background: var(--surface);
-    border: 1px solid var(--accent-border);
+    border: 1px solid var(--ok-border);
     font-family: var(--sans);
     font-size: 12px;
     white-space: normal;
@@ -303,6 +303,19 @@
   }
   .step-tag.fail { color: var(--no); }
   .step-tag.rec { color: var(--ok); }
+
+  .notes-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-top: 12px;
+  }
+  .notes-box ul {
+    margin: 6px 0 0;
+    padding-left: 18px;
+  }
+  .notes-box li { margin-bottom: 6px; }
 
   .questions {
     display: grid;
@@ -333,21 +346,21 @@
 <body>
 <main>
   <header>
-    <div class="eyebrow">LOO-1067 · Post-Build Concept Review · Against origin/main (3c9f1979fc → 69280f85c9)</div>
+    <div class="eyebrow">LOO-1067 · Concept Review Pass 2 · Built branch against origin/main (41023c8e55 → 90a0417f90)</div>
     <h1>Do the file browser’s concepts and the code’s concepts line up?</h1>
-    <p class="muted">Fresh full-area review of <code>69280f85c9</code> (138 files vs. <code>origin/main</code>) after the November 24 live demo, the #2040 remote-workspace merge, the large-file perf work, and third-pass QA (<code>scratch/qa.html</code>). Code was not edited; the updated design is written into <code>scratch/plan.md</code>.</p>
+    <p class="muted">Full-area post-build review of <code>90a0417f90</code> (154 files vs. <code>origin/main</code>) after the Pass 2 rebuild (<code>2c3a904433</code> TextKit 2 reader &amp; <code>FileVisit</code>, <code>0b0ab5da85</code> peer <code>scratch_pages</code> &amp; oversize fast-path, <code>883136da47</code> compress, and <code>90a0417f90</code> QA pass 4 fixes). No code or plan files were modified.</p>
     <div class="scope-box">
-      <strong>Area reviewed:</strong> The Task inspector (<code>Brief | Diff | Files</code>), the code reader (<code>TaskCodeReader</code>, <code>TaskFileDocument</code>), checkout search &amp; symbols (<code>lf task find|grep|symbols</code>), local and remote file observation (<code>TaskFileObservation</code>, <code>TaskFilesWatch</code> / <code>TaskFilesRevision</code>), presentation (<code>lf desktop files</code>), navigation history (<code>FileJumps</code>, <code>FileVisit</code>), and unified line comments (<code>ReviewDiff</code>).<br>
-      <span class="muted"><strong>Why this whole area:</strong> Demo feedback, large-file profiling, third-pass QA, and the #2040 merge exposed recurring symptoms across click handling, large-file responsiveness, definition landings, and peer scratch updates. Stepping back to the full area separates surface fixes from three underlying conceptual mismatches.</span>
+      <strong>Area reviewed:</strong> The Task inspector (<code>Brief | Diff | Files</code>), the code reading &amp; editing surfaces (<code>TaskCodeReader</code>, <code>TaskFileDocument</code>, <code>TaskHTMLView</code>), checkout search &amp; symbols (<code>lf task find|grep|symbols</code>, <code>FileOutline</code>), local and peer file observation (<code>TaskFileObservation</code>, <code>TaskFilesWatch</code> / <code>TaskFilesRevision</code>), deliberate presentation (<code>lf desktop files</code>), navigation history (<code>FileJumps</code>, <code>FileVisit</code>, <code>FilePosition</code>), and unified line comments (<code>ReviewDiff</code>).<br>
+      <span class="muted"><strong>Why this whole area:</strong> Pass 1 identified three structural mismatches inside the built file browser; Pass 2 rebuilt all three, compressed the duplicate line/paint layers, and ran fourth-pass live QA. Reviewing the full area against <code>origin/main</code> confirms the concepts hold together end to end.</span>
     </div>
     <div class="verdict-box">
-      <strong>Outcome — plan changed (3 of 11 concepts misaligned):</strong> 8 concepts align cleanly (working-tree/Diff split, checkout search/symbols, per-file Edit/Diff, unified comments, open files/history, unified Find, deliberate <code>lf desktop files</code> presentation, responsive rail &amp; breadcrumb). <strong>Three structural mismatches remain</strong> and belong in this work before shipping: (1) <code>TaskCodeReader</code> models a code document as thousands of isolated SwiftUI <code>Text</code> rows fought by four AppKit/CoreText workarounds; (2) post-#2040 <code>TaskFilesRevision</code> collapses working-tree and scratch invalidation into one UUID, breaking peer scratch notices and triggering redundant <code>git diff</code> reloads; (3) <code>FileVisit</code> conflates destination highlighting with forcing raw source view, leaving definition/outline/Back landings unmarked and breaking Back to rendered Markdown/HTML.
+      <strong>Outcome — nothing to change (11 of 11 concepts aligned):</strong> All three Pass 1 mismatches and both minor seams are resolved in <code>2c3a904433..90a0417f90</code>. <code>TaskCodeReader</code> now runs on one native read-only TextKit 2 text view with a clipped pinned gutter and no duplicated <code>CodeLine</code> array; peer <code>task.files.watch</code> carries <code>scratch_pages</code> independently of working-tree <code>revision</code>; <code>FilePosition</code> / <code>FileVisit</code> separate rendered vs. source mode from landing highlights; and oversize file reads sniff an 8 KiB prefix before buffering. No conceptual mismatch remains.
     </div>
   </header>
 
   <div class="legend">
-    <span><span class="badge badge-existing">Existing (HEAD)</span> Current behavior on <code>69280f85c9</code></span>
-    <span><span class="badge badge-proposed">Proposed</span> Target design recorded in <code>scratch/plan.md</code></span>
+    <span><span class="badge badge-before">Before (Pass 1)</span> Superseded state on <code>69280f85c9</code></span>
+    <span><span class="badge badge-built">Built (HEAD)</span> Current implementation on <code>90a0417f90</code></span>
     <span><span class="badge badge-choice">Choice for review</span> Reversible decision recorded in <code>scratch/questions.md</code></span>
   </div>
 
@@ -363,23 +376,23 @@
         </tr>
       </thead>
       <tbody>
-        <tr class="row-no">
+        <tr class="row-fixed">
           <td class="prod">Code reading surface (Read)<span class="sub">Instant open, multi-line drag-select &amp; copy, pinned line numbers, click underline, ⌘-click jump, inline comments &amp; peek</span></td>
-          <td class="code-col"><code>TaskCodeReader</code>: SwiftUI <code>LazyVStack</code> of 3,766 per-line <code>Text.textSelection(.enabled)</code> rows + <code>ReaderClicks</code> window monitor + <code>RunLoop.default</code> <code>NSApp.currentEvent</code> hack + <code>RowFrames</code> + <code>CTLine</code> hit-test &amp; width scan</td>
-          <td class="status"><span class="badge badge-no">No</span></td>
-          <td><strong>Biggest mismatch.</strong> Four layers of AppKit/CoreText workarounds fight SwiftUI’s hidden per-line <code>NSTextView</code>. Drag-selecting across multiple lines is impossible, ⌘-click relies on an untestable run-loop hack, opening a 3,766-line file blanks for 3–6 s, far jumps stall 271–600 ms, and line numbers scroll off-screen sideways.</td>
+          <td class="code-col"><code>TaskCodeReader</code>: <code>CodeReaderContainerView</code> + read-only TextKit 2 <code>CodeReaderTextView</code> + pinned <code>CodeReaderGutterView</code> (<code>clipsToBounds = true</code>) + <code>CodeLineIndex</code> + shared <code>NSTextStorage.paint</code> + <code>paragraphSpacing</code> inline slots</td>
+          <td class="status"><span class="badge badge-yes">Yes</span> <span class="badge badge-fixed">Fixed</span></td>
+          <td><strong>Pass 1 biggest mismatch resolved.</strong> Deleted <code>ReaderClicks</code>, <code>RowFrames</code>, <code>NumberedLine</code>, <code>CodeLine</code> arrays, <code>CTLine</code> hit-testing/pre-scan, and the <code>RunLoop.default</code> workaround. Direct <code>mouseDown</code> handles ⌘-click, plain-click underline, and native multi-line selection; <code>pendingScroll</code> + <code>scrollRangeToVisible</code> lands far jumps in newly opened long files; gutter picks clear text selection.</td>
         </tr>
-        <tr class="row-no">
+        <tr class="row-fixed">
           <td class="prod">Calm scratch updates (local &amp; peer)<span class="sub">Agent scratch writes badge Open &amp; Scratch and offer <code>Updated · Open ×</code> without running <code>git diff</code>, on any Machine</span></td>
-          <td class="code-col">Local: <code>TaskFileObservation</code> paths + Swift <code>git check-ignore</code> + <code>reconcileScratchWrites</code>.<br>Peer (#2040): <code>TaskFilesRevision.revision</code> (UUID only) → <code>invalidate([""])</code></td>
-          <td class="status"><span class="badge badge-no">No</span></td>
-          <td><strong>One idea under two brokenly divergent models.</strong> On a peer Machine, an ignored scratch write bumps the sole tree revision: Desktop never runs <code>reconcileScratchWrites</code> or <code>browser.noteWrites</code> (zero badges or <code>Updated</code> bar), while <code>comparisonChanged</code> forces <code>git diff</code> and re-reads every open file. <code>TaskFileBrowserJourneyTests</code> masked this by calling <code>files.invalidate([path])</code> directly.</td>
+          <td class="code-col">Local: <code>TaskFileObservation</code> + <code>git check-ignore</code> + <code>reconcileScratchWrites</code>.<br>Peer: <code>TaskFilesWatch</code> → <code>TaskFilesRevision { revision, scratch_pages }</code> + <code>seenScratchStamps</code> diffing</td>
+          <td class="status"><span class="badge badge-yes">Yes</span> <span class="badge badge-fixed">Fixed</span></td>
+          <td><strong>Pass 1 mismatch resolved.</strong> Ignored peer scratch writes refresh <code>scratch_pages</code> stamps without bumping <code>revision</code>, skipping <code>git diff</code> over SSH while badging Open &amp; Scratch, raising <code>Updated · Open ×</code>, reloading matching open scratch docs, surviving reconnects, and dropping vanished atomic-save temp siblings. Verified over real <code>task.files.watch</code>.</td>
         </tr>
-        <tr class="row-no">
+        <tr class="row-fixed">
           <td class="prod">Landing on a jump &amp; rendered vs. source<span class="sub">Definition, outline, Grep, and presentation landings mark their line; Back to rendered Markdown/HTML stays rendered</span></td>
-          <td class="code-col"><code>FileVisit(line, hit, lines, visitID)</code> + <code>TaskFileReadingView</code> checking <code>where store.visit == nil</code></td>
-          <td class="status"><span class="badge badge-no">No</span></td>
-          <td><strong>One type doing two jobs, missing half of each.</strong> <code>FileJumps.accept</code> (definitions/outline) and <code>step</code> (Back/Forward) set <code>lines: nil, hit: nil</code> so definition jumps mark nothing (QA pass 3 #1). Using <code>visit != nil</code> to switch Markdown/HTML to raw source turns <code>⌘[</code> Back to a rendered page into raw source, and clicking another line never clears a stale visit highlight.</td>
+          <td class="code-col"><code>FilePosition(path, line: Int?)</code> (<code>nil</code> = rendered) + <code>FileVisit(line, showsSource, highlight: .lines | .hit)</code> + <code>TaskFilesStore.isShowingRendered</code></td>
+          <td class="status"><span class="badge badge-yes">Yes</span> <span class="badge badge-fixed">Fixed</span></td>
+          <td><strong>Pass 1 mismatch resolved.</strong> Definition, outline, and Back/Forward source jumps mark <code>.lines(line...line)</code>; Back to a rendered Markdown/HTML page keeps <code>visit == nil</code> and stays rendered; clicking another line clears <code>visit.highlight</code> without dropping raw-source mode on a line-addressed Markdown file.</td>
         </tr>
         <tr>
           <td class="prod">Working tree vs. Diff comparison<span class="sub">Whole-Task counts &amp; scratch stay intact when Diff inspects one Graph step</span></td>
@@ -388,26 +401,26 @@
           <td>Clean 1:1 split. Step Diffs and missing bases never clobber Files’ <code>Changed in Task</code>, Brief’s head, or <code>scratch/</code>.</td>
         </tr>
         <tr>
-          <td class="prod">Checkout search &amp; symbols<span class="sub"><code>⌘P</code> find, <code>⇧⌘F</code> grep, <code>gd</code>/<code>gr</code>, <code>⇧⌘O</code> outline on local or peer Machine</span></td>
-          <td class="code-col">Peer Machine reads <code>task.files.find|grep|symbols</code> over shared <code>observe::checkout_files</code> + <code>scan_checkout</code> + <code>literal_matcher</code>; Swift <code>FileOutline</code></td>
+          <td class="prod">Checkout search, symbols &amp; oversize reads<span class="sub"><code>⌘P</code> find, <code>⇧⌘F</code> grep, <code>gd</code>/<code>gr</code>, <code>⇧⌘O</code> outline, instant &gt;1 MB refusal on any Machine</span></td>
+          <td class="code-col">Peer Machine reads <code>task.files.find|grep|symbols</code> over <code>observe::checkout_files</code> + <code>scan_checkout</code>; Swift <code>FileOutline</code>; <code>BINARY_SNIFF_BYTES</code> prefix in <code>snapshot.rs</code>; labeled <code>ProgressView("Loading…")</code></td>
           <td class="status"><span class="badge badge-yes">Yes</span></td>
-          <td>One Tree-sitter runtime, pure-Rust Machine reads, no-default DTOs. Minor seam to clean up in the same pass: <code>snapshot::file_snapshot</code> buffers 1 MB into <code>observe::Cache</code> for &gt;1 MB text files just to return <code>Truncated</code>, and <code>TaskFilesView</code> shows an unlabeled spinner that reads blank in background windows (QA pass 3 #2).</td>
+          <td>Pass 1’s two seams are also closed: both working-tree and committed &gt;1 MB reads sniff an 8 KiB prefix before buffering, and both Files and picker preview show labeled loading states.</td>
         </tr>
         <tr>
           <td class="prod">Per-file Read / Edit / Diff &amp; lazy editor<span class="sub">Read by default, draft visible in Read, lazy <code>NSTextView</code> on Edit</span></td>
-          <td class="code-col"><code>FilesBrowserState.modes</code>, lazy <code>TaskFileDocument.retainedEditor</code> (<code>usesFindBar = false</code>), per-file <code>DiffReviewState.step</code></td>
+          <td class="code-col"><code>FilesBrowserState.modes</code>, lazy <code>TaskFileDocument.retainedEditor</code> (<code>usesFindBar = false</code>), shared <code>NSTextStorage.paint</code>, per-file <code>DiffReviewState.fileReview</code></td>
           <td class="status"><span class="badge badge-yes">Yes</span></td>
-          <td>Clean ownership across switches; 3-way merge, Undo, and IME composition stay intact.</td>
+          <td>Clean ownership across switches; 3-way merge, Undo, and IME composition stay intact while Read and Edit share one whole-file syntax painter.</td>
         </tr>
         <tr>
           <td class="prod">Unified line comments<span class="sub">Comment on Read or Diff lines; send one batch to conversation</span></td>
           <td class="code-col"><code>ReviewSelection.Source</code> (<code>.file(draft:)</code> vs. <code>.diff(side:revision:)</code>), <code>ReviewComments</code>, <code>ReviewCommentsStrip</code></td>
           <td class="status"><span class="badge badge-yes">Yes</span></td>
-          <td>Each surface owns and re-anchors only its own source; <code>⌘↩</code> merges both into one unsent conversation message.</td>
+          <td>Each surface owns and re-anchors only its own source; <code>⌘↩</code> merges both into one unsent conversation message. Verified end to end into Session input in QA pass 4.</td>
         </tr>
         <tr>
           <td class="prod">Open files vs. Jump history vs. Drafts<span class="sub">Bounded auto-opens, independent <code>⌘[</code>/<code>⌘]</code>, visible drafts</span></td>
-          <td class="code-col"><code>FilesBrowserState</code> (<code>tabs</code>, MRU 12 <code>automatic</code> cap) + <code>FileJumps</code></td>
+          <td class="code-col"><code>FilesBrowserState</code> (<code>tabs</code>, MRU 12 <code>automatic</code> cap, dirty drafts) + <code>FileJumps</code></td>
           <td class="status"><span class="badge badge-yes">Yes</span></td>
           <td>Clean separation; empty file history falls through to Desktop window Back/Forward.</td>
         </tr>
@@ -415,7 +428,7 @@
           <td class="prod">Unified in-file Find (<code>⌘F</code>)<span class="sub">Search Read, Edit, Markdown, HTML, Diff; promote to Grep</span></td>
           <td class="code-col"><code>FileFind</code> + <code>DesktopAction("files-find-text")</code> across all five renderers</td>
           <td class="status"><span class="badge badge-yes">Yes</span></td>
-          <td>One model across all renderers; leaves terminal <code>⌘F</code> untouched. Keeping the query across file switches is intentional (question 4 below).</td>
+          <td>One model across all renderers; searches Read text directly without copying line arrays, reveals off-screen matches horizontally, and leaves terminal <code>⌘F</code> untouched.</td>
         </tr>
         <tr>
           <td class="prod">Deliberate presentation &amp; banners<span class="sub"><code>lf desktop files</code> shows a page beside Session without stealing focus</span></td>
@@ -427,61 +440,51 @@
           <td class="prod">Responsive rail, breadcrumb &amp; pane strip<span class="sub">Docked/drawer rail, readable nested names, narrow pane strip</span></td>
           <td class="code-col">Distinct rail IDs (<code>open:</code>, <code>changed:</code>, <code>entry:</code>), <code>… / folder / file</code> breadcrumb, bordered <code>SearchBox</code>, scrollable <code>browserTabs</code></td>
           <td class="status"><span class="badge badge-yes">Yes</span></td>
-          <td>Demo rail density, search field framing, and deep-path breadcrumb fixes verified in QA pass 3.</td>
+          <td>236 pt rail docks at 620 pt, dismisses on narrow pick, and keeps nested names readable in both Loopflow Dark and Light.</td>
         </tr>
       </tbody>
     </table>
   </div>
 
-  <h2>2. Biggest mismatch — Code Read surface (<code>TaskCodeReader</code>)</h2>
-  <p>Edit mode (<code>TaskFileDocument.editor</code>) already uses one native TextKit 2 <code>NSTextView</code> that opens immediately and colors syntax in the background. Read mode instead tries to emulate a code view with thousands of individual SwiftUI <code>Text.textSelection(.enabled)</code> rows inside a <code>LazyVStack</code>—and has accumulated four fragile AppKit/CoreText workarounds to fight SwiftUI’s own text selection.</p>
+  <h2>2. What Pass 2 resolved — before &amp; after</h2>
 
+  <h3>A. Code Read surface (<code>TaskCodeReader</code>)</h3>
   <div class="compare">
-    <div class="card existing-bad">
+    <div class="card before">
       <div class="card-head">
         <span class="card-title">Per-line SwiftUI <code>LazyVStack</code> + workarounds</span>
-        <span class="badge badge-existing">Existing (HEAD)</span>
+        <span class="badge badge-before">Before (Pass 1)</span>
       </div>
-      <div class="diagram"><span class="dim">Open WorkModel.swift (3,766 lines):</span>
+      <div class="diagram"><span class="dim">69280f85c9:</span>
   1. Blank spinner 3–6 s (Tree-sitter + 3,766 CTLine widths)
-  2. LazyVStack builds per-line HStack:
-       [ReviewGutter] [Text.textSelection(.enabled)]
-       └─ <span class="bad">Cannot drag-select across lines!</span>
+  2. Per-line HStack + <code>Text.textSelection(.enabled)</code>:
+       └─ <span class="bad">Cannot drag-select across lines</span>
        └─ <span class="bad">Gutter scrolls off-screen sideways</span>
-  3. Plain / ⌘-click fights hidden per-line NSTextView:
-       ReaderClicks (NSEvent local monitor)
-       → <span class="bad">RunLoop.default + NSApp.currentEvent hack</span>
-       → RowFrames (.onGeometryChange per row)
-       → CTLineGetStringIndexForPosition
-       → <span class="bad">Untestable in automated native suite</span>
+  3. <code>ReaderClicks</code> + <code>RunLoop.default</code> <code>NSApp.currentEvent</code>
+     + <code>RowFrames</code> + <code>CTLine</code> hit-testing
   4. Far Find / jump: <span class="bad">271–600 ms stall</span> building rows</div>
     </div>
-    <div class="card proposed">
+    <div class="card built">
       <div class="card-head">
         <span class="card-title">One read-only TextKit 2 <code>NSTextView</code> + pinned gutter</span>
-        <span class="badge badge-proposed">Proposed</span>
+        <span class="badge badge-built">Built (HEAD)</span>
       </div>
-      <div class="diagram"><span class="dim">Open WorkModel.swift (3,766 lines):</span>
-  1. Plain mono text renders immediately (<span class="good">&lt; 20 ms</span>)
-     └─ Async Tree-sitter paints colors + FileOutline
-  2. One read-only <code>CodeReaderTextView</code> (non-wrapping)
-     beside a synchronized pinned <code>CodeReaderGutterView</code>:
-       ├─ <span class="good">Native multi-line drag-select &amp; ⌘C</span>
-       ├─ <span class="good">Line numbers &amp; change bars stay pinned</span>
-       └─ <span class="good">Temp rendering attributes for Find / hit / visit</span>
-  3. Direct <code>mouseDown</code> override (no window monitor):
-       ├─ ⌘-click: <span class="good">direct hit-test, skips modal tracking</span>
-       ├─ Plain click (no drag): <span class="good">underlines target word</span>
-       └─ Drag: <span class="good">super.mouseDown selects across lines</span>
-  4. Inline comments &amp; peek: <span class="good">paragraphSpacing gap</span> +
-     viewport-wide <code>NSHostingView</code> right beneath line N</div>
+      <div class="diagram"><span class="dim">2c3a904433 → 883136da47 → 90a0417f90:</span>
+  1. Plain mono text mounts immediately (<span class="good">open ~279–727 ms</span>)
+     └─ Off-main Tree-sitter paints via shared <code>NSTextStorage.paint</code>
+  2. <code>CodeReaderContainerView</code> (<code>clipsToBounds = true</code>):
+       ├─ Pinned <code>CodeReaderGutterView</code> (never scrolls sideways)
+       ├─ Native multi-line drag-select &amp; <code>⌘C</code>
+       └─ Temp rendering attributes for target / hit / Find
+  3. Direct <code>mouseDown</code> + <code>paragraphSpacing</code> inline slots
+  4. <code>pendingScroll</code> + <code>scrollRangeToVisible</code> lands far jumps</div>
     </div>
   </div>
 
-  <div class="ui-mock" aria-label="Proposed native TextKit 2 reader with pinned gutter, multi-line selection, highlighted jump destination, and inline slot">
+  <div class="ui-mock" aria-label="Built native TextKit 2 reader with pinned gutter, multi-line selection, highlighted jump destination, and inline slot">
     <div class="mock-header">
       <span>◧ &nbsp; ‹ › &nbsp; … / render / <strong>mod.rs ▾</strong> › render_total</span>
-      <span class="badge badge-proposed">Proposed Read surface</span>
+      <span class="badge badge-built">Built Read surface (QA pass 4 verified)</span>
     </div>
     <div class="mock-split">
       <div class="mock-gutter">
@@ -492,127 +495,93 @@
         <div style="height: 54px;"></div>
         <div>7</div>
       </div>
-      <div class="mock-code"><div><span class="muted">// render_total in a comment is not a declaration</span></div><div class="hl-line"><span class="sel-span">pub fn render_total(settings: &amp;Settings, cents: u64) -&gt; String {</span></div><div><span class="sel-span">    format!("€{}.{:02}", cents / 100, cents % 100)</span></div><div>}</div><div class="inline-slot"><strong>ReviewCommentEditor</strong> or <strong>FileSymbolPeek</strong> sits in line 6’s <code>paragraphSpacing</code> gap — pinned to viewport width while code scrolls sideways, pushing line 7 down cleanly.</div><div>pub mod legacy {</div></div>
+      <div class="mock-code"><div><span class="muted">// render_total in a comment is not a declaration</span></div><div class="hl-line"><span class="sel-span">pub fn render_total(settings: &amp;Settings, cents: u64) -&gt; String {</span></div><div><span class="sel-span">    format!("€{}.{:02}", cents / 100, cents % 100)</span></div><div>}</div><div class="inline-slot"><strong>ReviewCommentEditor</strong> or <strong>FileSymbolPeek</strong> sits in line 6’s <code>paragraphSpacing</code> gap — viewport-wide while code scrolls sideways; picking a gutter line clears prior text selection so the slot stays clean.</div><div>pub mod legacy {</div></div>
     </div>
   </div>
-  <p class="muted"><strong>Deletes:</strong> <code>ReaderClicks</code>, <code>RowFrames</code>, <code>NumberedLine</code>, per-line <code>CTLine</code> width pre-scans, <code>CTLine</code> click hit-testing, and the <code>RunLoop.default</code> <code>NSApp.currentEvent</code> workaround. <code>TaskFileDocument.editor</code> stays separate for Edit mode so Undo, IME composition, and 3-way merge remain untouched.</p>
 
-  <h2>3. Two more conceptual mismatches</h2>
-
-  <h3>A. Local vs. Peer file observation after #2040: opaque tree UUID → separate working-tree revision &amp; scratch page stamps</h3>
+  <h3>B. Peer scratch observation &amp; explicit <code>FileVisit</code> / <code>FilePosition</code></h3>
   <div class="compare">
-    <div class="card existing-bad">
+    <div class="card before">
       <div class="card-head">
-        <span class="card-title">Single tree UUID swallows peer scratch writes</span>
-        <span class="badge badge-existing">Existing (HEAD)</span>
+        <span class="card-title">Single UUID watch &amp; implicit <code>visit != nil</code></span>
+        <span class="badge badge-before">Before (Pass 1)</span>
       </div>
-      <div class="diagram"><span class="dim">Peer Machine writes ignored scratch/explore.html</span>
-  TaskFilesWatch.invalidates_tree() → true
-  └─ bumps sole <code>TaskFilesRevision.revision</code>
-Desktop receive(_ revision):
-  └─ calls <code>invalidate([""])</code>
-       ├─ <span class="bad">pages = [] → zero rail badge, zero Updated bar</span>
-       ├─ <span class="bad">comparisonChanged = true → runs git diff over SSH</span>
-       └─ <span class="bad">re-reads EVERY open document in Files</span>
-<span class="dim">(Journey test passed only because it called files.invalidate([path]) directly)</span></div>
+      <div class="diagram"><span class="dim">Peer scratch write:</span>
+  Sole UUID bumped → <code>invalidate([""])</code>
+  └─ <span class="bad">Zero badge/Updated bar; ran git diff over SSH</span>
+<span class="dim">Navigation:</span>
+  Definition / Back visit had <code>lines: nil</code> → <span class="bad">unmarked</span>
+  Back to rendered <code>.md</code>/<code>.html</code> → <span class="bad">forced raw source</span></div>
     </div>
-    <div class="card proposed">
+    <div class="card built">
       <div class="card-head">
-        <span class="card-title">State-based <code>scratch_pages</code> beside tree <code>revision</code></span>
-        <span class="badge badge-proposed">Proposed</span>
+        <span class="card-title">Separate <code>scratch_pages</code> &amp; explicit mode/highlight</span>
+        <span class="badge badge-built">Built (HEAD)</span>
       </div>
-      <div class="diagram"><span class="dim">TaskFilesRevision (Rust + Swift DTO + schema):</span>
-  revision: Option&lt;String&gt;          <span class="dim">// working tree + .git only</span>
-  scratch_pages: Vec&lt;TaskScratchPage&gt; <span class="hi">// { path, stamp }</span>
-
-<span class="dim">Peer Machine writes ignored scratch/explore.html</span>
-  TaskFilesWatch:
-  ├─ tree_changed = false → <span class="good">revision unchanged (no git diff!)</span>
-  └─ scratch_changed = true → <span class="good">updates scratch_pages stamps</span>
-Desktop receive(_ revision):
-  └─ diffs <code>scratchPages</code> vs <code>seenScratchStamps</code>:
-       ├─ <span class="good">badges Open &amp; Scratch + Updated · Open ×</span>
-       ├─ <span class="good">re-reads only modified open scratch docs</span>
-       └─ <span class="good">survives reconnects &amp; drops vanished temp files</span></div>
+      <div class="diagram"><span class="dim">Peer scratch write (<code>TaskFilesRevision</code>):</span>
+  <code>revision</code> (working tree + <code>.git</code>) unchanged → <span class="good">no git diff</span>
+  <code>scratch_pages: [{ path, stamp }]</code> diffed vs <code>seenScratchStamps</code>
+  └─ <span class="good">Badges Open &amp; Scratch + Updated · Open × across reconnects</span>
+<span class="dim">Navigation (<code>FilePosition</code> / <code>FileVisit</code>):</span>
+  <code>line: Int?</code> (<code>nil</code> = rendered) + <code>showsSource</code> + <code>highlight</code>
+  └─ <span class="good">Marks landings; Back to rendered page stays rendered</span></div>
     </div>
   </div>
 
-  <h3>B. Destination landing &amp; rendered vs. source mode (<code>FileVisit</code> / <code>FilePosition</code>)</h3>
-  <div class="compare">
-    <div class="card existing-bad">
-      <div class="card-head">
-        <span class="card-title">Implicit <code>visit != nil</code> = raw source; unmarked jumps</span>
-        <span class="badge badge-existing">Existing (HEAD)</span>
-      </div>
-      <div class="diagram">Definition / Outline jump:
-  FileVisit(line: 3740, hit: nil, lines: nil)
-  └─ <span class="bad">marks() highlights NOTHING at line 3740</span>
-Back (⌘[) to rendered scratch/notes.md:
-  FileVisit(line: 1) → <code>store.visit != nil</code>
-  └─ <span class="bad">forces Markdown/HTML out of rendered into raw source</span>
-Click line 200 after <code>lf desktop files main.rs:8</code>:
-  └─ <span class="bad">line 8 stays highlighted until file switch</span></div>
-    </div>
-    <div class="card proposed">
-      <div class="card-head">
-        <span class="card-title">Explicit landing highlight + explicit source vs. rendered</span>
-        <span class="badge badge-proposed">Proposed</span>
-      </div>
-      <div class="diagram"><span class="hi">FilePosition(path, line: Int?)</span>  <span class="dim">// nil = rendered page</span>
-<span class="hi">FileVisit(line, highlight: .lines(ClosedRange) | .hit(TaskGrepHit), showsSource: Bool)</span>
-
-Definition / Outline jump → <span class="good">marks line...line at destination</span>
-Grep / gr reference       → <span class="good">marks exact hit bytes, showsSource: true</span>
-Presentation PATH:L1-L2   → <span class="good">marks L1...L2, showsSource: true</span>
-Back (⌘[) to rendered doc → <span class="good">line == nil → stays rendered!</span>
-Click another line        → <span class="good">clears stale visit highlight</span></div>
-    </div>
-  </div>
-
-  <h2>4. Concrete interaction walkthrough (normal, failure &amp; recovery)</h2>
+  <h2>3. Concrete interaction walkthrough (verified on HEAD)</h2>
   <ol class="steps">
-    <li><span class="step-tag">1. Normal</span> <strong>Open large file → drag-select → ⌘-click definition → comment → Back:</strong> Opening <code>WorkModel.swift</code> (3,766 lines) shows plain text in &lt;20 ms and applies Tree-sitter colors asynchronously. Dragging across lines 3748–3750 selects and copies cleanly. ⌘-clicking <code>scopeName</code> handles the click directly in <code>mouseDown</code> (no modal tracking loop), scrolls to line 3740, and highlights line 3740 so the declaration stands out even near EOF. Clicking gutter line 3740 opens <code>ReviewCommentEditor</code> in line 3740’s <code>paragraphSpacing</code> gap; <code>⌘[</code> returns to line 3749 and marks it.</li>
-    <li><span class="step-tag">2. Normal</span> <strong>Peer scratch write &amp; Back to rendered Markdown:</strong> While editing <code>src/Calls.swift</code> on a peer Machine, an agent rewrites ignored <code>scratch/report.html</code> via atomic rename. <code>TaskFilesWatch</code> updates <code>scratch_pages</code> without bumping <code>revision</code>: Desktop skips <code>git diff</code>, badges <code>scratch/report.html</code> in Open &amp; Scratch, and shows <code>Updated scratch/report.html · Open ×</code>. Opening <code>scratch/notes.md</code> rendered, jumping to a file, and pressing <code>⌘[</code> returns to <code>scratch/notes.md</code> still rendered.</li>
-    <li><span class="step-tag fail">3. Failure</span> <strong>Oversize (&gt;1 MB) file, peer disconnect, or missing symbol:</strong> Opening 2 MB <code>src/huge.rs</code> checks file size before buffering 1 MB of non-binary text in <code>observe::Cache</code> and shows a labeled loading state until <code>File exceeds 1 MB · preview unavailable</code> arrives. A peer watch disconnect preserves <code>seenScratchStamps</code> and drafts; zero definition hits leave scroll position and selection untouched.</li>
-    <li><span class="step-tag rec">4. Recovery</span> <strong>Reconnect after coalesced peer writes &amp; editing recovery:</strong> When the peer server reconnects after three scratch rewrites, the next <code>TaskFilesRevision</code> frame’s <code>scratch_pages</code> stamps differ from <code>seenScratchStamps</code>, surfacing every updated page without losing events. Switching to Edit still uses <code>TaskFileDocument.editor</code> with retained caret, Undo, IME composition, and 3-way merge.</li>
+    <li><span class="step-tag">1. Normal</span> <strong>Jump into long file → drag-select → gutter comment → ⌘-click peek → Back:</strong> Presenting <code>WorkModel.swift:3200-3202</code> from <code>main.rs</code> mounts plain monospace immediately, waits for the 4-digit gutter layout, sizes TextKit via <code>scrollRangeToVisible</code>, centers and marks lines 3200–3202, and paints syntax colors off-main without dropping the inline slot styles. Dragging across lines 5–8 selects natively; clicking gutter line 6 clears that text selection, opens <code>ReviewCommentEditor</code> in line 6’s gap, and <code>⌘↩</code> inserts the formatted reference into the Session’s unsent input. ⌘-clicking <code>render_total</code> opens the inline peek under line 6; accepting jumps to <code>render/mod.rs:4</code> (marked), and <code>⌘[</code> returns to <code>main.rs:6</code> (marked).</li>
+    <li><span class="step-tag">2. Normal</span> <strong>Local &amp; peer scratch writes + Back to rendered Markdown/HTML:</strong> Rewriting ignored <code>scratch/notes.md</code> twice leaves the open code file in view, adds the dot in Open &amp; Scratch, and raises <code>Updated scratch/notes.md · Open ×</code> without triggering a <code>git diff</code> comparison reload. Presenting <code>scratch/explore.html</code> opens rendered at <code>scrollY = 0</code>; <code>⌘[</code> returns to the prior source line, and <code>⌘[</code> back to a rendered Markdown page keeps it rendered.</li>
+    <li><span class="step-tag fail">3. Failure</span> <strong>Oversize (&gt;1 MB) file, peer disconnect, or missing symbol:</strong> Reading a &gt;1 MB file sniffs only <code>BINARY_SNIFF_BYTES</code> (8 KiB) before classifying <code>Truncated</code> (no 1 MB buffer in <code>observe::Cache</code>), while Files shows labeled <code>ProgressView("Loading…")</code>. Disconnects keep drafts and <code>seenScratchStamps</code> intact; zero definition hits leave scroll position and selection untouched.</li>
+    <li><span class="step-tag rec">4. Recovery</span> <strong>Reconnect after coalesced peer writes &amp; editing recovery:</strong> Reconnecting <code>task.files.watch</code> diffs deterministic mtime+size <code>scratch_pages</code> stamps against <code>seenScratchStamps</code>, surfacing every changed page and dropping vanished atomic-save temp files. Toggling <strong>Edit</strong> (<code>⌃⌘E</code>) retains <code>TaskFileDocument.editor</code> with caret, Undo, IME composition, and 3-way merge untouched.</li>
   </ol>
 
+  <h2>4. Polish notes &amp; deferred checks (outside concept realignment)</h2>
+  <div class="notes-box">
+    <p class="muted">None of the items below indicate a conceptual mismatch; they are noted from QA pass 4 (<code>scratch/qa.html</code>) for gate or human review:</p>
+    <ul>
+      <li><strong>Single-line external Rust <code>mod billing;</code> in breadcrumb:</strong> <code>FileOutline.declaration</code> includes bodyless <code>mod_item</code> declarations, so scrolling to line 1 shows <code>› billing</code> in the breadcrumb.</li>
+      <li><strong>Selection ink over syntax color:</strong> Selected code uses the shared palette’s selected-text foreground (shared with Edit and text inputs).</li>
+      <li><strong>Deferred physical-display checks:</strong> Physical key-window trackpad drag + <code>⌘C</code>, live <code>gd</code>/<code>gr</code> key chords in a key window, and a live SSH peer checkout (automated peer watch stream passed in <code>TaskFileBrowserJourneyTests</code>).</li>
+    </ul>
+  </div>
+
   <h2>5. Reversible choices made for review</h2>
-  <p class="muted">Every choice below is reversible and recorded in <code>scratch/questions.md</code> and <code>scratch/plan.md</code>. Reply with e.g. <code>1b</code> or <code>4b</code> to steer.</p>
+  <p class="muted">All choices below are built and reversible (recorded in <code>scratch/questions.md</code>). Reply with e.g. <code>1b</code> or <code>4b</code> to change any of them.</p>
   <div class="questions">
     <div class="q">
       <div class="q-title">1. Code Read implementation (<code>TaskCodeReader</code>) <span class="badge badge-choice">Choice for review</span></div>
       <ul class="opts">
-        <li class="chosen"><span class="opt-key">1a</span> <strong>Chosen:</strong> Replace the per-line SwiftUI <code>LazyVStack</code> in <code>TaskCodeReader</code> with one read-only TextKit 2 <code>NSTextView</code>, pinned line-number/change-mark gutter, direct <code>mouseDown</code> handling for ⌘-click &amp; word underlines, async coloring after immediate plain-text display, and <code>paragraphSpacing</code> inline slots for comments and symbol peek. Keep <code>TaskFileDocument.editor</code> separate for Edit mode.</li>
-        <li><span class="opt-key">1b</span> Keep the per-line SwiftUI <code>LazyVStack</code> and live with single-line-only text selection, the untestable <code>RunLoop.default</code> ⌘-click workaround, and scrolling line numbers.</li>
+        <li class="chosen"><span class="opt-key">1a</span> <strong>Built:</strong> One read-only TextKit 2 <code>NSTextView</code>, clipped pinned gutter, direct <code>mouseDown</code> for ⌘-click &amp; word underlines, immediate plain-text display with off-main Tree-sitter coloring/outline, and <code>paragraphSpacing</code> inline slots. <code>TaskFileDocument.editor</code> stays separate for Edit mode.</li>
+        <li><span class="opt-key">1b</span> Revert to per-line SwiftUI <code>LazyVStack</code> rows.</li>
       </ul>
     </div>
     <div class="q">
       <div class="q-title">2. Peer scratch observation over <code>task.files.watch</code> <span class="badge badge-choice">Choice for review</span></div>
       <ul class="opts">
-        <li class="chosen"><span class="opt-key">2a</span> <strong>Chosen:</strong> Add <code>scratch_pages: [TaskScratchPage]</code> (<code>path</code> + opaque mtime/size <code>stamp</code>) to <code>TaskFilesRevision</code> and keep <code>revision</code> strictly for working-tree/Git changes, so peer scratch writes badge Open &amp; Scratch, show <code>Updated · Open ×</code>, survive reconnects, and skip redundant <code>git diff</code> reloads.</li>
-        <li><span class="opt-key">2b</span> Leave <code>TaskFilesRevision</code> as a single UUID and accept that peer scratch writes raise no <code>Updated</code> notice and trigger full tree/diff rescans.</li>
+        <li class="chosen"><span class="opt-key">2a</span> <strong>Built:</strong> Carry <code>scratch_pages: [TaskScratchPage]</code> (<code>path</code> + mtime/size <code>stamp</code>) beside working-tree <code>revision</code> on <code>TaskFilesRevision</code> so peer scratch writes badge Open &amp; Scratch, raise <code>Updated · Open ×</code>, survive reconnects, and skip <code>git diff</code>.</li>
+        <li><span class="opt-key">2b</span> Collapse back to a single tree UUID with full rescans and no peer <code>Updated</code> notice.</li>
       </ul>
     </div>
     <div class="q">
       <div class="q-title">3. Jump landing highlight &amp; Back to rendered Markdown/HTML <span class="badge badge-choice">Choice for review</span></div>
       <ul class="opts">
-        <li class="chosen"><span class="opt-key">3a</span> <strong>Chosen:</strong> Highlight the destination line on definition, outline, and Back/Forward jumps (cleared when clicking another line), and store rendered vs. source explicitly on <code>FilePosition</code> / <code>FileVisit</code> so Back to a rendered Markdown/HTML page stays rendered.</li>
-        <li><span class="opt-key">3b</span> Keep destination lines unmarked on definition/outline/Back jumps and open Markdown/HTML as raw source whenever any <code>FileVisit</code> is active.</li>
+        <li class="chosen"><span class="opt-key">3a</span> <strong>Built:</strong> Mark the destination line on definition, outline, and Back/Forward source jumps (cleared on clicking another line), and store rendered vs. source explicitly on <code>FilePosition</code> / <code>FileVisit</code> so Back to rendered Markdown/HTML stays rendered.</li>
+        <li><span class="opt-key">3b</span> Leave definition/outline/Back landings unmarked and open Markdown/HTML as raw source whenever any <code>FileVisit</code> is active.</li>
       </ul>
     </div>
     <div class="q">
       <div class="q-title">4. In-file Find query across file switches <span class="badge badge-choice">Choice for review</span></div>
       <ul class="opts">
-        <li class="chosen"><span class="opt-key">4a</span> <strong>Chosen:</strong> Keep the Find bar and its query open when switching files (re-scanning the newly selected file, showing <code>No matches</code> if absent, dismissed with <code>Esc</code> or <code>×</code>).</li>
-        <li><span class="opt-key">4b</span> Close or clear the Find bar whenever the selected file changes.</li>
+        <li class="chosen"><span class="opt-key">4a</span> <strong>Built:</strong> Keep the Find bar and its query open when switching files (re-scanning the newly selected file until dismissed with <code>Esc</code> or <code>×</code>).</li>
+        <li><span class="opt-key">4b</span> Close or clear Find whenever the selected file changes.</li>
       </ul>
     </div>
     <div class="q">
-      <div class="q-title">5. Prior reversible choices still in effect (built &amp; unchanged)</div>
+      <div class="q-title">5. Prior reversible choices still in effect</div>
       <ul class="opts">
-        <li class="chosen"><span class="opt-key">5a</span> <strong>Kept:</strong> Single Tree-sitter runtime in Desktop + pure-Rust Machine <code>task.files.symbols</code>; peer verbs <code>lf task find|grep|symbols</code>; sole <code>lf desktop files</code> presentation (<code>lf open --file</code> deleted) unzooming Session without stealing focus; per-file Read/Edit/Diff; breadcrumb filename dropdown + <code>⌘P</code> (no second tab strip); <code>⌘[</code>/<code>⌘]</code> file history falling through to Desktop Back/Forward.</li>
-        <li><span class="opt-key">5b</span> Revisit any of the prior choices in <code>scratch/questions.md</code>.</li>
+        <li class="chosen"><span class="opt-key">5a</span> <strong>Built:</strong> Single Tree-sitter runtime in Desktop + pure-Rust Machine <code>task.files.symbols</code>; peer verbs <code>lf task find|grep|symbols</code>; sole <code>lf desktop files</code> presentation (<code>lf open --file</code> deleted) unzooming Session without stealing focus; per-file Read/Edit/Diff; breadcrumb filename dropdown + <code>⌘P</code> (no second tab strip); <code>⌘[</code>/<code>⌘]</code> file history falling through to Desktop Back/Forward.</li>
+        <li><span class="opt-key">5b</span> Revisit any prior choice in <code>scratch/questions.md</code>.</li>
       </ul>
     </div>
   </div>

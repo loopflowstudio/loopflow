@@ -198,12 +198,17 @@ Semantics:
 - Fixtures: `tests/fixtures/dto/graph_catalog.json` and
   `tests/fixtures/dto/server_schema.json` descriptions. `skill_entries.json`
   has no `verify` entry; `debug`'s verb stays.
-- Docs and copy: `docs/orchestration.md` ("three high-leverage moments" →
-  "two", feature YAML, table, `graph list` output, workflow JSON),
-  `docs/surfaces.md` (lines, sentences, stop counts), `docs/getting-started.md`
-  ("pauses once more to verify on `main`"), `swift/README.md` workflow bar,
-  `website/home.html` workflow cards (remove `<b>verify</b>` and trailing arrow
-  on `deliver`), `.lf/qa/auto.md` (`qaship` Graph's last step).
+- Docs and copy (updated in `write-docs`):
+  - `docs/getting-started.md` (`code` description: ends by delivering and merging)
+  - `docs/orchestration.md` ("two high-leverage moments", `feature` YAML,
+    `ship-review` handoff to `deliver`, Built-in Graphs table, `lf graph list`
+    output, workflow JSON, `Auto` `merges:` wording)
+  - `docs/surfaces.md` (New Task, unstarted Task, Start menu descriptions and stop counts)
+  - `swift/README.md` (workflow bar)
+  - `website/home.html` (workflow cards: removed `<b>verify</b>`; kept
+    `<span>deliver →</span>` before `<i>end</i>` to match `research`'s
+    `b::after` arrow and pre-#2012 `<span>ship →</span><i>end</i>`)
+  - Remaining for implementation: `.lf/qa/auto.md` (`qaship` Graph's last step).
 
 Stays: release `verify:` commands (`docs/config.md`, `docs/ops.md`,
 `.lf/config.yaml`, `release-run.md`), `git … --verify`, the ordinary verb in

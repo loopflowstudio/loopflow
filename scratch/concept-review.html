@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-1105 Concept Review — Repo Skill Guidance &amp; Verification Docs</title>
+<title>LOO-1105 Concept Review — Repo Skill Guidance &amp; Verification Docs (Post-Build)</title>
 <style>
   :root {
     --bg: #faf9f6;
@@ -14,21 +14,24 @@
     --text: #1c1b18;
     --muted: #5c5950;
     --accent: #2457a6;
-    --accent-soft: #eaf0fa;
     --yes-bg: #e7f4ea;
     --yes-fg: #1b6535;
     --no-bg: #fdecec;
     --no-fg: #a12626;
-    --prop-bg: #eef2ff;
-    --prop-fg: #3730a3;
-    --exist-bg: #f1efe9;
-    --exist-fg: #4b473e;
+    --seam-bg: #fff6e5;
+    --seam-fg: #8a5600;
+    --built-bg: #e8f1fb;
+    --built-fg: #1d4e89;
+    --follow-bg: #f1efe9;
+    --follow-fg: #4b473e;
     --warn-bg: #fff6e5;
     --warn-border: #e0a63b;
+    --ok-bg: #eef8f0;
+    --ok-border: #3d925b;
     --code-bg: #f2f0ea;
     --bar-before: #b85d4b;
-    --bar-plan: #c98a2e;
     --bar-after: #2d7a4d;
+    --bar-gate: #2457a6;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -40,21 +43,24 @@
       --text: #eceae4;
       --muted: #a4a095;
       --accent: #7daeff;
-      --accent-soft: #1b2840;
       --yes-bg: #183022;
       --yes-fg: #72d497;
       --no-bg: #381b1b;
       --no-fg: #f38b8b;
-      --prop-bg: #232445;
-      --prop-fg: #a8b1ff;
-      --exist-bg: #2a2925;
-      --exist-fg: #c2beb3;
+      --seam-bg: #322612;
+      --seam-fg: #f0bc5e;
+      --built-bg: #1a2a42;
+      --built-fg: #8cb8ff;
+      --follow-bg: #2a2925;
+      --follow-fg: #c2beb3;
       --warn-bg: #302614;
       --warn-border: #b88424;
+      --ok-bg: #16291e;
+      --ok-border: #3d925b;
       --code-bg: #262522;
       --bar-before: #d4715d;
-      --bar-plan: #d99b3d;
       --bar-after: #49a870;
+      --bar-gate: #6298ea;
     }
   }
   * { box-sizing: border-box; }
@@ -120,13 +126,29 @@
     border-left: 4px solid var(--accent);
     border-radius: 8px;
     padding: 14px 18px;
-    margin-bottom: 24px;
+    margin-bottom: 20px;
   }
+  .verdict {
+    background: var(--ok-bg);
+    border: 1px solid var(--ok-border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin: 18px 0 24px;
+  }
+  .verdict h3 { margin-top: 0; }
+  .callout {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin: 18px 0;
+  }
+  .callout h3 { margin-top: 0; }
   .status-strip {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    margin-bottom: 20px;
+    margin-bottom: 18px;
   }
   .badge {
     display: inline-block;
@@ -139,16 +161,9 @@
   }
   .b-yes { background: var(--yes-bg); color: var(--yes-fg); }
   .b-no { background: var(--no-bg); color: var(--no-fg); }
-  .b-prop { background: var(--prop-bg); color: var(--prop-fg); }
-  .b-exist { background: var(--exist-bg); color: var(--exist-fg); }
-  .callout {
-    background: var(--warn-bg);
-    border: 1px solid var(--warn-border);
-    border-radius: 10px;
-    padding: 16px 20px;
-    margin: 18px 0;
-  }
-  .callout h3 { margin-top: 0; }
+  .b-seam { background: var(--seam-bg); color: var(--seam-fg); }
+  .b-built { background: var(--built-bg); color: var(--built-fg); }
+  .b-follow { background: var(--follow-bg); color: var(--follow-fg); }
   table {
     width: 100%;
     border-collapse: collapse;
@@ -191,7 +206,7 @@
   }
   .card h3 { margin-top: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .bars { display: flex; flex-direction: column; gap: 12px; margin: 14px 0; }
-  .bar-row { display: grid; grid-template-columns: 135px 1fr 105px; align-items: center; gap: 10px; font-size: 12.5px; }
+  .bar-row { display: grid; grid-template-columns: 165px 1fr 125px; align-items: center; gap: 10px; font-size: 12.5px; }
   .bar-track {
     height: 18px;
     background: var(--surface-alt);
@@ -234,284 +249,197 @@
 </head>
 <body>
 <main>
-  <h1>LOO-1105 Concept Review</h1>
+  <h1>LOO-1105 Concept Review (Post-Build)</h1>
   <div class="meta">
     Branch <code>jack/loo-1105-tighten-loopflow-repo-skills-split</code> &middot;
     Base <code>23ce1a69f9</code> &middot;
-    Pre-implementation review (only <code>scratch/plan.md</code> and <code>scratch/questions.md</code> committed so far; no repo files edited yet)
+    Reviewed at <code>95a094add7</code> &middot;
+    16 repo Markdown files changed (prose and skills only; 0 Rust, Swift or Python edits)
   </div>
 
   <div class="area-box">
-    <strong>Area reviewed:</strong> Repository skill guidance and verification documentation &mdash; how this repository teaches its agents (<code>kickoff</code>, <code>implement</code>, <code>gate</code>, <code>ci-fix</code>, <code>qa</code>) what to plan, build, check locally, reproduce from CI, and test on a Mac, across <code>.lf/skills/</code>, <code>docs:</code> frontmatter attachments, <code>scripts/testing.md</code>, <code>.lf/qa/</code>, <code>scripts/macos_inputs.py</code>, <code>.github/CI.md</code>, and <code>AGENTS.md</code>.
-    <br><span class="muted">Widened beyond the edited files so the plan is checked against the real Swift layout, the real CI classifier, the real workflow jobs, and the existing <code>.lf/qa/</code> index.</span>
+    <strong>Area reviewed:</strong> Repository skill guidance and verification documentation &mdash; how this repository teaches its agents (<code>kickoff</code>, <code>implement</code>, <code>gate</code>, <code>ci-fix</code>, <code>qa</code>) what to plan, build, check locally, reproduce from CI, and test on a Mac, across <code>.lf/skills/</code>, <code>docs:</code> attachments, <code>scripts/testing.md</code>, <code>scripts/build_cache.md</code>, <code>.lf/qa/</code>, <code>scripts/macos_inputs.py</code>, <code>.github/workflows/{ci,macos}.yml</code>, <code>.github/CI.md</code>, and <code>AGENTS.md</code>.
+    <br><span class="muted">Reviewed end-to-end against <code>23ce1a69f9</code> after <code>implement</code>, <code>compress</code> and <code>qa</code>, checking the built overlays, rendered prompts, CI workflows, and live Mac preflight readings.</span>
+  </div>
+
+  <div class="verdict">
+    <h3>Outcome: Ready to advance &mdash; nothing in the plan needs another build pass</h3>
+    <p>Every conceptual mismatch flagged before implementation is resolved in committed files at <code>95a094add7</code> and verified by live <code>lf -b skill</code> launches, <code>documented_commands::</code>, <code>check_architecture.py</code>, link/anchor checks, and both locked and unlocked Mac <code>ioreg</code> readings. Two small ownership seams stay intentionally outside this prose-only PR and are called out below with what each separate Task takes.</p>
   </div>
 
   <div class="status-strip">
-    <span class="badge b-exist">Existing = on origin/main today</span>
-    <span class="badge b-prop">Proposed = revised scratch/plan.md</span>
+    <span class="badge b-built">Built &amp; committed at 95a094add7</span>
     <span class="badge b-yes">Lines up</span>
-    <span class="badge b-no">Mismatch found</span>
+    <span class="badge b-seam">Lines up (temporary seam)</span>
+    <span class="badge b-follow">Separate Task outside LOO-1105</span>
   </div>
 
-  <h2>1. Do the product's concepts and the code's concepts line up?</h2>
-  <p>Each row pairs what a contributor or agent needs to know with how the repository's files and kickoff draft currently model it.</p>
+  <h2>1. Do the product's concepts and the code's concepts line up at <code>HEAD</code>?</h2>
+  <p>Each row pairs what an agent or contributor needs to know with what the repository now delivers at <code>95a094add7</code>.</p>
 
   <table>
     <thead>
       <tr>
-        <th style="width: 19%">Product concept</th>
-        <th style="width: 34%">Code / repo-doc concept (Existing &amp; kickoff draft)</th>
-        <th style="width: 9%">Match</th>
-        <th style="width: 38%">What is wrong (where No)</th>
+        <th style="width: 20%">Product concept</th>
+        <th style="width: 35%">Built repo-doc / skill concept (<code>95a094add7</code>)</th>
+        <th style="width: 11%">Match</th>
+        <th style="width: 34%">Assessment</th>
       </tr>
     </thead>
     <tbody>
       <tr>
-        <td><strong>Cold-start guidance vs. on-demand reference</strong><br><span class="muted">Pay prompt tokens only for what this skill turn uses</span></td>
+        <td><strong>Cold-start prompt budget vs. on-demand reference</strong><br><span class="muted">Pay tokens only for guidance that turn uses</span></td>
         <td>
-          <span class="badge b-exist">Existing</span> <code>scripts/testing.md</code> (486 lines, 28 KB) is force-loaded via <code>docs:</code> on every <code>implement</code> and <code>gate</code> turn.<br><br>
-          Kickoff draft removes <code>docs:</code> from <code>implement</code> and splits 188 lines of <code>Builds</code>, <strong>but adds <code>docs: scripts/testing.md</code> (~290 lines, 16.3 KB) to <code>ci-fix.md</code></strong>.
-        </td>
-        <td><span class="badge b-no">No</span></td>
-        <td><strong>Two jobs in one force-loaded file.</strong> The slimmed <code>scripts/testing.md</code> still carries 137 lines of <code>Plan first</code> (23 subsystem test-planning traps) and 83 lines of <code>Gate</code> runner instructions. Force-loading it onto all ~272 <code>ci-fix</code> turns/14d makes <code>required-integration</code>, <code>rust-lint</code>, <code>architecture-check</code>, and <code>swift-test</code> repairs pay ~4.1K tokens for Gate planning prose they never use.</td>
-      </tr>
-      <tr>
-        <td><strong>Wire / DTO boundary &amp; Swift surface ownership</strong><br><span class="muted">Know which Rust edits break Desktop/iPhone and catch them before macOS CI</span></td>
-        <td>
-          Kickoff draft maps <code>loopflow-model</code> as &ldquo;wire types&rdquo;, names <code>swift/LoopflowDesktop</code> + <code>swift/LoopflowiOS</code>, and gates <code>gate.md</code> DTO checks on <code>rust/loopflow-model/</code> or <code>tests/fixtures/dto/</code>.
-        </td>
-        <td><span class="badge b-no">No</span></td>
-        <td><strong>Wrong directory names and an incomplete second classifier.</strong><br>
-        1. <code>swift/LoopflowDesktop</code> does not exist. The real layout is three targets: <code>swift/Loopflow/</code> (shared DTOs, server client, themes, shared views), <code>swift/LoopflowMac/</code> (Desktop shell), <code>swift/LoopflowiOS/</code> (iPhone shell). Dropping <code>swift/Loopflow/</code> hides the shared layer.<br>
-        2. <code>rust/loopflow-model/</code> has only 6 small files. Most wire DTOs live in <code>rust/loopflow/src/server/</code>, <code>rust/loopflow-execution/src/{machine,transport,terminal_holder}/wire.rs</code>, <code>read_stream.rs</code>, and <code>lf/commands/{read,write}.rs</code> &mdash; already owned by <code>scripts/macos_inputs.py</code> (<code>_PROTOCOL_INPUTS</code>) and <code>scripts/test.py --list</code>. Gating only on <code>loopflow-model</code> or <code>tests/fixtures/dto/</code> misses the exact bug where a server wire edit forgets its fixture.</td>
-      </tr>
-      <tr>
-        <td><strong>CI check name &rarr; local reproduction</strong><br><span class="muted">Given a failing check name, run the exact local repro</span></td>
-        <td>
-          <span class="badge b-exist">Existing</span> Job list in <code>.github/CI.md</code> (descriptions, no local commands); no <code>.lf/skills/ci-fix.md</code>.<br><br>
-          Kickoff draft adds <code>ci-fix.md</code> with 7 checks + <code>required-integration</code>, leaving <code>loopflow-ui-test</code> half-researched for <code>implement</code>.
-        </td>
-        <td><span class="badge b-no">No</span></td>
-        <td><strong>Half-accurate command map + split ownership of <code>required-integration</code>.</strong><br>
-        &bull; <code>e2e-smoke</code> runs Linux-only <code>planning_reconnect_tests</code> <em>before</em> <code>test_smoke.sh</code>.<br>
-        &bull; <code>macos / loopflow-ui-test</code> runs Desktop Xcode compile (<code>xcodegen</code> + <code>build_xcode_ci.py</code>) <em>and</em> <code>test_ios.py</code>.<br>
-        &bull; <code>rust-lint</code> runs <code>cargo fmt --all -- --check</code> and rustup <code>stable</code> (Homebrew <code>cargo</code> can miss newer Clippy lints).<br>
-        &bull; <code>architecture-check</code> and <code>migration-check</code> need <code>UV_PYTHON_PREFERENCE=only-managed</code> (SQLite &ge; 3.47) and <code>LOOPFLOW_REQUIRE_ORIGIN_MAIN=1</code>.<br>
-        &bull; Missing <code>scratch-clear</code> and <code>macos / macos-process-test</code>.<br>
-        &bull; <code>required-integration</code> is synthesized by <code>pr_landing.rs:233</code> for <em>every</em> repo (sibling to <code>merge-queue</code> / <code>merge-request</code> in builtin <code>ci-fix.md</code>).</td>
-      </tr>
-      <tr>
-        <td><strong>Pre-publish gate bar &amp; failure recovery</strong><br><span class="muted">Sync, catch fast local lint/DTO breaks, publish cleanly</span></td>
-        <td>
-          <span class="badge b-exist">Existing</span> <code>gate.md</code> publishes first without local lint or DTO checks.<br><br>
-          Kickoff draft adds lint + DTO check after <code>lf sync</code>, updates <code>AGENTS.md</code> for lint only.
-        </td>
-        <td><span class="badge b-no">No</span></td>
-        <td><strong>Incomplete recovery path &amp; two definitions of gate's bar.</strong> If <code>cargo fmt</code> or <code>clippy</code> fails after <code>lf commit -m "gate: checkpoint"</code>, fixing it leaves uncommitted edits before <code>lf pr publish</code>; pass-2 review fixes need the same sync &rarr; check &rarr; commit &rarr; clear-check &rarr; publish path. Meanwhile <code>AGENTS.md:448</code> only mentions lint, disagreeing with <code>gate.md</code> on pre-publish DTO/iOS parity.</td>
-      </tr>
-      <tr>
-        <td><strong>Locked-display Desktop QA &amp; <code>.lf/qa/</code> routing</strong><br><span class="muted">Detect a locked Mac immediately and take the working route</span></td>
-        <td>
-          <span class="badge b-exist">Existing</span> <code>.lf/skills/qa.md</code> inlines 42 lines belonging in <code>.lf/qa/</code>; no lock check; <code>.lf/qa/mobile.md</code> lacks a <code>Read when</code> line.<br><br>
-          Kickoff draft moves the 42 lines, adds <code>IOConsoleLocked</code> check, and says locked runs leave &ldquo;Ghostty panes, menus and keyboard&rdquo; open.
-        </td>
-        <td><span class="badge b-no">No</span></td>
-        <td><strong>Contradicts <code>.lf/qa/desktop.md</code>.</strong> Lines 353&ndash;385 of <code>.lf/qa/desktop.md</code> explicitly document how production mode + <code>QAHook</code> <em>does</em> open a Ghostty surface and type into it (<code>key post</code> / <code>key send</code>) while locked; only <code>-ui-test-mode live</code> lacks Ghostty panes, while hover, drags, menus, <code>&#8984;</code> chords, popovers, file panels and Settings pixels stay unreachable. Also checking both <code>IOConsoleLocked</code> and <code>CGSSessionScreenIsLocked</code> in one grep avoids XML parsing and covers both lock keys; and <code>.lf/qa/mobile.md</code> needs a <code>Read when</code> header to match <code>head -n 1 .lf/qa/*.md</code>.</td>
-      </tr>
-      <tr>
-        <td><strong>Build &amp; shared compilation cache docs</strong><br><span class="muted">Read only when building or debugging sccache/seeding</span></td>
-        <td>
-          <span class="badge b-prop">Proposed</span> Move <code>scripts/testing.md</code> lines 281&ndash;467 verbatim to <code>scripts/build_cache.md</code> beside <code>scripts/build_cache.py</code>; update the 4 anchors and <code>AGENTS.md</code>.
+          <span class="badge b-built">Built</span> <code>implement.md</code> (3,382 B, 0 <code>docs:</code>), <code>ci-fix.md</code> (2,787 B, 0 <code>docs:</code>, names Mac-trap error strings pointing to <code>scripts/testing.md</code>), <code>gate.md</code> (2,281 B, attaches slimmed 17,027 B <code>scripts/testing.md</code>).
         </td>
         <td><span class="badge b-yes">Yes</span></td>
-        <td>One owner, relative <code>benchmarks/</code> links stay intact, removes 10.5 KB from every <code>gate</code> cold start.</td>
+        <td>QA measured real first-turn prompts: <code>implement</code> dropped from <strong>34,605 B &rarr; 8,655 B</strong> (&minus;75%), <code>ci-fix</code> is <strong>5,715 B</strong> with no attachment, <code>gate</code> is <strong>22,576 B</strong> (without the 10.5 KB cache doc).</td>
       </tr>
       <tr>
-        <td><strong>Blast-radius checklist at <code>kickoff</code></strong><br><span class="muted">Name every touched surface &amp; check <code>DESIGN.md</code> up front</span></td>
+        <td><strong>Build &amp; shared compilation cache reference</strong><br><span class="muted">Read only when building or debugging sccache/seeding</span></td>
         <td>
-          <span class="badge b-prop">Proposed</span> 7-surface checklist (CLI, Server RPC &amp; schema, Storage &amp; migrations, DTOs &amp; fixtures, Desktop, iPhone, Docs) + <code>DESIGN.md</code> &amp; <code>design/prototypes/</code> for UI Tasks.
+          <span class="badge b-built">Built</span> <code>scripts/build_cache.md</code> (187 lines, 10,515 B) beside <code>scripts/build_cache.py</code>; <code>scripts/testing.md</code>, <code>AGENTS.md</code>, and all 4 relative links point there.
         </td>
         <td><span class="badge b-yes">Yes</span></td>
-        <td>Clean fit alongside existing history/sibling-variant rules in <code>.lf/skills/kickoff.md</code>.</td>
+        <td>Single owner, 0 broken links or anchors, 10.5 KB removed from every <code>gate</code> cold start.</td>
+      </tr>
+      <tr>
+        <td><strong>Wire / DTO boundary &amp; Swift surface ownership</strong><br><span class="muted">Know real crate/Swift targets and catch wire/iOS breaks locally</span></td>
+        <td>
+          <span class="badge b-built">Built</span> <code>implement.md</code> maps the real three Swift targets (<code>swift/Loopflow</code>, <code>swift/LoopflowMac</code>, <code>swift/LoopflowiOS</code>) plus DTO &amp; iPhone parity. <code>gate.md</code> delegates detection to <code>scripts/test.py --list</code> selecting <code>ios</code>, plus <code>rust/loopflow-model/</code>.
+        </td>
+        <td><span class="badge b-seam">Yes (seam)</span></td>
+        <td>Eliminates the non-existent <code>swift/LoopflowDesktop</code> name and covers server/wire edits via <code>macos_inputs.py</code>. <strong>Seam:</strong> <code>gate.md</code> carries <code>or rust/loopflow-model/ changed</code> until a 1-line follow-up adds <code>rust/loopflow-model/</code> to <code>_PROTOCOL_INPUTS</code>.</td>
+      </tr>
+      <tr>
+        <td><strong>CI check name &rarr; local reproduction</strong><br><span class="muted">Turn any red check name into the exact local command or repair</span></td>
+        <td>
+          <span class="badge b-built">Built</span> <code>.lf/skills/ci-fix.md</code> (<code>extends: builtin</code>) covers all 10 non-obvious checks (<code>required-integration</code>, <code>scratch-clear</code>, <code>architecture-check</code>, <code>rust-lint</code>, <code>migration-check</code>, <code>macos / swift-test</code>, <code>macos / loopflow-ui-test</code>, <code>macos / macos-process-test</code>, <code>task-installation</code>, <code>e2e-smoke</code>), verified against <code>ci.yml</code>, <code>macos.yml</code>, and <code>pr_landing.rs</code>.
+        </td>
+        <td><span class="badge b-seam">Yes (seam)</span></td>
+        <td>Every check command, env var (<code>UV_PYTHON_PREFERENCE=only-managed</code>, <code>LOOPFLOW_REQUIRE_ORIGIN_MAIN=1</code>, <code>LF_*</code> unset + <code>&lt; /dev/null</code>), and Linux-only note matches CI. <strong>Seam:</strong> <code>required-integration</code> is synthesized by <code>lf</code> for every repo; moving it to builtin <code>ci-fix.md</code> is a separate Task (touches <code>golden_prompt</code>).</td>
+      </tr>
+      <tr>
+        <td><strong>Pre-publish gate bar &amp; failure recovery</strong><br><span class="muted">Sync, catch fast lint/DTO breaks, recover cleanly, publish</span></td>
+        <td>
+          <span class="badge b-built">Built</span> <code>.lf/skills/gate.md</code> and <code>AGENTS.md</code> require local <code>cargo fmt</code>/<code>clippy</code> (when Rust changed), <code>DTOFixtureTests</code> + <code>test_ios.py</code> (when wire/iOS changed), and Swift boundary check (when <code>swift/</code> changed), with commit-after-fix and post-review-fix sync + <code>scratch/</code> clear checks.
+        </td>
+        <td><span class="badge b-yes">Yes</span></td>
+        <td>Normal path, lint-failure fix-and-commit, pass-2 review fixes, and unfinished-work <code>git revert</code> all hold up. Minor prose note: <code>scripts/testing.md:157</code> still opens &ldquo;Gate publishes the candidate first&rdquo; (meaning full suites stay on CI; lint and DTO/iOS now precede publish).</td>
+      </tr>
+      <tr>
+        <td><strong>Locked-display Desktop QA &amp; <code>.lf/qa/</code> routing</strong><br><span class="muted">Detect a locked Mac immediately and skip paying for unrelated QA notes</span></td>
+        <td>
+          <span class="badge b-built">Built</span> <code>.lf/skills/qa.md</code> shrunk from 3,624 B &rarr; 1,399 B; private-Machine and build-cache notes moved into <code>.lf/qa/served-launches.md</code> and <code>.lf/qa/build-cache.md</code>; every <code>.lf/qa/*.md</code> starts with <code>Read when </code>; <code>.lf/qa/desktop.md#display-lock-preflight</code> checks both <code>IOConsoleLocked</code> and <code>CGSSessionScreenIsLocked</code>.
+        </td>
+        <td><span class="badge b-yes">Yes</span></td>
+        <td>QA observed both unlocked (<code>"IOConsoleLocked" = No</code>) and locked (<code>"IOConsoleLocked" = Yes</code> + <code>"CGSSessionScreenIsLocked"=Yes</code>) outputs on this Mac. Locked route accurately reflects production <code>QAHook</code> Ghostty/keyboard support vs genuinely unreachable GUI interactions.</td>
+      </tr>
+      <tr>
+        <td><strong>Blast-radius &amp; design check at <code>kickoff</code></strong><br><span class="muted">Name every touched surface and read <code>DESIGN.md</code> before UI planning</span></td>
+        <td>
+          <span class="badge b-built">Built</span> <code>.lf/skills/kickoff.md</code> adds the 7-surface checklist (CLI, Server RPC &amp; schema, Storage &amp; migrations, DTOs &amp; fixtures, Desktop, iPhone, Docs) and requires reading <code>DESIGN.md</code> and <code>design/prototypes/</code> first for UI Tasks.
+        </td>
+        <td><span class="badge b-yes">Yes</span></td>
+        <td>Clean fit beside existing history and sibling-variant rules.</td>
       </tr>
     </tbody>
   </table>
 
-  <h2>2. Biggest Mismatch: Force-loading <code>scripts/testing.md</code> onto <code>ci-fix</code></h2>
-  <div class="callout">
-    <h3>Why this matters most</h3>
-    <p>The entire motivation of LOO-1105 is cutting cold-start token waste from always-loaded files while stopping preventable CI loops. Yet the kickoff draft removes 28 KB from <code>implement</code> and then <strong>adds 16.3 KB of Gate planning prose (<code>scripts/testing.md</code>) as a mandatory <code>docs:</code> attachment on all ~272 <code>ci-fix</code> turns</strong>.</p>
-    <p>Inside the slimmed <code>scripts/testing.md</code>, 79% of the bytes are <code>## Plan first</code> (137 lines, 7.9 KB &mdash; picking extra tests for a diff) and <code>## Gate</code> (83 lines, 5.1 KB &mdash; publishing a candidate and filtering <code>scripts/test.py</code>). A <code>ci-fix</code> worker already arrives with the exact failing check name from <code>pr_landing.rs</code>.</p>
-  </div>
-
+  <h2>2. Measured Before vs. After (from <code>scratch/qa.html</code>)</h2>
   <div class="card">
-    <h3>Skill cold-start payload from verification docs <span class="badge b-exist">Existing</span> vs. kickoff draft vs. <span class="badge b-prop">Proposed</span></h3>
+    <h3>Actual rendered first-turn prompt bytes via <code>lf -a claude:haiku -b skill &lt;name&gt;</code> <span class="badge b-built">Measured</span></h3>
     <div class="bars">
       <div class="bar-row">
-        <div class="bar-label">implement (now)</div>
+        <div class="bar-label">implement (main)</div>
         <div class="bar-track"><div class="bar-fill" style="width: 100%; background: var(--bar-before);"></div></div>
-        <div class="bar-num">28.0 KB (~7.0K tok)</div>
+        <div class="bar-num">34,605 B (1 doc)</div>
       </div>
       <div class="bar-row">
-        <div class="bar-label">implement (proposed)</div>
-        <div class="bar-track"><div class="bar-fill" style="width: 7%; background: var(--bar-after);"></div></div>
-        <div class="bar-num">~2.0 KB (~0.5K tok)</div>
+        <div class="bar-label">implement (branch)</div>
+        <div class="bar-track"><div class="bar-fill" style="width: 25%; background: var(--bar-after);"></div></div>
+        <div class="bar-num">8,655 B (0 docs)</div>
       </div>
       <div class="bar-row">
-        <div class="bar-label">gate (now)</div>
-        <div class="bar-track"><div class="bar-fill" style="width: 100%; background: var(--bar-before);"></div></div>
-        <div class="bar-num">28.0 KB (~7.0K tok)</div>
+        <div class="bar-label">gate (branch)</div>
+        <div class="bar-track"><div class="bar-fill" style="width: 65%; background: var(--bar-gate);"></div></div>
+        <div class="bar-num">22,576 B (1 doc)</div>
       </div>
       <div class="bar-row">
-        <div class="bar-label">gate (proposed)</div>
-        <div class="bar-track"><div class="bar-fill" style="width: 58%; background: var(--bar-after);"></div></div>
-        <div class="bar-num">16.3 KB (~4.1K tok)</div>
-      </div>
-      <div class="bar-row">
-        <div class="bar-label">ci-fix (kickoff draft)</div>
-        <div class="bar-track"><div class="bar-fill" style="width: 66%; background: var(--bar-plan);"></div></div>
-        <div class="bar-num">18.5 KB (~4.6K tok)</div>
-      </div>
-      <div class="bar-row">
-        <div class="bar-label">ci-fix (proposed)</div>
-        <div class="bar-track"><div class="bar-fill" style="width: 10%; background: var(--bar-after);"></div></div>
-        <div class="bar-num">~2.6 KB (~0.65K tok)</div>
+        <div class="bar-label">ci-fix (branch)</div>
+        <div class="bar-track"><div class="bar-fill" style="width: 17%; background: var(--bar-after);"></div></div>
+        <div class="bar-num">5,715 B (0 docs)</div>
       </div>
     </div>
     <div class="legend">
-      <span><i class="dot" style="background: var(--bar-before);"></i>Existing always-loaded</span>
-      <span><i class="dot" style="background: var(--bar-plan);"></i>Kickoff draft (adds 16.3 KB to 272 ci-fix turns)</span>
-      <span><i class="dot" style="background: var(--bar-after);"></i>Proposed (on-demand pointer in ci-fix)</span>
+      <span><i class="dot" style="background: var(--bar-before);"></i>Before (<code>main</code>)</span>
+      <span><i class="dot" style="background: var(--bar-after);"></i>Built &mdash; no attached <code>testing.md</code></span>
+      <span><i class="dot" style="background: var(--bar-gate);"></i>Built &mdash; slimmed <code>testing.md</code> attached (17.0 KB, down from ~28 KB)</span>
     </div>
+    <p class="muted" style="margin-top: 10px; margin-bottom: 0;"><code>.lf/skills/qa.md</code> also shrank from 3,624 B to 1,399 B (&minus;61%), moving 42 lines of private-Machine and build-cache recipes into <code>.lf/qa/</code>. QA also recorded in <code>.lf/qa/skills.md</code> that an already-running Graph snapshots skills at start, while landing's <code>lf --batch &hellip; skill ci-fix</code> launches fresh in the Task checkout and immediately picks up the new overlay.</p>
   </div>
 
+  <h2>3. Biggest Architectural Call in This Branch: On-Demand <code>testing.md</code> for <code>ci-fix</code> + Real Classifier for <code>gate</code></h2>
   <div class="grid-2">
     <div class="card">
-      <h3>Before (kickoff draft) <span class="badge b-no">Force-loaded</span></h3>
-<pre>---
-extends: builtin
-docs: scripts/testing.md   # +16.3 KB every turn!
----
-## In this repository
-- required-integration ...
-- 7 checks (e2e-smoke missing reconnect;
-  loopflow-ui-test left as TODO)</pre>
-      <p class="muted">Every <code>required-integration</code> or <code>rust-lint</code> fix loads 137 lines of Rust test-planning traps and 83 lines of Gate workflow prose.</p>
+      <h3><code>ci-fix</code> without <code>docs: scripts/testing.md</code> <span class="badge b-built">Built</span></h3>
+      <div class="flow">
+        <span class="node">Red check arrives</span>
+        <span class="arrow">&rarr;</span>
+        <span class="node good">5.7 KB prompt has exact repo check command</span>
+        <span class="arrow">&rarr;</span>
+        <span class="node good">Reads <code>scripts/testing.md</code> only on Mac traps or nextest filters</span>
+      </div>
+      <p class="muted">Avoids paying ~4.1K tokens of Gate test-planning prose on all ~272 repair turns/14d while naming the exact trap signatures (<code>syspolicyd</code>, <code>TMPDIR</code>, <code>fseventsd</code>, <code>has no resident login</code>, <code>No agent selected</code>) that jump straight to <code>scripts/testing.md</code>.</p>
     </div>
     <div class="card">
-      <h3>After (proposed in plan) <span class="badge b-prop">Self-contained + pointer</span></h3>
-<pre>---
-extends: builtin
----
-## In this repository
-- Full verified check table (all 9 non-obvious
-  checks + required-integration + scratch-clear)
-- LF_* unset + &lt; /dev/null rule
-- Mac traps (`syspolicyd`, `TMPDIR`, `has no
-  resident login`, `No agent selected`) &amp; nextest
-  filters: read `scripts/testing.md` on demand.</pre>
-      <p class="muted">Naming the exact error strings in one line lets <code>ci-fix</code> jump straight to <code>scripts/testing.md#macos-traps</code> if and only if a local Rust/Mac repro hits one.</p>
+      <h3><code>gate</code> DTO/iOS parity via <code>scripts/test.py --list</code> <span class="badge b-built">Built</span></h3>
+      <div class="flow">
+        <span class="node">Any wire or shared Swift edit</span>
+        <span class="arrow">&rarr;</span>
+        <span class="node good"><code>scripts/test.py --list</code> selects <code>ios</code> (via <code>macos_inputs.py</code>)</span>
+        <span class="arrow">&rarr;</span>
+        <span class="node good">Runs <code>DTOFixtureTests</code> + <code>test_ios.py</code> before publish</span>
+      </div>
+      <p class="muted">Catches server/execution wire edits that forgot to update <code>tests/fixtures/dto/</code> before burning 10&ndash;49 minutes on hosted macOS runners.</p>
     </div>
   </div>
 
-  <h2>3. Second Key Mismatch: Real Wire &amp; Swift Boundaries vs. Prose Lists</h2>
-  <div class="grid-2">
-    <div class="card">
-      <h3>Kickoff draft <span class="badge b-no">Misses server wire edits</span></h3>
-      <div class="flow">
-        <span class="node">Edit <code>rust/loopflow/src/server/</code></span>
-        <span class="arrow">&rarr;</span>
-        <span class="node">Forget <code>tests/fixtures/dto/</code></span>
-        <span class="arrow">&rarr;</span>
-        <span class="node bad"><code>gate.md</code> checks only <code>loopflow-model/</code> or <code>fixtures/dto/</code> &rarr; skips Swift/iOS</span>
-        <span class="arrow">&rarr;</span>
-        <span class="node bad">10&ndash;49 min macOS CI fail</span>
-      </div>
-      <p class="muted">Also names non-existent <code>swift/LoopflowDesktop</code> and hides shared library <code>swift/Loopflow/</code>.</p>
-    </div>
-    <div class="card">
-      <h3>Proposed <span class="badge b-prop">One classifier, real directories</span></h3>
-      <div class="flow">
-        <span class="node">Edit any wire/protocol or shared Swift file</span>
-        <span class="arrow">&rarr;</span>
-        <span class="node good"><code>scripts/test.py --list</code> (via <code>macos_inputs.py</code>) selects <code>ios</code></span>
-        <span class="arrow">&rarr;</span>
-        <span class="node good"><code>gate</code> runs <code>DTOFixtureTests</code> + <code>test_ios.py</code> (+ boundary check)</span>
-        <span class="arrow">&rarr;</span>
-        <span class="node good">Caught locally before publish</span>
-      </div>
-      <p class="muted"><code>implement.md</code> maps the actual three Swift targets: <code>swift/Loopflow/</code> (shared), <code>swift/LoopflowMac/</code>, <code>swift/LoopflowiOS/</code>.</p>
-    </div>
+  <h2>4. Remaining Seams &amp; Separate Outcomes (Outside LOO-1105)</h2>
+  <div class="callout">
+    <h3>Why these stay out of this PR</h3>
+    <p>LOO-1105 is strictly prose and repository skill overlays (0 Rust, Swift, or Python changes; 0 <code>golden_prompt</code> snapshot churn). The two small seams below are separate outcomes, each with a clear follow-up:</p>
+    <ul style="margin-bottom: 0;">
+      <li><strong>Add <code>rust/loopflow-model/</code> to <code>_PROTOCOL_INPUTS</code> in <code>scripts/macos_inputs.py</code></strong> <span class="badge b-follow">Separate Task</span> &mdash; 1-line Python edit + unit test so CI's macOS classifier also catches a <code>loopflow-model</code> wire edit that forgot its fixture, then remove the temporary <code>or rust/loopflow-model/ changed</code> clause from <code>.lf/skills/gate.md</code>.</li>
+      <li><strong>Move <code>required-integration</code> into builtin <code>ci-fix.md</code></strong> <span class="badge b-follow">Separate Task</span> &mdash; 1-paragraph edit to <code>rust/loopflow-definitions/src/builtins/task/skill/ci-fix.md</code> + <code>golden_prompt</code> snapshot update so every Loopflow repository inherits it beside <code>merge-queue</code> and <code>merge-request</code>.</li>
+      <li><strong>Slim <code>scripts/testing.md</code>'s 137-line <code>Plan first</code> prose wall</strong> <span class="badge b-follow">Optional follow-up</span> &mdash; turn subsystem traps into a compact path-to-filter table or move crate traps into crate READMEs to cut <code>gate</code>'s cold start further (from ~17 KB toward ~4 KB).</li>
+    </ul>
   </div>
 
-  <h2>4. Other Concrete Fixes Written into <code>scratch/plan.md</code></h2>
-  <table>
-    <thead>
-      <tr>
-        <th style="width: 22%">Area</th>
-        <th style="width: 39%">Counterexample / failure found</th>
-        <th style="width: 39%">Revised plan</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td><strong><code>gate.md</code> recovery &amp; <code>AGENTS.md</code> parity</strong></td>
-        <td>Running <code>cargo fmt --check</code> after <code>lf commit -m "gate: checkpoint"</code> leaves uncommitted fixes if lint fails; <code>AGENTS.md:448</code> only added lint and omitted pre-publish DTO/iOS parity.</td>
-        <td>Run <code>cargo fmt --all -- --check &amp;&amp; cargo clippy --all-targets -- -D warnings</code> (and DTO/iOS checks when <code>scripts/test.py --list</code> selects <code>ios</code> or <code>loopflow-model</code> changed), commit any fixes, confirm <code>scratch/</code> is clear, then <code>lf pr publish</code> (same on pass-2 review fixes). Update <code>AGENTS.md:448</code> to state both pre-publish checks.</td>
-      </tr>
-      <tr>
-        <td><strong><code>ci-fix.md</code> local commands</strong></td>
-        <td><code>e2e-smoke</code> omitted Linux-only <code>planning_reconnect_tests</code>; <code>loopflow-ui-test</code> was left as a TODO; <code>rust-lint</code> omitted <code>--all</code> and rustup <code>stable</code> vs Homebrew drift; <code>architecture-check</code> &amp; <code>migration-check</code> omitted <code>UV_PYTHON_PREFERENCE=only-managed</code> / <code>LOOPFLOW_REQUIRE_ORIGIN_MAIN=1</code>; <code>swift-test</code> ran a redundant <code>cargo build</code> before <code>test_desktop.sh</code>.</td>
-        <td>All exact commands verified from <code>ci.yml</code> and <code>macos.yml</code> are now in <code>scratch/plan.md</code>, including <code>scratch-clear</code> and <code>macos / macos-process-test</code>. Zero TODOs left for <code>implement</code>.</td>
-      </tr>
-      <tr>
-        <td><strong><code>qa.md</code> locked-screen route &amp; <code>.lf/qa/mobile.md</code></strong></td>
-        <td>Kickoff draft claimed Ghostty panes and keyboard are unreachable when locked, contradicting <code>.lf/qa/desktop.md:353-385</code> (production mode + <code>QAHook</code> opens Ghostty and drives keys). Also <code>.lf/qa/mobile.md</code> lacks a <code>Read when</code> line 1.</td>
-        <td>Preflight checks both <code>IOConsoleLocked</code> and <code>CGSSessionScreenIsLocked</code> via one-line <code>ioreg</code> grep. Locked route accurately separates headless tests, <code>-ui-test-mode live</code> snapshots, and production <code>QAHook</code> (including Ghostty/<code>key send</code>) from genuinely unreachable hover/drags/menus/<code>&#8984;</code> chords/popovers/Settings pixels. Add <code>Read when</code> header to <code>.lf/qa/mobile.md</code>.</td>
-      </tr>
-    </tbody>
-  </table>
-
-  <h2>5. Choices Made for Review (Reversible)</h2>
-  <p>None of these changes alter code, wire formats, or irreversible data. All are committed into <code>scratch/plan.md</code> so <code>implement</code> can build one clean pass; review them as built.</p>
-  <ul>
-    <li><strong>Drop <code>docs: scripts/testing.md</code> from <code>.lf/skills/ci-fix.md</code>; point to it on demand with error signatures.</strong> Passed over: attaching 16.3 KB of Gate + Plan-first prose to every <code>ci-fix</code> turn (~272 turns/14d).</li>
-    <li><strong>Trigger gate's DTO/iOS parity check from <code>scripts/test.py --list</code> selecting <code>ios</code> (plus <code>rust/loopflow-model/</code>) instead of a hand-maintained two-path rule.</strong> Passed over: gating only on <code>rust/loopflow-model/</code> or <code>tests/fixtures/dto/</code>, which misses server/execution wire edits that forget fixtures.</li>
-    <li><strong>Keep <code>required-integration</code> in <code>.lf/skills/ci-fix.md</code> for now rather than editing builtin <code>ci-fix.md</code>.</strong> Passed over: editing builtin skills in this Task (which moves <code>golden_prompt</code> snapshots and turns a prose-only PR into a Rust/CI build).</li>
-  </ul>
-
-  <h2>6. Separate Outcomes (Outside LOO-1105)</h2>
-  <p>Not part of this prose-only Task, stated plainly with what each would take:</p>
-  <ul>
-    <li><strong>Move <code>required-integration</code> into builtin <code>ci-fix.md</code></strong> (beside <code>merge-queue</code> and <code>merge-request</code>): 1-paragraph edit to <code>rust/loopflow-definitions/src/builtins/task/skill/ci-fix.md</code> + <code>golden_prompt</code> snapshot update so every Loopflow repository gets the rule, not just this one.</li>
-    <li><strong>Add <code>rust/loopflow-model/</code> to <code>_PROTOCOL_INPUTS</code> in <code>scripts/macos_inputs.py</code></strong>: 1-line Python edit + unit test so CI's macOS classifier catches a <code>loopflow-model</code> wire change even when its DTO fixture wasn't updated.</li>
-    <li><strong>Break up <code>scripts/testing.md</code>'s 137-line <code>Plan first</code> prose wall</strong>: convert to a compact path-to-filter table or move crate-specific traps into each crate's <code>README.md</code>, shrinking <code>gate</code>'s cold start from ~16.3 KB to ~4 KB.</li>
-  </ul>
-
-  <h2>7. Questions for Review</h2>
-  <p class="muted">Answer with a number and letter (e.g. &ldquo;1a, 2a&rdquo;). Implementation proceeds with option (a) on each.</p>
+  <h2>5. Built Choices Waiting on Your Sign-Off (All Reversible)</h2>
+  <p class="muted">All three choices are already built and committed at <code>95a094add7</code>. Reply with a number and letter (e.g. &ldquo;1a, 2a, 3a&rdquo;) only if you want to reverse one; otherwise this branch is ready for <code>gate</code>.</p>
 
   <div class="q-card">
-    <strong>1. When an automated CI repair starts, should it load the full Gate test-planning guide up front or only read it if a local Rust/Mac reproduction hits a trap?</strong>
+    <strong>1. When an automated CI repair runs, should it keep the lightweight check table and read the full test-planning guide only when it hits a Mac or nextest trap?</strong>
     <ol>
-      <li><strong>On demand (chosen):</strong> The repair prompt carries the repo's CI check-to-command table and names the exact Mac error messages that point into <code>scripts/testing.md</code>. Saves ~4K tokens on every repair turn (including simple syncs, lint fixes, and Swift fixes).</li>
-      <li><strong>Always attached:</strong> Attach the slimmed <code>scripts/testing.md</code> (~16 KB) to every repair turn so Mac traps and subsystem test lists are already in context before the first command runs.</li>
+      <li><strong>Keep on-demand (built):</strong> Every repair starts with a 5.7 KB prompt carrying all 10 repo check commands and the exact Mac error strings that point to <code>scripts/testing.md</code>, saving ~17 KB (~4K tokens) on routine sync, lint, and Swift fixes.</li>
+      <li><strong>Always attach <code>scripts/testing.md</code>:</strong> Add <code>docs: scripts/testing.md</code> to <code>.lf/skills/ci-fix.md</code> so Mac traps and subsystem test lists are always in context from turn 1.</li>
     </ol>
   </div>
 
   <div class="q-card">
-    <strong>2. Before publishing a PR, when should <code>gate</code> run the local Desktop DTO test and iPhone test suite?</strong>
+    <strong>2. Before publishing a PR, should <code>gate</code> run the local Desktop DTO test and iPhone Simulator suite whenever the branch touches any server protocol, wire type, or shared Swift code?</strong>
     <ol>
-      <li><strong>Whenever the branch touches any wire/protocol or shared Swift path that CI's macOS classifier maps to iOS, plus <code>loopflow-model</code> (chosen):</strong> Catches missed DTO fixtures on server/wire edits and shared Swift breaks on iPhone before waiting on macOS CI runners.</li>
-      <li><strong>Only when <code>loopflow-model</code> or <code>tests/fixtures/dto/</code> changed:</strong> Narrower and skips local iOS runs on server-only edits, at the cost of missing server wire edits where the fixture was forgotten.</li>
+      <li><strong>Yes &mdash; run whenever the iOS/protocol classifier triggers or <code>loopflow-model</code> changed (built):</strong> Catches missed DTO fixtures and broken iPhone views locally before waiting 10&ndash;49 minutes on hosted macOS CI, at the cost of a local Simulator run on wire/shared-Swift PRs.</li>
+      <li><strong>Narrower &mdash; run only when <code>loopflow-model</code> or <code>tests/fixtures/dto/</code> changed:</strong> Faster local <code>gate</code> on server-only edits, at the risk of missing a server wire edit whose author forgot to update the fixture.</li>
     </ol>
   </div>
 
   <div class="q-card">
-    <strong>3. Should <code>required-integration</code> stay in this repository's <code>ci-fix</code> overlay for now, or move into Loopflow's builtin <code>ci-fix</code> skill?</strong>
+    <strong>3. Keep <code>required-integration</code> in this repository's <code>ci-fix</code> overlay for this PR, and move it into Loopflow's builtin <code>ci-fix</code> skill in a separate Task?</strong>
     <ol>
-      <li><strong>Overlay now, builtin as a separate Task (chosen):</strong> Keeps LOO-1105 prose-only with no prompt-snapshot churn while immediately fixing Loopflow's own landing repairs.</li>
-      <li><strong>Move into builtin <code>ci-fix</code> inside LOO-1105:</strong> Fixes it for every Loopflow repository at once, adding a Rust prompt-snapshot update to this PR.</li>
+      <li><strong>Overlay now, builtin as a separate Task (built):</strong> Keeps LOO-1105 prose-only with no prompt-snapshot churn while fixing this repository's landing repairs immediately.</li>
+      <li><strong>Move into builtin <code>ci-fix</code> in this PR:</strong> Ships the rule to every Loopflow repository at once, turning this into a Rust + <code>golden_prompt</code> snapshot change.</li>
     </ol>
   </div>
 </main>

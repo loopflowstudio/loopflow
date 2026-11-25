@@ -131,17 +131,18 @@ def _terminal():
     continues the same process under a second conversation."""
     prompt = _option("-i") or ""
     _receive(prompt)
-    prompts = [prompt]
+    resumed = _option("--conversation")
+    turns = [(resumed or str(uuid.uuid4()), prompt, bool(resumed))] if prompt else []
     if (HOME / "tui-new").exists():
-        prompts.append((HOME / "tui-new").read_text())
-    conversation = _option("--conversation") or str(uuid.uuid4())
+        turns.append((str(uuid.uuid4()), (HOME / "tui-new").read_text(), False))
     heard = []
-    for prompt in prompts:
+    for conversation, prompt, resumed_thread in turns:
         heard.append(
             {
                 "conversation": conversation,
                 "context": _hook(
-                    "PreInvocation", conversation, invocationNum=0, initialNumSteps=1
+                    "PreInvocation", conversation, lastUserInput=prompt,
+                    invocationNum=0, initialNumSteps=3 if resumed_thread else 1,
                 ),
             }
         )
@@ -152,7 +153,6 @@ def _terminal():
         ]
         _keep(conversation, rows)
         _hook("Stop", conversation, executionNum=0, terminationReason="NO_TOOL_CALL")
-        conversation = str(uuid.uuid4())
     (HOME / "tui-heard.json").write_text(json.dumps(heard))
 
 

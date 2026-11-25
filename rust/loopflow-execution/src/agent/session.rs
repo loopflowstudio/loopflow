@@ -101,7 +101,8 @@ pub fn resolve_session_config(
         if !importing
             && crate::harness::launcher(config.agent.harness)
                 .capabilities()
-                .initial_prompt_on_resume
+                .resume_input
+                == crate::harness::ResumeInput::InitialPrompt
         {
             config.task_prompt = request.codex_initial_input();
         }

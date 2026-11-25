@@ -372,7 +372,7 @@ impl super::Launcher for loopflow_harness::OpenCode {
                 bare: super::ThreadName::Assigned,
                 managed: super::ThreadName::Assigned,
             },
-            initial_prompt_on_resume: false,
+            resume_input: super::ResumeInput::NamedSteers,
             native_skills: None,
             installed_skills: super::InstalledSkills {
                 global: ".agents/skills",

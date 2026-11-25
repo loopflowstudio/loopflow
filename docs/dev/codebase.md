@@ -118,7 +118,8 @@ uses outbound REST requests. Remote execution reaches the target Machine through
 
 A provider is one unit struct with two implementations: what it writes, then
 how lf launches it. Launch and transcript decisions branch on what the harness
-declares.
+declares. The generated parity checks and idle-wake declaration below are
+planned in LOO-1098.
 
 ```sh
 cargo test -p loopflow-harness <name>_decode                         # after steps 1-2

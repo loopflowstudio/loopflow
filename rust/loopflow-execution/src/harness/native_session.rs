@@ -7,7 +7,7 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::{Launch, Start};
+use super::{Launch, ResumeInput, Start};
 use crate::agent::missing_agent_message;
 use crate::agent::AgentConfig;
 use crate::harness::native_exit::{attachment_lost, departure};
@@ -130,20 +130,27 @@ pub fn resume_session_with_env(
         config.agent,
         config.agent,
     );
-    // A held Codex sends its first turn only to a thread with none; any other
-    // resumed thread already has it.
-    let sends_first_turn = harness.capabilities().initial_prompt_on_resume && kind.is_managed();
-    if provider_session.is_some() && !sends_first_turn {
-        config.task_prompt.clear();
-        // A conversation a steer named while it was stopped starts again
-        // reading its steers: a resumed provider waits for input, and no
-        // hook or idle wake reaches it before its first turn.
-        if kind.mode() == super::Mode::Interactive {
-            let steers = store.take_steers_to_start(&session.id)?;
-            if !steers.is_empty() {
-                config.task_prompt = crate::steer::render_complete(&steers);
+    if provider_session.is_some() {
+        config.task_prompt = match (kind, harness.capabilities().resume_input) {
+            // Only the app-server knows whether the thread already had its first turn.
+            (LaunchKind::Worker | LaunchKind::WorkSession, ResumeInput::InitialPrompt) => {
+                config.task_prompt
             }
-        }
+            (LaunchKind::WorkSession, ResumeInput::PromptHook)
+                if config.conversation_context.is_some() =>
+            {
+                prompt_for_waiting_steers(&store, &session.id)
+            }
+            (LaunchKind::Chat | LaunchKind::WorkSession, _) => {
+                let steers = store.take_steers_to_start(&session.id)?;
+                if steers.is_empty() {
+                    String::new()
+                } else {
+                    crate::steer::render_complete(&steers)
+                }
+            }
+            (LaunchKind::Batch | LaunchKind::Worker, _) => String::new(),
+        };
     }
     config.env.extend(extra_environment.clone());
     config.env.insert(
@@ -179,6 +186,22 @@ pub fn resume_session_with_env(
         finish_admission(&recording, capture, &result);
         result?.result(harness.kind(), provider_session.is_some(), kind)
     })
+}
+
+/// The opening prompt starts PreInvocation. Only the hook that prints the
+/// steers stamps delivery, so a launch that never reaches it loses nothing.
+fn prompt_for_waiting_steers(store: &SqliteStore, session: &str) -> String {
+    if let Err(error) = super::task_updates::write(store, session) {
+        tracing::warn!(%session, %error, "Task updates unread at resume");
+    }
+    match store.has_undelivered_steers(session) {
+        Ok(true) => "Read the waiting steers and Task updates for this Session.".into(),
+        Ok(false) => String::new(),
+        Err(error) => {
+            tracing::warn!(%session, %error, "steers unread at resume");
+            String::new()
+        }
+    }
 }
 
 pub(crate) fn require_provider_session_process(dir: &Path) -> Result<()> {

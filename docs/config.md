@@ -302,19 +302,9 @@ on every headless step, nothing is sandboxed and nothing asks.
 one you switch to gets the context block and your steers from its first
 prompt, and `lf resume` reopens the one you quit in.
 
-An idle `agy` work session wakes for steers, Task updates, and Graph handoffs:
-
-```bash
-lf steer LOO-12 "keep the retry budget at 3"
-# in the open agy TUI: the steer appears as a pasted prompt and starts a turn
-```
-
-Focusing the terminal or scrolling with the mouse does not block a wake. If you
-have unsubmitted keystrokes (typed while idle or mid-turn), or `agy` is in a
-`/` menu or external editor, the wake waits so your draft is never clobbered;
-pressing Enter delivers the waiting steers instead. Quit the session, steer or
-update its Task, and run `lf resume --task LOO-12`: waiting steers run once as
-soon as `agy` is ready for input.
+Reopen an Antigravity Task conversation with `lf resume --task LOO-12`.
+If steers or Task updates are waiting, the first turn reads them before you
+type. An already open, idle conversation reads them on its next turn.
 
 Usage counts the conversation lf started, not its subagents. A plain `agy`
 conversation is not listed in `lf session list`. Native response schemas, turn

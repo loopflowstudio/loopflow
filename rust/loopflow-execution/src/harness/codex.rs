@@ -1081,7 +1081,7 @@ impl super::Launcher for loopflow_harness::Codex {
                 bare: super::ThreadName::Reported,
                 managed: super::ThreadName::Reported,
             },
-            initial_prompt_on_resume: true,
+            resume_input: super::ResumeInput::InitialPrompt,
             native_skills: Some(crate::skills::catalog::SkillDialect::Codex),
             installed_skills: super::InstalledSkills {
                 global: ".agents/skills",

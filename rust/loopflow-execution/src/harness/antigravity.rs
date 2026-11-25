@@ -345,7 +345,7 @@ impl super::Launcher for loopflow_harness::Antigravity {
                 bare: super::ThreadName::Reported,
                 managed: super::ThreadName::Reported,
             },
-            initial_prompt_on_resume: false,
+            resume_input: super::ResumeInput::PromptHook,
             native_skills: None,
             installed_skills: super::InstalledSkills {
                 // agy 1.5.14 ignores `~/` paths in this file; sync writes the

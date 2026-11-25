@@ -372,10 +372,21 @@ pub struct InstalledSkills {
     pub global_registry: Option<&'static str>,
 }
 
+/// What starts a turn when a work session reopens on an existing thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResumeInput {
+    /// The app-server replays the saved request only for an empty thread.
+    InitialPrompt,
+    /// A steer naming the stopped conversation brings its waiting input.
+    NamedSteers,
+    /// An opening prompt runs the provider hook that reads waiting input.
+    PromptHook,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Capabilities {
     pub thread: ThreadNaming,
-    pub initial_prompt_on_resume: bool,
+    pub resume_input: ResumeInput,
     pub native_skills: Option<crate::skills::catalog::SkillDialect>,
     pub installed_skills: InstalledSkills,
     pub turn_limit: bool,

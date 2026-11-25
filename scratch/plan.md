@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Status: built (`78bde1d766`), compressed (`c6eab6e222`), QA'd (`73abaa380c`), reviewed (`scratch/concept-review.html`), post-build review findings applied (`02b9cf8f62`), ship-review revisions applied (`4cb640f3f6`: `fix` renamed to `quick`; builtin `ui` removed), generic design-wording pass applied (`b1d9ac2819`), QA'd again (`684bbae383`), concept-reviewed again (`5ec9a261ef`, against `684bbae383`: 7 of 7 pairings line up, no mismatches), and named skill inheritance (`extends: <name>` / `extends: lf:<name>`) built (`b51d7711a8`, after that review; its focused tests and a live `lf list skill` run are unverified here). Remaining: gate.
+Status: built (`78bde1d766`), compressed (`c6eab6e222`), QA'd (`73abaa380c`), reviewed (`scratch/concept-review.html`), post-build review findings applied (`02b9cf8f62`), ship-review revisions applied (`4cb640f3f6`: `fix` renamed to `quick`; builtin `ui` removed), generic design-wording pass applied (`b1d9ac2819`), QA'd again (`684bbae383`), concept-reviewed again (`5ec9a261ef`, against `684bbae383`: 7 of 7 pairings line up, no mismatches), and named skill inheritance (`extends: <name>` / `extends: lf:<name>`) built (`b51d7711a8`) and QA'd on the branch `lf` (`scratch/qa.html`: listing, composed launch text, merged `agent:`, `customize`, cycles and missing targets in launches and Graphs). Remaining: gate.
 
 
 A Task on `code`, `feature`, `pursue` or `redesign` runs `compress` and `qa`

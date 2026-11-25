@@ -1,51 +1,37 @@
 <!doctype html>
-<meta charset="utf-8">
-<title>LOO-1104 qa (after ship-review revisions)</title>
-<style>
-body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem;color:#222}
-table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:.4rem .6rem;vertical-align:top;text-align:left}
-pre{background:#f6f6f6;padding:.6rem;overflow:auto;font-size:13px}code{font-size:13px}
-.ok{color:#176b2c;font-weight:600}.fixed{color:#8a5a00;font-weight:600}
-</style>
-<h1>LOO-1104 qa: <code>quick</code>, no builtin <code>ui</code>, generic design wording</h1>
-<p>Branch <code>lf</code> (<code>target/debug/lf</code>) in a fresh repository under <code>/tmp/lfqa1104b</code> with a bare local origin, a private <code>LF_HOME</code> and real Claude haiku turns. The earlier run (<code>73abaa380c</code>) covered the inner loop, the bounded and oversized briefs, and read-only <code>concept-review</code>; this run covers what changed since then and the outer loop that run never reached.</p>
+<html><head><meta charset="utf-8"><title>LOO-1104 QA: named skill inheritance</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}
+pre{background:#f5f5f5;padding:.8em;overflow-x:auto;font-size:13px}td,th{border-bottom:1px solid #ddd;padding:.3em .6em;text-align:left;vertical-align:top}table{border-collapse:collapse}.ok{color:#1a7f37}.no{color:#b35900}</style></head><body>
+<h1>LOO-1104 QA: <code>extends: &lt;name&gt;</code> / <code>extends: lf:&lt;name&gt;</code></h1>
+<p>Branch <code>lf</code> at <code>be73184b3b</code> (<code>cargo build -p loopflow --bin lf</code>), private <code>LF_HOME=/tmp/lf-qa-ext/home</code>,
+fixture repository <code>/tmp/lf-qa-ext/repo</code> with a bare origin. Launches went to a stand-in <code>claude</code> that saved its argv and stdin, so every prompt below is the exact text lf sent.
+The Graph and skill changes earlier in this Task were QA'd at <code>684bbae383</code>; this run covers what came after: named inheritance and its compress pass.</p>
 
 <h2>Scenarios</h2>
 <table>
-<tr><th>#</th><th>What I did</th><th>What I saw</th><th></th></tr>
-<tr><td>1</td><td><code>lf graph show build|plan|quick|code|pursue</code>, <code>lf list graph</code>, <code>lf graph show ui|fix</code></td>
-<td><code>build</code>: sync, implement, concept-review, realign, compress, qa, pr-publish. <code>quick</code>: sync, implement, qa, gate, <code>land --wait-and-fix</code>. <code>code</code> runs both reviews before compress and qa. <code>ui</code> and <code>fix</code>: <code>error: graph not found</code>, exit 2. Neither ever shipped on <code>main</code>, so no returning user has a Task on them.</td><td class="ok">works</td></tr>
-<tr><td>2</td><td>Recomputed Desktop's Start menu rows (<code>StartFlow</code> in <code>BacklogView.swift</code>) from <code>lf graph list --json</code></td>
-<td>Under <em>Run without stopping</em>: <code>quick · Build a small, clear change and land it · merges without asking</code>. Stopping rows: feature, code, redesign, research (no <code>ui</code>). build, plan, pursue, deliver, refresh under More. Matches <code>docs/surfaces.md</code>.</td><td class="ok">works</td></tr>
-<tr><td>3</td><td><code>lf help concept-review|realign|verify|demo</code>; grep for "product" in concept-review; acceptance grep for Linear/Desktop in kickoff, advance, write-docs</td>
-<td>concept-review opens "decide what the system's concepts…"; no "product" left. Grep prints nothing. <code>demo</code> no longer carries the loop-decider paragraph.</td><td class="ok">works</td></tr>
-<tr><td>4</td><td><code>lf -b -a claude:haiku realign</code> over a plan and a hand-written review page holding a reversible flag choice, a missing docstring and a localization outcome</td>
-<td>The flag went into Pass 2 as "Made for review (reversible; nothing has shipped)" with both passed-over options and why; the docstring was fixed in <code>greet.py</code>; localization was listed under <code>## Deferred findings</code>; a dispositions section recorded each finding by substance. One commit: <code>lf realign: Add greet module docstring and plan a --style flag</code>.</td><td class="ok">works</td></tr>
-<tr><td>5</td><td><code>build</code>'s loop shape as a fixture Graph (<code>loop(loop(sync → implement) → concept-review → realign)</code>), brief "Let a caller choose a formal or casual greeting.", plan with pass 2 unbuilt</td>
-<td><code>implement</code>: <code>Decision pass 1. Iterating repeats 2 steps, back to sync.</code> → <code>advance</code>, plan line collapsed with commits. <code>concept-review</code>: wrote its page, didn't touch the plan or code. <code>realign</code>: <code>Decision pass 1. Iterating repeats 4 steps, back to sync.</code> It made <code>formal</code> keyword-only with a test, adopted "keep the boolean" as made for review (passed over <code>--style</code>), deferred README docs, and returned <code>advance</code> with "Review findings are settled, not deferred to another loop pass." About 10 minutes.</td><td class="ok">works</td></tr>
-<tr><td>6</td><td><code>lf graph show ui</code>, <code>lf nosuchthing</code> in a terminal</td>
-<td>The error was printed with no trailing newline, so the next prompt or output landed on the same line (<code>…use `lf skill ui`== fix</code>). <code>clap::Error::raw</code> prints its message verbatim. Now <code>finish_command</code> appends the newline (<code>rust/loopflow/src/bin/lf.rs</code>); rebuilt, and both errors end their line.</td><td class="fixed">broken → fixed</td></tr>
+<tr><th>Scenario</th><th>What I did</th><th>What I saw</th></tr>
+<tr><td>Listing</td><td><code>lf list skill</code> over 12 repository skills</td><td class="ok">Each shows its target: <code>(.lf/skills/qa.md, extends lf:qa)</code>, <code>(.lf/skills/card-implement.md, extends implement)</code>, <code>(.lf/skills/gate.md, extends builtin)</code>. A full copy reads <code>copies</code> in <code>--json</code>.</td></tr>
+<tr><td>Chain: child → repo overlay → builtin</td><td><code>card-implement</code> extends <code>implement</code>; <code>.lf/skills/implement.md</code> extends <code>implement</code> (itself); <code>lf -b -a claude card-implement probe</code></td><td class="ok">Prompt: builtin implement text, then <code>## Repo implement rules</code>, then <code>## Card rules</code>, inside <code>&lt;lf:skill:card-implement&gt;</code>. No <code>extends:</code> line leaks.</td></tr>
+<tr><td><code>extends: lf:qa</code></td><td>launch <code>qa</code></td><td class="ok">Builtin qa text with the repository section appended.</td></tr>
+<tr><td>Legacy <code>extends: builtin</code></td><td>launch <code>gate</code></td><td class="ok">Builtin gate text with the marker appended.</td></tr>
+<tr><td>Frontmatter merge</td><td><code>implement.md</code> sets <code>agent: claude:haiku</code>; <code>card2</code> extends it with <code>agent: claude:sonnet</code>; both launched without <code>-a</code></td><td class="ok"><code>card-implement</code> ran <code>--model haiku</code> (inherited); <code>card2</code> ran <code>--model sonnet</code> (child wins).</td></tr>
+<tr><td>Native and user-level parents</td><td><code>extends: probe</code> (a <code>.claude/skills/probe/SKILL.md</code>) and <code>extends: skillregistry/frontend-design</code> (<code>~/.lf/skills</code>)</td><td class="ok">Both compose under the child's name; descriptions inherited in the listing.</td></tr>
+<tr><td>Cycles</td><td><code>loopa ↔ loopb</code>, <code>selfie</code> extends itself with no builtin</td><td class="ok">Listing: <code>unavailable: … skill inheritance cycle: loopa -&gt; loopb -&gt; loopa</code>. Launch exits 1 with the same error; a Graph naming <code>loopa</code> fails <code>lf graph show</code> and <code>lf -b graph</code> before any agent starts.</td></tr>
+<tr><td>Missing targets</td><td><code>extends: nosuch</code>, <code>extends: lf:nosuch</code></td><td class="ok"><code>no skill is named "nosuch"</code> / <code>no builtin skill is named "nosuch"</code>, in the listing and at launch.</td></tr>
+<tr><td><code>lf skill customize</code></td><td><code>customize pr-message</code>, <code>customize card-implement</code> (exists), <code>customize ci-fix --full</code></td><td class="ok">New file starts <code>extends: lf:pr-message</code>; existing file path printed untouched; <code>--full</code> copies the builtin frontmatter and body.</td></tr>
 </table>
 
-<h2>Excerpt: realign deciding the outer loop</h2>
-<pre>[2/4] implement   → advance: "Pass 2 built… Plan lists no passes left, so advance."
-[3/4] concept-review
-[4/4] realign
-The review's open choices are all reversible before merge, so I'll adopt the recommended
-direction and mark each as made for review.
-→ advance: "Review findings are settled, not deferred to another loop pass. Fixed here: `formal`
-  is now keyword-only… Made for review… boolean `formal` kept instead of a `--style` option"</pre>
+<h2>Fixed</h2>
+<p>Nothing needed fixing. Added the stand-in recipe for reading composed launch text to <code>.lf/qa/skills.md</code>.</p>
 
-<h2>Where it stands</h2>
-<p><b>Works:</b> builtin Graph listings, the <code>quick</code> Start-menu row, the generic concept-review wording, <code>realign</code>'s reversible-choice placement, and <code>build</code>'s nested loop with both deciders.</p>
-<p><b>Not reached:</b></p>
-<ul>
-<li>Builtin <code>quick</code> through <code>qa → gate → land</code>, which needs a GitHub remote. Its loop is byte-identical to the <code>fix</code> loop the earlier run drove; only the name and description changed.</li>
-<li>Desktop rendered on screen. The rows were recomputed from the same JSON with the Swift logic, but the app wasn't opened.</li>
-<li><code>verify</code>'s identical-tree fast path (needs a merge): wording read only.</li>
-</ul>
-<p><b>Still wrong (worst first):</b></p>
-<ul>
-<li>A headless <code>concept-review</code> ended with "Questions (answer by number and letter)…" and "I renamed this Session". It addressed a person who wasn't there. It stayed read-only, so <code>realign</code> answered them correctly, but the skill gives a headless run no different voice. This is wording, not this Task's scope.</li>
-<li>Step commits stage everything, so <code>concept-review</code>'s commit carried <code>__pycache__</code> from a test the agent ran (a fixture without a <code>.gitignore</code>). This happened before this change too.</li>
-</ul>
+<h2>Not reached</h2>
+<ul><li>Desktop's skill list with the new <code>extends</code> field: covered only by the updated <code>ServerProtocolTests.swift</code> fixture; no Dev app run (the field reaches the wire through the same <code>Entry</code> the CLI JSON printed above).</li>
+<li>A real provider turn: the stand-in proves what lf sends, not how a model reads it.</li></ul>
+
+<h2>Still worth a look, worst first</h2>
+<ol>
+<li><code>selfie</code> extending itself with no builtin of that name reports <code>skill inheritance cycle: selfie -&gt; selfie</code>. True, but the person meant "the builtin", so <code>no builtin skill is named "selfie"</code> would say what to fix.</li>
+<li>A self-extending overlay lists as <code>(.lf/skills/implement.md, extends implement)</code>; the earlier <code>extends builtin</code> label said where the text comes from more plainly.</li>
+<li>A cycle error names the file where the walk closed (<code>loopb.md</code> when listing <code>loopa</code>); the chain in the message makes it findable.</li>
+</ol>
+</body></html>

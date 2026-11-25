@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Status: built (`78bde1d766`), compressed (`c6eab6e222`), QA'd (`73abaa380c`), and reviewed (`scratch/concept-review.html`). Two small prose seams remain for `ship-review` / `gate` (see `## Post-build review findings`).
+Status: built (`78bde1d766`), compressed (`c6eab6e222`), QA'd (`73abaa380c`), reviewed (`scratch/concept-review.html`), and post-build review findings applied before publish.
 
 
 A Task on `code`, `feature`, `pursue` or `redesign` runs `compress` and `qa`
@@ -420,14 +420,14 @@ One pass; it is prose, four YAML files, docs, and test expectations.
   - Updated `concept-review.md`, `realign.md`, `wave_session.md`, `implement.md` (109 lines after QA tightening), `demo.md`, `verify.md`, `kickoff.md`, `advance.md`, `write-docs.md`, `ship-review.md`; regenerated `tests/goldens/builtin_{implement,realign}.md`.
   - Updated Rust graph expectations in `compiled.rs` (including `fix` and `ui` cases and pinned return edges), `graph/mod.rs` (`edges()` reports relative offsets `1` and `3`, not absolute indices), `commands/graph.rs`, and `task_graph.rs:631` (`write-docs` shifted by +1 after `realign` joined `plan`).
   - QA (`scratch/qa.html`) verified `lf graph show`, `lf list graph`, Desktop `StartFlow` labels, `lf help`, and real Claude haiku decider runs for `build`'s inner loop, `fix` bounded brief, read-only `concept-review`, and `fix` oversized brief (caught and fixed in `73abaa380c`: no-plan `implement` now blocks oversized briefs before writing any plan or code).
-- Remaining: two small prose seams for `ship-review` / `gate` below; the Graph model, ownership map, code, docs, and tests hold.
+- Remaining: none; the two post-build review findings below are applied.
 
 ## Post-build review findings
 
-Recorded by post-build `concept-review` against base `23ce1a69f9` (`scratch/concept-review.html`). The overall model holds; neither item warrants re-running the 6-step `build` loop, and both fit cleanly in `ship-review` / `gate`:
+Recorded by post-build `concept-review` against base `23ce1a69f9` (`scratch/concept-review.html`), both resolved before `pr-publish`:
 
-1. **`realign.md` reversible-choice handoff (`rust/loopflow-definitions/src/builtins/task/skill/realign.md`, plus `tests/goldens/builtin_realign.md`):** `concept-review.md:48-50` shows a reversible product choice as a recommendation with what was passed over, and `ship-review.md:13` reads "choices agents made" from `scratch/plan.md`, while `realign.md:25-26` says "A change that needs a product decision is written as the exact open choice. Nothing goes into the plan as settled unless someone said so" and `## After a review` omits reversible product choices. Add 2–3 sentences to `realign.md` so headless `realign` adopts a recommended reversible choice into the plan marked "made for review" (with what was passed over, never written as settled), while irreversible choices still `blocked` (in a loop) or go to `scratch/questions.md` (outside a loop), then regenerate `tests/goldens/builtin_realign.md`.
-2. **`verify.md` `<qa head>` pointer (`rust/loopflow-definitions/src/builtins/task/skill/verify.md:18`):** Clarify that `<qa head>` is the branch's `lf qa:` commit (from `scratch/qa.html` finding #3).
+1. **Resolved — `realign.md` reversible-choice handoff:** added a bullet under `## After a review` so headless `realign` adopts a recommended reversible product choice into the plan marked as made for review (with what was passed over and why, never as settled), and regenerated `tests/goldens/builtin_realign.md`.
+2. **Resolved — `verify.md` `<qa head>` pointer:** clarified that `<qa head>` is the branch's `lf qa:` commit.
 
 ## Deferred findings
 

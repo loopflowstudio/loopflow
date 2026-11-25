@@ -15,9 +15,9 @@ nothing about the push run; report it separately, and say so if it is pending.
 Skip rebuilding `main` when all three hold:
 
 - Every shipped file on `main` matches the tree `qa` exercised:
-  `git diff <qa head> <merge SHA> -- . ':!scratch'` prints nothing
-  (`scratch/` is excluded because `lf land` clears added scratch files before
-  merging).
+  `git diff <qa head> <merge SHA> -- . ':!scratch'` prints nothing (where
+  `<qa head>` is the branch's `lf qa:` commit, and `scratch/` is excluded
+  because `lf land` clears added scratch files before merging).
 - Post-merge CI for `<merge SHA>` is green.
 - No claim depends on something that only exists after merge (a release
   install, a deployment, production state).

@@ -55,6 +55,10 @@ each one a place:
   behavior:** write it into the plan as the next pass.
 - **Separate outcome:** list it in the plan under `## Deferred findings` (which
   `ship-review` reads), with what it would take. Don't build it.
+- **Reversible product choice (headless):** adopt the recommended direction
+  into the plan marked as made for review, with what was passed over and why
+  (never as settled), so downstream steps build one coherent design and
+  `ship-review` surfaces the choice.
 
 Record in the plan what happened to each finding by substance (not bare
 numbers), so a later `realign` (such as `refresh`) does not act on the same

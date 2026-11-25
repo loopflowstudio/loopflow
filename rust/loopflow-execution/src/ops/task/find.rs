@@ -168,6 +168,17 @@ pub(super) fn is_scratch_page(path: &Path) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("html"))
 }
 
+fn match_span(path: &str, query: &str) -> Option<usize> {
+    let mut positions = path.char_indices();
+    let mut first = None;
+    let mut last = 0;
+    for ch in query.chars() {
+        (last, _) = positions.find(|(_, candidate)| *candidate == ch)?;
+        first.get_or_insert(last);
+    }
+    Some(last - first.unwrap_or(0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::is_scratch_page;
@@ -181,15 +192,4 @@ mod tests {
         assert!(!is_scratch_page(Path::new("scratch/EXPLORE.PAGE.HTML")));
         assert!(!is_scratch_page(Path::new("docs/index.html")));
     }
-}
-
-fn match_span(path: &str, query: &str) -> Option<usize> {
-    let mut positions = path.char_indices();
-    let mut first = None;
-    let mut last = 0;
-    for ch in query.chars() {
-        (last, _) = positions.find(|(_, candidate)| *candidate == ch)?;
-        first.get_or_insert(last);
-    }
-    Some(last - first.unwrap_or(0))
 }

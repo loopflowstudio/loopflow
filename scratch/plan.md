@@ -418,26 +418,41 @@ button).
 
 ## Passes
 
-1. **Loopback carrier and one answering page.** `loopback.rs`, shared
-   `Messages<S>`, local-only `page.url`, `lf page open` (with headless quiet
-   rule + `--host`/`--print`), minimal runtime (queue, strip, `task.steer` /
-   `session.steer` with `delivery.sentence`). Gate steps 2–4 pass. Proves the
-   riskiest piece first.
-2. **`lf page build` and the full runtime.** `<lf-diff>` (reusing
-   `diff_snapshot` / `task_diff_base`, optional `lines`, `old-line`),
-   `<lf-file>`, `<lf-component>` (`{{attr}}` + `<slot>`, `decision` +
-   `before-after`), partial→strict `data-lf` compiler, checks, `build_id` +
-   `work` stamp, `.lf/theme.css` from `DESIGN.md`; full runtime (CSS Highlight
-   notes, choices, questions, immediate `data-lf` with in-place receipts
-   separate from queue, `build_id`-keyed drafts). Gate step 1.
-3. **Desktop bridge.** `TaskFileReadingView` handler (`ready`/`sync`/`operation`),
+1. **Done — Loopback carrier and one answering page.** Built `server/loopback.rs`
+   (`127.0.0.1:0`, 32-byte random in-memory token, `Host` + constant-time token +
+   same-origin `Origin` checks, CSP / `Referrer-Policy` / `Cache-Control` /
+   `X-Content-Type-Options`, `404` empty body on refusal), moved shared
+   `Messages<S>` into `server/service.rs`, added local-Unix-socket-only
+   `ServerOperation::PageUrl` (`page.url`) via `LocalAuthority` (refused on both
+   Tailscale and loopback), regenerated `tests/fixtures/dto/server_schema.json`,
+   added `lf page open` (`--host auto|desktop|browser`, `--print`, headless
+   quiet URL print without invoking OS browser opener, `.page.html` refusal),
+   and embedded the page kit assets in `rust/loopflow-definitions/src/builtins/page/`.
+   Gate steps 2–4 pass in `rust/loopflow/tests/page_tests.rs`.
+2. **Done — `lf page build` and the full runtime.** Built `lf/commands/page_build.rs`
+   expanding `<lf-component>` (`.lf/components/<name>/` overriding builtins
+   `decision` and `before-after`), `<lf-diff>` (reusing `ops::task::checkout_file_diff`
+   once per file path for rename + untracked support, optional `lines`,
+   `<lf-note line|old-line>` with toggle), `<lf-file>`, partial→strict `data-lf`
+   expansion against `server::schema::describe()` + `Operation` deserialization
+   (`__LF_REQUEST_ID__` sentinel replaced per click with `crypto.randomUUID()`),
+   forbidden tag / missing path / `git cat-file -e` SHA checks naming element and
+   line, readable `work` stamp + 16-char `build_id`, `.lf/theme.css` from
+   `DESIGN.md`, `is_scratch_page` excluding `*.page.html`, and the full runtime
+   (`runtime.js`, `base.css`, `theme.css`). Gate step 1 passes in
+   `rust/loopflow/tests/page_tests.rs`.
+   *What this slice taught:* `task.create` returns `result.task.identifier` (not
+   top-level `identifier`), and `context::explain_in` returns the internal
+   `TaskId` rather than the readable identifier (`LOO-1109`) — both fixed so the
+   runtime button (`Steer <issue> ⌘↩`) and `Filed <id>` receipt show readable IDs.
+3. **Next — Desktop bridge.** `TaskFileReadingView` handler (`ready`/`sync`/`operation`),
    Swift `ReviewComments` as sole state owner (two-case anchor, clear on
    unmounted send), `ServerClient` raw JSON `Operation` forward,
    `ReviewRenderedView` kept read-only. Swift headless tests.
-4. **Skills and docs.** The five skills, `lf help page`, `LOOPFLOW.md`,
-   `server/README.md`, goldens, and keeping the pre-written user docs in sync
-   with any CLI/behavior adjustments. LOO-1109's own `ship-review.page.html` is
-   the first page built with the kit.
+4. **Pending — Skills and docs.** The five skills, `lf help page` alignment,
+   `LOOPFLOW.md`, `server/README.md`, goldens, and keeping the pre-written user
+   docs in sync with any CLI/behavior adjustments. LOO-1109's own
+   `ship-review.page.html` is the first page built with the kit.
 
 ## User docs written ahead of implementation
 

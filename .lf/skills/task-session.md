@@ -14,12 +14,6 @@ relaunch and next stop.
 up while a Task is already building, propose capping this Task and filing the
 addition as its own Task rather than steering it into the live run.
 
-## Review answers that ask for building
-
-**Answers that change the code go back to `implement`.** At `ship-review`,
-plain `lf task run <issue>` delivers; when answers change the code, steer them
-and run `lf task run <issue> --from implement`.
-
 ## Asking for a decision
 
 **Frame choices in product behavior.** When a conflict or design clash needs a

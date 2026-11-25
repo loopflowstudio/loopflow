@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Concept Review — LOO-1106: Delivery Readiness &amp; Scratch Cleanup (Pre-Build)</title>
+<title>Concept Review — LOO-1106: Delivery Readiness &amp; Scratch Cleanup (Post-Build)</title>
 <style>
   :root {
     --bg: #fafaf8;
@@ -13,19 +13,21 @@
     --text: #1c1b18;
     --muted: #5f5c53;
     --accent: #1d4ed8;
-    --accent-soft: #eff6ff;
     --yes-bg: #ecfdf5;
     --yes-fg: #065f46;
     --yes-border: #a7f3d0;
     --no-bg: #fef2f2;
     --no-fg: #991b1b;
     --no-border: #fecaca;
-    --prop-bg: #fffbeb;
-    --prop-fg: #92400e;
-    --prop-border: #fde68a;
-    --exist-bg: #eef2ff;
-    --exist-fg: #3730a3;
-    --exist-border: #c7d2fe;
+    --built-bg: #ecfdf5;
+    --built-fg: #065f46;
+    --built-border: #a7f3d0;
+    --note-bg: #fffbeb;
+    --note-fg: #92400e;
+    --note-border: #fde68a;
+    --base-bg: #eef2ff;
+    --base-fg: #3730a3;
+    --base-border: #c7d2fe;
     --out-bg: #f3f4f6;
     --out-fg: #374151;
     --out-border: #d1d5db;
@@ -40,19 +42,21 @@
       --text: #eceae2;
       --muted: #a19e93;
       --accent: #60a5fa;
-      --accent-soft: #172554;
       --yes-bg: #052e16;
       --yes-fg: #6ee7b7;
       --yes-border: #065f46;
       --no-bg: #3b0d0c;
       --no-fg: #fca5a5;
       --no-border: #7f1d1d;
-      --prop-bg: #2e2005;
-      --prop-fg: #fcd34d;
-      --prop-border: #78350f;
-      --exist-bg: #1e1b4b;
-      --exist-fg: #c7d2fe;
-      --exist-border: #3730a3;
+      --built-bg: #052e16;
+      --built-fg: #6ee7b7;
+      --built-border: #065f46;
+      --note-bg: #2e2005;
+      --note-fg: #fcd34d;
+      --note-border: #78350f;
+      --base-bg: #1e1b4b;
+      --base-fg: #c7d2fe;
+      --base-border: #3730a3;
       --out-bg: #27272a;
       --out-fg: #d4d4d8;
       --out-border: #3f3f46;
@@ -106,8 +110,9 @@
   }
   .badge.yes { background: var(--yes-bg); color: var(--yes-fg); border-color: var(--yes-border); }
   .badge.no { background: var(--no-bg); color: var(--no-fg); border-color: var(--no-border); }
-  .badge.proposed { background: var(--prop-bg); color: var(--prop-fg); border-color: var(--prop-border); }
-  .badge.existing { background: var(--exist-bg); color: var(--exist-fg); border-color: var(--exist-border); }
+  .badge.built { background: var(--built-bg); color: var(--built-fg); border-color: var(--built-border); }
+  .badge.note { background: var(--note-bg); color: var(--note-fg); border-color: var(--note-border); }
+  .badge.base { background: var(--base-bg); color: var(--base-fg); border-color: var(--base-border); }
   .badge.outside { background: var(--out-bg); color: var(--out-fg); border-color: var(--out-border); }
   code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
@@ -159,9 +164,8 @@
     padding: 14px 16px;
     margin: 16px 0;
   }
-  .callout.warn {
-    border-left-color: #d97706;
-  }
+  .callout.ok { border-left-color: #16a34a; }
+  .callout.warn { border-left-color: #d97706; }
   .grid-2 {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
@@ -206,244 +210,239 @@
 <main>
 
 <header>
-  <div class="kicker">Concept Review · Pre-Build · LOO-1106</div>
-  <h1>Delivery Readiness &amp; Scratch Cleanup</h1>
+  <div class="kicker">Concept Review · Post-Build · LOO-1106</div>
+  <h1>Delivery Readiness, Scratch Cleanup &amp; Check Cadence</h1>
   <p class="lead">
-    <strong>Area taken:</strong> how a reviewed branch moves from work-in-progress to a CI-tested, merged PR — the <code>deliver</code> and <code>quick</code> Graphs, the split between checkpoint PRs (<code>lf pr publish</code>) and landing candidates (<code>lf land</code>, <code>lf arm</code>, <code>lf pr submit</code>), <code>lf scratch clear</code>, and <code>sync</code> / conflict recovery during delivery.
-    Taken as one area because removing <code>gate</code> hands its mechanical contract (clear working notes, push one clean head, trigger full CI) directly to delivery.
+    <strong>Area taken:</strong> how a reviewed branch moves from work-in-progress to a CI-tested, merged PR — the <code>deliver</code> and <code>quick</code> Graphs, trust-boundary review prompts in <code>kickoff</code> and <code>ship-review</code>, the split between checkpoint PRs (<code>lf pr publish</code>) and landing candidates (<code>lf land</code>, <code>lf arm</code>, <code>lf pr submit</code>), <code>lf scratch clear</code>, stacked-PR parent detection, and <code>sync</code> / conflict recovery during delivery.
+    Reviewed as one whole against base <code>25d64b9ea2</code> because removing <code>gate</code> hands its entire mechanical contract (clear working notes, push one clean head, let CI run the matrix) directly to delivery.
   </p>
   <div class="status-strip">
-    <span class="badge existing">Existing = HEAD (3cf61b5832, plan only — no code built yet)</span>
-    <span class="badge proposed">Proposed = revised scratch/plan.md (updated by this review)</span>
+    <span class="badge built">Built &amp; committed on HEAD (a174f277bf)</span>
+    <span class="badge base">Compared against base (25d64b9ea2)</span>
+    <span class="badge note">Review choices = reversible, open to override</span>
     <span class="badge outside">Outside this Task = separate future outcome</span>
   </div>
 </header>
 
+<div class="callout ok">
+  <strong>Verdict:</strong> Every core product concept and code concept in this area now lines up on <code>HEAD</code> (<code>a174f277bf</code>). Nothing in the built model requires another pass through <code>implement</code>. One minor scope choice added during <code>compress</code> (<code>LOOPFLOW.md</code> gaining a 3-line compute-discipline principle) is called out below and in Question 4 so it can be kept or trimmed cleanly in review.
+</div>
+
 <section>
-  <h2>1. Do the product concepts and code concepts line up?</h2>
+  <h2>1. Do the product concepts and code concepts line up on <code>HEAD</code>?</h2>
   <p>
-    Every pairing in this area as it stands on <code>HEAD</code>, and what is wrong wherever the answer is <strong>NO</strong>.
+    Every pairing in this area evaluated against the built code on <code>a174f277bf</code> (commits <code>877f0d126f</code> through <code>a174f277bf</code>).
   </p>
   <table>
     <thead>
       <tr>
         <th style="width: 24%">Product concept</th>
-        <th style="width: 26%">Code / definitions behind it</th>
+        <th style="width: 28%">Code / definitions on HEAD</th>
         <th style="width: 10%">Aligned?</th>
-        <th style="width: 40%">What is wrong (on HEAD) &amp; proposed fix</th>
+        <th style="width: 38%">Assessment on <code>a174f277bf</code></th>
       </tr>
     </thead>
     <tbody>
       <tr>
-        <td><strong>Review-to-merge Graph path</strong><br><span class="muted">After <code>ship-review</code> (or <code>qa</code> on <code>quick</code>), go straight to CI and merge.</span></td>
-        <td><code>deliver.yaml</code>, <code>quick.yaml</code>, <code>gate.md</code>, <code>.lf/skills/gate.md</code>, <code>queue.yaml</code>, <code>.lf/graphs/finish-queue.yaml</code>, <code>.lf/graphs/pursue-auto.yaml</code></td>
-        <td><span class="badge no">NO</span></td>
-        <td><strong>Extra middle step nobody wants:</strong> <code>gate</code> is a generic LLM turn between review and <code>land</code>. <code>queue</code> and <code>finish-queue</code> exist only to run <code>gate</code>; <code>pursue-auto</code> has an outer loop only <code>gate</code> steers.<br><span class="badge proposed">Proposed</span> Delete <code>gate</code>, <code>queue</code>, <code>finish-queue</code>; <code>deliver</code> becomes <code>reflect → cmd: land --wait-and-fix</code>; <code>quick</code> drops <code>gate</code>; <code>pursue-auto</code> drops its outer loop.</td>
-      </tr>
-      <tr>
-        <td><strong>Checkpoint PR vs Landing Candidate</strong><br><span class="muted"><code>pr publish</code> shows WIP with notes (CI deferred); <code>submit</code>/<code>arm</code>/<code>land</code> push a clean head (full CI runs).</span></td>
-        <td><code>ops/pr.rs</code> (<code>create_or_update_pr</code>, <code>consume_gate_artifacts</code>, <code>read_cached_pr_copy</code>), <code>ops/land.rs</code> (<code>prepare_pr</code>), <code>.github/workflows/ci.yml</code> (<code>scratch-clear</code>)</td>
-        <td><span class="badge no">NO</span></td>
-        <td><strong>Dead file-based handoff:</strong> <code>ops/pr.rs</code> and <code>ops/land.rs</code> still read and delete <code>scratch/pr-title.txt</code>, <code>pr-body.md</code>, and <code>.pr-copy-ref</code>, which nothing writes anymore.<br><span class="badge proposed">Proposed</span> Delete <code>consume_gate_artifacts</code>, <code>read_cached_pr_copy</code>, and their 3 tests; keep <code>published_pr_copy</code> (same-head reuse) and <code>generate_pr_copy</code>.</td>
-      </tr>
-      <tr>
-        <td><strong>Delivery owns the clean pushed head</strong><br><span class="muted"><code>land</code>, <code>arm</code>, and <code>submit</code> push one head with no branch-added notes, even through conflicts or stacked merges.</span></td>
-        <td><code>ops/land.rs</code> (<code>prepare_pr</code>, <code>sync_land</code>, <code>accept_completed_integration</code>), <code>ops/sync.rs</code> (<code>start_owned_sync</code>, <code>finish_sync</code>), <code>ops/sync_execution.rs</code> (<code>with_sync_retry</code>)</td>
-        <td><span class="badge no">NO</span></td>
-        <td><strong>Biggest mismatch — no single owner, 6 cracks:</strong> (1) clears before sync, never after <code>sync-conflicts</code>; (2) stacked child clears against parent head and hits <code>UD scratch/plan.md</code> conflict; (3) clearing before sync deletes <code>scratch/plan.md</code> before <code>sync-conflicts</code> can read it and mutates the branch if sync aborts; (4) <code>SyncStrategy::Noop</code> hardcodes <code>push = false</code> so delivery skips pushing; (5) <code>sync_land</code> hardcodes <code>push: true</code> even on <code>--local</code>; (6) non-Task <code>resync == false</code> empty-tree check and standalone already-armed checkpoint shortcut can leak.<br><span class="badge proposed">Proposed</span> Single-owner delivery clear (Section 2).</td>
-      </tr>
-      <tr>
-        <td><strong>"Branch-added scratch"</strong><br><span class="muted">Working notes added on this work, not existing repository files or files moved into <code>scratch/</code>.</span></td>
-        <td><code>ops/scratch.rs::clear(repo)</code> hardcoding <code>task_diff_base</code> else <code>git::scratch::base</code>; <code>git/scratch.rs::added(base, tree)</code></td>
-        <td><span class="badge no">NO</span></td>
-        <td><strong>One function conflating two bases:</strong> while stacked on a live parent, <code>lf scratch clear</code> should keep parent notes out of the child's diff (<code>task_diff_base</code>). At delivery, everything the integration target lacks must clear (<code>target_sha</code> / <code>merge_base(HEAD, integration_base)</code>).<br><span class="badge proposed">Proposed</span> <code>ops::scratch::clear(repo, base)</code> takes its base explicitly.</td>
-      </tr>
-      <tr>
-        <td><strong>Sync mode: ordinary sync vs delivery sync</strong><br><span class="muted">Plain <code>lf sync</code> keeps working notes; delivery sync prepares a clean, non-empty pushed head.</span></td>
-        <td><code>SyncExpectation.require_changes: bool</code> in <code>ops/sync.rs:64-68</code></td>
-        <td><span class="badge no">NO</span></td>
-        <td><strong>Name hides the concept:</strong> <code>require_changes</code> names one check instead of the delivery contract (drop pure stacked-scratch conflicts, clear notes against <code>target_sha</code>, refuse empty tree, push on <code>Noop</code>).<br><span class="badge proposed">Proposed</span> Rename to <code>delivery: bool</code>.</td>
-      </tr>
-      <tr>
-        <td><strong>Stack base after delivery merge</strong><br><span class="muted">A stacked child whose parent squash-merged detaches onto <code>main</code> once it integrates.</span></td>
-        <td><code>finish_sync</code> → <code>record_control_task_state</code> (<code>sync.rs:441</code>), PLUS <code>sync_land</code> (<code>land.rs:411</code>), PLUS <code>accept_completed_integration</code> reading <code>HEAD^2</code> (<code>land.rs:419</code>)</td>
-        <td><span class="badge no">NO</span></td>
-        <td><strong>Three writers for one transition, and one breaks:</strong> <code>finish_sync</code> already calls <code>record_stack_sync(target_sha, clear_parent=true)</code>. <code>sync_land</code> duplicates it, and <code>accept_completed_integration</code> assumes <code>HEAD</code> is a 2-parent merge commit (<code>HEAD^2</code>), which fails once a clear commit sits on top.<br><span class="badge proposed">Proposed</span> Delete both extra callers; <code>finish_sync</code> is the single owner.</td>
-      </tr>
-      <tr>
-        <td><strong>PR body vs CI check results</strong><br><span class="muted">CI shows test/lint/QA results; the PR body keeps why it changed and only checks that wait for post-merge.</span></td>
-        <td><code>pr-message.md:25</code> vs <code>AGENTS.md:455-456</code></td>
-        <td><span class="badge no">NO</span></td>
-        <td><strong>Contradiction in instructions:</strong> <code>pr-message.md</code> forbids test/lint/QA lines in the PR body, while <code>AGENTS.md</code> says check lines move from <code>scratch/</code> into the PR body when cleared (and <code>generate_pr_copy</code> never reads <code>scratch/</code>).<br><span class="badge proposed">Proposed</span> Align <code>AGENTS.md:454-456</code> with <code>pr-message.md</code>.</td>
-      </tr>
-      <tr>
-        <td><strong>Manual cleanup (<code>lf scratch clear</code>)</strong><br><span class="muted">Clear this branch's committed notes on demand (e.g. before a manual <code>lf pr publish</code> to trigger CI without arming).</span></td>
-        <td><code>lf.rs:3298</code> → <code>ops/scratch.rs</code></td>
+        <td><strong>Review-to-merge Graph path</strong><br><span class="muted">After <code>ship-review</code> (or <code>qa</code> on <code>quick</code>), go straight to CI and merge with no extra agent turn.</span></td>
+        <td><code>deliver.yaml</code> (<code>reflect → cmd: land --wait-and-fix</code>), <code>quick.yaml</code>, <code>.lf/graphs/pursue-auto.yaml</code>; <code>gate.md</code>, <code>.lf/skills/gate.md</code>, <code>queue.yaml</code>, <code>.lf/graphs/finish-queue.yaml</code> deleted</td>
         <td><span class="badge yes">YES</span></td>
-        <td>Clean 1:1 pairing. Keeps today's base (<code>task_diff_base</code> else <code>git::scratch::base</code>).</td>
+        <td><span class="badge built">Built</span> <code>lf gate</code>, <code>lf help gate</code>, <code>lf skill customize gate</code>, and <code>queue</code> are gone; <code>pursue-auto</code> drops the outer loop <code>gate</code> used to steer; engine strings, docs, DTO fixtures, and tests agree.</td>
       </tr>
       <tr>
-        <td><strong>CI check deferral &amp; repair loop</strong><br><span class="muted">Checkpoint PRs skip the matrix; clean PRs run it; <code>land --wait-and-fix</code> + <code>ci-fix</code> repair failures.</span></td>
-        <td><code>.github/workflows/ci.yml</code> (<code>scratch-clear</code>), <code>ops/pr_landing.rs</code> (<code>decide_merge</code>, <code>admit_ci_fix</code>), <code>ci-fix.md</code></td>
+        <td><strong>Trust &amp; data boundary review</strong><br><span class="muted">Plans and ship reviews surface sensitive boundaries and offer opt-in focused reviews before delivery.</span></td>
+        <td>Builtin <code>kickoff.md</code> &amp; <code>ship-review.md</code>; repo overlays <code>.lf/skills/kickoff.md</code> &amp; <code>.lf/skills/ship-review.md</code> (<code>extends: builtin</code>)</td>
         <td><span class="badge yes">YES</span></td>
-        <td>No change needed once delivery cannot push a head with branch-added notes.</td>
+        <td><span class="badge built">Built</span> Builtins state the general boundary categories; repo overlays name Loopflow's four concrete triggers (Modal/Daytona credential forwarding, telemetry/outbound data, mobile/Tailscale server auth, install/release publisher boundary).</td>
+      </tr>
+      <tr>
+        <td><strong>Checkpoint PR vs Landing Candidate</strong><br><span class="muted"><code>pr publish</code> shows WIP with notes (CI deferred); <code>submit</code>/<code>arm</code>/<code>land</code> push one clean head (full CI runs).</span></td>
+        <td><code>ops/pr.rs::create_or_update_pr</code> (keeps notes; dead <code>consume_gate_artifacts</code> / <code>read_cached_pr_copy</code> / <code>.pr-copy-ref</code> deleted); <code>ops/land.rs::prepare_pr</code> (reuses <code>published_pr_copy</code> before push)</td>
+        <td><span class="badge yes">YES</span></td>
+        <td><span class="badge built">Built</span> Gate's dead file-based PR-copy handoff is gone. <code>lf pr publish</code> keeps notes intact for <code>ship-review</code>; delivery clears once and pushes once.</td>
+      </tr>
+      <tr>
+        <td><strong>Single-owner delivery clear &amp; push</strong><br><span class="muted"><code>land</code>, <code>arm</code>, and <code>submit</code> push one scratch-free, non-empty head — even through conflicts, <code>Noop</code>, or stacked merges — while keeping notes on disk during real code conflicts.</span></td>
+        <td><code>ops/scratch.rs::clear_for_delivery(repo, base)</code> called at the two push boundaries: <code>ops/sync.rs::verify_sync</code> (when <code>expected.delivery</code>) and <code>ops/land.rs::prepare_pr</code> (when <code>!resync</code>); <code>continue_delivery_scratch_conflicts</code> in <code>ops/sync.rs</code>; <code>git/scratch.rs::remove</code></td>
+        <td><span class="badge yes">YES</span></td>
+        <td><span class="badge built">Built</span> One helper owns both clearing and the empty-tree refusal. <code>Noop</code> pushes for delivery (<code>options.push &amp;&amp; expected.delivery</code>); <code>--local</code> passes <code>push: false</code> and guards remote branch deletion by ancestry; standalone already-armed shortcut checks <code>scratch::added</code> is empty.</td>
+      </tr>
+      <tr>
+        <td><strong>Two bases for "branch-added scratch"</strong><br><span class="muted">Manual <code>lf scratch clear</code> keeps a live stack parent's notes out of the child's diff; delivery clears everything the integration target lacks.</span></td>
+        <td><code>ops/scratch.rs::clear(repo)</code> (CLI: <code>task_diff_base</code> else <code>git::scratch::base</code>) vs <code>ops/scratch.rs::clear_for_delivery(repo, base)</code> (delivery: <code>target_sha</code> or <code>merge_base(HEAD, integration_base)</code>)</td>
+        <td><span class="badge yes">YES</span></td>
+        <td><span class="badge built">Built</span> Refined in <code>compress</code> (<code>4173f7b5ad</code>): the public API stays simple (<code>clear(repo)</code>) while delivery routes through one internal entry point (<code>clear_for_delivery</code>).</td>
+      </tr>
+      <tr>
+        <td><strong>Ordinary sync vs delivery sync</strong><br><span class="muted">Plain <code>lf sync</code> keeps notes; delivery sync drops pure scratch conflicts, clears remaining notes, refuses empty trees, and pushes on <code>Noop</code>.</span></td>
+        <td><code>SyncExpectation.delivery: bool</code> in <code>ops/sync.rs</code> (replacing <code>require_changes</code>)</td>
+        <td><span class="badge yes">YES</span></td>
+        <td><span class="badge built">Built</span> One boolean names the real mode; plain <code>lf sync</code> sets <code>false</code> and leaves notes untouched.</td>
+      </tr>
+      <tr>
+        <td><strong>Stacked child after parent merges</strong><br><span class="muted">A child whose parent squash-merged detaches onto <code>main</code> cleanly even if the parent's remote branch is already deleted.</span></td>
+        <td><code>ops/task/delivery.rs::resolve_task_pr_upstream</code> (reconciles live-recorded parent PR with GitHub before fetching); <code>ops/sync.rs::finish_sync</code> → <code>record_control_task_state</code> (single stack-sync writer)</td>
+        <td><span class="badge yes">YES</span></td>
+        <td><span class="badge built">Built</span> QA caught that <code>prepare_pr</code> fetched a deleted parent branch before asking GitHub whether the parent merged; fixed in <code>a174f277bf</code> and covered by <code>stacked_child_lands_when_parent_merge_is_not_yet_recorded</code>. Redundant <code>HEAD^2</code> and duplicate <code>record_stack_sync</code> callers are deleted.</td>
+      </tr>
+      <tr>
+        <td><strong>CI deferral, PR copy &amp; repair loop</strong><br><span class="muted">CI runs automated checks and shows results; PR body states why it changed and post-merge checks; <code>land --wait-and-fix</code> + <code>ci-fix</code> repair failures.</span></td>
+        <td><code>.github/workflows/ci.yml</code>, <code>.github/CI.md</code>, <code>AGENTS.md</code>, <code>ops/pr_landing.rs</code>, <code>ci-fix.md</code></td>
+        <td><span class="badge yes">YES</span></td>
+        <td><span class="badge built">Built</span> <code>AGENTS.md</code> and <code>.github/CI.md</code> now match <code>pr-message.md</code> and the single-push delivery behavior.</td>
+      </tr>
+      <tr>
+        <td><strong>Local check cadence vs CI</strong><br><span class="muted">Agents run narrow checks locally and defer broad suites and release builds to CI.</span></td>
+        <td><code>implement.md</code>, <code>compress.md</code>, <code>debug.md</code>, <code>qa.md</code>, <code>ci-fix.md</code>, plus <code>LOOPFLOW.md</code> &amp; <code>skills/loopflow/SKILL.md</code> (added in <code>4173f7b5ad</code>)</td>
+        <td><span class="badge note">REVIEW</span></td>
+        <td><span class="badge built">Built</span> Coherent with "CI is the gate", but adding a 3-line principle to <code>LOOPFLOW.md</code> is paid on every run (while <code>AGENTS.md</code> prefers per-skill rules). Kept as a reversible review choice (Question 4).</td>
       </tr>
     </tbody>
   </table>
 </section>
 
 <section>
-  <h2>2. Biggest mismatch: split ownership of the clean pushed head</h2>
+  <h2>2. Before vs Built: how the biggest mismatch was resolved</h2>
   <p>
-    Both <code>HEAD</code> and the first kickoff draft cleared <code>scratch/</code> <em>before</em> merging upstream changes in <code>prepare_pr</code>.
-    Walking real paths exposes why that split breaks down — and why moving to one clear at the push boundary is smaller and cleaner.
+    On base <code>25d64b9ea2</code>, delivery cleared <code>scratch/</code> <em>before</em> syncing against <code>task_diff_base</code> and never cleared after conflict recovery — causing six failures across stacked children, real conflicts, <code>Noop</code> syncs, <code>--local</code>, and manually armed checkpoints. On <code>HEAD</code> (<code>a174f277bf</code>), clearing happens once at the push boundary through <code>clear_for_delivery</code>.
   </p>
-
-  <div class="callout warn">
-    <strong>What the kickoff draft missed (caught by walking failure and edge paths):</strong>
-    <ol style="margin-top:8px; margin-bottom:0;">
-      <li><strong>Real code conflict loses <code>scratch/plan.md</code>:</strong> clearing before <code>sync_land</code> deletes <code>scratch/plan.md</code> from disk right before <code>sync-conflicts</code> starts — even though <code>sync-conflicts.md:9</code> tells the resolver to read <code>scratch/</code>. If the resolver stops or runs <code>lf sync --abort</code>, the failed <code>lf land</code> leaves a <code>"Clear added scratch files"</code> commit and wiped notes on the branch.</li>
-      <li><strong><code>SyncStrategy::Noop</code> never pushes:</strong> <code>ops/sync.rs:292</code> hardcodes <code>finish_sync(..., false)</code> for <code>Noop</code>. A persistent worktree or already-integrated stacked child hits <code>Noop</code> in <code>sync_land</code> and skips pushing its clear commit entirely.</li>
-      <li><strong><code>lf land --local</code> still pushes:</strong> <code>ops/land.rs:406</code> hardcodes <code>push: true</code> in <code>sync_land</code> even when <code>options.local</code> is set.</li>
-      <li><strong>Two smaller leaks:</strong> non-Task notes-only PRs on <code>resync == false</code> bypass <code>require_task_pr_range_nonempty</code>, and the standalone already-armed shortcut (<code>land.rs:97-113</code>) can return early on a manually armed checkpoint head without clearing notes.</li>
-    </ol>
-  </div>
 
   <div class="grid-2">
     <div class="card">
-      <div class="path-label"><span class="badge existing">Before (HEAD)</span></div>
+      <div class="path-label"><span class="badge base">Before (base 25d64b9ea2)</span></div>
       <h3>Pre-sync clear + unguarded push</h3>
       <pre><code>prepare_pr(Required):
-  resolve_pr_copy()      # reads dead scratch/pr-title.txt
-  scratch::clear(task_diff_base)  # misses parent notes!
-                                  # deletes plan.md pre-conflict!
+  refresh_task_pr_base()         # fetches deleted parent branch!
+  resolve_pr_copy()              # reads dead scratch/pr-title.txt
+  scratch::clear(task_diff_base) # misses parent notes;
+                                 # wipes plan.md pre-conflict!
   if resync:
-    sync_land(push: true)         # pushes even on --local!
-      Noop   -&gt; finish_sync(push=false)  # drops push!
-      Merge  -&gt; UD scratch/plan.md -&gt; launches LLM agent!
-      Agent  -&gt; may restore scratch/ -&gt; pushed as-is!
+    sync_land(push: true)        # pushes even on --local!
+      Noop  -&gt; finish_sync(push=false) # drops push!
+      Merge -&gt; UD scratch/plan.md -&gt; launches LLM agent!
+      Agent -&gt; may restore scratch/ -&gt; pushed as-is!
   else:
     push_with_upstream_if_needed() # no non-Task empty check
 
-prepare_pr(Completed):            # retry after conflict
-  accept_completed_integration()  # reads HEAD^2 (fragile)
+prepare_pr(Completed):           # retry after conflict
+  accept_completed_integration() # reads HEAD^2 (fragile)
   # scratch::clear skipped!</code></pre>
     </div>
 
     <div class="card">
-      <div class="path-label"><span class="badge proposed">After (Revised Plan)</span></div>
+      <div class="path-label"><span class="badge built">Built (HEAD a174f277bf)</span></div>
       <h3>Single-owner clear at the push boundary</h3>
       <pre><code>prepare_pr(Required):
-  # standalone armed shortcut checks added scratch == empty
-  resolve_pr_copy()               # published_pr_copy | generate
+  refresh_task_pr_base()         # reconciles live parent PR first
+  # standalone armed shortcut checks scratch::added == empty
+  resolve_pr_copy()              # published_pr_copy | generate
   if resync:
-    sync_land(push: !local)       # delivery: true; notes stay on disk
+    sync_land(push: !local)      # delivery: true; notes stay on disk
       Noop  -&gt; finish_sync(push = options.push &amp;&amp; delivery)
-      Merge -&gt; if all rerere_remaining are branch-added scratch
-               absent from target_sha:
-                 git rm -f &amp;&amp; continue_merge  # 0 agents!
-               else:
-                 sync-conflicts reads scratch/plan.md on disk;
-                 lf sync --abort leaves 0 clear commits!
+      Merge -&gt; continue_delivery_scratch_conflicts:
+                 if all rerere_remaining are branch-added scratch
+                 absent from target_sha:
+                   git rm -f &amp;&amp; continue_merge  # 0 agents!
+                 else:
+                   sync-conflicts reads scratch/plan.md on disk;
+                   lf sync --abort leaves 0 clear commits!
       finish_sync:
         verify_integrated_head + 0 unmerged paths
-        scratch::clear(repo, target_sha)       # ONE clear
-        refuse if HEAD^{tree} == target^{tree} # before push
+        clear_for_delivery(repo, target_sha)    # ONE clear + non-empty
         push once (skip if remote == HEAD)
-        record_control_task_state(target_sha)  # ONE stack write
+        record_control_task_state(target_sha)   # ONE stack write
   else:
-    base = merge_base(HEAD, integration_base)
-    scratch::clear(repo, base)                 # ONE clear
-    refuse if empty (Task or non-Task)
+    clear_for_delivery(repo, git::scratch::base) # ONE clear + non-empty
+    require_task_pr_range_nonempty()
     push_with_upstream_if_needed()
 
 prepare_pr(Completed):
-  get_default_branch()            # no HEAD^2, already cleared &amp; pushed</code></pre>
+  # no HEAD^2, already cleared &amp; pushed by finish_sync</code></pre>
     </div>
   </div>
 </section>
 
 <section>
-  <h2>3. Concrete walkthroughs (normal, failure, recovery, edge)</h2>
-
+  <h2>3. Concrete walkthroughs (verified on <code>HEAD</code>)</h2>
   <table>
     <thead>
       <tr>
         <th style="width: 24%">Scenario</th>
-        <th style="width: 38%">What a person sees</th>
+        <th style="width: 38%">Observed / verified behavior on <code>a174f277bf</code></th>
         <th style="width: 38%">What survives / what changes on purpose</th>
       </tr>
     </thead>
     <tbody>
       <tr>
         <td><strong>1. Normal <code>code</code> Task</strong><br><span class="muted"><code>build</code> → <code>ship-review</code> → <code>deliver</code></span></td>
-        <td><code>pr-publish</code> opens a checkpoint PR (notes kept, CI deferred during <code>ship-review</code>). After approval, <code>deliver</code> runs <code>reflect</code> then <code>lf land --wait-and-fix</code>: clears notes, pushes 1 clean head, full CI runs, merges.</td>
-        <td>Published PR copy reused if no new local commits; checkpoint history kept in git; <code>scratch/.gitkeep</code> and any existing repo docs under <code>scratch/</code> survive.</td>
+        <td><code>pr-publish</code> pushes checkpoint head with <code>scratch/plan.md</code> (CI deferred). After approval, <code>deliver</code> runs <code>reflect</code> then <code>lf land --wait-and-fix</code>: clears notes, pushes 1 clean head, arms exact-head auto-merge; repeat <code>lf land</code> reports already armed with 0 pushes. <em>(QA §4)</em></td>
+        <td>Published PR copy reused when no local commits were added; checkpoint history stays in git; <code>scratch/.gitkeep</code> and pre-existing repo files under <code>scratch/</code> survive.</td>
       </tr>
       <tr>
-        <td><strong>2. Stacked child, parent squash-merged</strong><br><span class="muted">Parent added <code>scratch/plan.md</code>, child edited it.</span></td>
-        <td><code>lf land</code> merges <code>origin/main</code> via fork comparison, sees only <code>UD scratch/plan.md</code> in <code>rerere remaining</code>, drops it mechanically (0 agents launched), clears any other child notes in <code>finish_sync</code>, detaches stack, pushes once.</td>
-        <td>Child commits and commit identities survive; parent link clears in store and PR retargets to <code>main</code>; remote head has only <code>scratch/.gitkeep</code>.</td>
+        <td><strong>2. Stacked child, parent squash-landed &amp; branch deleted</strong><br><span class="muted">Parent added <code>scratch/plan.md</code>, child edited it and added <code>scratch/qa.md</code>.</span></td>
+        <td><code>resolve_task_pr_upstream</code> reconciles parent PR with GitHub instead of fetching its deleted branch; <code>sync_for_delivery</code> merges <code>origin/main</code>, sees only <code>UD scratch/plan.md</code> in <code>rerere remaining</code>, drops it mechanically (0 agents), clears <code>scratch/qa.md</code> in <code>finish_sync</code>, pushes 1 head, arms auto-merge pinned to it. <em>(QA §2 + unit test)</em></td>
+        <td>Child commit history survives; parent link clears in store and PR retargets to <code>main</code>; remote tree has only <code>scratch/.gitkeep</code>.</td>
       </tr>
       <tr>
-        <td><strong>3. Real code conflict during <code>lf land</code></strong><br><span class="muted"><code>src/foo.rs</code> conflicts with <code>main</code>.</span></td>
-        <td><code>sync-conflicts</code> launches with <code>scratch/plan.md</code> still on disk. If it resolves <code>src/foo.rs</code> (even if it writes <code>scratch/notes.md</code>), <code>finish_sync</code> clears notes and pushes once. If it aborts (<code>lf sync --abort</code>), branch is untouched.</td>
-        <td>On abort: zero clear commits, all notes intact. On recovery: conflict resolution survives, notes cleared before push, 1 push total.</td>
+        <td><strong>3. Real code conflict during <code>lf land</code></strong><br><span class="muted"><code>code.txt</code> conflicts with <code>main</code> alongside <code>scratch/plan.md</code> (tested for both <code>UU</code> and <code>DU</code> + <code>UD</code>).</span></td>
+        <td><code>rerere remaining</code> reports both paths; <code>continue_delivery_scratch_conflicts</code> backs off before removing anything. <code>sync-conflicts</code> launches with <code>scratch/plan.md</code> on disk. On failure + <code>lf sync --abort</code>: 0 clear commits, 0 pushes, notes intact. Once resolved, <code>finish_sync</code> clears notes and pushes once. <em>(QA §3 + git probe + unit test)</em></td>
+        <td>On abort: branch and notes completely untouched. On recovery: conflict resolution survives, notes cleared before the single push.</td>
       </tr>
       <tr>
-        <td><strong>4. <code>Noop</code> delivery or <code>--local</code></strong><br><span class="muted">Already-integrated stack, persistent worktree, or origin-less <code>--local</code>.</span></td>
-        <td><code>Noop</code> delivery still clears committed notes and pushes the new head (skipping push only if remote already matches). <code>lf land --local</code> clears and merges locally without touching <code>origin</code>.</td>
-        <td>Untracked notes and unstaged edits in a persistent worktree survive untouched (<code>git::scratch::added</code> inspects committed <code>HEAD</code> only).</td>
+        <td><strong>4. <code>Noop</code> delivery or <code>--local</code></strong><br><span class="muted">Already-integrated stack, persistent worktree, or local merge.</span></td>
+        <td><code>Noop</code> delivery runs <code>clear_for_delivery</code> and pushes when remote differs from <code>HEAD</code> (skipping push if already equal). <code>lf land --local</code> merges locally with <code>push: false</code> and deletes a remote branch only if its head is already an ancestor of the merged head. <em>(<code>land_tests</code>)</em></td>
+        <td>Untracked notes in a persistent worktree stay local; unmerged remote commits are never deleted by <code>--local</code>.</td>
       </tr>
       <tr>
-        <td><strong>5. Renamed repo doc in <code>scratch/</code></strong><br><span class="muted"><code>git mv research.md scratch/research.md</code></span></td>
-        <td><code>git::scratch::added</code> uses <code>--find-renames</code> across the whole tree, so both auto-drop and <code>finish_sync</code> leave the moved file alone.</td>
-        <td>Repository content is never mistaken for a disposable note.</td>
+        <td><strong>5. Renamed repo doc or notes-only branch</strong><br><span class="muted"><code>git mv doc.md scratch/doc.md</code>, or branch with only <code>scratch/</code> additions.</span></td>
+        <td><code>git::scratch::added</code> uses <code>--find-renames</code> across the whole tree, so moved repo docs are never treated as disposable notes. A branch whose tree matches base after clearing is refused before any push (Task and non-Task, <code>resync</code> true or false). <em>(<code>land_tests</code>, <code>scratch_tests</code>)</em></td>
+        <td>Repository content is preserved; empty PRs are never pushed.</td>
       </tr>
     </tbody>
   </table>
 </section>
 
 <section>
-  <h2>4. Choices made for review (recorded in <code>scratch/plan.md</code>)</h2>
+  <h2>4. Reversible choices built for review</h2>
   <p>
-    Every choice below is reversible; none is irreversible once shipped, so the plan commits to the boldest, simplest option and records what was passed over.
+    Every choice below is already built and committed on <code>HEAD</code>; none is irreversible once shipped.
   </p>
   <ol>
-    <li><strong>Single-owner delivery clear (no pre-sync clear when <code>resync == true</code>).</strong> Keeps <code>scratch/plan.md</code> readable during real code conflicts and avoids mutating the branch on abort, while auto-dropping pure stacked-scratch <code>UD</code> conflicts with zero agent launches. <em>Passed over:</em> clearing before sync in <code>prepare_pr</code> and clearing again in <code>finish_sync</code>.</li>
-    <li><strong>Delete builtin <code>queue</code> Graph and <code>.lf/graphs/finish-queue.yaml</code>.</strong> Without <code>gate</code>, <code>queue</code> is just <code>compress</code> + <code>refresh</code> with no caller outside tests and one doc row. <em>Passed over:</em> keeping an unused two-step Graph.</li>
-    <li><strong>Delete cached PR copy (<code>scratch/pr-title.txt</code>, <code>pr-body.md</code>, <code>.pr-copy-ref</code>).</strong> Nothing writes it anymore; it was <code>gate</code>'s handoff. <em>Passed over:</em> leaving dead readers for a separate cleanup.</li>
-    <li><strong>Drop <code>pursue-auto</code>'s outer loop with <code>gate</code>.</strong> The outer loop had no step other than the inner loop plus <code>gate</code> + <code>loop-or-next</code>. <em>Passed over:</em> keeping a degenerate outer loop.</li>
-    <li><strong>Keep <code>lf scratch clear</code> as a standalone command</strong> with today's base (<code>task_diff_base</code> else <code>git::scratch::base</code>) so someone can still trigger CI on a manual <code>lf pr publish</code> without arming auto-merge. <em>Passed over:</em> deleting the CLI command.</li>
+    <li><strong>Single-owner delivery clear (no pre-sync clear when <code>resync == true</code>).</strong> Keeps <code>scratch/plan.md</code> on disk during real code conflicts and avoids leaving a clear commit on abort, while dropping pure stacked-scratch conflicts mechanically. <em>Passed over:</em> clearing in <code>prepare_pr</code> before sync and again in <code>finish_sync</code>.</li>
+    <li><strong>Delete builtin <code>queue</code> Graph and <code>.lf/graphs/finish-queue.yaml</code>.</strong> Without <code>gate</code>, <code>queue</code> is only <code>compress</code> + <code>refresh</code> with no caller outside tests and one doc row. <em>Passed over:</em> keeping an unused two-step Graph.</li>
+    <li><strong>Delete cached PR copy (<code>scratch/pr-title.txt</code>, <code>pr-body.md</code>, <code>.pr-copy-ref</code>).</strong> Nothing wrote it anymore; it was <code>gate</code>'s handoff. <em>Passed over:</em> leaving dead readers for later.</li>
+    <li><strong>Drop <code>pursue-auto</code>'s outer loop with <code>gate</code>.</strong> The outer loop only wrapped the inner loop plus <code>gate</code> + <code>loop-or-next</code>. <em>Passed over:</em> keeping a degenerate outer loop.</li>
+    <li><strong>Keep <code>lf scratch clear</code> as a standalone CLI command</strong> using today's base (<code>task_diff_base</code> else <code>git::scratch::base</code>) for triggering CI on a manual <code>lf pr publish</code> without arming auto-merge. <em>Passed over:</em> removing the CLI subcommand.</li>
+    <li><strong>Add a 3-line compute-discipline principle to <code>LOOPFLOW.md</code> and <code>skills/loopflow/SKILL.md</code></strong> (added during <code>compress</code> in <code>4173f7b5ad</code> alongside per-skill check-cadence updates in <code>implement</code>, <code>compress</code>, <code>debug</code>, <code>qa</code>, and <code>ci-fix</code>). <em>Passed over:</em> keeping check-cadence guidance strictly inside those five skills so <code>LOOPFLOW.md</code> stays smaller on every run.</li>
   </ol>
 </section>
 
 <section>
   <h2>5. Outside this Task</h2>
   <ul>
-    <li><span class="badge outside">Outside</span> <strong>Opt-in tailored review skills</strong> (<code>security-review</code>, <code>performance-review</code>): named in the Task brief as dedicated opt-in skills later.</li>
-    <li><span class="badge outside">Outside</span> <strong>Local test runner naming</strong> (<code>scripts/test.py</code>'s <code>.lf/tmp/gate</code> directory and <code>python/tests/test_gate_bounded.py</code>): repo-internal test runner vocabulary, not the <code>gate</code> skill. Renaming would touch CI/test-runner scripts and evidence schemas for no user-facing change.</li>
-    <li><span class="badge outside">Outside</span> <strong>Plain <code>lf sync</code> stacked-scratch modify/delete conflicts:</strong> a stacked child running ordinary <code>lf sync</code> (not delivery) after its parent squash-merged still wants to <em>keep</em> its edited <code>scratch/plan.md</code>, which is a different rule from delivery's discard. Worth a small follow-up if it bites in practice.</li>
-    <li><span class="badge outside">Outside</span> <strong>Wave <code>MEMORY.md</code> files</strong> mentioning <code>gate</code> as a historical phase (read-only in a Task checkout; updated by <code>wave-session</code>).</li>
+    <li><span class="badge outside">Outside</span> <strong>Opt-in tailored review skills</strong> (<code>security-review</code>, <code>performance-review</code>): named in the Task brief as separate future skills.</li>
+    <li><span class="badge outside">Outside</span> <strong>Local test runner naming</strong> (<code>scripts/test.py</code>'s <code>.lf/tmp/gate</code> directory and <code>python/tests/test_gate_bounded.py</code>): repo-internal test runner vocabulary, not the <code>gate</code> skill.</li>
+    <li><span class="badge outside">Outside</span> <strong>Plain <code>lf sync</code> stacked-scratch modify/delete conflicts:</strong> ordinary <code>lf sync</code> (outside delivery) wants to <em>keep</em> an edited <code>scratch/plan.md</code> after a parent squash-merges — the opposite rule from delivery's discard.</li>
+    <li><span class="badge outside">Outside</span> <strong>Wave <code>MEMORY.md</code> files</strong> mentioning <code>gate</code> as a historical phase (read-only in a Task checkout; curated by <code>wave-session</code>).</li>
   </ul>
 </section>
 
 <section>
   <h2>6. Open questions for review</h2>
-  <p class="muted">Answer with a number and letter (for example, <code>1a 2b</code>). Nothing here blocks building the plan as written.</p>
+  <p class="muted">Answer with a number and letter (for example, <code>1a 4b</code>). All chosen options are already built on <code>HEAD</code>.</p>
 
   <div class="question">
     <h3>1. When <code>lf land</code> hits a real merge conflict, should your <code>scratch/</code> notes stay in the checkout until the conflict is resolved?</h3>
     <ul class="opts">
-      <li><strong>1a (Chosen in plan):</strong> Yes — notes stay on disk so the conflict resolver can read your plan, and aborting the conflict leaves your branch and notes untouched. Notes clear only when the merge finishes and is about to push.</li>
-      <li><strong>1b:</strong> No — clear notes before attempting the merge, then clear again after conflict resolution. Simpler merge path, but the resolver cannot read <code>scratch/plan.md</code> on disk and an aborted land leaves a "Clear added scratch files" commit behind.</li>
+      <li><strong>1a (Built):</strong> Yes — notes stay on disk so the conflict resolver can read your plan, and aborting the conflict leaves your branch and notes untouched. Notes clear only when the merge finishes and is about to push.</li>
+      <li><strong>1b:</strong> No — clear notes before attempting the merge, then clear again after conflict resolution. The resolver cannot read <code>scratch/plan.md</code> on disk and an aborted land leaves a "Clear added scratch files" commit behind.</li>
     </ul>
   </div>
 
   <div class="question">
     <h3>2. Should <code>lf scratch clear</code> stay as a command you can run by hand?</h3>
     <ul class="opts">
-      <li><strong>2a (Chosen in plan):</strong> Keep it — useful if you want to trigger full CI on a manual <code>lf pr publish</code> without arming auto-merge or submitting.</li>
+      <li><strong>2a (Built):</strong> Keep it — useful if you want to trigger full CI on a manual <code>lf pr publish</code> without arming auto-merge or submitting.</li>
       <li><strong>2b:</strong> Remove the command — only <code>lf land</code>, <code>lf arm</code>, and <code>lf pr submit</code> clear working notes.</li>
     </ul>
   </div>
@@ -451,8 +450,16 @@ prepare_pr(Completed):
   <div class="question">
     <h3>3. Should the unused <code>queue</code> Graph disappear with <code>gate</code>?</h3>
     <ul class="opts">
-      <li><strong>3a (Chosen in plan):</strong> Delete <code>queue</code> (and <code>.lf/graphs/finish-queue.yaml</code>) — without <code>gate</code> it is only <code>compress</code> + <code>refresh</code> and nothing invokes it.</li>
+      <li><strong>3a (Built):</strong> Delete <code>queue</code> (and <code>.lf/graphs/finish-queue.yaml</code>) — without <code>gate</code> it is only <code>compress</code> + <code>refresh</code> and nothing runs it.</li>
       <li><strong>3b:</strong> Keep <code>queue</code> as <code>compress</code> → <code>refresh</code>.</li>
+    </ul>
+  </div>
+
+  <div class="question">
+    <h3>4. Should the 3-line "Spend compute deliberately" principle stay in <code>LOOPFLOW.md</code> (included on every agent run), or live only in the individual skills that run tests?</h3>
+    <ul class="opts">
+      <li><strong>4a (Built):</strong> Keep it in <code>LOOPFLOW.md</code> — every agent run (including ad-hoc sessions) gets the reminder to run narrow checks and leave broad suites to CI.</li>
+      <li><strong>4b:</strong> Remove it from <code>LOOPFLOW.md</code> and <code>skills/loopflow/SKILL.md</code> (and their goldens) — keep the rule only in <code>implement</code>, <code>compress</code>, <code>debug</code>, <code>qa</code>, and <code>ci-fix</code> so <code>LOOPFLOW.md</code> stays leaner on every run.</li>
     </ul>
   </div>
 </section>

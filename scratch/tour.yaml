@@ -1,11 +1,13 @@
-at: e63e6c31c2c81f06c6f86b1a19710b3a19321200
+at: deccc41ce6e3c73e53e67b5ea6c57a806aff4f0b
 first:
   - path: docs/work.md
     why: Pause and resume from the saved step
   - path: docs/surfaces.md
     why: How Working looks across surfaces
   - path: rust/loopflow-execution/src/task_graph.rs
-    why: Derive the next action from the saved Graph position
+    why: Read the saved cursor for display and resume
+  - path: rust/loopflow-execution/src/engine/task.rs
+    why: Return a run receipt or leave the stop waiting
   - path: rust/loopflow-storage/src/execution.rs
     why: Lifecycle, board membership and Working groups
   - path: rust/loopflow-storage/src/migrations/task_pauses.sql
@@ -13,7 +15,11 @@ first:
   - path: rust/loopflow-storage/src/sqlite/task_pause.rs
     why: Commit the hold and Graph stop together
   - path: rust/loopflow-execution/src/ops/task/pause.rs
-    why: Stop workers while the primary conversation stays open
+    why: Release the hold under run admission
+  - path: rust/loopflow-execution/src/ops/task.rs
+    why: Keep admission until the run claims its cursor
+  - path: rust/loopflow/src/lf/commands/graph.rs
+    why: Carry resumed and ordinary Graph runs alike
   - path: rust/loopflow-execution/src/harness/agent_process.rs
     why: Capture worker sessions under their attachment locks
   - path: rust/loopflow-execution/src/os_process.rs
@@ -55,13 +61,13 @@ first:
   - path: swift/Loopflow/Services/PendingChanges.swift
     why: Keep rows in place while pause or unpause settles
   - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
-    why: Resume a worker and leave review waiting
+    why: Resume workers and keep parked Graphs waiting
   - path: rust/loopflow/tests/machine_commands.rs
-    why: Exercise pause during a two-Machine move
+    why: Honor the owning Machine’s cursor after a stale click
   - path: swift/LoopflowTests/TaskConceptTests.swift
     why: Exercise group order, keyboard selection and paused conversations
   - path: swift/LoopflowTests/TaskActionsTests.swift
-    why: Click each unpause choice and check its write
+    why: Exercise unpause choices and the landing wait
   - path: swift/LoopflowiOSTests/TaskActionsTests.swift
     why: Measure the phone controls before and after pause
   - path: swift/LoopflowiOSTests/TaskFeedTests.swift

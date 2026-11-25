@@ -141,7 +141,7 @@ pub(super) fn scan_checkout<'a>(
         }
         let source = match read_search_file(&root, &checkout, path, &mut bytes) {
             Ok(None) => continue,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) if skip_search_error(&error) => continue,
             Err(error) => return Err(task_error(format!("Cannot search {path:?}: {error}"))),
             Ok(Some(source)) => source,
         };
@@ -178,6 +178,16 @@ fn read_search_file<'a>(
         return Ok(None);
     }
     Ok(std::str::from_utf8(bytes).ok())
+}
+
+fn skip_search_error(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+    ) || matches!(
+        error.raw_os_error(),
+        Some(libc::ELOOP | libc::EISDIR | libc::ENOTDIR | libc::ENXIO | libc::EOPNOTSUPP)
+    )
 }
 
 #[cfg(test)]

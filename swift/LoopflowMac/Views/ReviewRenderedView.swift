@@ -63,6 +63,9 @@ struct ReviewRendered: View {
         if rendering == .html {
             let count = [sides.old?.content, sides.new?.content].compactMap { $0 }.count
             page(sides.old, index: 0, count: count, absent: "Added")
+                .task(id: find?.query) {
+                    if count == 0, let find, !find.query.isEmpty { await find.search([]) }
+                }
             // Relative references resolve in the working tree only when the new
             // side is the working tree of a checkout on this Machine.
             page(sides.new, index: 1, count: count, absent: "Deleted", baseURL: reading.comparison.head == nil && store.machine == nil

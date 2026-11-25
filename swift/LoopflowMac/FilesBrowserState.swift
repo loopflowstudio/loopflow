@@ -53,6 +53,7 @@ final class FilesBrowserState {
                 notice = nil
                 visit = nil
                 jumps.readingLine = 1
+                jumps.target = nil
                 jumps.dismiss()
             }
             guard let path = selection else { return }
@@ -99,6 +100,11 @@ final class FilesBrowserState {
     }
 
     func noteWrites(_ paths: Set<String>, present: Set<String>) {
+        let removed = paths.subtracting(present)
+        if !removed.isEmpty {
+            presentations.removeAll { removed.contains($0.path) }
+            if case .presented(let request) = notice, removed.contains(request.path) { notice = nil }
+        }
         updated.removeAll { paths.contains($0) }
         let unread = present.filter { $0 != visibleReadPath }.sorted()
         updated.append(contentsOf: unread)

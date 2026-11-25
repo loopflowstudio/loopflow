@@ -19,6 +19,7 @@ struct TaskHTMLView: View {
     @State private var offset = CGPoint.zero
     /// Offsets during a load are the page settling, not the person scrolling.
     @State private var loading = false
+    @State private var loadToken = 0
     @State private var loaded = 0
     @State private var searched = false
 
@@ -118,6 +119,8 @@ struct TaskHTMLView: View {
     """#
 
     private func show() async {
+        loadToken += 1
+        let token = loadToken
         if page != nil {
             do { try await Task.sleep(for: .milliseconds(800)) } catch { return }
         }
@@ -134,7 +137,7 @@ struct TaskHTMLView: View {
         guard let page else { return }
         let restore = offset
         loading = true
-        defer { loading = false }
+        defer { if loadToken == token { loading = false } }
         guard await Self.load(page, html: html, baseURL: baseURL), !Task.isCancelled else { return }
         position.scrollTo(point: restore)
         loaded += 1
@@ -178,7 +181,9 @@ private enum TaskHTMLRules {
                 forIdentifier: "loopflow-offline-pages", encodedContentRuleList: rules)
         }
         Self.compiled = compiled
-        return await compiled.value
+        let result = await compiled.value
+        if result == nil, Self.compiled == compiled { Self.compiled = nil }
+        return result
     }
 }
 #endif

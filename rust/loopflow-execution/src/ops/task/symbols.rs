@@ -50,13 +50,15 @@ pub fn task_symbols(
         .filter(|candidate| path.as_deref().is_none_or(|p| p == *candidate));
     let whole_word = name.chars().all(|c| c.is_alphanumeric() || c == '_');
     let matcher = literal_matcher(name, whole_word)?;
+    let mut matched_path = false;
     let stopped = scan_checkout(&checkout.worktree, paths, cancelled, |path, source| {
+        matched_path = true;
         let candidate = matcher
             .is_match(source.as_bytes())
             .expect("RegexMatcher cannot fail while matching");
         Ok(!candidate || declarations(path, source, name, &mut result.hits))
     })?;
-    result.truncated = stopped || inventory.truncated;
+    result.truncated = stopped || (inventory.truncated && !(path.is_some() && matched_path));
     Ok(result)
 }
 
@@ -96,6 +98,14 @@ impl CodeMask {
                 } else {
                     i += 1;
                 }
+            } else if ext == "rs"
+                && bytes[i] == b'r'
+                && rest.get(1) == Some(&b'"')
+                && (i == 0 || !(bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_'))
+            {
+                self.quote = vec![b'"'];
+                self.raw = true;
+                i += 2;
             } else if matches!(ext, "rs" | "swift") && bytes[i] == b'#' {
                 let hashes = rest.iter().take_while(|&&b| b == b'#').count();
                 if rest.get(hashes) == Some(&b'"')

@@ -101,6 +101,9 @@ struct TaskCodeReader: View {
             .accessibilityIdentifier("files-code-reader")
         }
         .onDisappear { store?.jumps.target = nil }
+        .onChange(of: findMatch) { _, match in
+            if let match, case .line(let line) = match.cell { store?.jumps.readingLine = line }
+        }
         .task(id: findScan) {
             if let find = store?.find, !find.query.isEmpty {
                 await find.search(text: text)
@@ -268,8 +271,14 @@ final class CodeReaderTextView: NSTextView {
         guard !highlightedLines.isEmpty, let layoutManager = textLayoutManager else { return }
         let insetY = textContainerOrigin.y
         let searchY = max(0, rect.minY - insetY)
-        let startLocation = layoutManager.textLayoutFragment(for: CGPoint(x: 0, y: searchY))?.rangeInElement.location
-            ?? layoutManager.documentRange.location
+        let startLocation: NSTextLocation
+        if let fragment = layoutManager.textLayoutFragment(for: CGPoint(x: 0, y: searchY)) {
+            startLocation = fragment.rangeInElement.location
+        } else if searchY <= 0 {
+            startLocation = layoutManager.documentRange.location
+        } else {
+            return
+        }
         lineHighlightColor.setFill()
         layoutManager.enumerateTextLayoutFragments(from: startLocation, options: []) { fragment in
             let y = fragment.layoutFragmentFrame.minY + insetY
@@ -430,8 +439,19 @@ final class CodeReaderGutterView: NSView {
         let scrollY = scrollView.contentView.bounds.minY
         let insetY = textView.textContainerOrigin.y
         let searchY = max(0, dirtyRect.minY + scrollY - insetY)
-        let startLocation = layoutManager.textLayoutFragment(for: CGPoint(x: 0, y: searchY))?.rangeInElement.location
-            ?? layoutManager.documentRange.location
+        var firstFragment = layoutManager.textLayoutFragment(for: CGPoint(x: 0, y: searchY))
+        if firstFragment == nil, searchY <= textView.bounds.height {
+            layoutManager.ensureLayout(for: CGRect(x: 0, y: searchY, width: max(textView.bounds.width, 1), height: dirtyRect.height + 64))
+            firstFragment = layoutManager.textLayoutFragment(for: CGPoint(x: 0, y: searchY))
+        }
+        let startLocation: NSTextLocation
+        if let fragment = firstFragment {
+            startLocation = fragment.rangeInElement.location
+        } else if searchY <= 0 {
+            startLocation = layoutManager.documentRange.location
+        } else {
+            return
+        }
 
         let defaultHeight = textView.defaultLineHeight
         let advance = digitAdvance
@@ -560,7 +580,7 @@ final class CodeReaderContainerView: NSView {
         let minWidth = max(scrollWidth, ceil(widestLineWidth + 2 * textView.textContainerInset.width))
         let minHeight = max(bounds.height, 0)
         textView.minSize = NSSize(width: minWidth, height: minHeight)
-        if textView.frame.width < minWidth {
+        if abs(textView.frame.width - minWidth) > 0.5 || textView.frame.height < minHeight {
             textView.setFrameSize(NSSize(width: minWidth, height: max(textView.frame.height, minHeight)))
         }
         gutterView.needsDisplay = true
@@ -695,13 +715,15 @@ final class CodeReaderCoordinator {
             currentText = state.text
             highlights = []
             highlightsVersion += 1
-            previousRenderedRanges.removeAll()
+            clearRenderingAttributes(in: textView)
             lastRenderSignature = nil
             clearAllSlots(in: textView)
             lastScrollTarget = nil
             lastFindMatch = nil
             pendingScroll = nil
-            if let store = state.store { store.jumps.target = nil }
+            if let store = state.store, store.jumps.target != nil {
+                Task { @MainActor [weak store] in store?.jumps.target = nil }
+            }
 
             let index = CodeLineIndex(state.text)
             textView.lineIndex = index
@@ -758,7 +780,6 @@ final class CodeReaderCoordinator {
             lastFindMatch = state.findMatch
             if let match = state.findMatch, case .line(let line) = match.cell {
                 scroll(container: container, toLine: line, rangeInLine: match.range)
-                state.store?.jumps.readingLine = line
             }
         }
         let scrollTarget = state.location.map { ScrollTarget(visitID: $0.visitID, line: $0.line, hit: $0.hit) }
@@ -812,6 +833,17 @@ final class CodeReaderCoordinator {
         return hit.range(in: textView.lineIndex.text(ofLine: hit.line, in: textView.string as NSString))
     }
 
+    private func clearRenderingAttributes(in textView: CodeReaderTextView) {
+        if let layoutManager = textView.textLayoutManager {
+            for range in previousRenderedRanges {
+                layoutManager.removeRenderingAttribute(.underlineStyle, for: range)
+                layoutManager.removeRenderingAttribute(.underlineColor, for: range)
+                layoutManager.removeRenderingAttribute(.backgroundColor, for: range)
+            }
+        }
+        previousRenderedRanges.removeAll()
+    }
+
     private func updateRenderingAttributes(in textView: CodeReaderTextView, state: CodeReaderRepresentable) {
         let signature = RenderSignature(
             targetLine: state.target?.line,
@@ -826,12 +858,7 @@ final class CodeReaderCoordinator {
 
         guard let layoutManager = textView.textLayoutManager else { return }
 
-        for range in previousRenderedRanges {
-            layoutManager.removeRenderingAttribute(.underlineStyle, for: range)
-            layoutManager.removeRenderingAttribute(.underlineColor, for: range)
-            layoutManager.removeRenderingAttribute(.backgroundColor, for: range)
-        }
-        previousRenderedRanges.removeAll()
+        clearRenderingAttributes(in: textView)
 
         if let target = state.target,
            let docRange = textView.lineIndex.documentRange(line: target.line, rangeInLine: target.range),
@@ -876,12 +903,16 @@ final class CodeReaderCoordinator {
 
         // Remove stale slots.
         let removed = Set(slotHosts.keys).subtracting(activeLines)
+        var layoutChanged = !removed.isEmpty
         for line in removed {
             slotHosts.removeValue(forKey: line)?.view.removeFromSuperview()
             setParagraphSpacing(0, onLine: line, in: textView)
         }
 
-        guard !activeLines.isEmpty else { return }
+        guard !activeLines.isEmpty else {
+            if layoutChanged { container.gutterView.needsDisplay = true }
+            return
+        }
 
         let viewportWidth = max(200, container.scrollView.contentView.bounds.width)
         let source = textView.string as NSString
@@ -925,9 +956,11 @@ final class CodeReaderCoordinator {
             if slotHosts[line]?.height != measured {
                 slotHosts[line]?.height = measured
                 setParagraphSpacing(measured, onLine: line, in: textView)
+                layoutChanged = true
             }
         }
         positionSlots(in: container)
+        if layoutChanged { container.gutterView.needsDisplay = true }
     }
 
     private func slotHeightChanged(line: Int, height: CGFloat) {

@@ -243,7 +243,10 @@ final class TaskFilesStore {
     /// Last seen metadata stamps for `scratch/` pages on a peer Machine, retained across reconnects.
     @ObservationIgnored private var seenScratchStamps: [String: String]?
 
-    private var invalidation: Task<Void, Never>?
+    @ObservationIgnored private var invalidation: Task<Void, Never>?
+    @ObservationIgnored private var peerScratchTask: Task<Void, Never>?
+    private var pendingPeerScratchPaths: Set<String> = []
+    @ObservationIgnored private var retryTask: Task<Void, Never>?
     private var pendingPaths: Set<String> = []
     private var pendingComparison = false
     private var ignoreFailureLogged = false
@@ -252,7 +255,12 @@ final class TaskFilesStore {
         didSet { for document in documents.values { scheduleSave(document) } }
     }
 
-    deinit { servedObservation?.cancel() }
+    deinit {
+        servedObservation?.cancel()
+        invalidation?.cancel()
+        peerScratchTask?.cancel()
+        retryTask?.cancel()
+    }
 
     /// This Mac's checkout through FSEvents; any other Machine's through the
     /// server's `task.files.watch`, which follows the Task when it moves.
@@ -279,6 +287,15 @@ final class TaskFilesStore {
         observation = nil
         servedObservation?.cancel()
         servedObservation = nil
+        invalidation?.cancel()
+        invalidation = nil
+        pendingPaths.removeAll()
+        pendingComparison = false
+        peerScratchTask?.cancel()
+        peerScratchTask = nil
+        pendingPeerScratchPaths.removeAll()
+        retryTask?.cancel()
+        retryTask = nil
         servedRevision = nil
         seenScratchStamps = nil
         self.machine = machine
@@ -366,7 +383,8 @@ final class TaskFilesStore {
         if wasNotStarted {
             seenScratchStamps = incomingStamps
             // The checkout appeared: read what Not started hid.
-            Task { await retry() }
+            retryTask?.cancel()
+            retryTask = Task { [weak self] in await self?.retry() }
             return
         }
 
@@ -386,9 +404,20 @@ final class TaskFilesStore {
         if treeChanged {
             invalidate([""])
         } else if !touchedScratch.isEmpty {
-            let paths = touchedScratch
-            Task { [weak self] in
-                await self?.applyPeerScratchWrites(paths)
+            schedulePeerScratchWrites(touchedScratch)
+        }
+    }
+
+    private func schedulePeerScratchWrites(_ paths: Set<String>) {
+        pendingPeerScratchPaths.formUnion(paths)
+        guard peerScratchTask == nil else { return }
+        peerScratchTask = Task { [weak self] in
+            defer { self?.peerScratchTask = nil }
+            while let self, !self.pendingPeerScratchPaths.isEmpty {
+                let batch = self.pendingPeerScratchPaths
+                self.pendingPeerScratchPaths.removeAll()
+                await self.applyPeerScratchWrites(batch)
+                if Task.isCancelled { return }
             }
         }
     }
@@ -648,6 +677,7 @@ final class TaskFilesStore {
         fileGeneration += 1
         let generation = fileGeneration
         guard let path = selection else { return }
+        error = nil
         watchOpenFiles()
         let revision = documents[path]?.snapshot?.revision
         do {
@@ -655,6 +685,7 @@ final class TaskFilesStore {
             guard !Task.isCancelled, selection == path, generation == fileGeneration,
                   documents[path]?.snapshot?.revision == revision else { return }
             await document(path).reconcile(next)
+            guard !Task.isCancelled, selection == path, generation == fileGeneration else { return }
             error = nil
         } catch {
             // A superseded read is not a failure of the file.

@@ -514,7 +514,7 @@ fn checkout_search(
     use crate::lf::TaskCommand;
 
     let owner_issue =
-        |issue: &str| route.map_or_else(|| issue.to_owned(), |route| route.task_id.to_string());
+        |issue: &str| route.map_or_else(|| issue.to_owned(), |route| route.peer_selector.clone());
     match cmd {
         TaskCommand::Find {
             issue,

@@ -143,7 +143,12 @@ impl TaskFilesWatch {
             self.current.revision = Some(uuid::Uuid::new_v4().to_string());
         }
         if changes.scratch {
-            self.current.scratch_pages = scan_scratch_pages(checkout);
+            match scan_scratch_pages(checkout) {
+                Ok(pages) => self.current.scratch_pages = pages,
+                Err(error) => {
+                    tracing::warn!("scratch page scan kept prior state: {error}");
+                }
+            }
         }
         Ok(&self.current)
     }
@@ -166,7 +171,7 @@ impl TaskFilesWatch {
         self.current.revision = checkout.as_ref().map(|_| uuid::Uuid::new_v4().to_string());
         self.current.scratch_pages = checkout
             .as_deref()
-            .map(scan_scratch_pages)
+            .and_then(|path| scan_scratch_pages(path).ok())
             .unwrap_or_default();
         self.current.checkout = checkout;
         Ok(())
@@ -276,11 +281,9 @@ fn classify_changes(root: &Path, paths: &BTreeSet<String>, ignore_failed: &mut b
     }
 }
 
-fn scan_scratch_pages(root: &Path) -> Vec<TaskScratchPage> {
-    let Ok((paths, _)) = super::snapshot::scratch_paths(root) else {
-        return Vec::new();
-    };
-    paths
+fn scan_scratch_pages(root: &Path) -> std::io::Result<Vec<TaskScratchPage>> {
+    let (paths, _) = super::snapshot::scratch_paths(root)?;
+    Ok(paths
         .into_iter()
         .filter(|path| super::find::is_scratch_page(Path::new(path)))
         .filter_map(|path| {
@@ -300,7 +303,7 @@ fn scan_scratch_pages(root: &Path) -> Vec<TaskScratchPage> {
                 stamp: format!("{}.{}:{}", modified.0, modified.1, metadata.len()),
             })
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
@@ -379,12 +382,12 @@ mod tests {
         std::fs::create_dir_all(repo.path().join("scratch")).unwrap();
         std::fs::write(repo.path().join("scratch/page.html"), "<p>v1</p>").unwrap();
         std::fs::write(repo.path().join("scratch/notes.tmp"), "ignore").unwrap();
-        let first = scan_scratch_pages(repo.path());
+        let first = scan_scratch_pages(repo.path()).unwrap();
         assert_eq!(first.len(), 1);
         assert_eq!(first[0].path, "scratch/page.html");
 
         std::fs::write(repo.path().join("scratch/page.html"), "<p>v2 longer</p>").unwrap();
-        let second = scan_scratch_pages(repo.path());
+        let second = scan_scratch_pages(repo.path()).unwrap();
         assert_eq!(second.len(), 1);
         assert_ne!(first[0].stamp, second[0].stamp);
     }

@@ -740,7 +740,10 @@ pub(super) fn file_snapshot(
         read(MAX_FILE_BYTES + 1)?
     };
     snapshot.size_bytes = size;
-    read_contents(&mut snapshot, bytes, || Ok(read(MAX_BINARY_DATA_BYTES)?.1))?;
+    read_contents(&mut snapshot, bytes, || {
+        let (full_size, full_bytes) = read(MAX_BINARY_DATA_BYTES + 1)?;
+        Ok((full_size, full_bytes))
+    })?;
     Ok(snapshot)
 }
 
@@ -781,8 +784,12 @@ pub(super) fn committed_file_snapshot(
         MAX_FILE_BYTES + 1
     };
     let bytes = git_blob_prefix(workspace.worktree, object, limit)?;
+    let committed_size = snapshot.size_bytes;
     read_contents(&mut snapshot, bytes, || {
-        git_output_bytes(workspace.worktree, &["cat-file", "blob", object])
+        Ok((
+            committed_size,
+            git_output_bytes(workspace.worktree, &["cat-file", "blob", object])?,
+        ))
     })?;
     Ok(snapshot)
 }
@@ -792,17 +799,23 @@ pub(super) fn committed_file_snapshot(
 fn read_contents(
     snapshot: &mut TaskFileSnapshot,
     bytes: Vec<u8>,
-    whole: impl FnOnce() -> OpsResult<Vec<u8>>,
+    whole: impl FnOnce() -> OpsResult<(u64, Vec<u8>)>,
 ) -> OpsResult<()> {
     if bytes.contains(&0) {
         snapshot.state = TaskFileState::Binary;
         if snapshot.size_bytes <= MAX_BINARY_DATA_BYTES as u64 {
             let bytes = if bytes.len() as u64 >= snapshot.size_bytes {
-                bytes
+                Some(bytes)
             } else {
-                whole()?
+                let (full_size, full_bytes) = whole()?;
+                snapshot.size_bytes = full_size;
+                (full_size <= MAX_BINARY_DATA_BYTES as u64
+                    && full_bytes.len() <= MAX_BINARY_DATA_BYTES)
+                    .then_some(full_bytes)
             };
-            snapshot.data = Some(base64::engine::general_purpose::STANDARD.encode(bytes));
+            if let Some(bytes) = bytes {
+                snapshot.data = Some(base64::engine::general_purpose::STANDARD.encode(bytes));
+            }
         }
     } else if snapshot.size_bytes > MAX_FILE_BYTES as u64 || bytes.len() > MAX_FILE_BYTES {
         snapshot.state = TaskFileState::Truncated;
@@ -833,8 +846,16 @@ fn git_blob_prefix(worktree: &Path, object: &str, limit: usize) -> OpsResult<Vec
         .take(limit as u64)
         .read_to_end(&mut bytes)?;
     // A blob longer than the limit leaves git blocked on a full pipe.
-    let _ = child.kill();
-    child.wait()?;
+    let truncated = bytes.len() >= limit;
+    if truncated {
+        let _ = child.kill();
+    }
+    let status = child.wait()?;
+    if !truncated && !status.success() {
+        return Err(task_error(format!(
+            "git cat-file blob {object} exited with {status}"
+        )));
+    }
     Ok(bytes)
 }
 
@@ -904,8 +925,17 @@ pub(super) fn scratch_paths(root: &Path) -> std::io::Result<(Vec<String>, bool)>
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
             Err(error) => return Err(error),
         }
-        for entry in std::fs::read_dir(directory)? {
-            let entry = entry?;
+        let entries = match std::fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error),
+            };
             visited += 1;
             if visited > 2_000 {
                 paths.sort();
@@ -914,7 +944,11 @@ pub(super) fn scratch_paths(root: &Path) -> std::io::Result<(Vec<String>, bool)>
             if entry.file_name() == ".git" {
                 continue;
             }
-            let kind = entry.file_type()?;
+            let kind = match entry.file_type() {
+                Ok(kind) => kind,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error),
+            };
             if kind.is_dir() {
                 pending.push(entry.path());
             } else if kind.is_file() {

@@ -322,7 +322,7 @@ struct TaskFilesView: View {
                             .help(badge.help)
                     }
                 }
-                .padding(.leading, indent).padding(.trailing, Spacing.sm).padding(.vertical, 3)
+                .padding(.leading, indent).padding(.trailing, Spacing.sm).padding(.vertical, Spacing.xxs)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .workSelection(store.tree.selection == entry.path || store.selection == entry.path)
                 .contentShape(Rectangle())
@@ -439,7 +439,7 @@ struct TaskFilesView: View {
     private func fileRow(_ path: String, lines: TaskChangedFile.ChangedLines? = nil) -> some View {
         let place = ChangedFilesSidebar.place(path, under: nil)
         return Button { read(path) } label: {
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                     Text(place.name).font(Typography.mono).lineLimit(1).truncationMode(.middle)
                     if store.documents[path]?.dirty == true { UnsavedDraftMark() }

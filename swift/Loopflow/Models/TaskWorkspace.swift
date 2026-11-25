@@ -126,7 +126,7 @@ public struct TaskChangedFile: Decodable, Sendable, Identifiable, Hashable {
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         path = try values.decode(String.self, forKey: .path)
-        oldPath = try values.decodeIfPresent(String.self, forKey: .oldPath)
+        oldPath = try values.decode(String?.self, forKey: .oldPath)
         committed = try values.decode(Bool.self, forKey: .committed)
         staged = try values.decode(Bool.self, forKey: .staged)
         unstaged = try values.decode(Bool.self, forKey: .unstaged)

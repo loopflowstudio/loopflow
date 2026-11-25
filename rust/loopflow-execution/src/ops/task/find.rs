@@ -58,7 +58,9 @@ impl TaskFileInventory {
             .split(|byte| *byte == 0)
             .filter(|path| !path.is_empty())
         {
-            let path = std::str::from_utf8(bytes).map_err(io::Error::other)?;
+            let Ok(path) = std::str::from_utf8(bytes) else {
+                continue;
+            };
             paths.insert(path.to_string());
         }
         let mut scratch = Vec::new();

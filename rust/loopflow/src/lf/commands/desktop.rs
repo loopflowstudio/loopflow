@@ -1284,6 +1284,9 @@ fn presentation_path(input: &str) -> Result<(&str, Option<&str>)> {
     if lines.is_empty() || !lines.bytes().all(|c| c.is_ascii_digit() || c == b'-') {
         return Ok((input, None));
     }
+    if path.is_empty() {
+        return Err(DesktopError::Argument("Expected a checkout path before :LINE".into()).into());
+    }
     let (start, end) = lines.split_once('-').unwrap_or((lines, lines));
     if !matches!((start.parse::<u32>(), end.parse::<u32>()),
         (Ok(start), Ok(end)) if start > 0 && start <= end)

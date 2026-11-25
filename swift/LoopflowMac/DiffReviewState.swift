@@ -136,8 +136,10 @@ final class DiffReviewState {
         stepReading = next.map { ($0, makeReading(.branch(base: $0.base, head: $0.head))) }
         reviewGeneration += 1
         review = nil
-        reviewReading.openedGaps = [:]
-        reviewReading.dropSides()
+        if reviewReading !== workingTree {
+            reviewReading.openedGaps = [:]
+            reviewReading.dropSides()
+        }
         self[place: .changes] = ReviewPlace()
         windowStart = nil
         windowRows = Self.windowBudget
@@ -799,8 +801,12 @@ final class DiffReviewState {
         diffGeneration += 1
         let generation = diffGeneration
         // Keep the displayed diff for the same file while its replacement loads.
-        if fileReview?.path != browser.selection || fileReview?.baseCommit != workingTree.changes?.baseCommit { fileReview = nil }
+        if fileReview?.path != browser.selection || fileReview?.baseCommit != workingTree.changes?.baseCommit {
+            fileReview = nil
+            fileDiffError = nil
+        }
         guard let path = browser.selection, let base = workingTree.changes?.baseCommit else { return }
+        fileDiffError = nil
         let document = browser.documents[path]
         let version = document?.editVersion
         let draft = document?.dirty == true ? document?.text : nil

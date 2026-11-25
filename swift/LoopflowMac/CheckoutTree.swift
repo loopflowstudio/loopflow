@@ -14,6 +14,7 @@ final class CheckoutTree {
         var nextCursor: String?
         var pages = 0
         fileprivate var read: Task<Void, Never>?
+        fileprivate var readMore = false
         var loading: Bool { read != nil }
         /// The last read failed; earlier pages stay readable.
         var error: String?
@@ -137,8 +138,12 @@ final class CheckoutTree {
     /// One page of `directory` through `lf task files`; a remote Task reads
     /// through its Machine. A failure stays on that directory.
     func readDirectory(_ directory: String, more: Bool) async {
+        while let pending = listings[directory]?.read {
+            let sameKind = listings[directory]?.readMore == more
+            await pending.value
+            if sameKind || Task.isCancelled { return }
+        }
         var listing = listings[directory] ?? Listing()
-        if let pending = listing.read { await pending.value; return }
         let cursor = more ? listing.nextCursor : nil
         if more && cursor == nil { return }
         listing.error = nil
@@ -159,6 +164,7 @@ final class CheckoutTree {
             listings[directory] = result
         }
         listing.read = read
+        listing.readMore = more
         listings[directory] = listing
         await read.value
     }

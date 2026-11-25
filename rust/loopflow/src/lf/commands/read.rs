@@ -181,6 +181,7 @@ pub enum Read {
     TaskSymbols {
         issue: String,
         name: String,
+        #[serde(deserialize_with = "Option::deserialize")]
         path: Option<String>,
     },
     /// Search the Task checkout for literal text.

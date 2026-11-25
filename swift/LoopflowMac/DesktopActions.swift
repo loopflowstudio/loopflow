@@ -551,10 +551,11 @@ struct DesktopAction {
             }
             let request = FilesBrowserState.Presentation(path: path, lines: lines, mode: mode == "diff" ? .diff : .read)
             let workspace = try context.task
+            let task = context.model.task(id: workspace.key.id)?.task
             if let pane = workspace.multiplexer.browserPane, workspace.multiplexer.isVisible(pane) {
                 switch pane.content.selectedBrowserTab {
                 case .files, .changes:
-                    let files = try workspace.files(for: pane.content, task: nil, query: RegistryQueryLocal.shared)
+                    let files = try workspace.files(for: pane.content, task: task, query: RegistryQueryLocal.shared)
                     if files.holdsPresentation {
                         files.browser.offer(request)
                         return browserOutcome(workspace)
@@ -564,7 +565,7 @@ struct DesktopAction {
             }
             let outcome = try show(.files, context)
             if let pane = workspace.multiplexer.browserPane {
-                try workspace.files(for: pane.content, task: nil, query: RegistryQueryLocal.shared).openPresentation(request)
+                try workspace.files(for: pane.content, task: task, query: RegistryQueryLocal.shared).openPresentation(request)
             }
             return outcome
         },
@@ -623,7 +624,8 @@ struct DesktopAction {
             let outcome = try show(.files, context)
             let workspace = try context.task
             if let browser = workspace.multiplexer.browserPane {
-                try workspace.files(for: browser.content, task: nil, query: RegistryQueryLocal.shared).page = page
+                let task = context.model.task(id: workspace.key.id)?.task
+                try workspace.files(for: browser.content, task: task, query: RegistryQueryLocal.shared).page = page
             }
             return outcome
         },

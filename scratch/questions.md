@@ -7,6 +7,11 @@
 - Assumption taken (for review): `lf session bind` prints one factual line when
   the Task already has a different checkout (`Conversation stays in …; <TASK>'s
   checkout is …`), and stays silent about directories otherwise.
+- Assumption taken (for review): when an open Task is claimed and checked out
+  on this Machine, the server's recovery pass restarts its dead primary
+  conversation in the conversation's own directory even when that directory is
+  not the Task's checkout. A Task with no checkout on this Machine stays down
+  with `"its Task is not checked out here"`.
 - `lf resume` help says "With none for this scope, it starts one and says so",
   but an unowned linked worktree with no conversation refuses with "This
   worktree has no associated work conversation." Starting one there would be a

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-1101 · Concept Review — Conversation Location &amp; Task Binding</title>
+<title>LOO-1101 · Post-Build Concept Review — Conversation Location &amp; Task Binding</title>
 <style>
   :root {
     --bg: #ffffff;
@@ -306,11 +306,6 @@
   @media (max-width: 780px) {
     .flow-grid { grid-template-columns: 1fr; }
   }
-  .matrix-label {
-    font-weight: 600;
-    font-size: 13px;
-    margin-bottom: 4px;
-  }
   .question {
     border: 1px solid var(--border-strong);
     border-radius: 10px;
@@ -364,15 +359,15 @@
 <body>
 <main>
   <header>
-    <div class="eyebrow">Concept Review · LOO-1101</div>
-    <h1>Conversation Location &amp; Task Binding</h1>
+    <div class="eyebrow">Post-Build Concept Review · LOO-1101</div>
+    <h1>Conversation Location, Task Binding &amp; Recovery</h1>
     <p class="lead">
-      <strong>Area reviewed:</strong> How a conversation's directory relates to its checkout, Task ownership, binding, resuming, and workspace admission — widened from the `lf resume -a` failure in `manabot.academy-test-drive` because the failure lives at the boundary between `agent_sessions.cwd` and `task_checkouts.worktree`.
+      <strong>Area reviewed:</strong> How a conversation's directory relates to Task checkouts across binding, resuming, workspace admission, checkout adoption, and crash recovery — reviewed against base <code>41023c8e55</code> with the whole branch (<code>57ed33d102</code>) in it.
     </p>
     <div class="meta-bar">
-      <span class="badge badge-status">Pre-implementation review (HEAD has kickoff plan only)</span>
-      <span class="badge badge-existing">Existing = current HEAD (origin/main)</span>
-      <span class="badge badge-proposed">Proposed = updated scratch/plan.md</span>
+      <span class="badge badge-status">Post-build review · 2 mismatches still open on HEAD</span>
+      <span class="badge badge-existing">Built = HEAD 57ed33d102</span>
+      <span class="badge badge-proposed">Proposed = next pass in scratch/plan.md</span>
     </div>
   </header>
 
@@ -380,13 +375,22 @@
     “in a worktree i started w/o a task initially (manabot.academy-test-drive), i had an agy lf session going. then i wanted to move to fable, so i did <code>lf resume -a claude:fable</code> but it sai there was no work in this worktree”
   </blockquote>
 
-  <h2>1. Do the product's concepts and the code's concepts line up?</h2>
+  <div class="callout">
+    <div class="callout-title">Built vs. still open at HEAD (<code>57ed33d102</code>)</div>
+    <ul style="margin-bottom:0">
+      <li><span class="badge badge-yes">Built</span> Binding never rewrites <code>agent_sessions.cwd</code>; <code>lf session bind</code> prints a one-line factual note when the Task already owns a different checkout; workspace admission places only unstarted, unbound primary placeholders; checkout adoption skips Sessions bound to another Task while <code>lf resume</code> in an unowned worktree still finds them; CLI help, docs, and Desktop sheet copy match.</li>
+      <li><span class="badge badge-no">Still broken on HEAD</span> <strong>1. Recovery &amp; Task status outlook</strong> still require <code>session.cwd == task.worktree</code>, so a dead bound primary conversation never restarts on its own and <code>lf task status</code> / Desktop falsely report <em>“its Task is not checked out here.”</em> (Seen live in QA scenario 7.)</li>
+      <li><span class="badge badge-no">Still broken on HEAD</span> <strong>2. Re-selecting an already-assigned Session as primary</strong> fails if another Task owns its directory (e.g. after another Task adopts the worktree in QA scenario 6, or for a <code>lf --task</code> chat started in another Task's checkout).</li>
+    </ul>
+  </div>
+
+  <h2>1. Do the product's concepts and the code's concepts line up on HEAD?</h2>
 
   <table>
     <thead>
       <tr>
         <th class="col-concept">Product concept</th>
-        <th class="col-code">Code concept</th>
+        <th class="col-code">Code concept (at HEAD)</th>
         <th class="col-align">Lines up?</th>
         <th>Diagnosis</th>
       </tr>
@@ -395,54 +399,97 @@
       <tr>
         <td>
           <strong>Where a conversation runs</strong><br>
-          <span class="muted">The checkout where the agent process lives, where its edits sit, and where <code>lf resume</code> / <code>-a</code> / crash recovery continue it.</span>
+          <span class="muted">The directory where the agent process lives, where its edits sit, and where <code>lf resume</code> / <code>-a</code> continue it.</span>
         </td>
         <td>
           <code>agent_sessions.cwd</code><br>
           <code>processes.cwd</code><br>
           <code>SessionWorkspace</code>
         </td>
-        <td class="col-align"><span class="badge badge-no">No</span></td>
+        <td class="col-align"><span class="badge badge-yes">Yes</span></td>
         <td>
-          <strong>One concept split into a lie and reality.</strong>
-          <code>lf session bind</code> overwrites <code>agent_sessions.cwd</code> to <code>task.worktree</code> while the running provider stays in its original directory and files never move. <code>lf resume</code> in the real directory loses the conversation, server recovery restarts it in the wrong worktree, and directory-keyed providers (Claude Code's <code>~/.claude/projects/&lt;cwd&gt;/</code>) lose their transcript on resume.
+          <span class="badge badge-existing">Built</span> Binding no longer overwrites <code>cwd</code>. <code>lf resume -a claude:fable</code> in <code>manabot.academy-test-drive</code> finds the bound conversation and keeps provider transcripts and files together.
         </td>
       </tr>
       <tr>
         <td>
-          <strong>Attaching an existing conversation to a Task</strong><br>
-          <span class="muted">Creating a Task from a conversation, binding an unbound conversation, or making an already-assigned conversation primary.</span>
+          <strong>Attaching a conversation to a Task</strong><br>
+          <span class="muted">Creating a Task from a conversation, binding an unbound one, or re-selecting an assigned conversation as primary.</span>
         </td>
         <td>
-          <code>adoption::save(…, continue_in_task: bool)</code><br>
-          <code>promote_task_prepared(…, destination)</code>
+          <code>adoption::save</code> (no <code>continue_in_task</code>)<br>
+          <code>adoption::bind_session</code><br>
+          <code>resolve_checkout</code> (<code>adoption.rs:136</code>)
         </td>
         <td class="col-align"><span class="badge badge-no">No</span></td>
         <td>
-          <strong>One action split by an invisible flag.</strong>
-          <code>lf task create --session</code> passes <code>continue_in_task = false</code> (keeps <code>cwd</code>); <code>lf session bind</code> passes <code>continue_in_task = true</code> (rewrites <code>cwd</code>). Desktop's sheet even had to explain the split in prose: <em>“Creation keeps this conversation in place. Binding sets its directory to the Task worktree immediately.”</em>
+          <strong>Half-fixed; re-selecting across checkouts still fails.</strong>
+          The <code>continue_in_task</code> split is gone, and bind prints both paths when they differ. But <code>resolve_checkout</code> still rejects any Session whose worktree belongs to another Task (<code>checkout_task != session_task</code>) even when <code>bind_session</code> is only re-selecting a Session that already belongs to the target Task (e.g. after QA scenario 6, when a second Task adopts the research worktree).
         </td>
       </tr>
       <tr>
         <td>
-          <strong>Placing a brand-new primary vs. keeping a started conversation in place</strong><br>
-          <span class="muted">An unstarted primary placeholder moves into its Task/Wave/repo checkout when opened; a conversation that already ran stays where it ran.</span>
+          <strong>Recovering a dead Task conversation &amp; reporting its outlook</strong><br>
+          <span class="muted">When an open Task is checked out on this Machine and its primary conversation crashes, the server restarts it where it runs; status tells the truth about whether the Task is checked out here.</span>
         </td>
         <td>
-          <code>admit_scope_workspace</code> (<code>primary.rs:322</code>)<br>
-          <code>admit_session_workspace</code> (<code>sessions.rs:1746</code>)<br>
-          guard: <code>work_source == 'bound'</code>
+          <code>task_conversation_here_sql</code> (<code>session_recovery.rs:40</code>)<br>
+          <code>SessionSummary.in_task_checkout</code><br>
+          <code>Left::Elsewhere</code> → <em>“its Task is not checked out here”</em>
         </td>
         <td class="col-align"><span class="badge badge-no">No</span></td>
         <td>
-          <strong>Wrong predicate &amp; leaving column (missed by kickoff).</strong>
-          Guarding on <code>work_source = 'bound'</code> (marked <code>-- leaving</code> in <code>LOO-836</code>) leaves a hole: a conversation already assigned to a Task from another directory (e.g. <code>lf --task LOO-12</code> in <code>main</code> or another worktree → <code>work_source = 'declared'</code>, <code>bound_at = NULL</code>) that is later made primary gets silently moved to <code>task.worktree</code> on its next idle <code>lf resume</code>. The real rule is lifecycle: only an unstarted, unbound placeholder (<code>current_capture IS NULL AND bound_at IS NULL</code>) gets placed.
+          <strong>Biggest remaining mismatch.</strong>
+          <code>task_conversation_here_sql</code> still checks <code>rtrim(s.cwd,'/') = rtrim(c.worktree,'/')</code> — a leftover from when binding forced <code>cwd = worktree</code>. Any split-checkout primary conversation (another worktree, <code>main</code>, a Wave checkout, or even a subdirectory of the Task's checkout) is silently ignored by crash recovery and falsely labeled <em>“its Task is not checked out here”</em> in <code>lf task status</code> and Desktop.
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <strong>Placing a fresh primary vs. keeping a started conversation in place</strong><br>
+          <span class="muted">An unstarted primary placeholder lands in its scope's checkout; any launched or bound conversation stays put.</span>
+        </td>
+        <td>
+          <code>admit_scope_workspace</code> (<code>primary.rs:319</code>)<br>
+          <code>admit_session_workspace</code> (<code>sessions.rs:1752</code>)<br>
+          guard: <code>captured.is_none() &amp;&amp; bound_at.is_none()</code>
+        </td>
+        <td class="col-align"><span class="badge badge-yes">Yes</span></td>
+        <td>
+          <span class="badge badge-existing">Built</span> Replaced the leaving <code>work_source = 'bound'</code> guard. Already-started conversations made primary stay put on idle reopen; fresh placeholders still land in their scope checkout.
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <strong>Resuming vs. adopting a worktree that holds a bound conversation</strong><br>
+          <span class="muted"><code>lf resume</code> in an unowned worktree finds the bound chat there; a new Task adopting that worktree with <code>--run</code> skips chats already bound elsewhere.</span>
+        </td>
+        <td>
+          <code>checkout_conversation(root, None)</code> (resume)<br>
+          <code>checkout_conversation(root, Some(task))</code> (adoption)
+        </td>
+        <td class="col-align"><span class="badge badge-yes">Yes</span></td>
+        <td>
+          <span class="badge badge-existing">Built</span> Clean separation verified in unit tests and QA scenario 6. Once a new Task owns that worktree, bare <code>lf resume</code> opens the checkout owner's conversation while <code>lf resume --task</code> reaches the earlier bound one.
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <strong>Reopening after a conversation's directory is deleted</strong><br>
+          <span class="muted">If a worktree is deleted on disk, opening or recovering the conversation falls back to the repo's main checkout.</span>
+        </td>
+        <td>
+          <code>leave_gone_directory</code> (<code>primary.rs:285</code>)<br>
+          <code>relocate_session</code>
+        </td>
+        <td class="col-align"><span class="badge badge-yes">Yes</span></td>
+        <td>
+          Only runs when <code>!session.cwd.is_dir()</code>, so a retired or removed worktree stays reachable without ever moving a conversation out of a live directory.
         </td>
       </tr>
       <tr>
         <td>
           <strong>Task checkout vs. conversation directory</strong><br>
-          <span class="muted">A Task owns at most one worktree for its branch, diff, PR, and workers. A conversation has its own directory — usually the same, sometimes another checkout.</span>
+          <span class="muted">A Task owns at most one worktree for branch, diff, PR, and workers; its primary conversation runs in its own directory.</span>
         </td>
         <td>
           <code>task_checkouts.worktree</code><br>
@@ -451,117 +498,56 @@
         </td>
         <td class="col-align"><span class="badge badge-yes">Yes</span></td>
         <td>
-          Already separate in storage and Desktop (<code>SessionsView.swift:1257</code> launches terminals from <code>record.workspace.worktree</code>, derived from <code>session.cwd</code>). One doc lie needs fixing: <code>docs/work.md:156-158</code> claims <code>lf task checkout</code> moves a bound Session out of main/Wave, which it never did.
-        </td>
-      </tr>
-      <tr>
-        <td>
-          <strong>Reopening after a checkout is deleted</strong><br>
-          <span class="muted">After a Task closes and its worktree is retired, opening the conversation falls back to the repo's main checkout.</span>
-        </td>
-        <td>
-          <code>leave_gone_directory</code> (<code>primary.rs:288</code>)<br>
-          <code>relocate_session</code>
-        </td>
-        <td class="col-align"><span class="badge badge-yes">Yes</span></td>
-        <td>
-          Honest fallback when <code>!session.cwd.is_dir()</code>: the recorded directory genuinely no longer exists on disk. Distinct from moving a conversation out of a live checkout.
-        </td>
-      </tr>
-      <tr>
-        <td>
-          <strong>Resuming in an unowned linked worktree</strong><br>
-          <span class="muted"><code>lf resume</code> / <code>lf resume -a</code> in a worktree with no Task opens the conversation running there.</span>
-        </td>
-        <td>
-          <code>checkout_scope</code> → <code>None</code><br>
-          <code>checkout_conversation</code> (matches <code>agent_sessions.cwd</code>)
-        </td>
-        <td class="col-align"><span class="badge badge-yes">Yes</span></td>
-        <td>
-          Works automatically once <code>agent_sessions.cwd</code> stops lying. When an unowned worktree has <em>no</em> open conversation at all, <code>lf resume</code> still refuses and points to <code>lf</code> (separate from this Task).
-        </td>
-      </tr>
-      <tr>
-        <td>
-          <strong>Provider transcript location on local resume</strong><br>
-          <span class="muted">Resuming a conversation opens the same provider thread in the directory where it was saved.</span>
-        </td>
-        <td>
-          <code>native_session::resume_session_with_env</code><br>
-          (fixture stub: <code>opencode_cli.py</code>)
-        </td>
-        <td class="col-align"><span class="badge badge-yes">Yes</span></td>
-        <td>
-          Kickoff suspected local resume had a transcript-relocation layer because of <code>native-locations.json</code> in tests. Verified: no such layer exists — <code>opencode_cli.py</code> simply writes <code>os.getcwd()</code> on launch. Real Claude Code transcripts are directory-keyed and only resume reliably when <code>cwd</code> stays put.
-        </td>
-      </tr>
-      <tr>
-        <td>
-          <strong>Storage bind writers</strong><br>
-          <span class="muted">One action: bind a conversation to a Task.</span>
-        </td>
-        <td>
-          <code>promote_task_prepared</code> (production)<br>
-          <code>bind_session_prepared</code> (tests only)
-        </td>
-        <td class="col-align"><span class="badge badge-no">No</span></td>
-        <td>
-          Minor internal duplication: <code>bind_session_prepared</code> has zero production callers (only unit/integration tests). Neither moves <code>cwd</code> once the fix lands; cleaning up test callers is separate from LOO-1101.
+          <span class="badge badge-existing">Built</span> Separate in storage, CLI help, docs, and Desktop sheet copy (<em>“This conversation and its files stay in their current directory.”</em>).
         </td>
       </tr>
     </tbody>
   </table>
 
-  <h2>2. Biggest mismatch &amp; the fix (Before vs. After)</h2>
+  <h2>2. Biggest remaining mismatch &amp; the fix (HEAD vs. Proposed)</h2>
 
   <div class="callout callout-mismatch">
-    <div class="callout-title"><span class="badge badge-no">Biggest mismatch</span> Pretending a conversation moved to another directory</div>
+    <div class="callout-title"><span class="badge badge-no">Biggest mismatch</span> Recovery and status still pretend a Task isn't checked out here whenever its conversation sits in another directory</div>
     <p style="margin-bottom:0">
-      <code>lf session bind</code> rewrote <code>agent_sessions.cwd</code> to the Task's worktree without moving the running process, the files on disk, or directory-keyed provider transcripts — and <code>admit_scope_workspace</code> kept a second path that could do the same thing whenever an already-assigned conversation was made primary. Every downstream failure (missing conversation on <code>lf resume -a</code>, recovery restarting in the wrong worktree, broken Claude <code>--resume</code>) came from that single fiction.
+      <code>task_conversation_here_sql</code> was written when binding still overwrote <code>agent_sessions.cwd</code> to <code>task_checkouts.worktree</code>, so it used <code>rtrim(s.cwd,'/') = rtrim(c.worktree,'/')</code> as a proxy for “this Task is checked out on this Machine.” Now that bound conversations honestly stay in their own directories, that proxy breaks crash recovery for every split-checkout Task — directly contradicting this branch's own plan — and makes <code>lf task status</code> and Desktop print a false <em>“its Task is not checked out here”</em> line (observed in QA scenario 7).
     </p>
   </div>
 
   <div class="callout callout-proposed">
-    <div class="callout-title"><span class="badge badge-proposed">Proposed model</span> One invariant for conversation location</div>
+    <div class="callout-title"><span class="badge badge-proposed">Proposed completion</span> Let <code>task_checkouts</code> answer “checked out here” and <code>agent_sessions.cwd</code> answer “where it launches”</div>
     <p style="margin-bottom:0">
-      <strong>Binding changes what a conversation belongs to, never where it runs.</strong>
-      And <code>admit_scope_workspace</code> / <code>admit_session_workspace</code> only places an <em>unstarted, unbound primary placeholder</em> (<code>current_capture IS NULL AND bound_at IS NULL</code>) into its scope's checkout. Once a conversation has started or been bound, its directory is settled — only a missing directory on disk (<code>leave_gone_directory</code>) or an explicit Machine move (<code>lf session receive</code>) changes it.
+      Drop <code>rtrim(s.cwd,'/') = rtrim(c.worktree,'/')</code> from <code>task_conversation_here_sql</code> (keeping the <code>task_checkouts</code> join, open-Task check, primary-Session link, and <code>moved_to_machine_id IS NULL</code>), and rename internal <code>in_task_checkout</code> to <code>task_checked_out_here</code>. In parallel, let <code>adoption::bind_session</code> re-select a Session already assigned to the target Task without failing when another Task owns its worktree.
     </p>
   </div>
 
   <div class="compare">
     <div class="panel">
       <div class="panel-head">
-        <span>Before · Current behavior</span>
-        <span class="badge badge-existing">Existing</span>
+        <span>Before · Current HEAD (<code>57ed33d102</code>)</span>
+        <span class="badge badge-existing">Built</span>
       </div>
       <div class="panel-body">
-<div class="terminal"><span class="t-dim"># 1. Start agy in an unowned linked worktree</span>
-$ cd ../manabot.academy-test-drive
-$ lf -a agy
-<span class="t-dim">session_94d9963b running in manabot.academy-test-drive</span>
+<div class="terminal"><span class="t-dim"># Task 45783e owns ../repo.loo12; bound primary runs in ../repo.research</span>
+<span class="t-dim"># 1. Provider crashes / Mac reboots (QA scenario 7)</span>
+$ lf task status 45783e
+Conversation: died 01:57 (no exit recorded)
+  <span class="t-err">· its Task is not checked out here; `lf resume --task 45783e` opens it</span>
+<span class="t-dim"># Server recovery pass skips it — Task IS checked out here, but cwd != worktree</span>
 
-<span class="t-dim"># 2. Bind to MTG-388 (which already owns manabot.mtg-388-getting-into-a)</span>
-$ lf session bind session_94d9963b --task MTG-388
-Binding session_94d9963b to MTG-388. Permanent.
-<span class="t-err">Conversation directory set to …/manabot.mtg-388-getting-into-a.</span>
-
-<span class="t-dim"># 3. Switch to claude:fable from the worktree you're actually in</span>
-$ lf resume -a claude:fable
-<span class="t-err">Error: This worktree has no associated work conversation.</span>
-
-<span class="t-dim"># 4. Later: agy exits → server recovery restarts it</span>
-<span class="t-err">Task conversation started in …/manabot.mtg-388-getting-into-a</span>
-<span class="t-dim"># Wrong checkout; none of academy-test-drive's edits are there</span></div>
+<span class="t-dim"># 2. Another Task adopts ../repo.research (QA scenario 6)</span>
+$ lf task create "Adopt research" --worktree ../repo.research
+<span class="t-dim"># Later, re-select the first Session as 45783e's primary:</span>
+$ lf session bind session_94d9963b --task 45783e
+<span class="t-err">Error: The Session and checkout belong to different Tasks;</span>
+<span class="t-err">permanent bindings are unchanged</span></div>
         <div class="state-grid">
           <div class="state-box state-bad">
-            <strong>agent_sessions.cwd</strong>
-            <code>…/manabot.mtg-388-getting-into-a</code>
+            <strong>task_conversation_here_sql</strong>
+            <code>cwd == worktree</code> → <strong>false</strong>
           </div>
-          <div class="state-box">
-            <strong>Live process &amp; files</strong>
-            <code>…/manabot.academy-test-drive</code>
+          <div class="state-box state-bad">
+            <strong>resolve_checkout on re-bind</strong>
+            <code>checkout_task != session_task</code> → <strong>refused</strong>
           </div>
         </div>
       </div>
@@ -569,113 +555,91 @@ $ lf resume -a claude:fable
 
     <div class="panel panel-proposed">
       <div class="panel-head">
-        <span>After · Unified location invariant</span>
+        <span>After · Fully decoupled directory &amp; checkout</span>
         <span class="badge badge-proposed">Proposed</span>
       </div>
       <div class="panel-body">
-<div class="terminal"><span class="t-dim"># 1. Start agy in an unowned linked worktree</span>
-$ cd ../manabot.academy-test-drive
-$ lf -a agy
-<span class="t-dim">session_94d9963b running in manabot.academy-test-drive</span>
+<div class="terminal"><span class="t-dim"># Task 45783e owns ../repo.loo12; bound primary runs in ../repo.research</span>
+<span class="t-dim"># 1. Provider crashes / Mac reboots</span>
+$ lf task status 45783e
+Conversation: died 01:57 (no exit recorded) <span class="t-ok">· starting again</span>
+<span class="t-dim"># Recovery pass runs `lf session resume session_94d9963b`</span>
+<span class="t-ok">Task conversation started in …/repo.research</span>
 
-<span class="t-dim"># 2. Bind to MTG-388 (which already owns manabot.mtg-388-getting-into-a)</span>
-$ lf session bind session_94d9963b --task MTG-388
-Binding session_94d9963b to MTG-388. Permanent.
-<span class="t-accent">Conversation stays in …/manabot.academy-test-drive; MTG-388's checkout is …/manabot.mtg-388-getting-into-a.</span>
-
-<span class="t-dim"># 3. Switch to claude:fable from academy-test-drive</span>
-$ lf resume -a claude:fable
-<span class="t-ok">Started a new claude thread for session_94d9963b, seeded with what the agy thread knew.</span>
-<span class="t-dim"># Running in manabot.academy-test-drive, still MTG-388's primary</span>
-
-<span class="t-dim"># 4. Crash / recovery pass</span>
-<span class="t-ok">Task conversation started in …/manabot.academy-test-drive</span></div>
+<span class="t-dim"># 2. Another Task adopts ../repo.research, then re-select primary</span>
+$ lf task create "Adopt research" --worktree ../repo.research
+$ lf session bind session_94d9963b --task 45783e
+Binding session_94d9963b to 45783e (…). Permanent.
+<span class="t-accent">Conversation stays in …/repo.research; 45783e's checkout is …/repo.loo12.</span>
+<span class="t-ok">Session session_94d9963b belongs to 45783e.</span></div>
         <div class="state-grid">
           <div class="state-box state-good">
-            <strong>agent_sessions.cwd &amp; process</strong>
-            <code>…/manabot.academy-test-drive</code>
+            <strong>task_checked_out_here</strong>
+            <code>task_checkouts</code> row exists → <strong>true</strong>
           </div>
-          <div class="state-box">
-            <strong>task_checkouts.worktree</strong>
-            <code>…/manabot.mtg-388-getting-into-a</code>
+          <div class="state-box state-good">
+            <strong>bind_session re-select</strong>
+            <code>session_task == target</code> → <strong>reselected, checkout untouched</strong>
           </div>
         </div>
       </div>
     </div>
   </div>
 
-  <h3>Desktop sheet copy (<code>SessionActionSheet.swift</code>)</h3>
-  <div class="compare">
-    <div class="panel">
-      <div class="panel-head"><span>Before</span><span class="badge badge-existing">Existing</span></div>
-      <div class="panel-body">
-        <p style="margin:0; font-size:13.5px;">“Creation keeps this conversation in place. <strong>Binding sets its directory to the Task worktree immediately. Already-running clients may keep their original directory.</strong> Files stay where they are.”</p>
-      </div>
-    </div>
-    <div class="panel panel-proposed">
-      <div class="panel-head"><span>After</span><span class="badge badge-proposed">Proposed</span></div>
-      <div class="panel-body">
-        <p style="margin:0; font-size:13.5px;">“This conversation and its files stay in their current directory.”</p>
-      </div>
-    </div>
-  </div>
-
-  <h2>3. Stress-testing the model: normal path, failure, recovery &amp; counterexamples</h2>
+  <h2>3. Stress-testing the completed model</h2>
 
   <div class="flow-grid">
     <div class="flow-card">
       <h3>Normal path</h3>
-      <p class="muted">Unowned worktree <code>Y</code> has a live <code>agy</code> conversation. Bound to Task <code>T</code> (which owns worktree <code>X</code>). <code>lf resume -a claude:fable</code> in <code>Y</code> finds the Session via <code>checkout_conversation</code>, seeds the Claude thread from <code>agy</code>'s log, and runs in <code>Y</code>. <code>lf resume T</code> from anywhere opens the same Session in <code>Y</code>.</p>
+      <p class="muted">Live <code>agy</code> chat in unowned <code>Y</code> binds to Task <code>T</code> (checkout <code>X</code>). Bind prints both paths and leaves <code>cwd = Y</code>. <code>lf resume -a claude:fable</code> in <code>Y</code> switches provider in <code>Y</code>. <code>lf resume T</code> from anywhere attaches to it in <code>Y</code>.</p>
     </div>
     <div class="flow-card">
-      <h3>Failure &amp; recovery</h3>
-      <p class="muted">Provider exits or crashes → server recovery pass restarts it in <code>Y</code> (its actual files). If <code>Y</code> itself is later deleted on disk (e.g. a retired Task checkout), <code>leave_gone_directory</code> falls back to the repo's main checkout on next open so history remains reachable.</p>
+      <h3>Crash &amp; recovery</h3>
+      <p class="muted">Provider dies without quit (<code>exit_code</code> none or non-0/130) → <code>T</code> is open, claimed, and has a <code>task_checkouts</code> row here → server restarts the primary in <code>Y</code> and <code>lf task status</code> shows <code>starting again</code>. If <code>Y</code> was deleted on disk, <code>leave_gone_directory</code> falls back to <code>main</code>.</p>
     </div>
     <div class="flow-card">
-      <h3>Brand-new Task / Wave / Repo primary</h3>
-      <p class="muted"><code>lf task create --run</code> or <code>lf resume LOO-12</code> creates a placeholder with <code>captured = NULL</code> and <code>bound_at = NULL</code>. <code>admit_workspace</code> still places it into <code>task.worktree</code> (or the persistent Wave/repo worktree) before its first launch. Once launched, <code>cwd</code> never drifts.</p>
+      <h3>Task not checked out here</h3>
+      <p class="muted">Task <code>T</code> is checked out on another Machine (or never checked out locally yet, e.g. created from <code>main</code> without a worktree) → no <code>task_checkouts</code> row here → recovery leaves it stopped and <code>lf task status</code> truthfully reports <em>“its Task is not checked out here.”</em></p>
     </div>
   </div>
 
   <div class="callout callout-warn">
-    <div class="callout-title">Counterexamples kept visible (what this design trades off)</div>
+    <div class="callout-title">Counterexamples checked</div>
     <ol style="margin-bottom:0">
       <li>
-        <strong>Already-assigned conversation made primary from another directory (fixed in this plan):</strong>
-        Someone runs <code>lf --task LOO-12</code> from <code>main</code> or <code>repo.research</code> (<code>task_id = LOO-12</code>, <code>work_source = 'declared'</code>, <code>bound_at = NULL</code>, <code>current_capture IS NOT NULL</code>), then clicks <em>Make primary Task conversation</em>. Under kickoff's plan (which kept the <code>work_source = 'bound'</code> guard), the next idle <code>lf resume</code> would still overwrite <code>cwd</code> to <code>task.worktree</code>. Replacing that guard with <code>current_capture IS NULL AND bound_at IS NULL</code> closes the hole and drops two production reads of leaving <code>work_source</code>.
+        <strong><code>lf task create --run</code> setup race:</strong> Before <code>setup::checkout</code> finishes creating the worktree, <code>task_checkouts</code> has no row yet — so keeping the <code>task_checkouts</code> join in <code>task_conversations_here</code> means recovery never races initial checkout setup.
       </li>
       <li>
-        <strong>Split checkout between conversation (<code>Y</code>) and Task workers (<code>X</code>):</strong>
-        When you bind a conversation in <code>Y</code> to a Task that already owns <code>X</code>, the Task's Graph workers, <code>lf task changes</code>, and PR commands run in <code>X</code>, while the primary conversation runs in <code>Y</code>. Printing the one-line factual note on bind (<em>“Conversation stays in Y; TASK's checkout is X.”</em>) makes the split visible immediately instead of hiding it.
+        <strong>Collected remote Sessions &amp; moved Sessions:</strong> Sessions collected from remote rentals live in <code>machine_records</code>, never <code>agent_sessions</code>. Sessions moved to another Machine set <code>moved_to_machine_id</code> and <code>completed_at</code>, so neither triggers local recovery.
       </li>
       <li>
-        <strong>Machine move of a split Task (<code>lf task move</code> / <code>lf --machine M resume &lt;session&gt;</code>):</strong>
-        <code>moves::send_task</code> checkpoints <code>task.worktree</code> (<code>X</code>) and moves the conversation's transcript from <code>Y</code>. Uncommitted edits sitting in <code>Y</code> do not travel with <code>X</code>. Noted as a separate outcome below — rare enough not to block LOO-1101, but real.
+        <strong>Re-binding when <code>T</code> has no checkout and <code>S</code> sits in <code>T2</code>'s checkout:</strong> Because <code>bind_session</code> sets <code>checkout = None</code> when <code>checkout_task != target</code>, re-selecting <code>S</code> as <code>T</code>'s primary never steals <code>T2</code>'s worktree as <code>T</code>'s checkout.
       </li>
       <li>
-        <strong>Conversations moved by an earlier bind:</strong>
-        Already-rewritten rows in <code>~/.lf/loopflow.db</code> (like <code>session_94d9963b…</code> → <code>manabot.mtg-388-getting-into-a</code>) stay as stored; <code>lf resume &lt;session&gt;</code> still reaches them. No automatic DB rewrite is planned.
+        <strong><code>lf task create --session</code> with a crossed Session:</strong> Creating a new Task (<code>target = None</code>) or passing an explicit <code>--worktree</code> still refuses when the Session and checkout belong to different Tasks.
+      </li>
+      <li>
+        <strong>Split Task moved to another Machine (<code>lf task move</code>):</strong> <code>moves::send_task</code> checkpoints <code>task.worktree</code> (<code>X</code>), not <code>Y</code>. Uncommitted edits in <code>Y</code> do not travel with <code>X</code> — kept outside this Task.
       </li>
     </ol>
   </div>
 
   <h2>4. What changed in <code>scratch/plan.md</code></h2>
   <ul>
-    <li><strong>Added the <code>admit_scope_workspace</code> / <code>admit_session_workspace</code> fix:</strong> replace the leaving <code>work_source = 'bound'</code> guard with <code>captured.is_none() &amp;&amp; bound_at.is_none()</code> (SQL: <code>current_capture IS NOT NULL OR bound_at IS NOT NULL</code>) so an already-started conversation made primary never silently moves on idle resume, and two reads of leaving <code>work_source</code> disappear.</li>
-    <li><strong>Removed the false lead on <code>native-locations.json</code>:</strong> it is written only by the test stub <code>opencode_cli.py</code>, not by any local relocation layer in <code>lf</code>.</li>
-    <li><strong>Added missed affected surfaces:</strong> <code>swift/LoopflowTests/SessionControlsTests.swift</code> (mock and assertions expecting <code>/src/delivery</code>), <code>docs/work.md:156-158</code> (false claim that <code>lf task checkout</code> moves a bound Session), and accurate <code>leave_gone_directory</code> behavior in Absent &amp; error states.</li>
-    <li><strong>Added factual split-directory note on <code>lf session bind</code>:</strong> when <code>task.worktree</code> exists and differs from the Session's checkout root, print where the conversation stays and where the Task's checkout is.</li>
+    <li><strong>Added recovery &amp; outlook fix:</strong> drop <code>rtrim(s.cwd,'/') = rtrim(c.worktree,'/')</code> from <code>task_conversation_here_sql</code>, rename internal <code>SessionSummary.in_task_checkout</code> → <code>task_checked_out_here</code>, and add unit tests in <code>human_session/tests.rs</code> and <code>server/recovery.rs</code>.</li>
+    <li><strong>Added re-selection across checkouts fix:</strong> let <code>adoption::bind_session</code> pass the target Task into <code>resolve_checkout</code> so re-selecting an already-assigned Session succeeds without adopting another Task's checkout, with unit tests in <code>adoption/tests.rs</code>.</li>
+    <li><strong>Separated built vs. remaining work</strong> in <code>scratch/plan.md</code> so the next <code>implement</code> pass builds only the two remaining slices without redoing committed work.</li>
   </ul>
 
   <h2>5. Outside this Task (separate outcomes)</h2>
   <ul>
-    <li><strong><code>lf resume</code> in an empty unowned linked worktree:</strong> currently refuses with <em>“This worktree has no associated work conversation”</em> (explicitly tested in <code>adoption/tests.rs</code> and <code>session_launch_contract.rs</code>). Starting a conversation there instead would be a separate behavioral change.</li>
-    <li><strong><code>lf task move</code> when a primary conversation sits outside <code>task.worktree</code>:</strong> warning or refusing if <code>session.cwd</code> has uncommitted work outside the Task checkout (touches <code>ops/human_session/moves.rs</code>).</li>
-    <li><strong>Retiring <code>agent_sessions.work_source</code> and test-only <code>bind_session_prepared</code>:</strong> tracked under <code>LOO-836</code>; this Task only removes the two reads it directly touches.</li>
+    <li><strong><code>lf resume</code> in an empty unowned linked worktree:</strong> currently refuses and points to <code>lf</code>; starting a conversation there instead is a separate behavioral change.</li>
+    <li><strong><code>lf task move</code> when a primary conversation sits outside <code>task.worktree</code>:</strong> warning or refusing if uncommitted edits live in the conversation's directory rather than the Task's checkout.</li>
+    <li><strong>Retiring <code>agent_sessions.work_source</code> and test-only <code>bind_session_prepared</code>:</strong> tracked under <code>LOO-836</code>.</li>
   </ul>
 
   <h2>6. Open questions for review</h2>
-  <p class="muted">Choices marked <span class="badge badge-proposed">Chosen for build</span> are written into <code>scratch/plan.md</code> and built for review; reply with e.g. <code>1b</code> or <code>2b</code> to flip any of them.</p>
+  <p class="muted">Choices marked <span class="badge badge-proposed">Chosen for build</span> are built (or queued for the next pass) for review; reply with e.g. <code>1b</code> or <code>3b</code> to flip any of them.</p>
 
   <div class="question">
     <div class="question-head">
@@ -684,46 +648,46 @@ $ lf resume -a claude:fable
     <p class="muted">Applies both when binding from another linked worktree (like <code>manabot.academy-test-drive</code>) and when binding from <code>main</code> or a Wave checkout.</p>
     <ul class="options">
       <li class="chosen">
-        <span class="opt-key">1a.</span> <span class="badge badge-proposed">Chosen for build</span>
-        <strong>Always stay where it started.</strong> The conversation, its edits, <code>lf resume</code> in that worktree, and crash recovery all agree. The Task's own worktree stays where Graph workers and PRs run; <code>lf session bind</code> prints one line noting the two paths when they differ.
+        <span class="opt-key">1a.</span> <span class="badge badge-existing">Built</span>
+        <strong>Always stay where it started.</strong> The conversation, its edits, <code>lf resume</code> in that worktree, and crash recovery all stay in one directory. The Task's own worktree stays where Graph workers and PRs run.
       </li>
       <li>
         <span class="opt-key">1b.</span>
-        <strong>Stay in linked worktrees, but move out of <code>main</code> and Wave checkouts.</strong> Keeps a shared checkout cleaner after binding, at the cost of a second rule and the same live-process vs. stored-directory split whenever you bind a running chat from <code>main</code> (plus breaking Claude Code resume until a new thread starts).
+        <strong>Stay in linked worktrees, but move out of <code>main</code> and Wave checkouts.</strong> Keeps shared checkouts cleaner after binding, at the cost of a second rule and breaking Claude Code resume until a new thread starts.
       </li>
     </ul>
   </div>
 
   <div class="question">
     <div class="question-head">
-      <span class="question-num">2. When you bind a conversation in directory Y to a Task whose checkout is X, should <code>lf session bind</code> mention the two directories?</span>
+      <span class="question-num">2. When you bind a conversation in directory Y to a Task whose checkout is X, should <code>lf session bind</code> mention both directories?</span>
     </div>
-    <p class="muted">Matters because Graph workers and <code>lf task changes</code> will look at X while your bound chat edits Y.</p>
+    <p class="muted">Matters because Graph workers and <code>lf task changes</code> act on X while your bound conversation edits Y.</p>
     <ul class="options">
       <li class="chosen">
-        <span class="opt-key">2a.</span> <span class="badge badge-proposed">Chosen for build</span>
+        <span class="opt-key">2a.</span> <span class="badge badge-existing">Built</span>
         <strong>Print one factual line only when they differ:</strong> <em>“Conversation stays in &lt;Y&gt;; &lt;TASK&gt;'s checkout is &lt;X&gt;.”</em> Silent when they match or the Task has no checkout.
       </li>
       <li>
         <span class="opt-key">2b.</span>
-        <strong>Say nothing about directories.</strong> Print only the Task it bound to; rely on <code>lf task status</code> if someone checks where the conversation runs.
+        <strong>Say nothing about directories.</strong> Print only the Task it bound to.
       </li>
     </ul>
   </div>
 
   <div class="question">
     <div class="question-head">
-      <span class="question-num">3. What about <code>lf resume</code> with no arguments in an unowned linked worktree that has no conversation yet?</span>
+      <span class="question-num">3. When a bound conversation running outside its Task's checkout crashes or dies on reboot, should Loopflow restart it automatically?</span>
     </div>
-    <p class="muted">Today it refuses and tells you to run <code>lf</code> to start a new conversation there, even though <code>lf resume --help</code> says “With none for this scope, it starts one and says so.”</p>
+    <p class="muted">Applies when the Task itself is open and checked out on this Machine, while its primary conversation runs in another directory (another worktree or <code>main</code>).</p>
     <ul class="options">
       <li class="chosen">
         <span class="opt-key">3a.</span> <span class="badge badge-proposed">Chosen for build</span>
-        <strong>Keep the refusal out of this Task.</strong> An unowned worktree has no primary scope; <code>lf</code> starts a chat there and <code>lf resume</code> continues one once it exists.
+        <strong>Yes — restart it in the directory it was running in.</strong> Matches normal Task conversations, fixes the misleading <em>“its Task is not checked out here”</em> message, and leaves Tasks with no checkout on this Machine stopped.
       </li>
       <li>
         <span class="opt-key">3b.</span>
-        <strong>Have <code>lf resume</code> start a conversation in an empty unowned worktree too.</strong> Drops the refusal so <code>lf resume</code> works in every worktree; would be a small follow-up Task.
+        <strong>No — auto-restart only conversations inside the Task's own worktree.</strong> Leave split-checkout conversations down after crashes, and change the status message to say the conversation is outside the Task's checkout instead of saying the Task isn't checked out here.
       </li>
     </ul>
   </div>
@@ -735,7 +699,7 @@ $ lf resume -a claude:fable
     <p class="muted"><code>session_94d9963b7fd74dacbe01b65c99f7deb5</code> already had its directory rewritten to <code>manabot.mtg-388-getting-into-a</code> by the old bind.</p>
     <ul class="options">
       <li class="chosen">
-        <span class="opt-key">4a.</span> <span class="badge badge-proposed">Chosen for build</span>
+        <span class="opt-key">4a.</span> <span class="badge badge-existing">Built</span>
         <strong>No automatic repair.</strong> Leave existing rows as recorded; <code>lf resume &lt;session&gt;</code> reaches them from anywhere.
       </li>
       <li>

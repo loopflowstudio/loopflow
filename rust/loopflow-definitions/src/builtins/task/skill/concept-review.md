@@ -65,7 +65,9 @@ instead of describing it, marks proposed apart from existing, and ends with
 numbered questions so "2b" is a complete answer. Say its path.
 
 `scratch/concept-review.html` is the only file this skill writes; it does not
-edit `scratch/plan.md`, code or docs, and it does not decide a loop.
+edit `scratch/plan.md`, code or docs, and it does not decide a loop. With
+nobody there, the questions stay on the page; the reply gives its path and
+what it found.
 
 ## With a person
 

@@ -315,7 +315,7 @@ pub enum Read {
     #[serde(rename = "task.context")]
     #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::context_usage::ContextReport>()))]
     TaskContext { task: String },
-    /// `lf --cwd <directory> wave plan <wave>`: one Wave's Projects and
+    /// `lf --cwd <directory> wave plan <wave>`: one Wave's Project and
     /// Tasks, after syncing its repository with the tracker.
     #[serde(rename = "wave.plan")]
     #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::lf::commands::waves::WaveDetailSnapshot>>()))]
@@ -373,7 +373,7 @@ pub enum Read {
     /// `lf --cwd <directory> wave graph show <wave>|--no-wave`: the graph a
     /// new Task there would take up.
     #[serde(rename = "wave.graph")]
-    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::project::WaveGraph>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::task::WaveGraph>()))]
     WaveGraph {
         directory: PathBuf,
         wave: Option<String>,
@@ -1159,7 +1159,7 @@ impl Read {
             }
             Self::WaveGraph { directory, wave } => {
                 let repo = loopflow_execution::repo::working_directory_in(directory)?;
-                value(&block_on(loopflow_execution::ops::project::wave_graph(
+                value(&block_on(loopflow_execution::ops::task::wave_graph(
                     &repo,
                     wave.as_deref(),
                     wave.is_some(),

@@ -163,11 +163,6 @@ struct WorkSurfaceView: View {
                     TaskWorkflowHeader(model: model, task: task, work: model.taskWork[task.id])
                         .id(task.id)
                 }
-                if let unavailable = found.wave?.unavailableTasks.first(where: { $0.taskId == task.id }) {
-                    FailureLine("Planning is unavailable for this Task.", machine: unavailable.reason)
-                        .padding(.horizontal, Spacing.xl)
-                        .padding(.vertical, Spacing.sm)
-                }
                 TaskHistoryView(model: model, task: task)
                     .id(task.id)
                 // Raw records, for when the Workflow and the Graph process log disagree with them.

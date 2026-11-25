@@ -1,5 +1,3 @@
-#[cfg(any(test, feature = "test-support"))]
-use crate::test_linear_input::{Inventory, InventoryFixture, SeedLinear};
 use std::future::Future;
 use std::path::Path;
 use std::sync::Arc;
@@ -40,18 +38,11 @@ impl Fixture {
         );
     }
 
-    async fn seed_snapshot(&self, wave: &Wave) -> InventoryFixture {
-        let row = InventoryFixture {
-            wave_id: wave.id().clone(),
-            initiative: "initiative-1".into(),
-            synced_at: 1,
-            snapshot: Inventory {
-                projects: vec![],
-                items: vec![],
-            },
-        };
-        self.store.seed_inventory(row.clone(), None).await.unwrap();
-        row
+    fn seed_snapshot(&self, wave: &Wave) {
+        rusqlite::Connection::open(&self.database).unwrap().execute(
+            "INSERT INTO tracker_wave_sync(wave_id,tracker,initiative,synced_at) VALUES(?1,'linear','',1)",
+            [wave.id()],
+        ).unwrap();
     }
 }
 
@@ -91,7 +82,7 @@ fn gated(mut response: QueuedResponse) -> (QueuedResponse, Arc<Barrier>, Arc<Bar
 }
 
 async fn forced_read(repo: &Path) -> OpsResult<()> {
-    refresh_wave(repo, "product").await
+    refresh_wave(repo, "product").await.map(|_| ())
 }
 
 #[tokio::test]
@@ -106,7 +97,7 @@ async fn pm_read_linear_oauth_recovers() {
         serde_json::to_value(fixture.store.get_wave(wave.id()).await.unwrap()).unwrap();
     let timestamp = time::OffsetDateTime::from_unix_timestamp(now()).unwrap();
     let project = Project {
-        id: ProjectId::new(),
+        id: ProjectId::for_wave(wave.id()),
 
         summary: String::new(),
         status: loopflow_storage::work::project::ProjectStatus::Started,
@@ -114,8 +105,6 @@ async fn pm_read_linear_oauth_recovers() {
         slug: "reliability".into(),
         name: "Reliability".into(),
         description: "Retain this planning history.".into(),
-        krs: Vec::new(),
-        metric_targets: Vec::new(),
         tracker_synced_at: Some(1),
 
         wave_id: wave.id().clone(),
@@ -123,22 +112,7 @@ async fn pm_read_linear_oauth_recovers() {
         updated_at: timestamp,
     };
     fixture.store.create_project(&project).await.unwrap();
-    fixture
-        .store
-        .append_project_event(
-            &project.id,
-            &loopflow_storage::work::project::ProjectEventKind::Steer {
-                steer_id: loopflow_model::id::SteerId::new(),
-            },
-        )
-        .await
-        .unwrap();
-    let history = fixture
-        .store
-        .project_events_after(&project.id, 0)
-        .await
-        .unwrap();
-    fixture.seed_snapshot(&wave).await;
+    fixture.seed_snapshot(&wave);
     fixture.seed(now() - 1).await;
     let (oauth, exchanges) = test_server::spawn(vec![
         json_response(StatusCode::SERVICE_UNAVAILABLE, json!({})),
@@ -150,12 +124,9 @@ async fn pm_read_linear_oauth_recovers() {
             "id":"team-1", "name":"Fixture", "key":"FIX",
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"
         }]}}})),
-        json_response(StatusCode::OK, json!({"data":{"initiative":{"projects":{
-            "nodes":[{"id":"project-1", "name":"Product — Reliability", "description":"", "status":{"type":"started"},
+        json_response(StatusCode::OK, json!({"data":{"project":{"id":"project-1", "name":"Product — Reliability", "description":"", "status":{"type":"started"},
             "content":"workflow: feature\n\n## Definition\n\nFresh definition.\n\n## KRs\n\n- [ ] Fresh proof",
-            "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}}],
-            "pageInfo":{"hasNextPage":false,"endCursor":null}
-        }}}})),
+            "teams":{"nodes":[{"id":"team-1"}]}}}})),
         json_response(StatusCode::OK, json!({"data":{"project":{"issues":{
             "nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}
         }}}})),
@@ -173,8 +144,8 @@ async fn pm_read_linear_oauth_recovers() {
         .await
         .unwrap()
         .unwrap();
-    assert!(refreshed.metric_targets.is_empty());
-    assert_eq!(refreshed.krs[0].text, "Fresh proof");
+    // The KR section released lf wrote stays in Linear and out of the description.
+    assert_eq!(refreshed.description, "## Definition\n\nFresh definition.");
     assert_eq!(refreshed.id, project.id);
     assert_eq!(refreshed.wave_id, project.wave_id);
     assert_eq!(refreshed.created_at, project.created_at);
@@ -185,16 +156,7 @@ async fn pm_read_linear_oauth_recovers() {
         loopflow_storage::work::project::ProjectStatus::Started
     );
 
-    assert!(refreshed.krs.iter().any(|kr| kr.text == "Fresh proof"));
     assert!(refreshed.tracker_synced_at > project.tracker_synced_at);
-    assert_eq!(
-        fixture
-            .store
-            .project_events_after(&project.id, 0)
-            .await
-            .unwrap(),
-        history
-    );
     assert_eq!(exchanges.lock().await.len(), 2);
     assert!(exchanges
         .lock()
@@ -230,7 +192,7 @@ async fn pm_read_linear_oauth_invalid_grant() {
         std::env::set_var("LF_HOME", fixture.directory.path());
         let (repo, wave) = fixture.planning_repo().await;
         if cached {
-            fixture.seed_snapshot(&wave).await;
+            fixture.seed_snapshot(&wave);
         }
         let previous = fixture.wave_refresh_at(&wave);
         let original = fixture.seed(now() - 1).await;
@@ -563,7 +525,7 @@ async fn pm_read_linear_oauth_sqlite_contention_has_bounded_failure_and_recovers
     let fixture = Fixture::new().await;
     std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, wave) = fixture.planning_repo().await;
-    fixture.seed_snapshot(&wave).await;
+    fixture.seed_snapshot(&wave);
     let previous = fixture.wave_refresh_at(&wave);
     let original = fixture.seed(now() - 1).await;
     let conn = rusqlite::Connection::open(&fixture.database).unwrap();

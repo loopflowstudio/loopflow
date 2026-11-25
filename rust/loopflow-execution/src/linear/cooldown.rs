@@ -494,10 +494,10 @@ mod tests {
     use reqwest::{header::HeaderMap, StatusCode};
     use serde_json::json;
 
-    fn initiatives(remaining: i64, reset: i64) -> QueuedResponse {
+    fn statuses(remaining: i64, reset: i64) -> QueuedResponse {
         let mut response = json_response(
             StatusCode::OK,
-            json!({"data":{"initiatives":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}),
+            json!({"data":{"projectStatuses":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}),
         );
         for (key, value) in [
             ("x-ratelimit-requests-limit", 1000),
@@ -519,9 +519,9 @@ mod tests {
     #[tokio::test]
     async fn request_log_is_off_by_default() {
         let reset = super::now_ms() + 3_600_000;
-        let (url, requests) = test_server::spawn(vec![initiatives(900, reset)]).await;
+        let (url, requests) = test_server::spawn(vec![statuses(900, reset)]).await;
         let client = LinearClient::with_base_url("token".into(), None, url.clone());
-        client.initiatives().await.unwrap();
+        client.project_statuses().await.unwrap();
         assert_eq!(requests.lock().await.len(), 1);
         assert!(!request_log::log_path(&home(&url)).exists());
     }
@@ -529,14 +529,14 @@ mod tests {
     #[tokio::test]
     async fn request_log_records_operation_outcome_and_allowance() {
         let reset = super::now_ms() + 3_600_000;
-        let (url, _) = test_server::spawn(vec![initiatives(900, reset)]).await;
+        let (url, _) = test_server::spawn(vec![statuses(900, reset)]).await;
         turn_on_request_log(&url);
         let client = LinearClient::with_base_url("token".into(), None, url.clone());
-        client.initiatives().await.unwrap();
+        client.project_statuses().await.unwrap();
         let records = request_log::read_since(&home(&url), 0).unwrap();
         assert_eq!(records.len(), 1);
         let record = &records[0];
-        assert_eq!(record.operation, "ListInitiatives");
+        assert_eq!(record.operation, "ProjectStatuses");
         assert_eq!(record.outcome, RequestOutcome::Sent);
         assert_eq!(record.status, Some(200));
         assert_eq!(record.allowances.cost, Some(3));
@@ -555,16 +555,16 @@ mod tests {
         let reset = super::now_ms() + 3_600_000;
         // The first response leaves 5% of the hour's requests: inside the reserve.
         let (url, requests) =
-            test_server::spawn(vec![initiatives(50, reset), initiatives(49, reset)]).await;
+            test_server::spawn(vec![statuses(50, reset), statuses(49, reset)]).await;
         turn_on_request_log(&url);
         let client = LinearClient::with_base_url("token".into(), None, url.clone());
-        client.initiatives().await.unwrap();
+        client.project_statuses().await.unwrap();
         assert_eq!(
-            client.initiatives().await.unwrap_err(),
+            client.project_statuses().await.unwrap_err(),
             crate::linear::LinearError::RateLimited { reset_at_ms: reset }
         );
         assert_eq!(requests.lock().await.len(), 1);
-        assert!(urgent(client.initiatives()).await.unwrap().is_empty());
+        assert!(urgent(client.project_statuses()).await.unwrap().is_empty());
         assert_eq!(requests.lock().await.len(), 2);
         let outcomes: Vec<_> = request_log::read_since(&home(&url), 0)
             .unwrap()
@@ -637,15 +637,15 @@ mod tests {
             .headers
             .push(("x-ratelimit-requests-remaining".into(), "0".into()));
         let (url, requests) = test_server::spawn(vec![limited,
-            json_response(StatusCode::OK, json!({"data":{"initiatives":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}))]).await;
+            json_response(StatusCode::OK, json!({"data":{"projectStatuses":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}))]).await;
         let first = LinearClient::with_base_url("first-token".into(), None, url.clone());
         assert!(matches!(
-            first.initiatives().await,
+            first.project_statuses().await,
             Err(crate::linear::LinearError::RateLimited { .. })
         ));
         let second = LinearClient::with_base_url("refreshed-token".into(), None, url.clone());
         assert!(matches!(
-            second.initiatives().await,
+            second.project_statuses().await,
             Err(crate::linear::LinearError::RateLimited { .. })
         ));
         assert_eq!(requests.lock().await.len(), 1);
@@ -657,7 +657,7 @@ mod tests {
         // Exercise expiration without requiring both requests to finish in 250 ms.
         let expired = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) - 60_000;
         std::fs::write(&cooldown.path, expired.to_string()).unwrap();
-        assert!(second.initiatives().await.unwrap().is_empty());
+        assert!(second.project_statuses().await.unwrap().is_empty());
         assert_eq!(requests.lock().await.len(), 2);
     }
 

@@ -1,10 +1,7 @@
 use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot, WaveDetailSnapshot};
-use loopflow_execution::durable::TaskState;
-use loopflow_execution::work::wave::metrics::MetricPortfolioDto;
 
 const WAVE_DETAIL: &str = include_str!("../../../tests/fixtures/dto/wave_detail.json");
 const ROADMAP: &str = include_str!("../../../tests/fixtures/dto/roadmap_snapshot.json");
-const METRIC_PORTFOLIO: &str = include_str!("../../../tests/fixtures/dto/metric_portfolio.json");
 
 #[test]
 fn task_steer_receipt_requires_its_delivery_and_nullable_machine() {
@@ -82,23 +79,18 @@ fn wave_detail_preserves_graph_and_machine() {
         snapshot.wave.machine.as_ref().unwrap().label.as_deref(),
         Some("mini")
     );
-    assert_eq!(
-        snapshot.project_readiness.state,
-        loopflow_execution::store::sqlite::ProjectReadinessState::Ready
-    );
-    assert!(snapshot.project_readiness.activation.is_none());
     assert_eq!(snapshot.setup.graph.value.as_deref(), Some("code"));
     assert_eq!(
         snapshot.setup.skill_agents["implement"].source,
         loopflow_execution::config::ConfigSource::Repository
     );
-    let Evidence::Ok {
-        items: projects, ..
-    } = &snapshot.projects
+    let loopflow::lf::commands::waves::Reading::Ok {
+        value: Some(project),
+    } = &snapshot.project
     else {
-        panic!("missing Projects")
+        panic!("missing Project")
     };
-    assert_eq!(projects[0].sync.actions[1].change, "order");
+    assert_eq!(project.sync.actions[1].change, "order");
     let Evidence::Ok { items: tasks, .. } = &snapshot.tasks else {
         panic!("missing Tasks")
     };
@@ -117,45 +109,39 @@ fn wave_detail_preserves_graph_and_machine() {
         Some("pr_33333333333333333333333333333333")
     );
 
-    let loopflow::lf::commands::waves::Evidence::Ok { items, .. } = &snapshot.projects else {
-        panic!("missing Projects")
+    let loopflow::lf::commands::waves::Reading::Ok {
+        value: Some(project),
+    } = &snapshot.project
+    else {
+        panic!("missing Project")
     };
-
-    assert!(items[0].current);
     assert_eq!(
-        items[0].status,
+        project.status,
         loopflow_execution::work::project::ProjectStatus::Started
     );
 
     let encoded = serde_json::to_string(&snapshot).unwrap();
     let decoded: WaveDetailSnapshot = serde_json::from_str(&encoded).unwrap();
     assert_eq!(
-        serde_json::to_value(&decoded.projects).unwrap(),
-        serde_json::to_value(&snapshot.projects).unwrap()
+        serde_json::to_value(&decoded.project).unwrap(),
+        serde_json::to_value(&snapshot.project).unwrap()
     );
 }
 
 #[test]
-fn status_preserves_stranded_tasks_alongside_project_history() {
+fn status_keeps_task_runtime_alongside_project_status() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
-    assert_eq!(snapshot.unavailable_tasks[0].status, TaskState::Unstarted);
     let Evidence::Ok { items, .. } = snapshot.tasks else {
         panic!("available tasks")
     };
     assert_eq!(items[0].runtime.as_ref().unwrap().reason, "ready");
     let encoded = serde_json::from_str::<serde_json::Value>(WAVE_DETAIL).unwrap();
-    assert_eq!(encoded["projects"]["items"][0]["status"], "started");
+    assert_eq!(encoded["project"]["value"]["status"], "started");
 }
 
 #[test]
-fn status_and_roadmap_require_the_shared_metric_portfolio() {
+fn status_and_roadmap_round_trip_and_keep_workspace_facts() {
     let detail: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
-    assert!(matches!(
-        detail.metric_portfolio.metrics.as_slice(),
-        [metric] if metric.identity.metric_id == "task-loop-trust"
-            && matches!(metric.evidence, loopflow_execution::work::wave::metrics::MetricEvidenceDto::Met { .. })
-    ));
-
     let roadmap: RoadmapSnapshot = serde_json::from_str(ROADMAP).unwrap();
     // Each Task is written once, under the roadmap; Waves do not repeat them.
     assert_eq!(
@@ -163,7 +149,7 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
         serde_json::from_str::<serde_json::Value>(ROADMAP).unwrap()
     );
     let Evidence::Ok { items, .. } = roadmap.wave_tasks(&roadmap.waves[0]) else {
-        panic!("fixture has current Project evidence")
+        panic!("fixture has Project evidence")
     };
     assert!(!items.is_empty());
     assert_eq!(
@@ -177,7 +163,7 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
         Some("build-server")
     );
     assert!(
-        serde_json::to_value(&roadmap.waves[0].projects).unwrap()["items"][0]
+        serde_json::to_value(&roadmap.waves[0].project).unwrap()["value"]
             .get("graph")
             .is_none()
     );
@@ -201,86 +187,6 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
             .local_exists,
         Some(true)
     );
-    assert_eq!(
-        roadmap.waves[0].metric_portfolio.metrics[0]
-            .identity
-            .metric_id,
-        "task-loop-trust"
-    );
-    assert!(roadmap.waves[1].metric_portfolio.metrics.is_empty());
-
-    let mut detail_without_metrics: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
-    detail_without_metrics
-        .as_object_mut()
-        .unwrap()
-        .remove("metric_portfolio");
-    let error = serde_json::from_value::<WaveDetailSnapshot>(detail_without_metrics).unwrap_err();
-    assert!(error.to_string().contains("metric_portfolio"));
-
-    let mut roadmap_without_metrics: serde_json::Value = serde_json::from_str(ROADMAP).unwrap();
-    roadmap_without_metrics["waves"][0]
-        .as_object_mut()
-        .unwrap()
-        .remove("metric_portfolio");
-    let error = serde_json::from_value::<RoadmapSnapshot>(roadmap_without_metrics).unwrap_err();
-    assert!(error.to_string().contains("metric_portfolio"));
-}
-
-#[test]
-fn metric_portfolio_fixture_locks_every_tagged_payload() {
-    let portfolio: MetricPortfolioDto = serde_json::from_str(METRIC_PORTFOLIO).unwrap();
-    assert_eq!(portfolio.metrics.len(), 11);
-    assert!(matches!(
-        &portfolio.metrics[10].evidence,
-        loopflow_execution::work::wave::metrics::MetricEvidenceDto::Unknown {
-            cause:
-                loopflow_execution::work::wave::metrics::MetricUnknownCauseDto::TargetUnavailable {
-                    value: 1.0,
-                    ..
-                }
-        }
-    ));
-    assert_eq!(portfolio.contract_issues.len(), 5);
-    assert_eq!(
-        portfolio.metrics[0].description,
-        "Fraction of qualifying events that settled successfully."
-    );
-
-    let value: serde_json::Value = serde_json::from_str(METRIC_PORTFOLIO).unwrap();
-    let evidence = value["metrics"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|metric| metric["evidence"]["kind"].as_str().unwrap())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        evidence,
-        [
-            "met",
-            "missed",
-            "unknown",
-            "unknown",
-            "unknown",
-            "unknown",
-            "unknown",
-            "unknown",
-            "unavailable",
-            "untargeted",
-            "unknown",
-        ]
-    );
-
-    let mut missing_required = value;
-    missing_required["metrics"][0]
-        .as_object_mut()
-        .unwrap()
-        .remove("description");
-    let error = serde_json::from_value::<MetricPortfolioDto>(missing_required).unwrap_err();
-    assert!(error.to_string().contains("description"));
-
-    let mut with_unknown_field: serde_json::Value = serde_json::from_str(METRIC_PORTFOLIO).unwrap();
-    with_unknown_field["metrics"][0]["future_field"] = serde_json::json!(true);
-    serde_json::from_value::<MetricPortfolioDto>(with_unknown_field).unwrap();
 }
 
 #[test]
@@ -1387,11 +1293,7 @@ fn wave_added_receipt_round_trips_with_its_leftover() {
     use loopflow_execution::ops::wave_lifecycle::WaveAdded;
     let json = include_str!("../../../tests/fixtures/dto/wave_added.json");
     let added: WaveAdded = serde_json::from_str(json).unwrap();
-    let joined = include_str!("../../../tests/fixtures/dto/wave_joined.json");
-    let joined: WaveAdded = serde_json::from_str(joined).unwrap();
-    assert!(!joined.created && joined.project.is_none());
     assert!(added.created);
-    assert_eq!(added.project.as_ref().unwrap().wave_id, added.id);
     assert_eq!(added.summary.len(), 1);
     assert_eq!(
         serde_json::to_value(&added).unwrap(),
@@ -1446,8 +1348,7 @@ fn task_create_answers_with_the_conversation_record_and_row() {
 #[test]
 fn wave_graph_reports_its_default_with_or_without_a_wave() {
     let json = include_str!("../../../tests/fixtures/dto/wave_graph.json");
-    let graphs: Vec<loopflow_execution::ops::project::WaveGraph> =
-        serde_json::from_str(json).unwrap();
+    let graphs: Vec<loopflow_execution::ops::task::WaveGraph> = serde_json::from_str(json).unwrap();
     assert_eq!(graphs[0].default.source.as_str(), "repository");
     assert!(graphs[1].wave.is_none());
     assert_eq!(

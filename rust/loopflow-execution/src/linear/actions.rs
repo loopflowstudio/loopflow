@@ -7,7 +7,9 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
-use super::{LinearClient, LinearError, OrderedIssue, PlanningResponse};
+use super::{
+    parse_project_document, LinearClient, LinearError, LinearResult, OrderedIssue, PlanningResponse,
+};
 use crate::ops::tracker::{
     creation_id, ingest_task, message, now, observed_project, observed_task, opening_state,
     remote_parent, remote_project, remote_task, repository_scope, target_state, value, values,
@@ -23,26 +25,9 @@ use loopflow_storage::sqlite::tracker_actions::{
     ActionKind, ActionOwner, ActionPhase, TaskLink, TrackerAction,
 };
 use loopflow_storage::work::edit::WorkValue;
+use loopflow_storage::work::project::Project;
 
 impl LinearClient {
-    /// A Project created under a Wave with no Initiative stays local until the
-    /// Wave has one. A missing Project or Wave is not a block: the send reports it.
-    pub(crate) async fn blocked_action(
-        &self,
-        store: &Store,
-        repo: &Path,
-        action: &TrackerAction,
-    ) -> Option<String> {
-        let (ActionOwner::Project(project), ActionKind::Create) = (&action.owner, action.kind)
-        else {
-            return None;
-        };
-        let (_, slug) = project_wave(store, project).await.ok()?;
-        crate::ops::linear::read_initiative(repo, &slug)
-            .is_none()
-            .then(|| NO_INITIATIVE.to_string())
-    }
-
     pub(crate) async fn send_action(
         &self,
         store: &Store,
@@ -53,14 +38,11 @@ impl LinearClient {
             (ActionOwner::Task(task), ActionKind::Create) => {
                 self.create_task(store, repo, task, action).await
             }
-            (ActionOwner::Project(project), ActionKind::Create) => {
-                self.create_project(store, repo, project, action).await
-            }
             (ActionOwner::Task(task), ActionKind::Field) => {
                 self.task_field(store, repo, task, action).await
             }
             (ActionOwner::Project(project), ActionKind::Field) => {
-                self.project_field(store, repo, project, action).await
+                self.project_field(store, project, action).await
             }
             (ActionOwner::Task(task), ActionKind::State) => self.state(store, task, action).await,
             (ActionOwner::Task(task), ActionKind::Comment) => {
@@ -70,13 +52,11 @@ impl LinearClient {
             (ActionOwner::Project(project), ActionKind::Order) => {
                 self.order(store, project, action).await
             }
-            (ActionOwner::Project(project), ActionKind::Link) => {
-                self.link(store, repo, project).await
-            }
             (ActionOwner::Task(task), ActionKind::Link) => {
                 self.task_link(store, task, action).await
             }
-            (owner, kind) => Err(message(format!(
+            // A released lf can still queue a Project create; it retires.
+            (owner, kind) => Ok(Sent::Unsupported(format!(
                 "Linear carries no {} action for {owner:?}",
                 kind.as_str()
             ))),
@@ -95,9 +75,6 @@ impl LinearClient {
             (ActionOwner::Task(task), ActionKind::Create) => {
                 self.look_created_task(store, repo, task).await
             }
-            (ActionOwner::Project(project), ActionKind::Create) => {
-                self.look_created_project(store, repo, project).await
-            }
             (ActionOwner::Task(task), ActionKind::Delete) => {
                 self.look_deletion(store, repo, task, action).await
             }
@@ -106,8 +83,8 @@ impl LinearClient {
             (ActionOwner::Project(project), ActionKind::Order) => {
                 self.look_order(store, repo, project).await
             }
-            (ActionOwner::Project(project), _) => self.look_project(store, repo, project).await,
-            (ActionOwner::Wave(_), _) => Err(message("Linear Initiatives are not queued")),
+            (ActionOwner::Project(project), _) => self.look_project(store, project).await,
+            (ActionOwner::Wave(_), _) => Err(message("Linear carries no Wave actions")),
         };
         observed.map_err(|error| error.to_string())
     }
@@ -152,76 +129,41 @@ impl LinearClient {
         self.accepted(store, repo, response).await
     }
 
-    async fn create_project(
+    /// Make `project` in Linear under its own UUID and bind it. A create whose
+    /// reply was lost is refused the second time (Linear never reuses an id),
+    /// so a refusal first looks for the Project holding that id.
+    pub(crate) async fn create_project(
         &self,
         store: &Store,
         repo: &Path,
-        project: &ProjectId,
-        action: &TrackerAction,
-    ) -> OpsResult<Sent> {
-        let (wave, initiative) = project_scope(store, repo, project).await?;
-        let team = repository_scope(repo)?;
-        let id = creation_id(project.as_str())?;
-        let mut input = json!({"id": id, "teamIds": [team], "useDefaultTemplate": false});
-        let (mut description, mut krs, mut targets) = (String::new(), Vec::new(), Vec::new());
-        for value in values(action)? {
-            match value {
-                WorkValue::ProjectName(name) => input["name"] = json!(name),
-                WorkValue::ProjectSummary(summary) => input["description"] = json!(summary),
-                WorkValue::ProjectDescription(text) => description = text.unwrap_or_default(),
-                WorkValue::ProjectStatus(status) => {
-                    input["statusId"] = self
-                        .project_field_input(&WorkValue::ProjectStatus(status), "")
-                        .await
-                        .map_err(message)?["statusId"]
-                        .clone()
-                }
-                WorkValue::Krs(values) => krs = values,
-                WorkValue::MetricTargets(values) => targets = values,
-                _ => {}
-            }
-        }
-        input["content"] = json!(format!(
-            "{description}\n{}",
-            loopflow_storage::planning::render_project_content(&krs, &targets)
-        ));
-        let project = match crate::linear::urgent(self.deliver_planning_creation(true, input)).await
+        project: &Project,
+    ) -> OpsResult<()> {
+        let id = creation_id(project.id.as_str())?;
+        let input = json!({
+            "id": id,
+            "teamIds": [repository_scope(repo)?],
+            "useDefaultTemplate": false,
+            "name": project.name,
+            "description": project.summary,
+            "content": project.description,
+            "statusId": self.project_status_id(project.status).await.map_err(message)?,
+        });
+        let created = match crate::linear::urgent(self.deliver_planning_creation(true, input)).await
         {
             Ok(PlanningResponse::Project { project, .. }) => *project,
             Ok(PlanningResponse::Task { .. }) => {
-                return Ok(Sent::Unknown("Project creation returned an issue".into()))
+                return Err(message("Linear Project creation returned an issue"))
             }
-            Err(error) => return Ok(Sent::failed(error)),
+            Err(error) => match self.find_project(&id).await {
+                Ok(Some(found)) => found,
+                _ => {
+                    return Err(message(format!(
+                        "Linear did not create the Project: {error}"
+                    )))
+                }
+            },
         };
-        let project = match self.attached(&initiative, project).await {
-            Ok(project) => project,
-            Err(error) => return Ok(Sent::Unknown(error.to_string())),
-        };
-        accept_project(store, &wave, &initiative, &project)?;
-        Ok(Sent::Acknowledged {
-            revision: project.revision,
-            remote_id: Some(id),
-        })
-    }
-
-    /// A created Project joins its Wave's Initiative. The attachment carries an
-    /// id derived from both, so repeating it after a lost reply is safe.
-    async fn attached(
-        &self,
-        initiative: &str,
-        project: TrackerProject,
-    ) -> OpsResult<TrackerProject> {
-        if !project.initiative_ids.is_empty() {
-            return Ok(project);
-        }
-        let link = uuid::Uuid::new_v5(
-            &uuid::Uuid::NAMESPACE_URL,
-            format!("loopflow/project/{}/initiative/{initiative}", project.id).as_bytes(),
-        )
-        .to_string();
-        self.deliver_project_attachment(&link, &project.id, initiative)
-            .await
-            .map_err(message)
+        accept_project(store, &project.wave_id, &created)
     }
 
     async fn task_field(
@@ -259,18 +201,12 @@ impl LinearClient {
     async fn project_field(
         &self,
         store: &Store,
-        repo: &Path,
         project: &ProjectId,
         action: &TrackerAction,
     ) -> OpsResult<Sent> {
         let external = remote_project(store, project).await?;
-        // Prose, KRs and targets share the Project's one content document.
-        let (_, content) = self
-            .fetch_project_content(&external)
-            .await
-            .map_err(message)?;
         let input = self
-            .project_field_input(&value(action)?, &content)
+            .project_update_input(&external, value(action)?)
             .await
             .map_err(message)?;
         let observed = match self.deliver_planning_field(&external, true, input).await {
@@ -280,11 +216,32 @@ impl LinearClient {
             }
             Err(error) => return Ok(Sent::failed(error)),
         };
-        let (wave, initiative) = project_scope(store, repo, project).await?;
-        accept_project(store, &wave, &initiative, &observed)?;
+        accept_project(store, &project_wave(store, project).await?, &observed)?;
         Ok(Sent::Acknowledged {
             revision: observed.revision,
             remote_id: Some(external),
+        })
+    }
+
+    async fn project_update_input(&self, external: &str, value: WorkValue) -> LinearResult<Value> {
+        Ok(match value {
+            WorkValue::ProjectName(name) => json!({"name": name}),
+            WorkValue::ProjectSummary(summary) => json!({"description": summary}),
+            WorkValue::ProjectStatus(status) => {
+                json!({"statusId": self.project_status_id(status).await?})
+            }
+            WorkValue::ProjectDescription(Some(description)) => {
+                // Released sections share Linear's content field with the prose.
+                let node = self.project_node(external).await?;
+                let document = parse_project_document(node.content.as_deref().unwrap_or_default())?;
+                json!({"content": document.replace_description(&description)?})
+            }
+            other => {
+                return Err(LinearError::Message(format!(
+                    "unsupported Project field {}",
+                    other.field()
+                )))
+            }
         })
     }
 
@@ -400,21 +357,6 @@ impl LinearClient {
                     .then(a.sort_order.total_cmp(&b.sort_order))
             });
         }
-    }
-
-    async fn link(&self, store: &Store, repo: &Path, project: &ProjectId) -> OpsResult<Sent> {
-        let (wave, initiative) = project_scope(store, repo, project).await?;
-        let external = remote_project(store, project).await?;
-        let observed = self.project_ownership(&external).await.map_err(message)?;
-        let observed = match self.attached(&initiative, observed).await {
-            Ok(observed) => observed,
-            Err(error) => return Ok(Sent::Unknown(error.to_string())),
-        };
-        accept_project(store, &wave, &initiative, &observed)?;
-        Ok(Sent::Acknowledged {
-            revision: observed.revision,
-            remote_id: Some(external),
-        })
     }
 
     async fn task_link(
@@ -594,26 +536,7 @@ impl LinearClient {
             return Ok(None);
         };
         ingest_task(store, repo, &item, project.as_ref(), now()).await?;
-        Ok(Some(observed_task(store, &item).await))
-    }
-
-    async fn look_created_project(
-        &self,
-        store: &Store,
-        repo: &Path,
-        project: &ProjectId,
-    ) -> OpsResult<Option<Observed>> {
-        let Some(found) = self
-            .find_project(&creation_id(project.as_str())?)
-            .await
-            .map_err(message)?
-        else {
-            return Ok(None);
-        };
-        let (wave, initiative) = project_scope(store, repo, project).await?;
-        let found = self.attached(&initiative, found).await?;
-        accept_project(store, &wave, &initiative, &found)?;
-        Ok(Some(observed_project(&found)))
+        Ok(Some(observed_task(store, &item).await?))
     }
 
     async fn look_task(
@@ -628,7 +551,7 @@ impl LinearClient {
             return Ok(None);
         };
         ingest_task(store, repo, &item, project.as_ref(), now()).await?;
-        let mut observed = observed_task(store, &item).await;
+        let mut observed = observed_task(store, &item).await?;
         if action.kind == ActionKind::State {
             observed.state_history = Some(self.state_history(&external, action, &item).await);
         }
@@ -699,16 +622,11 @@ impl LinearClient {
     async fn look_project(
         &self,
         store: &Store,
-        repo: &Path,
         project: &ProjectId,
     ) -> OpsResult<Option<Observed>> {
         let external = remote_project(store, project).await?;
-        let (observed, _) = self
-            .fetch_project_content(&external)
-            .await
-            .map_err(message)?;
-        let (wave, initiative) = project_scope(store, repo, project).await?;
-        accept_project(store, &wave, &initiative, &observed)?;
+        let observed = self.project_ownership(&external).await.map_err(message)?;
+        accept_project(store, &project_wave(store, project).await?, &observed)?;
         Ok(Some(observed_project(&observed)))
     }
 
@@ -770,45 +688,20 @@ async fn project_id(store: &Store, project: Option<&str>) -> OpsResult<Option<St
     Ok(Some(remote_project(store, &project).await?))
 }
 
-const NO_INITIATIVE: &str = "Wave has no Linear Initiative; its Projects stay local";
-
-/// The Wave a Project belongs to and that Wave's Initiative.
-async fn project_scope(
-    store: &Store,
-    repo: &Path,
-    project: &ProjectId,
-) -> OpsResult<(WaveId, String)> {
-    let (wave, slug) = project_wave(store, project).await?;
-    let initiative =
-        crate::ops::linear::read_initiative(repo, &slug).ok_or_else(|| message(NO_INITIATIVE))?;
-    Ok((wave, initiative))
-}
-
-/// The Wave a Project belongs to, with its slug.
-async fn project_wave(store: &Store, project: &ProjectId) -> OpsResult<(WaveId, String)> {
-    let project = store
+/// The Wave a Project belongs to.
+async fn project_wave(store: &Store, project: &ProjectId) -> OpsResult<WaveId> {
+    Ok(store
         .get_project(project)
         .await
         .map_err(message)?
-        .ok_or_else(|| message("Project is missing"))?;
-    let wave = store
-        .get_wave(&project.wave_id)
-        .await
-        .map_err(message)?
-        .ok_or_else(|| message("Project Wave is missing"))?;
-    Ok((project.wave_id, wave.slug().to_owned()))
+        .ok_or_else(|| message("Project is missing"))?
+        .wave_id)
 }
 
-fn accept_project(
-    store: &Store,
-    wave: &WaveId,
-    initiative: &str,
-    project: &TrackerProject,
-) -> OpsResult<()> {
+fn accept_project(store: &Store, wave: &WaveId, project: &TrackerProject) -> OpsResult<()> {
     loopflow_storage::sqlite::linear_events::accept_linear_project_in(
         &store.sqlite,
         wave,
-        initiative,
         project,
         now(),
         loopflow_storage::planning_sync::TrackerKind::Linear,
@@ -1023,6 +916,38 @@ mod tests {
             .map(|r| r.body.clone())
             .collect();
         (sent, bodies)
+    }
+
+    #[tokio::test]
+    async fn project_updates_read_content_only_to_replace_observed_prose() {
+        use loopflow_storage::work::edit::WorkValue;
+        let id = uuid::Uuid::new_v4().to_string();
+        let (base, _) = test_server::spawn(vec![reply(json!({"project": {
+            "id": id, "name": "Plan", "status": {"type": "started"}, "description": null,
+            "content": "Old prose.\nworkflow: code\n", "initiatives": {"nodes":[]}, "teams": {"nodes":[]}
+        }}))]).await;
+        let client = LinearClient::with_base_url("fixture".into(), None, base);
+        assert!(client
+            .project_update_input(&id, WorkValue::ProjectDescription(None))
+            .await
+            .is_err());
+        assert_eq!(
+            client
+                .project_update_input(&id, WorkValue::ProjectSummary("Summary".into()))
+                .await
+                .unwrap(),
+            json!({"description": "Summary"})
+        );
+        assert_eq!(
+            client
+                .project_update_input(
+                    &id,
+                    WorkValue::ProjectDescription(Some("New prose.".into()))
+                )
+                .await
+                .unwrap(),
+            json!({"content": "New prose.\n\nworkflow: code\n"})
+        );
     }
 
     /// Each body's operation name and the attachment id it names, if any.

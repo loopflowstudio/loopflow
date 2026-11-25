@@ -107,14 +107,14 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.task_steers(&task_id)).await
     }
 
-    pub async fn append_interrupt(&self, work: &WorkRef) -> StoreResult<i64> {
-        let work = work.clone();
-        run_sqlite(&self.sqlite, move |store| store.append_interrupt(&work)).await
+    pub async fn append_interrupt(&self, task: &TaskId) -> StoreResult<i64> {
+        let task = task.clone();
+        run_sqlite(&self.sqlite, move |store| store.append_interrupt(&task)).await
     }
 
-    pub async fn latest_interrupt_id(&self, work: &WorkRef) -> StoreResult<i64> {
-        let work = work.clone();
-        run_sqlite(&self.sqlite, move |store| store.latest_interrupt_id(&work)).await
+    pub async fn latest_interrupt_id(&self, task: &TaskId) -> StoreResult<i64> {
+        let task = task.clone();
+        run_sqlite(&self.sqlite, move |store| store.latest_interrupt_id(&task)).await
     }
 
     #[cfg(any(test, feature = "test-support"))]

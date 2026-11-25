@@ -690,14 +690,14 @@ Rust suite skips those installation proofs; a skipped case is not verification.
 Task status reads a Graph from recorded command outcomes and OS liveness. Run
 `cargo test -p loopflow-execution --lib ops::task_execution::tests` for running, between
 steps, stopped and failed.
-Managed Task fixtures must bind the checkout's Team and Initiative before
+Managed Task fixtures must bind the checkout's Team and link the Wave's Project before
 creating Task worktrees; reuse `support::bind_task_planning` for the shared fixture.
 
 When changing Task planning lookup or provider response shapes, run the affected
 installation proofs and the paired `local_planning` deletion proof. The portable `task_abandonment`
 fixture retains unresolved Sessions, Processes, published PRs and files in both
 connection modes. The regular Rust suite skips installation proofs. Keep
-simulated provider revisions and checkout Team/Initiative bindings consistent
+simulated provider revisions, the checkout's Team binding and Project links consistent
 with the planning records those workflows resolve. Exercise unfinished work
 before confirmed removal; do not resurrect deleted Tasks by resetting only
 execution tables while retaining planning tombstones.
@@ -811,7 +811,7 @@ pass there does not cover its HTTPS fixtures. Keep nullable requested fields,
 including `dueDate`, present in fixture responses. Team migration also reads issue
 comments; its fixtures must include the requested pagination metadata.
 Run the same Linux suite when changing Linear mutation inputs or acknowledgements:
-the reconnect peer must accept partial Initiative updates and return `success`.
+the reconnect peer must accept partial updates and return `success`.
 
 ```bash
 cargo nextest run -p loopflow-execution --lib -E 'test(linear::) | test(ops::linear::) | test(ops::tracker_events::)' --no-fail-fast

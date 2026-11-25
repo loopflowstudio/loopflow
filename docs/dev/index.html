@@ -1552,7 +1552,7 @@ operations available to helpers without becoming standing Work identities.</p>
 <p>The source tree makes the planning boundary literal:</p>
 <pre tabindex="0"><code class="language-text">work/
 wave/{mod,config,context,
-      memory,metrics,relocate}
+      memory,relocate}
 project
 task
 
@@ -1750,7 +1750,7 @@ ledger.</p>
 <pre tabindex="0"><code class="language-text">Repository
   |-- Task                    repository work, optionally outside a Wave
   `-- Wave                    enduring objective, memory, cadence and default graph
-        `-- Project           plan, Tasks, KRs and targets; optional provider binding
+        `-- Project           a group of Tasks that starts and ends; optional provider binding
               `-- Task        identity, worktree, PR and captured graph position
 
 Process                          one actual lf process; immutable causal parent
@@ -1795,12 +1795,12 @@ Graph                          one lf process; cursor in its memory, graph in Gr
 </tr>
 <tr>
 <td>Wave</td>
-<td>Enduring objective, memory, cadence, budget and metric instruments</td>
-<td>Wave files, local Wave identity and, with Linear, Initiative membership</td>
+<td>Enduring objective, memory, cadence and budget</td>
+<td>Wave files, local Wave identity and its one Project, linked to a Linear Project when connected</td>
 </tr>
 <tr>
 <td>Project</td>
-<td>A Wave’s Tasks, KRs and targets</td>
+<td>All of a Wave’s Tasks, grouped under one name, summary and status</td>
 <td><code>projects</code> row, shared through the tracker</td>
 </tr>
 <tr>

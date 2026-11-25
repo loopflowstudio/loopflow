@@ -876,6 +876,57 @@ pub(crate) fn scope_graph_default(
     ))
 }
 
+/// The graph a scope's new Tasks take up, resolved through your `lf set wave.graph`,
+/// the Wave's and the repository's `graph:`, then `code`.
+/// The repository scope has no Wave.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct WaveGraph {
+    pub wave_id: Option<loopflow_model::id::WaveId>,
+    pub wave: Option<String>,
+    pub default: GraphDefault,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct GraphDefault {
+    pub name: String,
+    pub source: ConfigSource,
+}
+
+/// `selector: None` reads the ambient Wave; `in_wave: false` the repository.
+pub async fn wave_graph(
+    repo: &Path,
+    selector: Option<&str>,
+    in_wave: bool,
+) -> OpsResult<WaveGraph> {
+    let wave = if in_wave {
+        let store = crate::store::read_existing_registry()
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("Planning unavailable: local registry is absent"))?;
+        Some(
+            crate::work::wave::context::resolve_managed_wave(
+                Some(&store),
+                Some(repo),
+                selector,
+                std::env::var("LF_WAVE_ID").ok().as_deref(),
+            )
+            .await
+            .map_err(task_error)?,
+        )
+    } else {
+        None
+    };
+    let (name, source) = scope_graph_default(repo, wave.as_ref().map(|wave| wave.slug()))?;
+    Ok(WaveGraph {
+        wave_id: wave.as_ref().map(|wave| wave.id().clone()),
+        wave: wave.as_ref().map(|wave| wave.slug().into()),
+        default: GraphDefault { name, source },
+    })
+}
+
 /// Load `name` from `repo`, or name the graphs it could have been;
 /// `source` prefixes the error with which setting chose it.
 pub fn load_graph(
@@ -1306,21 +1357,6 @@ fn prepare_task(
                 "requested Wave does not own Task {}",
                 task.identifier
             )));
-        }
-        // A carrier or an exact issue lookup can deliver the Task before its Initiative inventory.
-        if let Some(wave) = wave.as_ref().filter(|_| {
-            task.worktree.is_none() && task.tracker_id.is_some() && !options.from_last_fetch
-        }) {
-            if super::tracker::queued_tracker(&main)
-                == Some(loopflow_storage::planning_sync::TrackerKind::Linear)
-            {
-                if let Err(error) = super::linear::acquire_wave_inventory(&store, wave).await {
-                    crate::journal::request::diagnostic(format_args!(
-                        "Wave {}: {error}",
-                        wave.slug()
-                    ));
-                }
-            }
         }
         validate_task_preparation(&store, &task).await?;
         options.validate_directive((!fetched).then_some(&task))?;
@@ -2100,9 +2136,8 @@ async fn place_prepared_task(
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("Task is unavailable"))?;
-        let wave = owning_wave(store, &task).await?;
-        let acquisition = match wave {
-            Some(wave) => Some(super::planning_sync::lock_wave_planning(&wave).await?),
+        let acquisition = match &task.wave_id {
+            Some(wave) => Some(super::planning_sync::lock_wave_planning(wave).await?),
             None => None,
         };
         let current = store
@@ -2201,7 +2236,7 @@ pub fn task_create(
         super::planning_sync::sync_after_save(
             &store,
             &main.to_string_lossy(),
-            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
+            Some(&ActionOwner::Task(task.id.clone())),
         )
         .await;
         store
@@ -2261,7 +2296,7 @@ pub(crate) fn sync_admitted(main: &Path, task: &loopflow_model::durable::TaskId)
         super::planning_sync::sync_after_save(
             &store,
             &repo,
-            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.clone()),
+            Some(&ActionOwner::Task(task.clone())),
         )
         .await;
         super::task_ownership::assert_assignee(&store.sqlite, main, task).await;
@@ -2422,7 +2457,8 @@ async fn file_task_in(
         )
         .await?;
         let id = task.id.clone();
-        let task = adoption::save(store, main, id, None, source, None, false, receipt).await?;
+        let task =
+            adoption::save(store, main, id, None, None, source, None, false, receipt).await?;
         return store
             .get_task(&task.id)
             .await
@@ -2443,36 +2479,24 @@ async fn file_task_in(
     let repository_id =
         crate::repository::location::ensure_repository(&store.sqlite, &main.to_string_lossy())
             .map_err(task_error)?;
-    let selected = select_task_creation_wave(store, main, wave).await?;
-    // With no Wave named, a follow-up is filed in its parent's Wave and Project.
-    let inherited = parent
+    let parent_wave = parent
         .as_ref()
-        .filter(|parent| wave.is_none() && parent.repository_id == repository_id)
-        .and_then(|parent| parent.project_id.clone().zip(parent.wave_id.clone()));
-    let (selected, inherited) = match (selected, inherited) {
-        (None, Some((project, wave))) => (
-            store.get_wave(&wave).await.map_err(task_error)?,
-            Some(project),
-        ),
-        (selected, _) => (selected, None),
+        .filter(|parent| parent.repository_id == repository_id)
+        .and_then(|parent| parent.wave_id.as_ref());
+    let selected = match (wave, parent_wave) {
+        (None, Some(id)) => store.get_wave(id).await.map_err(task_error)?,
+        _ => select_task_creation_wave(store, main, wave).await?,
     };
     let wave_slug = selected.as_ref().map(|wave| wave.slug().to_string());
-    let (creation_project, acquisition) = match selected {
-        Some(wave) => {
-            let acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
-            let project = match inherited {
-                Some(project) => project,
-                None => super::project::current_project(store, &wave)?.id,
-            };
-            (Some(project), Some(acquisition))
-        }
-        None => (None, None),
+    let acquisition = match &selected {
+        Some(wave) => Some(super::planning_sync::lock_wave_planning(wave.id()).await?),
+        None => None,
     };
     let creation = loopflow_storage::work::task::NewTask {
         due_date: None,
         id: loopflow_model::durable::TaskId::new(),
         repository_id,
-        project_id: creation_project,
+        project_id: None,
         parent_task_id: parent.map(|parent| parent.id),
         title: input.title,
         description: input.report,
@@ -2494,6 +2518,7 @@ async fn file_task_in(
         main,
         creation.id.clone(),
         Some(creation),
+        selected.map(|wave| wave.id().clone()),
         source,
         acquisition,
         false,
@@ -2889,7 +2914,7 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
         super::planning_sync::sync_after_save(
             &store,
             &repo.to_string_lossy(),
-            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
+            Some(&ActionOwner::Task(task.id.clone())),
         )
         .await;
         Ok(task)
@@ -2950,11 +2975,8 @@ pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsRes
                 .map_err(|error| task_error(format!("{error:#}")))?;
             return carriers_synced(&store, &repo, &task);
         };
-        let project = task
-            .project_id
-            .clone()
-            .map(loopflow_storage::sqlite::tracker_actions::ActionOwner::Project);
-        let owner = loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone());
+        let project = task.project_id.clone().map(ActionOwner::Project);
+        let owner = ActionOwner::Task(task.id.clone());
         for owner in project.iter().chain([&owner]) {
             super::tracker::drain::drain_repository(
                 &store,
@@ -3125,7 +3147,7 @@ async fn sync_completion(store: &SharedStore, task: &Task) -> OpsResult<()> {
     super::planning_sync::sync_after_save(
         store,
         &repo.to_string_lossy(),
-        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
+        Some(&ActionOwner::Task(task.id.clone())),
     )
     .await;
     Ok(())
@@ -3344,7 +3366,7 @@ pub fn task_edit(
         super::planning_sync::sync_after_save(
             &store,
             &repository_for_task(&store, &task)?.to_string_lossy(),
-            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
+            Some(&ActionOwner::Task(task.id.clone())),
         )
         .await;
         Ok(TaskEdit {
@@ -3370,34 +3392,23 @@ pub fn task_move_membership(repo: &Path, issue: &str, wave: Option<&str>) -> Ops
             ),
             None => None,
         };
-        let mut waves: Vec<_> = owning_wave(&store, &task)
-            .await?
-            .into_iter()
-            .chain(destination.clone())
-            .collect();
-        waves.sort_by(|a, b| a.id().as_str().cmp(b.id().as_str()));
-        waves.dedup_by(|a, b| a.id() == b.id());
+        let destination = destination.as_ref().map(Wave::id);
+        let mut waves: Vec<_> = task.wave_id.iter().chain(destination).collect();
+        waves.sort_unstable_by_key(|wave| wave.as_str());
+        waves.dedup();
         let mut guards = Vec::new();
-        for wave in &waves {
+        for wave in waves {
             guards.push(super::planning_sync::lock_wave_planning(wave).await?);
         }
-        let project = destination
-            .as_ref()
-            .map(|wave| super::project::current_project(&store, wave))
-            .transpose()?;
         store
             .sqlite
-            .move_task(
-                &task.id,
-                task.project_id.as_ref(),
-                project.as_ref().map(|p| &p.id),
-            )
+            .move_task(&task.id, task.project_id.as_ref(), destination)
             .map_err(task_error)?;
         drop(guards);
         super::planning_sync::sync_after_save(
             &store,
             &repository_for_task(&store, &task)?.to_string_lossy(),
-            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
+            Some(&ActionOwner::Task(task.id.clone())),
         )
         .await;
         Ok(TaskEdit {
@@ -3530,7 +3541,7 @@ pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
         let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
         let receipt = match live_execution(&store, &task).await? {
             Some(target) => {
-                store.append_interrupt(&work).await.map_err(task_error)?;
+                store.append_interrupt(&task.id).await.map_err(task_error)?;
                 super::child::WorkControlReceipt::Interrupt { work, target }
             }
             None => super::child::WorkControlReceipt::NoLiveRun { work },
@@ -3712,7 +3723,7 @@ pub(crate) async fn append_task_comment_async(
     super::planning_sync::sync_after_save(
         store,
         &repository_for_task(store, task)?.to_string_lossy(),
-        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
+        Some(&ActionOwner::Task(task.id.clone())),
     )
     .await;
     Ok(id)

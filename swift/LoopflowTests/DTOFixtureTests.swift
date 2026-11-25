@@ -96,7 +96,7 @@ struct DTOFixtureTests {
             WaveRemoval.self, from: String(decoding: loadFixtureData("wave_removal.json"), as: UTF8.self))
         #expect(removal.name == "desktop")
         #expect(removal.destination == nil)
-        #expect(removal.projects == 1)
+        #expect(removal.completedTasks == 1)
         #expect(removal.moved.filter(\.started).count == 1)
         #expect(removal.files == nil)
         #expect(removal.summary.first?.hasPrefix("2 open Tasks move to the repository") == true)
@@ -106,10 +106,7 @@ struct DTOFixtureTests {
         let added = try RegistryQuery.decode(
             WaveAdded.self, from: String(decoding: loadFixtureData("wave_added.json"), as: UTF8.self))
         #expect(added.created)
-        let joined = try RegistryQuery.decode(
-            WaveAdded.self, from: String(decoding: loadFixtureData("wave_joined.json"), as: UTF8.self))
-        #expect(!joined.created && joined.project == nil)
-        #expect(added.project?.id == "proj_283eee0d35124e709d4bd0ecadce83f3")
+        #expect(added.name == "research")
         #expect(added.files == .uncommitted(reason: "HEAD is detached"))
         #expect(added.summary.count == 1)
     }
@@ -118,8 +115,7 @@ struct DTOFixtureTests {
         let renamed = try RegistryQuery.decode(
             WaveRenamed.self, from: String(decoding: loadFixtureData("wave_renamed.json"), as: UTF8.self))
         #expect(renamed.to == "prod")
-        #expect(renamed.files == .committed(commit: "0f3c2a1d"))
-        #expect(renamed.initiative?.error == "Linear: rate limited")
+        #expect(renamed.files == .uncommitted(reason: "the main checkout has unrelated staged changes"))
         #expect(renamed.summary.count == 1)
     }
 
@@ -618,31 +614,6 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test("Configured Project selection survives competing statuses and provider renames")
-    func configuredProjectSelection() throws {
-        var root = try #require(JSONSerialization.jsonObject(with: loadFixtureData("wave_detail.json")) as? [String: Any])
-        var projects = try #require(root["projects"] as? [String: Any])
-        let rows = try #require(projects["items"] as? [[String: Any]])
-        var previous = try #require(rows.first)
-        previous["current"] = false
-        var selected = previous
-        selected["id"] = "configured-project"
-        selected["name"] = "Summer work — customer requests"
-        selected["current"] = true
-        selected["workflow"] = ""
-        projects["items"] = [previous, selected]
-        root["projects"] = projects
-        let status = try JSONDecoder().decode(WaveDetailSnapshot.self, from: JSONSerialization.data(withJSONObject: root))
-        #expect(status.currentProject?.id == "configured-project")
-        #expect(status.projects.items.count == 2)
-        selected.removeValue(forKey: "current")
-        projects["items"] = [selected]
-        root["projects"] = projects
-        #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(WaveDetailSnapshot.self, from: JSONSerialization.data(withJSONObject: root))
-        }
-    }
-
     @Test("Work Activity fixture carries Session records tagged with Work")
     func workActivityFixtureCarriesSessionRecords() throws {
         let data = try loadFixtureData("work_activity_snapshot.json")
@@ -680,9 +651,6 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("wave_detail.json")
         let detail = try JSONDecoder().decode(WaveDetailSnapshot.self, from: data)
 
-        #expect(detail.projectReadiness.state == .ready)
-        #expect(detail.projectReadiness.projectId == detail.currentProject?.id)
-        #expect(detail.projectReadiness.activation == nil)
         #expect(detail.wave.machine?.id == "home_00000000000000000000000000000001")
         #expect(detail.wave.machine?.route == "ssh://jack@mini-heart")
         #expect(detail.wave.machine?.label == "mini")
@@ -690,10 +658,7 @@ struct DTOFixtureTests {
         // The Machine runtime evidence carries the state and the one contextual action.
 
 
-        #expect(detail.currentProject?.sync.actions[1].kind == "order")
-        #expect(detail.unavailableTasks[0].taskIdentifier == "W2-127")
-        #expect(detail.unavailableTasks[0].status == .unstarted)
-        #expect(detail.unavailableTasks[0].owner == .wave)
+        #expect(detail.project.present?.sync.actions[1].kind == "order")
         #expect(detail.tasks.items.map(\.task.identifier) == ["INF-123", "INF-124"])
         #expect(detail.tasks.items[0].task.state == "unstarted")
         #expect(detail.tasks.items[0].runtime?.provider == nil)
@@ -726,12 +691,6 @@ struct DTOFixtureTests {
         #expect(detail.tasks.items[0].condition.state == .waiting)
         #expect(detail.tasks.items[0].condition.reason == "merge pull request head 333333333333 on GitHub")
         #expect(detail.tasks.items[0].actions.recommended == .openPr)
-        #expect(detail.metricPortfolio.metrics[0].identity.metricId == "task-loop-trust")
-        #expect(detail.metricPortfolio.metrics[0].evidence == .met(
-            value: 1,
-            sourceWindowStart: "2026-08-13T18:00:00Z",
-            sourceWindowEnd: "2026-08-20T18:00:00Z"
-        ))
     }
 
     @Test("roadmap fixture preserves sections and durable Task references")
@@ -744,11 +703,6 @@ struct DTOFixtureTests {
         let product = try #require(roadmap.waves.first)
         #expect(product.wave.name == "product")
 
-        #expect(product.metricPortfolio.metrics[0].identity.metricId == "task-loop-trust")
-
-        #expect(product.unavailableTasks[0].taskIdentifier == "W2-127")
-        #expect(product.unavailableTasks[0].status == .unstarted)
-        #expect(product.unavailableTasks[0].recovery.contains("lf task status task_40fbeea"))
         let tasks = product.tasks.items
         #expect(tasks.map(\.section) == [.backlog, .backlog, .backlog, .done])
         #expect(tasks.map(\.condition.state) == [.clear, .waiting, .clear, .clear])
@@ -774,51 +728,6 @@ struct DTOFixtureTests {
         #expect(task.task.isSuccessful)
         #expect(task.task.completedAt == "2026-07-14T18:30:00Z")
         #expect(page.next == task.id)
-    }
-
-    @Test("metric portfolio fixture preserves every closed evidence payload")
-    func metricPortfolioFixturePreservesEvidence() throws {
-        let data = try loadFixtureData("metric_portfolio.json")
-        let portfolio = try JSONDecoder().decode(MetricPortfolio.self, from: data)
-
-        #expect(portfolio.metrics.count == 11)
-        #expect(portfolio.metrics.contains {
-            if case .unknown(.targetUnavailable(value: 1.0, sourceWindowStart: _, sourceWindowEnd: _)) = $0.evidence { true } else { false }
-        })
-        #expect(portfolio.contractIssues.count == 5)
-        #expect(portfolio.contractIssues.contains(.projectUnavailable(waveId: "wave-other", reason: "PM snapshot unavailable")))
-        #expect(
-            portfolio.metrics[0].description
-                == "Fraction of qualifying events that settled successfully."
-        )
-        #expect(portfolio.metrics.map(\.stage).contains(.graduated))
-        #expect(portfolio.metrics.map(\.stage).contains(.installed))
-        #expect(portfolio.metrics.contains { if case .atMost = $0.target { true } else { false } })
-        #expect(portfolio.metrics.contains { if case .never = $0.freshness { true } else { false } })
-        #expect(portfolio.metrics.contains { if case .stale = $0.freshness { true } else { false } })
-        #expect(portfolio.metrics.contains { if case .unavailable = $0.evidence { true } else { false } })
-        #expect(portfolio.metrics.contains {
-            if case .unknown(.revisionMismatch) = $0.evidence { true } else { false }
-        })
-        #expect(portfolio.metrics.contains {
-            if case .unknown(.staleUnavailable) = $0.evidence { true } else { false }
-        })
-
-        var missing = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        var metrics = try #require(missing["metrics"] as? [[String: Any]])
-        metrics[0].removeValue(forKey: "description")
-        missing["metrics"] = metrics
-        let missingData = try JSONSerialization.data(withJSONObject: missing)
-        #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(MetricPortfolio.self, from: missingData)
-        }
-
-        var future = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        var futureMetrics = try #require(future["metrics"] as? [[String: Any]])
-        futureMetrics[0]["future_field"] = true
-        future["metrics"] = futureMetrics
-        let futureData = try JSONSerialization.data(withJSONObject: future)
-        _ = try JSONDecoder().decode(MetricPortfolio.self, from: futureData)
     }
 
     @Test("Metadata does not manufacture a live state or current occurrence")

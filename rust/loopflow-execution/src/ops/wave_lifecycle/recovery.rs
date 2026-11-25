@@ -125,6 +125,13 @@ fn apply_and_commit(
     Ok(files)
 }
 
+pub(crate) async fn lock_async(main: &Path) -> OpsResult<File> {
+    let main = main.to_owned();
+    crate::journal::request::spawn_blocking(move || lock(&main))
+        .await
+        .map_err(lifecycle_error)?
+}
+
 pub fn lock(main: &Path) -> OpsResult<File> {
     let git = crate::git::git_stdout(main, &["rev-parse", "--absolute-git-dir"])
         .map_err(lifecycle_error)?;

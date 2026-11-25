@@ -15,7 +15,6 @@ pub mod instrumentation;
 #[cfg(test)]
 mod leaving_guard;
 pub mod machine_records;
-pub mod metric;
 #[cfg(test)]
 pub mod migration_build;
 pub mod migration_catalog;

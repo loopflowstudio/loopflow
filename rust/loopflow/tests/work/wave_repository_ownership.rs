@@ -65,7 +65,7 @@ fn registered_wave(repo: &Path, slug: &str) -> Wave {
 fn project(wave: &Wave) -> Project {
     let now = OffsetDateTime::now_utc();
     Project {
-        id: ProjectId::new(),
+        id: ProjectId::for_wave(wave.id()),
 
         summary: String::new(),
         status: loopflow_execution::work::project::ProjectStatus::Started,
@@ -73,8 +73,6 @@ fn project(wave: &Wave) -> Project {
         slug: "architecture".to_string(),
         name: "Architecture".to_string(),
         description: "Keep identity boring.".to_string(),
-        krs: Vec::new(),
-        metric_targets: Vec::new(),
         tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
@@ -212,13 +210,12 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         store.create_wave(&legacy).await.unwrap();
         let sibling = Wave::new(WaveId::new(), "sibling".into(), alias.display().to_string());
         store.create_wave(&sibling).await.unwrap();
-        let snapshot: crate::test_linear_input::Inventory =
+        let snapshot: loopflow_storage::planning::ProjectInventory =
             serde_json::from_str(include_str!("../fixtures/linear_snapshot.json")).unwrap();
         store
             .seed_inventory(
                 InventoryFixture {
                     wave_id: legacy.id().clone(),
-                    initiative: "initiative-infrastructure".into(),
                     synced_at: 1,
                     snapshot: snapshot.clone(),
                 },
@@ -269,7 +266,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         let detail: crate::test_linear_input::IssueFixture =
             loopflow_test_support::retained_task_input(&database, resolved.repo(), "LOO-2");
         assert_eq!(detail.item, snapshot.items[0]);
-        assert_eq!(detail.project.as_ref(), Some(&snapshot.projects[0]));
+        assert_eq!(detail.project.as_ref(), Some(&snapshot.project));
     }
 
     let alpha_resolved =
@@ -346,30 +343,12 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .lines()
         .any(|line| { line.contains("infrastructure") && line.contains("beta") }));
 
-    store
-        .seed_inventory(
-            InventoryFixture {
-                wave_id: alpha.id().clone(),
-                initiative: "initiative-alpha".to_string(),
-                synced_at: 1,
-                snapshot: crate::test_linear_input::Inventory {
-                    projects: vec![],
-                    items: vec![],
-                },
-            },
-            None,
-        )
-        .await
-        .unwrap();
+    rusqlite::Connection::open(&database).unwrap().execute(
+        "INSERT INTO tracker_wave_sync(wave_id,tracker,initiative,synced_at) VALUES(?1,'linear','',1)",
+        [alpha.id()],
+    ).unwrap();
     let project = project(&alpha);
     store.create_project(&project).await.unwrap();
-    rusqlite::Connection::open(&database)
-        .unwrap()
-        .execute(
-            "UPDATE waves SET current_project_id=?2 WHERE id=?1",
-            rusqlite::params![project.wave_id, project.id.as_str()],
-        )
-        .unwrap();
     let (task, task_pr) = task(&store, &alpha, &project, &repo_a);
     planning::seed_unplaced_task(&database, &task);
     store
@@ -420,21 +399,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
 
     let occupied = registered_wave(&repo_a, "occupied");
     store.create_wave(&occupied).await.unwrap();
-    store
-        .seed_inventory(
-            InventoryFixture {
-                wave_id: occupied.id().clone(),
-                initiative: "initiative-occupied".to_string(),
-                synced_at: 1,
-                snapshot: crate::test_linear_input::Inventory {
-                    projects: vec![],
-                    items: vec![],
-                },
-            },
-            None,
-        )
-        .await
-        .unwrap();
     let collision = relocate_wave(&store, alpha.id(), &repo_a, None, Some("occupied"))
         .await
         .unwrap_err();
@@ -542,12 +506,12 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let conn = rusqlite::Connection::open(&database).unwrap();
     assert_eq!(
         conn.query_row(
-            "SELECT initiative FROM tracker_wave_sync WHERE wave_id=?1",
+            "SELECT count(*) FROM tracker_wave_sync WHERE wave_id=?1",
             [alpha.id().as_str()],
-            |r| r.get::<_, String>(0)
+            |r| r.get::<_, i64>(0)
         )
         .unwrap(),
-        "initiative-alpha"
+        1
     );
     assert_eq!(
         store

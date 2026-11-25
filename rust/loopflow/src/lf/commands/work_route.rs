@@ -787,10 +787,8 @@ mod tests {
             (selected_repo, &first),
             (other_path.to_str().unwrap(), &second),
         ] {
-            let project = loopflow_execution::work::wave::bootstrap::ensure_wave_project(
-                &store, repo, "inbox",
-            )
-            .unwrap();
+            let project =
+                loopflow_execution::test_support::seed_wave_project(&store, repo, "inbox").unwrap();
             store
                 .create_task(&NewTask {
                     parent_task_id: None,

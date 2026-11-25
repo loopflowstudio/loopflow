@@ -18,6 +18,9 @@ struct TaskCodeReader: View {
     @State private var widestLine: CGFloat = 0
 
     @State private var scrolling = false
+    /// Not observed: the rows report their frames on every scroll without re-running the reader.
+    @State var rows = RowFrames()
+    private static let space = "files-code-reader"
 
     var body: some View {
         Group {
@@ -84,15 +87,21 @@ struct TaskCodeReader: View {
                 }
             }
             .onChange(of: store?.find?.current) {
-                if case .line(let line) = store?.find?.current?.cell {
-                    proxy.scrollTo(line - 1, anchor: .center)
-                    store?.jumps.readingLine = line
-                }
+                guard let match = store?.find?.current, case .line(let line) = match.cell,
+                      lines.indices.contains(line - 1) else { return }
+                proxy.scrollTo(line - 1, anchor: scrollAnchor(line: line, text: lines[line - 1].text, range: match.range, width: width))
+                store?.jumps.readingLine = line
             }
             .task(id: location) {
                 guard let location, lines.indices.contains(location.line - 1) else { return }
                 let anchor = scrollAnchor(for: location, text: lines[location.line - 1].text, width: width)
                 proxy.scrollTo(location.line - 1, anchor: anchor)
+            }
+            .coordinateSpace(.named(Self.space))
+            .background {
+                if store != nil {
+                    ReaderClicks { point, modifiers in click(at: point, command: modifiers.contains(.command), in: lines) }
+                }
             }
         }
     }
@@ -149,16 +158,26 @@ struct TaskCodeReader: View {
 
     @ViewBuilder private func source(_ line: CodeLine, number: Int) -> some View {
         let label = Text(painted(line, number: number)).textSelection(.enabled)
-        if let store {
-            label.simultaneousGesture(SpatialTapGesture().onEnded { tap in
-                store.jumps.readingLine = number
-                let target = target(in: line.text, number: number, at: tap.location)
-                store.jumps.target = target
-                if NSApp.currentEvent?.modifierFlags.contains(.command) == true, let target {
-                    store.jumps.search(.definition(target.word), line: number, in: store)
-                }
-            })
+        if store != nil {
+            label
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { rows.frames[number] = $0 }
+                .onDisappear { rows.frames[number] = nil }
         } else { label }
+    }
+
+    /// A click on a source line underlines the identifier under it; ⌘-click also looks up its definition.
+    /// `point` is in the reader's coordinate space.
+    func click(at point: CGPoint, command: Bool, in lines: [CodeLine]) {
+        guard let store, store.filePicker == nil,
+              let (number, frame) = rows.frames.first(where: { $0.value.contains(point) }),
+              lines.indices.contains(number - 1) else { return }
+        store.jumps.readingLine = number
+        let local = CGPoint(x: point.x - frame.minX, y: point.y - frame.minY)
+        let target = target(in: lines[number - 1].text, number: number, at: local)
+        store.jumps.target = target
+        if command, let target {
+            store.jumps.search(.definition(target.word), line: number, in: store)
+        }
     }
 
     private nonisolated static func typeset(_ text: String) -> CTLine {
@@ -168,10 +187,17 @@ struct TaskCodeReader: View {
     }
 
     func scrollAnchor(for visit: FileVisit, text: String, width: CGFloat) -> UnitPoint {
+        let range = visit.hit.flatMap { $0.revision == revision ? $0.range(in: text) : nil }
+        return scrollAnchor(line: visit.line, text: text, range: range, width: width)
+    }
+
+    /// Centers `line` vertically and keeps its start in view, scrolling sideways only as far as `range` needs.
+    /// The default center anchor would scroll to the middle of the widest line.
+    func scrollAnchor(line number: Int, text: String, range: NSRange?, width: CGFloat) -> UnitPoint {
         let leading = UnitPoint(x: 0, y: 0.5)
-        guard let hit = visit.hit, hit.revision == revision, let range = hit.range(in: text) else { return leading }
+        guard let range else { return leading }
         let line = Self.typeset(text)
-        let inset = Spacing.sm + gutter(visit.line) + Spacing.md
+        let inset = Spacing.sm + gutter(number) + Spacing.md
         let overflow = inset + CTLineGetTypographicBounds(line, nil, nil, nil) + Spacing.sm - width
         guard overflow > 0 else { return leading }
         let start = CTLineGetOffsetForStringIndex(line, range.location, nil)
@@ -218,6 +244,67 @@ struct TaskCodeReader: View {
             value[attributed].backgroundColor = palette.keyboardFocus.opacity(0.3)
         }
         return store?.find?.highlight(value, in: .line(number), color: palette.keyboardFocus.opacity(0.45)) ?? value
+    }
+}
+
+final class RowFrames {
+    var frames: [Int: CGRect] = [:]
+}
+
+/// Selectable text takes a click before any SwiftUI gesture sees it, so the reader
+/// watches its window's mouse events instead. Events pass through untouched, keeping
+/// drag-selection and copy; a press released where it started counts as a click.
+struct ReaderClicks: NSViewRepresentable {
+    let clicked: (CGPoint, NSEvent.ModifierFlags) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(clicked: clicked) }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        context.coordinator.install(for: view)
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) { context.coordinator.clicked = clicked }
+
+    static func dismantleNSView(_ view: NSView, coordinator: Coordinator) { coordinator.uninstall() }
+
+    @MainActor final class Coordinator {
+        var clicked: (CGPoint, NSEvent.ModifierFlags) -> Void
+        weak var view: NSView?
+        private var monitor: Any?
+        private var pressed: CGPoint?
+
+        init(clicked: @escaping (CGPoint, NSEvent.ModifierFlags) -> Void) { self.clicked = clicked }
+
+        func install(for view: NSView) {
+            self.view = view
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
+                self?.handle(event)
+                return event
+            }
+        }
+
+        func handle(_ event: NSEvent) {
+            guard let view, event.window === view.window else { return }
+            var point = view.convert(event.locationInWindow, from: nil)
+            if !view.isFlipped { point.y = view.bounds.height - point.y }
+            guard view.bounds.contains(point) else {
+                pressed = nil
+                return
+            }
+            if event.type == .leftMouseDown {
+                pressed = point
+            } else if let start = pressed {
+                pressed = nil
+                if hypot(point.x - start.x, point.y - start.y) <= 3 { clicked(point, event.modifierFlags) }
+            }
+        }
+
+        func uninstall() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
     }
 }
 

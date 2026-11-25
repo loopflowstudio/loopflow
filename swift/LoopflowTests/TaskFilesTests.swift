@@ -300,6 +300,59 @@ struct TaskFilesTests {
         }
     }
 
+    @Test func clickingASourceLineUnderlinesItsWordAndCommandClickLooksUpTheDefinition() async throws {
+        let (store, _) = try readerShortcuts()
+        let path = "Call.swift"
+        let text = "let a = 1\nreader.read()"
+        store.selectFile(path)
+        await store.document(path).reconcile(snapshot(text, path: path))
+        let reader = TaskCodeReader(path: path, text: text, store: store, ready: {})
+        let lines = CodeLine.read(text, grammar: nil)
+        let font = NSFont(name: Typography.monoFace, size: Typography.monoSize)
+            ?? .monospacedSystemFont(ofSize: Typography.monoSize, weight: .regular)
+        let prefix = NSAttributedString(string: "reader.", attributes: [.font: font]).size().width
+        reader.rows.frames = [1: CGRect(x: 60, y: 8, width: 200, height: 16), 2: CGRect(x: 60, y: 24, width: 200, height: 16)]
+
+        reader.click(at: CGPoint(x: 60 + prefix + 1, y: 30), command: false, in: lines)
+        #expect(store.jumps.target?.word == "read" && store.jumps.target?.line == 2)
+        #expect(store.jumps.readingLine == 2 && store.jumps.peek == nil)
+
+        reader.click(at: CGPoint(x: 61, y: 30), command: true, in: lines)
+        #expect(store.jumps.target?.word == "reader")
+        #expect(store.jumps.peek?.lookup == .definition("reader"))
+        store.jumps.dismiss()
+
+        store.jumps.target = nil
+        reader.click(at: CGPoint(x: 61, y: 100), command: true, in: lines)
+        #expect(store.jumps.target == nil && store.jumps.peek == nil)
+    }
+
+    @Test(.requiresDisplay) func theReaderCountsAPressReleasedInPlaceAsAClickAndLeavesDragsToSelection() throws {
+        _ = NSApplication.shared
+        final class KeyWindow: NSWindow { override var isKeyWindow: Bool { true } }
+        let window = KeyWindow(contentRect: CGRect(x: 0, y: 0, width: 300, height: 100),
+                               styleMask: [.titled], backing: .buffered, defer: false)
+        let view = NSView(frame: window.contentLayoutRect)
+        window.contentView = view
+        var clicks: [(CGPoint, Bool)] = []
+        let monitor = ReaderClicks { point, modifiers in clicks.append((point, modifiers.contains(.command))) }.makeCoordinator()
+        monitor.install(for: view)
+        defer { monitor.uninstall() }
+        func send(_ type: NSEvent.EventType, at point: CGPoint, _ modifiers: NSEvent.ModifierFlags = []) throws {
+            let event = try #require(NSEvent.mouseEvent(with: type, location: point, modifierFlags: modifiers,
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                eventNumber: 0, clickCount: 1, pressure: 1))
+            NSApp.sendEvent(event)
+        }
+        try send(.leftMouseDown, at: CGPoint(x: 40, y: 90), .command)
+        try send(.leftMouseUp, at: CGPoint(x: 41, y: 90), .command)
+        try send(.leftMouseDown, at: CGPoint(x: 40, y: 90))
+        try send(.leftMouseUp, at: CGPoint(x: 140, y: 90))
+        #expect(clicks.count == 1)
+        // Window coordinates rise from the bottom; the reader's run down from the top.
+        #expect(clicks.first?.0 == CGPoint(x: 41, y: view.bounds.height - 90) && clicks.first?.1 == true)
+    }
+
     @Test func readChordsUseTheUnderlinedOccurrenceBesideSelectableText() async throws {
         let (store, monitor) = try readerShortcuts()
         let path = "Call.swift"
@@ -470,6 +523,8 @@ struct TaskFilesTests {
         var draft = reader
         draft.revision = nil
         #expect(draft.scrollAnchor(for: visit, text: line, width: 240).x == 0)
+        // A Find match at the start of a long line keeps the line numbers in view.
+        #expect(reader.scrollAnchor(line: 1, text: line, range: NSRange(location: 0, length: 3), width: 240) == UnitPoint(x: 0, y: 0.5))
     }
 
     /// A long line below a short first line stays reachable: the reader scrolls as wide as its widest line.

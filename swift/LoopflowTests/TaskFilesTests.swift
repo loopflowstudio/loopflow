@@ -290,57 +290,120 @@ struct TaskFilesTests {
         }
     }
 
+    private func hostCodeReader(
+        _ reader: TaskCodeReader,
+        size: CGSize = CGSize(width: 600, height: 300)
+    ) throws -> (NSWindow, CodeReaderContainerView) {
+        _ = NSApplication.shared
+        // Plain NSWindow (not isKeyWindow) keeps AppKit's Autofill/WindowServer check off in headless runs.
+        let window = NSWindow(contentRect: CGRect(origin: .zero, size: size),
+                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let hosting = NSHostingView(rootView: reader)
+        hosting.frame = window.contentLayoutRect
+        window.contentView = hosting
+        _ = window.measureFrame {}
+        func findContainer(_ view: NSView) -> CodeReaderContainerView? {
+            if let found = view as? CodeReaderContainerView { return found }
+            return view.subviews.lazy.compactMap(findContainer).first
+        }
+        let container = try #require(findContainer(hosting))
+        container.textView.textLayoutManager?.ensureLayout(for: container.textView.textLayoutManager!.documentRange)
+        _ = window.measureFrame {}
+        return (window, container)
+    }
+
+    private func pointInWindow(forLine line: Int, utf16Column: Int, in container: CodeReaderContainerView) throws -> CGPoint {
+        let textView = container.textView
+        let layoutManager = try #require(textView.textLayoutManager)
+        let contentManager = try #require(textView.textContentStorage)
+        let info = try #require(textView.lineIndex.line(at: line))
+        let loc = try #require(contentManager.location(contentManager.documentRange.location, offsetBy: info.location))
+        layoutManager.ensureLayout(for: NSTextRange(location: loc))
+        let fragment = try #require(layoutManager.textLayoutFragment(for: loc))
+        let lineFragment = try #require(fragment.textLineFragments.first)
+        let x = lineFragment.locationForCharacter(at: min(utf16Column, lineFragment.characterRange.length)).x
+            + fragment.layoutFragmentFrame.minX + textView.textContainerOrigin.x + 2
+        let y = fragment.layoutFragmentFrame.minY + textView.textContainerOrigin.y + lineFragment.typographicBounds.midY
+        return textView.convert(CGPoint(x: x, y: y), to: nil)
+    }
+
     @Test func clickingASourceLineUnderlinesItsWordAndCommandClickLooksUpTheDefinition() async throws {
         let (store, _) = try readerShortcuts()
         let path = "Call.swift"
         let text = "let a = 1\nreader.read()"
         store.selectFile(path)
         await store.document(path).reconcile(snapshot(text, path: path))
-        let reader = TaskCodeReader(path: path, text: text, store: store, ready: {})
-        let lines = CodeLine.read(text, grammar: nil)
-        let font = NSFont(name: Typography.monoFace, size: Typography.monoSize)
-            ?? .monospacedSystemFont(ofSize: Typography.monoSize, weight: .regular)
-        let prefix = NSAttributedString(string: "reader.", attributes: [.font: font]).size().width
-        reader.rows.frames = [1: CGRect(x: 60, y: 8, width: 200, height: 16), 2: CGRect(x: 60, y: 24, width: 200, height: 16)]
+        store.browser.visit = FileVisit(line: 1, showsSource: true, highlight: .lines(1...1))
+        let (window, container) = try hostCodeReader(TaskCodeReader(path: path, text: text, location: store.visit, store: store, ready: {}))
+        defer { window.contentView = nil; window.close() }
 
-        reader.click(at: CGPoint(x: 60 + prefix + 1, y: 30), command: false, in: lines)
+        // Plain click on "read" in line 2 underlines it, updates readingLine, and clears the stale visit highlight.
+        let readPoint = try pointInWindow(forLine: 2, utf16Column: 7, in: container)
+        let readLocal = container.textView.convert(readPoint, from: nil)
+        container.textView.setSelectedRange(NSRange(location: 0, length: 0))
+        container.textView.finishPlainClick(at: readLocal, clickCount: 1, modifiers: [])
         #expect(store.jumps.target?.word == "read" && store.jumps.target?.line == 2)
         #expect(store.jumps.readingLine == 2 && store.jumps.peek == nil)
+        #expect(store.browser.visit?.highlight == nil)
+        #expect(store.browser.visit?.showsSource == true)
 
-        reader.click(at: CGPoint(x: 61, y: 30), command: true, in: lines)
+        // A non-empty multi-line selection stays intact on the single read-only NSTextView and is not treated as a click.
+        #expect(container.textView.isSelectable && !container.textView.isEditable)
+        store.jumps.target = nil
+        container.textView.setSelectedRange(NSRange(location: 4, length: 12))
+        container.textView.finishPlainClick(at: readLocal, clickCount: 1, modifiers: [])
+        #expect((container.textView.string as NSString).substring(with: container.textView.selectedRange()).contains("\n"))
+        #expect(store.jumps.target == nil)
+
+        // Single ⌘-click on "reader" resolves directly through mouseDown without AppKit's modal multi-selection loop.
+        let readerPoint = try pointInWindow(forLine: 2, utf16Column: 1, in: container)
+        let cmdDown = try #require(NSEvent.mouseEvent(with: .leftMouseDown, location: readerPoint, modifierFlags: .command,
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+            eventNumber: 2, clickCount: 1, pressure: 1))
+        container.textView.mouseDown(with: cmdDown)
         #expect(store.jumps.target?.word == "reader")
         #expect(store.jumps.peek?.lookup == .definition("reader"))
         store.jumps.dismiss()
 
+        // Clicking below EOF clears target and starts no lookup.
         store.jumps.target = nil
-        reader.click(at: CGPoint(x: 61, y: 100), command: true, in: lines)
+        let belowEOF = container.textView.convert(CGPoint(x: 20, y: 200), to: nil)
+        let belowCmd = try #require(NSEvent.mouseEvent(with: .leftMouseDown, location: belowEOF, modifierFlags: .command,
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+            eventNumber: 3, clickCount: 1, pressure: 1))
+        container.textView.mouseDown(with: belowCmd)
         #expect(store.jumps.target == nil && store.jumps.peek == nil)
     }
 
-    @Test(.requiresDisplay) func theReaderCountsAPressReleasedInPlaceAsAClickAndLeavesDragsToSelection() throws {
-        _ = NSApplication.shared
-        final class KeyWindow: NSWindow { override var isKeyWindow: Bool { true } }
-        let window = KeyWindow(contentRect: CGRect(x: 0, y: 0, width: 300, height: 100),
-                               styleMask: [.titled], backing: .buffered, defer: false)
-        let view = NSView(frame: window.contentLayoutRect)
-        window.contentView = view
-        var clicks: [(CGPoint, Bool)] = []
-        let monitor = ReaderClicks { point, modifiers in clicks.append((point, modifiers.contains(.command))) }.makeCoordinator()
-        monitor.install(for: view)
-        defer { monitor.uninstall() }
-        func send(_ type: NSEvent.EventType, at point: CGPoint, _ modifiers: NSEvent.ModifierFlags = []) throws {
-            let event = try #require(NSEvent.mouseEvent(with: type, location: point, modifierFlags: modifiers,
-                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
-                eventNumber: 0, clickCount: 1, pressure: 1))
-            NSApp.sendEvent(event)
-        }
-        try send(.leftMouseDown, at: CGPoint(x: 40, y: 90), .command)
-        try send(.leftMouseUp, at: CGPoint(x: 41, y: 90), .command)
-        try send(.leftMouseDown, at: CGPoint(x: 40, y: 90))
-        try send(.leftMouseUp, at: CGPoint(x: 140, y: 90))
-        #expect(clicks.count == 1)
-        // Window coordinates rise from the bottom; the reader's run down from the top.
-        #expect(clicks.first?.0 == CGPoint(x: 41, y: view.bounds.height - 90) && clicks.first?.1 == true)
+    @Test(.requiresDisplay) func multiLineDragSelectsAcrossLinesNatively() async throws {
+        let (store, _) = try readerShortcuts()
+        let path = "Lines.swift"
+        let text = "first line\nsecond line\nthird line"
+        store.selectFile(path)
+        await store.document(path).reconcile(snapshot(text, path: path))
+        let (window, container) = try hostCodeReader(TaskCodeReader(path: path, text: text, store: store, ready: {}))
+        defer { window.contentView = nil; window.close() }
+
+        let start = try pointInWindow(forLine: 1, utf16Column: 2, in: container)
+        let end = try pointInWindow(forLine: 3, utf16Column: 5, in: container)
+        let drag = try #require(NSEvent.mouseEvent(with: .leftMouseDragged, location: end, modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+            eventNumber: 1, clickCount: 1, pressure: 1))
+        let up = try #require(NSEvent.mouseEvent(with: .leftMouseUp, location: end, modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+            eventNumber: 1, clickCount: 1, pressure: 0))
+        NSApp.postEvent(drag, atStart: false)
+        NSApp.postEvent(up, atStart: false)
+        let down = try #require(NSEvent.mouseEvent(with: .leftMouseDown, location: start, modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+            eventNumber: 1, clickCount: 1, pressure: 1))
+        container.textView.mouseDown(with: down)
+
+        let selected = (container.textView.string as NSString).substring(with: container.textView.selectedRange())
+        #expect(selected.contains("\n"))
+        #expect(selected.contains("second line"))
+        #expect(store.jumps.target == nil)
     }
 
     @Test func readChordsUseTheUnderlinedOccurrenceBesideSelectableText() async throws {
@@ -349,20 +412,18 @@ struct TaskFilesTests {
         let text = "😀 read() + read()"
         store.selectFile(path)
         await store.document(path).reconcile(snapshot(text, path: path))
-        let reader = TaskCodeReader(path: path, text: text, store: store, ready: {})
-        let font = NSFont(name: Typography.monoFace, size: Typography.monoSize)
-            ?? .monospacedSystemFont(ofSize: Typography.monoSize, weight: .regular)
-        let prefix = NSAttributedString(string: "😀 read() + ", attributes: [.font: font]).size().width
-        store.jumps.target = reader.target(in: text, number: 1, at: CGPoint(x: prefix + 1, y: 0))
+        let (window, container) = try hostCodeReader(TaskCodeReader(path: path, text: text, store: store, ready: {}))
+        defer { window.contentView = nil; window.close() }
+
+        let secondReadWindow = try pointInWindow(forLine: 1, utf16Column: 12, in: container)
+        let secondReadLocal = container.textView.convert(secondReadWindow, from: nil)
+        let hit = container.textView.hitTestIdentifier(at: secondReadLocal)
+        store.jumps.target = hit.target
         let target = try #require(store.jumps.target)
         #expect(target.word == "read" && target.range == NSRange(location: 12, length: 4))
-        let line = try #require(CodeLine.read(text, grammar: nil).first)
-        #expect(reader.marks(1, in: line).underline == target.range)
-        #expect(reader.target(in: text, number: 1, at: CGPoint(x: 1000, y: 0)) == nil)
+        #expect(container.textView.hitTestIdentifier(at: CGPoint(x: 1000, y: secondReadLocal.y)).target == nil)
 
-        let responder = NSTextView()
-        responder.isEditable = false
-        responder.isSelectable = true
+        let responder = container.textView
         func press(_ key: String) -> Bool {
             monitor.handleReadKey(key, modifiers: [], firstResponder: responder)
         }
@@ -384,6 +445,53 @@ struct TaskFilesTests {
         store.filePicker = nil
         store.mode = .edit
         #expect(!press("g") && store.jumps.peek == nil)
+    }
+
+    @Test func definitionOutlineAndBackHighlightTheirLinesWhileBackToRenderedStaysRendered() async throws {
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/peer", query: RegistryQuery { args, _ in
+            guard args.last == "target" else { throw RegistryQueryError("Unexpected query") }
+            return #"{"hits":[{"path":"Target.swift","name":"target","kind":"func","container":null,"line":4}],"truncated":false}"#
+        })
+        store.autosave = false
+
+        // Start on a rendered Markdown page, then open a code presentation and press Back.
+        let plan = store.document("scratch/plan.md")
+        await plan.reconcile(snapshot("# Plan\n\nDetails\n", path: plan.path))
+        store.selectFile(plan.path)
+        let reading = TaskFileReadingView(document: plan, store: store)
+        #expect(try reading.inspect().find(MarkdownBlocks.self).actualView().source == "# Plan\n\nDetails\n")
+
+        let targetDoc = store.document("Target.swift")
+        await targetDoc.reconcile(snapshot("let a = 1\nlet b = 2\nlet c = 3\nfunc target() {}\n", path: targetDoc.path))
+        store.openPresentation(.init(path: targetDoc.path, lines: 2...3))
+        #expect(store.visit?.highlight == .lines(2...3))
+        #expect(store.jumps.back.last == FilePosition(path: plan.path, line: nil))
+
+        // Back returns to rendered Markdown instead of raw source.
+        store.jumps.step(backwards: true, in: store)
+        #expect(store.selection == plan.path && store.visit == nil)
+        #expect(try TaskFileReadingView(document: plan, store: store).inspect().find(MarkdownBlocks.self).actualView().source == "# Plan\n\nDetails\n")
+
+        // Forward returns to Target.swift with its line explicitly highlighted.
+        store.jumps.step(backwards: false, in: store)
+        #expect(store.selection == targetDoc.path && store.visit?.highlight == .lines(2...2))
+
+        // Definition jump marks its destination line; Back marks the call line.
+        let callDoc = store.document("Call.swift")
+        await callDoc.reconcile(snapshot("func run() {\n  target()\n}\n", path: callDoc.path))
+        store.selectFile(callDoc.path)
+        await store.jumps.search(.definition("target"), line: 2, in: store)?.value
+        #expect(store.selection == targetDoc.path)
+        #expect(store.visit?.highlight == .lines(4...4))
+        store.jumps.step(backwards: true, in: store)
+        #expect(store.selection == callDoc.path)
+        #expect(store.visit?.highlight == .lines(2...2))
+
+        // Outline jump marks its destination line too.
+        await store.jumps.search(.outline, line: 2, in: store)?.value
+        let candidate = try #require(store.jumps.peek?.candidates.first)
+        store.jumps.accept(candidate, in: store)
+        #expect(store.visit?.highlight == .lines(1...1))
     }
 
     @Test func outlineAndLocalDefinitionReadTheLiveSwiftBuffer() async throws {
@@ -492,7 +600,7 @@ struct TaskFilesTests {
         #expect(store.selection == nested && store.mode == .read)
     }
 
-    @Test func grepRevealsTheSecondOccurrenceInACroppedLongLine() throws {
+    @Test func grepRevealsTheSecondOccurrenceInACroppedLongLine() async throws {
         let prefix = String(repeating: "x", count: 500)
         let excerpt = "😀 earlier hit, later hit"
         let line = prefix + excerpt
@@ -505,14 +613,36 @@ struct TaskFilesTests {
         #expect(String(painted[marked.range].characters) == "hit")
         #expect(String(hit.highlightedExcerpt(color: .yellow, omitPrefix: true).characters) == "…hit")
 
-        let visit = FileVisit(line: 1, hit: hit, visitID: nil)
-        let reader = TaskCodeReader(path: hit.path, text: line, location: visit, revision: "disk", ready: {})
-        #expect(reader.scrollAnchor(for: visit, text: line, width: 240).x == 1)
-        var draft = reader
-        draft.revision = nil
-        #expect(draft.scrollAnchor(for: visit, text: line, width: 240).x == 0)
-        // A Find match at the start of a long line keeps the line numbers in view.
-        #expect(reader.scrollAnchor(line: 1, text: line, range: NSRange(location: 0, length: 3), width: 240) == UnitPoint(x: 0, y: 0.5))
+        let visit = FileVisit(line: 1, showsSource: true, highlight: .hit(hit), visitID: nil)
+        let (window, container) = try hostCodeReader(
+            TaskCodeReader(path: hit.path, text: line, location: visit, revision: "disk", ready: {}),
+            size: CGSize(width: 280, height: 140)
+        )
+        defer { window.contentView = nil; window.close() }
+        // A hit far along a long line scrolls horizontally while keeping the gutter pinned at x = 0.
+        #expect(container.scrollView.contentView.bounds.minX > 0)
+        #expect(container.gutterView.frame.minX == 0)
+
+        let (draftWindow, draftContainer) = try hostCodeReader(
+            TaskCodeReader(path: hit.path, text: line, location: visit, revision: nil, ready: {}),
+            size: CGSize(width: 280, height: 140)
+        )
+        defer { draftWindow.contentView = nil; draftWindow.close() }
+        #expect(draftContainer.scrollView.contentView.bounds.minX == 0)
+
+        // A Find match near the start of a long line keeps x = 0.
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { _, _ in "{}" })
+        let find = FileFind()
+        store.find = find
+        find.query = "xxx"
+        let (findWindow, findContainer) = try hostCodeReader(
+            TaskCodeReader(path: hit.path, text: line, store: store, ready: {}),
+            size: CGSize(width: 280, height: 140)
+        )
+        defer { findWindow.contentView = nil; findWindow.close() }
+        await find.search(text: line)
+        _ = findWindow.measureFrame {}
+        #expect(findContainer.scrollView.contentView.bounds.minX == 0)
     }
 
     /// A long line below a short first line stays reachable: the reader scrolls as wide as its widest line.
@@ -602,7 +732,7 @@ struct TaskFilesTests {
         for n in 1...15 {
             store.openPresentation(.init(path: "page-\(n).md"))
         }
-        #expect(store.jumps.back.first == FilePosition(path: "draft.md", line: 7))
+        #expect(store.jumps.back.first == FilePosition(path: "draft.md", line: nil))
         #expect(store.tabs.count == 13 && store.tabs.first?.path == "draft.md")
         store.closeTab(try #require(store.tabs.first).id)
         #expect(store.documents[draft.path] === draft && store.openAndScratch.contains(draft.path))
@@ -819,15 +949,29 @@ struct TaskFilesTests {
         files.selectFile("a.swift")
         let document = files.document("a.swift")
         await document.reconcile(snapshot("uno\nsecond\nthird", path: document.path))
-        let view = TaskFilesView(store: files, checkoutBase: nil)
-        let reader = try view.inspect().find(TaskCodeReader.self).actualView()
-        let lines = CodeLine.read(reader.text, grammar: nil)
-        let first = try reader.row(0, in: lines).inspect().find(ReviewGutter.self).actualView()
-        first.select()
-        files.comments.select(path: document.path, source: .file(draft: false), line: 2, extend: true)
-        let editor = try reader.row(1, in: lines).inspect().find(ReviewCommentEditor.self)
+        let (window, container) = try hostCodeReader(TaskCodeReader(path: document.path, text: document.text, store: files, ready: {}))
+        defer { window.contentView = nil; window.close() }
+
+        // Click line 1 in the pinned gutter, then Shift-click line 2 to select L1-2 and open an inline slot.
+        let line1Text = try pointInWindow(forLine: 1, utf16Column: 0, in: container)
+        let line2Text = try pointInWindow(forLine: 2, utf16Column: 0, in: container)
+        let gutterX = container.gutterView.convert(CGPoint(x: 10, y: 0), to: nil).x
+        let click1 = try #require(NSEvent.mouseEvent(with: .leftMouseDown, location: CGPoint(x: gutterX, y: line1Text.y),
+            modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+            context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+        container.gutterView.mouseDown(with: click1)
+        let click2 = try #require(NSEvent.mouseEvent(with: .leftMouseDown, location: CGPoint(x: gutterX, y: line2Text.y),
+            modifierFlags: .shift, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+            context: nil, eventNumber: 2, clickCount: 1, pressure: 1))
+        container.gutterView.mouseDown(with: click2)
+        _ = window.measureFrame {}
+        #expect(files.comments.selection?.range == "L1-2")
+        #expect(!container.textView.subviews.isEmpty)
+        let paragraph = container.textView.textStorage?.attribute(.paragraphStyle, at: 5, effectiveRange: nil) as? NSParagraphStyle
+        #expect((paragraph?.paragraphSpacing ?? 0) > 0)
+
         files.comments.draft = "Read these together"
-        try editor.find(button: "Comment").tap()
+        files.comments.add(anchor: ["uno", "second"])
         #expect(files.comments.items.first?.anchor == ["uno", "second"])
         await document.reconcile(snapshot("above\nuno\nsecond\nthird", path: document.path))
         #expect(files.comments.items.first?.selection.range == "L2-3")

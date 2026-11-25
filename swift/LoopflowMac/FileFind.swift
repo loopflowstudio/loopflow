@@ -50,6 +50,33 @@ final class FileFind {
         await search(lines.enumerated().map { (.line($0.offset + 1), $0.element.text) })
     }
 
+    func search(text: String) async {
+        let needle = query
+        guard !needle.isEmpty else { return }
+        let scan = Task.detached(priority: .userInitiated) {
+            var hits: [Match] = []
+            var lineNumber = 1
+            for raw in text.utf8.split(separator: 10, omittingEmptySubsequences: false) {
+                if Task.isCancelled { return [] as [Match] }
+                let slice = raw.last == 13 ? raw.dropLast() : raw
+                let line = String(decoding: slice, as: UTF8.self) as NSString
+                var start = 0
+                while start < line.length {
+                    let hit = line.range(of: needle, options: .caseInsensitive,
+                                         range: NSRange(location: start, length: line.length - start))
+                    guard hit.location != NSNotFound, hit.length > 0 else { break }
+                    hits.append(Match(cell: .line(lineNumber), range: hit))
+                    start = NSMaxRange(hit)
+                }
+                lineNumber += 1
+            }
+            return hits
+        }
+        let hits = await withTaskCancellationHandler { await scan.value } onCancel: { scan.cancel() }
+        guard !Task.isCancelled, query == needle else { return }
+        receive(hits)
+    }
+
     func search(_ cells: [(Cell, String)]) async {
         let needle = query
         guard !needle.isEmpty else { return }

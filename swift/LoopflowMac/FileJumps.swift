@@ -5,15 +5,29 @@ import SwiftUI
 
 struct FilePosition: Equatable {
     let path: String
-    let line: Int
+    /// `nil` records a rendered Markdown or HTML page; a line number records source.
+    let line: Int?
 }
 
 struct FileVisit: Equatable {
+    enum Highlight: Equatable {
+        case lines(ClosedRange<Int>)
+        case hit(TaskGrepHit)
+    }
+
     let line: Int
-    var hit: TaskGrepHit?
-    var lines: ClosedRange<Int>?
+    var showsSource: Bool
+    var highlight: Highlight?
     // Repeating an address scrolls again. Picker previews stay keyed to their hit.
     var visitID: UUID? = UUID()
+
+    var lines: ClosedRange<Int>? {
+        if case .lines(let range) = highlight { range } else { nil }
+    }
+
+    var hit: TaskGrepHit? {
+        if case .hit(let hit) = highlight { hit } else { nil }
+    }
 }
 
 @Observable @MainActor
@@ -81,7 +95,9 @@ final class FileJumps {
     @ObservationIgnored private var lookup: Task<Void, Never>?
 
     func position(in store: TaskFilesStore) -> FilePosition? {
-        store.selection.map { FilePosition(path: $0, line: readingLine) }
+        store.selection.map { path in
+            FilePosition(path: path, line: store.isShowingRendered(path) ? nil : readingLine)
+        }
     }
 
     func record(_ destination: FilePosition, from origin: FilePosition?) {
@@ -97,7 +113,8 @@ final class FileJumps {
         if let current {
             if backwards { forward.append(current) } else { back.append(current) }
         }
-        store.reveal(destination.path, at: FileVisit(line: destination.line))
+        let visit = destination.line.map { FileVisit(line: $0, showsSource: true, highlight: .lines($0...$0)) }
+        store.reveal(destination.path, at: visit)
     }
 
     func dismiss() {
@@ -108,7 +125,9 @@ final class FileJumps {
 
     func accept(_ candidate: Candidate, in store: TaskFilesStore) {
         guard let origin = peek?.origin else { return }
-        let visit = FileVisit(line: candidate.position.line, hit: candidate.hit)
+        let line = candidate.position.line ?? 1
+        let highlight: FileVisit.Highlight = candidate.hit.map(FileVisit.Highlight.hit) ?? .lines(line...line)
+        let visit = FileVisit(line: line, showsSource: true, highlight: highlight)
         store.reveal(candidate.position.path, at: visit, from: origin)
     }
 
@@ -118,7 +137,7 @@ final class FileJumps {
         guard let document = store.selectedDocument else { return nil }
         store.filePicker = nil
         let version = document.editVersion
-        let origin = FilePosition(path: document.path, line: line)
+        let origin = FilePosition(path: document.path, line: store.isShowingRendered(document.path) ? nil : line)
         peek = Peek(lookup: request, origin: origin)
         lookup = Task {
             do {
@@ -189,7 +208,8 @@ struct FileSymbolPeek: View {
                                 HStack {
                                     Text(verbatim: candidate.label).lineLimit(1)
                                     Spacer()
-                                    Text("\(candidate.position.path):\(candidate.position.line)").foregroundStyle(palette.textSecondary)
+                                    Text(candidate.position.line.map { "\(candidate.position.path):\($0)" } ?? candidate.position.path)
+                                        .foregroundStyle(palette.textSecondary)
                                 }.frame(height: rowHeight).contentShape(Rectangle())
                             }.buttonStyle(.plain)
                         }

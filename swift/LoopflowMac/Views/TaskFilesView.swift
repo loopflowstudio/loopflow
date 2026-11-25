@@ -476,7 +476,7 @@ struct TaskFilesView: View {
                     Button("Retry") { Task { await store.workingTree.refresh(); await store.loadDiff() } }
                         .accessibilityIdentifier("files-comparison-retry")
                 }
-            } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
+            } else { ProgressView("Loading…").frame(maxWidth: .infinity, maxHeight: .infinity) }
         } else if let document = store.selectedDocument, let snapshot = document.snapshot {
             if snapshot.state == .text, store.mode == .read {
                 TaskFileReadingView(document: document, store: store, addToConversation: addToConversation,
@@ -506,7 +506,7 @@ struct TaskFilesView: View {
                 EmptyState(title: snapshot.state.title)
                     .task(id: store.find?.query) { await store.find?.search([]) }
             }
-        } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
+        } else { ProgressView("Loading…").frame(maxWidth: .infinity, maxHeight: .infinity) }
     }
 
     private func reportVisible(_ path: String) {
@@ -539,12 +539,12 @@ struct TaskFileReadingView: View {
 
     var body: some View {
         switch (document.path as NSString).pathExtension.lowercased() {
-        case "html" where store.visit == nil:
+        case "html" where store.visit?.showsSource != true:
             let baseURL = store.machine == nil
                 ? URL(fileURLWithPath: store.cwd).appendingPathComponent(document.path) : nil
             TaskHTMLView(html: document.text, baseURL: baseURL, find: store.find, ready: ready)
                 .accessibilityIdentifier("files-rendered-html")
-        case "md" where store.visit == nil:
+        case "md" where store.visit?.showsSource != true:
             ScrollViewReader { proxy in
                 ScrollView {
                     MarkdownBlocks(source: document.text, find: store.find).equatable()

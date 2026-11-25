@@ -269,10 +269,10 @@ struct TaskFilePickerView: View {
                 switch picker.preview {
                 case .text(let text, let revision):
                     TaskCodeReader(path: path, text: text,
-                                   location: result.hit.map { FileVisit(line: $0.line, hit: $0, visitID: nil) },
+                                   location: result.hit.map { FileVisit(line: $0.line, showsSource: true, highlight: .hit($0), visitID: nil) },
                                    revision: revision, ready: {})
                 case .message(let message): Text(message).font(Typography.meta)
-                case nil: ProgressView()
+                case nil: ProgressView("Loading…")
                 }
             }.id(path).task(id: path) { await picker.loadPreview(path, draft: store.documents[path]) }
         }

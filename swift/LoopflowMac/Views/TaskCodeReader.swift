@@ -1,8 +1,12 @@
 #if os(macOS)
-import CoreText
+import AppKit
 import Loopflow
 import SwiftUI
 
+/// One read-only TextKit 2 code surface paired with a pinned line-number and
+/// change-mark gutter. Plain monospace text mounts immediately; Tree-sitter
+/// syntax colors and outline arrive off-main. Inline comments and symbol peeks
+/// open beneath their line via `paragraphSpacing` without disturbing sideways scroll.
 struct TaskCodeReader: View {
     let path: String
     let text: String
@@ -12,352 +16,1191 @@ struct TaskCodeReader: View {
     var addToConversation: ((String) -> Bool)?
     let ready: () -> Void
     @Environment(\.palette) private var palette
-    @State private var parsedVersion = 0
-    @State private var lines: [CodeLine]?
-    @State private var widestLine: CGFloat = 0
+    @Environment(\.theme) private var theme
 
-    @State private var scrolling = false
-    /// Not observed: the rows report their frames on every scroll without re-running the reader.
-    @State var rows = RowFrames()
-    nonisolated static let space = "files-code-reader"
-
-    var body: some View {
-        Group {
-            if let lines {
-                GeometryReader { viewport in
-                    reader(lines, width: viewport.size.width)
-                }
-                .onAppear(perform: ready)
-                .accessibilityIdentifier("files-code-reader")
-            } else {
-                ProgressView()
-            }
-        }
-        .onDisappear { store?.jumps.target = nil }
-        .task(id: text) {
-            store?.jumps.target = nil
-            let document = store?.selectedDocument
-            let version = document?.editVersion
-            let result = await Task.detached(priority: .userInitiated) { [text, path, needsOutline = document != nil] in
-                let grammar = Grammar.named(path)
-                let tree = grammar?.parse(text)
-                let highlights = tree.flatMap { grammar?.highlights(in: $0, text: text) } ?? []
-                let lines = CodeLine.read(text, highlights: highlights)
-                let font = Self.monoFont()
-                let widest = lines.reduce(0.0) { max($0, CTLineGetTypographicBounds(Self.typeset($1.text, font: font), nil, nil, nil)) }
-                return (lines, needsOutline ? FileOutline(tree: tree, text: text, path: path) : nil, widest)
-            }.value
-            guard !Task.isCancelled else { return }
-            if let outline = result.1, let version { document?.receive(outline, version: version) }
-            lines = result.0
-            widestLine = result.2
-            parsedVersion += 1
+    private var detachedComments: [ReviewComment] {
+        guard let store else { return [] }
+        return store.comments.items.filter {
+            $0.original.path == path && $0.original.source.isFile && $0.detached
         }
     }
 
-    private func reader(_ lines: [CodeLine], width: CGFloat) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView([.horizontal, .vertical]) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if let store {
-                        ForEach(store.comments.items.filter { $0.original.path == path && $0.original.source.isFile && $0.detached }) {
-                            ReviewCommentRow(store: store, comment: $0).padding(.horizontal, Spacing.sm)
-                        }
-                    }
-                    ForEach(lines.indices, id: \.self) { index in
-                        row(index, in: lines)
-                    }
-                }
-                .scrollTargetLayout()
-                // A lazy stack takes its width from the rows it has measured, which leaves longer lines out of reach.
-                .frame(minWidth: 2 * Spacing.sm + gutter(lines.count) + Spacing.md + widestLine, alignment: .leading)
-                .font(Typography.mono)
-                .padding(.vertical, Spacing.sm)
-            }
-            .defaultScrollAnchor(.topLeading, for: .alignment)
-            .onScrollPhaseChange { _, phase in
-                scrolling = phase == .tracking || phase == .interacting || phase == .decelerating
-            }
-            .onScrollTargetVisibilityChange(idType: Int.self, threshold: 0.1) { visible in
-                if scrolling, let store, let first = visible.min() { store.jumps.readingLine = first + 1 }
-            }
-            .task(id: FileFind.Scan(query: store?.find?.query, revision: parsedVersion)) {
-                if let find = store?.find, !find.query.isEmpty {
-                    await find.search(lines: lines)
-                }
-            }
-            .onChange(of: store?.find?.current) {
-                guard let match = store?.find?.current, case .line(let line) = match.cell,
-                      lines.indices.contains(line - 1) else { return }
-                proxy.scrollTo(line - 1, anchor: scrollAnchor(line: line, text: lines[line - 1].text, range: match.range, width: width))
-                store?.jumps.readingLine = line
-            }
-            .task(id: location) {
-                guard let location, lines.indices.contains(location.line - 1) else { return }
-                let anchor = scrollAnchor(for: location, text: lines[location.line - 1].text, width: width)
-                proxy.scrollTo(location.line - 1, anchor: anchor)
-            }
-            .coordinateSpace(.named(Self.space))
-            .background {
-                if store != nil {
-                    ReaderClicks { point, modifiers in click(at: point, command: modifiers.contains(.command), in: lines) }
-                }
-            }
+    private var attachedComments: [ReviewComment] {
+        guard let store else { return [] }
+        return store.comments.items.filter {
+            !$0.detached && $0.original.path == path && $0.original.source.isFile
         }
     }
 
-    func row(_ index: Int, in lines: [CodeLine]) -> some View {
-        let number = index + 1
-        let isCommentSelected = selected(number)
-        return VStack(alignment: .leading, spacing: 0) {
-            NumberedLine(number: number, line: lines[index], marks: marks(number, in: lines[index]),
-                         gutter: store.map { NumberedLine.Gutter(selected: isCommentSelected, tone: changeTone(number, in: $0)) },
-                         rows: store == nil ? nil : rows,
-                         select: store.map { store in {
-                             store.comments.select(path: path, source: .file(draft: store.selectedDocument?.dirty == true),
-                                                   line: number, extend: NSEvent.modifierFlags.contains(.shift))
-                         } }).equatable()
-            if let store {
-                if let selection = store.comments.selection, isCommentSelected, selection.last == number {
-                    ReviewCommentEditor(store: store, selection: selection, excerpt: {
-                        lines[(selection.first - 1)...index].map(\.text)
-                    }, addToConversation: addToConversation)
-                }
-                ForEach(store.comments.items.filter {
-                    !$0.detached && $0.original.source.isFile && $0.original.path == path && $0.selection.last == number
-                }) { ReviewCommentRow(store: store, comment: $0) }
-                if let peek = store.jumps.peek, peek.lookup != .outline, peek.origin.line == number {
-                    FileSymbolPeek(store: store, peek: peek)
-                }
-            }
-        }
-        // Inside the row, so scrolling to a row's leading edge keeps the margin.
-        .padding(.horizontal, Spacing.sm)
+    private var commentSelection: ReviewSelection? {
+        guard let selection = store?.comments.selection,
+              selection.path == path, selection.source.isFile else { return nil }
+        return selection
     }
 
-    private func changeTone(_ line: Int, in store: TaskFilesStore) -> ThemeTone? {
-        guard let review = store.diffReview.fileReview, review.path == path,
+    private var inlinePeek: FileJumps.Peek? {
+        guard let peek = store?.jumps.peek,
+              peek.lookup != .outline, peek.origin.path == path else { return nil }
+        return peek
+    }
+
+    private var changeMarks: [Int: ReviewLine.Kind] {
+        guard let store,
+              let review = store.diffReview.fileReview, review.path == path,
               review.editVersion == store.selectedDocument?.editVersion,
               review.baseCommit == store.workingChanges?.baseCommit,
-              store.workingTree.filesByPath[path] != nil || store.selectedDocument?.dirty == true,
-              let mark = review.marks[line] else { return nil }
-        return mark == .removed ? palette.failureTone : palette.successTone
+              store.workingTree.filesByPath[path] != nil || store.selectedDocument?.dirty == true
+        else { return [:] }
+        return review.marks
     }
 
-    private func selected(_ number: Int) -> Bool {
-        guard let selection = store?.comments.selection, selection.path == path, selection.source.isFile else { return false }
-        return (selection.first...selection.last).contains(number)
+    private var target: FileJumps.Target? {
+        guard let target = store?.jumps.target, target.path == path else { return nil }
+        return target
     }
 
-    /// A click on a source line underlines the identifier under it; ⌘-click also looks up its definition.
-    /// `point` is in the reader's coordinate space.
-    func click(at point: CGPoint, command: Bool, in lines: [CodeLine]) {
-        guard let store, store.filePicker == nil,
-              let (number, frame) = rows.frames.first(where: { $0.value.contains(point) }),
-              lines.indices.contains(number - 1) else { return }
-        store.jumps.readingLine = number
-        let local = CGPoint(x: point.x - frame.minX, y: point.y - frame.minY)
-        let target = target(in: lines[number - 1].text, number: number, at: local)
-        store.jumps.target = target
-        if command, let target {
-            store.jumps.search(.definition(target.word), line: number, in: store)
+    private var findMatch: FileFind.Match? {
+        guard let match = store?.find?.current, case .line = match.cell else { return nil }
+        return match
+    }
+
+    private var findScan: FileFind.Scan<String> {
+        let rev = store?.selectedDocument?.path == path
+            ? "\(path)|\(store?.selectedDocument?.editVersion ?? 0)"
+            : "\(path)|\(text.utf8.count)"
+        return FileFind.Scan(query: store?.find?.query, revision: rev)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let store, !detachedComments.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(detachedComments) {
+                        ReviewCommentRow(store: store, comment: $0).padding(.horizontal, Spacing.sm)
+                    }
+                }
+                Divider()
+            }
+            CodeReaderRepresentable(
+                path: path,
+                text: text,
+                location: location,
+                revision: revision,
+                store: store,
+                target: target,
+                findMatch: findMatch,
+                commentSelection: commentSelection,
+                attachedComments: attachedComments,
+                inlinePeek: inlinePeek,
+                changeMarks: changeMarks,
+                palette: palette,
+                theme: theme,
+                addToConversation: addToConversation
+            )
+            .onAppear(perform: ready)
+            .accessibilityIdentifier("files-code-reader")
+        }
+        .onDisappear { store?.jumps.target = nil }
+        .task(id: findScan) {
+            if let find = store?.find, !find.query.isEmpty {
+                await find.search(text: text)
+            }
         }
     }
 
-    private nonisolated static func monoFont() -> NSFont {
+    nonisolated static func monoFont() -> NSFont {
         NSFont(name: Typography.monoFace, size: Typography.monoSize)
             ?? .monospacedSystemFont(ofSize: Typography.monoSize, weight: .regular)
     }
+}
 
-    private nonisolated static func typeset(_ text: String, font: NSFont? = nil) -> CTLine {
-        CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font ?? monoFont()]))
+// MARK: Line index
+
+/// UTF-16 line offsets for a source string, computed in one linear pass.
+struct CodeLineIndex: Sendable {
+    struct Line: Sendable {
+        /// UTF-16 offset where the line starts.
+        let location: Int
+        /// UTF-16 length excluding any trailing `\r` or `\n`.
+        let contentLength: Int
+        /// UTF-16 length including its line terminator.
+        let fullLength: Int
     }
 
-    func scrollAnchor(for visit: FileVisit, text: String, width: CGFloat) -> UnitPoint {
-        let range = visit.hit.flatMap { $0.revision == revision ? $0.range(in: text) : nil }
-        return scrollAnchor(line: visit.line, text: text, range: range, width: width)
-    }
+    let lines: [Line]
+    let longestLineIndex: Int
 
-    /// Centers `line` vertically and keeps its start in view, scrolling sideways only as far as `range` needs.
-    /// The default center anchor would scroll to the middle of the widest line.
-    func scrollAnchor(line number: Int, text: String, range: NSRange?, width: CGFloat) -> UnitPoint {
-        let leading = UnitPoint(x: 0, y: 0.5)
-        guard let range else { return leading }
-        let line = Self.typeset(text)
-        let inset = Spacing.sm + gutter(number) + Spacing.md
-        let overflow = inset + CTLineGetTypographicBounds(line, nil, nil, nil) + Spacing.sm - width
-        guard overflow > 0 else { return leading }
-        let start = CTLineGetOffsetForStringIndex(line, range.location, nil)
-        let end = CTLineGetOffsetForStringIndex(line, NSMaxRange(range), nil)
-        // scrollTo aligns the same fractional point in the row and the viewport.
-        let offset = inset + start + min(end - start, width) / 2 - width / 2
-        return UnitPoint(x: max(0, min(1, offset / overflow)), y: 0.5)
-    }
-
-    private func gutter(_ number: Int) -> CGFloat {
-        store == nil ? CTLineGetTypographicBounds(Self.typeset(String(number)), nil, nil, nil) : ReviewStream.gutterWidth + Spacing.xs
-    }
-
-    func target(in text: String, number: Int, at point: CGPoint) -> FileJumps.Target? {
-        let line = Self.typeset(text)
-        var index = CTLineGetStringIndexForPosition(line, point)
-        guard index != kCFNotFound, point.x >= 0,
-              point.x < CTLineGetTypographicBounds(line, nil, nil, nil) else { return nil }
-        // Core Text returns the nearest caret. The right half of a glyph
-        // therefore names the insertion position after the clicked character.
-        if CTLineGetOffsetForStringIndex(line, index, nil) > point.x { index -= 1 }
+    init(_ text: String) {
         let source = text as NSString
-        let characters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_$")).inverted
-        guard index >= 0, index < source.length else { return nil }
-        let before = source.rangeOfCharacter(from: characters, options: .backwards, range: NSRange(location: 0, length: index))
-        let after = source.rangeOfCharacter(from: characters, options: [], range: NSRange(location: index, length: source.length - index))
+        let length = source.length
+        var lines: [Line] = []
+        lines.reserveCapacity(max(1, length / 40))
+        var start = 0
+        var longest = 0
+        var longestLength = -1
+        var i = 0
+        while i < length {
+            if source.character(at: i) == 0x0A { // \n
+                let contentEnd = (i > start && source.character(at: i - 1) == 0x0D) ? i - 1 : i
+                let contentLen = contentEnd - start
+                let line = Line(location: start, contentLength: contentLen, fullLength: i - start + 1)
+                if contentLen > longestLength {
+                    longestLength = contentLen
+                    longest = lines.count
+                }
+                lines.append(line)
+                start = i + 1
+            }
+            i += 1
+        }
+        // Final line (or sole line for empty string / trailing newline).
+        let contentEnd = (length > start && source.character(at: length - 1) == 0x0D) ? length - 1 : length
+        let contentLen = contentEnd - start
+        if contentLen > longestLength {
+            longest = lines.count
+        }
+        lines.append(Line(location: start, contentLength: contentLen, fullLength: length - start))
+        self.lines = lines
+        self.longestLineIndex = longest
+    }
+
+    var count: Int { lines.count }
+
+    func line(at number: Int) -> Line? {
+        let index = number - 1
+        return lines.indices.contains(index) ? lines[index] : nil
+    }
+
+    /// 1-based line number containing `utf16Offset`.
+    func lineNumber(forUTF16Offset offset: Int) -> Int {
+        guard !lines.isEmpty else { return 1 }
+        var low = 0
+        var high = lines.count - 1
+        while low < high {
+            let mid = (low + high + 1) / 2
+            if lines[mid].location <= offset {
+                low = mid
+            } else {
+                high = mid - 1
+            }
+        }
+        return low + 1
+    }
+
+    func contentRange(forLine number: Int) -> NSRange? {
+        line(at: number).map { NSRange(location: $0.location, length: $0.contentLength) }
+    }
+
+    func paragraphRange(forLine number: Int) -> NSRange? {
+        line(at: number).map { NSRange(location: $0.location, length: $0.fullLength) }
+    }
+
+    func documentRange(line number: Int, rangeInLine: NSRange) -> NSRange? {
+        guard let line = line(at: number), rangeInLine.location >= 0 else { return nil }
+        let clampedStart = min(rangeInLine.location, line.contentLength)
+        let clampedLength = min(rangeInLine.length, max(0, line.contentLength - clampedStart))
+        guard clampedLength > 0 else { return nil }
+        return NSRange(location: line.location + clampedStart, length: clampedLength)
+    }
+
+    func text(ofLine number: Int, in source: NSString) -> String {
+        guard let range = contentRange(forLine: number), NSMaxRange(range) <= source.length else { return "" }
+        return source.substring(with: range)
+    }
+}
+
+// MARK: AppKit views
+
+/// Read-only TextKit 2 text view for source code: native single- and multi-line
+/// drag selection, direct ⌘-click definition lookup, plain-click identifier
+/// underline, and full-line background highlights.
+@MainActor
+final class CodeReaderTextView: NSTextView {
+    var isInteractive = true
+    var lineIndex = CodeLineIndex("")
+    var filePath = ""
+    var highlightedLines = IndexSet() {
+        didSet { if highlightedLines != oldValue { needsDisplay = true } }
+    }
+    var lineHighlightColor: NSColor = .selectedTextBackgroundColor {
+        didSet { if lineHighlightColor != oldValue { needsDisplay = true } }
+    }
+    var onPlainClick: ((Int?, FileJumps.Target?) -> Void)?
+    var onCommandClick: ((Int, FileJumps.Target?) -> Void)?
+
+    private var defaultLineHeight: CGFloat {
+        let font = self.font ?? TaskCodeReader.monoFont()
+        return ceil(font.ascender - font.descender + font.leading)
+    }
+
+    override func drawBackground(in rect: NSRect) {
+        super.drawBackground(in: rect)
+        guard !highlightedLines.isEmpty,
+              let layoutManager = textLayoutManager,
+              let contentManager = textContentStorage else { return }
+        let insetY = textContainerOrigin.y
+        let searchY = max(0, rect.minY - insetY)
+        let startLocation = layoutManager.textLayoutFragment(for: CGPoint(x: 0, y: searchY))?.rangeInElement.location
+            ?? layoutManager.documentRange.location
+        lineHighlightColor.setFill()
+        layoutManager.enumerateTextLayoutFragments(from: startLocation, options: []) { fragment in
+            let y = fragment.layoutFragmentFrame.minY + insetY
+            if y > rect.maxY { return false }
+            let offset = contentManager.offset(from: contentManager.documentRange.location, to: fragment.rangeInElement.location)
+            if offset != NSNotFound {
+                let line = self.lineIndex.lineNumber(forUTF16Offset: offset)
+                if self.highlightedLines.contains(line) {
+                    let height = fragment.textLineFragments.first?.typographicBounds.height ?? self.defaultLineHeight
+                    NSRect(x: rect.minX, y: y, width: rect.width, height: height).fill()
+                }
+            }
+            return true
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isInteractive else {
+            super.mouseDown(with: event)
+            return
+        }
+        let point = convert(event.locationInWindow, from: nil)
+        // Single ⌘-click resolves directly without entering AppKit's modal multi-selection loop.
+        if event.modifierFlags.contains(.command), event.clickCount == 1 {
+            window?.makeFirstResponder(self)
+            let hit = hitTestIdentifier(at: point)
+            if let line = hit.line {
+                onCommandClick?(line, hit.target)
+            }
+            return
+        }
+        super.mouseDown(with: event)
+        finishPlainClick(at: point, clickCount: event.clickCount, modifiers: event.modifierFlags)
+    }
+
+    func finishPlainClick(at point: CGPoint, clickCount: Int, modifiers: NSEvent.ModifierFlags) {
+        if selectedRange().length == 0, clickCount == 1, !modifiers.contains(.shift) {
+            let hit = hitTestIdentifier(at: point)
+            onPlainClick?(hit.line, hit.target)
+        }
+    }
+
+    /// Resolve the 1-based line number and identifier under `point` (in view coordinates).
+    func hitTestIdentifier(at point: CGPoint) -> (line: Int?, target: FileJumps.Target?) {
+        guard let layoutManager = textLayoutManager, let contentManager = textContentStorage else { return (nil, nil) }
+        let containerPoint = CGPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+        guard containerPoint.y >= 0 else { return (nil, nil) }
+        layoutManager.ensureLayout(for: CGRect(x: 0, y: max(0, containerPoint.y - 32), width: max(bounds.width, 1), height: 64))
+        guard let fragment = layoutManager.textLayoutFragment(for: containerPoint) else { return (nil, nil) }
+        let localY = containerPoint.y - fragment.layoutFragmentFrame.minY
+        guard let lineFragment = fragment.textLineFragments.first(where: {
+            localY >= $0.typographicBounds.minY && localY <= $0.typographicBounds.maxY
+        }) else { return (nil, nil) }
+        let fragOffset = contentManager.offset(from: contentManager.documentRange.location, to: fragment.rangeInElement.location)
+        guard fragOffset != NSNotFound else { return (nil, nil) }
+        let number = lineIndex.lineNumber(forUTF16Offset: fragOffset)
+        let localX = containerPoint.x - fragment.layoutFragmentFrame.minX
+        guard localX >= 0, localX < lineFragment.typographicBounds.maxX else { return (number, nil) }
+        var indexInLine = lineFragment.characterIndex(for: CGPoint(x: localX, y: lineFragment.typographicBounds.midY))
+        let lineText = lineIndex.text(ofLine: number, in: string as NSString)
+        let maxIndex = (lineText as NSString).length
+        // Caret index snaps to the nearest glyph edge; the right half of a glyph reports the next index.
+        if indexInLine > 0 {
+            let clamped = min(indexInLine, lineFragment.characterRange.length)
+            if lineFragment.locationForCharacter(at: clamped).x > localX {
+                indexInLine = clamped - 1
+            }
+        }
+        guard indexInLine >= 0, indexInLine < maxIndex else { return (number, nil) }
+        let target = Self.identifier(in: lineText, path: filePath, line: number, at: indexInLine)
+        return (number, target)
+    }
+
+    /// Extract the identifier spanning `utf16Index` in `lineText`.
+    static func identifier(in lineText: String, path: String, line number: Int, at utf16Index: Int) -> FileJumps.Target? {
+        let source = lineText as NSString
+        guard utf16Index >= 0, utf16Index < source.length else { return nil }
+        let nonIdentifier = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_$")).inverted
+        guard source.rangeOfCharacter(from: nonIdentifier, options: [], range: NSRange(location: utf16Index, length: 1)).location == NSNotFound else {
+            return nil
+        }
+        let before = source.rangeOfCharacter(from: nonIdentifier, options: .backwards, range: NSRange(location: 0, length: utf16Index))
+        let after = source.rangeOfCharacter(from: nonIdentifier, options: [], range: NSRange(location: utf16Index, length: source.length - utf16Index))
         let start = before.location == NSNotFound ? 0 : NSMaxRange(before)
         let end = after.location == NSNotFound ? source.length : after.location
-        guard index < end else { return nil }
+        guard start < end else { return nil }
         let range = NSRange(location: start, length: end - start)
         return FileJumps.Target(path: path, line: number, word: source.substring(with: range), range: range)
     }
+}
 
-    /// What a row shows besides its syntax colors, as values: a change elsewhere repaints no other line.
-    func marks(_ number: Int, in line: CodeLine) -> NumberedLine.Marks {
-        var marks = NumberedLine.Marks()
-        if let target = store?.jumps.target, target.path == path, target.line == number { marks.underline = target.range }
-        marks.selected = selected(number) || location?.lines?.contains(number) == true
-        if let hit = location?.hit, hit.line == number, hit.revision == revision { marks.hit = hit.range(in: line.text) }
-        if let match = store?.find?.current, match.cell == .line(number) { marks.find = match.range }
-        return marks
+/// Pinned line-number and change-mark gutter drawn directly against the text view's
+/// TextKit 2 layout fragments so line numbers never scroll off horizontally and stay
+/// aligned around inline comment and peek slots.
+@MainActor
+final class CodeReaderGutterView: NSView {
+    override var isFlipped: Bool { true }
+
+    weak var scrollView: NSScrollView?
+    weak var textView: CodeReaderTextView?
+    var isInteractive = true
+    var palette: LoopflowPalette? {
+        didSet { needsDisplay = true }
+    }
+    var font: NSFont = TaskCodeReader.monoFont() {
+        didSet { cachedDigitAdvance = nil; needsDisplay = true }
+    }
+    var selectedLines = IndexSet() {
+        didSet { if selectedLines != oldValue { needsDisplay = true } }
+    }
+    var changeMarks: [Int: ReviewLine.Kind] = [:] {
+        didSet { if changeMarks != oldValue { needsDisplay = true } }
+    }
+    var onSelectLine: ((Int, Bool) -> Void)?
+
+    private var hoveredLine: Int? {
+        didSet { if hoveredLine != oldValue { needsDisplay = true } }
+    }
+    private var tracking: NSTrackingArea?
+    private var cachedDigitAdvance: CGFloat?
+
+    private var digitAdvance: CGFloat {
+        if let cachedDigitAdvance { return cachedDigitAdvance }
+        let width = ("0" as NSString).size(withAttributes: [.font: font]).width
+        cachedDigitAdvance = width
+        return width
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        guard isInteractive else { return }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard isInteractive else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        hoveredLine = lineNumber(atY: point.y)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hoveredLine = nil
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isInteractive else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        if let line = lineNumber(atY: point.y) {
+            onSelectLine?(line, event.modifierFlags.contains(.shift))
+        }
+    }
+
+    /// 1-based line number whose text line covers `y` (nil inside an inline slot gap or past EOF).
+    func lineNumber(atY y: CGFloat) -> Int? {
+        guard let scrollView, let textView,
+              let layoutManager = textView.textLayoutManager,
+              let contentManager = textView.textContentStorage else { return nil }
+        let scrollY = scrollView.contentView.bounds.minY
+        let containerY = y + scrollY - textView.textContainerOrigin.y
+        guard containerY >= 0 else { return nil }
+        layoutManager.ensureLayout(for: CGRect(x: 0, y: max(0, containerY - 32), width: max(textView.bounds.width, 1), height: 64))
+        guard let fragment = layoutManager.textLayoutFragment(for: CGPoint(x: 0, y: containerY)) else { return nil }
+        let localY = containerY - fragment.layoutFragmentFrame.minY
+        guard let lineFragment = fragment.textLineFragments.first,
+              localY >= lineFragment.typographicBounds.minY,
+              localY <= lineFragment.typographicBounds.maxY else { return nil }
+        let offset = contentManager.offset(from: contentManager.documentRange.location, to: fragment.rangeInElement.location)
+        guard offset != NSNotFound else { return nil }
+        return textView.lineIndex.lineNumber(forUTF16Offset: offset)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let palette else { return }
+        NSColor(palette.background).setFill()
+        dirtyRect.fill()
+        guard let scrollView, let textView,
+              let layoutManager = textView.textLayoutManager,
+              let contentManager = textView.textContentStorage else { return }
+        let scrollY = scrollView.contentView.bounds.minY
+        let insetY = textView.textContainerOrigin.y
+        let searchY = max(0, dirtyRect.minY + scrollY - insetY)
+        let startLocation = layoutManager.textLayoutFragment(for: CGPoint(x: 0, y: searchY))?.rangeInElement.location
+            ?? layoutManager.documentRange.location
+
+        let trailingPad = Spacing.xs
+        let defaultHeight = ceil(font.ascender - font.descender + font.leading)
+        let advance = digitAdvance
+        let rightEdge = bounds.width - trailingPad
+        let secondaryInk = NSColor(palette.textSecondary)
+        let primaryInk = NSColor(palette.text)
+        let tertiaryInk = NSColor(palette.textTertiary)
+        let hoverFill = NSColor(palette.surfaceElement)
+
+        layoutManager.enumerateTextLayoutFragments(from: startLocation, options: []) { fragment in
+            let y = fragment.layoutFragmentFrame.minY + insetY - scrollY
+            if y > dirtyRect.maxY { return false }
+            let offset = contentManager.offset(from: contentManager.documentRange.location, to: fragment.rangeInElement.location)
+            guard offset != NSNotFound else { return true }
+            let line = textView.lineIndex.lineNumber(forUTF16Offset: offset)
+            let lineBounds = fragment.textLineFragments.first?.typographicBounds
+                ?? CGRect(x: 0, y: 0, width: 0, height: defaultHeight)
+            let rowRect = NSRect(x: 0, y: y + lineBounds.minY, width: self.bounds.width, height: lineBounds.height)
+            guard rowRect.maxY >= dirtyRect.minY else { return true }
+
+            let tone: ThemeTone? = self.changeMarks[line].map {
+                $0 == .removed ? palette.failureTone : palette.successTone
+            }
+            let selected = self.selectedLines.contains(line)
+            let hovered = self.hoveredLine == line
+
+            if hovered {
+                hoverFill.setFill()
+                rowRect.fill()
+            } else if let tone {
+                NSColor(tone.fill).setFill()
+                rowRect.fill()
+            }
+
+            let ink: NSColor
+            if !self.isInteractive {
+                ink = secondaryInk
+            } else if selected || hovered {
+                ink = primaryInk
+            } else if let tone {
+                ink = NSColor(tone.ink.opacity(0.8))
+            } else {
+                ink = tertiaryInk
+            }
+
+            let label = String(line) as NSString
+            let x = max(Spacing.sm, rightEdge - CGFloat(label.length) * advance)
+            label.draw(at: NSPoint(x: x, y: rowRect.minY), withAttributes: [
+                .font: self.font,
+                .foregroundColor: ink,
+            ])
+            return true
+        }
     }
 }
 
-/// A line number and its source. Equatable on what they show, so the rows a lazy
-/// stack keeps built skip their bodies when the reader redraws for another line.
-struct NumberedLine: View, Equatable {
-    struct Marks: Equatable, Sendable {
-        var underline: NSRange?
-        var selected = false
-        var hit: NSRange?
-        var find: NSRange?
+/// Hosts the pinned `CodeReaderGutterView` beside `NSScrollView` + `CodeReaderTextView`.
+@MainActor
+final class CodeReaderContainerView: NSView {
+    override var isFlipped: Bool { true }
+
+    let gutterView: CodeReaderGutterView
+    let scrollView: NSScrollView
+    let textView: CodeReaderTextView
+    var gutterWidth: CGFloat = ReviewStream.gutterWidth + Spacing.sm + Spacing.xs {
+        didSet { if gutterWidth != oldValue { needsLayout = true } }
+    }
+    var widestLineWidth: CGFloat = 0 {
+        didSet { if widestLineWidth != oldValue { needsLayout = true } }
+    }
+    var onLayout: (() -> Void)?
+
+    init(interactive: Bool) {
+        gutterView = CodeReaderGutterView()
+        scrollView = NSScrollView()
+        textView = CodeReaderTextView(usingTextLayoutManager: true)
+        super.init(frame: .zero)
+
+        textView.isInteractive = interactive
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isRichText = false
+        textView.usesFindBar = false
+        textView.drawsBackground = true
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = true
+        textView.autoresizingMask = []
+        textView.font = TaskCodeReader.monoFont()
+        textView.textContainerInset = NSSize(width: Spacing.md, height: Spacing.sm)
+        textView.textContainer?.widthTracksTextView = false
+        textView.textContainer?.heightTracksTextView = false
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.drawsBackground = true
+        scrollView.documentView = textView
+        scrollView.contentView.postsBoundsChangedNotifications = true
+
+        gutterView.isInteractive = interactive
+        gutterView.scrollView = scrollView
+        gutterView.textView = textView
+        if interactive {
+            gutterView.toolTip = "Select line; ⇧-click extends"
+        }
+
+        addSubview(gutterView)
+        addSubview(scrollView)
+        setAccessibilityElement(false)
+        setAccessibilityIdentifier("files-code-reader")
     }
 
-    struct Gutter: Equatable, Sendable {
-        let selected: Bool
-        let tone: ThemeTone?
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        gutterView.frame = NSRect(x: 0, y: 0, width: gutterWidth, height: bounds.height)
+        let scrollWidth = max(0, bounds.width - gutterWidth)
+        scrollView.frame = NSRect(x: gutterWidth, y: 0, width: scrollWidth, height: bounds.height)
+        let minWidth = max(scrollWidth, ceil(widestLineWidth + 2 * textView.textContainerInset.width))
+        let minHeight = max(bounds.height, 0)
+        textView.minSize = NSSize(width: minWidth, height: minHeight)
+        if textView.frame.width < minWidth {
+            textView.setFrameSize(NSSize(width: minWidth, height: max(textView.frame.height, minHeight)))
+        }
+        gutterView.needsDisplay = true
+        onLayout?()
+    }
+}
+
+// MARK: SwiftUI bridge & coordinator
+
+private struct CodeReaderRepresentable: NSViewRepresentable {
+    let path: String
+    let text: String
+    let location: FileVisit?
+    let revision: String?
+    let store: TaskFilesStore?
+    let target: FileJumps.Target?
+    let findMatch: FileFind.Match?
+    let commentSelection: ReviewSelection?
+    let attachedComments: [ReviewComment]
+    let inlinePeek: FileJumps.Peek?
+    let changeMarks: [Int: ReviewLine.Kind]
+    let palette: LoopflowPalette
+    let theme: ThemeDefinition
+    let addToConversation: ((String) -> Bool)?
+
+    func makeCoordinator() -> CodeReaderCoordinator { CodeReaderCoordinator() }
+
+    func makeNSView(context: Context) -> CodeReaderContainerView {
+        let container = CodeReaderContainerView(interactive: store != nil)
+        context.coordinator.attach(to: container)
+        return container
     }
 
-    let number: Int
-    let line: CodeLine
-    let marks: Marks
-    let gutter: Gutter?
-    let rows: RowFrames?
-    let select: (() -> Void)?
-    @Environment(\.palette) private var palette
-    @Environment(\.theme) private var theme
-
-    nonisolated static func == (a: Self, b: Self) -> Bool {
-        a.number == b.number && a.marks == b.marks && a.line == b.line && a.gutter == b.gutter
+    func updateNSView(_ container: CodeReaderContainerView, context: Context) {
+        context.coordinator.update(container: container, state: self)
     }
+
+    static func dismantleNSView(_ container: CodeReaderContainerView, coordinator: CodeReaderCoordinator) {
+        coordinator.detach()
+    }
+}
+
+@MainActor
+final class CodeReaderCoordinator {
+    private struct SlotHost {
+        let view: NSHostingView<AnyView>
+        var height: CGFloat
+    }
+
+    private weak var container: CodeReaderContainerView?
+    private var boundsObserver: NSObjectProtocol?
+    private var parseTask: Task<Void, Never>?
+
+    private struct RenderSignature: Equatable {
+        let targetLine: Int?
+        let targetRange: NSRange?
+        let hit: TaskGrepHit?
+        let revision: String?
+        let findMatch: FileFind.Match?
+        let theme: ThemeDefinition
+    }
+
+    private var currentPath: String?
+    private var currentText: String?
+    private var currentTheme: ThemeDefinition?
+    private var highlights: [Grammar.Highlight] = []
+    private var highlightsVersion = 0
+
+    private var previousRenderedRanges: [NSTextRange] = []
+    private var lastRenderSignature: RenderSignature?
+    private var slotHosts: [Int: SlotHost] = [:]
+    private var appliedSpacings: [Int: CGFloat] = [:]
+    private var extraBottomInset: CGFloat = 0
+
+    private struct ScrollTarget: Equatable {
+        let visitID: UUID?
+        let line: Int
+        let hit: TaskGrepHit?
+    }
+
+    private var lastScrollTarget: ScrollTarget?
+    private var lastFindMatch: FileFind.Match?
+    private var pendingScroll: (line: Int, rangeInLine: NSRange?)?
+    private var isProgrammaticScroll = false
+    private var lastScrollY: CGFloat = 0
+
+    private weak var store: TaskFilesStore?
+    private var addToConversation: ((String) -> Bool)?
+
+    func attach(to container: CodeReaderContainerView) {
+        self.container = container
+        container.onLayout = { [weak self] in self?.handleLayout() }
+        container.textView.onPlainClick = { [weak self] line, target in
+            self?.handlePlainClick(line: line, target: target)
+        }
+        container.textView.onCommandClick = { [weak self] line, target in
+            self?.handleCommandClick(line: line, target: target)
+        }
+        container.gutterView.onSelectLine = { [weak self] line, extend in
+            self?.handleGutterSelect(line: line, extend: extend)
+        }
+        boundsObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification,
+            object: container.scrollView.contentView,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleScroll() }
+        }
+    }
+
+    func detach() {
+        parseTask?.cancel()
+        parseTask = nil
+        if let boundsObserver { NotificationCenter.default.removeObserver(boundsObserver) }
+        boundsObserver = nil
+        for (_, slot) in slotHosts { slot.view.removeFromSuperview() }
+        slotHosts.removeAll()
+        appliedSpacings.removeAll()
+    }
+
+    fileprivate func update(container: CodeReaderContainerView, state: CodeReaderRepresentable) {
+        store = state.store
+        addToConversation = state.addToConversation
+        let textView = container.textView
+        let gutterView = container.gutterView
+        let font = TaskCodeReader.monoFont()
+
+        let textChanged = currentPath != state.path || currentText != state.text
+        let themeChanged = currentTheme != state.theme
+
+        if textChanged {
+            parseTask?.cancel()
+            parseTask = nil
+            currentPath = state.path
+            currentText = state.text
+            highlights = []
+            highlightsVersion += 1
+            previousRenderedRanges.removeAll()
+            lastRenderSignature = nil
+            clearAllSlots(in: textView)
+            lastScrollTarget = nil
+            lastFindMatch = nil
+            pendingScroll = nil
+            if let store = state.store { store.jumps.target = nil }
+
+            let index = CodeLineIndex(state.text)
+            textView.lineIndex = index
+            textView.filePath = state.path
+            applyPalette(to: container, palette: state.palette, font: font, recolorStorage: false)
+            textView.font = font
+            textView.string = state.text
+            currentTheme = state.theme
+
+            // Measure only the single longest line (O(1) CoreText call) and size the gutter for max digits.
+            let source = state.text as NSString
+            let longestText = index.text(ofLine: index.longestLineIndex + 1, in: source)
+            let longestWidth = (longestText as NSString).size(withAttributes: [.font: font]).width
+            let digitWidth = (String(max(1, index.count)) as NSString).size(withAttributes: [.font: font]).width
+            container.widestLineWidth = longestWidth
+            container.gutterWidth = state.store != nil
+                ? max(ReviewStream.gutterWidth, ceil(digitWidth)) + Spacing.sm + Spacing.xs
+                : ceil(digitWidth) + Spacing.sm + Spacing.xs
+            container.needsLayout = true
+
+            scheduleParse(path: state.path, text: state.text, store: state.store)
+        } else if themeChanged {
+            currentTheme = state.theme
+            applyPalette(to: container, palette: state.palette, font: font, recolorStorage: highlights.isEmpty)
+            if !highlights.isEmpty {
+                paintSyntax(in: textView, highlights: highlights, theme: state.theme, font: font)
+            }
+        }
+
+        // Update gutter state.
+        var selectedGutter = IndexSet()
+        if let selection = state.commentSelection {
+            selectedGutter.insert(integersIn: selection.first...selection.last)
+        }
+        gutterView.selectedLines = selectedGutter
+        gutterView.changeMarks = state.changeMarks
+
+        // Update full-line highlights (comment selection + FileVisit line range).
+        var lineHighlights = selectedGutter
+        if let lines = state.location?.lines {
+            lineHighlights.insert(integersIn: lines)
+        }
+        textView.highlightedLines = lineHighlights
+        textView.lineHighlightColor = NSColor(state.palette.keyboardFocus.opacity(0.3))
+
+        // Update character-level rendering attributes (sub-ms, no NSTextStorage mutation).
+        updateRenderingAttributes(in: textView, state: state)
+
+        // Update inline comment and symbol-peek slots.
+        updateSlots(in: container, state: state)
+
+        // Programmatic scroll for Find match or FileVisit.
+        if state.findMatch != lastFindMatch {
+            lastFindMatch = state.findMatch
+            if let match = state.findMatch, case .line(let line) = match.cell {
+                scroll(container: container, toLine: line, rangeInLine: match.range)
+                state.store?.jumps.readingLine = line
+            }
+        }
+        let scrollTarget = state.location.map { ScrollTarget(visitID: $0.visitID, line: $0.line, hit: $0.hit) }
+        if scrollTarget != lastScrollTarget {
+            lastScrollTarget = scrollTarget
+            if let location = state.location {
+                let rangeInLine: NSRange?
+                if let hit = location.hit, hit.revision == state.revision {
+                    let lineText = textView.lineIndex.text(ofLine: location.line, in: textView.string as NSString)
+                    rangeInLine = hit.range(in: lineText)
+                } else {
+                    rangeInLine = nil
+                }
+                scroll(container: container, toLine: location.line, rangeInLine: rangeInLine)
+            }
+        }
+    }
+
+    private func applyPalette(to container: CodeReaderContainerView, palette: LoopflowPalette, font: NSFont, recolorStorage: Bool) {
+        let textView = container.textView
+        textView.applyPalette(palette)
+        container.scrollView.backgroundColor = NSColor(palette.background)
+        container.gutterView.palette = palette
+        container.gutterView.font = font
+        if recolorStorage, let storage = textView.textStorage, storage.length > 0 {
+            let whole = NSRange(location: 0, length: storage.length)
+            storage.beginEditing()
+            storage.addAttribute(.foregroundColor, value: NSColor(palette.text), range: whole)
+            storage.endEditing()
+        }
+    }
+
+    private func scheduleParse(path: String, text: String, store: TaskFilesStore?) {
+        let document = store?.selectedDocument
+        let version = document?.path == path ? document?.editVersion : nil
+        let needsOutline = version != nil
+        let token = highlightsVersion
+        parseTask = Task { [weak self, weak document] in
+            let result = await Task.detached(priority: .userInitiated) {
+                let grammar = Grammar.named(path)
+                let tree = grammar?.parse(text)
+                let highlights = tree.flatMap { grammar?.highlights(in: $0, text: text) } ?? []
+                let outline = needsOutline ? FileOutline(tree: tree, text: text, path: path) : nil
+                return (highlights, outline)
+            }.value
+            guard !Task.isCancelled, let self, self.highlightsVersion == token,
+                  self.currentPath == path, self.currentText == text else { return }
+            if let outline = result.1, let version { document?.receive(outline, version: version) }
+            self.highlights = result.0
+            if let container = self.container, let activeTheme = self.currentTheme {
+                self.paintSyntax(in: container.textView, highlights: result.0, theme: activeTheme, font: TaskCodeReader.monoFont())
+            }
+        }
+    }
+
+    private func paintSyntax(in textView: CodeReaderTextView, highlights: [Grammar.Highlight], theme: ThemeDefinition, font: NSFont) {
+        guard let storage = textView.textStorage, storage.length > 0 else { return }
+        let inks = SyntaxInks.of(theme)
+        let whole = NSRange(location: 0, length: storage.length)
+        let bold = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+        let italic = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+        storage.beginEditing()
+        storage.addAttribute(.foregroundColor, value: NSColor(theme.palette.text), range: whole)
+        storage.addAttribute(.font, value: font, range: whole)
+        for highlight in highlights where NSMaxRange(highlight.range) <= storage.length {
+            guard let ink = highlight.ink else { continue }
+            switch ink {
+            case .emphasis: storage.addAttribute(.font, value: italic, range: highlight.range)
+            case .strong: storage.addAttribute(.font, value: bold, range: highlight.range)
+            default:
+                if ink == .heading { storage.addAttribute(.font, value: bold, range: highlight.range) }
+                if let color = inks.color(ink) {
+                    storage.addAttribute(.foregroundColor, value: NSColor(color), range: highlight.range)
+                }
+            }
+        }
+        storage.endEditing()
+    }
+
+    private func updateRenderingAttributes(in textView: CodeReaderTextView, state: CodeReaderRepresentable) {
+        let signature = RenderSignature(
+            targetLine: state.target?.line,
+            targetRange: state.target?.range,
+            hit: state.location?.hit,
+            revision: state.revision,
+            findMatch: state.findMatch,
+            theme: state.theme
+        )
+        guard signature != lastRenderSignature else { return }
+        lastRenderSignature = signature
+
+        guard let layoutManager = textView.textLayoutManager,
+              let contentManager = textView.textContentStorage else { return }
+
+        for range in previousRenderedRanges {
+            layoutManager.removeRenderingAttribute(.underlineStyle, for: range)
+            layoutManager.removeRenderingAttribute(.underlineColor, for: range)
+            layoutManager.removeRenderingAttribute(.backgroundColor, for: range)
+        }
+        previousRenderedRanges.removeAll()
+
+        func textRange(_ nsRange: NSRange) -> NSTextRange? {
+            let docStart = contentManager.documentRange.location
+            guard let start = contentManager.location(docStart, offsetBy: nsRange.location),
+                  let end = contentManager.location(start, offsetBy: nsRange.length) else { return nil }
+            return NSTextRange(location: start, end: end)
+        }
+
+        if let target = state.target,
+           let docRange = textView.lineIndex.documentRange(line: target.line, rangeInLine: target.range),
+           let range = textRange(docRange) {
+            layoutManager.addRenderingAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, for: range)
+            layoutManager.addRenderingAttribute(.underlineColor, value: NSColor(state.palette.actionInk), for: range)
+            previousRenderedRanges.append(range)
+        }
+
+        if let hit = state.location?.hit, hit.revision == state.revision {
+            let lineText = textView.lineIndex.text(ofLine: hit.line, in: textView.string as NSString)
+            if let inLine = hit.range(in: lineText),
+               let docRange = textView.lineIndex.documentRange(line: hit.line, rangeInLine: inLine),
+               let range = textRange(docRange) {
+                layoutManager.addRenderingAttribute(.backgroundColor, value: NSColor(state.palette.keyboardFocus.opacity(0.3)), for: range)
+                previousRenderedRanges.append(range)
+            }
+        }
+
+        if let match = state.findMatch, case .line(let line) = match.cell,
+           let docRange = textView.lineIndex.documentRange(line: line, rangeInLine: match.range),
+           let range = textRange(docRange) {
+            layoutManager.addRenderingAttribute(.backgroundColor, value: NSColor(state.palette.keyboardFocus.opacity(0.45)), for: range)
+            previousRenderedRanges.append(range)
+        }
+
+        textView.needsDisplay = true
+    }
+
+    // MARK: Inline slots
+
+    private func updateSlots(in container: CodeReaderContainerView, state: CodeReaderRepresentable) {
+        let textView = container.textView
+        guard let store = state.store else {
+            if !slotHosts.isEmpty { clearAllSlots(in: textView) }
+            return
+        }
+
+        // Collect all 1-based lines that host an editor, comment row, or symbol peek.
+        var activeLines = Set<Int>()
+        if let sel = state.commentSelection { activeLines.insert(sel.last) }
+        for comment in state.attachedComments { activeLines.insert(comment.selection.last) }
+        if let peek = state.inlinePeek, let peekLine = peek.origin.line { activeLines.insert(peekLine) }
+
+        // Remove stale slots.
+        let removed = Set(slotHosts.keys).subtracting(activeLines)
+        for line in removed {
+            slotHosts.removeValue(forKey: line)?.view.removeFromSuperview()
+            setParagraphSpacing(0, onLine: line, in: textView)
+        }
+
+        guard !activeLines.isEmpty else {
+            updateLastLineBottomInset(in: textView)
+            return
+        }
+
+        let viewportWidth = max(200, container.scrollView.contentView.bounds.width)
+        let source = textView.string as NSString
+
+        for line in activeLines.sorted() {
+            let selection = state.commentSelection?.last == line ? state.commentSelection : nil
+            let comments = state.attachedComments.filter { $0.selection.last == line }
+            let peek = state.inlinePeek?.origin.line == line ? state.inlinePeek : nil
+            let lineIndex = textView.lineIndex
+            let addToConversation = state.addToConversation
+            let root = AnyView(
+                InlineSlotView(
+                    store: store,
+                    selection: selection,
+                    excerpt: {
+                        guard let selection else { return [] }
+                        return (selection.first...selection.last).map { lineIndex.text(ofLine: $0, in: source) }
+                    },
+                    comments: comments,
+                    peek: peek,
+                    addToConversation: addToConversation,
+                    onHeightChange: { [weak self] height in
+                        self?.slotHeightChanged(line: line, height: height)
+                    }
+                )
+                .environment(\.palette, state.palette)
+                .environment(\.theme, state.theme)
+            )
+            let host: NSHostingView<AnyView>
+            if let existing = slotHosts[line] {
+                host = existing.view
+                host.rootView = root
+            } else {
+                host = NSHostingView(rootView: root)
+                host.translatesAutoresizingMaskIntoConstraints = true
+                textView.addSubview(host)
+                slotHosts[line] = SlotHost(view: host, height: 0)
+            }
+            host.frame.size.width = viewportWidth
+            let measured = max(1, ceil(host.fittingSize.height))
+            if slotHosts[line]?.height != measured {
+                slotHosts[line]?.height = measured
+                setParagraphSpacing(measured, onLine: line, in: textView)
+            }
+        }
+        updateLastLineBottomInset(in: textView)
+        positionSlots(in: container)
+    }
+
+    private func slotHeightChanged(line: Int, height: CGFloat) {
+        guard let container, var slot = slotHosts[line] else { return }
+        let rounded = max(1, ceil(height))
+        guard abs(slot.height - rounded) >= 1 else { return }
+        slot.height = rounded
+        slotHosts[line] = slot
+        setParagraphSpacing(rounded, onLine: line, in: container.textView)
+        updateLastLineBottomInset(in: container.textView)
+        positionSlots(in: container)
+        container.gutterView.needsDisplay = true
+    }
+
+    private func setParagraphSpacing(_ spacing: CGFloat, onLine line: Int, in textView: CodeReaderTextView) {
+        let current = appliedSpacings[line] ?? 0
+        guard abs(current - spacing) >= 0.5 else { return }
+        if spacing <= 0 {
+            appliedSpacings.removeValue(forKey: line)
+        } else {
+            appliedSpacings[line] = spacing
+        }
+        guard let storage = textView.textStorage,
+              let range = textView.lineIndex.paragraphRange(forLine: line),
+              range.length > 0, NSMaxRange(range) <= storage.length else { return }
+        let style = NSMutableParagraphStyle()
+        style.paragraphSpacing = spacing
+        storage.beginEditing()
+        storage.addAttribute(.paragraphStyle, value: style, range: range)
+        storage.endEditing()
+    }
+
+    /// Ensure an inline slot anchored on the very last line of a file without a trailing newline has room below it.
+    private func updateLastLineBottomInset(in textView: CodeReaderTextView) {
+        let lastLine = textView.lineIndex.count
+        let needed = slotHosts[lastLine]?.height ?? 0
+        if abs(needed - extraBottomInset) >= 0.5 {
+            extraBottomInset = needed
+            textView.textContainerInset = NSSize(width: Spacing.md, height: Spacing.sm)
+            let desiredMinHeight = max(textView.minSize.height, textView.frame.height + needed)
+            if needed > 0 {
+                textView.minSize.height = desiredMinHeight
+            }
+        }
+    }
+
+    private func positionSlots(in container: CodeReaderContainerView) {
+        guard !slotHosts.isEmpty else { return }
+        let textView = container.textView
+        guard let layoutManager = textView.textLayoutManager,
+              let contentManager = textView.textContentStorage else { return }
+        let clipBounds = container.scrollView.contentView.bounds
+        let width = max(160, clipBounds.width)
+        let insetY = textView.textContainerOrigin.y
+        let defaultHeight = ceil(TaskCodeReader.monoFont().ascender - TaskCodeReader.monoFont().descender)
+
+        for (line, slot) in slotHosts {
+            guard let info = textView.lineIndex.line(at: line),
+                  let loc = contentManager.location(contentManager.documentRange.location, offsetBy: info.location)
+            else { continue }
+            layoutManager.ensureLayout(for: NSTextRange(location: loc))
+            guard let fragment = layoutManager.textLayoutFragment(for: loc) else { continue }
+            let textHeight = fragment.textLineFragments.first?.typographicBounds.height ?? defaultHeight
+            let y = fragment.layoutFragmentFrame.minY + insetY + textHeight
+            let frame = NSRect(x: clipBounds.minX, y: y, width: width, height: slot.height)
+            if slot.view.frame != frame {
+                slot.view.frame = frame
+            }
+        }
+        // Keep space below a last-line slot reachable by scrolling.
+        if let lastSlot = slotHosts[textView.lineIndex.count] {
+            let bottom = lastSlot.view.frame.maxY + Spacing.sm
+            if textView.frame.height < bottom {
+                textView.setFrameSize(NSSize(width: textView.frame.width, height: bottom))
+            }
+        }
+    }
+
+    private func clearAllSlots(in textView: CodeReaderTextView) {
+        for (line, slot) in slotHosts {
+            slot.view.removeFromSuperview()
+            setParagraphSpacing(0, onLine: line, in: textView)
+        }
+        slotHosts.removeAll()
+        appliedSpacings.removeAll()
+        extraBottomInset = 0
+    }
+
+    // MARK: Scrolling & interaction
+
+    func scroll(container: CodeReaderContainerView, toLine line: Int, rangeInLine: NSRange?) {
+        let scrollView = container.scrollView
+        let clipBounds = scrollView.contentView.bounds
+        let visibleHeight = clipBounds.height
+        let visibleWidth = clipBounds.width
+        guard visibleWidth > 0, visibleHeight > 0 else {
+            pendingScroll = (line, rangeInLine)
+            return
+        }
+        pendingScroll = nil
+        let textView = container.textView
+        guard let layoutManager = textView.textLayoutManager,
+              let contentManager = textView.textContentStorage,
+              let info = textView.lineIndex.line(at: line),
+              let loc = contentManager.location(contentManager.documentRange.location, offsetBy: info.location)
+        else { return }
+        layoutManager.ensureLayout(for: NSTextRange(location: loc))
+        guard let fragment = layoutManager.textLayoutFragment(for: loc) else { return }
+
+        let insetY = textView.textContainerOrigin.y
+        let lineHeight = fragment.textLineFragments.first?.typographicBounds.height ?? 16
+        let lineMidY = fragment.layoutFragmentFrame.minY + insetY + lineHeight / 2
+        let maxY = max(0, textView.frame.height - visibleHeight)
+        let targetY = min(maxY, max(0, lineMidY - visibleHeight / 2))
+
+        var targetX: CGFloat = 0
+        if let rangeInLine, let lineFragment = fragment.textLineFragments.first {
+            let maxChar = lineFragment.characterRange.length
+            let startIdx = min(max(0, rangeInLine.location), maxChar)
+            let endIdx = min(max(startIdx, NSMaxRange(rangeInLine)), maxChar)
+            let startX = lineFragment.locationForCharacter(at: startIdx).x + textView.textContainerOrigin.x
+            let endX = lineFragment.locationForCharacter(at: endIdx).x + textView.textContainerOrigin.x
+            if endX > visibleWidth - Spacing.md {
+                let maxX = max(0, textView.frame.width - visibleWidth)
+                targetX = min(maxX, max(0, startX + min(endX - startX, visibleWidth) / 2 - visibleWidth / 2))
+            }
+        }
+
+        isProgrammaticScroll = true
+        scrollView.contentView.scroll(to: CGPoint(x: targetX, y: targetY))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        lastScrollY = scrollView.contentView.bounds.minY
+        isProgrammaticScroll = false
+        container.gutterView.needsDisplay = true
+        positionSlots(in: container)
+    }
+
+    private func handleLayout() {
+        guard let container else { return }
+        if let pending = pendingScroll,
+           container.scrollView.contentView.bounds.width > 0,
+           container.scrollView.contentView.bounds.height > 0 {
+            scroll(container: container, toLine: pending.line, rangeInLine: pending.rangeInLine)
+            return
+        }
+        positionSlots(in: container)
+    }
+
+    private func handleScroll() {
+        guard let container else { return }
+        container.gutterView.needsDisplay = true
+        if !slotHosts.isEmpty { positionSlots(in: container) }
+        let scrollY = container.scrollView.contentView.bounds.minY
+        guard !isProgrammaticScroll, abs(scrollY - lastScrollY) > 0.5 else { return }
+        lastScrollY = scrollY
+        guard let store,
+              let layoutManager = container.textView.textLayoutManager,
+              let contentManager = container.textView.textContentStorage else { return }
+        let topY = max(0, scrollY - container.textView.textContainerOrigin.y + 4)
+        if let fragment = layoutManager.textLayoutFragment(for: CGPoint(x: 0, y: topY)) {
+            let offset = contentManager.offset(from: contentManager.documentRange.location, to: fragment.rangeInElement.location)
+            if offset != NSNotFound {
+                let line = container.textView.lineIndex.lineNumber(forUTF16Offset: offset)
+                if store.jumps.readingLine != line {
+                    store.jumps.readingLine = line
+                }
+            }
+        }
+    }
+
+    private func handlePlainClick(line: Int?, target: FileJumps.Target?) {
+        guard let store, store.filePicker == nil else { return }
+        if store.browser.visit?.highlight != nil {
+            store.browser.visit?.highlight = nil
+        }
+        if let line {
+            store.jumps.readingLine = line
+        }
+        store.jumps.target = target
+    }
+
+    private func handleCommandClick(line: Int, target: FileJumps.Target?) {
+        guard let store, store.filePicker == nil else { return }
+        if store.browser.visit?.highlight != nil {
+            store.browser.visit?.highlight = nil
+        }
+        store.jumps.readingLine = line
+        store.jumps.target = target
+        if let target {
+            store.jumps.search(.definition(target.word), line: line, in: store)
+        }
+    }
+
+    private func handleGutterSelect(line: Int, extend: Bool) {
+        guard let store, let path = currentPath else { return }
+        store.comments.select(
+            path: path,
+            source: .file(draft: store.selectedDocument?.dirty == true),
+            line: line,
+            extend: extend
+        )
+    }
+}
+
+/// Inline review editor, attached comments, and symbol peek hosted inside a line's `paragraphSpacing` slot.
+private struct InlineSlotView: View {
+    let store: TaskFilesStore
+    let selection: ReviewSelection?
+    let excerpt: () -> [String]
+    let comments: [ReviewComment]
+    let peek: FileJumps.Peek?
+    let addToConversation: ((String) -> Bool)?
+    let onHeightChange: (CGFloat) -> Void
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
-            if let gutter, let rows, let select {
-                ReviewGutter(number: number, selected: gutter.selected, tone: gutter.tone, select: select)
-                Text(painted).textSelection(.enabled)
-                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TaskCodeReader.space)) } action: { [number] in
-                        rows.frames[number] = $0
-                    }
-                    .onDisappear { [number] in rows.frames[number] = nil }
-            } else {
-                Text(verbatim: String(number)).foregroundStyle(palette.textSecondary)
-                Text(painted).textSelection(.enabled)
+        VStack(alignment: .leading, spacing: 0) {
+            if let selection {
+                ReviewCommentEditor(store: store, selection: selection, excerpt: excerpt, addToConversation: addToConversation)
+            }
+            ForEach(comments) { comment in
+                ReviewCommentRow(store: store, comment: comment)
+            }
+            if let peek {
+                FileSymbolPeek(store: store, peek: peek)
+                    .padding(.horizontal, Spacing.sm)
             }
         }
-        // Code scrolls sideways; a wrapped line would read as two lines beside one number.
-        .fixedSize(horizontal: true, vertical: false)
-    }
-
-    private var painted: AttributedString {
-        var value = AttributedString(line.text)
-        value.paint(line.highlights, inks: .of(theme))
-        if let underline = marks.underline, let range = Range(underline, in: value) {
-            value[range].underlineStyle = Text.LineStyle(pattern: .solid, color: palette.actionInk)
-        }
-        if marks.selected { value.backgroundColor = palette.keyboardFocus.opacity(0.3) }
-        if let hit = marks.hit, let range = Range(hit, in: value) {
-            value[range].backgroundColor = palette.keyboardFocus.opacity(0.3)
-        }
-        if let find = marks.find, let range = Range(find, in: value) {
-            value[range].backgroundColor = palette.keyboardFocus.opacity(0.45)
-        }
-        return value
-    }
-}
-
-final class RowFrames {
-    var frames: [Int: CGRect] = [:]
-}
-
-/// Selectable text takes a click before any SwiftUI gesture sees it, so the reader
-/// watches its window's mouse events instead. Events pass through untouched, keeping
-/// drag-selection and copy; a press released where it started counts as a click.
-struct ReaderClicks: NSViewRepresentable {
-    let clicked: (CGPoint, NSEvent.ModifierFlags) -> Void
-
-    func makeCoordinator() -> Coordinator { Coordinator(clicked: clicked) }
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        context.coordinator.install(for: view)
-        return view
-    }
-
-    func updateNSView(_ view: NSView, context: Context) { context.coordinator.clicked = clicked }
-
-    static func dismantleNSView(_ view: NSView, coordinator: Coordinator) { coordinator.uninstall() }
-
-    @MainActor final class Coordinator {
-        var clicked: (CGPoint, NSEvent.ModifierFlags) -> Void
-        weak var view: NSView?
-        private var monitor: Any?
-        private var pressed: CGPoint?
-
-        init(clicked: @escaping (CGPoint, NSEvent.ModifierFlags) -> Void) { self.clicked = clicked }
-
-        func install(for view: NSView) {
-            self.view = view
-            monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
-                self?.handle(event)
-                return event
-            }
-        }
-
-        func handle(_ event: NSEvent) {
-            guard let view, event.window === view.window else { return }
-            var point = view.convert(event.locationInWindow, from: nil)
-            if !view.isFlipped { point.y = view.bounds.height - point.y }
-            guard view.bounds.contains(point) else {
-                pressed = nil
-                return
-            }
-            if event.type == .leftMouseDown {
-                pressed = point
-                // Selectable text tracks some presses itself (⌘-click extends a selection) and takes the
-                // mouse-up off the queue before any monitor sees it. Default mode resumes only once that
-                // loop ends, and the up it took is then the application's current event.
-                RunLoop.main.perform(inModes: [.default]) { [weak self] in
-                    MainActor.assumeIsolated {
-                        guard let self, self.pressed != nil, let up = NSApp.currentEvent, up.type == .leftMouseUp else { return }
-                        self.handle(up)
-                    }
-                }
-            } else if let start = pressed {
-                pressed = nil
-                if hypot(point.x - start.x, point.y - start.y) <= 3 { clicked(point, event.modifierFlags) }
-            }
-        }
-
-        func uninstall() {
-            if let monitor { NSEvent.removeMonitor(monitor) }
-            monitor = nil
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onGeometryChange(for: CGFloat.self, of: \.size.height) { height in
+            if height > 0 { onHeightChange(height) }
         }
     }
 }

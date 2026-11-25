@@ -46,10 +46,19 @@ final class TaskFilesStore {
     var jumps: FileJumps { browser.jumps }
     var visit: FileVisit? { browser.visit }
 
-    /// History traversal has no origin to record. A path without a visit opens rendered.
+    static func isRenderablePage(_ path: String) -> Bool {
+        ["md", "html"].contains((path as NSString).pathExtension.lowercased())
+    }
+
+    func isShowingRendered(_ path: String) -> Bool {
+        mode == .read && Self.isRenderablePage(path) && visit?.showsSource != true
+    }
+
+    /// History traversal has no origin to record. A path without a source visit opens rendered.
     func reveal(_ path: String, at visit: FileVisit?, mode: Mode = .read, from origin: FilePosition? = nil) {
         let line = visit?.line ?? 1
-        jumps.record(FilePosition(path: path, line: line), from: origin)
+        let destinationLine: Int? = (mode == .read && Self.isRenderablePage(path) && visit?.showsSource != true) ? nil : line
+        jumps.record(FilePosition(path: path, line: destinationLine), from: origin)
         jumps.dismiss()
         browser.open(path, automatically: true)
         page = .files
@@ -60,7 +69,7 @@ final class TaskFilesStore {
     }
 
     func openMatch(_ hit: TaskGrepHit) {
-        reveal(hit.path, at: FileVisit(line: hit.line, hit: hit), from: jumps.position(in: self))
+        reveal(hit.path, at: FileVisit(line: hit.line, showsSource: true, highlight: .hit(hit)), from: jumps.position(in: self))
     }
 
     func selectFileFromInput(_ path: String) {
@@ -98,7 +107,7 @@ final class TaskFilesStore {
 
     func openPresentation(_ request: FilesBrowserState.Presentation) {
         filePicker = nil
-        let visit = request.lines.map { FileVisit(line: $0.lowerBound, lines: $0) }
+        let visit = request.lines.map { FileVisit(line: $0.lowerBound, showsSource: true, highlight: .lines($0)) }
         reveal(request.path, at: visit, mode: request.mode, from: jumps.position(in: self))
     }
 

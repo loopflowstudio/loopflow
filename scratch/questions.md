@@ -11,7 +11,7 @@
   promote-on-second-open with a follower relay, holding standalone chats
   forever without cleanup, and hard-requiring the server.
 
-- Chosen headless (post-build concept review, planned for Pass 2): record
+- Chosen headless (post-build concept review, built in Pass 2): record
   intentional retirement in `agent_sessions.agent_end_reason` (additive
   migration, cleared in `attach_in`) and record `agent_exit_code` on waited
   native launches (`spawn_native` in `native_session.rs`). Retired chats,

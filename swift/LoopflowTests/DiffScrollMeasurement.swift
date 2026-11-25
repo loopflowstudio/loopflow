@@ -41,13 +41,13 @@ struct DiffScrollMeasurement {
                                                                      addToConversation: nil))
         window.orderFront(nil)
         defer { window.contentView = nil; window.close() }
-        let first = frame(window)
-        let scroll = try #require(window.contentView.flatMap(Self.streamScroll(in:)))
+        let first = window.measureFrame {}
+        let scroll = try #require(window.contentView?.tallestScrollView)
 
         var scrolled: [Double] = []
         for _ in 0..<300 {
             let y = scroll.contentView.bounds.minY + 40
-            scrolled.append(measure(window) {
+            scrolled.append(window.measureFrame {
                 scroll.contentView.scroll(to: CGPoint(x: 0, y: y))
                 scroll.reflectScrolledClipView(scroll.contentView)
             })
@@ -56,15 +56,15 @@ struct DiffScrollMeasurement {
         var slowest: [(Double, String)] = []
         let targets = stride(from: 0, to: review.files.count, by: max(1, review.files.count / 20)).map { review.files[$0] }
         for file in targets.reversed() {
-            jumps.append(measure(window) {
+            jumps.append(window.measureFrame {
                 store.diffReview[place: .changes] = .init(anchor: store.diffReview.topID(of: file, in: .changes), current: store.diffReview.stops(of: [file], in: .changes).first?.id)
             })
             slowest.append((jumps.last ?? 0, "\(file.path) (\(file.blocks.count) blocks)"))
         }
         let last = try #require(review.files.last)
-        _ = measure(window) { store.diffReview[place: .changes] = .init(anchor: store.diffReview.topID(of: last, in: .changes), current: store.diffReview.stops(of: [last], in: .changes).first?.id) }
+        _ = window.measureFrame { store.diffReview[place: .changes] = .init(anchor: store.diffReview.topID(of: last, in: .changes), current: store.diffReview.stops(of: [last], in: .changes).first?.id) }
         let before = store.diffReview[place: .changes].anchor
-        let earlier = measure(window) { store.diffReview.showEarlierFiles() }
+        let earlier = window.measureFrame { store.diffReview.showEarlierFiles() }
         let held = store.diffReview[place: .changes].anchor == before
         let report = """
         files \(review.files.count), blocks \(lines), stops parsed \(parsed) counted \(counted), first frame \(Self.ms(first)) ms
@@ -77,32 +77,6 @@ struct DiffScrollMeasurement {
         if let output = environment["LF_DIFF_SCROLL_OUTPUT"] {
             try report.write(toFile: output, atomically: true, encoding: .utf8)
         }
-    }
-
-    private func frame(_ window: NSWindow) -> Double { measure(window) {} }
-
-    /// One action and the layout and drawing it causes, in milliseconds.
-    private func measure(_ window: NSWindow, _ action: () -> Void) -> Double {
-        let start = DispatchTime.now().uptimeNanoseconds
-        action()
-        for _ in 0..<3 {
-            window.contentView?.layoutSubtreeIfNeeded()
-            window.layoutIfNeeded()
-            window.displayIfNeeded()
-            RunLoop.main.run(until: .now)
-        }
-        return Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
-    }
-
-    /// The tallest scroll view: the stream, not the sidebar's list.
-    private static func streamScroll(in view: NSView) -> NSScrollView? {
-        var found: [NSScrollView] = []
-        func visit(_ view: NSView) {
-            if let scroll = view as? NSScrollView { found.append(scroll) }
-            view.subviews.forEach(visit)
-        }
-        visit(view)
-        return found.max { ($0.documentView?.bounds.height ?? 0) < ($1.documentView?.bounds.height ?? 0) }
     }
 
     private nonisolated static func run(_ lf: String, _ args: [String], cwd: String?) throws -> String {

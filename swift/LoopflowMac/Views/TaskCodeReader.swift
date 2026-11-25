@@ -20,7 +20,7 @@ struct TaskCodeReader: View {
     @State private var scrolling = false
     /// Not observed: the rows report their frames on every scroll without re-running the reader.
     @State var rows = RowFrames()
-    private static let space = "files-code-reader"
+    static let space = "files-code-reader"
 
     var body: some View {
         Group {
@@ -107,22 +107,14 @@ struct TaskCodeReader: View {
     }
 
     func row(_ index: Int, in lines: [CodeLine]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
-                if let store {
-                    let number = index + 1
-                    ReviewGutter(number: number, selected: selected(number),
-                                 tone: changeTone(number, in: store)) {
-                        store.comments.select(path: path, source: .file(draft: store.selectedDocument?.dirty == true),
-                                              line: number, extend: NSEvent.modifierFlags.contains(.shift))
-                    }
-                } else {
-                    Text(verbatim: String(index + 1)).foregroundStyle(palette.textSecondary)
+        let number = index + 1
+        return VStack(alignment: .leading, spacing: 0) {
+            NumberedLine(number: number, line: lines[index], marks: marks(number, in: lines[index]), review: store.map { store in
+                NumberedLine.Review(selected: selected(number), tone: changeTone(number, in: store), rows: rows) {
+                    store.comments.select(path: path, source: .file(draft: store.selectedDocument?.dirty == true),
+                                          line: number, extend: NSEvent.modifierFlags.contains(.shift))
                 }
-                source(lines[index], number: index + 1)
-            }
-            // Code scrolls sideways; a wrapped line would read as two lines beside one number.
-            .fixedSize(horizontal: true, vertical: false)
+            }).equatable()
             if let store {
                 if let selection = store.comments.selection, selected(index + 1), selection.last == index + 1 {
                     ReviewCommentEditor(store: store, selection: selection, excerpt: {
@@ -154,15 +146,6 @@ struct TaskCodeReader: View {
     private func selected(_ number: Int) -> Bool {
         guard let selection = store?.comments.selection, selection.path == path, selection.source.isFile else { return false }
         return (selection.first...selection.last).contains(number)
-    }
-
-    @ViewBuilder private func source(_ line: CodeLine, number: Int) -> some View {
-        let label = CodeLineText(line: line, marks: marks(number, in: line)).equatable()
-        if store != nil {
-            label
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { rows.frames[number] = $0 }
-                .onDisappear { rows.frames[number] = nil }
-        } else { label }
     }
 
     /// A click on a source line underlines the identifier under it; ⌘-click also looks up its definition.
@@ -232,8 +215,8 @@ struct TaskCodeReader: View {
     }
 
     /// What a row shows besides its syntax colors, as values: a change elsewhere repaints no other line.
-    func marks(_ number: Int, in line: CodeLine) -> CodeLineText.Marks {
-        var marks = CodeLineText.Marks()
+    func marks(_ number: Int, in line: CodeLine) -> NumberedLine.Marks {
+        var marks = NumberedLine.Marks()
         if let target = store?.jumps.target, target.path == path, target.line == number { marks.underline = target.range }
         marks.selected = selected(number) || location?.lines?.contains(number) == true
         if let hit = location?.hit, hit.line == number, hit.revision == revision { marks.hit = hit.range(in: line.text) }
@@ -242,9 +225,9 @@ struct TaskCodeReader: View {
     }
 }
 
-/// One source line. Equatable on its text and marks, so the rows SwiftUI keeps
-/// built skip repainting when the reader redraws for another line.
-struct CodeLineText: View, Equatable {
+/// A line number and its source. Equatable on what they show, so the rows a lazy
+/// stack keeps built skip their bodies when the reader redraws for another line.
+struct NumberedLine: View, Equatable {
     struct Marks: Equatable {
         var underline: NSRange?
         var selected = false
@@ -252,17 +235,42 @@ struct CodeLineText: View, Equatable {
         var find: NSRange?
     }
 
+    /// A gutter that selects lines for review comments, and where the source was laid out.
+    struct Review {
+        let selected: Bool
+        let tone: ThemeTone?
+        let rows: RowFrames
+        let select: () -> Void
+    }
+
+    let number: Int
     let line: CodeLine
     let marks: Marks
+    let review: Review?
     @Environment(\.palette) private var palette
     @Environment(\.theme) private var theme
 
     nonisolated static func == (a: Self, b: Self) -> Bool {
-        a.marks == b.marks && a.line.text == b.line.text && a.line.highlights == b.line.highlights
+        a.number == b.number && a.marks == b.marks && a.line.text == b.line.text && a.line.highlights == b.line.highlights
+            && (a.review == nil) == (b.review == nil) && a.review?.selected == b.review?.selected && a.review?.tone == b.review?.tone
     }
 
     var body: some View {
-        Text(painted).textSelection(.enabled)
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
+            if let review {
+                ReviewGutter(number: number, selected: review.selected, tone: review.tone, select: review.select)
+                Text(painted).textSelection(.enabled)
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TaskCodeReader.space)) } action: { [number] in
+                        review.rows.frames[number] = $0
+                    }
+                    .onDisappear { [number] in review.rows.frames[number] = nil }
+            } else {
+                Text(verbatim: String(number)).foregroundStyle(palette.textSecondary)
+                Text(painted).textSelection(.enabled)
+            }
+        }
+        // Code scrolls sideways; a wrapped line would read as two lines beside one number.
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private var painted: AttributedString {

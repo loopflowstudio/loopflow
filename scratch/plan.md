@@ -40,20 +40,9 @@ The display prototype was withdrawn. The provider fixture now drops the same
 invalid hook reply as the real CLI, so the existing Task reopen contract
 catches this loss. The Pass 2 reopen path still sends plain system messages.
 
-### Remaining decision
+### Resolved decision (2026-11-25)
 
-Open choice: (a) show steers as SDK `userMessage` steps on Antigravity only,
-and teach the transcript reader that `SYSTEM_SDK` `USER_INPUT` rows are lf
-deliveries rather than turns from the person; (b) wait for a
-display-only provider field and ship this Task with the existing system-message delivery,
-filing display as its own Task; (c) another shape.
-
-Inline steer and Task update display still needs a design. A provider-supported
-display-only message would retain today's model input and turn history. Using
-a visible SDK user message changes model input and requires a decision about
-attribution, observations and turn accounting. Verify the chosen shape in the
-native TUI before changing `ClaimedSteers`, the hook interface or the shared
-10,000-byte budget. Check a reopen, a later turn and a headless worker.
+Jack Heart chose `(b)`: ship Pass 2 with today's system-message delivery and track inline steer/Task-update display in its own Task (**LOO-1103**, `task_a265825e5d3e484b88cd7c047a79b675`). No further implementation remains in LOO-1098; proceed to `pr-publish` and `ship-review`.
 
 ### Focused check
 
@@ -79,6 +68,7 @@ cargo test -p loopflow --test session_launch_contract a_reopened_antigravity_tas
 
 ## Outside this work
 
+- Inline steer & Task-update display in Antigravity TUI: **LOO-1103** (`task_a265825e5d3e484b88cd7c047a79b675`, waiting on a working display-only `agy` hook field).
 - Already-open Antigravity idle wake: **LOO-1099** (live PTY probes ruled out `?2004h` paste-mode readiness).
 - Viewer handoff (multi-viewer `agy`): **LOO-1097**.
 - Headless unanswered questions on Claude, Codex, Antigravity: **Task 48edb9**.

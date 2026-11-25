@@ -493,7 +493,21 @@ button).
    CLI family coverage in `docs/dev/reference.md`, so adding `lf page` required
    mapping it under the `Client API server` row there. Also, `builtins::tests`
    now enforces the kit contract across all five review skills and `LOOPFLOW.md`.
-   All planned passes are built; ready for `concept-review` / `compress` / `qa`.
+   Realign check: `cargo test -p loopflow-definitions --lib builtins::` 13/13 pass.
+
+### Remaining (later Graph steps, not implement)
+
+- **compress:** split `lf/commands/page_build.rs` (1434 lines) along its
+  expansions (components, diffs, `data-lf`, checks); split
+  `TaskFilesTests/reviewPageBridgeOwnsStateClearsAfterSendAndForwardsOperations`
+  along its numbered steps; `builtins::tests::review_page_skills_use_lf_page_kit`
+  asserts prompt substrings (including a negative `"visual language"` check) and
+  would not fail if a page broke — keep only what guards a real regression.
+- **qa:** the runtime in Chrome against branch `lf server` and in Dev Desktop:
+  highlight note + choice + `⌘↩` steer, switching files before sending, a
+  `data-lf` `task.create` receipt, `file://` copy. No JS runs in CI.
+- Open questions 1–8 in `scratch/questions.md` stay for review (notably which
+  browser "an agent-browser split" meant).
 
 ## User docs written ahead of implementation
 

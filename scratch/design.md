@@ -86,7 +86,7 @@ Live demo in `Loopflow Dev` on `loopflow` (`HEAD` `407892c6d0`) confirmed `⇧�
 
 ### Fixes for `implement`
 
-Built November 24: 1–4 and the placeholder, peek-edge parts of 5. Remaining: 6, and display QA for 5.
+Built November 24–25: 1–4, the placeholder and peek-edge parts of 5, and 6 (timings in [the plan](plan.md)). Remaining: display QA for 5.
 
 1. **`⌘-click` & click-to-underline (`gd`/`gr`) in `TaskCodeReader.swift`:**
    - Root cause (`TaskCodeReader.swift:150-161`): `Text(...).textSelection(.enabled)` wraps an AppKit text view that swallows mouse clicks before SwiftUI `.simultaneousGesture(SpatialTapGesture())` fires on macOS.

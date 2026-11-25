@@ -1,0 +1,71 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LOO-1101 QA</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}
+pre{background:#f5f5f2;padding:.7em 1em;overflow-x:auto;font-size:13px}
+td,th{border-bottom:1px solid #ddd;padding:.35em .6em;text-align:left;vertical-align:top}
+table{border-collapse:collapse;width:100%}
+.ok{color:#176b2c}.bad{color:#a52222}
+</style></head><body>
+<h1>LOO-1101 QA: a bound conversation stays where it runs</h1>
+<p>Branch <code>lf</code> (debug build of b79caea470 plus the fix below) on a private Machine
+(<code>LF_HOME=/tmp/lf-qa-1101/lfhome</code>, isolated <code>HOME</code>), with stand-in <code>agy</code> and
+<code>claude</code> that log their <code>pwd</code> and arguments and then <code>sleep</code>. The repository has two linked
+worktrees, as in the report: <code>repo.academy-test-drive</code> (no Task) and <code>repo.mtg-388</code>
+(adopted by Task <code>2b6944</code>). For a control, the installed <code>lf 0.16.0+62a368e5c</code> ran the same script on its own home.</p>
+
+<h2>Scenarios</h2>
+<table>
+<tr><th>#</th><th>What I did</th><th>What I saw</th></tr>
+<tr><td>1</td><td><code>lf -a agy</code> in <code>repo.academy-test-drive</code> under a PTY, then (with the chat still running)
+<code>lf session bind &lt;S&gt; --task 2b6944</code></td>
+<td class="ok"><pre>Session session_df54… belongs to 2b6944.
+Conversation stays in /private/tmp/lf-qa-1101/repo.academy-test-drive; 2b6944's checkout is /private/tmp/lf-qa-1101/repo.mtg-388.
+Binding session_df54… to 2b6944 (Seat table for MTG-388). Permanent.</pre>
+<code>agent_sessions.cwd</code> = academy-test-drive, <code>task_id</code> set, <code>work_source=bound</code>, primary row written; the agy process's cwd is still academy-test-drive.</td></tr>
+<tr><td>2</td><td><code>lf resume -a claude:fable</code> from <code>repo.academy-test-drive</code> (the reported command)</td>
+<td class="ok"><pre>Stopped the agy client that had this conversation; continuing here.</pre>
+Same Session, now <code>claude</code>/<code>fable</code>, new thread (<code>--session-id 1db7f21b…</code>), stand-in cwd academy-test-drive.</td></tr>
+<tr><td>2c</td><td>The same scenario on the installed lf (control)</td>
+<td class="bad"><pre>Conversation directory set to /private/tmp/lf-qa-1101r/repo.mtg-388. Already-running clients may keep their original directory. Files stay in their original checkout.
+…
+Error: This worktree has no associated work conversation.</pre>
+The bug as reported. After the chat ended, its recovery pass also started
+<code>lf session resume --request-id recover:…</code> with its provider in <code>repo.mtg-388</code>, the report's second symptom.</td></tr>
+<tr><td>3</td><td><code>lf resume --task 2b6944</code> from the main checkout while claude runs</td>
+<td class="ok">Attaches to the held claude in academy-test-drive (title <code>2b6944 repo.academy-test-drive · Available</code>); no second provider.</td></tr>
+<tr><td>4</td><td>Killed the claude, then bare <code>lf resume</code> from the Task's own checkout <code>repo.mtg-388</code></td>
+<td class="ok">Restarts <code>claude --resume 1db7f21b…</code> in <strong>academy-test-drive</strong>. The idle reopen that the old <code>work_source='bound'</code> guard handled now stays put.</td></tr>
+<tr><td>5</td><td>New Task adopting <code>repo.fresh</code>, then <code>lf -a claude resume --task</code></td>
+<td class="ok">"Nothing to resume here; starting a new conversation." Placeholder primary created in <code>repo.fresh</code>: unstarted primaries still take their checkout.</td></tr>
+<tr><td>6</td><td><code>lf task create 'Adopt academy' --worktree ../repo.academy-test-drive</code></td>
+<td class="ok">The new Task gets the checkout but not the conversation bound to 2b6944 (primary table unchanged).
+Bare <code>lf resume</code> there then opens the checkout owner's conversation (asks for <code>-a</code>); the bound one is still reached with <code>--task 2b6944</code>.</td></tr>
+<tr><td>7</td><td>Second Task <code>45783e</code> (checkout <code>repo.loo12</code>), live agy chat in <code>repo.research</code> bound to it, then killed the driver, agy and <code>lf -a agy</code>, restarted the server, then <code>lf resume --task 45783e</code> from main</td>
+<td class="ok">No restart into <code>repo.loo12</code>. <code>lf task status</code>: "Conversation: died 01:57 (no exit recorded)". The explicit reopen started agy in <code>repo.research</code>.</td></tr>
+</table>
+
+<h2>Fixed</h2>
+<p><code>lf session bind</code> printed "Binding S to T. Permanent." after the bind had finished, so it came after the new
+"Conversation stays in…" line and after stdout's result. The line now prints before the bind runs
+(<code>rust/loopflow-execution/src/ops/human_session.rs</code>, <code>bind</code>). The fixture in
+<code>session_lifecycle_tests.rs</code> matches with <code>contains</code>, so the order change doesn't affect it.</p>
+
+<h2>What works now</h2>
+<p>The reported flow end to end: bind a running chat to a Task that already has a checkout, then switch harness from the
+worktree it runs in. Reopening by Task, idle restarts and server restarts all keep the conversation in its directory.
+Fresh Task primaries still land in their checkout.</p>
+
+<h2>Not reached</h2>
+<ul>
+<li>Seeding the fable thread from the agy transcript: the stand-in writes no Antigravity transcript, so there was nothing to seed. Real <code>agy</code> under the account's <code>HOME</code> would cover it.</li>
+<li>Desktop's binding sheet copy and <code>SessionControlsTests</code>: no Dev build in this run (gate/CI).</li>
+<li>Whether the branch's recovery pass ever restarts a dead bound conversation on its own: scenario 7 didn't trigger one, so I only checked where an explicit reopen lands.</li>
+</ul>
+
+<h2>Still odd, worst first</h2>
+<ul>
+<li><code>lf task status</code> from the main checkout says "its Task is not checked out here" for a Task that is checked out on this Machine. "here" means this directory, but it reads as this Machine. This existed before the change.</li>
+<li>After another Task adopts the conversation's worktree (scenario 6), bare <code>lf resume</code> there no longer finds the bound conversation. That follows the rule that the checkout's owner wins, and nothing in it says so.</li>
+</ul>
+</body></html>

@@ -27,7 +27,7 @@ use crate::work::task::{
     TaskTrackerCursor, TrackerEventOutcome,
 };
 use crate::{PlanningState, StoreError, StoreResult};
-use loopflow_model::durable::Author;
+use loopflow_model::durable::{Author, RepositoryId};
 use loopflow_model::id::WaveId;
 
 use super::{SqliteStore, TaskCheckout};

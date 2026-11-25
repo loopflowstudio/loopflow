@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-1098 Concept Review — Harness Interface, Parity &amp; Waking Work Sessions</title>
+<title>LOO-1098 Concept Review — Harness Parity, Waking Work Sessions &amp; Displaying Steers in Antigravity</title>
 <style>
   :root {
     --bg: #ffffff;
@@ -11,10 +11,12 @@
     --bg-proposed: #eef6ff;
     --bg-existing: #f8f5f0;
     --bg-warn: #fff8e6;
+    --bg-ok: #eefaf1;
     --border: #d0d7de;
     --border-proposed: #54aeff;
     --border-existing: #c8b8a6;
     --border-warn: #d4a72c;
+    --border-ok: #4ac26b;
     --fg: #1f2328;
     --fg-muted: #59636e;
     --yes-bg: #dafbe1;
@@ -27,6 +29,11 @@
     --exist-fg: #424a53;
     --code-bg: #f0f3f6;
     --accent: #0969da;
+    --tui-bg: #16181d;
+    --tui-fg: #e6edf3;
+    --tui-muted: #8b949e;
+    --tui-accent: #79c0ff;
+    --tui-border: #30363d;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -35,10 +42,12 @@
       --bg-proposed: #0d1f36;
       --bg-existing: #1c1917;
       --bg-warn: #261f0d;
+      --bg-ok: #0f2417;
       --border: #30363d;
       --border-proposed: #388bfd;
       --border-existing: #575049;
       --border-warn: #9e6a03;
+      --border-ok: #2ea043;
       --fg: #e6edf3;
       --fg-muted: #8b949e;
       --yes-bg: #122d1b;
@@ -51,6 +60,11 @@
       --exist-fg: #b1bac4;
       --code-bg: #1f242c;
       --accent: #58a6ff;
+      --tui-bg: #090c10;
+      --tui-fg: #e6edf3;
+      --tui-muted: #8b949e;
+      --tui-accent: #79c0ff;
+      --tui-border: #30363d;
     }
   }
   * { box-sizing: border-box; }
@@ -61,13 +75,13 @@
     color: var(--fg);
     font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   }
-  main { max-width: 1020px; margin: 0 auto; }
+  main { max-width: 1040px; margin: 0 auto; }
   header { border-bottom: 1px solid var(--border); padding-bottom: 1.25rem; margin-bottom: 2rem; }
-  h1 { font-size: 1.65rem; margin: 0 0 0.4rem; letter-spacing: -0.015em; }
-  h2 { font-size: 1.25rem; margin: 2.25rem 0 0.75rem; padding-bottom: 0.35rem; border-bottom: 1px solid var(--border); }
-  h3 { font-size: 1.02rem; margin: 1.35rem 0 0.5rem; }
+  h1 { font-size: 1.62rem; margin: 0 0 0.45rem; letter-spacing: -0.015em; }
+  h2 { font-size: 1.24rem; margin: 2.25rem 0 0.75rem; padding-bottom: 0.35rem; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 1.02rem; margin: 1.25rem 0 0.5rem; }
   p { margin: 0.5rem 0 0.85rem; }
-  .lead { font-size: 1.02rem; color: var(--fg); margin: 0.35rem 0; }
+  .lead { font-size: 1.02rem; margin: 0.35rem 0; }
   .meta { font-size: 0.86rem; color: var(--fg-muted); display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; margin-top: 0.65rem; }
   code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -82,12 +96,12 @@
     border-radius: 8px;
     padding: 0.85rem 1rem;
     overflow-x: auto;
-    font: 12.8px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font: 12.6px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     margin: 0.6rem 0 1rem;
   }
   .badge {
     display: inline-block;
-    font-size: 0.74rem;
+    font-size: 0.73rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -114,7 +128,7 @@
   th { background: var(--bg-subtle); font-weight: 600; }
   .grid-2 {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
     gap: 1rem;
     margin: 0.9rem 0 1.25rem;
   }
@@ -126,8 +140,34 @@
   }
   .card.existing { background: var(--bg-existing); border-color: var(--border-existing); }
   .card.proposed { background: var(--bg-proposed); border-color: var(--border-proposed); }
+  .card.ok { background: var(--bg-ok); border-color: var(--border-ok); }
   .card.warn { background: var(--bg-warn); border-color: var(--border-warn); }
   .card h3 { margin-top: 0; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+  .tui {
+    background: var(--tui-bg);
+    color: var(--tui-fg);
+    border: 1px solid var(--tui-border);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    font: 12.8px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    margin: 0.65rem 0 0.9rem;
+  }
+  .tui .dim { color: var(--tui-muted); }
+  .tui .pill {
+    display: inline-block;
+    border: 1px solid var(--tui-border);
+    border-radius: 5px;
+    padding: 0.05rem 0.45rem;
+    color: var(--tui-muted);
+    font-size: 0.82em;
+  }
+  .tui .steer-box {
+    border-left: 3px solid var(--tui-accent);
+    padding: 0.35rem 0.7rem;
+    margin: 0.45rem 0;
+    background: rgba(121, 192, 255, 0.08);
+    border-radius: 0 5px 5px 0;
+  }
   .flow {
     display: flex;
     flex-wrap: wrap;
@@ -177,39 +217,49 @@
 <body>
 <main>
   <header>
-    <h1>Concept Review: Harness Interface, Parity &amp; Waking Work Sessions</h1>
+    <h1>Concept Review: Harness Parity, Waking Work Sessions &amp; Displaying Steers in Antigravity</h1>
     <p class="lead">
       <strong>Area reviewed:</strong> How Loopflow defines, enforces, and verifies top-level behavior
       across all five harnesses (<code>Claude</code>, <code>Codex</code>, <code>OpenCode</code>,
-      <code>Pi</code>, <code>Antigravity</code>) — widened from LOO-1098's Antigravity reopen and
-      parity pass to the whole <code>Harness</code> / <code>Launcher</code> interface, SQL wake
-      dispatch, conformance tests, and docs.
+      <code>Pi</code>, <code>Antigravity</code>) — covering the <code>Harness</code> / <code>Launcher</code>
+      interface, idle/reopen wake dispatch, hook reply delivery (<code>emit_block</code> &amp;
+      <code>hook_reply</code>), and cross-harness contract suites.
     </p>
     <div class="meta">
-      <span><strong>Task:</strong> LOO-1098 (Decision pass 1, post-build)</span>
-      <span><strong>Built at HEAD:</strong> <code>c0b28b7dc6</code> vs base <code>80cced1bd4</code></span>
-      <span><strong>Status:</strong> <span class="badge badge-existing">Built at HEAD</span> vs <span class="badge badge-proposed">Proposed next pass in scratch/plan.md</span></span>
+      <span><strong>Task:</strong> LOO-1098 (Decision pass 2, post-build)</span>
+      <span><strong>Built at HEAD:</strong> <code>76ff5e7438</code> vs base <code>3c9f1979fc</code></span>
+      <span><strong>Legend:</strong> <span class="badge badge-existing">Built at HEAD</span> vs <span class="badge badge-proposed">Proposed pass 3 in scratch/plan.md</span></span>
     </div>
   </header>
 
-  <div class="card warn">
-    <h3>What is built vs. what this review changes</h3>
+  <div class="card ok">
+    <h3>What Pass 2 built &amp; verified at <code>76ff5e7438</code></h3>
     <p>
-      <strong>Committed &amp; live-verified at <code>c0b28b7dc6</code>:</strong>
-      Reopening a closed Antigravity work session with waiting steers or Task updates starts one turn
-      via <code>agy --conversation &lt;id&gt; -i …</code> and delivers them through <code>PreInvocation</code>
-      (verified on real <code>agy 1.5.16</code> in <code>scratch/qa.html</code>); nested launches strip
-      <code>ANTIGRAVITY_*</code> parent markers; live held-terminal wake for already-open <code>agy</code>
-      was dropped after PTY probes showed <code>?2004h</code> cannot distinguish prompts from dialogs/menus
-      and moved to <strong>LOO-1099</strong>.
+      Every mismatch raised in Pass 1's review is now built, committed, and verified live on real
+      <code>agy 1.5.16</code>, Claude Code, and Codex <code>0.172.0</code> (<code>scratch/qa.html</code>):
+      <code>harness/parity.rs</code> and the README gap table are gone; <code>Harness</code> and
+      <code>Launcher</code> demand caller markers, driver recognition, sign-in advice, and
+      <code>idle_reach</code>; storage returns raw idle candidates and the launcher owns endpoint selection
+      (also closing a latent real-store bug where 974 Codex rows had <code>agent_inbox</code> populated);
+      <code>Capabilities</code> separates <code>initial_prompt_on_resume</code> from
+      <code>reopen_steers</code>; and all behavior suites iterate <code>HarnessKind::ALL</code>.
     </p>
+  </div>
+
+  <div class="card warn" style="margin-top: 1rem;">
+    <h3>Why we iterate once more (Pass 3)</h3>
+    <blockquote>
+      "is this also ging to make it so that agy *displays* the steers it gets" / "Just go ahead and put this in the task please, lets go back"
+    </blockquote>
     <p>
-      <strong>Why we iterate before landing:</strong> Pass 1 built a declarative parity table
-      (<code>harness/parity.rs</code> + generated <code>harness/README.md</code>) with a first-class
-      <code>Support::Gap</code> opt-out that makes missing behaviors pass tests, left idle-wake dispatch
-      hardcoded in SQL, kept provider env stripping outside <code>Harness</code>, and overloaded
-      <code>ResumeInput</code>. This review replaces that with required interface methods/capabilities
-      and unconditional <code>HarnessKind::ALL</code> assertions.
+      At <code>76ff5e7438</code>, Antigravity receives waiting steers and Task updates through
+      <code>PreInvocation</code>, but the TUI buries them inside a collapsed <em>"System Message"</em> row
+      because <code>emit_block</code> glues steers and reference context into a single string before
+      <code>Launcher::hook_reply</code>, and <code>Antigravity::hook_reply</code> emits no
+      <code>metadata.user_markdown</code>. Pass 3 splits reference context from steers across
+      <code>ClaimedSteers</code>, <code>ContextDelivery</code>, <code>Launcher::hook_reply</code>, and
+      <code>emit_block</code> so Antigravity renders steers and Task updates inline in clean markdown while
+      keeping background reference context collapsed.
     </p>
   </div>
 
@@ -218,166 +268,186 @@
     <thead>
       <tr>
         <th style="width:23%">Product concept<br><span class="small">What a person expects &amp; does</span></th>
-        <th style="width:31%">Code concept <span class="badge badge-existing">Built at HEAD</span><br><span class="small">Types, records, and APIs at <code>c0b28b7dc6</code></span></th>
+        <th style="width:31%">Code concept <span class="badge badge-existing">Built at HEAD</span><br><span class="small">Types, records, and APIs at <code>76ff5e7438</code></span></th>
         <th style="width:9%">Lines up?</th>
-        <th style="width:37%">What is wrong (and how the next pass fixes it)</th>
+        <th style="width:37%">Status (or what Pass 3 changes)</th>
       </tr>
     </thead>
     <tbody>
       <tr>
+        <td><strong>Incoming steers &amp; Task updates are visible inline in Antigravity's TUI</strong>, while startup/compact reference context stays collapsed.</td>
+        <td><code>Antigravity::hook_reply(_event, text)</code> emits one <code>{"injectSteps":[{"systemMessage":{"systemMessage":text}}]}</code>; <code>ClaimedSteers</code> has only model-facing XML <code>text</code>.</td>
+        <td><span class="badge badge-no">No</span></td>
+        <td><strong>One step, no human view.</strong> Steers disappear into a collapsed "System Message" row alongside raw XML and prompt paths. <strong>Pass 3:</strong> add <code>ClaimedSteers.display</code> (clean markdown) and emit a dedicated <code>injectSteps</code> entry with <code>metadata.user_markdown</code> for steers only.</td>
+      </tr>
+      <tr>
+        <td><strong>Hook delivery separates background reference context from live steers/updates</strong> while respecting single-string provider size limits.</td>
+        <td><code>emit_block</code> pastes steers into reference context via <code>delivery.block_with_prefix</code> before calling <code>hook_reply(event, &amp;text)</code>.</td>
+        <td><span class="badge badge-no">No</span></td>
+        <td><strong>Two concepts merged too early.</strong> Once glued into one <code>&amp;str</code>, a harness cannot style or isolate steers from reference files. <strong>Pass 3:</strong> <code>delivery.block_reserving(moment, reserve)</code> + <code>Launcher::hook_reply(event, context, steers)</code>.</td>
+      </tr>
+      <tr>
         <td><strong>Adding a harness gives it all the good stuff</strong> — no opt-out table where missing features quietly pass.</td>
-        <td><code>harness/parity.rs</code> (<code>Behavior</code>, <code>Support::{Yes, Gap { why, owner }}</code>, <code>assert_observed</code>) + generated markdown table in <code>harness/README.md</code>.</td>
-        <td><span class="badge badge-no">No</span></td>
-        <td><strong>Opt-out abstraction.</strong> <code>Support::Gap</code> turns missing behavior into a green test and invites marking new harnesses "unsupported". <strong>Fix:</strong> delete <code>parity.rs</code> and the README table; every behavior test iterates <code>HarnessKind::ALL</code> and asserts unconditionally.</td>
+        <td><code>parity.rs</code> and README table deleted; <code>Harness</code>, <code>Launcher</code>, and <code>Capabilities</code> require full plumbing; suites iterate <code>HarnessKind::ALL</code>.</td>
+        <td><span class="badge badge-yes">Yes</span></td>
+        <td>Built at <code>89b2c33aa5</code>. Only two explicit legacy <code>TODO</code> arms remain (<code>LOO-1099</code>, <code>Task 48edb9</code>), with no wildcards.</td>
       </tr>
       <tr>
-        <td><strong>Pre-existing provider bugs are temporary debt</strong>, not a reusable capability model.</td>
-        <td>3 known gaps (<code>UnansweredQuestion</code> Task 48edb9, <code>IdleWorkSessionWake</code> LOO-1099, <code>ViewerHandoff</code> LOO-1097) modeled as first-class <code>Support::Gap</code> rows.</td>
-        <td><span class="badge badge-no">No</span></td>
-        <td><strong>Wrong lifecycle.</strong> Temporary debt became a permanent enum. <strong>Fix:</strong> keep only two narrow inline <code>TODO</code> arms in their exact tests (explicit legacy <code>HarnessKind</code> matches, no wildcards); track <code>ViewerHandoff</code> in Linear + QA notes.</td>
+        <td><strong>Waking an idle work session</strong> — each harness chooses its own endpoint; storage stores facts only.</td>
+        <td><code>sqlite/steers.rs::idle_conversation_candidates</code> returns raw <code>IdleCandidate</code>; <code>steer.rs</code> dispatches via <code>Launcher::idle_reach</code> before checking OS process liveness.</td>
+        <td><span class="badge badge-yes">Yes</span></td>
+        <td>Built &amp; compressed (<code>89b2c33aa5</code>, <code>4414e34eb5</code>); verified live on Claude and Codex (<code>76ff5e7438</code>). Unreachable sessions incur zero OS syscalls.</td>
       </tr>
       <tr>
-        <td><strong>The Harness interface demands full functionality</strong> — a new harness cannot compile while skipping core plumbing.</td>
-        <td><code>Harness</code> defaults <code>recognizes_driver</code> and <code>sign_in_advice</code>; <code>CALLER_SESSION_ENV</code> is a flat array in <code>agent/mod.rs</code>; <code>Launcher</code> has no idle-wake method.</td>
-        <td><span class="badge badge-no">No</span></td>
-        <td><strong>Scattered owners &amp; silent defaults.</strong> <code>ANTIGRAVITY_*</code> was missed in LOO-1013 because caller env lived outside <code>Harness</code>. <strong>Fix:</strong> make <code>caller_session_env</code>, <code>recognizes_driver</code>, <code>sign_in_advice</code> required on <code>Harness</code> and <code>idle_reach</code> required on <code>Launcher</code>.</td>
-      </tr>
-      <tr>
-        <td><strong>Waking an idle work session</strong> — each harness declares how the server reaches it; storage stores facts only.</td>
-        <td><code>sqlite/steers.rs::idle_conversation_candidates</code> hardcodes <code>CASE WHEN s.provider='codex' THEN s.agent_endpoint</code> and filters by non-null columns; <code>context.rs</code> calls raw SQL candidates.</td>
-        <td><span class="badge badge-no">No</span></td>
-        <td><strong>Storage owns harness dispatch.</strong> Dropping a harness from wake is silent in SQL. <strong>Fix:</strong> SQL returns raw live yielded rows (same index); <code>steer::idle_conversations</code> and <code>context.rs</code> both ask <code>Launcher::idle_reach</code>.</td>
-      </tr>
-      <tr>
-        <td><strong>Reopening a work session with waiting steers</strong> — quit, steer, <code>lf resume --task</code> runs waiting steers once before you type.</td>
-        <td><code>Capabilities.resume_input: ResumeInput::{InitialPrompt, NamedSteers, PromptHook}</code> drives <code>agent/session.rs</code>, <code>ops/human_session.rs</code>, and <code>native_session.rs</code>.</td>
-        <td><span class="badge badge-no">No</span></td>
-        <td><strong>One enum for two concepts.</strong> <code>InitialPrompt</code> is Codex's empty-thread bootstrap (checked even when <code>provider_session.is_none()</code>), unrelated to reopen steers. <strong>Fix:</strong> restore <code>initial_prompt_on_resume: bool</code> and add required <code>reopen_steers: ReopenSteers::{ServerBoundary, PromptHook}</code> (every variant works).</td>
+        <td><strong>Reopening a work session with waiting steers</strong> — distinct from Codex's empty-thread bootstrap.</td>
+        <td><code>Capabilities.initial_prompt_on_resume: bool</code> + <code>reopen_steers: ReopenSteers::{ServerBoundary, PromptHook}</code>; tests partition <code>HarnessKind::ALL</code> exhaustively.</td>
+        <td><span class="badge badge-yes">Yes</span></td>
+        <td>Built at <code>89b2c33aa5</code>. Both variants deliver waiting steers; no unsupported variant exists.</td>
       </tr>
       <tr>
         <td><strong>Antigravity reopen runs waiting steers once, quietly when empty</strong>, and drops nothing if launch fails.</td>
         <td><code>native_session::prompt_for_waiting_steers</code> writes Task updates, checks <code>has_undelivered_steers</code>, passes <code>-i</code> only when non-empty; <code>PreInvocation</code> claims and stamps delivery.</td>
         <td><span class="badge badge-yes">Yes</span></td>
-        <td>Verified live on <code>agy 1.5.16</code>. Steers stay unread if launch fails before the hook runs. (One visible UX trade-off: the generic opening line appears as the user's turn — see Question 1.)</td>
+        <td>Verified live on <code>agy 1.5.16</code> in pass 1 and pass 2 (<code>SAFFRON</code> reply, quiet empty reopen).</td>
       </tr>
       <tr>
-        <td><strong>Missing-CLI test proves uninstalled harnesses fail &amp; fall back cleanly</strong> on any developer machine.</td>
-        <td><code>task_graph_launch_tests</code> checks all <code>os_process::tool_dirs(&amp;host_home)</code>, while <code>scripts/test_network.py</code> only hides <code>/opt/homebrew/*</code> and <code>/usr/local/*</code>.</td>
-        <td><span class="badge badge-no">No</span></td>
-        <td><strong>Mismatch on hosts with <code>~/.local/bin/claude</code>.</strong> Inside <code>test_network.py</code>, checking host <code>HOME</code> still sees <code>~/.local/bin</code> and false-panics even though <code>GraphTask</code> isolates <code>HOME</code>. <strong>Fix:</strong> check only system tool dirs matching <code>test_network.py</code>.</td>
+        <td><strong>Missing-CLI test matches sandbox isolation</strong> on developer machines with host providers installed.</td>
+        <td><code>task_graph_launch_tests</code> checks the same four system tool dirs hidden by <code>scripts/test_network.py</code> across <code>HarnessKind::ALL</code>.</td>
+        <td><span class="badge badge-yes">Yes</span></td>
+        <td>Built at <code>89b2c33aa5</code>.</td>
       </tr>
       <tr>
         <td><strong>Pass-through resilience</strong> — a down server or locked store never blocks typing or breaks a conversation.</td>
-        <td>Reopen prompt runs <code>PreInvocation</code> which reads SQLite directly when the server is down; held terminals remain pass-through.</td>
+        <td>Reopen hook reads SQLite directly when the server is down; held terminals remain pass-through.</td>
         <td><span class="badge badge-yes">Yes</span></td>
-        <td>Holds in both current <code>HEAD</code> and the next pass.</td>
+        <td>Unchanged by Pass 3 (hook formatting stays in-process).</td>
       </tr>
     </tbody>
   </table>
 
-  <h2>2. Biggest mismatch — Before &amp; After</h2>
-  <blockquote>
-    "i would rather make it harder to add a harnes if it makes it harder to miss imortant behavior. when i add a harness, i want it to have all the good stuff" — "1. Just remove the table. Instead, just make sure that all behaviors are asserted to work and testeed  across all harnesses." — "and that the Harness interface demands full functionality"
-  </blockquote>
+  <h2>2. Biggest remaining mismatch — Before &amp; After</h2>
+  <p>
+    What a person actually sees in <code>agy</code> when reopening a Task conversation with a waiting steer or receiving a steer mid-session:
+  </p>
 
   <div class="grid-2">
     <div class="card existing">
-      <h3><span class="badge badge-existing">Built at HEAD</span> Opt-out parity table + SQL guessing</h3>
-      <div class="flow">
-        <span class="node">New HarnessKind</span>
-        <span class="arrow">&rarr;</span>
-        <span class="node broken">parity::support =&gt; Support::Gap</span>
-        <span class="arrow">&rarr;</span>
-        <span class="node broken">assert_observed passes!</span>
+      <h3><span class="badge badge-existing">Built at HEAD</span> One collapsed System Message</h3>
+      <div class="tui">
+        <div><span class="dim">&gt;</span> Read the waiting steers and Task updates for this Session.</div>
+        <div style="margin: 0.45rem 0;"><span class="pill">&#9656; System Message (collapsed — 9.8 KB)</span></div>
+        <div>SAFFRON</div>
       </div>
-      <pre>// harness/parity.rs (HEAD)
-(Antigravity, IdleWorkSessionWake) =&gt; Support::Gap {
-    why: "next turn only", owner: "LOO-1099",
-}
-// assert_eq!(observed, declared == Support::Yes);
-
-// sqlite/steers.rs (HEAD)
-CASE WHEN s.provider='codex' THEN s.agent_endpoint END
-// agent/mod.rs (HEAD)
-const CALLER_SESSION_ENV = &[/* flat list */];</pre>
+      <div class="flow">
+        <span class="node">steers + context</span>
+        <span class="arrow">&rarr;</span>
+        <span class="node broken">block_with_prefix &rarr; 1 &amp;str</span>
+        <span class="arrow">&rarr;</span>
+        <span class="node broken">1 collapsed systemMessage</span>
+      </div>
+      <pre>// Antigravity::hook_reply (HEAD)
+{"injectSteps": [{
+  "systemMessage": {
+    "systemMessage": "This Session: ...\n&lt;lf:steers&gt;...\nCurrent reference context..."
+  }
+}]}</pre>
     </div>
+
     <div class="card proposed">
-      <h3><span class="badge badge-proposed">Next pass</span> Required interface + unconditional tests</h3>
-      <div class="flow">
-        <span class="node">New HarnessKind</span>
-        <span class="arrow">&rarr;</span>
-        <span class="node proposed">Harness + Launcher required methods</span>
-        <span class="arrow">&rarr;</span>
-        <span class="node proposed">HarnessKind::ALL asserts true</span>
+      <h3><span class="badge badge-proposed">Pass 3</span> Collapsed context + inline steer markdown</h3>
+      <div class="tui">
+        <div><span class="dim">&gt;</span> Read the waiting steers and Task updates for this Session.</div>
+        <div style="margin: 0.45rem 0;"><span class="pill">&#9656; System Message (collapsed — reference context)</span></div>
+        <div class="steer-box">
+          <div><strong>Steer</strong> <span class="dim">(Jack Heart)</span></div>
+          <div>If you read this, answer with exactly the one word SAFFRON and nothing else.</div>
+        </div>
+        <div>SAFFRON</div>
       </div>
-      <pre>// Harness (no defaults)
-fn caller_session_env(&amp;self) -&gt; &amp;'static [&amp;'static str];
-fn recognizes_driver(&amp;self, command: &amp;str) -&gt; bool;
-fn sign_in_advice(&amp;self) -&gt; &amp;'static str;
-
-// Launcher &amp; Capabilities (no opt-out)
-fn idle_reach(&amp;self, ep: &amp;IdleEndpoints) -&gt; Option&lt;IdleReach&gt;;
-pub reopen_steers: ReopenSteers; // ServerBoundary | PromptHook
-pub initial_prompt_on_resume: bool;
-
-// Tests (no parity.rs, no README table)
-for harness in HarnessKind::ALL {
-    assert!(observed, "{harness:?}");
-}</pre>
+      <div class="flow">
+        <span class="node">context (reserved)</span>
+        <span class="arrow">+</span>
+        <span class="node proposed">ClaimedSteers { text, display }</span>
+        <span class="arrow">&rarr;</span>
+        <span class="node proposed">2 injectSteps (user_markdown on steers only)</span>
+      </div>
+      <pre>// Antigravity::hook_reply (Pass 3)
+{"injectSteps": [
+  {"systemMessage": {"systemMessage": "&lt;reference context&gt;"}},
+  {"systemMessage": {
+    "systemMessage": "&lt;lf:steers&gt;...&lt;/lf:steers&gt;",
+    "metadata": {
+      "user_markdown": "**Steer** (Jack Heart)\n\nIf you read this..."
+    }
+  }}
+]}</pre>
     </div>
   </div>
 
-  <h2>3. Concrete interaction walk &amp; counterexamples</h2>
+  <h2>3. Concrete interaction walk &amp; counterexamples (Pass 3)</h2>
   <table>
     <thead>
       <tr>
         <th style="width:22%">Scenario</th>
-        <th style="width:43%">What happens under the redesigned model</th>
+        <th style="width:43%">What happens under Pass 3</th>
         <th style="width:35%">Counterexample tested &amp; caught</th>
       </tr>
     </thead>
     <tbody>
       <tr>
-        <td><strong>Adding a 6th harness</strong><br><span class="small">Contributor adds <code>HarnessKind::Foo</code></span></td>
-        <td>Compiler stops at <code>Harness</code> (<code>caller_session_env</code>, <code>recognizes_driver</code>, <code>sign_in_advice</code>, <code>transcript_home</code>, <code>transcript_reader</code>) and <code>Launcher</code> (<code>capabilities</code> with <code>installed_skills</code> &amp; <code>reopen_steers</code>, <code>idle_reach</code>, <code>classify_failure</code>, <code>open</code>, <code>driver</code>). All <code>HarnessKind::ALL</code> tests fail until <code>Foo</code> passes worker, steer, usage, interrupt, refusal, missing-CLI, skills, question, reopen, and idle wake — no table cell to mark <code>Gap</code>.</td>
-        <td><em>Wildcard escape hatch:</em> if the two legacy test exceptions (LOO-1099 idle wake, Task 48edb9 questions) used <code>_ =&gt; {}</code>, <code>Foo</code> could slip past them. Resolved by matching only the named legacy variants explicitly — any new variant falls into the strict assertion path.</td>
+        <td><strong>Reopen Antigravity with waiting steers or Task update</strong><br><span class="small"><code>lf resume --task &lt;id&gt;</code></span></td>
+        <td><code>PreInvocation</code> runs as <code>Start</code>. <code>emit_block</code> builds reference context via <code>block_reserving</code> and claims steers via <code>steer::claim</code>. <code>Antigravity::hook_reply</code> emits two <code>injectSteps</code>: collapsed context first, then steers with <code>metadata.user_markdown</code>. The person sees the steer/update inline right above the reply.</td>
+        <td><em>Reference context leakage:</em> if <code>metadata.user_markdown</code> were placed on the combined block, 9 KB of file listings and scratch files would dump into the TUI. Separate <code>injectSteps</code> guarantees reference context never gets <code>metadata.user_markdown</code>.</td>
       </tr>
       <tr>
-        <td><strong>Reopening Antigravity with waiting steers</strong><br><span class="small">Quit, save repo steer / Task comment, <code>lf resume --task</code></span></td>
-        <td><code>reopen_steers == ReopenSteers::PromptHook</code> checks <code>task_updates::write</code> and <code>has_undelivered_steers</code>. If waiting, launches <code>agy --conversation &lt;id&gt; -i "Read the waiting steers…"</code>; <code>PreInvocation</code> claims, injects, and stamps delivery. Empty queue omits <code>-i</code>.</td>
-        <td><em>Launch crashes before hook:</em> because <code>prompt_for_waiting_steers</code> does not stamp delivery, steers stay pending and arrive on the next resume. <em>Down server:</em> hook falls back to direct SQLite read and still delivers.</td>
+        <td><strong>Fresh Antigravity start or reopen with nothing waiting</strong><br><span class="small"><code>steers == None</code></span></td>
+        <td>On fresh start, <code>emit_block</code> emits 1 <code>injectSteps</code> entry (collapsed reference context, no <code>metadata</code>). On reopen with nothing waiting, <code>-i</code> is omitted and no turn runs.</td>
+        <td><em>Empty inline box:</em> <code>Antigravity::hook_reply</code> only pushes the steers step when <code>steers.is_some()</code>, so no blank markdown block can ever appear.</td>
       </tr>
       <tr>
-        <td><strong>Idle work session wake &amp; server restart</strong><br><span class="small">Steer or Graph settlement arrives while session is idle</span></td>
-        <td><code>sqlite/steers.rs::idle_conversation_candidates</code> returns raw live yielded rows using <code>agent_sessions_unended_agent</code>. <code>steer::idle_conversations</code> checks live OS pid and asks <code>Launcher::idle_reach</code>. <code>context.rs::read_news</code> uses the same resolver. Server restart forgets nothing.</td>
-        <td><em>Unpopulated reach column:</em> returning raw rows from SQL must not let <code>context.rs</code> skip hook delivery when a session has not reported its socket/inbox yet. Resolved because <code>Launcher::idle_reach</code> returns <code>None</code> when the harness's endpoint column is <code>NULL</code>.</td>
+        <td><strong>Mid-session Antigravity turn / post-tool steer</strong><br><span class="small"><code>Tool</code> or <code>Steer</code> moment</span></td>
+        <td><code>context</code> is <code>None</code>. <code>Antigravity::hook_reply</code> emits 1 <code>injectSteps</code> entry with <code>systemMessage</code> (model XML) and <code>metadata.user_markdown</code> (clean human markdown).</td>
+        <td><em>Escaping &amp; long bodies:</em> model-facing <code>text</code> escapes <code>$</code> to <code>&amp;#36;</code> and caps at 400 B with a prompt-log path; <code>display</code> renders raw unescaped markdown (so <code>$PATH</code> reads as <code>$PATH</code>) and truncates only very large bodies (&gt; 2 KB) on a char boundary.</td>
       </tr>
       <tr>
-        <td><strong>Missing-CLI test on a developer's Mac</strong><br><span class="small">Host has <code>~/.local/bin/claude</code> and <code>/opt/homebrew/bin/opencode</code></span></td>
-        <td><code>scripts/test_network.py</code> hides <code>/opt/homebrew/*</code> and <code>/usr/local/*</code> providers; <code>GraphTask</code> uses an isolated temp <code>HOME</code>; the test pre-check inspects only system tool dirs matching <code>test_network.py</code>.</td>
-        <td><em>False sandbox panic:</em> at <code>HEAD</code>, checking host <code>HOME</code> inside <code>LOOPFLOW_NETWORK_ISOLATED=1</code> sees <code>~/.local/bin/claude</code> and panics even though <code>GraphTask</code> cannot see host <code>HOME</code>. Fixed in next pass.</td>
+        <td><strong>Claude / Codex / OpenCode / Pi Start or Compact with steers</strong><br><span class="small">Single-string <code>additionalContext</code></span></td>
+        <td><code>delivery.block_reserving(moment, steers.text.len())</code> reserves the exact steer byte count inside <code>HOOK_CONTEXT_BYTES</code> (10,000 B). Default <code>Launcher::hook_reply</code> concatenates <code>steers.text + context</code> into <code>hookSpecificOutput.additionalContext</code>.</td>
+        <td><em>10 KB hook overflow:</em> generating a full 10 KB context block and appending steers afterward would exceed Claude's 10,000-character hook limit and Codex's 2,500-token budget. Reserving <code>steers.text.len()</code> inside <code>block_reserving</code> keeps the combined output &le; 10,000 bytes.</td>
+      </tr>
+      <tr>
+        <td><strong>Headless Antigravity worker</strong><br><span class="small"><code>agy --output-format stream-json</code></span></td>
+        <td><code>PreInvocation</code> emits the same valid <code>injectSteps</code> with <code>metadata.user_markdown</code> on mid-turn steers; the model still reads only <code>systemMessage</code>.</td>
+        <td><em>Worker protocol break:</em> verified both in <code>agy_cli.py</code> fixtures (<code>task_graph_launch_tests</code>) and live against real <code>agy 1.5.16</code> in QA.</td>
       </tr>
     </tbody>
   </table>
 
-  <h2>4. Open questions for review</h2>
-  <p class="small">All remaining items are reversible choices made for the next pass. Reply with a number and letter (e.g. <code>1b</code>) to reverse any of them.</p>
+  <h2>4. Outside this work (separate outcomes)</h2>
+  <ul>
+    <li><strong>Already-open idle Antigravity wake (LOO-1099):</strong> Live PTY probes on <code>agy 1.5.16</code> proved <code>?2004h</code> paste-mode transitions fire at the trust dialog and do not toggle on slash menus or model pickers, and server adoption has no draft history.</li>
+    <li><strong>Multi-viewer handoff on Antigravity (LOO-1097):</strong> Opening an <code>agy</code> session in a second viewer closes the first.</li>
+    <li><strong>Headless unanswered questions on Claude, Codex, Antigravity (Task 48edb9):</strong> Decoders do not yet fail a headless turn on unanswered interactive questions.</li>
+    <li><strong>Same steer, different response on Claude vs. Codex/Antigravity (observed in pass 2 QA, <code>scratch/qa.html</code>):</strong> Claude <code>task-session</code> primaries receive steers wrapped in <code>&lt;cross-session-message&gt;</code>, acknowledge them, and wait for typed confirmation, whereas Codex and Antigravity act on them immediately. Delivery parity is done; prompt/wrapper framing is a separate outcome.</li>
+  </ul>
+
+  <h2>5. Open questions for review</h2>
+  <p class="small">Reversible choices made for Pass 3 so it can be reviewed as built. Reply with a number and letter (e.g. <code>1b</code>) to reverse any of them.</p>
 
   <div class="q-card">
-    <strong class="q-title">1. When you reopen a closed Antigravity Task conversation with waiting steers, what should appear as the opening message on screen?</strong>
-    <p class="small">Antigravity needs an opening prompt to trigger the hook that loads waiting steers and Task updates before you type, so that opening prompt shows up as a turn in the terminal.</p>
+    <strong class="q-title">1. When a steer or Task update displays inline in Antigravity, how much detail should appear on screen?</strong>
+    <p class="small">The model still gets the full machine metadata (steer ID, source, revision, prompt-log path). This choice is only what the person sees in the terminal.</p>
     <ul class="opts">
-      <li class="chosen"><strong>1a (chosen in current build):</strong> Show the short generic line <em>"Read the waiting steers and Task updates for this Session."</em> and let the hook inject the actual steers behind the scenes — nothing is marked delivered until the hook runs, so a failed launch never loses a steer.</li>
-      <li><strong>1b:</strong> Put the actual steer text directly as the opening prompt (so you see the steer words on screen instead of the generic line, at the cost of marking steers read at launch before Antigravity starts, or skipping Task updates that exceed prompt size).</li>
+      <li class="chosen"><strong>1a (chosen for Pass 3):</strong> Clean label + body only — e.g. <code>**Steer** (Jack Heart)</code> or <code>**Task update**</code> followed by the message text (plus a short <em>"N more waiting"</em> line if more steers remain queued), hiding internal IDs and <code>.lf/prompts/</code> paths.</li>
+      <li><strong>1b:</strong> Include the steer ID and source/revision header inline as well, matching the model-facing <code>&lt;lf:steers&gt;</code> text verbatim.</li>
     </ul>
   </div>
 
   <div class="q-card">
-    <strong class="q-title">2. Should Loopflow still list known provider-specific limitations (like live idle wake on Antigravity under LOO-1099) in prose inside <code>docs/sessions.md</code> and <code>harness/README.md</code>?</strong>
-    <p class="small">The generated parity table is being removed so code and tests enforce full parity instead of documenting opt-outs.</p>
+    <strong class="q-title">2. When you reopen a closed Antigravity Task conversation with waiting steers, what should appear as the opening user line above the inline steer?</strong>
+    <p class="small">Antigravity needs an opening prompt to trigger the hook that loads waiting steers before you type, so that line still appears above the newly visible inline steer.</p>
     <ul class="opts">
-      <li class="chosen"><strong>2a (chosen for next pass):</strong> Yes — keep brief, plain sentences in user docs (<code>docs/sessions.md</code>, <code>docs/config.md</code>) and developer notes (<code>harness/README.md</code>) where current behavior actually differs (for example, that an already-open Antigravity conversation reads new steers on its next turn), with no parity table.</li>
-      <li><strong>2b:</strong> Remove provider-caveat prose from <code>harness/README.md</code> too and leave known gaps only in Linear issues (LOO-1097, LOO-1099, Task 48edb9) and user docs.</li>
+      <li class="chosen"><strong>2a (chosen, built in Pass 1):</strong> Keep the short generic line <em>"Read the waiting steers and Task updates for this Session."</em> and display the actual steers inline right below it via <code>user_markdown</code> — nothing is marked delivered until the hook runs, so a failed launch never loses a steer.</li>
+      <li><strong>2b:</strong> Put the actual steer text directly as the opening prompt (no generic line, at the cost of marking steers read before Antigravity starts and losing Task updates that exceed prompt size).</li>
     </ul>
   </div>
 </main>

@@ -27,3 +27,15 @@ to `c3742012`. That conversation may show those two sends.
   and waited "when you ask here", on both idle wake and reopen. Delivery is the
   same; behavior differs. Likely skill/primary-session framing, outside this
   diff. See scratch/qa.html.
+
+# Pass 3 steer — display steers inline in Antigravity (2026-11-25)
+
+- Jack Heart (`comment:79dd230d-1028-4f14-acb2-90b07b1f3804`):
+  - `"is this also ging to make it so that agy *displays* the steers it gets"`
+  - `"Just go ahead and put this in the task please, lets go back"`
+- Reversible formatting choice made for Pass 3: render clean markdown in
+  `metadata.user_markdown` (`**Steer** (<author>)`, `**Task update**`,
+  `**Task notice**` + raw body, truncated cleanly only above 2 KB, plus quiet
+  `N more waiting` footer) rather than echoing raw `<lf:steers>` XML / prompt
+  log paths inline.
+

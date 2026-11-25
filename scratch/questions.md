@@ -1,15 +1,13 @@
-# Open choices
+# Settled direction & open notes
 
-- Use Antigravity's native interactive prompt to start a reopened work
-  session's hook. Keep a steer unread until the hook prints it.
-- Revisit live idle wake after finding a reliable prompt or provider address.
-  The trust dialog and model picker observations in the plan rule out the
-  proposed paste-mode readiness check.
-- LOO-1099 owns the already-open Antigravity idle-wake gap.
-- Check reopen at the provider boundary on the four server-delivered routes
-  and through the native CLI launch on Antigravity.
-- Keep viewer handoff as a real-provider check (LOO-1097) and unanswered
-  questions as an automated gap (48edb9).
+- **No parity table or `Support::Gap` (Jack Heart, 2026-11-24):**
+  - `"i would rather make it harder to add a harnes if it makes it harder to miss imortant behavior. when i add a harness, i want it to have all the good stuff"`
+  - `"1. Just remove the table. Instead, just make sure that all behaviors are asserted to work and testeed  across all harnesses."`
+  - `"and that the Harness interface demands full functionality"`
+  Remove `harness/parity.rs` and the `harness/README.md` parity table; put required mechanisms directly on `Harness` / `Launcher` / `Capabilities` and assert every behavior unconditionally across `HarnessKind::ALL`, isolating only the pre-existing gaps (LOO-1099 live `agy` idle wake, Task 48edb9 headless questions) as narrow inline exceptions with no wildcards.
+- **Reopen on Antigravity:** Use Antigravity's native interactive prompt (`-i "Read the waiting steers and Task updates for this Session."`) to fire `PreInvocation`, keeping steers unread until the hook prints them. Open UX detail noted in QA: that generic opening line is visible as the first turn in the TUI.
+- **Already-open idle Antigravity wake:** Owned by LOO-1099 (live PTY probes ruled out `?2004h` paste-mode readiness due to trust dialog, slash menu, model picker, and server-adoption draft safety).
+- **Viewer handoff:** Owned by LOO-1097 (live provider TUI behavior).
 
 # Probe side effect (2026-11-24)
 

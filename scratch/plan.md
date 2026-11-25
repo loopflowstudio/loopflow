@@ -277,12 +277,12 @@ run at gate/CI.
 
 ## Verification
 
-- Run focused Rust tests covering both new slices:
-  - `cargo test -p loopflow-storage --lib sqlite::session_recovery::`
-  - `cargo test -p loopflow-execution --lib ops::human_session::tests::`
-  - `cargo test -p loopflow-execution --lib ops::task::adoption::tests::`
-  - `cargo test -p loopflow --lib server::recovery::`
-- Verify SQLite query plans for `task_conversations_here` and `session_summary`
-  unchanged or improved (`cargo test -p loopflow-storage --lib query_plans::`).
-- Native resume, provider-switch fixtures, and Desktop `SessionControlsTests`
-  run at gate/CI.
+- Focused Rust tests at `2c13f5ec62` (agent, 2026-11-25), all pass:
+  - `cargo test -p loopflow-storage --lib sqlite::session_recovery::` — 1 passed
+  - `cargo test -p loopflow-storage --lib query_plans::` — 17 passed
+  - `cargo test -p loopflow-execution --lib ops::human_session::tests::` — 36 passed
+  - `cargo test -p loopflow-execution --lib ops::task::adoption::tests::` — 12 passed
+  - `cargo test -p loopflow --lib server::recovery::` — 11 passed
+- Deferred to gate/CI: native resume and provider-switch fixtures
+  (`session_lifecycle_tests.rs`, `session_launch_contract.rs`), Desktop
+  `SessionControlsTests`, clippy over `--all-targets`.

@@ -63,7 +63,7 @@ Realign after Pass 4: the removed types are gone from Rust and Swift. `ConcreteS
 
 ## QA · November 25, real providers
 
-The feature walkthrough ran on real Claude: explore on `claude:sonnet`, the primary on the default model. The primary was crashed during explore and restarted, the Task parked at `after-explore`, and the handoff was presented with the artifact and numbered choices. The reply “1b 2b 3b, I want the switch with a warm kitchen palette” reached kickoff through `--at-arrival`/`--reason`. Two fixes came out of it: `lf task wait --until submitted` now returns at a breakpoint (the primary had blocked in it for the whole review), and status says a parked run “stopped at breakpoint” instead of “finished”. Details and what remains wrong are in [qa.html](qa.html).
+The feature walkthrough ran on real Claude: explore on `claude:sonnet`, the primary on the default model. The primary was crashed during explore and restarted, the Task parked at `after-explore`, and the handoff was presented with the artifact and numbered choices. The reply “1b 2b 3b, I want the switch with a warm kitchen palette” reached kickoff through `--at-arrival`/`--reason`. Two fixes came out of it: the primary had blocked in `lf task wait --until submitted` for the whole review, which Pass 5 replaced with `--until breakpoint` (task-session now uses it; `submitted` again waits only for an open PR or a finished Task), and status says a parked run “stopped at breakpoint” instead of “finished”. Details and what remains wrong are in [qa.html](qa.html).
 
 ## Pass 5 · Unified breakpoint ownership, navigation, reply scope, and waits
 
@@ -94,7 +94,9 @@ Closed all four concept splits identified at `4b295b5e3a` ([concept-review.html]
 - Focused Swift tests passed: 107/107 tests across 6 suites (`TaskActionsTests`, `WorkflowLineTests`, `DTOFixtureTests`, `RegistryQueryTests`, `DashboardWorkspaceTests`, `DesktopHeadlessTests/taskWorkflow`), plus `ServerProtocolTests` against the regenerated `server_schema.json`.
 - `cargo fmt --check` passed.
 
-## Remaining · gate and demo (after Pass 5)
+## Remaining · gate and demo
+
+Nothing remains to implement; Pass 5 closed every split in [concept-review.html](concept-review.html).
 
 **Gate and demo.** Gate owns all-target Clippy, the full Swift package check, `scripts/test_desktop.sh --filter DTOFixtureTests/breakpointOffersContinuationForThePresentedArrival`, iOS build/simulator checks, and full Work/Now projection checks. Before shipping, run the feature walkthrough in a disposable repository with different agents for explore and the primary. Quit during explore, reopen from Now or with `lf resume --task <ID>`, open the artifact and choose the other layout. Record what appeared on reopen and what planning received, separately from the stand-in results. The multi-day Desktop usage goals in the earlier Task snapshot require real sessions.
 

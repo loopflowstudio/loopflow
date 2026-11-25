@@ -1480,7 +1480,7 @@ fn validate_preparation_status(task: &Task, status: WorkStatus) -> OpsResult<()>
             task.identifier, task.identifier
         ))),
         WorkStatus::Abandoned => Err(task_error(format!(
-            "Task {} is abandoned; inspect its retained history with `lf task status {}`",
+            "Task {} is abandoned; `lf task reopen {}` reopens it without moving its Graph",
             task.identifier, task.identifier
         ))),
         WorkStatus::Ready => Ok(()),
@@ -1555,18 +1555,11 @@ async fn restore_task_checkout(
         } else if ref_exists(&repo, &remote)? {
             remote
         } else {
-            let started = store
-                .task_events_after(&task.id, 0)
-                .await
+            if store
+                .sqlite
+                .task_checkout_ready(&task.id)
                 .map_err(task_error)?
-                .iter()
-                .any(|event| {
-                    matches!(
-                        &event.kind,
-                        TaskEventKind::CheckoutReady { .. } | TaskEventKind::PrStarted { .. }
-                    )
-                });
-            if started {
+            {
                 return Err(task_error(format!("Task branch {} is missing locally and remotely; its committed work cannot be recovered from the base alone; use --recover-from COMMIT only after locating its retained history", task.branch)));
             }
             task.base_commit.clone()
@@ -1590,13 +1583,17 @@ async fn restore_task_checkout(
     finish_task_checkout(store, task).await
 }
 
+fn checkout_path_exists(path: &Path) -> std::io::Result<bool> {
+    match path.symlink_metadata() {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 fn validate_checkout_restoration(task: &Task, repo: &Path) -> OpsResult<()> {
     let worktree = task.worktree()?;
-    if match worktree.symlink_metadata() {
-        Ok(_) => true,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-        Err(error) => return Err(error.into()),
-    } {
+    if checkout_path_exists(worktree)? {
         return Err(task_error(format!(
             "Task checkout path {} is occupied; its contents were preserved",
             worktree.display()
@@ -1621,16 +1618,11 @@ fn validate_checkout_restoration(task: &Task, repo: &Path) -> OpsResult<()> {
 }
 
 async fn finish_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    let events = store
-        .task_events_after(&task.id, 0)
-        .await
-        .map_err(task_error)?;
-    if !events.iter().any(|event| {
-        matches!(
-            &event.kind,
-            TaskEventKind::CheckoutReady { .. } | TaskEventKind::PrStarted { .. }
-        )
-    }) {
+    if !store
+        .sqlite
+        .task_checkout_ready(&task.id)
+        .map_err(task_error)?
+    {
         store
             .append_task_event(
                 &task.id,
@@ -1866,7 +1858,7 @@ async fn record_stack_parent(
     if let Some(pr) = parent.pr {
         return Ok((pr, note));
     }
-    let pr = delivery::next_task_pr(store, &parent.task).await?;
+    let pr = delivery::next_task_pr(store, &parent.task)?;
     if let Err(error) = store.insert_task_pr(&pr).await {
         // Another child may have recorded the parent first; stack on that row.
         let active = store
@@ -2946,38 +2938,310 @@ pub fn task_copied_sessions(
 pub struct TaskCompletion {
     pub task: Task,
     pub children: Vec<loopflow_storage::sqlite::children::ChildCompletion>,
+    /// Where rehomed children moved; `None` when they became top-level.
+    pub rehomed_to: Option<Task>,
 }
 
-/// Complete the Task and settle its children without moving their Graphs.
-pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<TaskCompletion> {
+/// Complete the Task without moving its Graph. Open children need a policy;
+/// every refusal writes nothing. A leaf whose PR has not merged keeps a
+/// pending request that completes it once the merge is seen.
+pub fn task_complete(
+    repo: &Path,
+    issue: &str,
+    note: Option<&str>,
+    children: Option<loopflow_storage::sqlite::children::ChildPolicy>,
+) -> OpsResult<TaskCompletion> {
+    use loopflow_storage::sqlite::children::ChildPolicy;
+
     block_on_task(async {
         let (store, mut task) = resolve_saved_task(repo, None, issue).await?;
-        let children = match store
-            .sqlite
-            .request_family_completion(&task.id, note)
-            .map_err(task_error)?
-        {
-            Some(request) => settle_completion(&store, &mut task, request).await?,
-            None => Vec::new(),
+        let done = |task| TaskCompletion {
+            task,
+            children: Vec::new(),
+            rehomed_to: None,
         };
-        Ok(TaskCompletion { task, children })
+        match task_work_status(&store, &task).await? {
+            WorkStatus::Done => return Ok(done(task)),
+            WorkStatus::Abandoned => {
+                return Err(refused(format!(
+                    "{} is abandoned; `lf task reopen {}` before completing it",
+                    task.identifier, task.identifier
+                )))
+            }
+            WorkStatus::Ready => {}
+        }
+        let open = store
+            .sqlite
+            .open_task_child_count(&task.id)
+            .map_err(task_error)?;
+        if open > 0 && children.is_none() {
+            return Err(refused(open_children_refusal(&store, &task)?));
+        }
+        // Only an existing PR needs reconciliation or a checkout mutation lock.
+        let mut pr = store.active_task_pr(&task.id).await.map_err(task_error)?;
+        if pr.as_ref().is_some_and(|pr| pr.phase() != PrPhase::Merged) {
+            pr = reconcile_task_pr_observation(
+                &store,
+                &mut task,
+                crate::ops::pr::PrReadFreshness::Cached,
+            )
+            .await?;
+        }
+        if let Some(refusal) = completion_refusal(pr.as_ref(), &task.identifier) {
+            if open > 0 || children.is_some() {
+                return Err(refused(refusal));
+            }
+            // A leaf waits for its merge, as a Graph's `end` does.
+            if let Some(request) = store
+                .sqlite
+                .request_task_completion(&task.id, note)
+                .map_err(task_error)?
+            {
+                store
+                    .sqlite
+                    .fail_task_completion(&task.id, request, &refusal)
+                    .map_err(task_error)?;
+            }
+            return Err(task_error(refusal));
+        }
+        if open > 0 && children == Some(ChildPolicy::Abandon) {
+            if let Some(refusal) = live_abandon_refusal(&store, &task)? {
+                return Err(refused(refusal));
+            }
+        }
+        let completion = store
+            .sqlite
+            .complete_task_now(&task, note, children)
+            .map_err(completion_error)?;
+        task = store
+            .get_task(&task.id)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("completed Task is missing"))?;
+        settle_children(&store, &completion.children).await;
+        finish_completion(&store, &task).await?;
+        Ok(TaskCompletion {
+            task,
+            children: completion.children,
+            rehomed_to: completion.rehomed_to,
+        })
     })
+}
+
+/// A completion refusal: nothing was written, so a served client may retry.
+fn refused(message: impl Into<String>) -> OpsError {
+    OpsError::Refused(crate::engine::Error::conflict(message))
+}
+
+fn completion_error(error: loopflow_storage::StoreError) -> OpsError {
+    use loopflow_storage::StoreError;
+    match error {
+        StoreError::InvalidData(reason) | StoreError::InvalidAuthority(reason) => refused(reason),
+        other => task_error(other),
+    }
+}
+
+/// Why bare completion refuses: the open tree, then both choices.
+fn open_children_refusal(store: &SharedStore, task: &Task) -> OpsResult<String> {
+    use loopflow_storage::sqlite::children::OpenDescendant;
+
+    /// One row per descendant: indented identifier, title, standing.
+    fn rows(descendants: &[OpenDescendant], depth: usize, into: &mut Vec<[String; 3]>) {
+        for descendant in descendants {
+            let pr = descendant.pr.as_ref().and_then(|pr| {
+                pr.github()
+                    .map(|github| format!("#{} {}", github.number, pr.phase().as_str()))
+            });
+            let step = descendant.step.as_ref().map(|step| format!("at {step}"));
+            let running = (descendant.state == TaskState::Moving).then_some("running");
+            let standing = pr
+                .as_deref()
+                .into_iter()
+                .chain(running)
+                .chain(step.as_deref())
+                .collect::<Vec<_>>()
+                .join(", ");
+            into.push([
+                format!("{}{}", "  ".repeat(depth), descendant.task.identifier),
+                descendant.task.title.clone(),
+                if standing.is_empty() {
+                    descendant.state.label().to_string()
+                } else {
+                    standing
+                },
+            ]);
+            rows(&descendant.children, depth + 1, into);
+        }
+    }
+    let descendants = store
+        .sqlite
+        .open_descendants(&task.id)
+        .map_err(task_error)?;
+    let destination = store
+        .sqlite
+        .rehome_destination(&task.id)
+        .map_err(task_error)?;
+    let open = descendants.len();
+    let mut text = vec![format!(
+        "{} has {open} open {}; say what happens to {}:",
+        task.identifier,
+        if open == 1 { "child" } else { "children" },
+        if open == 1 { "it" } else { "them" },
+    )];
+    let mut tree = Vec::new();
+    rows(&descendants, 1, &mut tree);
+    let width = |column: usize| {
+        tree.iter()
+            .map(|row| row[column].chars().count())
+            .max()
+            .unwrap_or(0)
+    };
+    let (lead, title) = (width(0), width(1));
+    text.extend(
+        tree.iter()
+            .map(|[id, name, standing]| format!("{id:<lead$}  {name:<title$}  {standing}")),
+    );
+    let id = &task.identifier;
+    let rehome = match destination {
+        Some(destination) => format!(
+            "direct children move up to {} and stay open",
+            destination.identifier
+        ),
+        None => "direct children become top-level Tasks".to_string(),
+    };
+    text.push(format!(
+        "  lf task complete {id} --children rehome    # {rehome}"
+    ));
+    text.push(format!(
+        "  lf task complete {id} --children abandon   # merged descendants done, the rest abandoned"
+    ));
+    Ok(text.join("\n"))
+}
+
+/// Why `--children abandon` refuses: any descendant it would abandon with live
+/// work. A conversation idle in its held terminal is not live; abandoning closes it.
+fn live_abandon_refusal(store: &SharedStore, task: &Task) -> OpsResult<Option<String>> {
+    use loopflow_storage::sqlite::children::OpenDescendant;
+
+    fn walk(
+        store: &SharedStore,
+        descendants: &[OpenDescendant],
+        into: &mut Vec<(String, String)>,
+    ) -> OpsResult<()> {
+        for descendant in descendants {
+            let merged = descendant
+                .pr
+                .as_ref()
+                .is_some_and(|pr| pr.phase() == PrPhase::Merged);
+            if !merged {
+                let work = store
+                    .sqlite
+                    .task_open_work(&descendant.task.id)
+                    .map_err(task_error)?;
+                for (work, _) in crate::ops::task_execution::unresolved_work(&store.sqlite, &work)?
+                {
+                    let idle = match work.held_terminal() {
+                        Some(terminal) => store
+                            .sqlite
+                            .terminal_retention(terminal)
+                            .map_err(task_error)?
+                            .is_none(),
+                        None => false,
+                    };
+                    if !idle {
+                        into.push((descendant.task.identifier.clone(), work.label()));
+                    }
+                }
+            }
+            walk(store, &descendant.children, into)?;
+        }
+        Ok(())
+    }
+    let descendants = store
+        .sqlite
+        .open_descendants(&task.id)
+        .map_err(task_error)?;
+    let mut blocked = Vec::new();
+    walk(store, &descendants, &mut blocked)?;
+    if blocked.is_empty() {
+        return Ok(None);
+    }
+    let mut running: Vec<&str> = blocked.iter().map(|(id, _)| id.as_str()).collect();
+    // `walk` emits all blockers for one descendant consecutively.
+    running.dedup();
+    let interrupt = running
+        .iter()
+        .map(|id| format!("`lf task interrupt {id}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let lines = blocked
+        .iter()
+        .map(|(id, work)| format!("  {id} is running: {work}"));
+    Ok(Some(
+        std::iter::once(format!(
+            "{} {} still running; stop with {interrupt} or use --children rehome:",
+            running.join(", "),
+            if running.len() == 1 { "is" } else { "are" },
+        ))
+        .chain(lines)
+        .collect::<Vec<_>>()
+        .join("\n"),
+    ))
+}
+
+/// Follow-ups for children a completion settled. Each child is already
+/// settled; a failed follow-up is reported and retried by later passes.
+async fn settle_children(
+    store: &SharedStore,
+    children: &[loopflow_storage::sqlite::children::ChildCompletion],
+) {
+    use loopflow_storage::sqlite::children::ChildOutcome;
+
+    let mut settled = children.iter().collect::<Vec<_>>();
+    while let Some(child) = settled.pop() {
+        settled.extend(&child.children);
+        let result = match child.outcome {
+            ChildOutcome::Done => finish_completion(store, &child.task).await,
+            ChildOutcome::Rehomed => sync_completion(store, &child.task).await,
+            ChildOutcome::Abandoned => lifecycle::finish_abandon(store, &child.task, false).await,
+        };
+        if let Err(error) = result {
+            crate::journal::request::diagnostic(format_args!(
+                "{} was settled; follow-up failed: {error}",
+                child.task.identifier
+            ));
+        }
+    }
 }
 
 pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
     block_on_task(async {
         let store = task_store().await?;
+        let unavailable = || task_error(format!("Task {issue} is unavailable"));
+        let id = store
+            .sqlite
+            .resolve_task_id(issue, None)
+            .map_err(task_error)?
+            .ok_or_else(unavailable)?;
+        let _retirement = retirement::lock(&id)?;
         let task = store
-            .get_task_by_issue(issue)
+            .get_task(&id)
             .await
             .map_err(task_error)?
-            .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
-        let _retirement = retirement::lock(&task.id)?;
+            .ok_or_else(unavailable)?;
+        let repo = repository_for_task(&store, &task)?;
+        let checkout_removed = match &task.worktree {
+            Some(path) if task_work_status(&store, &task).await? == WorkStatus::Abandoned => {
+                !checkout_path_exists(path)?
+                    && (task.branch.is_empty()
+                        || !crate::git::worktrees::branch_exists(&repo, &task.branch)?)
+            }
+            _ => false,
+        };
         let task = store
             .sqlite
-            .reopen_task(&task.id, note)
+            .reopen_task(&task.id, note, checkout_removed)
             .map_err(task_error)?;
-        let repo = repository_for_task(&store, &task)?;
         super::planning_sync::sync_after_save(
             &store,
             &repo.to_string_lossy(),
@@ -3139,12 +3403,8 @@ pub fn completion_pending_text(task: &Task, reason: &str) -> String {
     )
 }
 
-async fn settle_completion(
-    store: &SharedStore,
-    task: &mut Task,
-    request: i64,
-) -> OpsResult<Vec<loopflow_storage::sqlite::children::ChildCompletion>> {
-    use loopflow_storage::sqlite::children::{ChildOutcome, CompletionSettlement};
+async fn settle_completion(store: &SharedStore, task: &mut Task, request: i64) -> OpsResult<()> {
+    use loopflow_storage::sqlite::children::CompletionSettlement;
 
     let result = async {
         if task_work_status(store, task).await? == WorkStatus::Abandoned {
@@ -3154,50 +3414,25 @@ async fn settle_completion(
         if let Some(refusal) = task_completion_refusal(store, task).await? {
             return Err(task_error(refusal));
         }
-        let children = match store
+        match store
             .complete_task(task, request)
             .await
             .map_err(task_error)?
         {
-            CompletionSettlement::Settled(children) => children,
-            CompletionSettlement::WaitingForChildren => return Ok(Vec::new()),
+            CompletionSettlement::Settled => {}
+            CompletionSettlement::WaitingForChildren => return Ok(()),
             CompletionSettlement::Superseded => {
                 return Err(task_error(
                     "Completion request was superseded by newer Task status",
                 ));
             }
-        };
+        }
         *task = store
             .get_task(&task.id)
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("completed Task is missing"))?;
-        let mut settled = children.iter().collect::<Vec<_>>();
-        while let Some(child) = settled.pop() {
-            settled.extend(&child.children);
-            let result = match child.outcome {
-                ChildOutcome::Done => finish_completion(store, &child.task).await,
-                ChildOutcome::Abandoned => {
-                    let close = retirement::close_conversations(&store.sqlite, &child.task.id);
-                    let sync = sync_completion(store, &child.task).await;
-                    let cleanup = match repository_for_task(store, &child.task) {
-                        Ok(repo) => lifecycle::cleanup_abandoned(&repo, store, &child.task, false)
-                            .await
-                            .map(drop),
-                        Err(error) => Err(error),
-                    };
-                    sync.and(close).and(cleanup)
-                }
-            };
-            if let Err(error) = result {
-                crate::journal::request::diagnostic(format_args!(
-                    "{} was settled; follow-up failed: {error}",
-                    child.task.identifier
-                ));
-            }
-        }
-        finish_completion(store, task).await?;
-        Ok(children)
+        finish_completion(store, task).await
     }
     .await;
     if let Err(error) = &result {

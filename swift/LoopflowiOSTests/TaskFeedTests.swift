@@ -13,10 +13,13 @@ private actor HeldServer: ServerCarrier {
     private var outgoing: [Data] = []
     private var receiving: CheckedContinuation<Data?, any Error>?
     private(set) var writes: [String] = []
+    /// Each write's `children`, `"null"` when it sent none.
+    private(set) var children: [String] = []
     private var refusal: String?
     private(set) var expression: String?
 
-    init(machineID: String, paused: Bool = false) throws {
+    /// `openChildren[i]` open children under `LOO-<i + 1>`.
+    init(machineID: String, paused: Bool = false, openChildren: [Int: Int] = [:]) throws {
         self.machineID = machineID
         let url = try XCTUnwrap(Bundle(for: TaskFeedTests.self).url(forResource: "task-reading", withExtension: "json"))
         let response = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
@@ -26,6 +29,7 @@ private actor HeldServer: ServerCarrier {
             contents[index]["identifier"] = "LOO-\(index + 1)"
             contents[index]["working_group"] = paused ? "paused" : "active"
             contents[index]["states"] = paused ? ["open", "paused", "working"] : ["open", "working", "idle", "available"]
+            contents[index]["open_children"] = openChildren[index] ?? 0
         }
         plan["contents"] = contents
         self.plan = plan
@@ -52,6 +56,7 @@ private actor HeldServer: ServerCarrier {
             deliver(reading(id, answers: json["checkpoint"]))
         case "request" where json["request_id"] is String:
             writes.append(try XCTUnwrap(json["request_id"] as? String))
+            children.append(((json["operation"] as? [String: Any])?["children"] as? String) ?? "null")
             if let refusal {
                 deliver(["type": "error", "id": id as Any, "code": "conflict", "message": refusal,
                          "data": NSNull(), "revisions": NSNull()])
@@ -176,6 +181,44 @@ final class TaskFeedTests: XCTestCase {
         XCTAssertEqual(identifiers(feed), ["LOO-1", "LOO-3"], "still gone while the Machine holds its answer")
         feed.notices.current?.action?.perform()
         try await until { await server.writes.count == 2 }
+    }
+
+    func testASwipedParentStaysUntilAskedWhatHappensToItsChildren() async throws {
+        let machineID = "HOME_\(UUID().uuidString.lowercased())"
+        let server = try HeldServer(machineID: machineID, openChildren: [1: 3])
+        let feed = TaskFeed(client: client(server, machineID: machineID), notices: NoticeCenter())
+        defer { feed.forget() }
+        await feed.start()
+        try await until { identifiers(feed) == ["LOO-1", "LOO-2", "LOO-3"] }
+        let parent = feed.shownRepositories[0].tasks[1]
+        feed.complete(parent) {}
+        XCTAssertEqual(feed.completing?.identifier, "LOO-2")
+        XCTAssertEqual(TaskChildPolicy.question(issue: "LOO-2", openChildren: parent.openChildren ?? 0),
+                       "Complete LOO-2? 3 children are open")
+        XCTAssertEqual(identifiers(feed), ["LOO-1", "LOO-2", "LOO-3"], "the row stays while the dialog asks")
+        let unasked = await server.writes
+        XCTAssertEqual(unasked, [], "nothing is written before the answer")
+
+        feed.complete(parent, children: .rehome) {}
+        XCTAssertNil(feed.completing)
+        XCTAssertEqual(identifiers(feed), ["LOO-1", "LOO-3"])
+        try await until { await server.writes.count == 1 }
+        let sent = await server.children
+        XCTAssertEqual(sent, ["rehome"])
+    }
+
+    func testASwipedLeafSendsNoChildren() async throws {
+        let machineID = "HOME_\(UUID().uuidString.lowercased())"
+        let server = try HeldServer(machineID: machineID, openChildren: [1: 3])
+        let feed = TaskFeed(client: client(server, machineID: machineID), notices: NoticeCenter())
+        defer { feed.forget() }
+        await feed.start()
+        try await until { identifiers(feed).count == 3 }
+        feed.complete(feed.shownRepositories[0].tasks[0]) {}
+        XCTAssertNil(feed.completing)
+        try await until { await server.writes.count == 1 }
+        let sent = await server.children
+        XCTAssertEqual(sent, ["null"])
     }
 
     func testARefusedCompleteReturnsTheRowAndItsNoticeShowsTheTask() async throws {

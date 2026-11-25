@@ -32,6 +32,28 @@ use loopflow_model::id::WaveId;
 
 use super::{SqliteStore, TaskCheckout};
 
+/// What completing a parent does with its open children. A parent with open
+/// children completes only once someone picks one.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+    clap::ValueEnum,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ChildPolicy {
+    /// Direct open children move up to the nearest open ancestor, or become
+    /// top-level, and stay open.
+    Rehome,
+    /// Open descendants whose PR merged are done; the rest are abandoned.
+    Abandon,
+}
+
 /// What completing a parent did with one child, in the order they are reported.
 #[derive(
     Debug,
@@ -51,6 +73,8 @@ pub enum ChildOutcome {
     Done,
     /// It was not merged and was canceled with its parent.
     Abandoned,
+    /// It stays open, moved up to its parent's nearest open ancestor.
+    Rehomed,
 }
 
 #[derive(Debug)]
@@ -63,9 +87,27 @@ pub struct ChildCompletion {
     pub children: Vec<ChildCompletion>,
 }
 
+/// One open Task under a parent, with its own open children.
+#[derive(Debug)]
+pub struct OpenDescendant {
+    pub task: Task,
+    pub state: TaskState,
+    pub pr: Option<TaskPr>,
+    pub step: Option<String>,
+    pub children: Vec<OpenDescendant>,
+}
+
+/// What completing a Task now did with its open children.
+#[derive(Debug, Default)]
+pub struct ParentCompletion {
+    pub children: Vec<ChildCompletion>,
+    /// Where rehomed children moved; `None` when they became top-level.
+    pub rehomed_to: Option<Task>,
+}
+
 #[derive(Debug)]
 pub enum CompletionSettlement {
-    Settled(Vec<ChildCompletion>),
+    Settled,
     WaitingForChildren,
     Superseded,
 }
@@ -262,14 +304,16 @@ fn place_task_in(
     task.branch = pr.branch.clone();
     task.base_commit = pr.base_commit.clone();
     task.parent_pr_id = pr.parent_pr_id.clone();
-    validate_initial_task_pr(&task, pr)?;
+    validate_placement_pr(&task, pr)?;
     conn.execute(
         "UPDATE tasks SET workspace_slug=?2,updated_at=?3 WHERE id=?1",
         params![task_id.as_str(), workspace_slug, now_unix()],
     )?;
     write_task_checkout_in(conn, &task)?;
     if pr.publication.is_some() {
-        insert_task_pr(conn, pr)?;
+        let mut discovered = pr.clone();
+        discovered.sequence = next_task_pr_sequence_in(conn, task_id)?;
+        insert_task_pr(conn, &discovered)?;
     }
     seed_task_tracker_cursor(conn, &task)?;
     insert_task_event_in(
@@ -507,17 +551,22 @@ impl SqliteStore {
         Ok(request)
     }
 
-    /// Explicit completion settles the Task and its children together.
-    pub fn request_family_completion(
-        &self,
-        task: &TaskId,
-        note: Option<&str>,
-    ) -> StoreResult<Option<i64>> {
+    /// Open Tasks under `parent`, each with its own, in filing order.
+    pub fn open_descendants(&self, parent: &TaskId) -> StoreResult<Vec<OpenDescendant>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let request = request_completion(&tx, task, note, true)?;
+        let tx = conn.savepoint()?;
+        let descendants = open_descendants_in(&tx, parent)?;
         tx.commit()?;
-        Ok(request)
+        Ok(descendants)
+    }
+
+    /// Where `--children rehome` moves `parent`'s open children.
+    pub fn rehome_destination(&self, parent: &TaskId) -> StoreResult<Option<Task>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.savepoint()?;
+        let destination = rehome_destination_in(&tx, parent)?;
+        tx.commit()?;
+        Ok(destination)
     }
 
     pub fn open_task_child_count(&self, task: &TaskId) -> StoreResult<u32> {
@@ -566,9 +615,9 @@ impl SqliteStore {
         validate_task_project(&tx, task)?;
         let state = super::durable::task_state_in(&tx, &task.id)?;
         if state == TaskState::Done {
-            return Ok(CompletionSettlement::Settled(Vec::new()));
+            return Ok(CompletionSettlement::Settled);
         }
-        let (current, family, _) = completion_request(&tx, &task.id)?;
+        let (current, _) = completion_request(&tx, &task.id)?;
         if current != Some(request) {
             return Ok(CompletionSettlement::Superseded);
         }
@@ -584,47 +633,105 @@ impl SqliteStore {
                 task.id
             )));
         }
-        if !family && open_task_child_count(&tx, &task.id)? > 0 {
+        // A pending request never settles children: that is a person's choice.
+        if open_task_child_count(&tx, &task.id)? > 0 {
             clear_completion_request(&tx, &task.id)?;
             tx.commit()?;
             return Ok(CompletionSettlement::WaitingForChildren);
         }
-        record_task_completion(&tx, &task.id)?;
-        let children = if family {
-            complete_children(&tx, &task.id)?
-        } else {
-            Vec::new()
-        };
+        record_task_completion(&tx, &task.id, None)?;
         tx.commit()?;
-        Ok(CompletionSettlement::Settled(children))
+        Ok(CompletionSettlement::Settled)
     }
 
-    pub fn reopen_task(&self, id: &TaskId, note: Option<&str>) -> StoreResult<Task> {
+    /// Complete the Task now and settle its open children by `children`.
+    /// Refuses, writing nothing, while its PR is unmerged or while children
+    /// are open and no policy was given.
+    pub fn complete_task_now(
+        &self,
+        task: &Task,
+        note: Option<&str>,
+        children: Option<ChildPolicy>,
+    ) -> StoreResult<ParentCompletion> {
+        validate_task(task)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        validate_task_project(&tx, task)?;
+        match super::durable::task_state_in(&tx, &task.id)? {
+            TaskState::Done => return Ok(ParentCompletion::default()),
+            TaskState::Abandoned => {
+                return Err(StoreError::InvalidData(format!(
+                    "Task {} is abandoned and cannot be completed",
+                    task.identifier
+                )))
+            }
+            _ => {}
+        }
+        if active_task_pr_on(&tx, &task.id)?.is_some_and(|pr| pr.phase() != PrPhase::Merged) {
+            return Err(StoreError::InvalidAuthority(
+                "Task requires a verified merge".into(),
+            ));
+        }
+        if children.is_none() && open_task_child_count(&tx, &task.id)? > 0 {
+            return Err(StoreError::InvalidData(format!(
+                "{} has open children; pass --children rehome or --children abandon",
+                task.identifier
+            )));
+        }
+        record_task_completion(&tx, &task.id, note)?;
+        // Both policies touch only open children, so with none they settle nothing.
+        let settled = match children {
+            None => ParentCompletion::default(),
+            Some(ChildPolicy::Abandon) => ParentCompletion {
+                children: complete_children(&tx, &task.id)?,
+                rehomed_to: None,
+            },
+            Some(ChildPolicy::Rehome) => rehome_children(&tx, &task.id)?,
+        };
+        tx.commit()?;
+        Ok(settled)
+    }
+
+    pub fn reopen_task(
+        &self,
+        id: &TaskId,
+        note: Option<&str>,
+        checkout_removed: bool,
+    ) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
         require_task_not_deleted(&tx, &task)?;
-        if super::durable::task_state_in(&tx, id)? == TaskState::Abandoned {
-            return Err(StoreError::InvalidAuthority(
-                "An abandoned Task cannot be reopened".into(),
-            ));
-        }
-        let (completed, pending): (bool, bool) = tx.query_row(
-            "SELECT planning_state IS 'completed',completion_request IS NOT NULL FROM tasks WHERE id=?1",
+        let (completed, abandoned, pending): (bool, bool, bool) = tx.query_row(
+            "SELECT planning_state IS 'completed',
+                    abandoned_at IS NOT NULL OR planning_state IS 'canceled',
+                    completion_request IS NOT NULL
+             FROM tasks WHERE id=?1",
             [id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
         super::task_pause::clear_in(&tx, id)?;
-        if completed || pending {
+        if completed || abandoned || pending {
             tx.execute(
-                "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
+                "UPDATE tasks SET abandoned_at=NULL,abandon_reason=NULL,completion_request=NULL,completion_error=NULL WHERE id=?1",
                 [id.as_str()],
             )?;
+            // Check before deleting a removed checkout so prior work still reopens as started.
             let target = if has_prior_work(&tx, id)? {
                 "started"
             } else {
                 "unstarted"
             };
+            if abandoned {
+                tx.execute(
+                    "UPDATE task_prs SET historical=1
+                     WHERE task_id=?1 AND historical=0 AND abandoned_at IS NOT NULL",
+                    [id.as_str()],
+                )?;
+                if checkout_removed {
+                    tx.execute("DELETE FROM task_checkouts WHERE task_id=?1", [id.as_str()])?;
+                }
+            }
             super::task_state::decide_in(&tx, id, target)?;
             // Reopening clears auto: it ended with the Task.
             tx.execute("DELETE FROM task_auto WHERE task_id=?1", [id.as_str()])?;
@@ -1012,6 +1119,11 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn next_task_pr_sequence(&self, task: &TaskId) -> StoreResult<u32> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        next_task_pr_sequence_in(&conn, task)
+    }
+
     pub fn task_prs(&self, task_id: &TaskId) -> StoreResult<Vec<TaskPr>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(&format!(
@@ -1233,6 +1345,19 @@ impl SqliteStore {
         Ok(event)
     }
 
+    /// Whether the latest checkout finished placement, including older PR-backed checkouts.
+    pub fn task_checkout_ready(&self, task: &TaskId) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT kind IN ('checkout_ready','pr_started') FROM
+                (SELECT json_extract(kind_json,'$.kind') AS kind FROM task_events
+                 WHERE task_id=?1 AND kind IN ('checkout_initializing','checkout_ready','pr_started')
+                 ORDER BY id DESC LIMIT 1)",
+            [task.as_str()],
+            |row| row.get(0),
+        ).optional()?.unwrap_or(false))
+    }
+
     pub fn task_events_after(&self, task_id: &TaskId, cursor: i64) -> StoreResult<Vec<TaskEvent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         task_events_after_in(&conn, task_id, cursor)
@@ -1410,11 +1535,11 @@ fn validate_task_pr(pr: &TaskPr) -> StoreResult<()> {
         .map_err(|error| StoreError::InvalidData(error.to_string()))
 }
 
-fn validate_initial_task_pr(task: &Task, pr: &TaskPr) -> StoreResult<()> {
+fn validate_placement_pr(task: &Task, pr: &TaskPr) -> StoreResult<()> {
     validate_task_pr(pr)?;
-    if pr.task_id != task.id || pr.sequence != 1 || !pr.is_active() {
+    if pr.task_id != task.id || !pr.is_active() {
         return Err(StoreError::InvalidData(
-            "Task requires its sequence-1 active PR".to_string(),
+            "Task placement requires its own active PR".to_string(),
         ));
     }
     Ok(())
@@ -1864,6 +1989,14 @@ fn ingest_linear_comment(
     } else {
         Ok(None)
     }
+}
+
+fn next_task_pr_sequence_in(conn: &Connection, task: &TaskId) -> StoreResult<u32> {
+    Ok(conn.query_row(
+        "SELECT COALESCE(MAX(sequence),0)+1 FROM task_prs WHERE task_id=?1",
+        [task.as_str()],
+        |row| row.get(0),
+    )?)
 }
 
 fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
@@ -2540,14 +2673,11 @@ pub(super) fn open_task_child_count(conn: &Connection, task: &TaskId) -> StoreRe
     )?)
 }
 
-fn completion_request(conn: &Connection, task: &TaskId) -> StoreResult<(Option<i64>, bool, bool)> {
+fn completion_request(conn: &Connection, task: &TaskId) -> StoreResult<(Option<i64>, bool)> {
     Ok(conn.query_row(
-        "SELECT t.completion_request,
-                COALESCE(json_extract(e.kind_json,'$.kind')='family_completion_requested',0),
-                t.planning_state IS 'completed'
-         FROM tasks t LEFT JOIN task_events e ON e.id=t.completion_request WHERE t.id=?1",
+        "SELECT completion_request,planning_state IS 'completed' FROM tasks WHERE id=?1",
         [task.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     )?)
 }
 
@@ -2556,27 +2686,15 @@ pub(super) fn request_completion_in(
     task: &TaskId,
     note: Option<&str>,
 ) -> StoreResult<Option<i64>> {
-    request_completion(conn, task, note, false)
-}
-
-fn request_completion(
-    conn: &Connection,
-    task: &TaskId,
-    note: Option<&str>,
-    family: bool,
-) -> StoreResult<Option<i64>> {
-    let (pending, family_requested, completed) = completion_request(conn, task)?;
-    if pending.is_some() && (!family || family_requested) {
+    let (pending, completed) = completion_request(conn, task)?;
+    if pending.is_some() {
         return Ok(pending);
     }
-    if completed || (!family && open_task_child_count(conn, task)? > 0) {
+    if completed || open_task_child_count(conn, task)? > 0 {
         return Ok(None);
     }
-    let reason = note.map(str::to_string);
-    let event = if family {
-        TaskEventKind::FamilyCompletionRequested { reason }
-    } else {
-        TaskEventKind::CompletionRequested { reason }
+    let event = TaskEventKind::CompletionRequested {
+        reason: note.map(str::to_string),
     };
     insert_task_event_in(conn, task, &event)?;
     let request = conn.last_insert_rowid();
@@ -2595,7 +2713,7 @@ fn clear_completion_request(conn: &Connection, task: &TaskId) -> StoreResult<()>
     Ok(())
 }
 
-fn record_task_completion(conn: &Connection, task: &TaskId) -> StoreResult<()> {
+fn record_task_completion(conn: &Connection, task: &TaskId, note: Option<&str>) -> StoreResult<()> {
     super::task_pause::clear_in(conn, task)?;
     clear_completion_request(conn, task)?;
     super::task_state::decide_in(conn, task, "completed")?;
@@ -2603,7 +2721,10 @@ fn record_task_completion(conn: &Connection, task: &TaskId) -> StoreResult<()> {
         conn,
         task,
         &TaskEventKind::Completed {
-            summary: "Task completed".into(),
+            summary: note.map_or_else(
+                || "Task completed".into(),
+                |note| format!("Task completed: {note}"),
+            ),
         },
     )?;
     super::task_summaries::write_in(conn, task, super::task_summaries::TaskEnd::Done)
@@ -2629,20 +2750,14 @@ fn complete_children(conn: &Connection, parent: &TaskId) -> StoreResult<Vec<Chil
     for task in children {
         let pr = active_task_pr_on(conn, &task.id)?;
         let outcome = if pr.as_ref().is_some_and(|pr| pr.phase() == PrPhase::Merged) {
-            record_task_completion(conn, &task.id)?;
+            record_task_completion(conn, &task.id, None)?;
             ChildOutcome::Done
         } else {
             super::durable::abandon_task_in(conn, &task.id, "parent Task completed", now_unix())?;
             ChildOutcome::Abandoned
         };
         let children = complete_children(conn, &task.id)?;
-        let step = conn
-            .query_row(
-                "SELECT step FROM task_graphs WHERE task_id=?1 AND run_start IS NULL",
-                [task.id.as_str()],
-                |row| row.get(0),
-            )
-            .optional()?;
+        let step = parked_step(conn, &task.id)?;
         completions.push(ChildCompletion {
             task,
             outcome,
@@ -2653,6 +2768,87 @@ fn complete_children(conn: &Connection, parent: &TaskId) -> StoreResult<Vec<Chil
     }
     completions.sort_by_key(|child| child.outcome);
     Ok(completions)
+}
+
+/// Rehoming moves only direct children; each brings its own subtree along.
+/// Closed children keep their link as history.
+fn rehome_children(conn: &Connection, parent: &TaskId) -> StoreResult<ParentCompletion> {
+    let open = children_where(conn, parent, &open_task_children_where())?;
+    if open.is_empty() {
+        return Ok(ParentCompletion::default());
+    }
+    let destination = rehome_destination_in(conn, parent)?;
+    let edit = Edit::TaskParent(destination.as_ref().map(|task| task.id.to_string()));
+    let mut children = Vec::with_capacity(open.len());
+    for child in open {
+        planning_write::local(
+            conn,
+            &crate::work::edit::WorkEdit::for_target(
+                child.id.as_str(),
+                std::slice::from_ref(&edit),
+            ),
+        )?;
+        children.push(ChildCompletion {
+            pr: None,
+            step: None,
+            task: task_on(conn, &child.id)?.ok_or(StoreError::NotFound)?,
+            outcome: ChildOutcome::Rehomed,
+            children: Vec::new(),
+        });
+    }
+    Ok(ParentCompletion {
+        children,
+        rehomed_to: destination,
+    })
+}
+
+/// Follow visible parents past closed Tasks, stopping where the tree ends.
+fn rehome_destination_in(conn: &Connection, parent: &TaskId) -> StoreResult<Option<Task>> {
+    let mut statement = conn.prepare_cached(&format!(
+        "SELECT t.id, {} FROM tasks child JOIN tasks t ON t.id=child.parent_task_id
+         WHERE child.id=?1 AND {TASK_VISIBLE}",
+        super::durable::task_open_sql("t")
+    ))?;
+    let mut current = parent.clone();
+    // Parent links never form a cycle: `parent_refusal` refuses one.
+    while let Some((ancestor, open)) = statement
+        .query_row([current.as_str()], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+        })
+        .optional()?
+    {
+        current = TaskId::from_raw(ancestor);
+        if open {
+            return task_on(conn, &current);
+        }
+    }
+    Ok(None)
+}
+
+fn open_descendants_in(conn: &Connection, parent: &TaskId) -> StoreResult<Vec<OpenDescendant>> {
+    children_where(conn, parent, &open_task_children_where())?
+        .into_iter()
+        .map(|task| {
+            Ok(OpenDescendant {
+                state: super::durable::task_state_in(conn, &task.id)?,
+                pr: active_task_pr_on(conn, &task.id)?,
+                step: parked_step(conn, &task.id)?,
+                children: open_descendants_in(conn, &task.id)?,
+                task,
+            })
+        })
+        .collect()
+}
+
+/// The step a Task's Graph stands at between runs.
+fn parked_step(conn: &Connection, task: &TaskId) -> StoreResult<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT step FROM task_graphs WHERE task_id=?1 AND run_start IS NULL",
+            [task.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?)
 }
 
 fn has_prior_work(conn: &Connection, task: &TaskId) -> StoreResult<bool> {

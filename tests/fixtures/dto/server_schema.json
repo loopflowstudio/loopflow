@@ -754,6 +754,26 @@
           "const": "abandoned",
           "description": "It was not merged and was canceled with its parent.",
           "type": "string"
+        },
+        {
+          "const": "rehomed",
+          "description": "It stays open, moved up to its parent's nearest open ancestor.",
+          "type": "string"
+        }
+      ]
+    },
+    "ChildPolicy": {
+      "description": "What completing a parent does with its open children. A parent with open\nchildren completes only once someone picks one.",
+      "oneOf": [
+        {
+          "const": "rehome",
+          "description": "Direct open children move up to the nearest open ancestor, or become\ntop-level, and stay open.",
+          "type": "string"
+        },
+        {
+          "const": "abandon",
+          "description": "Open descendants whose PR merged are done; the rest are abandoned.",
+          "type": "string"
         }
       ]
     },
@@ -13393,7 +13413,7 @@
           "type": "object"
         },
         {
-          "description": "A person asked to complete the Task, so settling it settles its\nchildren too. A Graph reaching `end` writes `CompletionRequested`,\nwhich waits while a child is open. The request can pend until the\nTask's PR merges, and a child can be filed, reopened or moved under\nthe Task meanwhile, so who asked is kept with the request.",
+          "description": "History only: an earlier `lf task complete` that would settle the\nTask's children once it ran. Completion now settles children at once,\nby the policy given, and nothing writes this.",
           "properties": {
             "kind": {
               "const": "family_completion_requested",
@@ -15455,6 +15475,15 @@
             }
           ]
         },
+        "open_children": {
+          "description": "How many direct children of a Task are open, so a client can ask what\nhappens to them before completing it; `None` for anything but a Task.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "primary_session": {
           "type": [
             "string",
@@ -15501,7 +15530,8 @@
         "primary_session",
         "location",
         "argv",
-        "unavailable"
+        "unavailable",
+        "open_children"
       ],
       "type": "object"
     },
@@ -16647,8 +16677,19 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf task complete <issue>`.",
+          "description": "`lf task complete <issue> [--children rehome|abandon]`.",
           "properties": {
+            "children": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ChildPolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What happens to open children; `null` refuses while any are open."
+            },
             "directory": {
               "type": "string"
             },
@@ -16663,7 +16704,8 @@
           "required": [
             "kind",
             "directory",
-            "issue"
+            "issue",
+            "children"
           ],
           "type": "object",
           "x-result": {

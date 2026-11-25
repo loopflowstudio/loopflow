@@ -8,8 +8,16 @@ use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 
 pub fn run() -> anyhow::Result<()> {
-    loopflow_execution::installation::server::ensure()?;
-    let socket = UnixStream::connect(loopflow_execution::machine::socket_path()?)?;
+    let path = loopflow_execution::machine::socket_path()?;
+    // Connect to an already-running server directly instead of serializing
+    // every SSH pipe behind `ensure()`'s install lock and binary digest.
+    let socket = match UnixStream::connect(&path) {
+        Ok(socket) => socket,
+        Err(_) => {
+            loopflow_execution::installation::server::ensure()?;
+            UnixStream::connect(&path)?
+        }
+    };
     let mut to_server = socket.try_clone()?;
     std::thread::spawn(move || {
         let _ = std::io::copy(&mut std::io::stdin().lock(), &mut to_server);

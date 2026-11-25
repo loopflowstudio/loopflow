@@ -245,6 +245,21 @@ struct ServerProtocolTests {
         #expect(try encoded(request) == value("task_from_session"))
     }
 
+    @Test func taskCompletionNamesWhatHappensToOpenChildren() throws {
+        let cases: [(TaskChildPolicy?, String, [String])] = [
+            (nil, "null", ["task", "complete", "LOO-2", "--json"]),
+            (.rehome, #""rehome""#, ["task", "complete", "LOO-2", "--children", "rehome", "--json"]),
+            (.abandon, #""abandon""#, ["task", "complete", "LOO-2", "--children", "abandon", "--json"]),
+        ]
+        for (children, wire, argv) in cases {
+            let write = ServedWrite.taskComplete(directory: "/repo", issue: "LOO-2", children: children)
+            let json = #"{"kind":"task.complete","directory":"/repo","issue":"LOO-2","children":"# + wire + "}"
+            #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(write))
+                == JSONDecoder().decode(JSONValue.self, from: Data(json.utf8)))
+            #expect(write.argv == argv)
+        }
+    }
+
     @Test func coreLoopWritesShareTheRustWriteContract() throws {
         let writes: [(String, String, ServedWrite)] = [
             ("task_run", "run-1", .taskRun(directory: "/repo", issue: "LOO-1", graph: nil, from: "implement", agent: "claude", approve: false)),

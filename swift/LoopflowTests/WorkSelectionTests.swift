@@ -95,7 +95,7 @@ func fixtureViewPlan(owner: WorkWorkspaceKey, members: [WorkViewPlan.Content],
 func fixtureStartedPlan(_ tasks: [(id: String, states: [WorkSelectionState])], repository: String = "repo") -> WorkViewPlan {
     let members = tasks.map {
         WorkViewPlan.Content(work: .init(repository: repository, kind: .task, id: $0.id), title: $0.id,
-            states: $0.states, identifier: nil, workingGroup: .active, graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
+            states: $0.states, identifier: nil, workingGroup: .active, graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [], openChildren: nil)
     }
     return fixtureViewPlan(owner: .init(repository: repository, kind: .repository, id: repository), members: members)
 }
@@ -117,5 +117,5 @@ extension WorkModel {
 
 func fixtureViewContent(work: WorkWorkspaceKey, title: String) -> WorkViewPlan.Content {
     WorkViewPlan.Content(work: work, title: title,
-        states: [.open], identifier: nil, workingGroup: .active, graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
+        states: [.open], identifier: nil, workingGroup: .active, graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [], openChildren: nil)
 }

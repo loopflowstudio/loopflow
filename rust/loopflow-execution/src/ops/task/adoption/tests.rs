@@ -558,7 +558,8 @@ fn binding_a_done_task_keeps_it_done() {
         let created = table
             .create("Finished work", None, destination.as_deref())
             .unwrap();
-        crate::ops::task::task_complete(table.repo.path(), created.id.as_str(), None).unwrap();
+        crate::ops::task::task_complete(table.repo.path(), created.id.as_str(), None, None)
+            .unwrap();
         let completed = table.task(&created.id);
         assert!(completed.completed_at.is_some());
         std::fs::write(origin.join("draft.txt"), "untracked draft\n").unwrap();

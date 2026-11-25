@@ -97,3 +97,58 @@ child stops. Read both in
 entry holding `<cross-session-message from="loopflow">`, then its reply.
 Afterwards stop that home's `lf server run`, its `lf holder run` and the
 `claude` children under it, by PID after checking `LF_HOME` with `ps eww`.
+
+# Completing a parent: `--children`, live children, reopen
+
+Same fake-GitHub world. `lf task create '<words>' --parent <id> --json` builds
+the tree; zsh does not split `${2:+--parent $2}`, so pass `--parent` literally.
+
+- A live child without a provider: commit `.lf/graphs/live.yaml` holding
+  `- cmd: task wait <some open Task>` before the child's checkout is placed,
+  then `lf task run <child> live`. Its Graph stays `running` until that Task
+  closes, which is what `--children abandon` refuses on.
+- `lf task interrupt <child>` answers "stopped Graph live at task wait …" but a
+  running `cmd:` step never reads the interrupt; the processes keep going and
+  the refusal stays. Stop them by PID (`lf task run` carrier first, then its
+  `graph run` and the step) from `ps -axo pid,ppid,command`, matching the
+  private `bin/lf` path. Status then reads `Stopped … exited with status 130`.
+- A merged child: commit in its checkout, `lf pr open`, merge its branch into
+  `main` on origin, delete the branch, set `state: MERGED`, `merge_commit` and
+  `merged_head`, then `lf pr reconcile` in that checkout.
+- Abandonment deletes the branch and checkout. The stand-in answers
+  `headRepository` (without it lf refuses "open PR has unavailable head
+  repository") and `pr close`, but does not close a PR when its head branch is
+  deleted the way GitHub does: the state file keeps it `OPEN`, so a later
+  `lf pr open` reuses that number instead of opening a new one.
+- Reopen, then `lf task run <child>`: after abandonment deleted the checkout and
+  branch, the new checkout starts from current main and the Graph runs.
+- Refusals write nothing: diff `select … from tasks` and `count(*) from
+  task_events` before and after.
+- Served `task.complete`: hello as `"kind":"desktop"` (a `machine` client must
+  carry a sender), send `"children": null | "rehome" | "abandon"`. A refusal
+  answers `code: conflict`; a missing `children` key is `invalid`; an unknown
+  policy reads "this server has no operation `task.complete`", the message a
+  newer client gets from an older server.
+
+# Completing a parent in Desktop
+
+`Complete Task…` lives only in SwiftUI context menus, which the QA hook
+cannot open (`desktop.md`). For a local build only, add a top-level
+`DesktopAction("qa-complete", …)` taking `id` (the `task_…` id) that calls
+`context.model.beginComplete(context.model.task(id: id)!.task)`, install
+`QAHook.swift`, and build the isolated Dev bundle. With the hook running,
+`LF_DESKTOP=<bundle id> lf desktop do qa-complete id=<task_…>` raises the
+dialog; `snap` lists it as its own untitled window (about 285x270 pt), and
+`click 1 <x> <y>` in its points (PNG pixels / 2) picks a button. Cancel
+writes nothing. Revert both Swift edits before committing.
+
+- Reading the store between steps: `tasks` has `planning_state`,
+  `planning_completed_at`, `abandoned_at`, `completion_request`,
+  `planning_deleted_at`; `task_prs` has `github_number`, `sequence`,
+  `historical`, `abandoned_at`; `task_events.kind_json`.
+- `lf task status` on a Task with no checkout here (a reopened abandoned Task
+  whose checkout was deleted) prints "Not checked out on …" and no `action:`
+  line; `lf desktop plan --task <id> --json` shows the row Desktop reads
+  (`actions`, `run_control`).
+- Abandoning a Task with no PR keeps its checkout and branch, directly or
+  through `--children abandon`; only a PR's branch is deleted.

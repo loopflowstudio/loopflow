@@ -491,7 +491,7 @@ struct DesktopHeadlessTests {
 
         // Completion has its own operation and does not move the Workflow.
         model.select(.task(id: task.id))
-        model.completeTask(task)
+        model.completeTask(task, children: nil)
         #expect(model.selection != .task(id: task.id))
         // Completing says so in the click, with Undo, which reopens and reselects the Task.
         let completed = try #require(model.navigation.notices.current)

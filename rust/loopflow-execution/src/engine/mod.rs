@@ -169,3 +169,18 @@ impl Error {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Error, ErrorCode};
+    use crate::ops::OpsError;
+
+    #[test]
+    fn a_refused_write_keeps_its_code_and_words() {
+        let refusal = OpsError::Refused(Error::conflict("LOO-12 has 1 open child"));
+        let written = Error::written(&anyhow::Error::from(refusal).context("task.complete"));
+        assert_eq!(written, Error::conflict("LOO-12 has 1 open child"));
+        let failed = Error::written(&OpsError::Message("disk full".into()).into());
+        assert_eq!(failed.code, ErrorCode::OutcomeUnknown);
+    }
+}

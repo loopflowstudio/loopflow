@@ -55,7 +55,7 @@ pub fn task_run_control(evidence: &TaskRunEvidence) -> TaskRunControl {
     }
     let unavailable = match evidence.status {
         TaskState::Done => Some("Task is complete".into()),
-        TaskState::Abandoned => Some("Task is abandoned; recover it before running a Graph".into()),
+        TaskState::Abandoned => Some("Task is abandoned; reopen it before running a Graph".into()),
         _ => evidence
             .plan_terminal_reason
             .or(evidence.worktree_blocker)

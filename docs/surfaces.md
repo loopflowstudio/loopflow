@@ -113,6 +113,17 @@ Machine refuses, the row returns and a single bottom Notice explains why
 (auto-dismissing after 6 seconds; **Complete** posts a Notice with **Undo**,
 which reopens the Task).
 
+Completing a parent with open children asks before writing. In Desktop,
+**Complete Task…** opens a dialog naming the open children: when any open
+descendant would be abandoned, **Complete & Move Children to \<ancestor\>** (or
+**Complete & Move Children to Top Level**) is the default action and
+**Complete & Abandon Children** is destructive; when every open descendant
+already has a merged PR, **Complete & Finish Children** is the default with
+**Complete & Move Children to …** beside it. On iOS, swiping a parent left and
+tapping **Complete** keeps the row in place and asks between **Move Children
+Up** and **Abandon Children**. **Reopen Task** works on both done and abandoned
+Tasks.
+
 If the Machine pauses briefly, edits still show immediately and flush once it
 reconnects. After ~10 seconds offline, mutation controls disable until the
 connection returns. See [Connect clients](server.md) for connection recovery.
@@ -213,7 +224,7 @@ status and tracker sync, as on the Portfolio page.
   leaves the backlog for Working.
 - **Undo.** ⌘Z undoes a reorder, a claim or a brief edit. If someone changed
   the brief since your edit, undo leaves it and says so. Start and Abandon
-  aren't undone; an abandoned Task keeps its ID and history.
+  aren't undone; an abandoned Task keeps its ID and history and can be reopened.
 
 | Key | Does |
 |---|---|

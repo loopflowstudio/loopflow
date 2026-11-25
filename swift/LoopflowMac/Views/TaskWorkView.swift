@@ -198,10 +198,14 @@ struct TaskActionItems: View {
         }
         TaskLifecycleItems(model: model, task: task)
         if !task.isCompleted {
-            Button(model.hasOpenChildren(task) ? "Complete Task & Settle Children…" : "Complete Task") {
+            let hasOpenChildren = model.hasOpenChildren(task)
+            Button(hasOpenChildren ? "Complete Task…" : "Complete Task") {
                 model.beginComplete(task)
             }
             .disabled(model.changeRefusal != nil)
+            .help(hasOpenChildren
+                ? "Mark this Task done and choose whether its open children move up or are abandoned"
+                : "Mark this Task done")
             .accessibilityIdentifier("task-complete")
         }
         TaskMetadataItems(model: model, task: task, wave: wave, newConversation: newConversation, openSession: openSession)
@@ -302,7 +306,8 @@ struct TaskAbandonConfirmation: ViewModifier {
     }
 }
 
-/// The window's one Complete… confirmation when completing a parent will settle open children.
+/// The window's one Complete… sheet for a parent with open children:
+/// choose whether to move them up or settle them with the parent, then confirm.
 struct TaskCompleteConfirmation: ViewModifier {
     let model: WorkModel
 
@@ -310,51 +315,245 @@ struct TaskCompleteConfirmation: ViewModifier {
         model.navigation.completing.flatMap { model.task(id: $0)?.task }
     }
 
-    private func summary(for descendants: [RoadmapTask]) -> (done: [RoadmapTask], abandoned: [RoadmapTask]) {
-        let done = descendants.filter { $0.pr?.phase == .merged }
-        let abandoned = descendants.filter { $0.pr?.phase != .merged }
-        return (done, abandoned)
+    static func defaultPolicy(descendants: [RoadmapTask]) -> TaskChildPolicy {
+        descendants.allSatisfy { $0.pr?.phase == .merged } ? .abandon : .rehome
     }
 
-    private func message(for descendants: [RoadmapTask]) -> String {
-        let (done, abandoned) = summary(for: descendants)
-        var lines: [String] = []
+    static func moveTitle(to destination: RoadmapTask?) -> String {
+        destination.map { "Move children to \($0.task.identifier)" }
+            ?? "Move children to top level"
+    }
+
+    static func moveDetail(to destination: RoadmapTask?) -> String {
+        let place = destination.map { "under \($0.task.identifier)" } ?? "at the top level"
+        return "Direct children stay open \(place); PRs and checkouts stay intact."
+    }
+
+    static func settleTitle(allMerged: Bool) -> String {
+        allMerged ? "Finish merged children" : "Abandon unmerged children"
+    }
+
+    static func settleDetail(descendants: [RoadmapTask]) -> String {
+        let done = descendants.filter { $0.pr?.phase == .merged }.map(\.task.identifier)
+        let abandoned = descendants.filter { $0.pr?.phase != .merged }.map(\.task.identifier)
+        var parts: [String] = []
         if !done.isEmpty {
-            let names = done.map(\.task.identifier).joined(separator: ", ")
-            lines.append("Marked done (PR merged): \(names).")
+            parts.append("Marks \(done.joined(separator: ", ")) done.")
         }
         if !abandoned.isEmpty {
-            let names = abandoned.map(\.task.identifier).joined(separator: ", ")
-            lines.append("Abandoned (PRs closed, branches deleted, cannot be reopened): \(names).")
+            parts.append("Closes PRs and deletes branches for \(abandoned.joined(separator: ", ")); each can be reopened later.")
         }
-        return lines.joined(separator: "\n")
+        return parts.joined(separator: " ")
+    }
+
+    static func confirmLabel(policy: TaskChildPolicy, allMerged: Bool) -> String {
+        switch policy {
+        case .rehome: "Complete & Move"
+        case .abandon: allMerged ? "Complete & Finish" : "Complete & Abandon"
+        }
+    }
+
+    static func confirmRole(policy: TaskChildPolicy, allMerged: Bool) -> LoopflowButtonStyle.Role {
+        policy == .abandon && !allMerged ? .destructive : .success
     }
 
     func body(content: Content) -> some View {
-        let descendants = completing.map { model.openDescendants(of: $0) } ?? []
-        let (_, abandoned) = summary(for: descendants)
-        let title: String = if let task = completing {
-            descendants.count == 1
-                ? "Complete \(task.task.identifier) and settle 1 open child?"
-                : "Complete \(task.task.identifier) and settle \(descendants.count) open children?"
-        } else {
-            "Complete Task?"
-        }
-        content.confirmationDialog(
-            title,
-            isPresented: Binding(get: { completing != nil }, set: { if !$0 { model.navigation.completing = nil } }),
-            presenting: completing
-        ) { task in
-            Button(
-                abandoned.isEmpty ? "Complete & Finish Children" : "Complete & Settle Children",
-                role: abandoned.isEmpty ? nil : .destructive
-            ) {
-                model.navigation.completing = nil
-                model.completeTaskFromInput(task)
+        content.background {
+            // Own view node so this sheet does not collide with sibling `.sheet` modifiers on SessionsView.
+            Color.clear.sheet(item: Binding(
+                get: { completing },
+                set: { if $0 == nil { model.navigation.completing = nil } }
+            )) { task in
+                let tree = model.openDescendantTree(of: task)
+                TaskCompleteSheet(
+                    task: task,
+                    openChildCount: model.openChildCount(task),
+                    descendants: tree,
+                    destination: model.rehomeDestination(of: task),
+                    onConfirm: { policy in
+                        model.navigation.completing = nil
+                        model.completeTaskFromInput(task, children: policy)
+                    },
+                    onCancel: { model.navigation.completing = nil }
+                )
             }
-        } message: { _ in
-            Text(message(for: descendants))
         }
+    }
+}
+
+private struct TaskCompleteSheet: View {
+    let task: RoadmapTask
+    let openChildCount: Int
+    let descendants: [(task: RoadmapTask, depth: Int)]
+    let destination: RoadmapTask?
+    let onConfirm: (TaskChildPolicy) -> Void
+    let onCancel: () -> Void
+    @State private var policy: TaskChildPolicy
+    @Environment(\.palette) private var palette
+
+    init(
+        task: RoadmapTask,
+        openChildCount: Int,
+        descendants: [(task: RoadmapTask, depth: Int)],
+        destination: RoadmapTask?,
+        onConfirm: @escaping (TaskChildPolicy) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.task = task
+        self.openChildCount = openChildCount
+        self.descendants = descendants
+        self.destination = destination
+        self.onConfirm = onConfirm
+        self.onCancel = onCancel
+        _policy = State(initialValue: TaskCompleteConfirmation.defaultPolicy(descendants: descendants.map(\.task)))
+    }
+
+    private var flatDescendants: [RoadmapTask] { descendants.map(\.task) }
+    private var allMerged: Bool { flatDescendants.allSatisfy { $0.pr?.phase == .merged } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Text(TaskChildPolicy.question(issue: task.task.identifier, openChildren: openChildCount))
+                    .font(Typography.lede)
+                    .foregroundStyle(palette.text)
+                Text(openChildCount == 1
+                     ? "Choose what happens to its open child:"
+                     : "Choose what happens to its open children:")
+                    .font(Typography.text)
+                    .foregroundStyle(palette.textSecondary)
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(descendants, id: \.task.id) { entry in
+                        childRow(entry.task, depth: entry.depth)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(Spacing.sm)
+            }
+            .frame(maxHeight: 160)
+            .background(
+                RoundedRectangle(cornerRadius: CornerRadius.row)
+                    .fill(palette.background)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: CornerRadius.row)
+                    .strokeBorder(palette.border, lineWidth: 1)
+            )
+
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                // The first choice is the one that keeps work.
+                ForEach(allMerged ? [TaskChildPolicy.abandon, .rehome] : [.rehome, .abandon], id: \.self) {
+                    optionRow($0)
+                }
+            }
+
+            HStack(spacing: Spacing.sm) {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(LoopflowButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier("task-complete-cancel")
+                Button(
+                    TaskCompleteConfirmation.confirmLabel(policy: policy, allMerged: allMerged),
+                    role: policy == .abandon && !allMerged ? .destructive : nil
+                ) {
+                    onConfirm(policy)
+                }
+                .buttonStyle(LoopflowButtonStyle(TaskCompleteConfirmation.confirmRole(policy: policy, allMerged: allMerged)))
+                .keyboardShortcut(.defaultAction)
+                .accessibilityIdentifier("task-complete-confirm")
+            }
+        }
+        .padding(Spacing.xl)
+        .frame(width: 440)
+    }
+
+    private func childRow(_ child: RoadmapTask, depth: Int) -> some View {
+        let badge = childBadge(child)
+        return HStack(spacing: Spacing.sm) {
+            Text(child.task.identifier)
+                .font(Typography.mono)
+                .foregroundStyle(palette.textSecondary)
+            Text(child.task.name)
+                .font(Typography.text)
+                .foregroundStyle(palette.text)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: Spacing.xs)
+            Text(badge.label)
+                .font(Typography.meta)
+                .foregroundStyle(badge.ink)
+                .padding(.horizontal, Spacing.xs)
+                .padding(.vertical, Spacing.xxs)
+                .background(
+                    RoundedRectangle(cornerRadius: CornerRadius.control)
+                        .fill(badge.fill)
+                )
+        }
+        .padding(.leading, CGFloat(depth) * Spacing.lg)
+    }
+
+    private func childBadge(_ child: RoadmapTask) -> (label: String, ink: Color, fill: Color) {
+        if let pr = child.pr {
+            let number = pr.publication?.github.map { "#\($0.number) " } ?? ""
+            if pr.phase == .merged {
+                return ("\(number)merged", palette.successTone.ink, palette.successTone.fill)
+            }
+            if child.lifecycle == .moving {
+                return ("\(number)open, running", palette.workingTone.ink, palette.workingTone.fill)
+            }
+            return ("\(number)open", palette.warningTone.ink, palette.warningTone.fill)
+        }
+        if child.lifecycle == .moving {
+            return ("running", palette.workingTone.ink, palette.workingTone.fill)
+        }
+        return (child.lifecycle.rawValue, palette.textSecondary, palette.surfaceMuted)
+    }
+
+    private func optionRow(_ choice: TaskChildPolicy) -> some View {
+        let selected = policy == choice
+        let title = choice == .rehome
+            ? TaskCompleteConfirmation.moveTitle(to: destination)
+            : TaskCompleteConfirmation.settleTitle(allMerged: allMerged)
+        let detail = choice == .rehome
+            ? TaskCompleteConfirmation.moveDetail(to: destination)
+            : TaskCompleteConfirmation.settleDetail(descendants: flatDescendants)
+        return Button {
+            policy = choice
+        } label: {
+            HStack(alignment: .top, spacing: Spacing.sm) {
+                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                    .font(Typography.text)
+                    .foregroundStyle(selected ? palette.success : palette.textTertiary)
+                    .padding(.top, Spacing.xxs)
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(title)
+                        .font(Typography.textStrong)
+                        .foregroundStyle(palette.text)
+                    Text(detail)
+                        .font(Typography.meta)
+                        .foregroundStyle(palette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(Spacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: CornerRadius.row)
+                    .fill(selected ? palette.surfaceMuted : palette.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: CornerRadius.row)
+                    .strokeBorder(selected ? palette.borderStrong : palette.border, lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: CornerRadius.row))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("task-complete-\(choice.rawValue)")
     }
 }
 

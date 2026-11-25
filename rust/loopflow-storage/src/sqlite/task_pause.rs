@@ -239,7 +239,7 @@ mod tests {
             refusal.ends_with(&run_refusal(&task.identifier)),
             "{refusal}"
         );
-        store.reopen_task(&id, None).unwrap();
+        store.reopen_task(&id, None, false).unwrap();
         assert!(store.task_pause(&id).unwrap().is_none());
 
         pause();
@@ -248,7 +248,7 @@ mod tests {
         assert_eq!(store.task_state(&id).unwrap(), TaskState::Done);
         assert!(store.task_pause(&id).unwrap().is_none());
 
-        store.reopen_task(&id, None).unwrap();
+        store.reopen_task(&id, None, false).unwrap();
         pause();
         store
             .abandon(&WorkRef::Task(id.clone()), "superseded")

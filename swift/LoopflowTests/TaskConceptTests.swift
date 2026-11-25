@@ -88,7 +88,7 @@ struct TaskConceptTests {
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         let key = WorkWorkspaceKey(repository: row.task.repositoryId, kind: .task, id: row.id)
         let member = WorkViewPlan.Content(work: key, title: row.task.name, states: [.open, .paused, .working],
-                                          identifier: row.task.identifier, workingGroup: .paused, graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
+                                          identifier: row.task.identifier, workingGroup: .paused, graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [], openChildren: nil)
         var backlog = member
         backlog.states = [.backlog, .paused]
         backlog.workingGroup = nil

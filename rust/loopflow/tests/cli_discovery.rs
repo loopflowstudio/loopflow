@@ -1355,6 +1355,12 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         [],
     )
     .unwrap();
+    // Backlog has one open child and one done one: a phone asks about the open one.
+    conn.execute(
+        "UPDATE tasks SET parent_task_id='task_33333333333333333333333333333333' WHERE issue_identifier IN ('FIX-1','FIX-4')",
+        [],
+    )
+    .unwrap();
     let counts = || -> (i64, i64, i64) {
         conn.query_row("SELECT (SELECT count(*) FROM agent_sessions), (SELECT count(*) FROM task_ownership), (SELECT count(*) FROM processes)", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap()
     };
@@ -1384,6 +1390,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     assert_eq!(plan.contents[0].title, "Backlog");
     assert!(plan.contents[0].primary_session.is_none());
     assert!(plan.contents[0].argv.is_none());
+    assert_eq!(plan.contents[0].open_children, Some(1));
     assert_eq!(counts(), before);
     let missing = invoke(&["desktop", "view", "show", "query:missing"]);
     assert_eq!(

@@ -1415,7 +1415,7 @@ fn end_is_refused_while_a_published_pr_is_unmerged() {
     });
     runtime.block_on(task.store.update_task_pr(&pr)).unwrap();
 
-    let message = task_complete(repo.path(), "INF-123", Some("done"))
+    let message = task_complete(repo.path(), "INF-123", Some("done"), None)
         .expect_err("an unmerged published PR must block completion")
         .to_string();
     assert!(

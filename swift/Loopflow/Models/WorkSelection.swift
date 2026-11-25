@@ -184,10 +184,13 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
         public let location: Location?
         public let argv: [String]?
         public let unavailable: [String]
+        /// How many direct children of a Task are open; nil for anything but a Task.
+        public let openChildren: Int?
         enum CodingKeys: String, CodingKey {
             case work, title, states, identifier, location, argv, unavailable
             case workingGroup = "working_group"
             case graphStep = "graph_step", primarySession = "primary_session"
+            case openChildren = "open_children"
         }
     }
     public let dashboardID: String?
@@ -234,7 +237,8 @@ extension WorkViewPlan.Content {
                   primarySession: try c.decode(String?.self, forKey: .primarySession),
                   location: try c.decode(WorkViewPlan.Location?.self, forKey: .location),
                   argv: try c.decode([String]?.self, forKey: .argv),
-                  unavailable: try c.decode([String].self, forKey: .unavailable))
+                  unavailable: try c.decode([String].self, forKey: .unavailable),
+                  openChildren: try c.decode(Int?.self, forKey: .openChildren))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -249,6 +253,7 @@ extension WorkViewPlan.Content {
         try c.encode(location, forKey: .location)
         try c.encode(argv, forKey: .argv)
         try c.encode(unavailable, forKey: .unavailable)
+        try c.encode(openChildren, forKey: .openChildren)
     }
 }
 

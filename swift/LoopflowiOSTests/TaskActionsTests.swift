@@ -99,7 +99,7 @@ final class TaskActionsTests: XCTestCase {
             return nil
         }
         changes.make(.complete(task: rawRow.task.identifier), subject: rawRow.task.identifier, verb: "completed",
-                     write: .taskComplete(directory: rawRow.task.repo, issue: rawRow.task.identifier),
+                     write: .taskComplete(directory: rawRow.task.repo, issue: rawRow.task.identifier, children: nil),
                      notices: NoticeCenter(), show: nil)
         let patched = changes.apply(to: [rawRow], readAt: open.readAt).first ?? rawRow
         let bar = try TaskWorkflowControls(task: patched, actions: open.actions(for: patched), pending: nil,

@@ -1059,7 +1059,7 @@ impl SqliteStore {
                 )?;
             }
             let mut comments =
-                tx.prepare("SELECT id FROM task_comments WHERE task_id=?1 ORDER BY created_at,id")?;
+                tx.prepare_cached("SELECT id FROM task_comments WHERE task_id=?1 ORDER BY created_at,id")?;
             let ids = comments
                 .query_map([task.as_str()], |row| row.get::<_, String>(0))?
                 .collect::<Result<Vec<_>, _>>()?;

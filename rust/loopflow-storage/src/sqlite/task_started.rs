@@ -62,7 +62,7 @@ pub(super) fn published_in(
     conn: &rusqlite::Connection,
     tasks: &[TaskId],
 ) -> StoreResult<HashSet<TaskId>> {
-    let mut statement = conn.prepare(
+    let mut statement = conn.prepare_cached(
         "SELECT DISTINCT task_id FROM task_prs WHERE historical=0
             AND publication_requested_at IS NOT NULL
             AND task_id IN (SELECT value FROM json_each(?1))",

@@ -77,7 +77,7 @@ impl SqliteStore {
     pub fn saved_machines(&self) -> StoreResult<Vec<SavedMachine>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query =
-            conn.prepare("SELECT id,is_local,created_at,observed_at FROM machines ORDER BY id")?;
+            conn.prepare_cached("SELECT id,is_local,created_at,observed_at FROM machines ORDER BY id")?;
         let rows = query
             .query_map([], |row| {
                 Ok(SavedMachine {

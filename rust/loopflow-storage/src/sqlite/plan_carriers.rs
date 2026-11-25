@@ -379,7 +379,7 @@ impl SqliteStore {
     ) -> StoreResult<PlanPage> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
-        let mut query = snapshot.prepare(
+        let mut query = snapshot.prepare_cached(
             "SELECT seq,owner_table,owner_id FROM plan_changes WHERE repo=?1 AND seq>?2 ORDER BY seq",
         )?;
         let mut rows = query.query(params![repo, since])?;

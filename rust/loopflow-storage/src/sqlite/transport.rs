@@ -58,7 +58,7 @@ impl SqliteStore {
     /// Terminals whose child has not been recorded as ended, with their holder's build.
     pub fn running_terminals(&self) -> StoreResult<Vec<(TerminalId, String)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
+        let mut query = conn.prepare_cached(
             "SELECT id,holder_build FROM held_terminals WHERE ended_at IS NULL ORDER BY id",
         )?;
         let rows = query

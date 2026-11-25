@@ -191,7 +191,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
         let mut query =
-            snapshot.prepare("SELECT id,repo FROM repository_plans WHERE selected=1")?;
+            snapshot.prepare_cached("SELECT id,repo FROM repository_plans WHERE selected=1")?;
         let mut out = query
             .query_map([], |row| {
                 Ok(ScopeAddress {
@@ -204,7 +204,7 @@ impl SqliteStore {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         let mut query =
-            snapshot.prepare("SELECT id,repo,slug FROM wave_addresses WHERE retired_at IS NULL")?;
+            snapshot.prepare_cached("SELECT id,repo,slug FROM wave_addresses WHERE retired_at IS NULL")?;
         for row in query.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,

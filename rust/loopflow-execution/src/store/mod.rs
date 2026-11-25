@@ -534,14 +534,12 @@ pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {
     })
 }
 
-/// Open for reading only. The ordinary open runs first so an incompatible
-/// schema is reported the same way; the returned connection cannot write, so a
-/// long-lived reader never commits and never wakes itself.
-pub(crate) async fn open_read_only_store(cfg: &StorageConfig) -> StoreResult<Store> {
+/// Open for reading only, borrowing a validated read-only connection from the
+/// process pool without opening a separate write connection.
+pub(crate) fn open_read_only_store(cfg: &StorageConfig) -> StoreResult<Store> {
     let StorageConfig::Sqlite { path } = cfg;
-    drop(crate::store::open_sqlite(path)?);
     Ok(Store {
-        sqlite: sqlite::SqliteStore::open_read_only(path, crate::store::token_key::encryption_key)?,
+        sqlite: crate::store::opening::open_read_only_validated(path)?,
     })
 }
 

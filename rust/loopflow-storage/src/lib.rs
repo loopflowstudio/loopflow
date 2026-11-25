@@ -23,6 +23,7 @@ pub mod migration_schema;
 pub mod people;
 pub mod planning;
 pub mod planning_sync;
+pub(crate) mod pool;
 pub mod pr_landing;
 pub mod process;
 pub mod profile;

@@ -122,7 +122,7 @@ pub fn hosts(
     task: &TaskId,
 ) -> StoreResult<Vec<(TerminalId, Option<LfProcessId>)>> {
     let conn = store.conn.lock().expect("store mutex poisoned");
-    let mut query = conn.prepare(
+    let mut query = conn.prepare_cached(
         "SELECT terminal_id,launcher_lf_process_id FROM desktop_shells
          WHERE task_id=?1 AND terminal_id IS NOT NULL",
     )?;

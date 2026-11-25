@@ -26,7 +26,7 @@ impl SqliteStore {
         )?;
         if removed {
             let ids = {
-                let mut q=tx.prepare("SELECT id FROM tasks WHERE external_issue_id=?1 AND planning_deleted_at IS NULL")?;
+                let mut q=tx.prepare_cached("SELECT id FROM tasks WHERE external_issue_id=?1 AND planning_deleted_at IS NULL")?;
                 let rows = q.query_map([issue_id], |r| r.get::<_, String>(0))?;
                 rows.collect::<Result<Vec<_>, _>>()?
             };
@@ -40,7 +40,7 @@ impl SqliteStore {
                 )?;
             }
         }
-        let mut query = tx.prepare(
+        let mut query = tx.prepare_cached(
             "SELECT repo,revision FROM tracker_items WHERE tracker IN ('linear','asana') AND id=?1",
         )?;
         let rows = query
@@ -86,7 +86,7 @@ impl SqliteStore {
         selector: &str,
     ) -> StoreResult<crate::LinearIssueState> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
+        let mut query = conn.prepare_cached(
             "SELECT i.id,i.revision,i.observed_at,
              p.team_ids,i.team_id,
              i.needs_refresh OR COALESCE(p.archived,0)
@@ -186,7 +186,7 @@ impl SqliteStore {
             // A malformed observation belongs to this Wave's acquisition status.
             // Read the whole Wave before adding claims so readable siblings survive.
             let observations = (|| -> StoreResult<_> {
-                let mut query = conn.prepare(
+                let mut query = conn.prepare_cached(
                     "SELECT p.id,p.team_ids
                      FROM projects l JOIN tracker_projects p ON p.id=l.external_project_id
                      WHERE l.wave_id=?1 AND p.repo=?2 AND p.tracker=?3 AND p.archived=0",
@@ -200,7 +200,7 @@ impl SqliteStore {
                         Ok((id, serde_json::from_str::<Vec<String>>(&teams)?))
                     })
                     .collect::<StoreResult<Vec<_>>>()?;
-                let mut query = conn.prepare(
+                let mut query = conn.prepare_cached(
                     "SELECT i.id,i.identifier,i.project_id,i.team_id
                      FROM projects l JOIN tracker_items i ON i.project_id=l.external_project_id
                      JOIN tracker_projects p ON p.id=i.project_id AND p.repo=i.repo AND p.tracker=i.tracker

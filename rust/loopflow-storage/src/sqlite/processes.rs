@@ -610,7 +610,7 @@ impl SqliteStore {
         if !crate::migration_runner::migration_is_applied(&conn, "process_rows_on_owners")? {
             return Ok(Vec::new());
         }
-        let mut query = conn.prepare(
+        let mut query = conn.prepare_cached(
             "SELECT 'Graph run',lf_process_id,pid,os_started_at,started_at FROM graph_processes
                  WHERE ended_at IS NULL AND pid IS NOT NULL
              UNION ALL SELECT 'Graph step',lf_process_id,pid,os_started_at,started_at

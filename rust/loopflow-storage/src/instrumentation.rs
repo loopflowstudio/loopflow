@@ -31,8 +31,18 @@ pub fn enable_request_tracing() {
 pub static SQL_NANOS: AtomicU64 = AtomicU64::new(0);
 
 pub fn observe_sqlite(connection: &rusqlite::Connection) {
+    attach_trace(connection, true);
+}
+
+/// Re-arm tracing on a pooled connection checked out for reuse without
+/// double-counting physical connection opens.
+pub(crate) fn rearm_sqlite(connection: &rusqlite::Connection) {
+    attach_trace(connection, false);
+}
+
+fn attach_trace(connection: &rusqlite::Connection, count_open: bool) {
     #[cfg(any(test, feature = "test-support"))]
-    if subscription::observe(connection) {
+    if subscription::observe(connection, count_open) {
         assert!(
             !ENABLED.load(Ordering::Relaxed),
             "measurement tracers must not overlap"
@@ -44,7 +54,9 @@ pub fn observe_sqlite(connection: &rusqlite::Connection) {
     }
     let mut events = TraceEventCodes::SQLITE_TRACE_STMT | TraceEventCodes::SQLITE_TRACE_ROW;
     if ENABLED.load(Ordering::Relaxed) {
-        CONNECTIONS.fetch_add(1, Ordering::Relaxed);
+        if count_open {
+            CONNECTIONS.fetch_add(1, Ordering::Relaxed);
+        }
         events |= TraceEventCodes::SQLITE_TRACE_PROFILE;
     }
     connection.trace_v2(events, Some(count_sqlite));

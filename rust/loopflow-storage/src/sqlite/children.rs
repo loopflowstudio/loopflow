@@ -529,7 +529,7 @@ impl SqliteStore {
 
     pub fn task_checkout_paths(&self) -> StoreResult<Vec<(TaskId, PathBuf)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare("SELECT task_id, worktree FROM task_checkouts")?;
+        let mut statement = conn.prepare_cached("SELECT task_id, worktree FROM task_checkouts")?;
         let rows = statement.query_map([], |row| {
             Ok((
                 TaskId::from_raw(row.get::<_, String>(0)?),
@@ -1393,7 +1393,7 @@ impl SqliteStore {
     /// events, and the attempt count only ever looks at the recent tail.
     pub fn recent_task_events(&self, task_id: &TaskId, limit: u32) -> StoreResult<Vec<TaskEvent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
+        let mut statement = conn.prepare_cached(
             "SELECT id, task_id, kind_json, created_at
              FROM task_events WHERE task_id = ?1 ORDER BY id DESC LIMIT ?2",
         )?;
@@ -1624,7 +1624,7 @@ pub(super) fn tracker_states_in(
         .filter(|task| task.tracker_id.is_some())
         .map(|task| &task.id)
         .collect();
-    let mut statement = conn.prepare(
+    let mut statement = conn.prepare_cached(
             "SELECT t.id,i.observed_at,
          COALESCE(i.needs_refresh,0) OR COALESCE(observed.archived,0)
          OR COALESCE(parent.archived,0)
@@ -1815,7 +1815,7 @@ pub(super) fn short_task_id(conn: &Connection, id: &TaskId) -> StoreResult<Optio
     // Task IDs are canonical lowercase hex, so the six-character prefix is a
     // primary-key range rather than a scan of every Task.
     let mut query =
-        conn.prepare("SELECT substr(id,6) FROM tasks WHERE id!=?1 AND id>=?2 AND id<?2||'~'")?;
+        conn.prepare_cached("SELECT substr(id,6) FROM tasks WHERE id!=?1 AND id>=?2 AND id<?2||'~'")?;
     let others = query
         .query_map(params![id.as_str(), format!("task_{}", &hex[..6])], |row| {
             row.get::<_, String>(0)
@@ -1850,7 +1850,7 @@ pub(super) struct TaskIdentifiers {
 impl TaskIdentifiers {
     pub(super) fn read(conn: &Connection) -> StoreResult<Self> {
         let mut statement =
-            conn.prepare("SELECT lower(substr(id,6)),issue_identifier FROM tasks")?;
+            conn.prepare_cached("SELECT lower(substr(id,6)),issue_identifier FROM tasks")?;
         let rows = statement
             .query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -2128,7 +2128,7 @@ fn task_candidates_in(
     repository: Option<&RepositoryId>,
 ) -> StoreResult<Vec<(TaskId, String, Option<String>)>> {
     let selector = loopflow_model::id::TaskSelector::parse(issue);
-    let mut statement = conn.prepare(
+    let mut statement = conn.prepare_cached(
         "SELECT t.id, COALESCE(t.issue_title, t.issue_identifier, t.id), w.repo FROM tasks t
          JOIN repository_plans w ON w.id=t.repository_id
          WHERE (?5 IS NULL OR t.repository_id=?5)
@@ -2549,7 +2549,7 @@ pub(super) fn task_events_after_in(
     task_id: &TaskId,
     cursor: i64,
 ) -> StoreResult<Vec<TaskEvent>> {
-    let mut statement = conn.prepare(
+    let mut statement = conn.prepare_cached(
         "SELECT id, task_id, kind_json, created_at
          FROM task_events WHERE task_id=?1 AND id>?2 ORDER BY id",
     )?;

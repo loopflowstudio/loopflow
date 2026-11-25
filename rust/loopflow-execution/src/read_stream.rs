@@ -474,7 +474,6 @@ struct Reader<A, F> {
     runtime: Runtime,
     observations: Arc<Cache>,
     dependencies: Dependencies,
-    store: Option<SharedStore>,
     // Why the store that exists cannot be opened; a refused store is not an empty one.
     refused: Option<String>,
     answers: Option<u64>,
@@ -528,7 +527,6 @@ where
             runtime: reader_runtime()?,
             observations: Cache::shared(),
             dependencies: Dependencies::default(),
-            store: None,
             refused: None,
             answers: None,
             force: true,
@@ -561,23 +559,25 @@ where
             }
             mailbox.closed
         };
-        if self.watch != Watch::Files && self.store.is_none() && self.database.exists() {
+        let store = if self.watch != Watch::Files && self.database.exists() {
             #[cfg(any(test, feature = "test-support"))]
             let _open = Stage::new("reader_store_open");
             let config = StorageConfig::sqlite(self.database.clone());
-            match self
-                .runtime
-                .block_on(crate::store::open_read_only_store(&config))
-            {
+            match crate::store::open_read_only_store(&config) {
                 Ok(opened) => {
-                    self.store = Some(Arc::new(opened));
                     self.refused = None;
+                    Some(Arc::new(opened))
                 }
-                Err(error) => self.refused = Some(format!("{error:#}")),
+                Err(error) => {
+                    self.refused = Some(format!("{error:#}"));
+                    None
+                }
             }
-        }
-        let revisions = self
-            .store
+        } else {
+            self.refused = None;
+            None
+        };
+        let revisions = store
             .as_ref()
             .and_then(|store| store.sqlite.revisions().ok());
         let now = Instant::now();
@@ -606,13 +606,11 @@ where
                 settle(&self.shared);
             }
             // The first revision query pins the snapshot the whole reading uses.
-            let store = self.store.clone();
             let snapshot = store
                 .as_ref()
                 .map(|store| store.sqlite.read_snapshot())
                 .transpose()?;
-            let read_at = self
-                .store
+            let read_at = store
                 .as_ref()
                 .map(|store| store.sqlite.revision_map())
                 .transpose()?;
@@ -622,12 +620,11 @@ where
                 Some(reason) => Err(anyhow::anyhow!("Loopflow store cannot be read: {reason}")),
                 None => self
                     .runtime
-                    .block_on((self.read)(self.store.clone(), self.args.clone())),
+                    .block_on((self.read)(store.clone(), self.args.clone())),
             });
             self.dependencies = dependencies;
             let reading = reading.and_then(|body| Ok(serde_json::to_value(body)?));
-            if let (Some(observer), Some(store), Ok(body)) =
-                (&mut self.observer, &self.store, &reading)
+            if let (Some(observer), Some(store), Ok(body)) = (&mut self.observer, &store, &reading)
             {
                 update.events = observer.read(&store.sqlite, body)?;
             }
@@ -660,6 +657,7 @@ where
             self.read_on = Some(began);
             self.force = false;
         }
+        drop(store);
         let read_on = self.read_on.expect("a subscription reads before it waits");
         let rest_end = read_on + self.cost.saturating_mul(BUSY_SHARE);
         let wake = if rest_end > now {

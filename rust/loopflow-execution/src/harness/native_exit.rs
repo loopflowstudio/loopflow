@@ -396,7 +396,7 @@ mod tests {
                     attachment,
                     provider: "claude".into(),
                     client: false,
-                        cwd: home.into(),
+                    cwd: home.into(),
                     capture: Some(capture.hand_off()),
 
                     diagnostics: (home.join("absent.log"), 0),

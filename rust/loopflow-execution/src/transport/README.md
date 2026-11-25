@@ -289,11 +289,11 @@ requests are checked against. For direct interactive launches (`lf -a agy`,
 `Start.session` is `None`. Before starting the provider, a chat launcher
 sends `exit_record` (and a delegated Skill sends `bind_session`) over
 `held.sock` with the created Session ID; the server binds that Session in
-`Registry::live` and updates `meta.json` (and keeps an `exit_record` in
-`exit-record.json` until settlement, which server restarts also fall back to
-when `meta.session` is absent). A Skill keeps its wait for checkpoint and
-completion. Its `bind_session` carries the same capture and attachment in
-`skill-exit.json` in case retirement ends the launcher. The native client's announcement stays in
+`Registry::live` and updates `meta.json`. An `exit_record` stays in
+`exit-record.json` until settlement; a Skill keeps its wait for checkpoint and
+completion, and its `bind_session` keeps the same capture and attachment in
+`skill-exit.json` in case retirement ends the launcher. Server restarts fall
+back to either kept record when `meta.session` is absent. The native client's announcement stays in
 `native-client.json` until that client ends. A launcher that execs its
 provider never announces it again, so a server that takes the terminal up
 reads it there; without it a Desktop pane would stay paused waiting for

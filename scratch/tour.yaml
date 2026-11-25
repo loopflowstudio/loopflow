@@ -1,4 +1,4 @@
-at: 583685d7cc62247840b9b0051db935d23ee4c688
+at: 3bef9525faa0ac2607193ad2329dcbdebf4df7dc
 first:
   - path: docs/sessions.md
     why: Share a draft, detach, and read the ending
@@ -8,6 +8,8 @@ first:
     why: Each agent generation can carry its retirement reason
   - path: rust/loopflow-storage/src/sqlite/processes.rs
     why: Record the first ending and clear it on resume
+  - path: rust/loopflow-execution/src/transport/wire.rs
+    why: Requests for standalone retirement and waiting Skill handoff
   - path: rust/loopflow/src/bin/lf.rs
     why: Direct launches choose their terminal
   - path: rust/loopflow-execution/src/transport.rs

@@ -617,18 +617,20 @@ fn session_ending(
         .filter(|_| conversation || !task_primary);
     // One that never had an agent has no liveness to read: it is not Closed.
     let never_ran = session.agent_process_id.is_none() && ended.is_none();
-    let ending = match (end, retirement) {
-        (Some(end), Some(reason)) => format!("closed {} ({reason})", clock(end.at)),
-        (Some(end), None) => format!(
-            "died {} ({})",
-            clock(end.at),
-            end.exit_code
-                .map_or("no exit recorded".to_string(), |code| format!(
-                    "exit {code}"
-                ))
-        ),
-        (None, _) if never_ran => "not started".to_string(),
-        (None, _) => "closed".to_string(),
+    let ending = match end {
+        Some(end) => match end.reason.as_deref() {
+            Some(reason) => format!("closed {} ({reason})", clock(end.at)),
+            None => format!(
+                "died {} ({})",
+                clock(end.at),
+                end.exit_code
+                    .map_or("no exit recorded".to_string(), |code| format!(
+                        "exit {code}"
+                    ))
+            ),
+        },
+        None if never_ran => "not started".to_string(),
+        None => "closed".to_string(),
     };
     if ended.is_none() && failure.is_none() && !(never_ran && conversation) {
         // Nothing says why it is down: a recorded agent this Machine cannot

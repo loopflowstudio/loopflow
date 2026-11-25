@@ -419,7 +419,9 @@ fn kept_exit_record(place: &Place, terminal: &TerminalId) -> crate::process::Ses
         diagnostics: ("/absent.log".into(), 0),
     };
     std::fs::write(
-        super::exit_record_file(place, terminal),
+        place
+            .terminal(terminal.as_str())
+            .join(super::super::hosted::EXIT_RECORD),
         serde_json::to_vec(&record).unwrap(),
     )
     .unwrap();

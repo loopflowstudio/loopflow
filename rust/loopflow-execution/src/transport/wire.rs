@@ -244,8 +244,7 @@ pub enum Request {
     /// retirement ends them both, the host finishes the capture instead.
     BindSession {
         key: String,
-        session: String,
-        on_retirement: Option<Box<crate::harness::native_exit::NativeExit>>,
+        record: Box<crate::harness::native_exit::NativeExit>,
     },
     /// Transfer the direct child's exit recording to its host before exec.
     ExitRecord {

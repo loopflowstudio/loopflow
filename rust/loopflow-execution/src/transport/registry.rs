@@ -68,10 +68,8 @@ impl Meta {
     fn read(place: &Place, terminal: &TerminalId) -> Option<Self> {
         let mut meta = Self::read_raw(place, terminal)?;
         if meta.session.is_none() {
-            meta.session = super::hosted::read_kept::<crate::harness::native_exit::NativeExit>(
-                &exit_record_file(place, terminal),
-            )
-            .map(|record| record.session.into());
+            meta.session = super::hosted::read_kept_exit(&place.terminal(terminal.as_str()), true)
+                .map(|record| record.session.into());
         }
         Some(meta)
     }
@@ -1091,13 +1089,6 @@ fn bind_session(live: &Live, place: &Place, terminal: &TerminalId, session: &str
     }
 }
 
-/// Where a held terminal keeps the exit record its launcher handed off.
-fn exit_record_file(place: &Place, terminal: &TerminalId) -> PathBuf {
-    place
-        .terminal(terminal.as_str())
-        .join(super::hosted::EXIT_RECORD)
-}
-
 /// Record an ended terminal, then drop its ring and its directory. The
 /// directory is the receipt: it goes only once the store has the exit, so a
 /// store outage leaves it for the next attempt. Whether it is settled.
@@ -1116,14 +1107,7 @@ fn settle(exit: &mut Unsettled) -> bool {
     let retirement =
         super::hosted::read_kept::<String>(&directory.join(super::hosted::RETIRE_REASON));
     if exit.recording.is_none() {
-        let file = directory.join(super::hosted::EXIT_RECORD);
-        let skill = directory.join(super::hosted::SKILL_EXIT);
-        let record = super::hosted::read_kept::<crate::harness::native_exit::NativeExit>(&file)
-            .or_else(|| {
-                retirement.as_ref()?;
-                super::hosted::read_kept(&skill)
-            });
-        if let Some(record) = record {
+        if let Some(record) = super::hosted::read_kept_exit(&directory, retirement.is_some()) {
             use std::os::unix::process::ExitStatusExt;
             let status = exit.code.map_or(libc::SIGKILL, |code| i32::from(code) << 8);
             crate::harness::native_exit::settle(
@@ -1131,8 +1115,8 @@ fn settle(exit: &mut Unsettled) -> bool {
                 std::process::ExitStatus::from_raw(status),
                 retirement.as_deref(),
             );
-            super::hosted::remove_kept(&file);
-            super::hosted::remove_kept(&skill);
+            super::hosted::remove_kept(&directory.join(super::hosted::EXIT_RECORD));
+            super::hosted::remove_kept(&directory.join(super::hosted::SKILL_EXIT));
         }
     }
     let code = if retirement.is_some() {

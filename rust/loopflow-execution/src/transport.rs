@@ -2568,8 +2568,7 @@ pub(crate) fn hand_exit_record(record: &NativeExit) -> Result<bool> {
     let request = if launcher_waits {
         Request::BindSession {
             key: handoff.key.clone(),
-            session: record.session.clone(),
-            on_retirement: Some(Box::new(record.clone())),
+            record: Box::new(record.clone()),
         }
     } else {
         Request::ExitRecord {

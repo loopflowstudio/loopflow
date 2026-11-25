@@ -399,18 +399,12 @@ impl Hosted {
                                 *exit_record = Some(record);
                                 viewer.reply(answers, Reply::Accepted);
                             }
-                            Request::BindSession {
-                                key,
-                                session,
-                                on_retirement,
-                            } if key == *control_key => {
-                                bind_session(&session);
-                                if let (Some(directory), Some(record)) =
-                                    (kept.as_ref(), &on_retirement)
-                                {
-                                    keep(&directory.join(SKILL_EXIT), record);
+                            Request::BindSession { key, record } if key == *control_key => {
+                                bind_session(&record.session);
+                                if let Some(directory) = kept {
+                                    keep(&directory.join(SKILL_EXIT), &record);
                                 }
-                                *skill_exit = on_retirement;
+                                *skill_exit = Some(record);
                                 viewer.reply(answers, Reply::Accepted);
                             }
                             Request::DropExitRecord { key } if key == *control_key => {
@@ -757,14 +751,16 @@ impl Hosted {
                     || (self.attached
                         && self.viewers.iter().all(|viewer| viewer.output.is_empty())))
             {
-                if self.retirement.is_some() || !child.outcome_unknown() {
-                    let reason = if self.retirement.is_some() {
-                        CloseReason::Retired
-                    } else if self.replaced {
-                        CloseReason::Replaced
-                    } else {
-                        CloseReason::Finished
-                    };
+                let close_reason = if self.retirement.is_some() {
+                    Some(CloseReason::Retired)
+                } else if child.outcome_unknown() {
+                    None
+                } else if self.replaced {
+                    Some(CloseReason::Replaced)
+                } else {
+                    Some(CloseReason::Finished)
+                };
+                if let Some(reason) = close_reason {
                     close_viewers(&mut self.viewers, reason);
                 }
                 release_viewer_hold(&self.id, self.observed_hold);
@@ -778,52 +774,56 @@ impl Hosted {
             self.observed_hold = hold;
             self.viewing.send(hold);
         }
-        // Decide after all attaches and departures in this pass. The store's
-        // observation can lag either, including a brief visit between sweeps.
-        let grace_elapsed = match hold {
-            Some(ViewerHold::Viewed(_)) => false,
-            Some(ViewerHold::Absent(at)) => now >= at + loopflow_storage::sqlite::WORKSPACE_GRACE,
-            None => true,
-        };
-        let notice = closes
-            .iter()
-            .rev()
-            .find_map(|(_, _, text)| text.as_deref().map(|text| (text, text)))
-            .or_else(|| {
-                (grace_elapsed && !closes.is_empty()).then_some((
-                    "15 minutes without a viewer",
-                    "Session closed after 15 minutes without a viewer",
-                ))
-            })
-            .filter(|_| !child.drained() && self.retirement.is_none());
-        let retiring = notice.is_some();
-        if let Some((reason, text)) = notice {
-            if let Some(directory) = &self.kept {
-                keep(&directory.join(RETIRE_REASON), &reason);
+        if !closes.is_empty() {
+            // Decide after all attaches and departures in this pass. The store's
+            // observation can lag either, including a brief visit between sweeps.
+            let grace_elapsed = match hold {
+                Some(ViewerHold::Viewed(_)) => false,
+                Some(ViewerHold::Absent(at)) => {
+                    now >= at + loopflow_storage::sqlite::WORKSPACE_GRACE
+                }
+                None => true,
+            };
+            let notice = closes
+                .iter()
+                .rev()
+                .find_map(|(_, _, text)| text.as_deref().map(|text| (text, text)))
+                .or_else(|| {
+                    grace_elapsed.then_some((
+                        "15 minutes without a viewer",
+                        "Session closed after 15 minutes without a viewer",
+                    ))
+                })
+                .filter(|_| !child.drained() && self.retirement.is_none());
+            let retiring = notice.is_some();
+            if let Some((reason, text)) = notice {
+                if let Some(directory) = &self.kept {
+                    keep(&directory.join(RETIRE_REASON), &reason);
+                }
+                self.retirement = Some(reason.to_owned());
+                self.deliver(
+                    1,
+                    format!("\r\n{text}\r\n").as_bytes(),
+                    answering,
+                    Span::Aside { through: None },
+                );
+                snapshot::leave(&self.id, &self.output);
             }
-            self.retirement = Some(reason.to_owned());
-            self.deliver(
-                1,
-                format!("\r\n{text}\r\n").as_bytes(),
-                answering,
-                Span::Aside { through: None },
-            );
-            snapshot::leave(&self.id, &self.output);
-        }
-        for (requester, answers, _) in closes {
-            if let Some(viewer) = self
-                .viewers
-                .iter_mut()
-                .find(|viewer| viewer.id == requester)
-            {
-                viewer.reply(answers, Reply::Accepted);
-                let _ = viewer.flush();
+            for (requester, answers, _) in closes {
+                if let Some(viewer) = self
+                    .viewers
+                    .iter_mut()
+                    .find(|viewer| viewer.id == requester)
+                {
+                    viewer.reply(answers, Reply::Accepted);
+                    let _ = viewer.flush();
+                }
             }
-        }
-        if retiring {
-            // A held terminal has no process to signal: the notice ends it.
-            release_viewer_hold(&self.id, self.observed_hold);
-            child.retire();
+            if retiring {
+                // A held terminal has no process to signal: the notice ends it.
+                release_viewer_hold(&self.id, self.observed_hold);
+                child.retire();
+            }
         }
         Ok(Pass::Continue)
     }
@@ -986,6 +986,18 @@ pub(super) fn read_kept<T: serde::de::DeserializeOwned>(file: &std::path::Path) 
             |error| tracing::warn!(%error, file = %file.display(), "kept handoff unreadable"),
         )
         .ok()
+}
+
+/// The terminal's kept exit record, including a Skill's fallback when requested.
+pub(super) fn read_kept_exit(
+    directory: &std::path::Path,
+    include_skill: bool,
+) -> Option<NativeExit> {
+    read_kept(&directory.join(EXIT_RECORD)).or_else(|| {
+        include_skill
+            .then(|| read_kept(&directory.join(SKILL_EXIT)))
+            .flatten()
+    })
 }
 
 /// What cannot be kept is still used by this server; only a server that

@@ -52,9 +52,8 @@ works, write the working version into that surface's file, replacing what was
 wrong. A surface with no file gets one, whose first line says when to read it:
 `Read when the change touches …`. Commit the notes with the change.
 
-Show the run in `scratch/qa.html`: each scenario, what you did, what you saw
-with screenshots or transcripts, and what you fixed. Present the finished page
-with `lf desktop files scratch/qa.html`. Finish with what works
-now, what you couldn't reach and why, and what is still wrong, worst first.
-When the repository has a visual language (a design system, the app, its docs,
-internal tools), borrow its palette, type and layout.
+Show the run in `scratch/qa.page.html` following `lf help page`: each scenario,
+what you did, what you saw with screenshots or real transcripts, and what you
+fixed. Finish with what works now, what you couldn't reach and why, and what is
+still wrong, worst first. Compile with `lf page build scratch/qa.page.html` and
+present with `lf page open scratch/qa.html`.

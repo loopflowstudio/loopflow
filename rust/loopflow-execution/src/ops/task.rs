@@ -1083,16 +1083,15 @@ async fn try_start_task_run(
         {
             auto::turn_on(store, task)?;
             if let Some(graph_process) = auto::running_graph(store, task, &carrier.id).await? {
-                let at = row.graph.step_name_of(cursor);
+                let place = row.graph.place_of(cursor);
+                let at = place.as_ref().map(|place| row.graph.step_name(place));
                 return Ok(Some(TaskRunStart::Live {
                     run: format!(
                         "{} at {}",
                         row.graph.name,
                         at.as_deref().unwrap_or(&row.step)
                     ),
-                    merges: row
-                        .graph
-                        .place_of(cursor)
+                    merges: place
                         .is_some_and(|place| row.graph.reaches_landing(&place, true, merges)),
                     graph_process,
                 }));
@@ -1146,17 +1145,12 @@ async fn try_start_task_run(
     }
     // Auto on runs through the interactive steps, standing in at each;
     // off, no run merges.
-    let (on, off) = match store
+    let auto = store
         .sqlite
         .task_auto(&task.id)
         .map_err(task_error)?
-        .map(|mark| mark.state)
-    {
-        Some(loopflow_storage::sqlite::AutoState::On) => (true, false),
-        Some(loopflow_storage::sqlite::AutoState::Off) => (false, true),
-        None => (false, false),
-    };
-    let through = mode.runs_through() || on;
+        .map(|mark| mark.state);
+    let through = mode.runs_through() || auto == Some(loopflow_storage::sqlite::AutoState::On);
     let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
         .map_err(task_error)?
         .ok_or_else(|| task_error(format!("Task {issue} lost its graph while starting")))?;
@@ -1184,7 +1178,8 @@ async fn try_start_task_run(
             .map_err(task_error)?;
         return Ok(Some(TaskRunStart::Waiting(step.to_owned())));
     }
-    let merges = !off && graph.reaches_landing(&start.place, through, merges);
+    let merges = auto != Some(loopflow_storage::sqlite::AutoState::Off)
+        && graph.reaches_landing(&start.place, through, merges);
     let label = if start.place == crate::task_graph::Place::default() {
         format!("{} from start", graph.name)
     } else {

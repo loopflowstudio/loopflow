@@ -103,6 +103,21 @@ them, stop the server by PID first; the start comes on `lf server run`.
 - A quit chat outside any Task is missing from `lf session list --all`; take
   its ID from agy's quit line ("Continue with: lf resume <id>").
 
+# Reopening with waiting steers
+
+Run a Task whose Graph stops at once (`- cmd: help task`, `- interactive:
+demo`) with `-a agy`; its conversation's first turn reports status. Quit it
+from a view (Esc, ctrl+c twice), then save direction that names no
+conversation: `lf --repo . steer '<ask for one word>'`. Nothing starts and
+`lf session steers <session>` shows it pending. `lf resume --task <id>` then
+starts `agy --conversation <id> … -i Read the waiting steers and Task updates
+for this Session.`; the screen shows that line as a turn and the one-word
+answer before anything is typed, and the steer reads `delivered`. A second
+reopen with nothing waiting has no `-i`. `lf comment <task>` names the Task,
+so the server starts the closed conversation itself with the same line.
+While agy is open and idle, a repository steer stays pending until the next
+typed turn (LOO-1099).
+
 # Failures on demand
 
 - Unserved model: `lf set --global agents 'agy:no-such-model-xyz,agy'`,

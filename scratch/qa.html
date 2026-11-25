@@ -1,0 +1,65 @@
+<!doctype html><meta charset="utf-8"><title>LOO-1098 QA</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:960px;margin:2em auto;padding:0 1em;color:#222}pre{background:#111;color:#ddd;padding:1em;overflow-x:auto;font:12px/1.35 Menlo,monospace;border-radius:6px}h2{margin-top:2em}td,th{padding:.3em .6em;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}.ok{color:#176b2c;font-weight:600}.gap{color:#9a5b00;font-weight:600}</style>
+<h1>LOO-1098 QA: reopening Antigravity with waiting steers</h1>
+<p>Branch <code>lf</code> at 3eb88d0559, real <code>agy</code> 1.5.16 (Gemini 4 Neon), private <code>LF_HOME</code> under <code>/tmp/lfq1098</code>, disposable repository with a bare origin, Graph <code>- cmd: help task</code> → <code>- interactive: demo</code>. Each view is <code>lf resume --task ae3987</code> under a Python PTY driver, rendered with pyte.</p>
+<table><tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>1. <code>lf task run ae3987 -a agy</code>: Task conversation opens on agy and reports status</td><td class="ok">works</td></tr>
+<tr><td>2. Quit agy, <code>lf --repo . steer</code> while closed: nothing starts, steer pending</td><td class="ok">works</td></tr>
+<tr><td>3. <code>lf resume --task</code>, nothing typed: the steer runs as a turn and agy answers VIOLET; receipt <code>delivered</code></td><td class="ok">works</td></tr>
+<tr><td>4. Quit, reopen with nothing waiting: no <code>-i</code>, no new turn</td><td class="ok">works</td></tr>
+<tr><td>5. Quit, <code>lf comment ae3987</code>: the server starts agy with the same prompt; answers AMBER, delivered once</td><td class="ok">works</td></tr>
+<tr><td>6. agy open and idle, repository steer: stays pending; arrives with the next typed turn ("Hello — TEAL.")</td><td class="gap">documented gap (LOO-1099)</td></tr>
+<tr><td>7. Nested launch from a shell holding <code>ANTIGRAVITY_*</code>: the stand-in <code>claude</code> sees none of them</td><td class="ok">works</td></tr>
+<tr><td>8. Claude, Codex, OpenCode and Pi reopen paths</td><td>read the code: the same branches as before (<code>NamedSteers</code>/<code>InitialPrompt</code>); no live run</td></tr>
+</table>
+<h2>2–3. Steer saved while closed, then reopen</h2>
+<pre>$ lf --repo . steer 'If you read this, answer with exactly the one word VIOLET and nothing else.'
+Saved a4febd59-79f5-446d-aa79-13c87dd128bb
+$ lf session steers af29d991…   →  1 pending   (holder has no agy child)
+$ lf resume --task ae3987        →  agy --conversation 767128f6-… -i Read the waiting steers and Task updates for this Session.</pre>
+<pre>
+────────────────────────────────────────────────────────────
+&gt; Read the waiting steers and Task updates for this Session.
+○ Thought for 5.2s (Initial assessment: The steer instructs a one-word response (&quot;VIOLET&quot;). The task title confirms...)
+● Explored 1 file (20261124-210041-oPFbD7-steer.md) (ctrl+o to expand)
+  VIOLET
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+&gt; Auto mode: edits &amp; safe commands auto-approved (shift+tab to cycle)
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+? for shortcuts                                                                              auto · Gemini 4 Neon · high
+
+</pre>
+<p>Afterwards <code>lf session steers</code>: <code>0 pending</code>, <code>a4febd59 delivered</code>. agy's <code>transcript_full.jsonl</code> holds a second <code>USER_INPUT</code> (the opening line) followed by the hook's <code>SYSTEM_MESSAGE</code> with the steer.</p>
+<h2>5. Task comment while closed</h2>
+<pre>$ lf comment ae3987 'Comment probe: when you read this, reply with exactly the word AMBER.'
+Saved cad8fdcb-…; the Machine server starts af29d991… to read it</pre>
+<pre>
+  VIOLET
+────────────────────────────────────────────────────────────
+&gt; Read the waiting steers and Task updates for this Session.
+  AMBER
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+&gt; Auto mode: edits &amp; safe commands auto-approved (shift+tab to cycle)
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+? for shortcuts                                                                              auto · Gemini 4 Neon · high
+
+</pre>
+<h2>6. Open and idle (the LOO-1099 gap)</h2>
+<pre>
+  AMBER
+────────────────────────────────────────────────────────────
+&gt; Say hello.
+  Hello — TEAL.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+&gt;
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+? for shortcuts                                                                              auto · Gemini 4 Neon · high
+
+</pre>
+<h2>Fixed</h2><p>Nothing broke. One note added: <code>.lf/qa/antigravity.md</code> “Reopening with waiting steers”.</p>
+<h2>Still open, worst first</h2>
+<ol>
+<li>An open, idle agy hears a repository steer only when someone types (LOO-1099). Shown in scenario 6.</li>
+<li>The reopen turn shows lf's line “Read the waiting steers and Task updates for this Session.” as if the person had typed it. It's readable, but it is the first thing on screen after reopening.</li>
+<li>Not run live: the reopen paths on Claude, Codex, OpenCode and Pi (unchanged code; covered by <code>server::wake::tests::reopened_work_sessions_take_waiting_steers</code>), a returning Machine with steers saved by the released <code>lf</code>, and a second viewer (LOO-1097).</li>
+</ol>

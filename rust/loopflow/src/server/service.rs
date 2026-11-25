@@ -1866,6 +1866,9 @@ async fn served(
 
         Operation::Read(query)
         | Operation::Measured(super::wire::MeasuredOperation::Read { query }) => {
+            // The blocking worker can outlive this request after a cancel or disconnect.
+            let request = Arc::new(());
+            let requester = Arc::downgrade(&request);
             tokio::task::spawn_blocking(move || {
                 let _held = reservation;
                 let query = origin.place(query)?;
@@ -1873,10 +1876,13 @@ async fn served(
                     loopflow_execution::journal::request::isolate(|| {
                         loopflow_execution::observe::Cache::shared()
                             .capture(|| match origin {
-                                Origin::Local(peers) => query.read_with(|machine, sender, read| {
-                                    peers.query(machine, sender, read)
-                                }),
-                                Origin::Machine(_) => query.read_here(),
+                                Origin::Local(peers) => query.read_with(
+                                    &|| requester.strong_count() == 0,
+                                    |machine, sender, read| peers.query(machine, sender, read),
+                                ),
+                                Origin::Machine(_) => {
+                                    query.read_here_until(&|| requester.strong_count() == 0)
+                                }
                             })
                             .0
                     })

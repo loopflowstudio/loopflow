@@ -1,4 +1,5 @@
 #if os(macOS)
+import AppKit
 import Foundation
 import Loopflow
 import SwiftTreeSitter
@@ -39,14 +40,23 @@ final class Grammar: Sendable {
         return loaded(name)
     }
 
+    func parse(_ text: String) -> MutableTree? {
+        let parser = Parser()
+        guard (try? parser.setLanguage(language)) != nil else { return nil }
+        return parser.parse(text)
+    }
+
     /// Every named piece of `text`, ordered for painting: each piece starts at
     /// or after the one before, and a piece inside another follows it, so
     /// painting in order leaves the innermost color on top. Pieces without an
     /// ink are left out, so a broad capture such as `variable` never hides a
     /// narrower one that colors.
     func highlights(of text: String) -> [Highlight] {
-        let parser = Parser()
-        guard (try? parser.setLanguage(language)) != nil, let tree = parser.parse(text) else { return [] }
+        guard let tree = parse(text) else { return [] }
+        return highlights(in: tree, text: text)
+    }
+
+    func highlights(in tree: MutableTree, text: String) -> [Highlight] {
         var found = captures(in: tree, text: text)
         if let inline, let root = tree.rootNode {
             var ranges: [TSRange] = []
@@ -243,7 +253,9 @@ struct FileHighlights: Equatable, Sendable {
     }
 
     private static func numbered(_ text: String, grammar: Grammar) -> [Int: [Grammar.Highlight]] {
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        // Split on UTF-8 LF so CRLF keeps CR inside the offsets Tree-sitter reports.
+        let lines = text.utf8.split(separator: 10, omittingEmptySubsequences: false)
+            .map { String(decoding: $0, as: UTF8.self) }
         var result: [Int: [Grammar.Highlight]] = [:]
         for (index, spans) in Grammar.Highlight.byLine(grammar.highlights(of: text), lines: lines).enumerated()
         where !spans.isEmpty {
@@ -395,6 +407,33 @@ extension AttributedString {
             default: self[range].foregroundColor = inks.color(ink)
             }
         }
+    }
+}
+
+extension NSTextStorage {
+    /// Paint whole-file highlights onto text storage for `theme` and `font`.
+    @MainActor func paint(_ highlights: [Grammar.Highlight], theme: ThemeDefinition, font: NSFont) {
+        guard length > 0 else { return }
+        let inks = SyntaxInks.of(theme)
+        let whole = NSRange(location: 0, length: length)
+        let bold = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+        let italic = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+        beginEditing()
+        addAttribute(.foregroundColor, value: NSColor(theme.palette.text), range: whole)
+        addAttribute(.font, value: font, range: whole)
+        for highlight in highlights where NSMaxRange(highlight.range) <= length {
+            guard let ink = highlight.ink else { continue }
+            switch ink {
+            case .emphasis: addAttribute(.font, value: italic, range: highlight.range)
+            case .strong: addAttribute(.font, value: bold, range: highlight.range)
+            default:
+                if ink == .heading { addAttribute(.font, value: bold, range: highlight.range) }
+                if let color = inks.color(ink) {
+                    addAttribute(.foregroundColor, value: NSColor(color), range: highlight.range)
+                }
+            }
+        }
+        endEditing()
     }
 }
 

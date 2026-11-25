@@ -67,7 +67,6 @@ lf open --wave product --workspace  # open every started, unfinished Task in `pr
 lf open --workspace                 # open every started, unfinished Task in this repo
 lf open --available                 # open conversations ready for your next turn
 lf diff ENG-123 --base parent --difftool  # inspect one Task's changes in your diff tool
-lf task file ENG-123 README.md --at parent  # read a file as it was before the Task
 ```
 
 `--workspace` opens an overview of started, unfinished Tasks: Desktop opens its
@@ -78,6 +77,45 @@ conversation, in a new Rex session, Herdr workspace, or cmux group). Pass
 External hosts own their own layouts: add splits, shells, and editors with
 your terminal's normal controls. Desktop remembers your per-Task pane layout on
 each Mac independently.
+
+## Search and read a Task's checkout
+
+Every checkout read runs on the Machine that owns the Task, so local and remote
+Tasks answer the same commands:
+
+```bash
+lf task find ENG-123 TaskFile                    # fuzzy-find paths across tracked, untracked, and scratch/ files
+lf task grep ENG-123 ReviewSelection             # literal content search (--whole-word for identifier references)
+lf task symbols ENG-123 reconcile                # find declarations across the checkout (--path narrows to one file)
+lf task file ENG-123 README.md --at parent       # read a file as it was before the Task
+```
+
+```text
+$ lf task grep ENG-123 ReviewSelection
+swift/LoopflowMac/ReviewDiff.swift:14:struct ReviewSelection: Equatable {
+swift/LoopflowMac/Views/ReviewStreamView.swift:82:    var selection: ReviewSelection?
+
+$ lf task symbols ENG-123 reconcile
+swift/LoopflowMac/TaskFileDocument.swift:318:func reconcile (TaskFileDocument)
+```
+
+- `lf task find <ID> [query]` returns tracked, nonignored untracked, and
+  `scratch/` paths (up to 100 ranked matches for a query, or the full inventory
+  when no query is given and the checkout fits within 2,000 paths). Add `--json`
+  for `scratch` paths, `latest_scratch_page`, and `truncated`. Use `--limit N`
+  to set how many paths a reply contains. A query searches the full inventory
+  even when the initial list was truncated.
+- `lf task grep <ID> <query>` searches the same inventory (literal by default;
+  pass `--whole-word` for whole-word references), capping at 100 hits and
+  skipping files over 1 MB. `--json` includes 1-based line numbers, UTF-8 byte
+  spans, excerpts, and `truncated`. Each occurrence has its own hit.
+  `start` is inclusive and `end` is exclusive, measured from the start of the
+  line in the file’s reported `revision`. `excerpt_start` gives the byte offset
+  of the excerpt’s first character on that line.
+- `lf task symbols <ID> <name> [--path <path>]` finds declarations (functions,
+  types, methods, and Markdown headings) with their enclosing container, path,
+  and 1-based line number. JSON returns up to 100 exact-name matches in `hits`.
+  Check `truncated` before treating a single result as unique.
 
 ## Split in the right directory
 

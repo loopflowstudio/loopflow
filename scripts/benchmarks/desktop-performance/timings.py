@@ -47,7 +47,7 @@ EXPERIENCES = [
         "Search or filter changed",
         "Matching results visible and selectable",
     ),
-    ("open_file", "Open a file", "File clicked", "Contents visible and editor accepts input"),
+    ("open_file", "Open a file", "File clicked", "File contents visible"),
     (
         "reconnect",
         "Recover a connection",
@@ -622,6 +622,7 @@ def render_html(report: dict) -> str:
             "refresh_to_typing": "Refresh → typing",
             "file_to_editor": "Open file → focused editor (two actions)",
             "file_to_visible_editor": "Open file → contents usable",
+            "file_to_visible_reader": "Open file → contents visible",
             "send_to_response_observed": "Send → response observed",
         }.get(scenario, title)
         bars = []

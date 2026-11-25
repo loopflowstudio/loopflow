@@ -1277,51 +1277,25 @@ pub(super) fn conversation_opening(url: &str) -> Result<Option<DesktopOpening>> 
         .find(|opening| opening.url == url))
 }
 
-/// Reuse the Files surface without launching Desktop or changing conversation ownership.
-pub(super) fn present_files(
-    resolution: &loopflow_execution::ops::context::ContextExplanation,
-    paths: &[&std::path::Path],
-) -> Result<bool> {
-    let mut desktop = match DesktopConnection::open() {
-        Ok(desktop) => desktop,
-        Err(error)
-            if error
-                .downcast_ref::<DesktopError>()
-                .is_some_and(|error| matches!(error, DesktopError::Unreachable(_))) =>
-        {
-            return Ok(false)
-        }
-        Err(error) => return Err(error),
+fn presentation_path(input: &str) -> Result<(&str, Option<&str>)> {
+    let Some((path, lines)) = input.rsplit_once(':') else {
+        return Ok((input, None));
     };
-    let reading: DesktopInspection = desktop.call("inspect", serde_json::json!({}))?;
-    let scope = Scope {
-        inspection: &reading,
-        resolution,
-        explicit_work: true,
-        caller: std::env::var("LF_TERMINAL_ID")
-            .ok()
-            .filter(|id| !id.is_empty()),
-    };
-    let window = scope.window(None).map_err(DesktopError::target)?;
-    let pane = scope
-        .pane(window, None, PaneNeed::for_action("files"))
-        .map_err(DesktopError::target)?;
-    for path in paths {
-        let _: DesktopActionReceipt = desktop.call(
-            "perform",
-            DesktopActionRequest {
-                repository: window.repository.clone(),
-                window: window.window.clone(),
-                pane: Some(pane.target(window)),
-                action: "files".into(),
-                args: std::collections::BTreeMap::from([(
-                    "path".into(),
-                    path.to_string_lossy().into_owned(),
-                )]),
-            },
-        )?;
+    if lines.is_empty() || !lines.bytes().all(|c| c.is_ascii_digit() || c == b'-') {
+        return Ok((input, None));
     }
-    Ok(true)
+    if path.is_empty() {
+        return Err(DesktopError::Argument("Expected a checkout path before :LINE".into()).into());
+    }
+    let (start, end) = lines.split_once('-').unwrap_or((lines, lines));
+    if !matches!((start.parse::<u32>(), end.parse::<u32>()),
+        (Ok(start), Ok(end)) if start > 0 && start <= end)
+    {
+        return Err(
+            DesktopError::Argument("Expected LINE or LINE-END after the path".into()).into(),
+        );
+    }
+    Ok((path, Some(lines)))
 }
 
 /// View, start or close a Task shell through this Machine's server, which
@@ -1811,7 +1785,20 @@ impl Verb {
             DesktopCommand::Show { target } => (action("show", vec![]), target.clone()),
             DesktopCommand::Close { target } => (action("close", vec![]), target.clone()),
             DesktopCommand::Reopen { target } => (action("reopen", vec![]), target.clone()),
-            DesktopCommand::Files { target } => (action("files", vec![]), target.clone()),
+            DesktopCommand::Files { path, mode, target } => {
+                let mut args = Vec::new();
+                if let Some(path) = path {
+                    let (path, lines) = presentation_path(path)?;
+                    args.push(("path", path.to_owned()));
+                    if let Some(lines) = lines {
+                        args.push(("lines", lines.to_owned()));
+                    }
+                }
+                if let Some(mode) = mode {
+                    args.push(("mode", mode.clone()));
+                }
+                (action("files", args), target.clone())
+            }
             DesktopCommand::GraphLog { target } => (action("graph-log", vec![]), target.clone()),
             DesktopCommand::PageBack { target } => (action("page-back", vec![]), target.clone()),
             DesktopCommand::PageForward { target } => {
@@ -3977,6 +3964,19 @@ mod tests {
             caller.window(None).unwrap().window,
             inspection.windows[0].window
         );
+    }
+
+    #[test]
+    fn desktop_files_addresses_lines_without_reinterpreting_other_colons() {
+        assert_eq!(
+            super::presentation_path("notes:a.md:7-12").unwrap(),
+            ("notes:a.md", Some("7-12"))
+        );
+        assert_eq!(
+            super::presentation_path("notes:a.md").unwrap(),
+            ("notes:a.md", None)
+        );
+        assert!(super::presentation_path("a.md:8-2").is_err());
     }
 
     #[test]

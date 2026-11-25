@@ -21,9 +21,9 @@ struct RemoteTaskWorkspaceTests {
             // Not started: mini owns the Task but has no checkout for it yet.
             let files = TaskFilesStore(issue: task, cwd: "", machine: world.miniID, localMachineID: world.laptopID, query: query)
             files.autosave = false
-            await files.refreshChanges()
+            await files.workingTree.refresh()
             #expect(files.notStarted)
-            await files.readDirectory("", more: false)
+            await files.tree.readDirectory("", more: false)
             #expect(files.notStarted)
             // The watch stays open on the unstarted Task and names mini as the laptop does.
             files.observeFiles()
@@ -58,9 +58,9 @@ struct RemoteTaskWorkspaceTests {
             #expect(files.document("document.txt").snapshot?.content == "unchanged on mini\n")
 
             // Changes shows mini's uncommitted hunk; Save writes it there.
-            await files.refreshChanges()
-            #expect(files.changesError == nil)
-            #expect(files.changes?.files.map(\.path).contains("notes.txt") == true)
+            await files.workingTree.refresh()
+            #expect(files.workingTree.error == nil)
+            #expect(files.workingChanges?.files.map(\.path).contains("notes.txt") == true)
             files.selectFile("notes.txt", mode: .edit)
             await files.loadFile()
             let notes = files.document("notes.txt")
@@ -69,6 +69,18 @@ struct RemoteTaskWorkspaceTests {
             await notes.save(issue: task, query: query)
             #expect(!notes.saveFailed, "\(notes.saveMessage ?? "")")
             #expect(try String(contentsOf: checkout.appendingPathComponent("notes.txt"), encoding: .utf8) == "saved from the laptop\n")
+
+            // An ignored scratch write on mini arrives through task.files.watch with badge + Updated notice.
+            let scratchDir = checkout.appendingPathComponent("scratch")
+            try FileManager.default.createDirectory(at: scratchDir, withIntermediateDirectories: true)
+            try "<h1>Peer report</h1>\n".write(to: scratchDir.appendingPathComponent("report.html"), atomically: true, encoding: .utf8)
+            try await eventually("peer scratch write reaches Open & Scratch", showing: {
+                "updated=\(files.browser.updated) scratch=\(files.scratchPaths) notice=\(String(describing: files.browser.notice))"
+            }) {
+                files.browser.updated.contains("scratch/report.html")
+            }
+            #expect(files.browser.notice == .updated("scratch/report.html"))
+            #expect(files.scratchPaths.contains("scratch/report.html"))
 
             // Shell runs on mini, in mini's checkout.
             let ran = try await world.laptop.terminal(world.shell(task, id: "shell-1", run: "hostname; pwd"))
@@ -94,7 +106,7 @@ struct RemoteTaskWorkspaceTests {
             await world.miniServer.stop()
             try world.disconnect(true)
             let reopened = TaskFilesStore(issue: task, cwd: "", machine: world.miniID, query: query)
-            await reopened.readDirectory("", more: false)
+            await reopened.tree.readDirectory("", more: false)
             let failure = try #require(reopened.tree.listings[""]?.error)
             #expect(failure.contains("mini"), "\(failure)")
             files.observeFiles()
@@ -290,6 +302,7 @@ private final class TwoMachines {
         for args in [["config", "user.name", "Fixture Person"], ["config", "user.email", "fixture@example.invalid"]] {
             _ = try await laptop.run(args, cwd: repo, executable: "/usr/bin/git")
         }
+        try "scratch/\n".write(to: repo.appendingPathComponent(".gitignore"), atomically: true, encoding: .utf8)
         try "unchanged on mini\n".write(to: repo.appendingPathComponent("document.txt"), atomically: true, encoding: .utf8)
         try "first notes\n".write(to: repo.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
         for args in [["add", "."], ["commit", "-qm", "Shared files"], ["push", "-q", "origin", "main"]] {

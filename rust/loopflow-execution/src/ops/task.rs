@@ -4,7 +4,7 @@ pub use adoption::TaskAdoptionOptions;
 pub mod remote;
 pub use remote::TASK_SOURCE_ENV;
 mod workspace;
-pub use workspace::{TaskFilesRevision, TaskFilesWatch};
+pub use workspace::{TaskFilesRevision, TaskFilesWatch, TaskScratchPage};
 mod planning_explain;
 pub use planning_explain::{
     explain_task_planning, TaskPlanningAction, TaskPlanningExplanation, TaskPlanningRequest,
@@ -15,7 +15,14 @@ pub use checkout_explain::{
 };
 mod explain;
 pub use explain::{explain_task_run, TaskRunAction, TaskRunExplanation};
+mod checkout_file;
 mod directory;
+mod find;
+mod grep;
+mod symbols;
+pub use find::{task_find, TaskFileInventory};
+pub use grep::{task_grep, TaskGrepHit, TaskGrepResults};
+pub use symbols::{task_symbols, TaskSymbol, TaskSymbols};
 mod handoff;
 mod lifecycle;
 #[cfg(test)]
@@ -242,6 +249,17 @@ pub struct TaskChangedFile {
     /// Runs of changed lines in the file's patch, each the Diff's stop: a run
     /// ends at an unchanged line, a hunk's end, or a removal after additions.
     pub changes: u64,
+    /// Text lines in the patch; absent for an untracked file beyond the reader's size limit.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub lines: Option<ChangedLines>,
+}
+
+#[derive(
+    Debug, Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct ChangedLines {
+    pub added: u64,
+    pub removed: u64,
 }
 
 /// One commit in a Task's comparison. A Graph step's commits share the subject

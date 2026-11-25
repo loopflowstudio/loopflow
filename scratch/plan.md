@@ -69,7 +69,9 @@ Mounted focus, scroll and the 360/620-point layouts continue to gate and display
 
 **Demo fixes, November 24.** The live demo ([demo notes](demo-notes.md), [design](design.md#demo-feedback--fixes-2026-11-24)) found that ⌘-click and word underlines did nothing: selectable text took the click before the reader's tap gesture. The reader now watches its window's mouse events, counts a press released within 3 points as a click, maps it onto the row frames it records, and leaves drags to selection. Find scrolls to its match with the Grep anchor instead of the middle of the widest line. The rail uses the Diff sidebar's headings and padding, open and changed rows show name, directory and colored counts, and the tree steps 8 points per level. Find and the picker search are bordered fields under a divider; placeholders and the symbol peek read on dark themes.
 
-Next: main-thread stalls on large files (design fix 6: `main thread stalled ms=2011` opening files in `loopflow`) need a profile before changing anything. Display QA checks the new rail and fields in a dark theme and Loopflow Light, and a physical ⌘-click.
+Next: main-thread stalls on large files (design fix 6). The demo log showed `main thread stalled ms=2011` and `ms=1059` around `swift/LoopflowMac/WorkModel.swift` (3,765 lines, 189 KB). Measure before changing anything: a headless test that opens that file in Read, then runs ⌘F, a click and a scroll, timing main-thread work for each. Fix the largest cost it finds (candidates: per-row comment filtering, repeated `AttributedString` or Tree-sitter painting, synchronous work on selection or Find), and keep the test as the timing guard. Display QA checks the new rail and fields in a dark theme and Loopflow Light, and a physical ⌘-click.
+
+Main's #2040 merged in (`8423d1360b`); `swift build --build-tests --package-path swift` passed on the merged tree on November 24.
 
 ## Gate and demo
 

@@ -1,0 +1,162 @@
+<h1>LOO-1109: interactive review pages across browser, Desktop, and offline</h1>
+
+<div class="lf-meta">
+  <span>Task <code>LOO-1109</code></span>
+  <span>Passes 1–4 complete</span>
+  <span>Built with <code>lf page build</code></span>
+</div>
+
+<h2>What was built</h2>
+
+<p>Review skills (<code>ship-review</code>, <code>explore</code>, <code>concept-review</code>, <code>qa</code>, <code>demo</code>) now write short body-only fragments (<code>scratch/&lt;name&gt;.page.html</code>) and compile them with <code>lf page build</code> into one self-contained HTML file (<code>scratch/&lt;name&gt;.html</code>). Every compiled page carries the same interaction runtime: drag across text to leave a note, pick choices or answer numbered questions, and press <code>⌘↩</code> once to deliver one formatted line across every host.</p>
+
+<p><strong>Try it:</strong> <code>lf page build scratch/ship-review.page.html &amp;&amp; lf page open scratch/ship-review.html</code></p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Host</th>
+      <th><code>lf page open</code> does</th>
+      <th><code>⌘↩</code> delivers</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Browser beside Rex or any terminal</td>
+      <td>Mints <code>http://127.0.0.1:&lt;port&gt;/&lt;token&gt;/f/&lt;path&gt;</code> via <code>page.url</code> and opens it</td>
+      <td><code>task.steer</code> (Task pages) or <code>session.steer</code> over loopback WebSocket; strip shows <code>delivery.sentence</code></td>
+    </tr>
+    <tr>
+      <td>Loopflow Desktop</td>
+      <td>Opens the page in <strong>Files</strong> quietly (<code>lf desktop files</code>)</td>
+      <td>Notes, choices, and answers join <strong>Diff</strong> line comments in <code>ReviewCommentsStrip</code> and insert on one line</td>
+    </tr>
+    <tr>
+      <td>Headless Graph step (<code>lf -b</code> / auto)</td>
+      <td>Prints the loopback URL and exits without popping a browser window</td>
+      <td>Desktop's <code>scratch_pages</code> watcher surfaces an <strong>Updated</strong> notice if open</td>
+    </tr>
+    <tr>
+      <td>Offline (<code>file://</code> or stopped server)</td>
+      <td>Double-click the file</td>
+      <td>Copies the exact same one-line reply to the clipboard</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Direct action buttons (<code>data-lf</code>) stay separate from the reply queue: clicking opens an inline confirmation showing the operation kind and fields, executes immediately with a fresh per-confirm <code>request_id</code>, and replaces the button with an in-place receipt (for example, <code>Filed LOO-1200</code>). If you later send queued notes with <code>⌘↩</code>, a short <code>[already ran: …]</code> suffix rides along so the agent does not repeat it.</p>
+
+<h2>How it works</h2>
+
+<p>The loopback carrier in <code>lf server</code> reuses the existing Machine WebSocket protocol (<code>Messages&lt;S&gt;</code> and <code>service::session</code>) behind a per-server 32-byte random in-memory token, exact <code>Host</code> verification, and same-origin <code>Origin</code> verification on upgrades:</p>
+
+<lf-diff path="rust/loopflow/src/server/loopback.rs" lines="209-264">
+  <lf-note line="222">DNS rebinding defense: every request must carry Host: 127.0.0.1:&lt;port&gt;, otherwise 404 with empty body.</lf-note>
+  <lf-note line="234">Constant-time token check; the token lives only in memory and is never printed by lf server status.</lf-note>
+  <lf-note line="261">Browser cross-origin WebSocket defense: foreign origins cannot upgrade even if they guess a port.</lf-note>
+</lf-diff>
+
+<p><code>lf page open</code> routes by caller context so headless Graph steps never pop browser windows while interactive Rex and Desktop sessions land where you already work:</p>
+
+<lf-diff path="rust/loopflow/src/lf/commands/page.rs" lines="65-100">
+  <lf-note line="93">Interactive agent viewed in Desktop opens Desktop Files; viewed in Rex/tmux/terminal opens the loopback URL in the browser.</lf-note>
+  <lf-note line="95">Headless agent (agent_caller present, no viewer) prints the URL quietly and never invokes the OS browser opener.</lf-note>
+</lf-diff>
+
+<p>In Loopflow Desktop, <code>TaskFileReadingView</code> attaches <code>TaskHTMLBridge</code> (a reply-capable <code>WKScriptMessageHandlerWithReply</code> named <code>loopflow</code>), while side-by-side HTML diffs in <code>ReviewRenderedView</code> leave it unset so historical commits stay read-only:</p>
+
+<lf-diff path="swift/LoopflowMac/Views/TaskHTMLView.swift" lines="23-76">
+  <lf-note line="34">Swift owns page draft state keyed by (path, build_id); Desktop never touches localStorage, so peer-Machine pages on about:blank work cleanly.</lf-note>
+  <lf-note line="59">Peer-Machine pages swap the stamped remote checkout path for Desktop's local repository directory before forwarding to ServerClient.rawOperation.</lf-note>
+</lf-diff>
+
+<p><code>ReviewComments</code> stores page drafts alongside line-anchored Diff comments, skips line reconciliation for <code>.page</code> anchors, and clears both stored state and any mounted <code>WebPage</code> when sending succeeds:</p>
+
+<lf-diff path="swift/LoopflowMac/ReviewDiff.swift" lines="875-957">
+  <lf-note line="881">A rebuild bumps build_id and automatically drops stale drafts and items from the earlier build of the same path.</lf-note>
+  <lf-note line="936">Clearing pageStates and bumping pageClearGeneration prevents notes from resurrecting if the person sent comments while viewing a source file.</lf-note>
+</lf-diff>
+
+<h2>Key data structures and APIs</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Concept</th>
+      <th>Owner</th>
+      <th>Contract</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Loopback listener &amp; URL minting</td>
+      <td><code data-path="rust/loopflow/src/server/loopback.rs">server/loopback.rs</code>, <code data-path="rust/loopflow/src/server/service.rs">server/service.rs</code></td>
+      <td><code>127.0.0.1:0</code> TCP listener; <code>GET /&lt;token&gt;/f/&lt;abs-path&gt;</code> (CSP, <code>no-referrer</code>, <code>no-store</code>, <code>nosniff</code>); <code>GET /&lt;token&gt;/machine</code> WebSocket (<code>Admission::Local</code>, <code>local_authority: None</code>); local-Unix-socket-only <code>ServerOperation::PageUrl</code> (<code>page.url</code>)</td>
+    </tr>
+    <tr>
+      <td>Page compiler</td>
+      <td><code data-path="rust/loopflow/src/lf/commands/page_build.rs">lf/commands/page_build.rs</code></td>
+      <td>Compiles <code>*.page.html</code> → <code>*.html</code>: expands <code>&lt;lf-component&gt;</code>, <code>&lt;lf-diff&gt;</code> (via <code>checkout_file_diff</code> once per path), <code>&lt;lf-file&gt;</code>, partial→strict <code>data-lf</code> validated against <code>Operation</code>; checks missing paths, unknown Git SHAs, forbidden tags; stamps <code>PageStamp</code> (<code>work</code>, <code>directory</code>, <code>base</code>, <code>head</code>, <code>path</code>, <code>build_id</code>)</td>
+    </tr>
+    <tr>
+      <td>Page kit assets &amp; overrides</td>
+      <td><code data-path="rust/loopflow-definitions/src/builtins/page/runtime.js">builtins/page/</code>, <code data-path=".lf/theme.css">.lf/theme.css</code></td>
+      <td>Embedded <code>runtime.js</code>, <code>base.css</code>, <code>theme.css</code>, and builtin components (<code>decision</code>, <code>before-after</code>); repos override with <code>.lf/theme.css</code> and <code>.lf/components/&lt;name&gt;/{template.html,style.css}</code></td>
+    </tr>
+    <tr>
+      <td>Desktop bridge &amp; comments</td>
+      <td><code data-path="swift/LoopflowMac/Views/TaskHTMLView.swift">TaskHTMLView.swift</code>, <code data-path="swift/LoopflowMac/ReviewDiff.swift">ReviewDiff.swift</code>, <code data-path="swift/Loopflow/Services/ServerLink.swift">ServerLink.swift</code></td>
+      <td><code>TaskHTMLBridge</code> (<code>ready</code> / <code>sync</code> / <code>operation</code>); <code>ReviewComment.Anchor</code> (<code>.lines</code> | <code>.page</code>); <code>ServerClient.rawOperation</code> / <code>ServerLink.sendRawOperation</code> without adding a new <code>ServerOperation</code> case</td>
+    </tr>
+    <tr>
+      <td>Skills &amp; authoring contract</td>
+      <td><code data-path="rust/loopflow/src/lf/mod.rs">lf help page</code>, <code data-path="rust/loopflow-definitions/src/builtins/LOOPFLOW.md">LOOPFLOW.md</code></td>
+      <td><code>explore</code>, <code>concept-review</code>, <code>qa</code>, <code>demo</code>, and <code>ship-review</code> point to <code>lf help page</code>, compile with <code>lf page build</code>, and open with <code>lf page open</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Trade-offs and invariants going forward</h2>
+
+<ul>
+  <li><strong>Any Machine <code>Operation</code> is allowed over the loopback WebSocket</strong> (no allowlist), guarded by the 32-byte in-memory token, exact <code>Host</code> check, and same-origin <code>Origin</code> check. <code>page.url</code> and <code>mobile.*</code> remain local-Unix-socket-only, and no <code>/ticket</code> route is exposed on loopback.</li>
+  <li><strong>The loopback token is never written to disk.</strong> Restarting <code>lf server</code> rotates port and token; open browser tabs detect the close, show <code>lf server restarted; run lf page open &lt;path&gt;</code>, and fall back to clipboard copy.</li>
+  <li><strong>Task pages always steer via <code>task.steer</code>, never the building worker's <code>session.steer</code>.</strong> Headless Graph workers exit after building the page, and <code>session.steer</code> silently queues onto finished Sessions; <code>task.steer</code> reaches the Task's active work or primary interactive Session and returns <code>delivery.sentence</code>.</li>
+  <li><strong>Desktop never touches <code>localStorage</code> for review pages.</strong> <code>ReviewComments</code> owns draft state keyed by <code>(path, build_id)</code>, preventing <code>SecurityError</code> on peer-Machine <code>about:blank</code> pages and preventing resurrection after sending from another file.</li>
+  <li><strong><code>*.page.html</code> sources are excluded from <code>is_scratch_page</code></strong> in both Rust (<code>ops/task/find.rs</code>) and Swift (<code>TaskFilesStore.swift</code>), and <code>lf page open</code> refuses raw <code>.page.html</code> files with the exact <code>lf page build</code> command.</li>
+  <li><strong>Opening beside Rex uses the OS default browser.</strong> Rex currently exposes no browser block (<code>onboarding</code>, <code>terminal.shell</code>, <code>tunnel</code>) and <code>agent-browser</code> is not installed on this Machine.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<lf-component name="decision" id="f1" title="Split page_build.rs (1,434 lines) during compress" recommendation="Fix here">
+  <p><code data-path="rust/loopflow/src/lf/commands/page_build.rs">page_build.rs</code> combines HTML tag scanning, component slot expansion, unified diff parsing/rendering, <code>data-lf</code> schema expansion, and validation checks in one 1,434-line file. Splitting into focused submodules under <code>page/</code> during <code>compress</code> will make it much easier to read and modify.</p>
+</lf-component>
+
+<lf-component name="decision" id="f2" title="Split the 8-part Desktop bridge test into focused cases" recommendation="Fix here">
+  <p><code data-path="swift/LoopflowTests/TaskFilesTests.swift">reviewPageBridgeOwnsStateClearsAfterSendAndForwardsOperations</code> exercises eight bridge behaviors in one test method. Splitting along its numbered steps during <code>compress</code> will keep failures immediately pinpointed.</p>
+</lf-component>
+
+<lf-component name="decision" id="f3" title="Native browser split inside Rex / agent-browser" recommendation="File Task">
+  <p><code>lf page open</code> currently opens the OS default browser when invoked beside Rex because Rex has no browser block type and <code>agent-browser</code> is not installed here. Adding a dedicated browser split or <code>agent-browser</code> host once that surface exists is a separate outcome.</p>
+  <p><button type="button" data-lf='{"kind":"task.create","title":"Support Rex browser split / agent-browser host in lf page open"}'>File Task now</button></p>
+</lf-component>
+
+<h2>Questions</h2>
+
+<div data-choice="q1" data-label="1. Browser host beside Rex">
+  <p><strong>1.</strong> When opening a review page beside Rex, is opening the OS default browser the right default for now, or did you have a specific browser/split tool in mind?</p>
+  <button type="button" data-value="1a: Keep OS default browser">1a. Keep OS default browser</button>
+  <button type="button" data-value="1b: Wire a specific browser split">1b. Wire a specific browser split (add note)</button>
+</div>
+
+<div data-choice="q2" data-label="2. Direct data-lf actions vs reply queue">
+  <p><strong>2.</strong> Direct <code>data-lf</code> buttons confirm inline, execute immediately with an in-place receipt, and stay out of the <code>⌘↩</code> queue (only appending <code>[already ran: …]</code> if you also send notes). Keep that split, or queue them into <code>⌘↩</code>?</p>
+  <button type="button" data-value="2a: Keep immediate confirm + in-place receipt">2a. Keep immediate confirm + receipt</button>
+  <button type="button" data-value="2b: Queue data-lf into ⌘↩">2b. Queue into ⌘↩ instead</button>
+</div>
+
+<div data-question="q3" data-label="3. Anything else on page layout or skills">
+  <p><strong>3.</strong> Anything missing from the review page layout, <code>lf help page</code> contract, or the five updated skills?</p>
+  <textarea rows="3" placeholder="Optional notes…"></textarea>
+</div>

@@ -474,10 +474,26 @@ button).
    checks eight behaviors in one test and could split along its numbered steps.
    Deferred to qa: the runtime against `__lfDesktopApplyState` in Dev Desktop
    (switch files before sending, click a `data-lf` button); no JS runs in CI.
-4. **Next — Skills and docs.** The five skills, `lf help page` alignment,
-   `LOOPFLOW.md`, `server/README.md`, goldens, and keeping the pre-written user
-   docs in sync with any CLI/behavior adjustments. LOO-1109's own
-   `ship-review.page.html` is the first page built with the kit.
+4. **Done — Skills and docs (`929e95f0a6`).** Rewrote `explore`, `concept-review`, `qa`,
+   `demo`, and `ship-review` under `rust/loopflow-definitions/src/builtins/task/skill/`
+   to point at `lf help page`, compile `scratch/<name>.page.html` with
+   `lf page build`, and present `scratch/<name>.html` with `lf page open`
+   (replacing hand-written HTML/CSS/visual-language paragraphs and
+   `lf desktop files`). Expanded `lf help page` (`after_help` in `lf/mod.rs`)
+   with exact control markup and build checks, updated `LOOPFLOW.md` to name
+   `lf page open` beside `lf desktop files`, added the loopback carrier and
+   `page.url` to `rust/loopflow/src/server/README.md`, mapped `lf page` in
+   `docs/dev/reference.md` (fixing `check_architecture.py` 27/27), regenerated
+   the six prompt goldens under `tests/goldens/`, verified all six pre-written
+   user docs (`surfaces.md`, `orchestration.md`, `getting-started.md`,
+   `server.md`, `security.md`, `index.md`) match the shipped CLI and runtime,
+   and built LOO-1109's own `scratch/ship-review.page.html` →
+   `scratch/ship-review.html` with the kit.
+   *What this slice taught:* `scripts/check_architecture.py` enforces top-level
+   CLI family coverage in `docs/dev/reference.md`, so adding `lf page` required
+   mapping it under the `Client API server` row there. Also, `builtins::tests`
+   now enforces the kit contract across all five review skills and `LOOPFLOW.md`.
+   All planned passes are built; ready for `concept-review` / `compress` / `qa`.
 
 ## User docs written ahead of implementation
 

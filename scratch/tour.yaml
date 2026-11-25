@@ -1,0 +1,41 @@
+at: 929e95f0a68af7a4888d10691645f98e8098c901
+first:
+  - path: docs/surfaces.md
+    why: Review page UX across browser, Desktop, headless, and offline
+  - path: docs/orchestration.md
+    why: Page authoring contract, kit tags, and repo customization
+  - path: docs/server.md
+    why: Loopback listener lifecycle and token rotation
+  - path: docs/security.md
+    why: Loopback admission checks, CSP, and page.url boundary
+  - path: rust/loopflow/src/server/loopback.rs
+    why: Loopback HTTP/WebSocket carrier, Host/Origin/token admission
+  - path: rust/loopflow/src/server/service.rs
+    why: Shared Messages carrier and local-only page.url dispatch
+  - path: rust/loopflow/src/lf/commands/page.rs
+    why: lf page build/open dispatch and caller host routing
+  - path: rust/loopflow/src/lf/commands/page_build.rs
+    why: Fragment compiler, diff/component/data-lf expansion, build checks
+  - path: rust/loopflow-definitions/src/builtins/page/runtime.js
+    why: Shared highlight notes, choices, loopback WS, Desktop bridge
+  - path: swift/LoopflowMac/Views/TaskHTMLView.swift
+    why: Desktop TaskHTMLBridge wired only in TaskFileReadingView
+  - path: swift/LoopflowMac/ReviewDiff.swift
+    why: Page-anchored ReviewComment and Swift-owned draft state
+  - path: swift/Loopflow/Services/ServerLink.swift
+    why: Raw Operation forwarding for Desktop data-lf actions
+  - path: rust/loopflow-definitions/src/builtins/task/skill/ship-review.md
+    why: Review skills rewritten to use lf help page and lf page
+  - path: rust/loopflow/tests/page_tests.rs
+    why: End-to-end loopback, admission, steer, and build integration tests
+  - path: swift/LoopflowTests/TaskFilesTests.swift
+    why: Headless Desktop bridge state, clear-on-send, and op forwarding tests
+hide:
+  - path: tests/fixtures/dto/server_schema.json
+    why: Regenerated server JSON Schema for page.url
+  - path: tests/goldens/
+    why: Regenerated prompt goldens for LOOPFLOW.md presentation line
+  - path: swift/LoopflowMac/ThirdPartyNotices/
+    why: Refreshed third-party inventory for hyper/http-body-util
+  - path: Cargo.lock
+    why: Lockfile updates for loopback HTTP dependencies

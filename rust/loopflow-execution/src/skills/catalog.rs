@@ -132,9 +132,21 @@ fn merge_extension(
 ) -> Result<String, LoadError> {
     let (parent_frontmatter, parent_body) = split_frontmatter(parent).unwrap_or(("", parent));
     let mut merged = if parent_dialect == SkillDialect::Loopflow {
-        let mut value = serde_yaml_ng::from_str::<serde_yaml_ng::Mapping>(parent_frontmatter)
-            .map(Value::Mapping)
-            .unwrap_or_else(|_| Value::Mapping(serde_yaml_ng::Mapping::new()));
+        let mut value = if parent_frontmatter.trim().is_empty() {
+            Value::Mapping(serde_yaml_ng::Mapping::new())
+        } else {
+            match serde_yaml_ng::from_str::<Value>(parent_frontmatter)
+                .map_err(|error| LoadError::InvalidSkill(error.to_string()))?
+            {
+                Value::Null => Value::Mapping(serde_yaml_ng::Mapping::new()),
+                Value::Mapping(map) => Value::Mapping(map),
+                _ => {
+                    return Err(LoadError::InvalidSkill(
+                        "skill frontmatter must be a YAML mapping".into(),
+                    ))
+                }
+            }
+        };
         crate::config::normalize_context(&mut value);
         value
     } else {
@@ -856,6 +868,36 @@ mod tests {
                 .contains("implement -> loop-helper -> implement"),
             "{err}"
         );
+
+        write(
+            repo.path(),
+            ".lf/skills/broken-parent.md",
+            "---\ndefault_agent: [\n---\nBroken parent.\n",
+        );
+        write(
+            repo.path(),
+            ".lf/skills/child-of-broken.md",
+            "---\nextends: broken-parent\n---\nChild.\n",
+        );
+        write(
+            repo.path(),
+            ".lf/skills/list-parent.md",
+            "---\n- not-a-mapping\n---\nList parent.\n",
+        );
+        write(
+            repo.path(),
+            ".lf/skills/child-of-list.md",
+            "---\nextends: list-parent\n---\nChild.\n",
+        );
+        let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
+        assert!(matches!(
+            catalog.load_skill("child-of-broken"),
+            Err(crate::error::LoadError::InvalidSkill(_))
+        ));
+        assert!(matches!(
+            catalog.load_skill("child-of-list"),
+            Err(crate::error::LoadError::InvalidSkill(_))
+        ));
     }
 
     #[test]

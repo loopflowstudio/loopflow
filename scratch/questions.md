@@ -4,5 +4,8 @@
 
 - The direct launcher uses the connection that welcomed it. An unanswered
   `session.start` can already have started the provider, so report its error
-  instead of launching a second copy in the caller. Skills keep their current
-  completion path pending the change described in the plan.
+  instead of launching a second copy in the caller.
+
+- A delegated Skill keeps its launcher inside the held PTY to run its ordinary
+  completion and checkpoint. The original invocation carries whether it owns
+  that checkpoint across the relay, which otherwise looks like a new caller.

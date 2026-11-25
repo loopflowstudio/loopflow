@@ -1607,10 +1607,12 @@ lf task run / lf task auto on ──────────► Graph process �
         └─ one startup line, then gone   └─ logs/graph-&lt;id&gt;.log
 </code></pre>
 <p>Transport selects one of the <a href="https://loopflow.studio/docs/glossary#loopflows-words">four launch kinds</a>
-before delegation. Interactive launches delegate to a held work session whenever
+before delegation. Direct terminal chats, Skills and bare resumes share a held work session when
 the Machine server is reachable, and fall back to a direct foreground chat when
 no server is running (or stdin/stdout is not a terminal). Bound/primary
-conversations and Desktop panes require the server at startup.</p>
+conversations and Desktop panes require the server at startup. A standalone Skill's
+launcher stays in its held terminal through provider exit to checkpoint edits and
+record completion. A direct Graph keeps its steps in its own terminal.</p>
 <table tabindex="0">
 <thead>
 <tr>

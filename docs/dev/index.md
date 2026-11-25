@@ -175,10 +175,12 @@ lf task run / lf task auto on ──────────► Graph process �
 ```
 
 Transport selects one of the [four launch kinds](../glossary.md#loopflows-words)
-before delegation. Interactive launches delegate to a held work session whenever
+before delegation. Direct terminal chats, Skills and bare resumes share a held work session when
 the Machine server is reachable, and fall back to a direct foreground chat when
 no server is running (or stdin/stdout is not a terminal). Bound/primary
-conversations and Desktop panes require the server at startup.
+conversations and Desktop panes require the server at startup. A standalone Skill's
+launcher stays in its held terminal through provider exit to checkpoint edits and
+record completion. A direct Graph keeps its steps in its own terminal.
 
 | Launch | Reports turns | Where the agent runs | Examples |
 | --- | --- | --- | --- |

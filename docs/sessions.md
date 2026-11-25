@@ -59,13 +59,16 @@ unviewed conversation closes about 15 minutes after live work settles
 (returning later continues from saved history without reopening the Task).
 Abandoning a Task stops unviewed conversations immediately.
 
-Standalone held conversations (not bound to a Task or a Wave/repository primary
-scope) stay alive after you detach or close their tab, and close about 15
-minutes after their last view leaves once any active turn finishes. Reattach
+A standalone held conversation stays live for 15 minutes after its last view
+leaves. After that, cleanup waits for active turns and pending requests to
+finish. Opening a view resets the timer. Reattach
 before then to pick up live, or run `lf resume <session>` later to continue
 from saved history. Binding a running standalone conversation to a Task
 (`lf session bind <session> --task LOO-12`) moves it onto the Task's lifetime
 without restarting it.
+
+A standalone Skill keeps running when you detach. When its provider exits
+successfully, the launcher checkpoints any edits it owns and records completion.
 
 ## Four kinds of launch
 
@@ -74,7 +77,7 @@ managed by the local server vs. bare:
 
 | Kind | Started by | Terminal & lifetime | Server involvement |
 |---|---|---|---|
-| **Work session** | `lf`, `lf <skill>`, `lf -i`, `lf resume` (while the server is running), `lf resume --task`, interactive Graph steps, Wave/repo sessions, Desktop panes | Runs in a **holder** process; outlives windows and `lf install`; `Ctrl+]` detaches a terminal view. Standalone conversations close ~15 minutes after their last view leaves when idle | Records turns, wakes idle conversations on steers/updates |
+| **Work session** | `lf`, `lf <skill>`, `lf -i`, `lf resume` (while the server is running), `lf resume --task`, Graph steps in a held terminal, Wave/repo sessions, Desktop panes | Runs in a **holder** process; outlives windows and `lf install`; `Ctrl+]` detaches a terminal view. Standalone conversations close ~15 minutes after their last view leaves when idle | Records turns, wakes idle conversations on steers/updates |
 | **Worker** | Headless steps of `lf task run` / `lf task auto on`, Discord Wave replies | Headless; runs in its own process | Records turns; keeps running if server stops |
 | **Chat** | `lf`, `lf <skill>`, `lf -i`, or bare `lf resume` when no local server is running (or stdin/stdout is not a terminal) | Runs directly in your terminal (`Ctrl+C`/`Ctrl+Z` go straight to the agent); ends with the terminal | None; reads transcript at exit |
 | **Batch** | `lf -b <skill>` | Headless child of its caller; prints output and exits | None; reads transcript at exit |

@@ -19,7 +19,7 @@ Every term the docs use, in one plain sentence.
 | **KR** | Key result: an observable outcome stated for a Wave's Project. |
 | **Memory** | `MEMORY.md`, where a Wave keeps decisions and context across Tasks. |
 | **Session** (**LfSession**) | A continuable agent conversation (interactive or headless) with identity, steers, and native provider history. |
-| **Work session** | An interactive conversation running in a held terminal (any interactive `lf` launch while the server is running, plus Task, Wave, and repository sessions); survives window close and `lf install`, supports multiple live views, and wakes on steers. |
+| **Work session** | An interactive conversation running in a held terminal (a direct terminal chat, Skill, or resume while the server is running, plus Task, Wave, and repository conversations); survives window close and `lf install`, supports multiple live views, and wakes on steers. |
 | **Worker** | A headless step of a Task Graph (or Discord Wave reply) whose turns are reported to the server. |
 | **Chat** | A direct interactive conversation (`lf`, `lf <skill>`, or bare `lf resume`) running straight in your terminal when no local server is running (or without a TTY); ends with the terminal. |
 | **Batch** | A direct headless run (`lf -b <skill>`) that prints its answer and exits. |

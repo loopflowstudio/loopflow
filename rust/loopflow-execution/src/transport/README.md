@@ -68,13 +68,16 @@ Every launch belonging to a Task counts toward its usage and receives its
 steers. Work sessions and workers report turn boundaries to the Machine server;
 chats and batches read their steers directly.
 
-On a direct default or inline chat, a terminal with both stdin and stdout
+On a direct chat or Skill launch, a terminal with both stdin and stdout
 attached opens the server connection once and uses it for `session.start`.
 The child runs the original arguments from the original working directory,
 including worktree selection. Inside the holder, `LaunchInput::kind()` selects
-a work session. The child prints the context header and hands its exit record
-to the server before executing the provider. Without a server or terminal the
-launcher runs locally. Direct Graphs own their steps.
+a work session. A chat hands its exit record to the server and executes the
+provider. A delegated Skill registers its Session and waits for the provider
+inside the held terminal. On success it runs the original invocation's
+checkpoint and records completion, even after the last view detaches. Direct
+Graphs run their steps in the Graph's terminal. Without a server the
+launcher runs locally.
 
 On resume, bound and primary conversations, Desktop panes and framed
 `lf --machine` viewers require a holder. A standalone conversation uses the
@@ -180,7 +183,7 @@ reported as such, never given an invented exit code.
 
 ### The child in a held terminal
 
-A Claude launcher hands the server what it would record at exit, then execs
+For a held chat, a Claude launcher hands the server what it would record at exit, then execs
 into the provider, so Claude is the holder's direct child and no `lf -i` waits
 beside it; the server records the provider's exit, settles its capture and
 reports where the conversation moved. A Codex launcher does the same into its client, which talks to its app-server directly. The
@@ -636,7 +639,8 @@ scope conversation) use the same fifteen-minute unviewed grace: when no view
 has been attached for fifteen minutes and `terminal_retention` is clear (never
 interrupting an active turn or pending request), both `lf task retire` and the
 server's one-minute recovery pass close the held terminal with the notice
-“Session closed after 15 minutes without a viewer”. Binding a running
+“Session closed after 15 minutes without a viewer”. The host checks for a
+returning view or a fresh departure before delivering the notice. Binding a running
 standalone conversation to a Task (`lf session bind`) sets `bound_at` and moves
 it onto open-Task lifetime without restarting it. For done Tasks, the grace starts no earlier than
 completion; a newly resumed, never-viewed conversation starts it at launch. A

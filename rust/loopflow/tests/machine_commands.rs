@@ -1034,9 +1034,15 @@ fn machine_add_on_the_remote_updates_only_its_registry() {
 
 /// Two actual CLIs joined by the fixture's local-only SSH substitute.
 fn preview_machines() -> Machines {
+    use loopflow_execution::store::{machines, open_sqlite};
+
     let fixture = Machines::new();
     let remote = fixture.root.path().join("remote");
     support::seed_store(&remote.join("store"));
+    let remote_store = open_sqlite(&remote.join("store/loopflow.db")).unwrap();
+    let local_store = open_sqlite(&fixture.root.path().join("local/loopflow.db")).unwrap();
+    let mini = machines::local_machine(&remote_store).unwrap();
+    machines::add_machine(&local_store, &mini.id, "mini", "mini").unwrap();
     executable(
         &remote.join(".local/bin/lf"),
         &format!(
@@ -1046,8 +1052,6 @@ fn preview_machines() -> Machines {
             env!("CARGO_BIN_EXE_lf"),
         ),
     );
-    // Seed identity using the normal operation before taking the read baseline.
-    assert_success(&fixture.run(&["machine", "add", "mini"]));
     assert_success(&fixture.run(&["set", "--global", "default_agent", "codex"]));
     for bin in [fixture.root.path().join("bin"), remote.join(".local/bin")] {
         for program in ["gh", "security", "doppler", "claude", "codex", "opencode"] {
@@ -1735,7 +1739,7 @@ impl SharedPlan {
         store: &loopflow_execution::store::sqlite::SqliteStore,
         path: &Path,
     ) -> loopflow_execution::durable::TaskId {
-        let project = loopflow_execution::work::wave::bootstrap::ensure_wave_project(
+        let project = loopflow_execution::test_support::seed_wave_project(
             store,
             path.to_str().unwrap(),
             "owners",
@@ -2247,7 +2251,7 @@ fn set_machine_changes_local_preferences_without_copying_or_moving_work() {
     let laptop = loopflow_execution::store::machines::local_machine(&plan.local)
         .unwrap()
         .id;
-    let wave = loopflow_execution::work::wave::bootstrap::ensure_wave_project(
+    let wave = loopflow_execution::test_support::seed_wave_project(
         &plan.local,
         plan.local_path.to_str().unwrap(),
         "owners",

@@ -3,7 +3,6 @@ use crate::support;
 use std::fs;
 use std::process::Command;
 
-use loopflow_execution::durable::WorkRef;
 use loopflow_execution::ops::task::{task_interrupt, task_status};
 use loopflow_execution::work::task::{
     GithubObservationResult, GithubPr, Observation, PrPublication,
@@ -204,9 +203,8 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
     assert!(matches!(&first.observation, Observation::NotRequired));
     assert!(!first.status.is_terminal(), "{first:?}");
 
-    let work = WorkRef::Task(task.task.id.clone());
     let previous_interrupt = runtime
-        .block_on(task.store.latest_interrupt_id(&work))
+        .block_on(task.store.latest_interrupt_id(&task.task.id))
         .unwrap();
     let interrupt = task_interrupt("INF-123").expect("interrupt control stays local");
     assert!(matches!(interrupt.observation, Observation::NotRequired));
@@ -216,7 +214,7 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
     );
     assert_eq!(
         runtime
-            .block_on(task.store.latest_interrupt_id(&work))
+            .block_on(task.store.latest_interrupt_id(&task.task.id))
             .unwrap(),
         previous_interrupt,
         "an idle Task records no interrupt"
@@ -287,9 +285,8 @@ fn rest_failure_is_retained_while_local_controls_continue() {
     );
     assert!(matches!(first.observation, Observation::NotRequired));
 
-    let work = WorkRef::Task(task.task.id.clone());
     let previous_interrupt = runtime
-        .block_on(task.store.latest_interrupt_id(&work))
+        .block_on(task.store.latest_interrupt_id(&task.task.id))
         .unwrap();
     let interrupt = task_interrupt("INF-123").expect("interrupt control survives REST failure");
     assert!(matches!(interrupt.observation, Observation::NotRequired));
@@ -299,7 +296,7 @@ fn rest_failure_is_retained_while_local_controls_continue() {
     );
     assert_eq!(
         runtime
-            .block_on(task.store.latest_interrupt_id(&work))
+            .block_on(task.store.latest_interrupt_id(&task.task.id))
             .unwrap(),
         previous_interrupt,
         "an idle Task records no interrupt"

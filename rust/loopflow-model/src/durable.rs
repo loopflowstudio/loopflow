@@ -48,6 +48,28 @@ prefixed_uuid_id!(
     DurableDataError::InvalidId
 );
 
+impl ProjectId {
+    /// A Wave's one Project shares the Wave's UUID, so every Machine that
+    /// makes it makes the same record. A historical Wave ID that is no UUID
+    /// names one through UUIDv5.
+    pub fn for_wave(wave: &WaveId) -> Self {
+        let uuid = uuid::Uuid::parse_str(wave.as_str()).unwrap_or_else(|_| {
+            uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, wave.as_str().as_bytes())
+        });
+        Self(format!("proj_{}", uuid.simple()))
+    }
+
+    /// Whether `external` is the tracker id this Project's own `create` made:
+    /// Loopflow sends the Project's UUID with it.
+    pub fn made_as(&self, external: &str) -> bool {
+        let own = self
+            .0
+            .strip_prefix("proj_")
+            .and_then(|id| uuid::Uuid::parse_str(id).ok());
+        own.is_some() && own == uuid::Uuid::parse_str(external).ok()
+    }
+}
+
 impl TaskId {
     /// Linear UUIDs are also the creation UUID used by locally authored Tasks.
     pub fn from_issue(id: &str) -> Self {
@@ -385,7 +407,17 @@ impl std::fmt::Display for WorkStatus {
 
 #[cfg(test)]
 mod tests {
-    use super::WorkStatus;
+    use super::{ProjectId, WaveId, WorkStatus};
+
+    #[test]
+    fn a_wave_project_is_made_as_its_wave_uuid_in_either_spelling() {
+        let wave = WaveId::parse("6f9619ff-8b86-d011-b42d-00c04fc964ff").unwrap();
+        let project = ProjectId::for_wave(&wave);
+        assert!(project.made_as("6F9619FF-8B86-D011-B42D-00C04FC964FF"));
+        assert!(project.made_as("6f9619ff8b86d011b42d00c04fc964ff"));
+        assert!(!project.made_as("00000000-0000-0000-0000-000000000001"));
+    }
+
     #[test]
     fn work_status_fixture_round_trips_every_current_variant() {
         let fixture = include_str!("../../../tests/fixtures/dto/work_statuses.json");

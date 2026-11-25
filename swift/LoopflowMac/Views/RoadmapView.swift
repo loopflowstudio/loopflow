@@ -272,7 +272,7 @@ struct RoadmapWaveSection: View {
                     .textSelection(.enabled)
             }
 
-            if let project = roadmap.currentProject { WaveProjectView(project: project, repo: roadmap.wave.repo) }
+            if let project = roadmap.project.present { WaveProjectView(project: project, repo: roadmap.wave.repo) }
             switch roadmap.tasks {
             case .unavailable(let reason):
                 FailureLine("Tasks did not load.", machine: reason)
@@ -283,11 +283,6 @@ struct RoadmapWaveSection: View {
                         onAction: { action in onTaskAction(task, action) }, onOpenWorktree: onOpenWorktree)
                 }
                 if truncated { Text("Older Tasks are truncated.").foregroundStyle(palette.warning) }
-            }
-            ForEach(roadmap.unavailableTasks, id: \.taskId) { task in
-                FailureLine("\(task.taskIdentifier) is unavailable.", machine: task.reason) {
-                    Text(task.recovery).font(Typography.text).foregroundStyle(palette.textSecondary)
-                }
             }
         }
         .accessibilityIdentifier("loopflow-wave-\(roadmap.wave.id)")

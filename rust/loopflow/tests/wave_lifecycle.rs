@@ -120,11 +120,11 @@ fn removing_an_empty_wave_retires_it_and_removes_its_files_on_main() {
     assert_eq!(preview["summary"][0], "research has no Tasks or Sessions.");
     assert_eq!(preview["uncommitted"][0], ".lf/wave/research/GOAL.md");
     assert_eq!(
-        preview["summary"][2],
+        preview["summary"][1],
         ".lf/wave/research is deleted on the main checkout; Git history keeps its committed files."
     );
     assert_eq!(
-        preview["summary"][3],
+        preview["summary"][2],
         "Uncommitted edits in .lf/wave/research are deleted with it: .lf/wave/research/GOAL.md."
     );
     assert!(
@@ -141,7 +141,7 @@ fn removing_an_empty_wave_retires_it_and_removes_its_files_on_main() {
     assert!(lab.live_waves().is_empty());
     assert_eq!(
         removed["summary"][1],
-        "1 Project stays readable in history."
+        ".lf/wave/research removed on the main checkout."
     );
     let history = lab.lf(&["wave", "show", "research", "--json"]);
     assert_eq!(
@@ -181,14 +181,13 @@ fn removing_a_wave_with_work_moves_open_tasks_and_keeps_history() {
     let preview = lab.lf(&["wave", "remove", "desktop", "--preview", "--json"]);
     assert_eq!(preview["moved"].as_array().unwrap().len(), 2);
     assert_eq!(preview["completed_tasks"], 1);
-    assert_eq!(preview["projects"], 1);
     let summary = preview["summary"].to_string();
     assert!(
         summary.contains("2 open Tasks move to the repository (1 started keeps its worktree"),
         "{summary}"
     );
     assert!(
-        summary.contains("1 completed Task and 1 Project stay readable"),
+        summary.contains("1 completed Task stays readable"),
         "{summary}"
     );
 
@@ -364,16 +363,6 @@ fn git(lab: &Lab, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
-fn bind_initiative(lab: &Lab, wave: &str, initiative: &str) {
-    let path = lab.path().join(format!(".lf/wave/{wave}/config.yaml"));
-    let config = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(
-        path,
-        format!("{config}linear:\n  initiative: {initiative}\n"),
-    )
-    .unwrap();
-}
-
 fn fail_index_reset(lab: &Lab, args: &[&str]) {
     let shim = tempfile::tempdir().unwrap();
     let path = std::env::var_os("PATH").unwrap();
@@ -503,50 +492,6 @@ fn lifecycle_retry_reconciles_index_without_touching_replacement_waves() {
             replacement["id"]
         );
     }
-}
-
-#[test]
-fn removal_retry_retains_descendant_archive_bindings_after_retirement_and_replacement() {
-    let lab = Lab::new();
-    let parent = lab.lf(&["wave", "add", "parent", "--json"]);
-    lab.lf(&["wave", "add", "parent/child", "--json"]);
-    bind_initiative(&lab, "parent/child", "original-child-initiative");
-    for _ in 0..2 {
-        let removed = lab.lf(&["wave", "remove", "parent", "--json"]);
-        assert_eq!(
-            removed["waves"],
-            serde_json::json!(["parent", "parent/child"])
-        );
-        assert_eq!(
-            removed["initiatives"][0]["initiative"],
-            "original-child-initiative"
-        );
-        assert!(removed["initiatives"][0]["error"].is_string());
-        assert_eq!(removed["files"]["state"], "uncommitted");
-        assert!(!removed["summary"]
-            .to_string()
-            .contains("removed on the main checkout"));
-        assert!(lab
-            .path()
-            .join(".lf/wave/parent/child/config.yaml")
-            .exists());
-    }
-    let replacement = lab.lf(&["wave", "add", "parent", "--json"]);
-    assert_ne!(replacement["id"], parent["id"]);
-    bind_initiative(&lab, "parent", "replacement-initiative");
-    let config = std::fs::read(lab.path().join(".lf/wave/parent/config.yaml")).unwrap();
-    let retried = lab.lf(&["wave", "remove", "parent", "--json"]);
-    assert_eq!(retried["id"], parent["id"]);
-    assert_eq!(retried["initiatives"].as_array().unwrap().len(), 1);
-    assert_eq!(
-        retried["initiatives"][0]["initiative"],
-        "original-child-initiative"
-    );
-    assert_eq!(
-        std::fs::read(lab.path().join(".lf/wave/parent/config.yaml")).unwrap(),
-        config
-    );
-    assert_eq!(lab.live_waves(), ["parent"]);
 }
 
 #[test]
@@ -697,47 +642,22 @@ fn removal_retry_leaves_a_replacement_at_the_deleted_address_intact() {
 }
 
 #[test]
-fn rename_retry_preserves_a_reused_source_and_the_original_provider_binding() {
+fn rename_retry_preserves_a_reused_source() {
     let lab = Lab::new();
     let original = lab.lf(&["wave", "add", "research", "--json"]);
-    bind_initiative(&lab, "research", "original-initiative");
     let branch = git(&lab, &["branch", "--show-current"]);
     git(&lab, &["checkout", "--detach"]);
-    let first = lab.lf(&[
-        "wave",
-        "rename",
-        "research",
-        "ops",
-        "--title",
-        "Operations",
-        "--json",
-    ]);
+    let first = lab.lf(&["wave", "rename", "research", "ops", "--json"]);
     assert_eq!(first["files"]["state"], "uncommitted");
-    assert!(first["initiative"]["error"].is_string());
     let replacement = lab.lf(&["wave", "add", "research", "--json"]);
-    bind_initiative(&lab, "research", "replacement-initiative");
-    let replacement_config =
-        std::fs::read(lab.path().join(".lf/wave/research/config.yaml")).unwrap();
-    // The current target binding also cannot redirect the outstanding provider effect.
-    let target_config = lab.path().join(".lf/wave/ops/config.yaml");
-    let changed_binding = std::fs::read_to_string(&target_config)
-        .unwrap()
-        .replace("original-initiative", "later-initiative");
-    std::fs::write(&target_config, &changed_binding).unwrap();
+    let replacement_goal = std::fs::read(lab.path().join(".lf/wave/research/GOAL.md")).unwrap();
     git(&lab, &["checkout", branch.trim()]);
     let again = lab.lf(&["wave", "rename", "research", "ops", "--json"]);
     assert_eq!(again["id"], original["id"]);
     assert_eq!(again["files"]["state"], "committed", "{again}");
-    assert_eq!(again["initiative"]["initiative"], "original-initiative");
-    assert_eq!(again["initiative"]["title"], "Operations");
-    assert!(again["initiative"]["error"].is_string());
     assert_eq!(
-        std::fs::read(&target_config).unwrap(),
-        changed_binding.as_bytes()
-    );
-    assert_eq!(
-        std::fs::read(lab.path().join(".lf/wave/research/config.yaml")).unwrap(),
-        replacement_config
+        std::fs::read(lab.path().join(".lf/wave/research/GOAL.md")).unwrap(),
+        replacement_goal
     );
     assert_ne!(original["id"], replacement["id"]);
     assert_eq!(lab.live_waves(), ["ops", "research"]);

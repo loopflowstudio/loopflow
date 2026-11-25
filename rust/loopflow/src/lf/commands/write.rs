@@ -422,7 +422,7 @@ writes! {
         name: String,
     } => loopflow_execution::ops::wave_lifecycle::WaveRenamed;
     { wave, name, .. } => tokio::runtime::Runtime::new()?.block_on(
-        loopflow_execution::ops::wave_lifecycle::rename(directory, wave, Some(name), None, None),
+        loopflow_execution::ops::wave_lifecycle::rename(directory, wave, Some(name), None),
     )?,
 
     #[serde(rename = "wave.remove")]
@@ -462,8 +462,8 @@ writes! {
         on, agent, ..
     } => super::session::moved(on.as_deref(), agent)?,
 
-    /// `lf wave add <wave> [--objective <objective>] --json`: the Wave, its
-    /// authored files and first Project; an existing Wave is unchanged.
+    /// `lf wave create <wave> [--objective <objective>] --json`: the Wave and
+    /// its authored files; an existing Wave is unchanged.
     #[serde(rename = "wave.create")]
     WaveCreate {
         directory: PathBuf,
@@ -487,34 +487,23 @@ writes! {
     WaveSync { directory: PathBuf, wave: String } => Option<crate::lf::commands::waves::WaveDetailSnapshot>;
     { wave, .. } => {
         let refreshed = super::ops::refresh_status(directory, Some(wave))?;
-        super::waves::desktop_status(directory, refreshed.wave().unwrap_or(wave))?
+        super::waves::desktop_status(directory, refreshed.as_deref().unwrap_or(wave))?
     },
 
-    /// `lf wave plan bind <wave> <project> --json`: the tracker Project
-    /// bound as the Wave's current Project.
-    #[serde(rename = "wave.plan.bind")]
-    WavePlanBind {
-        replace: bool,
-        directory: PathBuf,
-        wave: String,
-        project: String,
-    } => loopflow_storage::work::project::Project;
-    { wave, project, replace, .. } => {
-        loopflow_execution::engine::wave::planning_bind(directory, wave, project, *replace)?
-    },
-
-    /// `lf wave plan connect [<wave>|--all] [--team-key <key>]
+    /// `lf wave plan connect [<wave> [<project>]|--all] [--team-key <key>]
     /// [--team-name <name>] --json`: one receipt per Wave connected.
     #[serde(rename = "wave.plan.connect")]
     WavePlanConnect {
         directory: PathBuf,
         wave: Option<String>,
+        project: Option<String>,
         all: bool,
         team_key: Option<String>,
         team_name: Option<String>,
     } => Vec<loopflow_execution::ops::linear::LinearInitResult>;
     {
         wave,
+        project,
         all,
         team_key,
         team_name,
@@ -522,6 +511,7 @@ writes! {
     } => loopflow_execution::engine::wave::planning_connect(
         directory,
         wave.as_deref(),
+        project.as_deref(),
         *all,
         team_key.as_deref(),
         team_name.as_deref(),
@@ -1120,7 +1110,6 @@ macro_rules! directory_of {
             | Write::WaveRemove { directory, .. }
             | Write::WaveMachine { directory, .. }
             | Write::WaveSync { directory, .. }
-            | Write::WavePlanBind { directory, .. }
             | Write::WavePlanConnect { directory, .. }
             | Write::WavePlanReteam { directory, .. }
             | Write::GraphCustomize { directory, .. }
@@ -1655,8 +1644,7 @@ mod tests {
             r#"{"kind":"task.report","directory":"/r","issue":"FIX-1","message":"landed"}"#,
             r#"{"kind":"task.interrupt","directory":"/r","issue":"FIX-1"}"#,
             r#"{"kind":"session.steer","directory":"/r","session":null,"wave":"product","message":"ship by Friday"}"#,
-            r#"{"kind":"wave.plan.bind","replace":false,"directory":"/r","wave":"product","project":"3f1c"}"#,
-            r#"{"kind":"wave.plan.connect","directory":"/r","wave":null,"all":true,"team_key":null,"team_name":null}"#,
+            r#"{"kind":"wave.plan.connect","directory":"/r","wave":null,"project":null,"all":true,"team_key":null,"team_name":null}"#,
             r#"{"kind":"wave.plan.reteam","directory":"/r","apply":false}"#,
             r#"{"kind":"repo.release","directory":"/r","version":"minor","target":null}"#,
             r#"{"kind":"checkout.commit","directory":"/r","message":"Tidy","push":false,"no_add":false,"paths":[],"agent":null}"#,

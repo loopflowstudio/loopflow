@@ -94,7 +94,7 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
             repo.path().canonicalize().unwrap().display().to_string(),
         );
         let project = Project {
-            id: ProjectId::new(),
+            id: ProjectId::for_wave(wave.id()),
             wave_id: wave.id().clone(),
 
             summary: String::new(),
@@ -103,16 +103,13 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
             name: "Project".into(),
             status: loopflow_execution::work::project::ProjectStatus::Started,
             description: "Adopt existing work".into(),
-            krs: Vec::new(),
-            metric_targets: Vec::new(),
             tracker_synced_at: Some(now.unix_timestamp()),
             created_at: now,
             updated_at: now,
         };
-        let snapshot: crate::test_linear_input::Inventory = serde_json::from_value(json!({
-            "projects": [{"id":"project-1", "slug":"project", "name":"Project",
-                "summary":"", "metric_targets":[], "status":"started",
-                "krs":[], "initiative_ids":["initiative-1"], "team_ids":["team-1"]}],
+        let snapshot: loopflow_storage::planning::ProjectInventory = serde_json::from_value(json!({
+            "project": {"id":"project-1", "slug":"project", "name":"Project",
+                "summary":"", "status":"started", "team_ids":["team-1"]},
             "items": [{"id":"issue-1", "identifier":"FIX-1", "branch_name":branch, "revision":"2026-09-29T12:00:00Z",
                 "url":null, "name":"A different title", "description":"Existing implementation",
                 "rank":0, "completed":false, "state":"started", "project_id":"project-1",
@@ -122,20 +119,12 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
         let imported_id = runtime.block_on(async {
             store.create_wave(&wave).await.unwrap();
             store.create_project(&project).await.unwrap();
-            rusqlite::Connection::open(home.path().join("loopflow.db"))
-                .unwrap()
-                .execute(
-                    "UPDATE waves SET current_project_id=?2 WHERE id=?1",
-                    rusqlite::params![wave.id(), project.id.as_str()],
-                )
-                .unwrap();
             let mut historical = snapshot.clone();
             historical.items[0].branch_name = None;
             store
                 .seed_inventory(
                     InventoryFixture {
                         wave_id: wave.id().clone(),
-                        initiative: "initiative-1".into(),
                         synced_at: now.unix_timestamp(),
                         snapshot: historical,
                     },
@@ -147,7 +136,6 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
                 .seed_inventory(
                     InventoryFixture {
                         wave_id: wave.id().clone(),
-                        initiative: "initiative-1".into(),
                         synced_at: now.unix_timestamp(),
                         snapshot,
                     },
@@ -335,7 +323,7 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
                 let mut restored = original.clone();
                 restored.item.revision = Some(format!("2026-09-30T12:00:{:02}Z", index * 2));
                 runtime
-                    .block_on(store.seed_issue(&scope, "linear", restored, None, None))
+                    .block_on(store.seed_issue(&scope, "linear", restored, None))
                     .unwrap();
                 let mut observed = original.clone();
                 observed.item.revision = Some(format!("2026-09-30T12:00:{:02}Z", index * 2 + 1));
@@ -350,7 +338,7 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
                     observed.item.team_id = Some("another-team".into());
                 }
                 runtime
-                    .block_on(store.seed_issue(&scope, "linear", observed, None, None))
+                    .block_on(store.seed_issue(&scope, "linear", observed, None))
                     .unwrap();
                 if condition == "removed" {
                     runtime

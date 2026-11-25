@@ -989,7 +989,6 @@ struct DesktopPerformanceTests {
             task["runtime"] = runtime
             return task
         }
-        wave["unavailable_tasks"] = []
         var waveInfo = try #require(wave["wave"] as? [String: Any])
         waveInfo["repo"] = checkout
         wave["wave"] = waveInfo

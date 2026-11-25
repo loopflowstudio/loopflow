@@ -121,11 +121,7 @@ fn task_run_checks_admission_while_standalone_graphs_run_with_task_context() {
         }
         deliver_state_writes(&registered.store, &registered.task.id);
         runtime
-            .block_on(
-                registered
-                    .store
-                    .seed_issue(&scope, "linear", record, None, None),
-            )
+            .block_on(registered.store.seed_issue(&scope, "linear", record, None))
             .unwrap();
         // Old valid planning still admits a launch without reaching the provider.
         rusqlite::Connection::open(home.path().join("loopflow.db"))
@@ -1278,7 +1274,7 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
         record.item.state = Some("completed".into());
         record.item.completed = true;
         runtime
-            .block_on(store.seed_issue(&scope, "linear", record, None, None))
+            .block_on(store.seed_issue(&scope, "linear", record, None))
             .unwrap();
     }
 
@@ -1458,7 +1454,7 @@ fn checkout_leaves_graph_selection_to_the_first_run() {
     observation.item.name = "Graph chosen at first run".into();
     observation.item.branch_name = None;
     runtime
-        .block_on(store.seed_issue(&scope, "linear", observation, None, None))
+        .block_on(store.seed_issue(&scope, "linear", observation, None))
         .unwrap();
     let task = runtime
         .block_on(store.get_task_by_issue("INF-124"))
@@ -2782,9 +2778,9 @@ fn linear_completion_and_reopening_preserve_the_graph() {
     record.item.revision = Some("2026-10-07T12:00:00Z".into());
     record.item.state = Some("started".into());
     record.item.completed = false;
-    rt.block_on(store.seed_issue(&scope, "linear", record, None, None))
+    rt.block_on(store.seed_issue(&scope, "linear", record, None))
         .unwrap();
-    rt.block_on(store.seed_issue(&scope, "linear", stale, None, None))
+    rt.block_on(store.seed_issue(&scope, "linear", stale, None))
         .unwrap();
     assert_eq!(task.state(), "active");
     assert_eq!(task.graph(), graph);
@@ -2957,7 +2953,14 @@ fn provider_completion_preserves_a_live_run_and_its_graph_process_records_the_ar
     task.publish(false);
     let placement = task.status();
     assert!(placement["pr"]["id"].is_string());
-    task.ok(&["wave", "add", "other", "--json"]);
+    // `wave add` would make the Project in Linear, which this fixture can't reach.
+    let repo = task.repo.path().canonicalize().unwrap();
+    loopflow_execution::test_support::seed_wave_project(
+        &task.registered.store.sqlite,
+        repo.to_str().unwrap(),
+        "other",
+    )
+    .unwrap();
     task.ok(&["task", "move", "INF-123", "--wave", "other"]);
     let moved = task.status();
     assert_eq!(moved["wave"], "other");

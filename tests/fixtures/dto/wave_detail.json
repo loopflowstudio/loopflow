@@ -19,41 +19,6 @@
       "label": "mini"
     }
   },
-  "metric_portfolio": {
-    "metrics": [
-      {
-        "identity": {
-          "wave_id": "wave-1",
-          "metric_id": "task-loop-trust"
-        },
-        "contract_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "name": "Task loops earn trust",
-        "description": "Fraction of Tasks settled during the trailing seven days that either completed with every PR landed through Loopflow auto-merge or stopped with a non-resumable failure receipt. Open Tasks are excluded. A user-landed PR or manual Git repair inside the Task fails the metric.",
-        "stage": "graduated",
-        "instrumented": true,
-        "instrument": "lifecycle-scorecard",
-        "unit": "ratio",
-        "target": {
-          "kind": "at_least",
-          "value": 1.0
-        },
-        "window": "7d",
-        "freshness_policy": "30h",
-        "freshness": {
-          "kind": "fresh",
-          "source_time": "2026-08-20T18:00:00Z",
-          "expires_at": "2026-08-22T00:00:00Z"
-        },
-        "evidence": {
-          "kind": "met",
-          "value": 1.0,
-          "source_window_start": "2026-08-13T18:00:00Z",
-          "source_window_end": "2026-08-20T18:00:00Z"
-        }
-      }
-    ],
-    "contract_issues": []
-  },
   "history": {
     "state": "ok",
     "truncated": false,
@@ -643,89 +608,54 @@
     ],
     "truncated": false
   },
-  "unavailable_tasks": [
-    {
-      "work_id": "task_40fbeeaadfbca5367aa7391432ae84ff",
-      "task_id": "linear-task-w2-127",
-      "task_identifier": "W2-127",
-      "status": "unstarted",
-      "owner": "wave",
-      "reason": "Task's owning Project is absent from the current PM snapshot",
-      "recovery": "lf task status task_40fbeeaadfbca5367aa7391432ae84ff --json"
-    }
-  ],
-  "projects": {
+  "project": {
     "state": "ok",
-    "items": [
-      {
-        "id": "proj_0123456789ab40008000000000000001",
-        "slug": "release-feedback",
-        "name": "current",
-        "status": "started",
-        "current": true,
-        "metric_targets": [
+    "value": {
+      "id": "proj_0123456789ab40008000000000000001",
+      "url": null,
+      "unbound": null,
+      "slug": "release-feedback",
+      "name": "current",
+      "status": "started",
+      "sync": {
+        "actions": [
           {
-            "metric_id": "task-loop-trust",
-            "target": {
-              "kind": "at_least",
-              "value": 1.0
-            }
-          }
-        ],
-        "krs": [
-          {
-            "text": "Every failed run has an owner",
-            "holds": false
-          }
-        ],
-        "sync": {
-          "actions": [
-            {
-              "id": "create-task",
-              "seq": 1,
-              "owner_kind": "task",
-              "owner_id": "proj_0123456789ab40008000000000000001",
-              "kind": "create",
-              "change": "create",
-              "subject": null,
-              "phase": "queued",
-              "tracker": "linear",
-              "error": null,
-              "local_value": {
-                "title": "Saved offline"
-              },
-              "tracker_value": null
+            "id": "create-task",
+            "seq": 1,
+            "owner_kind": "task",
+            "owner_id": "proj_0123456789ab40008000000000000001",
+            "kind": "create",
+            "change": "create",
+            "subject": null,
+            "phase": "queued",
+            "tracker": "linear",
+            "error": null,
+            "local_value": {
+              "title": "Saved offline"
             },
-            {
-              "id": "order-project",
-              "seq": 2,
-              "owner_kind": "project",
-              "owner_id": "proj_0123456789ab40008000000000000001",
-              "kind": "order",
-              "change": "order",
-              "subject": null,
-              "phase": "sent",
-              "tracker": "linear",
-              "error": "Reply lost; awaiting readback",
-              "local_value": [
-                "task-b",
-                "task-a"
-              ],
-              "tracker_value": null
-            }
-          ]
-        },
-        "tracker_id": "project-1"
-      }
-    ],
-    "truncated": false
-  },
-  "project_readiness": {
-    "state": "ready",
-    "project_id": "proj_0123456789ab40008000000000000001",
-    "observed_at": null,
-    "pending_successor": null,
-    "activation": null
+            "tracker_value": null
+          },
+          {
+            "id": "order-project",
+            "seq": 2,
+            "owner_kind": "project",
+            "owner_id": "proj_0123456789ab40008000000000000001",
+            "kind": "order",
+            "change": "order",
+            "subject": null,
+            "phase": "sent",
+            "tracker": "linear",
+            "error": "Reply lost; awaiting readback",
+            "local_value": [
+              "task-b",
+              "task-a"
+            ],
+            "tracker_value": null
+          }
+        ]
+      },
+      "tracker_id": "project-1"
+    }
   },
   "setup": {
     "graph": {

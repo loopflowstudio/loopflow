@@ -1,5 +1,5 @@
-//! The `wave` namespace's planning binding: `wave.plan.bind`, `.connect`
-//! and `.reteam` tie a Wave's plan to the repository's tracker. `wave.sync`
+//! The `wave` namespace's planning binding: `wave.plan.connect` and
+//! `.reteam` tie a Wave's plan to the repository's tracker. `wave.sync`
 //! is the explicit exchange; the planning reads (`wave.plan`,
 //! `plan.list`, `wave.list`) read the stored snapshot and exchange nothing.
 
@@ -8,32 +8,15 @@ use std::path::Path;
 use super::{Error, ErrorCode, Result};
 use crate::ops::linear::{LinearInitResult, LinearReteamResult};
 use crate::ops::Progress;
-use loopflow_storage::work::project::Project;
 
-/// `wave.plan.bind`: bind the existing tracker Project `project` as the
-/// Wave's shared current selection, as `lf wave plan bind <wave>
-/// <project>` does, and return the Project as stored.
-pub fn planning_bind(
-    directory: &Path,
-    wave: &str,
-    project: &str,
-    replace: bool,
-) -> Result<Project> {
-    let repo = repo_root(directory)?;
-    tokio::runtime::Runtime::new()
-        .map_err(written)?
-        .block_on(crate::ops::project::bind_project(
-            &repo, wave, project, replace,
-        ))
-        .map_err(written)
-}
-
-/// `wave.plan.connect`: connect `wave` (the ambient Wave with none, every
-/// authored Wave with `all`) to its tracker Initiative and the repository's
-/// Team, as `lf wave plan connect` does; one receipt per Wave connected.
+/// `wave.plan.connect`: link the Project of `wave` (the ambient Wave with
+/// none, every authored Wave with `all`) to `project` in the repository's
+/// tracker Team, or make one there, as `lf wave plan connect` does; one
+/// receipt per Wave connected.
 pub fn planning_connect(
     directory: &Path,
     wave: Option<&str>,
+    project: Option<&str>,
     all: bool,
     team_key: Option<&str>,
     team_name: Option<&str>,
@@ -78,6 +61,7 @@ pub fn planning_connect(
                 &repo,
                 &crate::ops::linear::LinearInitOptions {
                     wave: Some(wave),
+                    project: project.map(str::to_owned),
                     team_key: team_key.map(str::to_owned),
                     team_name: team_name.map(str::to_owned),
                 },

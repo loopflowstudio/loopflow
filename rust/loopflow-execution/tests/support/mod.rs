@@ -23,6 +23,17 @@ pub mod rex;
 // Shared with the library's cfg(test) store setup; production never embeds it.
 pub use loopflow_storage::test_database;
 
+/// Create the Wave and a Project for fixtures that need Task membership.
+#[allow(dead_code)] // Shared helper compiled into each integration test binary.
+pub fn seed_wave_project(
+    store: &loopflow_storage::sqlite::SqliteStore,
+    repo: &str,
+    name: &str,
+) -> loopflow_storage::StoreResult<Project> {
+    let wave = loopflow::work::wave::bootstrap::ensure_wave(store, repo, name)?;
+    store.seed_project(&wave)
+}
+
 #[allow(dead_code)] // Shared helper compiled into each integration test binary.
 pub fn seed_store(home: &Path) {
     test_database::copy(&home.join("loopflow.db")).expect("copy fixture store");
@@ -517,10 +528,6 @@ pub fn bind_task_planning(repo: &TestRepo) {
         "planning:\n  provider: linear\n  team: team-task-pr-tests\n",
     );
     repo.create_file(".lf/wave/task-pr-tests/GOAL.md", "Keep work.\n");
-    repo.create_file(
-        ".lf/wave/task-pr-tests/config.yaml",
-        "linear:\n  initiative: initiative-task-pr-tests\n",
-    );
     repo.stage_all();
     repo.commit("Bind fixture planning before creating Task checkouts");
 }
@@ -635,8 +642,9 @@ fn register_task_fixture(
         "task-pr-tests".to_string(),
         worktree.display().to_string(),
     );
+    // The Wave's own Project, which creating the Wave makes.
     let project = Project {
-        id: ProjectId::new(),
+        id: ProjectId::for_wave(wave.id()),
 
         summary: String::new(),
         status: loopflow::work::project::ProjectStatus::Started,
@@ -646,8 +654,6 @@ fn register_task_fixture(
         slug: "task-pr-tests".to_string(),
         name: "Task PR tests".to_string(),
         description: "Keep Task PR transitions durable.".to_string(),
-        krs: Vec::new(),
-        metric_targets: Vec::new(),
         tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
@@ -712,13 +718,6 @@ fn register_task_fixture(
             .create_project(&project)
             .await
             .expect("create test project");
-        rusqlite::Connection::open(home.join("loopflow.db"))
-            .expect("open fixture database")
-            .execute(
-                "UPDATE waves SET current_project_id=?2 WHERE id=?1",
-                rusqlite::params![wave.id(), project.id.as_str()],
-            )
-            .expect("select fixture Project");
         planning::seed_unplaced_task(&home.join("loopflow.db"), &task);
         planning::seed_linear_admission(&home.join("loopflow.db"), &wave, &project, &task);
         pr.task_id = task.id.clone();

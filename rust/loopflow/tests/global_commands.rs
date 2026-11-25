@@ -649,13 +649,14 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
         let path = home.path().join(".lf/loopflow.db");
         let store = loopflow_execution::store::open_sqlite(&path).unwrap();
         let conn = rusqlite::Connection::open(path).unwrap();
-        let project: String = conn
+        let wave: loopflow_model::id::WaveId = conn
             .query_row(
-                "SELECT current_project_id FROM waves WHERE repo=?1 AND name='inbox'",
+                "SELECT id FROM waves WHERE repo=?1 AND name='inbox'",
                 [repo.canonicalize().unwrap().to_str().unwrap()],
                 |row| row.get(0),
             )
             .unwrap();
+        let project = store.seed_project(&wave).unwrap().id;
         store
             .create_task(&loopflow_execution::work::task::NewTask {
                 parent_task_id: None,
@@ -666,7 +667,7 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
                 .unwrap(),
                 due_date: None,
                 id: loopflow_execution::durable::TaskId::parse(id).unwrap(),
-                project_id: Some(loopflow_execution::durable::ProjectId::parse(&project).unwrap()),
+                project_id: Some(project),
                 title: title.into(),
                 description: String::new(),
             })
@@ -2123,7 +2124,7 @@ fn task_planning_explain_retains_deletion_and_missing_evidence() {
 }
 
 #[test]
-fn task_planning_explain_create_uses_piped_input_and_current_project_validation() {
+fn task_planning_explain_create_uses_piped_input_and_previews_the_project_joined() {
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
@@ -2195,37 +2196,40 @@ fn task_planning_explain_create_uses_piped_input_and_current_project_validation(
         .unwrap(),
     ))
     .unwrap();
-    assert!(
-        preview["impediments"][0]
-            .as_str()
-            .unwrap()
-            .contains("terminal"),
+    // Its Project ended: the Task still joins the Wave's one Project.
+    assert_eq!(preview["impediments"], serde_json::json!([]));
+    assert_eq!(
+        preview["action"]["project"],
+        registered.task.project_id.as_ref().unwrap().as_str(),
         "{preview}"
     );
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     assert!(fs::read(&path).unwrap() == before);
-    // Execution uses the same current-Project refusal, rather than creating in history.
-    let refused = command(
-        home.path(),
-        repo.path(),
-        &[
-            "task",
-            "create",
-            "--wave",
-            "task-pr-tests",
-            "--title",
-            "Not admitted",
-        ],
-    )
-    .output()
-    .unwrap();
-    assert!(!refused.status.success());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("terminal"));
-    assert_eq!(
-        db.query_row("SELECT count(*) FROM tasks", [], |row| row.get::<_, i64>(0))
-            .unwrap(),
-        1
+    success(
+        command(
+            home.path(),
+            repo.path(),
+            &[
+                "task",
+                "create",
+                "--wave",
+                "task-pr-tests",
+                "--title",
+                "After the Project ended",
+            ],
+        )
+        .output()
+        .unwrap(),
     );
+    let (tasks, projects): (i64, i64) = db
+        .query_row(
+            "SELECT (SELECT count(*) FROM tasks WHERE project_id=?1),
+                    (SELECT count(*) FROM projects)",
+            [registered.task.project_id.as_ref().unwrap().as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((tasks, projects), (2, 1));
 }
 
 #[test]
@@ -2237,13 +2241,13 @@ fn task_planning_explain_creation_provenance_follows_resolved_selection() {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     let store = loopflow_execution::store::open_sqlite(&path).unwrap();
     let canonical = repo.path().canonicalize().unwrap();
-    let selected = loopflow_execution::work::wave::bootstrap::ensure_wave_project(
+    let selected = loopflow_execution::test_support::seed_wave_project(
         &store,
         canonical.to_str().unwrap(),
         "selected",
     )
     .unwrap();
-    loopflow_execution::work::wave::bootstrap::ensure_wave_project(
+    loopflow_execution::test_support::seed_wave_project(
         &store,
         canonical.to_str().unwrap(),
         "inbox",
@@ -2323,17 +2327,17 @@ fn task_planning_explain_move_resolves_destination_and_retains_recorded_work() {
         );
     }
     // Setup owns these locks; preview must not recreate them.
-    fs::remove_dir_all(home.path().join(".lf/chapter-locks")).unwrap();
+    let _ = fs::remove_dir_all(home.path().join(".lf/chapter-locks"));
     let path = home.path().join(".lf/loopflow.db");
     let store = loopflow_execution::store::open_sqlite(&path).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     let project = |wave: &str| -> String {
-        db.query_row(
-            "SELECT current_project_id FROM waves WHERE name=?1",
-            [wave],
-            |row| row.get(0),
-        )
-        .unwrap()
+        let id: loopflow_model::id::WaveId = db
+            .query_row("SELECT id FROM waves WHERE name=?1", [wave], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        store.seed_project(&id).unwrap().id.to_string()
     };
     let source = project("source");
     let destination = project("destination");
@@ -2454,7 +2458,7 @@ fn task_planning_explain_move_resolves_destination_and_retains_recorded_work() {
         .query_row("SELECT count(*) FROM waves", [], |row| row.get(0))
         .unwrap();
     assert_eq!(count, 2);
-    fs::remove_dir_all(home.path().join(".lf/chapter-locks")).unwrap();
+    let _ = fs::remove_dir_all(home.path().join(".lf/chapter-locks"));
     // Recorded work stays put while its planning membership can change.
     db.execute(
         "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)

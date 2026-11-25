@@ -152,13 +152,17 @@ pub fn render_complete(steers: &[Steer]) -> String {
     text
 }
 
+/// Short interactive prompt sent to a provider whose steers arrive through its
+/// turn hook (`PreInvocation`), rather than a server-side inbox or RPC.
+pub const WAKE_PROMPT: &str = "Read the waiting steers and Task updates for this Session.";
+
 /// A managed conversation whose last boundary was a turn end, and how the
 /// Machine server reaches it there.
 #[derive(Debug, Clone)]
 pub struct IdleConversation {
     pub adapter: SteerAdapter,
-    /// The Session's selected native conversation.
-    pub thread: String,
+    /// The Session's selected native conversation, once reported.
+    pub thread: Option<String>,
     /// The Session's working directory, where rendered steers are saved.
     pub cwd: std::path::PathBuf,
     pub reach: IdleReach,
@@ -170,11 +174,17 @@ pub enum IdleReach {
     Codex(std::path::PathBuf),
     /// What the provider's own code listens on.
     Inbox(Inbox),
+    /// The held terminal hosting the provider's interactive TUI.
+    Terminal(loopflow_model::id::TerminalId),
 }
 
 fn idle_reach(candidate: &IdleCandidate) -> Option<IdleReach> {
     let kind = loopflow_harness::HarnessKind::parse(candidate.provider.as_deref()?)?;
-    crate::harness::launcher(kind).idle_reach(&candidate.endpoints)
+    let reach = crate::harness::launcher(kind).idle_reach(&candidate.endpoints)?;
+    if candidate.thread.is_none() && !matches!(reach, IdleReach::Terminal(_)) {
+        return None;
+    }
+    Some(reach)
 }
 
 /// A recorded start leaves waiting input for the server when this launch

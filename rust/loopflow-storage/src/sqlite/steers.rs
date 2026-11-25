@@ -298,12 +298,14 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
             "SELECT s.id,s.agent_process_id,a.capability,s.provider_thread,s.cwd,
-                s.provider,s.agent_endpoint,s.agent_inbox,s.agent_socket,s.agent_pid,s.agent_os_started_at
+                s.provider,s.agent_endpoint,s.agent_inbox,s.agent_socket,s.held_terminal_id,
+                s.agent_pid,s.agent_os_started_at
              FROM agent_sessions s INDEXED BY agent_sessions_unended_agent
              JOIN steer_adapters a ON a.agent_process_id=s.agent_process_id
              JOIN session_activity act ON act.session_id=s.id AND act.agent_process_id=s.agent_process_id
              WHERE s.agent_process_id IS NOT NULL AND s.agent_ended_at IS NULL
-               AND act.yielded=1 AND s.interactive=1 AND s.provider_thread IS NOT NULL
+               AND act.yielded=1 AND s.interactive=1
+               AND (s.provider_thread IS NOT NULL OR s.held_terminal_id IS NOT NULL)
                AND (?1 IS NULL OR s.id=?1)",
         )?;
         let rows = statement.query_map([session], |row| {
@@ -324,8 +326,9 @@ impl SqliteStore {
                     endpoint: path(6)?,
                     inbox: path(7)?,
                     socket: path(8)?,
+                    held_terminal: row.get(9)?,
                 },
-                identity: row.get::<_, Option<u32>>(9)?.zip(row.get(10)?),
+                identity: row.get::<_, Option<u32>>(10)?.zip(row.get(11)?),
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)

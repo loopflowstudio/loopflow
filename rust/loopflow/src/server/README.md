@@ -941,6 +941,16 @@ that lapses for the next boundary:
   A turn already running takes the message as a steer. OpenCode's TUI shows
   the answer but not the message that caused it.
 
+- Antigravity: its held terminal (`agent_sessions.held_terminal_id`). When the
+  held terminal's retained `libghostty-vt` screen shows `agy`'s empty idle
+  prompt (`───` / `>` / `───` with `? for shortcuts`, bracketed paste enabled,
+  main screen, no `esc to cancel` or navigation menu) and no recent user
+  keystrokes or open paste, the server injects the trigger prompt via bracketed
+  paste (`ESC[200~ … ESC[201~\r`) and marks the conversation woken without
+  claiming steers; `PreInvocation` claims and stamps them once `agy` starts the
+  turn. When a draft, menu, or dialog is open, the wake defers and retries
+  until the prompt is empty again.
+
 A reopened work session takes steers saved while it was closed as a turn
 before anyone types. Without a steer or an opening prompt, it waits for input.
 The new provider process's first boundary records it idle
@@ -949,18 +959,17 @@ or socket, lets the server deliver waiting steers. Claude reports its start.
 Codex runs its start hook inside a turn, so lf reports the start once the
 app-server holds the conversation. If Codex has an opening prompt, lf reports
 the prompt before starting its turn. OpenCode names its socket when the plugin
-loads, and Pi names its socket at `session_start`. The next boundary claims
-any steers the server could not deliver.
+loads, and Pi names its socket at `session_start`. Antigravity opens with `-i`
+when news is waiting and records its opening idle state when opened without
+`-i`, so steers arriving while it sits idle wake its held terminal as soon as
+its prompt is ready. The next boundary claims any steers the server could not
+deliver.
 
 A server that restarts reads the same conversations again. An unreachable
-Claude inbox or extension socket leaves its news unclaimed. After a failed
-send the steers arrive again. One watcher serves every Session, with a 60 s
-fallback for a missed checkpoint or a Machine's sleep.
-
-Antigravity gets waiting updates on reopen through its native interactive
-prompt. The launcher checks for unread steers and starts a turn with `-i`
-when there is news. The first `PreInvocation` hook reads the steers. An
-Antigravity conversation that is already open reads them at its next boundary.
+Claude inbox, extension socket, or busy held terminal leaves its news
+unclaimed. After a failed send the steers arrive again. One watcher serves
+every Session, with a 60 s fallback for a missed checkpoint or a Machine's
+sleep (and a 2 s retry while a held-terminal wake is deferred).
 
 ### Starting a stopped conversation
 

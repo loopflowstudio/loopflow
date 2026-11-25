@@ -205,9 +205,10 @@ lf session steers <session>                          # pending vs. delivered
 
 - **Running Sessions** receive steers at their next provider boundary (after a
   tool call or turn).
-- **Idle work sessions** on Claude, Codex, OpenCode and Pi wake for steers,
-  Task comments, and Graph runs that settle. An open Antigravity conversation
-  reads waiting steers when its next turn begins.
+- **Idle work sessions** on Claude, Codex, OpenCode, Pi, and Antigravity wake
+  for steers, Task comments, and Graph runs that settle. Antigravity wakes only
+  when its held terminal is at an empty idle prompt, leaving drafts, slash
+  menus, and dialogs untouched.
 - **Reopened work sessions** (`lf resume --task <ID>`) run steers saved while
   they were closed as soon as the provider is ready for input, before you type.
 - **A Task's conversation** also hears about the

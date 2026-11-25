@@ -247,6 +247,17 @@ enum Nudge {
     Narrowed { since: Instant },
 }
 
+/// Outcome of trying to wake an idle interactive terminal by pasting a prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WakeTerminal {
+    /// The bracketed-paste prompt was pushed into the terminal's PTY input queue.
+    Injected,
+    /// The terminal is hosted, but its screen or input state is not safe to paste into.
+    NotReady,
+    /// No live held terminal with that ID is currently hosted by this registry.
+    Absent,
+}
+
 enum Command {
     Add(TerminalId, Box<Entry>),
     /// A pending holder answered, or is gone: what it held is hosted or settled.
@@ -254,6 +265,12 @@ enum Command {
         place: Place,
         entries: Vec<(TerminalId, Entry)>,
         unsettled: Vec<Unsettled>,
+    },
+    /// Inspect a hosted terminal's VT screen and, if safely idle, paste `prompt`.
+    WakePrompt {
+        terminal: TerminalId,
+        prompt: String,
+        reply: mpsc::Sender<WakeTerminal>,
     },
     /// The server is going; its terminals stay with their holders. A real
     /// server's exit is enough; fixtures replace one within a process.
@@ -330,6 +347,7 @@ impl std::fmt::Debug for Command {
         match self {
             Self::Add(terminal, _) => write!(f, "Add({terminal})"),
             Self::Resolved { place, .. } => write!(f, "Resolved({})", place.socket.display()),
+            Self::WakePrompt { terminal, .. } => write!(f, "WakePrompt({terminal})"),
             #[cfg(any(test, feature = "test-support"))]
             Self::Stop => f.write_str("Stop"),
         }
@@ -406,6 +424,21 @@ impl Registry {
             .iter()
             .find(|(_, held)| held.as_ref() == Some(session))
             .map(|(terminal, _)| terminal.clone())
+    }
+
+    /// If `terminal` is hosted and its VT screen shows an empty idle prompt
+    /// with no open paste or recent user keystrokes, inject `prompt` via
+    /// bracketed paste + Enter.
+    pub fn wake_idle_prompt(&self, terminal: &TerminalId, prompt: &str) -> Result<WakeTerminal> {
+        let (reply, outcome) = mpsc::channel();
+        self.send(Command::WakePrompt {
+            terminal: terminal.clone(),
+            prompt: prompt.to_owned(),
+            reply,
+        })?;
+        outcome
+            .recv_timeout(Duration::from_secs(2))
+            .context("held terminal loop did not answer wake check")
     }
 
     /// The terminal a holder that has not answered yet may be running for
@@ -854,6 +887,20 @@ fn run(
                         .retain(|holder| holder.place != place);
                     terminals.extend(entries);
                     unsettled.extend(ended);
+                }
+                Command::WakePrompt {
+                    terminal,
+                    prompt,
+                    reply,
+                } => {
+                    let outcome = match terminals.get_mut(&terminal) {
+                        None => WakeTerminal::Absent,
+                        Some(entry) if matches!(entry.nudge, Some(Nudge::Replaying { .. })) => {
+                            WakeTerminal::NotReady
+                        }
+                        Some(entry) => entry.hosted.wake_idle_prompt(&mut entry.child, &prompt),
+                    };
+                    let _ = reply.send(outcome);
                 }
                 #[cfg(any(test, feature = "test-support"))]
                 Command::Stop => return,

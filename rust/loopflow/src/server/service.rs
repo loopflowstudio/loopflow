@@ -1004,11 +1004,12 @@ pub(super) async fn session<C: Carrier>(
                 } else {
                     None
                 };
-                let (request_id, instance, outgoing, remote_control) = (
+                let (request_id, instance, outgoing, remote_control, terminals) = (
                     id.clone(),
                     instance.clone(),
                     outgoing.clone(),
                     remote_control.clone(),
+                    terminals.clone(),
                 );
                 let uploaded_reservation = uploaded_reservation.take();
                 let task = tasks.spawn(async move {
@@ -1033,6 +1034,7 @@ pub(super) async fn session<C: Carrier>(
                         outgoing,
                         reservation,
                         remote_control,
+                        terminals,
                     )
                     .await;
                 });
@@ -1699,6 +1701,7 @@ async fn request(
     outgoing: Outbox,
     reservation: Arc<Reservation>,
     remote_control: Option<mpsc::Sender<Control>>,
+    terminals: Option<Arc<Registry>>,
 ) {
     #[cfg(test)]
     let completion = tests::take_request_completion(&id);
@@ -1712,7 +1715,7 @@ async fn request(
     let trace_id = loopflow_model::id::TraceId::default();
     let answer = match operation {
         Operation::Server(ServerOperation::SessionBoundary(boundary)) => {
-            Answer::read(session_boundary(boundary, reservation.clone()).await)
+            Answer::read(session_boundary(boundary, reservation.clone(), terminals).await)
         }
         operation => {
             operate(
@@ -2016,6 +2019,7 @@ async fn plan_here(
 async fn session_boundary(
     boundary: super::wire::SessionBoundary,
     reservation: Arc<Reservation>,
+    terminals: Option<Arc<Registry>>,
 ) -> Result<serde_json::Value, Error> {
     let (answer, after) = tokio::task::spawn_blocking(move || {
         let _held = reservation;
@@ -2031,7 +2035,9 @@ async fn session_boundary(
     .map_err(unavailable)?;
     if let Some(after) = after {
         tokio::task::spawn_blocking(move || {
-            loopflow_execution::journal::request::isolate(|| super::boundary::after(after))
+            loopflow_execution::journal::request::isolate(|| {
+                super::boundary::after(after, terminals)
+            })
         });
     }
     serde_json::to_value(answer).map_err(unavailable)

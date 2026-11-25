@@ -105,7 +105,13 @@ pub(super) struct Hosted {
     /// from the ring: its queries were answered when it was printed, or
     /// went unanswered while no server ran. Nothing answers them now.
     replayed_through: u64,
+    /// When a viewer last typed a real keystroke (excluding terminal replies,
+    /// focus reports and mouse events).
+    last_user_key: Option<Instant>,
 }
+
+/// How long after the last user keystroke an idle-terminal wake holds off.
+const USER_KEY_QUIET: Duration = Duration::from_secs(2);
 
 /// The threads the Machine server's held terminals share: viewing records
 /// and Session-name reads.
@@ -167,6 +173,7 @@ impl Hosted {
             title: crate::terminal_title::OutputTitle::new(&id, &watchers.titles),
             reported_status: None,
             replayed_through: 0,
+            last_user_key: None,
             id,
         })
     }
@@ -216,6 +223,39 @@ impl Hosted {
         self.output.program_status()
     }
 
+    /// Inject `prompt` via bracketed paste + Enter when this terminal is at an
+    /// empty idle Antigravity prompt with no active paste or recent typing.
+    pub fn wake_idle_prompt(
+        &mut self,
+        child: &mut Source,
+        prompt: &str,
+    ) -> super::registry::WakeTerminal {
+        use super::registry::WakeTerminal;
+        if self.exit.is_some()
+            || self.settling.is_some()
+            || (self.replayed_through > 0 && child.position() < self.replayed_through)
+            || self.pending_input.in_paste()
+            || !self.pending_input.is_empty()
+            || self
+                .last_user_key
+                .is_some_and(|at| at.elapsed() < USER_KEY_QUIET)
+        {
+            return WakeTerminal::NotReady;
+        }
+        let Some(terminal) = self.output.terminal() else {
+            return WakeTerminal::NotReady;
+        };
+        if !crate::harness::antigravity::prompt_ready(terminal) {
+            return WakeTerminal::NotReady;
+        }
+        let payload = format!("\x1b[200~{prompt}\x1b[201~\r");
+        if !self.pending_input.push(payload.as_bytes()) {
+            return WakeTerminal::NotReady;
+        }
+        child.forward(&mut self.pending_input);
+        WakeTerminal::Injected
+    }
+
     /// Serve every connection, move input and output, and judge the ending.
     pub fn pass(&mut self, child: &mut Source) -> Result<Pass> {
         let child_pid = child.pid();
@@ -254,6 +294,7 @@ impl Hosted {
                 kept,
                 execution_directory_reported,
                 close_notice,
+                last_user_key,
                 ..
             } = self;
             for index in 0..viewers.len() {
@@ -286,6 +327,9 @@ impl Hosted {
                                 );
                                 if input::keys(&typed).next().is_some() {
                                     output.acknowledge_results();
+                                }
+                                if input::has_user_keystroke(&typed) {
+                                    *last_user_key = Some(Instant::now());
                                 }
                                 *writer = Some(viewer.id.clone());
                                 sizing.touch(viewer);

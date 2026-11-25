@@ -5,8 +5,9 @@
 //! each one it has news for. A server restart forgets nothing. No process or
 //! clock per Session: Claude takes the message in its cross-session inbox,
 //! Codex as a turn its app-server starts, OpenCode and Pi as a turn their
-//! plugin or extension starts. A conversation the server cannot reach hears
-//! it at its next boundary.
+//! plugin or extension starts, and Antigravity via a VT-guarded bracketed paste
+//! into its held terminal whose `PreInvocation` hook reads the waiting steers.
+//! A conversation the server cannot reach hears it at its next boundary.
 //!
 //! A steer naming a stopped interactive Session starts it, once per steer,
 //! in a held terminal as `session.continue` does; the resumed conversation
@@ -15,32 +16,45 @@
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::json;
 
-use loopflow_execution::steer::{IdleConversation, IdleReach, Inbox};
-use loopflow_execution::transport::registry::Registry;
+use loopflow_execution::steer::{IdleConversation, IdleReach, Inbox, WAKE_PROMPT};
+use loopflow_execution::transport::registry::{Registry, WakeTerminal};
 use loopflow_model::id::LfSessionId;
 use loopflow_storage::sqlite::SqliteStore;
 
 /// How long the watcher waits for a store change before reading the revision
 /// anyway: the change signal can miss a checkpoint or a Machine's sleep.
 const UNSIGNALLED: Duration = Duration::from_secs(60);
+/// How soon the watcher retries an idle held terminal that was busy (e.g. typed
+/// draft, open menu, or recent typing) when news arrived.
+const DEFERRED_RETRY: Duration = Duration::from_secs(2);
 const SEND_DEADLINE: Duration = Duration::from_secs(2);
 /// A provider's turn start loads nothing new; it answers once the turn exists.
 const TURN_START_DEADLINE: Duration = Duration::from_secs(15);
 
+/// Set when a turn-end wake deferred a held terminal, so the watcher keeps
+/// retrying until the terminal returns to an empty idle prompt.
+static DEFERRED: AtomicBool = AtomicBool::new(false);
+
+pub(super) fn note_deferred() {
+    DEFERRED.store(true, Ordering::Release);
+}
+
 /// Wake `session` now if it is idle and has news: a turn just ended, so an
-/// update that arrived during it waits no longer. Blocking.
-pub(super) fn after_turn(store: &SqliteStore, session: &str) {
-    wake_idle(store, Some(session));
+/// update that arrived during it waits no longer. Returns `true` if a held
+/// terminal with news was not yet ready to paste into. Blocking.
+pub(super) fn after_turn(store: &SqliteStore, session: &str, terminals: Option<&Registry>) -> bool {
+    wake_idle(store, Some(session), terminals)
 }
 
 /// Start the Machine's one watcher. It runs as long as the server; without
-/// `terminals` it starts no stopped Session.
+/// `terminals` it starts no stopped Session and cannot wake held terminals.
 pub(super) fn start(terminals: Option<Arc<Registry>>) {
     let spawned = std::thread::Builder::new()
         .name("task-update-wake".into())
@@ -61,21 +75,28 @@ fn watch(terminals: Option<Arc<Registry>>) {
     };
     loop {
         watcher.read(&path);
-        changes.wait(UNSIGNALLED);
+        let timeout = if watcher.deferred || DEFERRED.load(Ordering::Acquire) {
+            DEFERRED_RETRY
+        } else {
+            UNSIGNALLED
+        };
+        changes.wait(timeout);
     }
 }
 
 /// The watcher's store, the revisions it last woke conversations for, and
-/// the held terminals it starts stopped Sessions in.
+/// the held terminals it starts stopped Sessions in or wakes when idle.
 #[derive(Default)]
 struct Watcher {
     store: Option<SqliteStore>,
     seen: Option<(i64, i64)>,
     terminals: Option<Arc<Registry>>,
+    deferred: bool,
 }
 
 impl Watcher {
-    /// Wake idle conversations if the revisions moved since the last reading.
+    /// Wake idle conversations if the revisions moved since the last reading,
+    /// or retry held terminals that were busy on an earlier pass.
     /// The first reading wakes too: what arrived while no server ran reaches
     /// each idle conversation now. One that already heard it gets nothing;
     /// claimed updates and confirmed steers say so.
@@ -88,6 +109,7 @@ impl Watcher {
         let Some(store) = &self.store else {
             return;
         };
+        let nudged = DEFERRED.swap(false, Ordering::AcqRel);
         match store
             .task_update_revision()
             .and_then(|updates| Ok((updates, store.steer_revision()?)))
@@ -108,7 +130,10 @@ impl Watcher {
                         |session, request| hold(terminals, session, request),
                     );
                 }
-                wake_idle(store, None);
+                self.deferred = wake_idle(store, None, self.terminals.as_deref());
+            }
+            Ok(_) if self.deferred || nudged => {
+                self.deferred = wake_idle(store, None, self.terminals.as_deref());
             }
             Ok(_) => {}
             Err(error) => {
@@ -169,44 +194,73 @@ fn hold(terminals: &Registry, session: &LfSessionId, request: String) -> Result<
     Ok(())
 }
 
-fn wake_idle(store: &SqliteStore, session: Option<&str>) {
+fn wake_idle(store: &SqliteStore, session: Option<&str>, terminals: Option<&Registry>) -> bool {
     match loopflow_execution::steer::idle_conversations(store, session) {
         Ok(idle) => {
+            let mut deferred = false;
             for conversation in idle {
-                wake(store, &conversation);
+                deferred |= wake(store, &conversation, terminals);
             }
+            deferred
         }
-        Err(error) => tracing::warn!(session, %error, "idle conversations unread"),
+        Err(error) => {
+            tracing::warn!(session, %error, "idle conversations unread");
+            false
+        }
     }
 }
 
 /// Deliver `conversation`'s pending steers, Task updates among them; with
-/// none, the conversation is not touched. The steers are stamped once sent,
-/// so a failed send leaves a claim that lapses for the next boundary. Once
-/// sent, the conversation is recorded as in a turn, so the next revision
-/// starts no second one.
-fn wake(store: &SqliteStore, conversation: &IdleConversation) {
+/// none, the conversation is not touched. Provider-API endpoints claim and
+/// stamp steers once sent, so a failed send leaves a claim that lapses for the
+/// next boundary. Held-terminal wakes (`IdleReach::Terminal`) leave steers
+/// unclaimed and paste the trigger prompt once the VT screen shows an empty
+/// idle prompt; the provider's `PreInvocation` hook claims and stamps them
+/// once the turn starts. Returns `true` when a held terminal with news was not
+/// yet ready to paste into.
+fn wake(
+    store: &SqliteStore,
+    conversation: &IdleConversation,
+    terminals: Option<&Registry>,
+) -> bool {
     let IdleConversation {
         adapter,
         thread,
         cwd,
         reach,
     } = conversation;
-    let delivered = (|| -> Result<()> {
+    let outcome = (|| -> Result<bool> {
         let session = &adapter.session;
         loopflow_execution::harness::task_updates::write(store, session)?;
         if !store.has_undelivered_steers(session)? {
-            return Ok(());
+            return Ok(false);
         }
+        if let IdleReach::Terminal(terminal) = reach {
+            let Some(terminals) = terminals else {
+                return Ok(false);
+            };
+            return match terminals.wake_idle_prompt(terminal, WAKE_PROMPT)? {
+                WakeTerminal::Injected => {
+                    store.record_woken(adapter)?;
+                    Ok(false)
+                }
+                WakeTerminal::NotReady => Ok(true),
+                WakeTerminal::Absent => Ok(false),
+            };
+        }
+        let Some(thread) = thread.as_deref() else {
+            return Ok(false);
+        };
         // Connect before claiming, so an unreachable conversation keeps its
         // news for its next boundary.
         let reach = match reach {
             IdleReach::Inbox(Inbox::Claude(key)) => match open_inbox(key, thread)? {
                 Some((socket, token)) => Reach::Claude(socket, token),
-                None => return Ok(()),
+                None => return Ok(false),
             },
             IdleReach::Codex(endpoint) => Reach::Codex(endpoint),
             IdleReach::Inbox(Inbox::Socket(socket)) => Reach::Socket(open_socket(socket)?),
+            IdleReach::Terminal(_) => unreachable!("handled above"),
         };
         let steers = loopflow_execution::steer::claim(
             store,
@@ -216,7 +270,7 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
             loopflow_execution::steer::NativeBoundary::Turn,
         )?;
         let Some(steers) = steers else {
-            return Ok(());
+            return Ok(false);
         };
         match reach {
             Reach::Claude(mut socket, token) => {
@@ -227,10 +281,14 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
         }
         store.record_woken(adapter)?;
         loopflow_execution::steer::delivered(store, session, &steers);
-        Ok(())
+        Ok(false)
     })();
-    if let Err(error) = delivered {
-        tracing::warn!(session = adapter.session, error = %format!("{error:#}"), "idle conversation not woken; its steers wait for its next boundary");
+    match outcome {
+        Ok(deferred) => deferred,
+        Err(error) => {
+            tracing::warn!(session = adapter.session, error = %format!("{error:#}"), "idle conversation not woken; its steers wait for its next boundary");
+            false
+        }
     }
 }
 
@@ -657,7 +715,7 @@ mod tests {
             let messages = extension(&socket, "started\n", 2);
             fixture.settle(provider, &socket);
             fixture.comment(&fixture.store, "c-1", "use the staging bucket");
-            after_turn(&fixture.store, &session);
+            after_turn(&fixture.store, &session, None);
             let message = messages.try_recv().expect(provider);
             assert_eq!(message["thread"], thread);
             let text = message["text"].as_str().unwrap();
@@ -672,14 +730,103 @@ mod tests {
             );
             // Woken, it is in a turn: nothing more goes out until that ends.
             fixture.comment(&fixture.store, "c-2", "and the eu region");
-            wake_idle(&fixture.store, None);
+            wake_idle(&fixture.store, None, None);
             assert!(messages.try_recv().is_err(), "{provider} woken mid-turn");
             fixture.settle(provider, &socket);
-            after_turn(&fixture.store, &session);
+            after_turn(&fixture.store, &session, None);
             let text = messages.try_recv().expect(provider)["text"].to_string();
             assert!(text.contains("and the eu region"));
             assert!(!text.contains("staging bucket"), "{text}");
         }
+    }
+
+    const HOLDER_BUILD: &str = "feedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface";
+
+    /// A real holder + Registry in `home` running a shell script that simulates
+    /// an open Antigravity TUI in a held terminal.
+    fn held_agy_terminal(
+        store: &SqliteStore,
+        session: &str,
+        script: &str,
+        wait_for: &str,
+    ) -> (
+        std::sync::Arc<super::Registry>,
+        loopflow_model::id::TerminalId,
+    ) {
+        use loopflow_execution::terminal_holder::{serve, Place};
+        use loopflow_execution::transport::registry::{connect, Registry, Start};
+        use loopflow_execution::transport::wire::{frame, Incoming, Request, Tag};
+        use std::io::Write;
+        use std::time::{Duration, Instant};
+
+        let place = Place::of(HOLDER_BUILD).unwrap();
+        let (ready, listening) = std::sync::mpsc::channel();
+        let served = place.clone();
+        std::thread::spawn(move || {
+            let _ = serve(&served, HOLDER_BUILD, move || {
+                let _ = ready.send(());
+            });
+        });
+        listening.recv_timeout(Duration::from_secs(10)).unwrap();
+        let registry = Registry::open(HOLDER_BUILD).unwrap();
+        let terminal = registry
+            .start(Start {
+                session: Some(loopflow_model::id::LfSessionId::from(session)),
+                request: format!("wake-{session}"),
+                argv: vec!["/bin/sh".into(), "-c".into(), script.into()],
+                cwd: "/".into(),
+                env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+                rows: 24,
+                cols: 80,
+                placement: None,
+            })
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET held_terminal_id=?2 WHERE id=?1",
+                rusqlite::params![session, terminal.as_str()],
+            )
+            .unwrap();
+        // Wait until Hosted's ghostty_vt::Terminal has parsed the screen text.
+        let mut socket = connect(&terminal).unwrap();
+        let attach = Incoming {
+            id: 1,
+            request: Request::Attach {
+                focused: None,
+                rows: 24,
+                cols: 80,
+                name: None,
+                from: None,
+            },
+        };
+        socket
+            .write_all(&frame(Tag::Request, &serde_json::to_vec(&attach).unwrap()))
+            .unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        let mut seen = Vec::new();
+        let needle = wait_for.as_bytes();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !seen.windows(needle.len()).any(|w| w == needle) {
+            assert!(
+                Instant::now() < deadline,
+                "held terminal never showed {wait_for:?}: {:?}",
+                String::from_utf8_lossy(&seen)
+            );
+            let mut buf = [0u8; 4096];
+            if let Ok(n) = socket.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                seen.extend_from_slice(&buf[..n]);
+            }
+        }
+        drop(socket);
+        (registry, terminal)
     }
 
     #[test]
@@ -706,12 +853,25 @@ mod tests {
         Reopen,
     }
 
+    fn pin_lf_home(
+        home: &Path,
+    ) -> (
+        std::sync::MutexGuard<'static, ()>,
+        crate::test_ambient::EnvGuard,
+    ) {
+        let lock = loopflow_execution::journal::test_env_lock();
+        let guard = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
+        std::env::set_var("LF_HOME", home);
+        (lock, guard)
+    }
+
     fn check_waiting_steer(harness: HarnessKind, wake_at: WakeAt) {
         let session = "waiting";
         let fixture = fixture(session);
-        // Pi's session_start records the provider thread in its Machine.
-        let _home = (harness == HarnessKind::Pi && wake_at == WakeAt::Reopen)
-            .then(|| crate::test_support::EnvGuard::with_lf_home(&[], fixture.home.path()));
+        // Pi's session_start and Antigravity's held terminal use LF_HOME.
+        let _home = ((harness == HarnessKind::Pi && wake_at == WakeAt::Reopen)
+            || harness == HarnessKind::Antigravity)
+            .then(|| pin_lf_home(fixture.home.path()));
         let store = &fixture.store;
         let socket = fixture.home.path().join("s");
         let thread = if harness == HarnessKind::Pi {
@@ -731,16 +891,17 @@ mod tests {
 
         // Each listener returns the actual turn addressed to this conversation.
         type ReadTurn = Box<dyn FnOnce() -> String>;
-        let (inbox, message): (Option<Inbox>, Option<ReadTurn>) = match harness {
+        let mut terminals = None;
+        let (inbox, message): (Option<Inbox>, ReadTurn) = match harness {
             HarnessKind::Claude => {
                 let listener = UnixListener::bind(&socket).unwrap();
                 (
                     Some(Inbox::Claude(fixture.claude(&socket))),
-                    Some(Box::new(move || {
+                    Box::new(move || {
                         let frames = received(&listener);
                         assert_eq!(frames[1]["session_id"], thread);
                         frames[1]["message"]["content"].as_str().unwrap().to_owned()
-                    })),
+                    }),
                 )
             }
             HarnessKind::Codex => {
@@ -756,26 +917,76 @@ mod tests {
                 let server = codex_app_server(&socket);
                 (
                     None,
-                    Some(Box::new(move || {
+                    Box::new(move || {
                         let start = server.join().unwrap();
                         assert_eq!(start["method"], "turn/start");
                         assert_eq!(start["params"]["threadId"], thread);
                         start["params"]["toolOutput"]["output"].to_string()
-                    })),
+                    }),
                 )
             }
             HarnessKind::OpenCode | HarnessKind::Pi => {
                 let messages = extension(&socket, "started\n", 1);
                 (
                     Some(Inbox::Socket(socket)),
-                    Some(Box::new(move || {
+                    Box::new(move || {
                         let message = messages.recv().unwrap();
                         assert_eq!(message["thread"], thread);
                         message["text"].as_str().unwrap().to_owned()
-                    })),
+                    }),
                 )
             }
-            HarnessKind::Antigravity => (None, None),
+            HarnessKind::Antigravity => {
+                let pasted = fixture.home.path().join("pasted");
+                let rule = "─".repeat(80);
+                let script = format!(
+                    r#"stty -echo
+printf '\033[?2004h\033[2J\033[H{rule}\r\n\033[94m>\033[m\r\n{rule}\r\n? for shortcuts   auto · Gemini 4 Neon · high\r\n'
+IFS= read -r line
+printf '%s' "$line" > "{}"
+"#,
+                    pasted.display()
+                );
+                let (registry, _) = held_agy_terminal(store, session, &script, "? for shortcuts");
+                terminals = Some(registry);
+                let store_clone = store.clone();
+                let repo = fixture.home.path().join("repo");
+                let adapter = fixture.adapter.clone();
+                (
+                    None,
+                    Box::new(move || {
+                        let deadline =
+                            std::time::Instant::now() + std::time::Duration::from_secs(5);
+                        while !pasted.exists() {
+                            assert!(
+                                std::time::Instant::now() < deadline,
+                                "held agy terminal never received wake paste"
+                            );
+                            std::thread::sleep(std::time::Duration::from_millis(20));
+                        }
+                        assert_eq!(
+                            std::fs::read_to_string(&pasted).unwrap(),
+                            format!("\x1b[200~{}\x1b[201~", super::WAKE_PROMPT)
+                        );
+                        // Option A: steers stay unstamped until agy's PreInvocation runs.
+                        assert_eq!(
+                            store_clone.session_steers(session, 0, 8).unwrap().pending,
+                            1
+                        );
+                        let claimed = loopflow_execution::steer::claim(
+                            &store_clone,
+                            &repo,
+                            &adapter,
+                            thread,
+                            NativeBoundary::Turn,
+                        )
+                        .unwrap()
+                        .expect("PreInvocation claims waiting steer");
+                        loopflow_execution::steer::delivered(&store_clone, session, &claimed);
+                        claimed.text
+                    }),
+                )
+            }
         };
 
         let report = |moment, callback, inbox| {
@@ -834,28 +1045,114 @@ mod tests {
             report(BoundaryMoment::Stop, event("Stop"), inbox);
             steer();
         }
-        after_turn(store, session);
+        assert!(
+            !after_turn(store, session, terminals.as_deref()),
+            "{harness:?} {wake_at:?} should wake immediately"
+        );
+        let text = message();
+        assert!(
+            text.contains("use the other table"),
+            "{harness:?} {wake_at:?}: {text}"
+        );
         let page = store.session_steers(session, 0, 8).unwrap();
         assert_eq!(page.items.len(), 1, "{harness:?} {wake_at:?}");
-        match harness {
-            // TODO(LOO-1099): an open idle agy reads this on its next turn.
-            HarnessKind::Antigravity => {
-                assert_eq!(wake_at, WakeAt::TurnEnd);
-                assert!(page.items[0].delivered_at.is_none());
-                assert_eq!(page.pending, 1);
-            }
-            HarnessKind::Claude | HarnessKind::Codex | HarnessKind::OpenCode | HarnessKind::Pi => {
-                assert!(
-                    page.items[0].delivered_at.is_some(),
-                    "{harness:?} {wake_at:?}"
-                );
-                assert_eq!(page.pending, 0);
-                assert!(
-                    message.unwrap()().contains("use the other table"),
-                    "{harness:?} {wake_at:?}"
-                );
-            }
+        assert!(
+            page.items[0].delivered_at.is_some(),
+            "{harness:?} {wake_at:?}"
+        );
+        assert_eq!(page.pending, 0, "{harness:?} {wake_at:?}");
+        if let Some(registry) = terminals {
+            registry.close();
         }
+    }
+
+    #[test]
+    fn an_open_idle_antigravity_with_a_draft_defers_wake_until_the_prompt_is_empty() {
+        let session = "wake-agy-draft";
+        let fixture = fixture(session);
+        let _home = pin_lf_home(fixture.home.path());
+        let store = &fixture.store;
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET provider='agy',provider_thread='native' WHERE id=?1",
+                [session],
+            )
+            .unwrap();
+        let clear = fixture.home.path().join("clear");
+        let cleared = fixture.home.path().join("cleared");
+        let pasted = fixture.home.path().join("pasted");
+        let rule = "─".repeat(80);
+        let script = format!(
+            r#"stty -echo
+printf '\033[?2004h\033[2J\033[H{rule}\r\n> keep this draft\r\n{rule}\r\nauto · Gemini 4 Neon · high\r\n'
+while [ ! -f "{clear}" ]; do sleep 0.05; done
+printf '\033[2J\033[H{rule}\r\n\033[94m>\033[m\r\n{rule}\r\n? for shortcuts   auto · Gemini 4 Neon · high\r\n'
+: > "{cleared}"
+IFS= read -r line
+printf '%s' "$line" > "{pasted}"
+"#,
+            clear = clear.display(),
+            cleared = cleared.display(),
+            pasted = pasted.display(),
+        );
+        let (registry, _) = held_agy_terminal(store, session, &script, "keep this draft");
+        super::super::boundary::answer(
+            store,
+            &SessionBoundary {
+                moment: BoundaryMoment::Stop,
+                delivery: fixture.delivery.clone(),
+                adapter: Some(fixture.adapter.clone()),
+                callback: serde_json::json!({"hook_event_name":"Stop","session_id":"native"}),
+                gap: None,
+                printed: Vec::new(),
+                inbox: None,
+            },
+        )
+        .unwrap();
+        store
+            .save_session_steer(session, "Fixture author", "wait until draft clears")
+            .unwrap();
+        let path = fixture.store_path();
+        let mut watcher = Watcher {
+            terminals: Some(registry.clone()),
+            ..Watcher::default()
+        };
+        watcher.read(&path);
+        assert!(watcher.deferred, "draft must defer held-terminal wake");
+        assert!(!pasted.exists(), "draft must not be clobbered");
+        assert_eq!(store.session_steers(session, 0, 8).unwrap().pending, 1);
+
+        // Once the person clears the draft, the next watcher tick wakes it
+        // without needing another steer or revision move.
+        std::fs::write(&clear, "").unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !cleared.exists() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        // Poll until Hosted has read the cleared screen from the holder.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while watcher.deferred {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "deferred wake never fired"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            watcher.read(&path);
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !pasted.exists() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(
+            std::fs::read_to_string(&pasted).unwrap(),
+            format!("\x1b[200~{}\x1b[201~", super::WAKE_PROMPT)
+        );
+        registry.close();
     }
 
     #[test]
@@ -869,7 +1166,7 @@ mod tests {
             let _messages = refused.then(|| extension(&socket, "", 1));
             fixture.settle("opencode", &socket);
             fixture.comment(&fixture.store, "c-1", "use the staging bucket");
-            after_turn(&fixture.store, &session);
+            after_turn(&fixture.store, &session, None);
             assert_eq!(
                 loopflow_execution::steer::idle_conversations(&fixture.store, Some(&session))
                     .unwrap()
@@ -893,7 +1190,7 @@ mod tests {
         let (listener, inbox) = fixture.idle_claude();
         fixture.comment(&fixture.store, "c-1", "use the staging bucket");
         fixture.comment(&fixture.store, "c-2", "PR: https://example.test/pr/1");
-        after_turn(&fixture.store, "wake-claude");
+        after_turn(&fixture.store, "wake-claude", None);
         let frames = received(&listener);
         assert_eq!(
             frames[0],
@@ -919,9 +1216,9 @@ mod tests {
         );
         // Woken, it is in a turn: nothing more goes out until its Stop.
         fixture.comment(&fixture.store, "c-3", "and the eu region");
-        wake_idle(&fixture.store, None);
+        wake_idle(&fixture.store, None, None);
         fixture.stop(&fixture.store, &inbox);
-        after_turn(&fixture.store, "wake-claude");
+        after_turn(&fixture.store, "wake-claude", None);
         let wire = received(&listener)[1]["message"]["content"].to_string();
         assert!(wire.contains("and the eu region"));
         assert!(
@@ -945,7 +1242,7 @@ mod tests {
         let restarted = loopflow_execution::store::open_sqlite(&path).unwrap();
         fixture.stop(&restarted, &inbox);
         fixture.comment(&restarted, "c-2", "PR: https://example.test/pr/2");
-        wake_idle(&restarted, None);
+        wake_idle(&restarted, None, None);
         let content = received(&listener)[1]["message"]["content"].to_string();
         assert!(content.contains("pr/2") && !content.contains("pr/1"));
     }
@@ -1017,7 +1314,7 @@ mod tests {
         assert!(content.contains("lint failed"));
 
         fixture.stop(store, &inbox);
-        after_turn(store, "wake-graph");
+        after_turn(store, "wake-graph", None);
         assert_eq!(
             listener.accept().unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock
@@ -1045,8 +1342,8 @@ mod tests {
         fixture.claude(&socket);
         listener.set_nonblocking(true).unwrap();
         fixture.comment(&fixture.store, "c-1", "PR: https://example.test/pr/1");
-        after_turn(&fixture.store, "wake-bare");
-        wake_idle(&fixture.store, None);
+        after_turn(&fixture.store, "wake-bare", None);
+        wake_idle(&fixture.store, None, None);
         assert_eq!(
             listener.accept().unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock,
@@ -1072,7 +1369,7 @@ mod tests {
         fixture.stop(&fixture.store, &inbox);
         fixture.comment(&fixture.store, "c-1", "use the staging bucket");
         fixture.comment(&fixture.store, "c-2", "PR: https://example.test/pr/1");
-        after_turn(&fixture.store, "wake-gone");
+        after_turn(&fixture.store, "wake-gone", None);
         assert_eq!(
             loopflow_execution::steer::idle_conversations(&fixture.store, Some("wake-gone"))
                 .unwrap()

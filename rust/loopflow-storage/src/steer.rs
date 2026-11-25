@@ -32,12 +32,13 @@ pub struct IdleEndpoints {
     pub endpoint: Option<std::path::PathBuf>,
     pub inbox: Option<std::path::PathBuf>,
     pub socket: Option<std::path::PathBuf>,
+    pub held_terminal: Option<loopflow_model::id::TerminalId>,
 }
 
 #[derive(Debug)]
 pub struct IdleCandidate {
     pub adapter: SteerAdapter,
-    pub thread: String,
+    pub thread: Option<String>,
     pub cwd: std::path::PathBuf,
     pub provider: Option<String>,
     pub endpoints: IdleEndpoints,

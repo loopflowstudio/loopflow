@@ -199,7 +199,7 @@ fn prompt_for_waiting_steers(store: &SqliteStore, session: &str) -> String {
         tracing::warn!(%session, %error, "Task updates unread at resume");
     }
     match store.has_undelivered_steers(session) {
-        Ok(true) => "Read the waiting steers and Task updates for this Session.".into(),
+        Ok(true) => crate::steer::WAKE_PROMPT.into(),
         Ok(false) => String::new(),
         Err(error) => {
             tracing::warn!(%session, %error, "steers unread at resume");

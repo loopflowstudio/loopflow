@@ -63,37 +63,53 @@ At `ship-review` (2026-11-25), Jack Heart directed folding already-open idle Ant
    - **Typed draft:** non-placeholder text on the `>` line inside the `───` box (survives server restarts/adoption without depending solely on keystroke history).
    - **Empty idle prompt:** `───` / `>` (empty or placeholder hint only — verify dim/faint style or exact placeholder check and cursor position on `agy 1.5.16`/`1.5.17`) / `───` with `? for shortcuts` below, no `esc to cancel`, `!alternate_screen()`, `bracketed_paste()` on, `yielded == true`, `!pending_input.in_paste()`, and no recent user keystrokes.
 
-### Implementation plan (Pass 4)
+### Built & checked (Pass 4)
 
-1. **Expose `Terminal::bracketed_paste(&self) -> bool`** on `loopflow-terminal`'s `ghostty_vt::Terminal` (using `DATA_MODE` + `ModeConfig` for mode `2004`, plus any cell-style/cursor helper needed to distinguish dim placeholder text from a typed draft cleanly).
-2. **Add `IdleReach::Terminal(TerminalId)` (and `held_terminal_id` on `IdleEndpoints`):**
-   - `sqlite/steers.rs::idle_conversation_candidates` includes `held_terminal_id` (and allows candidates whose `held_terminal_id IS NOT NULL`, keeping the existing index plan).
-   - `Antigravity::idle_reach` returns `endpoints.held_terminal.map(IdleReach::Terminal)` — removing `TODO(LOO-1099)`.
-   - Preserve pass-through when `MachineServer` or the store is unavailable.
-3. **VT-guarded held-terminal wake in `transport::hosted` / `transport::registry` + `server::wake`:**
-   - Filter terminal query replies (DA, CPR, theme, focus) and SGR/X10 mouse events from user keystrokes so focus/scroll never blocks a wake, while real keystrokes hold off wakes briefly (`last_user_key` / `unsubmitted_input`).
-   - Before waking an `IdleReach::Terminal` conversation, check the `Hosted` terminal's VT screen readiness + keystroke guard: `bracketed_paste()`, `!alternate_screen()`, `!in_paste()`, quiet since last user keystroke, and VT screen shows `agy`'s empty top-level prompt box (not trust dialog, not slash menu, not model picker, not `esc to cancel`, no typed draft — so server restarts/adoptions also protect drafts).
-   - **Option A payload:** do **not** claim/stamp steers in `server::wake` for `IdleReach::Terminal`; instead verify `has_undelivered_steers` (after `task_updates::write`), check terminal readiness, inject bracketed paste `ESC[200~ Read the waiting steers and Task updates for this Session. ESC[201~\r` (the same trigger prompt as reopen), and call `store.record_woken(adapter)` so the watcher sends no second paste while the turn starts. `PreInvocation` claims and stamps the steers/updates once `agy` actually processes the prompt, so a dropped paste loses nothing and never double-delivers.
-   - If the terminal is not ready (user typing, modal open, trust dialog, etc.), leave steers untouched for the next turn or watcher tick. (Also re-check readiness when `Hosted` sees `?2004h` / prompt settle or on watcher ticks.)
-4. **Tests & live QA:**
-   - Remove the `TODO(LOO-1099)` exception from `server::wake::tests::every_harness_wakes_its_idle_work_session` so **all 5 harnesses in `HarnessKind::ALL`** pass idle wake unconditionally.
-   - Add unit tests for the VT prompt-readiness predicate covering every captured state: empty prompt (blank and placeholder), typed draft (even with no prior keystroke history after restart), trust dialog, slash menu, model picker, running turn (`esc to cancel`), alternate screen, and mouse/focus events not counting as drafts.
-   - Update `docs/sessions.md`, `rust/loopflow-execution/src/harness/README.md`, `rust/loopflow/src/server/README.md`, and `scratch/5whys.md` to reflect that already-open idle `agy` wake is implemented.
-   - Verify live on real `agy 1.5.17` in QA: open `agy` Task session, let it go idle, run `lf steer <task> 'Reply with only the word OK.'` (and a Task update / interactive-step handoff), verify it wakes without typing and leaves `0 pending`, AND verify a typed draft / slash menu / model picker is NOT clobbered.
+1. **`loopflow-terminal` (`ghostty_vt.rs`):** exposed `Terminal::bracketed_paste(&self) -> bool` (DEC private mode 2004 via `DATA_MODE`) and made `Terminal::text()` and `Terminal::cursor()` available in non-test builds.
+2. **`IdleReach::Terminal(TerminalId)` & opening idle recording:**
+   - `IdleEndpoints` carries `held_terminal: Option<TerminalId>`; `sqlite/steers.rs::idle_conversation_candidates` reads `s.held_terminal_id` and allows `(s.provider_thread IS NOT NULL OR s.held_terminal_id IS NOT NULL)` while keeping `INDEXED BY agent_sessions_unended_agent`.
+   - `Antigravity::idle_reach` returns `endpoints.held_terminal.clone().map(IdleReach::Terminal)` (removed `TODO(LOO-1099)`).
+   - `Antigravity::open` records `record_first_boundary` (best-effort) when a managed launch opens without `-i`, so freshly opened or reopened idle `agy` work sessions without waiting steers can still wake when a steer arrives later.
+   - `lf/commands/context.rs::read_news` checks `!prompt` before deferring `SessionStart` steers to a server wake, so Antigravity's `PreInvocation` (which is both start and opening prompt) always claims its steers.
+   - Shared `loopflow_execution::steer::WAKE_PROMPT` across reopen (`native_session.rs`) and idle wake (`server/wake.rs`).
+3. **VT-guarded held-terminal wake (`harness/antigravity.rs`, `transport/{input,hosted,registry}.rs`, `server/{wake,boundary,service}.rs`):**
+   - `antigravity::prompt_ready` requires `!alternate_screen()`, `bracketed_paste()`, `at_ground()`, no live `Working`/`Blocked` OSC 7501 status, exact single-line empty prompt box (`───` / `>` / `───`), `? for shortcuts` in footer, and no `esc to cancel`, `↑/↓ Navigate`, `esc Go Back`, `enter Confirm`, or `enter Select`.
+   - `transport::input::has_user_keystroke` ignores terminal query replies, focus reports, and SGR/X10/URXVT mouse events while holding off wakes for 2 s after real user keystrokes (`USER_KEY_QUIET`), open bracketed pastes (`PendingInput::in_paste()`), queued input, or post-restart ring replay.
+   - `Registry::wake_idle_prompt` executes on the `held-terminals` thread and injects `ESC[200~ <WAKE_PROMPT> ESC[201~\r`; `server::wake` leaves steers unclaimed/unstamped for `IdleReach::Terminal` (Option A) and calls `store.record_woken(adapter)`. `PreInvocation` claims and stamps steers once `agy` starts the turn.
+   - Busy/not-ready held terminals set `deferred` so `Watcher` retries every 2 s (`DEFERRED_RETRY`) without requiring a new store revision; `boundary::wake` also gives post-`Stop` TUI redraws two brief 300 ms retries before nudging `Watcher`.
+4. **Tests & docs updated:**
+   - Removed `TODO(LOO-1099)` from `server::wake::tests::every_harness_wakes_its_idle_work_session` — all 5 harnesses in `HarnessKind::ALL` pass idle wake unconditionally (Antigravity through a real holder + `Registry`).
+   - Added `antigravity::tests::prompt_ready_accepts_only_empty_idle_prompt`, `transport::input::tests::mouse_focus_and_query_reports_are_not_user_keystrokes`, `transport::registry::tests::wake_idle_prompt_guards_against_drafts_typing_and_open_pastes_but_ignores_mouse_and_focus`, and `server::wake::tests::an_open_idle_antigravity_with_a_draft_defers_wake_until_the_prompt_is_empty`.
+   - Fixed `wake.rs` test helper to use `test_env_lock() + test_ambient::EnvGuard` instead of `EnvGuard::with_lf_home` (which spawned a nested `cargo build --bin lf` inside unit tests).
+   - Fixed `lf::commands::context::tests::a_wakeable_start_leaves_waiting_steers_to_the_wake` to set `provider='opencode'` for its `Inbox::Socket` fixture and cover `prompt == true`.
+   - Updated `docs/sessions.md`, `rust/loopflow-execution/src/harness/README.md`, `rust/loopflow/src/server/README.md`, and `scratch/5whys.md`.
 
-### Focused check
+### Focused checks run (Pass 4)
 
-`cargo test -p loopflow --test session_launch_contract a_reopened_antigravity_task_hears_repository_direction_once` passed with the corrected fixture (1 passed, 28 filtered). Native results are in [QA](qa.html).
+- `cargo fmt --check` — passed
+- `cargo test -p loopflow-terminal --lib ghostty_vt::tests::` — 8 passed
+- `cargo test -p loopflow-storage --lib query_plans::` — passed
+- `cargo test -p loopflow-execution --lib harness::antigravity::` — 8 passed (1 ignored live test)
+- `cargo test -p loopflow-execution --lib transport::input::` — 7 passed
+- `cargo test -p loopflow-execution --lib transport::registry::tests::wake_idle_prompt_` — 1 passed
+- `cargo test -p loopflow --lib server::wake::tests::` — 14 passed
+- `cargo test -p loopflow --lib server::boundary::tests::` — 14 passed
+- `cargo test -p loopflow --lib lf::commands::context::tests::a_wakeable_start_leaves_waiting_steers_to_the_wake` — 1 passed
+
+Deferred to gate / CI (high local Machine load ~100+): `cargo clippy --all-targets -- -D warnings`, `documented_commands::`, full acceptance matrix, and live QA on real `agy 1.5.17` (open idle wake, Task update / interactive-step handoff, and draft/menu non-clobbering).
 
 ## Acceptance at gate
 
 ```sh
 cargo test -p loopflow --test integration documented_commands::
+cargo test -p loopflow-terminal --lib ghostty_vt::tests::
 cargo test -p loopflow-storage --lib query_plans::
 cargo test -p loopflow-execution --lib harness::conformance_tests::
 cargo test -p loopflow-execution --lib harness::launch_matrix::every_harness_runs_all_four_launch_kinds
 cargo test -p loopflow-execution --lib harness::environment_tests::
 cargo test -p loopflow-execution --lib harness::antigravity::
+cargo test -p loopflow-execution --lib transport::input::
+cargo test -p loopflow-execution --lib transport::registry::tests::wake_idle_prompt_
 cargo test -p loopflow-execution --lib steer::
 cargo test -p loopflow-execution --lib context_block::
 cargo test -p loopflow --lib lf::commands::context::tests::

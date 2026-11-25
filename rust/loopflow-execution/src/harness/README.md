@@ -138,16 +138,18 @@ records its turn as interrupted, and leaves the Graph at that step. The next
 
 An idle work session is woken through the provider's own way in
 ([Waking an idle conversation](../../../loopflow/src/server/README.md#waking-an-idle-conversation)):
-Claude's inbox, Codex's app-server, and for OpenCode and Pi a socket their
-plugin or extension listens on, which asks the provider to start the turn.
+Claude's inbox, Codex's app-server, OpenCode and Pi's plugin/extension socket,
+and Antigravity's held terminal.
 An OpenCode work session reports each turn's first request and its end, so the
 server knows when it is idle; Pi reports every event. Both name their socket
-as they start. A work session reopened on any of the four takes the steers
-saved while it was closed as a turn; Codex's launch reports the start its
-app-server's hook would only report inside a turn.
+as they start. A work session reopened on Claude, Codex, OpenCode, or Pi takes
+the steers saved while it was closed as a turn; Codex's launch reports the start
+its app-server's hook would only report inside a turn.
 Antigravity opens its saved conversation with an interactive prompt when news
-is waiting. Its first model call reads the steers through `PreInvocation`.
-While it is open and idle, they wait for the next turn.
+is waiting, and when already open and idle at an empty prompt, the server
+pastes the same trigger prompt into its held terminal after checking its VT
+screen; `PreInvocation` claims and delivers the steers once `agy` starts the
+turn.
 
 Each harness's decoder reports a provider failure as an error event, and
 `drive::run` asks that harness what it means (`classify_failure`), once, at the

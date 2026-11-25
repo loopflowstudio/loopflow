@@ -5,6 +5,7 @@
 
 use loopflow_execution::process::attachment;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
@@ -13,6 +14,7 @@ use crate::server::wire::{BoundaryMoment, SessionBoundary, SessionBoundaryAnswer
 use loopflow_execution::context_block::ContextDelivery;
 use loopflow_execution::steer::NativeBoundary;
 use loopflow_execution::store::SharedStore;
+use loopflow_execution::transport::registry::Registry;
 use loopflow_storage::sqlite::SqliteStore;
 
 /// How long a pending Session move waits after its Stop is answered: the hook
@@ -164,7 +166,7 @@ pub(super) fn answer(
 
 /// Run what a boundary left, after its answer. Blocking; failures are logged,
 /// since no one waits for them.
-pub(super) fn after(after: After) {
+pub(super) fn after(after: After, terminals: Option<Arc<Registry>>) {
     let session = match &after {
         After::TurnEnd(ended) => ended.session.clone(),
         After::Reachable(session) => Some(session.clone()),
@@ -178,8 +180,10 @@ pub(super) fn after(after: After) {
                 return Ok(());
             };
             match after {
-                After::TurnEnd(ended) => turn_end(std::sync::Arc::new(store), ended).await,
-                After::Reachable(session) => wake(&store.sqlite, session).await,
+                After::TurnEnd(ended) => {
+                    turn_end(std::sync::Arc::new(store), ended, terminals).await
+                }
+                After::Reachable(session) => wake(&store.sqlite, session, terminals).await,
             }
         })
     })();
@@ -191,7 +195,11 @@ pub(super) fn after(after: After) {
 /// Record a Codex Session's turns, refresh the Session's planning, wake it
 /// with any Task update its turn missed, then continue it on a pending move's
 /// agent.
-async fn turn_end(store: SharedStore, ended: TurnEnd) -> Result<()> {
+async fn turn_end(
+    store: SharedStore,
+    ended: TurnEnd,
+    terminals: Option<Arc<Registry>>,
+) -> Result<()> {
     if let (Some(session), Some((endpoint, thread))) = (&ended.session, &ended.codex) {
         record_codex_turns(&store.sqlite, session, thread, endpoint).await;
     }
@@ -209,7 +217,7 @@ async fn turn_end(store: SharedStore, ended: TurnEnd) -> Result<()> {
         return Ok(());
     };
     // The turn ended: an update that arrived during it goes out now.
-    wake(&store.sqlite, session.clone()).await?;
+    wake(&store.sqlite, session.clone(), terminals).await?;
     if store.sqlite.pending_session_move(&session)?.is_none() {
         return Ok(());
     }
@@ -217,13 +225,30 @@ async fn turn_end(store: SharedStore, ended: TurnEnd) -> Result<()> {
     loopflow_execution::ops::human_session::moves_bulk::apply_pending_move(&store, &session).await
 }
 
-/// Wake `session` if it is idle and has news.
-async fn wake(store: &SqliteStore, session: String) -> Result<()> {
-    let store = store.clone();
-    loopflow_execution::journal::request::spawn_blocking(move || {
-        super::wake::after_turn(&store, &session)
-    })
-    .await?;
+/// Wake `session` if it is idle and has news. For a held-terminal wake right
+/// after `Stop`, the TUI may still be redrawing its idle prompt; give it two
+/// brief retries before handing off to the background watcher.
+async fn wake(
+    store: &SqliteStore,
+    session: String,
+    terminals: Option<Arc<Registry>>,
+) -> Result<()> {
+    for attempt in 0..3 {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        }
+        let store = store.clone();
+        let session = session.clone();
+        let terminals = terminals.clone();
+        let deferred = loopflow_execution::journal::request::spawn_blocking(move || {
+            super::wake::after_turn(&store, &session, terminals.as_deref())
+        })
+        .await?;
+        if !deferred {
+            return Ok(());
+        }
+    }
+    super::wake::note_deferred();
     Ok(())
 }
 

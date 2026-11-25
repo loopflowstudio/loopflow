@@ -47,5 +47,7 @@ LOO-1068 wrote the gap down. Nobody owned it.
 - The harness interface requires the capabilities and operations a provider
   must supply. The behavior tests cover every member of `HarnessKind::ALL`.
   A new provider enters the tests as soon as it joins the enum.
-- Already-open Antigravity wake has a named exception pointing to LOO-1099.
-  Reopen has its own test that drives the Task conversation and checks delivery.
+- Every harness in `HarnessKind::ALL` passes idle wake unconditionally:
+  Antigravity wakes already-open idle work sessions through its VT-guarded held
+  terminal (`IdleReach::Terminal`), and reopen has its own test driving the
+  Task conversation and checking delivery.

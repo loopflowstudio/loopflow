@@ -340,9 +340,8 @@ impl StreamDriver for Driver {
 }
 
 impl super::Launcher for loopflow_harness::Antigravity {
-    fn idle_reach(&self, _endpoints: &IdleEndpoints) -> Option<IdleReach> {
-        // TODO(LOO-1099): wake an already-open Antigravity conversation.
-        None
+    fn idle_reach(&self, endpoints: &IdleEndpoints) -> Option<IdleReach> {
+        endpoints.held_terminal.clone().map(IdleReach::Terminal)
     }
 
     fn capabilities(&self) -> super::Capabilities {
@@ -483,9 +482,26 @@ impl super::Launcher for loopflow_harness::Antigravity {
         if let Some(trust) = cwd.and_then(trust) {
             args.extend(["--settings".into(), trust]);
         }
-        if let Some(input) = input.filter(|input| !input.is_empty()) {
-            crate::agent::validate_terminal_turn(&input)?;
-            args.extend(["-i".into(), input]);
+        let opening = input.filter(|input| !input.is_empty());
+        if let Some(input) = &opening {
+            crate::agent::validate_terminal_turn(input)?;
+            args.extend(["-i".into(), input.clone()]);
+        } else if launch.kind.is_managed() {
+            // `agy` runs no start hook until a turn begins, so a work session
+            // opened without `-i` records itself idle here; the held terminal's
+            // VT guard waits until `agy` draws its empty prompt before waking.
+            let recording = launch.recording;
+            let recorded = recording
+                .store
+                .reserve_steer_adapter(&recording.session, &recording.attachment)
+                .and_then(|adapter| recording.store.record_first_boundary(&adapter));
+            if let Err(error) = recorded {
+                tracing::warn!(
+                    session = %recording.session,
+                    %error,
+                    "Antigravity opening idle state unrecorded; wakes wait for the first turn"
+                );
+            }
         }
         if let Some(context) = &launch.config.conversation_context {
             let delivery = context.configure_hooks(&mut client.process)?;
@@ -510,6 +526,60 @@ fn main_git_dir(cwd: &Path) -> Option<PathBuf> {
     let main = crate::agent::workspace_add_dirs(cwd).pop()?;
     let git = main.join(".git").canonicalize().ok()?;
     (git.as_os_str() > cwd.canonicalize().ok()?.as_os_str()).then_some(git)
+}
+
+/// Whether `terminal` shows Antigravity's empty top-level prompt box and no
+/// running turn, dialog, picker, or typed draft.
+///
+/// Checked against the retained `libghostty-vt` screen right before pasting a
+/// wake prompt, so drafts and modals survive server restarts and adoptions
+/// without relying on keystroke history alone.
+pub(crate) fn prompt_ready(terminal: &loopflow_terminal::ghostty_vt::Terminal) -> bool {
+    use loopflow_model::program_status::State;
+    if terminal.alternate_screen() || !terminal.bracketed_paste() || !terminal.at_ground() {
+        return false;
+    }
+    if terminal
+        .program_status()
+        .records
+        .iter()
+        .any(|report| matches!(report.state, State::Working | State::Blocked))
+    {
+        return false;
+    }
+    let Ok(screen) = terminal.text() else {
+        return false;
+    };
+    let lines: Vec<&str> = screen.lines().collect();
+    let is_rule = |line: &&str| {
+        let trimmed = line.trim();
+        trimmed.chars().count() >= 10 && trimmed.chars().all(|ch| ch == '─')
+    };
+    let Some(bottom) = lines.iter().rposition(is_rule) else {
+        return false;
+    };
+    let Some(top) = lines[..bottom].iter().rposition(is_rule) else {
+        return false;
+    };
+    // Empty single-line prompt box: `───` / `>` / `───`.
+    if bottom != top + 2 || lines[top + 1].trim() != ">" {
+        return false;
+    }
+    let footer = &lines[bottom + 1..];
+    let has_shortcuts = footer.iter().any(|line| line.contains("? for shortcuts"));
+    if !has_shortcuts {
+        return false;
+    }
+    let blocked = [
+        "esc to cancel",
+        "↑/↓ Navigate",
+        "esc Go Back",
+        "enter Confirm",
+        "enter Select",
+    ];
+    !footer
+        .iter()
+        .any(|line| blocked.iter().any(|marker| line.contains(marker)))
 }
 
 /// Settings for one session that let the TUI start in a worktree lf created
@@ -978,6 +1048,78 @@ mod tests {
         );
         // Any other handler would have to answer, and `{}` denies a tool.
         assert_eq!(managed["loopflow"].as_object().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn prompt_ready_accepts_only_empty_idle_prompt() {
+        use loopflow_terminal::ghostty_vt::Terminal;
+
+        let render = |bytes: &[u8]| {
+            let mut terminal = Terminal::new(80, 24).unwrap();
+            terminal.write(bytes);
+            terminal
+        };
+        let rule = "─".repeat(80);
+        let idle = format!(
+            "\x1b[?2004h\x1b[2J\x1b[H  Antigravity CLI 1.5.17\r\n\r\n{rule}\r\n\x1b[94m>\x1b[m\r\n{rule}\r\n? for shortcuts                                 auto · Gemini 4 Neon · high\r\n"
+        );
+        assert!(super::prompt_ready(&render(idle.as_bytes())));
+
+        // Without bracketed paste mode enabled, never inject.
+        let no_paste = idle.replacen("\x1b[?2004h", "", 1);
+        assert!(!super::prompt_ready(&render(no_paste.as_bytes())));
+
+        // Alternate screen (sign-in, trust dialog, full-screen UI).
+        let alt = format!("\x1b[?1049h{idle}");
+        assert!(!super::prompt_ready(&render(alt.as_bytes())));
+
+        // Typed draft (even with no prior keystroke history after adoption).
+        let draft = format!(
+            "\x1b[?2004h\x1b[2J\x1b[H{rule}\r\n> finish this thought\r\n{rule}\r\nauto · Gemini 4 Neon · high\r\n"
+        );
+        assert!(!super::prompt_ready(&render(draft.as_bytes())));
+
+        // Draft even if footer still showed `? for shortcuts`.
+        let draft_with_footer = format!(
+            "\x1b[?2004h\x1b[2J\x1b[H{rule}\r\n> x\r\n{rule}\r\n? for shortcuts   auto · Gemini 4 Neon · high\r\n"
+        );
+        assert!(!super::prompt_ready(&render(draft_with_footer.as_bytes())));
+
+        // Multiline pasted draft.
+        let multiline = format!(
+            "\x1b[?2004h\x1b[2J\x1b[H{rule}\r\n> line1\r\n  line2\r\n{rule}\r\n? for shortcuts   auto · Gemini 4 Neon · high\r\n"
+        );
+        assert!(!super::prompt_ready(&render(multiline.as_bytes())));
+
+        // Trust dialog (no prompt box, navigate/confirm footer).
+        let trust = "\x1b[?2004h\x1b[2J\x1b[HDo you trust the contents of this project?\r\n> Yes, I trust this folder\r\n  No, exit\r\n  ↑/↓ Navigate · enter Confirm\r\n";
+        assert!(!super::prompt_ready(&render(trust.as_bytes())));
+
+        // Slash menu.
+        let slash = format!(
+            "\x1b[?2004h\x1b[2J\x1b[H{rule}\r\n> /\r\n{rule}\r\n> /add-dir    Add a directory\r\n  ↑/↓ Navigate · enter Select · tab Complete\r\n? for shortcuts\r\n"
+        );
+        assert!(!super::prompt_ready(&render(slash.as_bytes())));
+
+        // Model picker.
+        let model = "\x1b[?2004h\x1b[2J\x1b[HSelect Model\r\n> Gemini 4 Neon\r\n  Keyboard: ↑/↓ Navigate · enter Select · esc Go Back\r\nesc to cancel\r\n";
+        assert!(!super::prompt_ready(&render(model.as_bytes())));
+
+        // Running turn (`Generating...`, `esc to cancel` in footer).
+        let running = format!(
+            "\x1b[?2004h\x1b[2J\x1b[H⣷  Generating...\r\n{rule}\r\n>\r\n{rule}\r\nesc to cancel   auto · Gemini 4 Neon · high\r\n"
+        );
+        assert!(!super::prompt_ready(&render(running.as_bytes())));
+
+        // Running turn even if `? for shortcuts` wasn't erased yet.
+        let running_mixed = format!(
+            "\x1b[?2004h\x1b[2J\x1b[H{rule}\r\n>\r\n{rule}\r\n? for shortcuts   esc to cancel\r\n"
+        );
+        assert!(!super::prompt_ready(&render(running_mixed.as_bytes())));
+
+        // OSC 7501 working status blocks injection.
+        let working_status = format!("{idle}\x1b]7501;state=working\x07");
+        assert!(!super::prompt_ready(&render(working_status.as_bytes())));
     }
 
     /// Needs `agy` on PATH, signed in:

@@ -776,3 +776,81 @@ read next",
     registry.close();
     kill(&place, &terminal);
 }
+
+#[test]
+fn wake_idle_prompt_guards_against_drafts_typing_and_open_pastes_but_ignores_mouse_and_focus() {
+    let ledger = TestLedgerGuard::new();
+    let place = holder();
+    let registry = Registry::open(BUILD).unwrap();
+    let pasted = ledger.home().join("pasted");
+    let rule = "─".repeat(80);
+    let script = format!(
+        r#"stty -echo
+printf '\033[?2004h\033[2J\033[H{rule}\r\n\033[94m>\033[m\r\n{rule}\r\n? for shortcuts   auto · Gemini 4 Neon · high\r\n'
+IFS= read -r line
+printf '%s' "$line" > "{}"
+"#,
+        pasted.display()
+    );
+    let terminal = registry.start(shell(None, "wake-guard", &script)).unwrap();
+    let mut view = View::attach(&terminal);
+    view.wait_for("? for shortcuts");
+
+    // Unknown terminal reports Absent.
+    assert_eq!(
+        registry
+            .wake_idle_prompt(&TerminalId::new(), "ignored")
+            .unwrap(),
+        super::WakeTerminal::Absent
+    );
+
+    // Focus reports and mouse wheel events do not count as user keystrokes.
+    view.type_in(b"\x1b[I\x1b[<64;10;20M\x1b[O");
+    std::thread::sleep(Duration::from_millis(50));
+
+    // An open bracketed paste blocks injection.
+    let paste_seen = ledger.home().join("paste_seen");
+    let paste_script = format!(
+        r#"stty raw -echo
+printf '\033[?2004h\033[2J\033[H{rule}\r\n\033[94m>\033[m\r\n{rule}\r\n? for shortcuts   auto · Gemini 4 Neon · high\r\n'
+dd bs=1 count=13 of="{}" 2>/dev/null
+sleep 30
+"#,
+        paste_seen.display()
+    );
+    let draft_terminal = registry
+        .start(shell(None, "wake-paste", &paste_script))
+        .unwrap();
+    let mut paste_view = View::attach(&draft_terminal);
+    paste_view.wait_for("? for shortcuts");
+    paste_view.type_in(b"\x1b[200~partial");
+    wait_until("paste bytes forwarded through hosted terminal", || {
+        std::fs::read(&paste_seen).is_ok_and(|bytes| bytes == b"\x1b[200~partial")
+    });
+    assert_eq!(
+        registry
+            .wake_idle_prompt(&draft_terminal, "blocked")
+            .unwrap(),
+        super::WakeTerminal::NotReady
+    );
+    drop(paste_view);
+
+    // The clean terminal (which only saw focus + mouse events) accepts the wake.
+    assert_eq!(
+        registry
+            .wake_idle_prompt(&terminal, crate::steer::WAKE_PROMPT)
+            .unwrap(),
+        super::WakeTerminal::Injected
+    );
+    wait_until("pasted wake prompt written", || pasted.exists());
+    assert_eq!(
+        std::fs::read_to_string(&pasted).unwrap(),
+        format!(
+            "\x1b[I\x1b[<64;10;20M\x1b[O\x1b[200~{}\x1b[201~",
+            crate::steer::WAKE_PROMPT
+        )
+    );
+    drop(view);
+    registry.close();
+    kill(&place, &draft_terminal);
+}

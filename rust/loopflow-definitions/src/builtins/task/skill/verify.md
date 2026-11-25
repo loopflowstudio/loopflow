@@ -12,6 +12,20 @@ remember. If nothing is left to check after merge, say why and finish.
 Read post-merge CI for the exact merge SHA. A green PR or merge queue says
 nothing about the push run; report it separately, and say so if it is pending.
 
+Skip rebuilding `main` when all three hold:
+
+- Every shipped file on `main` matches the tree `qa` exercised:
+  `git diff <qa head> <merge SHA> -- . ':!scratch'` prints nothing (where
+  `<qa head>` is the branch's `lf qa:` commit, and `scratch/` is excluded
+  because `lf land` clears added scratch files before merging).
+- Post-merge CI for `<merge SHA>` is green.
+- No claim depends on something that only exists after merge (a release
+  install, a deployment, production state).
+
+When all three hold, verify from the `qa` and `gate` records and the CI run,
+and cite them. Any missing—or any diff outside `scratch/`, including edits by
+`gate` or `land` or synced upstream commits—means the full check below.
+
 Check headless first; most claims need no person. Build main and run it
 isolated from real work. Seed the state a claim needs and drive the real
 commands against it. Run apps through their headless view and interaction

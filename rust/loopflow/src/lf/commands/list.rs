@@ -42,6 +42,7 @@ pub fn list_children(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
                     .unwrap_or_default(),
                 invocation: format!("lf {}", child_path.join(" ")),
                 builtin: None,
+                extends: None,
             });
         }
     }
@@ -57,14 +58,11 @@ pub fn show(path: &[String], repo: &Path, json: bool) -> Result<()> {
         let mut output = String::new();
         let mut kind = String::new();
         for entry in entries {
+            let source = entry.source_label();
             if kind != entry.kind {
                 kind = entry.kind;
                 output.push_str(&format!("\n{}\n", kind.to_uppercase()));
             }
-            let source = match entry.builtin {
-                Some(relation) => format!("{}, {}", entry.source, relation.describe()),
-                None => entry.source,
-            };
             output.push_str(&format!(
                 "  {:<26} {}\n    {} ({source})\n",
                 entry.name,

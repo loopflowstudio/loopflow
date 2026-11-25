@@ -11,7 +11,7 @@ discovery or swap in something technically convenient.
 **Continue; don't re-derive.** Build on the design that exists. If the plan
 is already good enough, keep it.
 
-**Choose.** An open product choice gets asked when someone is here. With
+**Choose.** An open design choice gets asked when someone is here. With
 nobody here, make the bold choice and mark it in the plan as made for review,
 with what you passed over.
 
@@ -23,11 +23,11 @@ with what you passed over.
 
 2. **De-risk.** Find what could sink the approach and answer it: read the docs,
    call the API, run the probe. Start with risks already flagged, then look for
-   the ones nobody named. Come back with answers, not a worry list: "Linear's
-   API has no conditional assignment, so we read-then-assign with conflict
-   detection", not "there might be API limitations". When two explanations
-   fit, run the smallest probe that tells them apart. Keep the finding even
-   when it kills the attractive approach.
+   the ones nobody named. Come back with answers, not a worry list: "the
+   tracker's API has no conditional assignment, so we read-then-assign with
+   conflict detection", not "there might be API limitations". When two
+   explanations fit, run the smallest probe that tells them apart. Keep the
+   finding even when it kills the attractive approach.
 
 3. **Compare mechanisms.** Where it's uncertain, weigh approaches that differ
    by mechanism, not presentation. A route is blocked when what it still needs

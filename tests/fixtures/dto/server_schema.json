@@ -540,7 +540,7 @@
       "oneOf": [
         {
           "const": "extends",
-          "description": "`extends: builtin`: the builtin's text with the file's appended.",
+          "description": "Extends the builtin of the same name (`extends: lf:<name>`, `extends: <name>`, or `extends: builtin`).",
           "type": "string"
         },
         {
@@ -2488,6 +2488,13 @@
         "description": {
           "type": "string"
         },
+        "extends": {
+          "description": "Parent skill named by `extends:` (`lf:<name>` for a builtin, or `<name>`),\nwhen the skill extends another.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "invocation": {
           "type": "string"
         },
@@ -2507,7 +2514,8 @@
         "source",
         "description",
         "invocation",
-        "builtin"
+        "builtin",
+        "extends"
       ],
       "type": "object"
     },
@@ -7684,6 +7692,7 @@
             {
               "builtin": null,
               "description": "Find why the code misbehaves, fix the cause, and verify the original workflow.",
+              "extends": null,
               "invocation": "lf debug [message]",
               "kind": "skill",
               "name": "debug",
@@ -7692,6 +7701,7 @@
             {
               "builtin": "extends",
               "description": "Use the change the way the people it is for will use it, and fix what breaks.",
+              "extends": "lf:qa",
               "invocation": "lf qa [message]",
               "kind": "skill",
               "name": "qa",
@@ -7699,7 +7709,17 @@
             },
             {
               "builtin": null,
+              "description": "Turn the next slice of the plan into working code.",
+              "extends": "implement",
+              "invocation": "lf card-implement [message]",
+              "kind": "skill",
+              "name": "card-implement",
+              "source": ".lf/skills/card-implement.md"
+            },
+            {
+              "builtin": null,
               "description": "design, implement, gate, land",
+              "extends": null,
               "invocation": "lf code [message]",
               "kind": "graph",
               "name": "code",

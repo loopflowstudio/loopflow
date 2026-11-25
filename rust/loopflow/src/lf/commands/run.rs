@@ -1522,7 +1522,7 @@ for line in sys.stdin:
         std::fs::create_dir_all(native.parent().unwrap()).unwrap();
         std::fs::write(&native, "Original audit instructions").unwrap();
         let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
-        let skill = catalog.resolve("audit").unwrap().unwrap().load().unwrap();
+        let skill = catalog.load_skill("audit").unwrap();
         std::fs::remove_file(&native).unwrap();
         let invocation = loopflow_execution::skills::invocation::SkillInvocation {
             skill,

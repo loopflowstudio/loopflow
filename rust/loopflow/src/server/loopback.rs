@@ -206,20 +206,18 @@ fn empty(status: StatusCode) -> Response<Full<Bytes>> {
         .expect("empty HTTP response is valid")
 }
 
+fn header_str(req: &Request<Incoming>, name: hyper::header::HeaderName) -> Option<&str> {
+    req.headers()
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+}
+
 async fn handle_request(req: Request<Incoming>, state: Arc<State>) -> Response<Full<Bytes>> {
     if req.method() != Method::GET {
         return empty(StatusCode::NOT_FOUND);
     }
     // DNS rebinding defense: Host must be exactly `127.0.0.1:<port>`.
-    let expected_host = state.handle.expected_host();
-    let Some(host) = req
-        .headers()
-        .get(HOST)
-        .and_then(|value| value.to_str().ok())
-    else {
-        return empty(StatusCode::NOT_FOUND);
-    };
-    if host != expected_host {
+    if header_str(&req, HOST) != Some(state.handle.expected_host().as_str()) {
         return empty(StatusCode::NOT_FOUND);
     }
 
@@ -250,23 +248,12 @@ fn handle_websocket(req: Request<Incoming>, state: Arc<State>) -> Response<Full<
         return empty(StatusCode::NOT_FOUND);
     }
     // Browser cross-origin WebSocket defense: Origin must be exact same-origin.
-    let expected_origin = state.handle.expected_origin();
-    let Some(origin) = req
-        .headers()
-        .get(ORIGIN)
-        .and_then(|value| value.to_str().ok())
-    else {
-        return empty(StatusCode::NOT_FOUND);
-    };
-    if origin != expected_origin {
+    if header_str(&req, ORIGIN) != Some(state.handle.expected_origin().as_str()) {
         return empty(StatusCode::NOT_FOUND);
     }
 
-    let is_upgrade = req
-        .headers()
-        .get(UPGRADE)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.eq_ignore_ascii_case("websocket"));
+    let is_upgrade =
+        header_str(&req, UPGRADE).is_some_and(|value| value.eq_ignore_ascii_case("websocket"));
     let has_connection_upgrade = req
         .headers()
         .get_all(CONNECTION)
@@ -274,17 +261,8 @@ fn handle_websocket(req: Request<Incoming>, state: Arc<State>) -> Response<Full<
         .filter_map(|value| value.to_str().ok())
         .flat_map(|value| value.split(','))
         .any(|token| token.trim().eq_ignore_ascii_case("upgrade"));
-    let valid_version = req
-        .headers()
-        .get(SEC_WEBSOCKET_VERSION)
-        .and_then(|value| value.to_str().ok())
-        == Some("13");
-    let Some(key) = req
-        .headers()
-        .get(SEC_WEBSOCKET_KEY)
-        .and_then(|value| value.to_str().ok())
-        .filter(|value| !value.is_empty())
-    else {
+    let valid_version = header_str(&req, SEC_WEBSOCKET_VERSION) == Some("13");
+    let Some(key) = header_str(&req, SEC_WEBSOCKET_KEY).filter(|value| !value.is_empty()) else {
         return empty(StatusCode::NOT_FOUND);
     };
 

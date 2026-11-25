@@ -27,6 +27,25 @@ fn lf_cmd(repo: &std::path::Path, home: &std::path::Path) -> Command {
     cmd
 }
 
+fn install_fake_browser_opener(home: &std::path::Path) -> (String, std::path::PathBuf) {
+    let fake_bin = home.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let opener_marker = home.join("browser-opened");
+    for opener in ["open", "xdg-open"] {
+        let script = fake_bin.join(opener);
+        fs::write(
+            &script,
+            format!("#!/bin/sh\necho \"$@\" > {}\n", opener_marker.display()),
+        )
+        .unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    (
+        format!("{}:/usr/bin:/bin", fake_bin.display()),
+        opener_marker,
+    )
+}
+
 #[test]
 fn loopback_serves_page_enforces_admission_and_steers_task() {
     let repo = TestRepo::new();
@@ -87,18 +106,7 @@ fn loopback_serves_page_enforces_admission_and_steers_task() {
 
     // Headless `lf page open` (with LF_AGENT_CALLER and no viewer) prints the URL
     // without invoking the OS browser opener.
-    let fake_bin = home.path().join("fake-bin");
-    fs::create_dir_all(&fake_bin).unwrap();
-    let opener_marker = home.path().join("browser-opened");
-    for opener in ["open", "xdg-open"] {
-        let script = fake_bin.join(opener);
-        fs::write(
-            &script,
-            format!("#!/bin/sh\necho \"$@\" > {}\n", opener_marker.display()),
-        )
-        .unwrap();
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
-    }
+    let (test_path, opener_marker) = install_fake_browser_opener(home.path());
     let caller = serde_json::to_string(&loopflow_storage::process::AgentCaller {
         session_id: "session_headless_test".into(),
         agent_process_id: None,
@@ -108,7 +116,7 @@ fn loopback_serves_page_enforces_admission_and_steers_task() {
     .unwrap();
     let headless = lf_cmd(repo.path(), home.path())
         .env("LF_AGENT_CALLER", caller)
-        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .env("PATH", &test_path)
         .args(["page", "open", "scratch/ship-review.html"])
         .output()
         .unwrap();
@@ -610,19 +618,7 @@ fn page_open_routes_interactive_plain_terminal_to_browser_and_headless_worker_qu
     )
     .unwrap();
 
-    let fake_bin = home.path().join("fake-bin");
-    fs::create_dir_all(&fake_bin).unwrap();
-    let opener_marker = home.path().join("browser-opened");
-    for opener in ["open", "xdg-open"] {
-        let script = fake_bin.join(opener);
-        fs::write(
-            &script,
-            format!("#!/bin/sh\necho \"$@\" > {}\n", opener_marker.display()),
-        )
-        .unwrap();
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
-    }
-    let test_path = format!("{}:/usr/bin:/bin", fake_bin.display());
+    let (test_path, opener_marker) = install_fake_browser_opener(home.path());
 
     // Headless worker session (`interactive == false`) prints URL quietly even if LF_DESKTOP is set.
     let headless_caller = seed_session(home.path(), repo.path(), "session_headless_worker", false);

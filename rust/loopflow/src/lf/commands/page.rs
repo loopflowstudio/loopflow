@@ -68,6 +68,11 @@ enum OpenRoute {
 }
 
 fn decide_open_route(host: PageHost) -> OpenRoute {
+    match host {
+        PageHost::Desktop => return OpenRoute::Desktop,
+        PageHost::Browser => return OpenRoute::Browser,
+        PageHost::Auto => {}
+    }
     let caller = loopflow_execution::journal::agent_caller();
     let in_desktop_env = std::env::var_os("LF_DESKTOP").is_some_and(|value| !value.is_empty());
     let session_interactive = caller
@@ -103,34 +108,28 @@ fn route_for(
     session_interactive: Option<bool>,
     viewed_host: Option<OpenHost>,
 ) -> OpenRoute {
-    match host {
-        PageHost::Desktop => OpenRoute::Desktop,
-        PageHost::Browser => OpenRoute::Browser,
-        PageHost::Auto => {
-            if !has_agent_caller {
-                if in_desktop_env {
-                    OpenRoute::Desktop
-                } else {
-                    OpenRoute::Browser
-                }
+    match (host, has_agent_caller) {
+        (PageHost::Desktop, _) => OpenRoute::Desktop,
+        (PageHost::Browser, _) => OpenRoute::Browser,
+        (PageHost::Auto, false) => {
+            if in_desktop_env {
+                OpenRoute::Desktop
             } else {
-                match session_interactive {
-                    Some(false) => OpenRoute::PrintQuiet,
-                    Some(true) => {
-                        if matches!(viewed_host, Some(OpenHost::Desktop)) || in_desktop_env {
-                            OpenRoute::Desktop
-                        } else {
-                            OpenRoute::Browser
-                        }
-                    }
-                    None => match viewed_host {
-                        Some(OpenHost::Desktop) => OpenRoute::Desktop,
-                        Some(_) => OpenRoute::Browser,
-                        None => OpenRoute::PrintQuiet,
-                    },
-                }
+                OpenRoute::Browser
             }
         }
+        (PageHost::Auto, true) => match session_interactive {
+            Some(false) => OpenRoute::PrintQuiet,
+            Some(true) if in_desktop_env || viewed_host == Some(OpenHost::Desktop) => {
+                OpenRoute::Desktop
+            }
+            Some(true) => OpenRoute::Browser,
+            None => match viewed_host {
+                Some(OpenHost::Desktop) => OpenRoute::Desktop,
+                Some(_) => OpenRoute::Browser,
+                None => OpenRoute::PrintQuiet,
+            },
+        },
     }
 }
 

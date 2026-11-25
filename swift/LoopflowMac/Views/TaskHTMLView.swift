@@ -43,12 +43,8 @@ struct TaskHTMLBridge {
                   let state = try? Self.jsonValue(from: rawState) else {
                 return (NSNull(), nil)
             }
-            let rawItems = payload["items"] as? [[String: Any]] ?? []
-            let pageItems = rawItems.compactMap { entry -> ReviewComments.PageItem? in
-                guard let reference = entry["reference"] as? String, !reference.isEmpty else { return nil }
-                return ReviewComments.PageItem(reference: reference, text: entry["text"] as? String ?? "")
-            }
-            store.comments.syncPage(path: path, buildID: buildID, state: state, items: pageItems)
+            let references = (payload["items"] as? [String] ?? []).filter { !$0.isEmpty }
+            store.comments.syncPage(path: path, buildID: buildID, state: state, items: references)
             return (NSNull(), nil)
 
         case "operation":

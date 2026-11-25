@@ -72,11 +72,7 @@ fn load_component(repo_root: &Path, name: &str, line: usize) -> Result<(String, 
                 repo_template.display()
             )
         })?;
-        let style_path = repo_dir.join("style.css");
-        let style = style_path
-            .is_file()
-            .then(|| std::fs::read_to_string(&style_path).ok())
-            .flatten();
+        let style = std::fs::read_to_string(repo_dir.join("style.css")).ok();
         return Ok((html, style));
     }
     if let Some((html, style)) = get_builtin_page_component(name) {

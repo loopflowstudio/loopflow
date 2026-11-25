@@ -62,6 +62,19 @@
     return result && ((result.task && result.task.identifier) || result.identifier);
   }
 
+  function errorMessage(err) {
+    return String(err && err.message ? err.message : err);
+  }
+
+  function makeButton(label, onClick, className) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    if (className) btn.className = className;
+    btn.textContent = label;
+    btn.addEventListener("click", onClick);
+    return btn;
+  }
+
   function randomId() {
     if (window.crypto && typeof window.crypto.randomUUID === "function") {
       return window.crypto.randomUUID();
@@ -86,48 +99,40 @@
   function queueItems() {
     const items = [];
     for (const note of state.notes) {
-      const ref =
+      items.push(
         "`" +
-        pagePath +
-        "` § " +
-        oneLine(note.section) +
-        ' › "' +
-        oneLine(note.quote) +
-        '" ' +
-        oneLine(note.text);
-      items.push({ id: "note:" + note.id, reference: ref, text: oneLine(note.text) });
+          pagePath +
+          "` § " +
+          oneLine(note.section) +
+          ' › "' +
+          oneLine(note.quote) +
+          '" ' +
+          oneLine(note.text)
+      );
     }
     for (const [group, entry] of Object.entries(state.choices)) {
       if (!entry || !entry.value) continue;
-      const label = oneLine(entry.label || group);
-      const ref = "`" + pagePath + "` § " + label + ": " + oneLine(entry.value);
-      items.push({ id: "choice:" + group, reference: ref, text: oneLine(entry.value) });
+      items.push("`" + pagePath + "` § " + oneLine(entry.label || group) + ": " + oneLine(entry.value));
     }
     for (const [group, entry] of Object.entries(state.multiselects)) {
       if (!entry || !Array.isArray(entry.values) || entry.values.length === 0) continue;
-      const label = oneLine(entry.label || group);
-      const joined = entry.values.map(oneLine).join(", ");
-      const ref = "`" + pagePath + "` § " + label + ": " + joined;
-      items.push({ id: "multi:" + group, reference: ref, text: joined });
+      items.push(
+        "`" + pagePath + "` § " + oneLine(entry.label || group) + ": " + entry.values.map(oneLine).join(", ")
+      );
     }
     for (const [qid, entry] of Object.entries(state.questions)) {
       if (!entry || !oneLine(entry.answer)) continue;
-      const label = oneLine(entry.label || qid);
-      const ans = oneLine(entry.answer);
-      const ref = "`" + pagePath + "` § " + label + ": " + ans;
-      items.push({ id: "question:" + qid, reference: ref, text: ans });
+      items.push("`" + pagePath + "` § " + oneLine(entry.label || qid) + ": " + oneLine(entry.answer));
     }
     for (const act of state.offlineActions) {
-      const ref = "`" + pagePath + "` Run: " + oneLine(act.summary);
-      items.push({ id: "offline:" + act.id, reference: ref, text: oneLine(act.summary) });
+      items.push("`" + pagePath + "` Run: " + oneLine(act.summary));
     }
     return items;
   }
 
   function formatReplyMessage(items) {
     if (!items.length) return "";
-    const parts = items.map((item, idx) => "(" + (idx + 1) + ") " + oneLine(item.reference));
-    let message = parts.join(" ");
+    let message = items.map((ref, idx) => "(" + (idx + 1) + ") " + oneLine(ref)).join(" ");
     const unreported = state.receipts.filter((r) => !r.reported);
     if (unreported.length > 0) {
       const ran = unreported
@@ -194,10 +199,11 @@
     refresh(false);
   }
 
-  // Desktop calls this with `null` after `ReviewComments.insert(into:)` sends the page's items.
+  // Desktop calls this with `null` after `ReviewComments.insert(into:)` sends the page's items;
+  // Swift has already updated its stored page state, so don't echo a redundant `sync` back.
   window.__lfDesktopApplyState = function (loaded) {
     if (loaded) applyState(loaded);
-    else clearDrafts({ markReported: true });
+    else clearDrafts({ markReported: true, persist: false });
   };
 
   // --- Loopback WebSocket carrier ---
@@ -213,8 +219,11 @@
     return wsProto + "//" + window.location.host + "/" + token + "/machine";
   }
 
-  function disconnectedMessage(reason) {
-    return reason || "Loopflow server disconnected — run lf page open " + pagePath;
+  function markDisconnected(reason) {
+    hostMode = "clipboard";
+    serverDisconnected = true;
+    showBanner(reason || "Loopflow server disconnected — run lf page open " + pagePath);
+    renderStrip();
   }
 
   function connectLoopback() {
@@ -222,18 +231,14 @@
     const url = loopbackWsUrl();
     if (!url) return;
     if (!Number.isInteger(protocolRevision) || !Number.isInteger(protocolMinRevision)) {
-      serverDisconnected = true;
-      showBanner("Review page is missing server protocol version — rebuild with lf page build");
-      renderStrip();
+      markDisconnected("Review page is missing server protocol version — rebuild with lf page build");
       return;
     }
     let ws;
     try {
       ws = new WebSocket(url);
     } catch (_) {
-      serverDisconnected = true;
-      showBanner(disconnectedMessage(""));
-      renderStrip();
+      markDisconnected("");
       return;
     }
     let handshakeError = "";
@@ -287,10 +292,7 @@
       }
       pending.clear();
       if (closingForUnload) return;
-      hostMode = "clipboard";
-      serverDisconnected = true;
-      showBanner(disconnectedMessage(handshakeError));
-      renderStrip();
+      markDisconnected(handshakeError);
     });
     window.addEventListener("pagehide", () => {
       closingForUnload = true;
@@ -379,9 +381,7 @@
           } else {
             state.choices[group] = { label, value };
           }
-          syncControlsFromState();
-          saveState();
-          renderStrip();
+          refresh(true);
         });
       });
     });
@@ -398,9 +398,7 @@
           const next = idx >= 0 ? current.filter((v) => v !== value) : current.concat([value]);
           if (next.length === 0) delete state.multiselects[group];
           else state.multiselects[group] = { label, values: next };
-          syncControlsFromState();
-          saveState();
-          renderStrip();
+          refresh(true);
         });
       });
     });
@@ -539,22 +537,11 @@
     wrap.className = "lf-action-confirm";
 
     const summary = actionNote("lf-action-summary", summarizeOperation(template));
-
-    const runBtn = document.createElement("button");
-    runBtn.type = "button";
-    runBtn.className = "lf-btn-accent";
-    runBtn.textContent = "Run";
-
-    const cancelBtn = document.createElement("button");
-    cancelBtn.type = "button";
-    cancelBtn.textContent = "Cancel";
+    const runBtn = makeButton("Run", execute, "lf-btn-accent");
+    const cancelBtn = makeButton("Cancel", () => showInSlot(action, action.btn));
 
     wrap.append(summary, runBtn, cancelBtn);
     showInSlot(action, wrap);
-
-    cancelBtn.addEventListener("click", () => {
-      showInSlot(action, action.btn);
-    });
 
     function execute() {
       showInSlot(action, wrap);
@@ -570,17 +557,11 @@
         (err) => {
           const errWrap = document.createElement("span");
           errWrap.className = "lf-action-error";
-          const retryBtn = document.createElement("button");
-          retryBtn.type = "button";
-          retryBtn.textContent = "Retry";
-          retryBtn.addEventListener("click", execute);
-          errWrap.append(actionNote("", String(err && err.message ? err.message : err)), retryBtn);
+          errWrap.append(actionNote("", errorMessage(err)), makeButton("Retry", execute));
           showInSlot(action, errWrap);
         }
       );
     }
-
-    runBtn.addEventListener("click", execute);
   }
 
   // --- Highlight-to-comment ---
@@ -624,24 +605,12 @@
     popover.style.top = Math.max(8, Math.min(window.innerHeight - 120, rect.bottom + 8)) + "px";
     popover.style.left = Math.max(8, Math.min(window.innerWidth - 280, rect.left)) + "px";
 
-    const trigger = document.createElement("button");
-    trigger.type = "button";
-    trigger.className = "lf-btn-accent";
-    trigger.textContent = "Note";
-    trigger.addEventListener("click", () => {
+    const trigger = makeButton("Note", () => {
       popover.innerHTML = "";
       const ta = document.createElement("textarea");
       ta.placeholder = "Add note…";
       const actions = document.createElement("div");
       actions.className = "lf-note-popover-actions";
-      const cancel = document.createElement("button");
-      cancel.type = "button";
-      cancel.textContent = "Cancel";
-      cancel.addEventListener("click", dismissPopover);
-      const save = document.createElement("button");
-      save.type = "button";
-      save.className = "lf-btn-accent";
-      save.textContent = "Save note";
       function commit() {
         const text = oneLine(ta.value);
         if (!text) return;
@@ -650,12 +619,8 @@
         try {
           window.getSelection().removeAllRanges();
         } catch (_) {}
-        renderNotesTray();
-        renderHighlights();
-        saveState();
-        renderStrip();
+        refresh(true);
       }
-      save.addEventListener("click", commit);
       ta.addEventListener("keydown", (e) => {
         if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
           e.preventDefault();
@@ -664,10 +629,10 @@
           dismissPopover();
         }
       });
-      actions.append(cancel, save);
+      actions.append(makeButton("Cancel", dismissPopover), makeButton("Save note", commit, "lf-btn-accent"));
       popover.append(ta, actions);
       ta.focus();
-    });
+    }, "lf-btn-accent");
     popover.append(trigger);
     document.body.append(popover);
   }
@@ -694,17 +659,10 @@
       chip.className = "lf-note-chip";
       const body = document.createElement("span");
       body.textContent = note.section + ' › "' + note.quote + '" — ' + note.text;
-      const del = document.createElement("button");
-      del.type = "button";
-      del.className = "lf-btn-quiet";
-      del.textContent = "Remove";
-      del.addEventListener("click", () => {
+      const del = makeButton("Remove", () => {
         state.notes = state.notes.filter((n) => n.id !== note.id);
-        renderNotesTray();
-        renderHighlights();
-        saveState();
-        renderStrip();
-      });
+        refresh(true);
+      }, "lf-btn-quiet");
       chip.append(body, del);
       trayEl.append(chip);
     }
@@ -801,12 +759,13 @@
   // Drop unsent drafts while keeping rendered receipts; mark receipts reported only after a reply is sent.
   function clearDrafts(options) {
     const markReported = Boolean(options && options.markReported);
+    const persist = !options || options.persist !== false;
     const receipts = markReported
       ? state.receipts.map((r) => Object.assign({}, r, { reported: true }))
       : state.receipts.slice();
     state = emptyState();
     state.receipts = receipts;
-    refresh(true);
+    refresh(persist);
   }
 
   function submitReply() {
@@ -830,7 +789,7 @@
           clearDrafts({ markReported: true });
         },
         (err) => {
-          stripStatusText = String(err && err.message ? err.message : err);
+          stripStatusText = errorMessage(err);
           stripStatusKind = "error";
           renderStrip();
         }
@@ -847,7 +806,7 @@
         renderStrip();
       },
       (err) => {
-        stripStatusText = "Copy failed: " + String(err && err.message ? err.message : err);
+        stripStatusText = "Copy failed: " + errorMessage(err);
         stripStatusKind = "error";
         renderStrip();
       }
@@ -891,25 +850,16 @@
     }
 
     if (items.length > 0) {
-      const clearBtn = document.createElement("button");
-      clearBtn.type = "button";
-      clearBtn.className = "lf-btn-quiet";
-      clearBtn.textContent = "Clear";
-      clearBtn.addEventListener("click", () => {
+      const clearBtn = makeButton("Clear", () => {
         stripStatusText = "";
         stripStatusKind = "";
         clearDrafts({ markReported: false });
-      });
-
-      const sendBtn = document.createElement("button");
-      sendBtn.type = "button";
-      sendBtn.className = "lf-btn-accent";
-      sendBtn.textContent =
+      }, "lf-btn-quiet");
+      const sendLabel =
         hostMode === "loopback"
           ? "Steer " + steerTargetLabel() + " ⌘↩"
           : "Copy reply ⌘↩";
-      sendBtn.addEventListener("click", submitReply);
-      stripEl.append(clearBtn, sendBtn);
+      stripEl.append(clearBtn, makeButton(sendLabel, submitReply, "lf-btn-accent"));
     }
   }
 

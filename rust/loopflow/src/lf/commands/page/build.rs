@@ -178,13 +178,8 @@ fn repo_relative_path(output_abs: &Path, repo_root: &Path, fallback: &Path) -> P
 }
 
 fn load_theme_css(repo_root: &Path) -> String {
-    let repo_theme = repo_root.join(".lf/theme.css");
-    if repo_theme.is_file() {
-        if let Ok(text) = std::fs::read_to_string(&repo_theme) {
-            return text;
-        }
-    }
-    PAGE_DEFAULT_THEME_CSS.to_owned()
+    std::fs::read_to_string(repo_root.join(".lf/theme.css"))
+        .unwrap_or_else(|_| PAGE_DEFAULT_THEME_CSS.to_owned())
 }
 
 fn resolve_diff_base(repo_root: &Path, override_base: Option<&str>) -> Result<String> {
@@ -195,16 +190,9 @@ fn resolve_diff_base(repo_root: &Path, override_base: Option<&str>) -> Result<St
         return Ok(base);
     }
     if let Ok(branch) = loopflow_execution::git::get_default_branch(repo_root) {
-        if let Ok(out) = Command::new("git")
-            .current_dir(repo_root)
-            .args(["merge-base", "HEAD", &branch])
-            .output()
-        {
-            if out.status.success() {
-                let sha = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-                if !sha.is_empty() {
-                    return Ok(sha);
-                }
+        if let Ok(sha) = loopflow_execution::git::merge_base(repo_root, "HEAD", &branch) {
+            if !sha.is_empty() {
+                return Ok(sha);
             }
         }
     }

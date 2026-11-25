@@ -795,9 +795,9 @@ struct ReviewComment: Equatable, Sendable, Identifiable {
         start = selection.first
     }
 
-    init(pagePath: String, reference: String, text: String = "") {
+    init(pagePath: String, reference: String) {
         target = .page(path: pagePath, reference: reference)
-        self.text = text
+        text = ""
         anchor = []
         start = nil
     }
@@ -849,11 +849,6 @@ final class ReviewComments {
         let buildID: String
     }
 
-    struct PageItem: Equatable, Sendable {
-        let reference: String
-        let text: String
-    }
-
     var items: [ReviewComment] = []
     var selection: ReviewSelection? { didSet { if oldValue != selection { draft = "" } } }
     var draft = ""
@@ -889,12 +884,12 @@ final class ReviewComments {
     }
 
     /// Store `state` for `(path, buildID)` and replace `path`'s `.page` entries in `items`.
-    func syncPage(path: String, buildID: String, state: JSONValue, items pageItems: [PageItem]) {
+    func syncPage(path: String, buildID: String, state: JSONValue, items references: [String]) {
         _ = removeStalePageStates(for: path, keeping: buildID)
         pageStates[PageKey(path: path, buildID: buildID)] = state
         let firstIndex = items.firstIndex { $0.isPage(path) }
         items.removeAll { $0.isPage(path) }
-        let replacements = pageItems.map { ReviewComment(pagePath: path, reference: $0.reference, text: $0.text) }
+        let replacements = references.map { ReviewComment(pagePath: path, reference: $0) }
         if let firstIndex, firstIndex <= items.count {
             items.insert(contentsOf: replacements, at: firstIndex)
         } else {

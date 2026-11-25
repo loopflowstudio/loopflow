@@ -643,75 +643,75 @@ button.lf-btn-quiet {
 <p>Walking the interaction: a person starts an interactive <code>lf explore</code> in Ghostty or iTerm2. The agent compiles <code>scratch/explore.page.html</code> and runs <code>lf page open scratch/explore.html</code>. Because <code>viewed_placement()</code> only recognizes multiplexer IDs (<code>desktop:</code>, <code>rex:</code>, <code>cmux:</code>, <code>herdr:</code>, <code>tmux:</code>), it returns <code>None</code> and <code>route_for</code> prints a URL without opening the browser — even though SQLite already knows <code>session.interactive == true</code>.</p>
 
 <div class="lf-codeblock" data-path="rust/loopflow/src/lf/commands/page.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow/src/lf/commands/page.rs:70-135</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
-<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,280 @@</td></tr>
+<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,279 @@</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">70</td><td class="lf-sign">+</td><td>fn decide_open_route(host: PageHost) -&gt; OpenRoute {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">71</td><td class="lf-sign">+</td><td>    let caller = loopflow_execution::journal::agent_caller();</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">72</td><td class="lf-sign">+</td><td>    let in_desktop_env = std::env::var_os(&quot;LF_DESKTOP&quot;).is_some_and(|value| !value.is_empty());</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">73</td><td class="lf-sign">+</td><td>    let session_interactive = caller</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">74</td><td class="lf-sign">+</td><td>        .as_ref()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">75</td><td class="lf-sign">+</td><td>        .and_then(|c| load_session(&amp;c.session_id))</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">71</td><td class="lf-sign">+</td><td>    match host {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">72</td><td class="lf-sign">+</td><td>        PageHost::Desktop =&gt; return OpenRoute::Desktop,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">73</td><td class="lf-sign">+</td><td>        PageHost::Browser =&gt; return OpenRoute::Browser,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">74</td><td class="lf-sign">+</td><td>        PageHost::Auto =&gt; {}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">75</td><td class="lf-sign">+</td><td>    }</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Reads session.interactive from SQLite via shared load_session().</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">76</td><td class="lf-sign">+</td><td>        .map(|session| session.interactive);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">77</td><td class="lf-sign">+</td><td>    let placement = caller</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">78</td><td class="lf-sign">+</td><td>        .as_ref()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">79</td><td class="lf-sign">+</td><td>        .and_then(|_| viewed_placement())</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">80</td><td class="lf-sign">+</td><td>        .map(|(host, _)| host);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">81</td><td class="lf-sign">+</td><td>    route_for(</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">82</td><td class="lf-sign">+</td><td>        host,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">83</td><td class="lf-sign">+</td><td>        caller.is_some(),</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">84</td><td class="lf-sign">+</td><td>        in_desktop_env,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">85</td><td class="lf-sign">+</td><td>        session_interactive,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">86</td><td class="lf-sign">+</td><td>        placement,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">87</td><td class="lf-sign">+</td><td>    )</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">88</td><td class="lf-sign">+</td><td>}</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">89</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">90</td><td class="lf-sign">+</td><td>pub(super) fn load_session(</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">91</td><td class="lf-sign">+</td><td>    session_id: &amp;loopflow_model::id::LfSessionId,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">92</td><td class="lf-sign">+</td><td>) -&gt; Option&lt;loopflow_execution::session::LfSession&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">93</td><td class="lf-sign">+</td><td>    let store = loopflow_execution::store::read_existing_registry()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">94</td><td class="lf-sign">+</td><td>        .ok()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">95</td><td class="lf-sign">+</td><td>        .flatten()?;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">96</td><td class="lf-sign">+</td><td>    store.sqlite.session(session_id).ok().flatten()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">97</td><td class="lf-sign">+</td><td>}</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">98</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">99</td><td class="lf-sign">+</td><td>fn route_for(</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">100</td><td class="lf-sign">+</td><td>    host: PageHost,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">101</td><td class="lf-sign">+</td><td>    has_agent_caller: bool,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">102</td><td class="lf-sign">+</td><td>    in_desktop_env: bool,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">103</td><td class="lf-sign">+</td><td>    session_interactive: Option&lt;bool&gt;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">104</td><td class="lf-sign">+</td><td>    viewed_host: Option&lt;OpenHost&gt;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">105</td><td class="lf-sign">+</td><td>) -&gt; OpenRoute {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">106</td><td class="lf-sign">+</td><td>    match host {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">107</td><td class="lf-sign">+</td><td>        PageHost::Desktop =&gt; OpenRoute::Desktop,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">108</td><td class="lf-sign">+</td><td>        PageHost::Browser =&gt; OpenRoute::Browser,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">109</td><td class="lf-sign">+</td><td>        PageHost::Auto =&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">110</td><td class="lf-sign">+</td><td>            if !has_agent_caller {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">111</td><td class="lf-sign">+</td><td>                if in_desktop_env {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">112</td><td class="lf-sign">+</td><td>                    OpenRoute::Desktop</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">113</td><td class="lf-sign">+</td><td>                } else {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">114</td><td class="lf-sign">+</td><td>                    OpenRoute::Browser</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">115</td><td class="lf-sign">+</td><td>                }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">116</td><td class="lf-sign">+</td><td>            } else {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">117</td><td class="lf-sign">+</td><td>                match session_interactive {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">118</td><td class="lf-sign">+</td><td>                    Some(false) =&gt; OpenRoute::PrintQuiet,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">119</td><td class="lf-sign">+</td><td>                    Some(true) =&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">120</td><td class="lf-sign">+</td><td>                        if matches!(viewed_host, Some(OpenHost::Desktop)) || in_desktop_env {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">121</td><td class="lf-sign">+</td><td>                            OpenRoute::Desktop</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">122</td><td class="lf-sign">+</td><td>                        } else {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">123</td><td class="lf-sign">+</td><td>                            OpenRoute::Browser</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">76</td><td class="lf-sign">+</td><td>    let caller = loopflow_execution::journal::agent_caller();</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">77</td><td class="lf-sign">+</td><td>    let in_desktop_env = std::env::var_os(&quot;LF_DESKTOP&quot;).is_some_and(|value| !value.is_empty());</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">78</td><td class="lf-sign">+</td><td>    let session_interactive = caller</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">79</td><td class="lf-sign">+</td><td>        .as_ref()</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">80</td><td class="lf-sign">+</td><td>        .and_then(|c| load_session(&amp;c.session_id))</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">81</td><td class="lf-sign">+</td><td>        .map(|session| session.interactive);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">82</td><td class="lf-sign">+</td><td>    let placement = caller</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">83</td><td class="lf-sign">+</td><td>        .as_ref()</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">84</td><td class="lf-sign">+</td><td>        .and_then(|_| viewed_placement())</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">85</td><td class="lf-sign">+</td><td>        .map(|(host, _)| host);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">86</td><td class="lf-sign">+</td><td>    route_for(</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">87</td><td class="lf-sign">+</td><td>        host,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">88</td><td class="lf-sign">+</td><td>        caller.is_some(),</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">89</td><td class="lf-sign">+</td><td>        in_desktop_env,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">90</td><td class="lf-sign">+</td><td>        session_interactive,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">91</td><td class="lf-sign">+</td><td>        placement,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">92</td><td class="lf-sign">+</td><td>    )</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">93</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">94</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">95</td><td class="lf-sign">+</td><td>pub(super) fn load_session(</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">96</td><td class="lf-sign">+</td><td>    session_id: &amp;loopflow_model::id::LfSessionId,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">97</td><td class="lf-sign">+</td><td>) -&gt; Option&lt;loopflow_execution::session::LfSession&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">98</td><td class="lf-sign">+</td><td>    let store = loopflow_execution::store::read_existing_registry()</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">99</td><td class="lf-sign">+</td><td>        .ok()</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">100</td><td class="lf-sign">+</td><td>        .flatten()?;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">101</td><td class="lf-sign">+</td><td>    store.sqlite.session(session_id).ok().flatten()</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">102</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">103</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">104</td><td class="lf-sign">+</td><td>fn route_for(</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">105</td><td class="lf-sign">+</td><td>    host: PageHost,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">106</td><td class="lf-sign">+</td><td>    has_agent_caller: bool,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">107</td><td class="lf-sign">+</td><td>    in_desktop_env: bool,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">108</td><td class="lf-sign">+</td><td>    session_interactive: Option&lt;bool&gt;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">109</td><td class="lf-sign">+</td><td>    viewed_host: Option&lt;OpenHost&gt;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">110</td><td class="lf-sign">+</td><td>) -&gt; OpenRoute {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">111</td><td class="lf-sign">+</td><td>    match (host, has_agent_caller) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">112</td><td class="lf-sign">+</td><td>        (PageHost::Desktop, _) =&gt; OpenRoute::Desktop,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">113</td><td class="lf-sign">+</td><td>        (PageHost::Browser, _) =&gt; OpenRoute::Browser,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">114</td><td class="lf-sign">+</td><td>        (PageHost::Auto, false) =&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">115</td><td class="lf-sign">+</td><td>            if in_desktop_env {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">116</td><td class="lf-sign">+</td><td>                OpenRoute::Desktop</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">117</td><td class="lf-sign">+</td><td>            } else {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">118</td><td class="lf-sign">+</td><td>                OpenRoute::Browser</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">119</td><td class="lf-sign">+</td><td>            }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">120</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">121</td><td class="lf-sign">+</td><td>        (PageHost::Auto, true) =&gt; match session_interactive {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">122</td><td class="lf-sign">+</td><td>            Some(false) =&gt; OpenRoute::PrintQuiet,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">123</td><td class="lf-sign">+</td><td>            Some(true) if in_desktop_env || viewed_host == Some(OpenHost::Desktop) =&gt; {</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Plain-terminal interactive sessions now route to OpenRoute::Browser while session.interactive == false stays PrintQuiet.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">124</td><td class="lf-sign">+</td><td>                        }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">125</td><td class="lf-sign">+</td><td>                    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">126</td><td class="lf-sign">+</td><td>                    None =&gt; match viewed_host {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">127</td><td class="lf-sign">+</td><td>                        Some(OpenHost::Desktop) =&gt; OpenRoute::Desktop,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">128</td><td class="lf-sign">+</td><td>                        Some(_) =&gt; OpenRoute::Browser,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">129</td><td class="lf-sign">+</td><td>                        None =&gt; OpenRoute::PrintQuiet,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">130</td><td class="lf-sign">+</td><td>                    },</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">131</td><td class="lf-sign">+</td><td>                }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">132</td><td class="lf-sign">+</td><td>            }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">133</td><td class="lf-sign">+</td><td>        }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">134</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">135</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">124</td><td class="lf-sign">+</td><td>                OpenRoute::Desktop</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">125</td><td class="lf-sign">+</td><td>            }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">126</td><td class="lf-sign">+</td><td>            Some(true) =&gt; OpenRoute::Browser,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">127</td><td class="lf-sign">+</td><td>            None =&gt; match viewed_host {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">128</td><td class="lf-sign">+</td><td>                Some(OpenHost::Desktop) =&gt; OpenRoute::Desktop,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">129</td><td class="lf-sign">+</td><td>                Some(_) =&gt; OpenRoute::Browser,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">130</td><td class="lf-sign">+</td><td>                None =&gt; OpenRoute::PrintQuiet,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">131</td><td class="lf-sign">+</td><td>            },</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">132</td><td class="lf-sign">+</td><td>        },</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">133</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">134</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">135</td><td class="lf-sign">+</td><td></td></tr>
 </tbody></table></div></div>
 
 <div class="lf-before-after">
@@ -800,66 +800,66 @@ button.lf-btn-quiet {
 <p>Walking failure and recovery: when <code>wire::REVISION</code> bumps from 10 to 11 (or a person reloads a stale loopback tab after <code>lf server</code> restarts or stops), the WebSocket closes before <code>welcome</code>. Today <code>runtime.js</code> hardcodes <code>10</code>, drops un-ID'd <code>error</code> frames, and hides the banner unless <code>welcomed</code> was already true — so the page silently falls back to clipboard copy with no explanation.</p>
 
 <div class="lf-codeblock" data-path="rust/loopflow-definitions/src/builtins/page/runtime.js"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-definitions/src/builtins/page/runtime.js:239-294</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
-<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,944 @@</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">239</td><td class="lf-sign">+</td><td>    let handshakeError = &quot;&quot;;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">240</td><td class="lf-sign">+</td><td>    let closingForUnload = false;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">241</td><td class="lf-sign">+</td><td>    ws.addEventListener(&quot;open&quot;, () =&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">242</td><td class="lf-sign">+</td><td>      ws.send(</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">243</td><td class="lf-sign">+</td><td>        JSON.stringify({</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">244</td><td class="lf-sign">+</td><td>          type: &quot;hello&quot;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">245</td><td class="lf-sign">+</td><td>          revision: protocolRevision,</td></tr>
+<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,894 @@</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">239</td><td class="lf-sign">+</td><td>      ws = new WebSocket(url);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">240</td><td class="lf-sign">+</td><td>    } catch (_) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">241</td><td class="lf-sign">+</td><td>      markDisconnected(&quot;&quot;);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">242</td><td class="lf-sign">+</td><td>      return;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">243</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">244</td><td class="lf-sign">+</td><td>    let handshakeError = &quot;&quot;;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">245</td><td class="lf-sign">+</td><td>    let closingForUnload = false;</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Reads wire::REVISION / wire::MIN_REVISION stamped by lf page build into #lf-page.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">246</td><td class="lf-sign">+</td><td>          min_revision: protocolMinRevision,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">247</td><td class="lf-sign">+</td><td>          client: {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">248</td><td class="lf-sign">+</td><td>            kind: &quot;page&quot;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">249</td><td class="lf-sign">+</td><td>            platform: &quot;browser&quot;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">250</td><td class="lf-sign">+</td><td>            name: &quot;review-page&quot;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">251</td><td class="lf-sign">+</td><td>            version: &quot;1&quot;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">252</td><td class="lf-sign">+</td><td>          },</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">253</td><td class="lf-sign">+</td><td>        })</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">254</td><td class="lf-sign">+</td><td>      );</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">255</td><td class="lf-sign">+</td><td>    });</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">256</td><td class="lf-sign">+</td><td>    ws.addEventListener(&quot;message&quot;, (event) =&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">257</td><td class="lf-sign">+</td><td>      let msg;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">258</td><td class="lf-sign">+</td><td>      try {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">259</td><td class="lf-sign">+</td><td>        msg = JSON.parse(event.data);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">260</td><td class="lf-sign">+</td><td>      } catch (_) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">261</td><td class="lf-sign">+</td><td>        return;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">262</td><td class="lf-sign">+</td><td>      }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">263</td><td class="lf-sign">+</td><td>      if (msg.type === &quot;welcome&quot;) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">264</td><td class="lf-sign">+</td><td>        socket = ws;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">265</td><td class="lf-sign">+</td><td>        hostMode = &quot;loopback&quot;;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">266</td><td class="lf-sign">+</td><td>        serverDisconnected = false;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">267</td><td class="lf-sign">+</td><td>        hideBanner();</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">268</td><td class="lf-sign">+</td><td>        renderStrip();</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">269</td><td class="lf-sign">+</td><td>        return;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">270</td><td class="lf-sign">+</td><td>      }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">271</td><td class="lf-sign">+</td><td>      if (msg.type === &quot;error&quot; &amp;&amp; !msg.id) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">246</td><td class="lf-sign">+</td><td>    ws.addEventListener(&quot;open&quot;, () =&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">247</td><td class="lf-sign">+</td><td>      ws.send(</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">248</td><td class="lf-sign">+</td><td>        JSON.stringify({</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">249</td><td class="lf-sign">+</td><td>          type: &quot;hello&quot;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">250</td><td class="lf-sign">+</td><td>          revision: protocolRevision,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">251</td><td class="lf-sign">+</td><td>          min_revision: protocolMinRevision,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">252</td><td class="lf-sign">+</td><td>          client: {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">253</td><td class="lf-sign">+</td><td>            kind: &quot;page&quot;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">254</td><td class="lf-sign">+</td><td>            platform: &quot;browser&quot;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">255</td><td class="lf-sign">+</td><td>            name: &quot;review-page&quot;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">256</td><td class="lf-sign">+</td><td>            version: &quot;1&quot;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">257</td><td class="lf-sign">+</td><td>          },</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">258</td><td class="lf-sign">+</td><td>        })</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">259</td><td class="lf-sign">+</td><td>      );</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">260</td><td class="lf-sign">+</td><td>    });</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">261</td><td class="lf-sign">+</td><td>    ws.addEventListener(&quot;message&quot;, (event) =&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">262</td><td class="lf-sign">+</td><td>      let msg;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">263</td><td class="lf-sign">+</td><td>      try {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">264</td><td class="lf-sign">+</td><td>        msg = JSON.parse(event.data);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">265</td><td class="lf-sign">+</td><td>      } catch (_) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">266</td><td class="lf-sign">+</td><td>        return;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">267</td><td class="lf-sign">+</td><td>      }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">268</td><td class="lf-sign">+</td><td>      if (msg.type === &quot;welcome&quot;) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">269</td><td class="lf-sign">+</td><td>        socket = ws;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">270</td><td class="lf-sign">+</td><td>        hostMode = &quot;loopback&quot;;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">271</td><td class="lf-sign">+</td><td>        serverDisconnected = false;</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Captures un-ID'd handshake error frames and shows the server message immediately.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">272</td><td class="lf-sign">+</td><td>        handshakeError = msg.message || msg.code || &quot;Loopflow server rejected connection&quot;;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">273</td><td class="lf-sign">+</td><td>        showBanner(handshakeError);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">272</td><td class="lf-sign">+</td><td>        hideBanner();</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">273</td><td class="lf-sign">+</td><td>        renderStrip();</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">274</td><td class="lf-sign">+</td><td>        return;</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">275</td><td class="lf-sign">+</td><td>      }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">276</td><td class="lf-sign">+</td><td>      if ((msg.type === &quot;response&quot; || msg.type === &quot;error&quot;) &amp;&amp; msg.id &amp;&amp; pending.has(msg.id)) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">277</td><td class="lf-sign">+</td><td>        const entry = pending.get(msg.id);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">278</td><td class="lf-sign">+</td><td>        pending.delete(msg.id);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">279</td><td class="lf-sign">+</td><td>        if (msg.type === &quot;response&quot;) entry.resolve(msg.result);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">280</td><td class="lf-sign">+</td><td>        else entry.reject(new Error(msg.message || msg.code || &quot;Server error&quot;));</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">281</td><td class="lf-sign">+</td><td>      }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">282</td><td class="lf-sign">+</td><td>    });</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">283</td><td class="lf-sign">+</td><td>    ws.addEventListener(&quot;close&quot;, () =&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">284</td><td class="lf-sign">+</td><td>      if (socket === ws) socket = null;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">285</td><td class="lf-sign">+</td><td>      for (const [, entry] of pending) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">286</td><td class="lf-sign">+</td><td>        entry.reject(new Error(&quot;Connection closed&quot;));</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">287</td><td class="lf-sign">+</td><td>      }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">288</td><td class="lf-sign">+</td><td>      pending.clear();</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">289</td><td class="lf-sign">+</td><td>      if (closingForUnload) return;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">290</td><td class="lf-sign">+</td><td>      hostMode = &quot;clipboard&quot;;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">291</td><td class="lf-sign">+</td><td>      serverDisconnected = true;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">292</td><td class="lf-sign">+</td><td>      showBanner(disconnectedMessage(handshakeError));</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">276</td><td class="lf-sign">+</td><td>      if (msg.type === &quot;error&quot; &amp;&amp; !msg.id) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">277</td><td class="lf-sign">+</td><td>        handshakeError = msg.message || msg.code || &quot;Loopflow server rejected connection&quot;;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">278</td><td class="lf-sign">+</td><td>        showBanner(handshakeError);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">279</td><td class="lf-sign">+</td><td>        return;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">280</td><td class="lf-sign">+</td><td>      }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">281</td><td class="lf-sign">+</td><td>      if ((msg.type === &quot;response&quot; || msg.type === &quot;error&quot;) &amp;&amp; msg.id &amp;&amp; pending.has(msg.id)) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">282</td><td class="lf-sign">+</td><td>        const entry = pending.get(msg.id);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">283</td><td class="lf-sign">+</td><td>        pending.delete(msg.id);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">284</td><td class="lf-sign">+</td><td>        if (msg.type === &quot;response&quot;) entry.resolve(msg.result);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">285</td><td class="lf-sign">+</td><td>        else entry.reject(new Error(msg.message || msg.code || &quot;Server error&quot;));</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">286</td><td class="lf-sign">+</td><td>      }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">287</td><td class="lf-sign">+</td><td>    });</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">288</td><td class="lf-sign">+</td><td>    ws.addEventListener(&quot;close&quot;, () =&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">289</td><td class="lf-sign">+</td><td>      if (socket === ws) socket = null;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">290</td><td class="lf-sign">+</td><td>      for (const [, entry] of pending) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">291</td><td class="lf-sign">+</td><td>        entry.reject(new Error(&quot;Connection closed&quot;));</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">292</td><td class="lf-sign">+</td><td>      }</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Shows handshake error or truthful disconnect banner on any loopback close, even before welcome.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">293</td><td class="lf-sign">+</td><td>      renderStrip();</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">294</td><td class="lf-sign">+</td><td>    });</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">293</td><td class="lf-sign">+</td><td>      pending.clear();</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">294</td><td class="lf-sign">+</td><td>      if (closingForUnload) return;</td></tr>
 </tbody></table></div></div>
 
 <div class="lf-before-after">
@@ -883,18 +883,18 @@ button.lf-btn-quiet {
 <p>Walking recovery: a reviewer clicks <strong>File Task now</strong> (<code>Filed LOO-1200</code>), adds a note, hits <strong>Clear</strong> to rewrite the note, and then presses <code>⌘↩</code>. Because <strong>Clear</strong> shares <code>clearDrafts()</code> with <code>submitReply()</code>, it flips <code>reported: true</code> on the receipt even though nothing was sent — so <code>[already ran: task.create → LOO-1200]</code> disappears from the steer.</p>
 
 <div class="lf-codeblock" data-path="rust/loopflow-definitions/src/builtins/page/runtime.js"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-definitions/src/builtins/page/runtime.js:801-810</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
-<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,944 @@</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">801</td><td class="lf-sign">+</td><td>  // Drop unsent drafts while keeping rendered receipts; mark receipts reported only after a reply is sent.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">802</td><td class="lf-sign">+</td><td>  function clearDrafts(options) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">803</td><td class="lf-sign">+</td><td>    const markReported = Boolean(options &amp;&amp; options.markReported);</td></tr>
+<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,894 @@</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">801</td><td class="lf-sign">+</td><td>      () =&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">802</td><td class="lf-sign">+</td><td>        stripStatusText = serverDisconnected</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">803</td><td class="lf-sign">+</td><td>          ? &quot;Copied reply (server disconnected)&quot;</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Marks receipts reported only when markReported is true (actual send), leaving Clear drafts separate.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">804</td><td class="lf-sign">+</td><td>    const receipts = markReported</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">805</td><td class="lf-sign">+</td><td>      ? state.receipts.map((r) =&gt; Object.assign({}, r, { reported: true }))</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">806</td><td class="lf-sign">+</td><td>      : state.receipts.slice();</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">807</td><td class="lf-sign">+</td><td>    state = emptyState();</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">808</td><td class="lf-sign">+</td><td>    state.receipts = receipts;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">809</td><td class="lf-sign">+</td><td>    refresh(true);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">810</td><td class="lf-sign">+</td><td>  }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">804</td><td class="lf-sign">+</td><td>          : &quot;Copied reply&quot;;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">805</td><td class="lf-sign">+</td><td>        stripStatusKind = &quot;ok&quot;;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">806</td><td class="lf-sign">+</td><td>        renderStrip();</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">807</td><td class="lf-sign">+</td><td>      },</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">808</td><td class="lf-sign">+</td><td>      (err) =&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">809</td><td class="lf-sign">+</td><td>        stripStatusText = &quot;Copy failed: &quot; + errorMessage(err);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">810</td><td class="lf-sign">+</td><td>        stripStatusKind = &quot;error&quot;;</td></tr>
 </tbody></table></div></div>
 
 <div class="lf-before-after">
@@ -940,7 +940,7 @@ button.lf-btn-quiet {
   <textarea rows="3" placeholder="Optional notes…"></textarea>
 </div>
 </main>
-<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1109"},"directory":"/Users/jack/src/loopflow.loo-1109-human-comprehension-review","base":"6d617de68638439a144601b3cb8cbaf6ec678630","head":"611edeb386","path":"scratch/concept-review.html","build_id":"f5686c0e5dda0574","protocol":{"revision":10,"min_revision":10}}</script>
+<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1109"},"directory":"/Users/jack/src/loopflow.loo-1109-human-comprehension-review","base":"6d617de68638439a144601b3cb8cbaf6ec678630","head":"89be14c594","path":"scratch/concept-review.html","build_id":"66438615d395874d","protocol":{"revision":10,"min_revision":10}}</script>
 <script>
 (function () {
   "use strict";
@@ -1006,6 +1006,19 @@ button.lf-btn-quiet {
     return result && ((result.task && result.task.identifier) || result.identifier);
   }
 
+  function errorMessage(err) {
+    return String(err && err.message ? err.message : err);
+  }
+
+  function makeButton(label, onClick, className) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    if (className) btn.className = className;
+    btn.textContent = label;
+    btn.addEventListener("click", onClick);
+    return btn;
+  }
+
   function randomId() {
     if (window.crypto && typeof window.crypto.randomUUID === "function") {
       return window.crypto.randomUUID();
@@ -1030,48 +1043,40 @@ button.lf-btn-quiet {
   function queueItems() {
     const items = [];
     for (const note of state.notes) {
-      const ref =
+      items.push(
         "`" +
-        pagePath +
-        "` § " +
-        oneLine(note.section) +
-        ' › "' +
-        oneLine(note.quote) +
-        '" ' +
-        oneLine(note.text);
-      items.push({ id: "note:" + note.id, reference: ref, text: oneLine(note.text) });
+          pagePath +
+          "` § " +
+          oneLine(note.section) +
+          ' › "' +
+          oneLine(note.quote) +
+          '" ' +
+          oneLine(note.text)
+      );
     }
     for (const [group, entry] of Object.entries(state.choices)) {
       if (!entry || !entry.value) continue;
-      const label = oneLine(entry.label || group);
-      const ref = "`" + pagePath + "` § " + label + ": " + oneLine(entry.value);
-      items.push({ id: "choice:" + group, reference: ref, text: oneLine(entry.value) });
+      items.push("`" + pagePath + "` § " + oneLine(entry.label || group) + ": " + oneLine(entry.value));
     }
     for (const [group, entry] of Object.entries(state.multiselects)) {
       if (!entry || !Array.isArray(entry.values) || entry.values.length === 0) continue;
-      const label = oneLine(entry.label || group);
-      const joined = entry.values.map(oneLine).join(", ");
-      const ref = "`" + pagePath + "` § " + label + ": " + joined;
-      items.push({ id: "multi:" + group, reference: ref, text: joined });
+      items.push(
+        "`" + pagePath + "` § " + oneLine(entry.label || group) + ": " + entry.values.map(oneLine).join(", ")
+      );
     }
     for (const [qid, entry] of Object.entries(state.questions)) {
       if (!entry || !oneLine(entry.answer)) continue;
-      const label = oneLine(entry.label || qid);
-      const ans = oneLine(entry.answer);
-      const ref = "`" + pagePath + "` § " + label + ": " + ans;
-      items.push({ id: "question:" + qid, reference: ref, text: ans });
+      items.push("`" + pagePath + "` § " + oneLine(entry.label || qid) + ": " + oneLine(entry.answer));
     }
     for (const act of state.offlineActions) {
-      const ref = "`" + pagePath + "` Run: " + oneLine(act.summary);
-      items.push({ id: "offline:" + act.id, reference: ref, text: oneLine(act.summary) });
+      items.push("`" + pagePath + "` Run: " + oneLine(act.summary));
     }
     return items;
   }
 
   function formatReplyMessage(items) {
     if (!items.length) return "";
-    const parts = items.map((item, idx) => "(" + (idx + 1) + ") " + oneLine(item.reference));
-    let message = parts.join(" ");
+    let message = items.map((ref, idx) => "(" + (idx + 1) + ") " + oneLine(ref)).join(" ");
     const unreported = state.receipts.filter((r) => !r.reported);
     if (unreported.length > 0) {
       const ran = unreported
@@ -1138,10 +1143,11 @@ button.lf-btn-quiet {
     refresh(false);
   }
 
-  // Desktop calls this with `null` after `ReviewComments.insert(into:)` sends the page's items.
+  // Desktop calls this with `null` after `ReviewComments.insert(into:)` sends the page's items;
+  // Swift has already updated its stored page state, so don't echo a redundant `sync` back.
   window.__lfDesktopApplyState = function (loaded) {
     if (loaded) applyState(loaded);
-    else clearDrafts({ markReported: true });
+    else clearDrafts({ markReported: true, persist: false });
   };
 
   // --- Loopback WebSocket carrier ---
@@ -1157,8 +1163,11 @@ button.lf-btn-quiet {
     return wsProto + "//" + window.location.host + "/" + token + "/machine";
   }
 
-  function disconnectedMessage(reason) {
-    return reason || "Loopflow server disconnected — run lf page open " + pagePath;
+  function markDisconnected(reason) {
+    hostMode = "clipboard";
+    serverDisconnected = true;
+    showBanner(reason || "Loopflow server disconnected — run lf page open " + pagePath);
+    renderStrip();
   }
 
   function connectLoopback() {
@@ -1166,18 +1175,14 @@ button.lf-btn-quiet {
     const url = loopbackWsUrl();
     if (!url) return;
     if (!Number.isInteger(protocolRevision) || !Number.isInteger(protocolMinRevision)) {
-      serverDisconnected = true;
-      showBanner("Review page is missing server protocol version — rebuild with lf page build");
-      renderStrip();
+      markDisconnected("Review page is missing server protocol version — rebuild with lf page build");
       return;
     }
     let ws;
     try {
       ws = new WebSocket(url);
     } catch (_) {
-      serverDisconnected = true;
-      showBanner(disconnectedMessage(""));
-      renderStrip();
+      markDisconnected("");
       return;
     }
     let handshakeError = "";
@@ -1231,10 +1236,7 @@ button.lf-btn-quiet {
       }
       pending.clear();
       if (closingForUnload) return;
-      hostMode = "clipboard";
-      serverDisconnected = true;
-      showBanner(disconnectedMessage(handshakeError));
-      renderStrip();
+      markDisconnected(handshakeError);
     });
     window.addEventListener("pagehide", () => {
       closingForUnload = true;
@@ -1323,9 +1325,7 @@ button.lf-btn-quiet {
           } else {
             state.choices[group] = { label, value };
           }
-          syncControlsFromState();
-          saveState();
-          renderStrip();
+          refresh(true);
         });
       });
     });
@@ -1342,9 +1342,7 @@ button.lf-btn-quiet {
           const next = idx >= 0 ? current.filter((v) => v !== value) : current.concat([value]);
           if (next.length === 0) delete state.multiselects[group];
           else state.multiselects[group] = { label, values: next };
-          syncControlsFromState();
-          saveState();
-          renderStrip();
+          refresh(true);
         });
       });
     });
@@ -1483,22 +1481,11 @@ button.lf-btn-quiet {
     wrap.className = "lf-action-confirm";
 
     const summary = actionNote("lf-action-summary", summarizeOperation(template));
-
-    const runBtn = document.createElement("button");
-    runBtn.type = "button";
-    runBtn.className = "lf-btn-accent";
-    runBtn.textContent = "Run";
-
-    const cancelBtn = document.createElement("button");
-    cancelBtn.type = "button";
-    cancelBtn.textContent = "Cancel";
+    const runBtn = makeButton("Run", execute, "lf-btn-accent");
+    const cancelBtn = makeButton("Cancel", () => showInSlot(action, action.btn));
 
     wrap.append(summary, runBtn, cancelBtn);
     showInSlot(action, wrap);
-
-    cancelBtn.addEventListener("click", () => {
-      showInSlot(action, action.btn);
-    });
 
     function execute() {
       showInSlot(action, wrap);
@@ -1514,17 +1501,11 @@ button.lf-btn-quiet {
         (err) => {
           const errWrap = document.createElement("span");
           errWrap.className = "lf-action-error";
-          const retryBtn = document.createElement("button");
-          retryBtn.type = "button";
-          retryBtn.textContent = "Retry";
-          retryBtn.addEventListener("click", execute);
-          errWrap.append(actionNote("", String(err && err.message ? err.message : err)), retryBtn);
+          errWrap.append(actionNote("", errorMessage(err)), makeButton("Retry", execute));
           showInSlot(action, errWrap);
         }
       );
     }
-
-    runBtn.addEventListener("click", execute);
   }
 
   // --- Highlight-to-comment ---
@@ -1568,24 +1549,12 @@ button.lf-btn-quiet {
     popover.style.top = Math.max(8, Math.min(window.innerHeight - 120, rect.bottom + 8)) + "px";
     popover.style.left = Math.max(8, Math.min(window.innerWidth - 280, rect.left)) + "px";
 
-    const trigger = document.createElement("button");
-    trigger.type = "button";
-    trigger.className = "lf-btn-accent";
-    trigger.textContent = "Note";
-    trigger.addEventListener("click", () => {
+    const trigger = makeButton("Note", () => {
       popover.innerHTML = "";
       const ta = document.createElement("textarea");
       ta.placeholder = "Add note…";
       const actions = document.createElement("div");
       actions.className = "lf-note-popover-actions";
-      const cancel = document.createElement("button");
-      cancel.type = "button";
-      cancel.textContent = "Cancel";
-      cancel.addEventListener("click", dismissPopover);
-      const save = document.createElement("button");
-      save.type = "button";
-      save.className = "lf-btn-accent";
-      save.textContent = "Save note";
       function commit() {
         const text = oneLine(ta.value);
         if (!text) return;
@@ -1594,12 +1563,8 @@ button.lf-btn-quiet {
         try {
           window.getSelection().removeAllRanges();
         } catch (_) {}
-        renderNotesTray();
-        renderHighlights();
-        saveState();
-        renderStrip();
+        refresh(true);
       }
-      save.addEventListener("click", commit);
       ta.addEventListener("keydown", (e) => {
         if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
           e.preventDefault();
@@ -1608,10 +1573,10 @@ button.lf-btn-quiet {
           dismissPopover();
         }
       });
-      actions.append(cancel, save);
+      actions.append(makeButton("Cancel", dismissPopover), makeButton("Save note", commit, "lf-btn-accent"));
       popover.append(ta, actions);
       ta.focus();
-    });
+    }, "lf-btn-accent");
     popover.append(trigger);
     document.body.append(popover);
   }
@@ -1638,17 +1603,10 @@ button.lf-btn-quiet {
       chip.className = "lf-note-chip";
       const body = document.createElement("span");
       body.textContent = note.section + ' › "' + note.quote + '" — ' + note.text;
-      const del = document.createElement("button");
-      del.type = "button";
-      del.className = "lf-btn-quiet";
-      del.textContent = "Remove";
-      del.addEventListener("click", () => {
+      const del = makeButton("Remove", () => {
         state.notes = state.notes.filter((n) => n.id !== note.id);
-        renderNotesTray();
-        renderHighlights();
-        saveState();
-        renderStrip();
-      });
+        refresh(true);
+      }, "lf-btn-quiet");
       chip.append(body, del);
       trayEl.append(chip);
     }
@@ -1745,12 +1703,13 @@ button.lf-btn-quiet {
   // Drop unsent drafts while keeping rendered receipts; mark receipts reported only after a reply is sent.
   function clearDrafts(options) {
     const markReported = Boolean(options && options.markReported);
+    const persist = !options || options.persist !== false;
     const receipts = markReported
       ? state.receipts.map((r) => Object.assign({}, r, { reported: true }))
       : state.receipts.slice();
     state = emptyState();
     state.receipts = receipts;
-    refresh(true);
+    refresh(persist);
   }
 
   function submitReply() {
@@ -1774,7 +1733,7 @@ button.lf-btn-quiet {
           clearDrafts({ markReported: true });
         },
         (err) => {
-          stripStatusText = String(err && err.message ? err.message : err);
+          stripStatusText = errorMessage(err);
           stripStatusKind = "error";
           renderStrip();
         }
@@ -1791,7 +1750,7 @@ button.lf-btn-quiet {
         renderStrip();
       },
       (err) => {
-        stripStatusText = "Copy failed: " + String(err && err.message ? err.message : err);
+        stripStatusText = "Copy failed: " + errorMessage(err);
         stripStatusKind = "error";
         renderStrip();
       }
@@ -1835,25 +1794,16 @@ button.lf-btn-quiet {
     }
 
     if (items.length > 0) {
-      const clearBtn = document.createElement("button");
-      clearBtn.type = "button";
-      clearBtn.className = "lf-btn-quiet";
-      clearBtn.textContent = "Clear";
-      clearBtn.addEventListener("click", () => {
+      const clearBtn = makeButton("Clear", () => {
         stripStatusText = "";
         stripStatusKind = "";
         clearDrafts({ markReported: false });
-      });
-
-      const sendBtn = document.createElement("button");
-      sendBtn.type = "button";
-      sendBtn.className = "lf-btn-accent";
-      sendBtn.textContent =
+      }, "lf-btn-quiet");
+      const sendLabel =
         hostMode === "loopback"
           ? "Steer " + steerTargetLabel() + " ⌘↩"
           : "Copy reply ⌘↩";
-      sendBtn.addEventListener("click", submitReply);
-      stripEl.append(clearBtn, sendBtn);
+      stripEl.append(clearBtn, makeButton(sendLabel, submitReply, "lf-btn-accent"));
     }
   }
 

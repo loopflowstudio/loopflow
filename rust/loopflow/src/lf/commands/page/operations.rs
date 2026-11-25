@@ -18,11 +18,11 @@ const REQUEST_ID_SENTINEL: &str = "__LF_REQUEST_ID__";
 static DATA_LF_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?s)data-lf\s*=\s*(?:'([^']*)'|"([^"]*)")"#).expect("static data-lf regex")
 });
+static OPERATION_SCHEMAS: LazyLock<HashMap<String, Value>> = LazyLock::new(operation_schemas);
 
 /// Expand every `data-lf='…'` attribute in `input` into complete, strict wire
 /// `Operation` JSON validated against `crate::server::wire::Operation`.
 pub(super) fn expand(repo_root: &Path, input: &str) -> Result<String> {
-    let mut schemas: Option<HashMap<String, Value>> = None;
     let mut out = String::with_capacity(input.len());
     let mut cursor = 0;
     for caps in DATA_LF_RE.captures_iter(input) {
@@ -36,7 +36,7 @@ pub(super) fn expand(repo_root: &Path, input: &str) -> Result<String> {
             .map(|m| m.as_str())
             .unwrap_or("");
         let unescaped = unescape_html_attr(raw_attr);
-        let strict_json = compile_operation_json(repo_root, &mut schemas, &unescaped, elem, line)?;
+        let strict_json = compile_operation_json(repo_root, &unescaped, elem, line)?;
         out.push_str("data-lf='");
         out.push_str(&escape_single_quoted_attr(&strict_json));
         out.push('\'');
@@ -61,13 +61,7 @@ fn operation_schemas() -> HashMap<String, Value> {
     ops
 }
 
-fn compile_operation_json(
-    repo_root: &Path,
-    schemas: &mut Option<HashMap<String, Value>>,
-    raw: &str,
-    elem: &str,
-    line: usize,
-) -> Result<String> {
+fn compile_operation_json(repo_root: &Path, raw: &str, elem: &str, line: usize) -> Result<String> {
     let mut value: Value = serde_json::from_str(raw).map_err(|err| {
         anyhow::anyhow!("line {line}: <{elem} data-lf=…> is not valid JSON: {err}")
     })?;
@@ -81,23 +75,16 @@ fn compile_operation_json(
     else {
         bail!("line {line}: <{elem} data-lf=…> requires a string `kind` field");
     };
-    let map = schemas.get_or_insert_with(operation_schemas);
-    let Some(arm) = map.get(&kind) else {
+    let Some(arm) = OPERATION_SCHEMAS.get(&kind) else {
         bail!("line {line}: <{elem} data-lf=…> unknown operation kind `{kind}`");
     };
 
     // Expand missing required properties from the operation's generated JSON Schema.
     let properties = arm.get("properties").and_then(Value::as_object);
-    let required: Vec<String> = arm
+    let required: Vec<&str> = arm
         .get("required")
         .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect()
-        })
+        .map(|items| items.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default();
 
     if let Some(props) = properties {
@@ -114,32 +101,35 @@ fn compile_operation_json(
         }
     }
 
-    for field in &required {
+    for &field in &required {
         if object.contains_key(field) {
             continue;
         }
         if field == "directory" {
             object.insert(
-                field.clone(),
+                field.to_owned(),
                 Value::String(repo_root.to_string_lossy().into_owned()),
             );
             continue;
         }
         if field == "request_id" {
-            object.insert(field.clone(), Value::String(REQUEST_ID_SENTINEL.to_owned()));
+            object.insert(
+                field.to_owned(),
+                Value::String(REQUEST_ID_SENTINEL.to_owned()),
+            );
             continue;
         }
         if let Some(default_value) = properties
             .and_then(|props| props.get(field))
             .and_then(default_for_schema)
         {
-            object.insert(field.clone(), default_value);
+            object.insert(field.to_owned(), default_value);
         }
     }
     let missing: Vec<&str> = required
         .iter()
+        .copied()
         .filter(|field| !object.contains_key(*field))
-        .map(String::as_str)
         .collect();
     if !missing.is_empty() {
         bail!(
@@ -199,10 +189,8 @@ mod tests {
 
     #[test]
     fn data_lf_expands_partial_task_create_into_strict_operation_and_rejects_unknown_fields() {
-        let mut schemas = None;
         let strict = compile_operation_json(
             Path::new("/tmp/repo"),
-            &mut schemas,
             r#"{"kind":"task.create","title":"Prune retry log rows"}"#,
             "button",
             12,
@@ -218,7 +206,6 @@ mod tests {
 
         let unknown_field = compile_operation_json(
             Path::new("/tmp/repo"),
-            &mut schemas,
             r#"{"kind":"task.create","title":"Ok","bogus":1}"#,
             "button",
             14,
@@ -234,7 +221,6 @@ mod tests {
 
         let misspelled = compile_operation_json(
             Path::new("/tmp/repo"),
-            &mut schemas,
             r#"{"kind":"task.create","titel":"Ok"}"#,
             "button",
             15,
@@ -245,7 +231,6 @@ mod tests {
 
         let unknown_kind = compile_operation_json(
             Path::new("/tmp/repo"),
-            &mut schemas,
             r#"{"kind":"task.fly"}"#,
             "button",
             19,

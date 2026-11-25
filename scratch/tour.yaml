@@ -1,4 +1,4 @@
-at: 884a2d10c877127e97d3872361b10e1c0cbf3769
+at: 89be14c594f3972c92ba41f216b02b8aa8caf481
 first:
   - path: docs/surfaces.md
     why: Review page UX across browser, Desktop, headless, and offline
@@ -13,21 +13,23 @@ first:
   - path: rust/loopflow/src/server/service.rs
     why: Shared Messages carrier and local-only page.url dispatch
   - path: rust/loopflow/src/lf/commands/page.rs
-    why: lf page build/open dispatch and caller host routing
+    why: lf page build/open dispatch and interactive vs headless routing
   - path: rust/loopflow/src/lf/commands/page/
     why: Fragment compiler split into build, components, diff, operations, html
   - path: rust/loopflow-definitions/src/builtins/page/runtime.js
-    why: Shared highlight notes, choices, loopback WS, Desktop bridge
+    why: Highlight notes, choices, receipts, loopback WS, Desktop bridge
+  - path: rust/loopflow-definitions/src/builtins/page/base.css
+    why: Page layout, code blocks, and guarded data-label prompts
   - path: swift/LoopflowMac/Views/TaskHTMLView.swift
     why: Desktop TaskHTMLBridge wired only in TaskFileReadingView
   - path: swift/LoopflowMac/ReviewDiff.swift
-    why: Page-anchored ReviewComment and Swift-owned draft state
+    why: Page-anchored ReviewComment and Swift-owned draft/receipt state
   - path: swift/Loopflow/Services/ServerLink.swift
     why: Raw Operation forwarding for Desktop data-lf actions
   - path: rust/loopflow-definitions/src/builtins/task/skill/ship-review.md
     why: Review skills rewritten to use lf help page and lf page
   - path: rust/loopflow/tests/page_tests.rs
-    why: End-to-end loopback, admission, steer, and build integration tests
+    why: End-to-end loopback, admission, routing, steer, and build tests
   - path: swift/LoopflowTests/TaskFilesTests.swift
     why: Focused Desktop bridge state, send, and operation forwarding tests
 hide:

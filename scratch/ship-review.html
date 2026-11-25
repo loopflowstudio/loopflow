@@ -591,147 +591,147 @@ button.lf-btn-quiet {
 <p>The loopback carrier in <code>lf server</code> reuses the existing Machine WebSocket protocol (<code>Messages&lt;S&gt;</code> and <code>service::session</code>) behind a per-server 32-byte random in-memory token, exact <code>Host</code> verification, and same-origin <code>Origin</code> verification on upgrades:</p>
 
 <div class="lf-codeblock" data-path="rust/loopflow/src/server/loopback.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow/src/server/loopback.rs:209-264</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
-<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,723 @@</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">209</td><td class="lf-sign">+</td><td>async fn handle_request(req: Request&lt;Incoming&gt;, state: Arc&lt;State&gt;) -&gt; Response&lt;Full&lt;Bytes&gt;&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">210</td><td class="lf-sign">+</td><td>    if req.method() != Method::GET {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">211</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">212</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">213</td><td class="lf-sign">+</td><td>    // DNS rebinding defense: Host must be exactly `127.0.0.1:&lt;port&gt;`.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">214</td><td class="lf-sign">+</td><td>    let expected_host = state.handle.expected_host();</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">215</td><td class="lf-sign">+</td><td>    let Some(host) = req</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">216</td><td class="lf-sign">+</td><td>        .headers()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">217</td><td class="lf-sign">+</td><td>        .get(HOST)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">218</td><td class="lf-sign">+</td><td>        .and_then(|value| value.to_str().ok())</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">219</td><td class="lf-sign">+</td><td>    else {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">220</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">221</td><td class="lf-sign">+</td><td>    };</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">222</td><td class="lf-sign">+</td><td>    if host != expected_host {</td></tr>
+<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,701 @@</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">209</td><td class="lf-sign">+</td><td>fn header_str(req: &amp;Request&lt;Incoming&gt;, name: hyper::header::HeaderName) -&gt; Option&lt;&amp;str&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">210</td><td class="lf-sign">+</td><td>    req.headers()</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">211</td><td class="lf-sign">+</td><td>        .get(name)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">212</td><td class="lf-sign">+</td><td>        .and_then(|value| value.to_str().ok())</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">213</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">214</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">215</td><td class="lf-sign">+</td><td>async fn handle_request(req: Request&lt;Incoming&gt;, state: Arc&lt;State&gt;) -&gt; Response&lt;Full&lt;Bytes&gt;&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">216</td><td class="lf-sign">+</td><td>    if req.method() != Method::GET {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">217</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">218</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">219</td><td class="lf-sign">+</td><td>    // DNS rebinding defense: Host must be exactly `127.0.0.1:&lt;port&gt;`.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">220</td><td class="lf-sign">+</td><td>    if header_str(&amp;req, HOST) != Some(state.handle.expected_host().as_str()) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">221</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">222</td><td class="lf-sign">+</td><td>    }</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">DNS rebinding defense: every request must carry Host: 127.0.0.1:&lt;port&gt;, otherwise 404 with empty body.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">223</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">224</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">225</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">226</td><td class="lf-sign">+</td><td>    // Route structure: `/&lt;token&gt;/machine` or `/&lt;token&gt;/f/&lt;absolute path&gt;`.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">227</td><td class="lf-sign">+</td><td>    let path = req.uri().path();</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">228</td><td class="lf-sign">+</td><td>    let Some(without_leading) = path.strip_prefix(&#39;/&#39;) else {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">229</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">230</td><td class="lf-sign">+</td><td>    };</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">231</td><td class="lf-sign">+</td><td>    let Some((token, rest)) = without_leading.split_once(&#39;/&#39;) else {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">232</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">233</td><td class="lf-sign">+</td><td>    };</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">234</td><td class="lf-sign">+</td><td>    if !state.handle.matches_token(token) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">223</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">224</td><td class="lf-sign">+</td><td>    // Route structure: `/&lt;token&gt;/machine` or `/&lt;token&gt;/f/&lt;absolute path&gt;`.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">225</td><td class="lf-sign">+</td><td>    let path = req.uri().path();</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">226</td><td class="lf-sign">+</td><td>    let Some(without_leading) = path.strip_prefix(&#39;/&#39;) else {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">227</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">228</td><td class="lf-sign">+</td><td>    };</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">229</td><td class="lf-sign">+</td><td>    let Some((token, rest)) = without_leading.split_once(&#39;/&#39;) else {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">230</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">231</td><td class="lf-sign">+</td><td>    };</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">232</td><td class="lf-sign">+</td><td>    if !state.handle.matches_token(token) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">233</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">234</td><td class="lf-sign">+</td><td>    }</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Constant-time token check; the token lives only in memory and is never printed by lf server status.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">235</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">236</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">237</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">238</td><td class="lf-sign">+</td><td>    if rest == &quot;machine&quot; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">239</td><td class="lf-sign">+</td><td>        return handle_websocket(req, state);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">240</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">241</td><td class="lf-sign">+</td><td>    if let Some(encoded_file) = rest.strip_prefix(&quot;f/&quot;) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">242</td><td class="lf-sign">+</td><td>        return handle_file(encoded_file).await;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">243</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">244</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">245</td><td class="lf-sign">+</td><td>    empty(StatusCode::NOT_FOUND)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">246</td><td class="lf-sign">+</td><td>}</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">247</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">248</td><td class="lf-sign">+</td><td>fn handle_websocket(req: Request&lt;Incoming&gt;, state: Arc&lt;State&gt;) -&gt; Response&lt;Full&lt;Bytes&gt;&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">249</td><td class="lf-sign">+</td><td>    if req.uri().query().is_some() {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">250</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">251</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">252</td><td class="lf-sign">+</td><td>    // Browser cross-origin WebSocket defense: Origin must be exact same-origin.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">253</td><td class="lf-sign">+</td><td>    let expected_origin = state.handle.expected_origin();</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">254</td><td class="lf-sign">+</td><td>    let Some(origin) = req</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">255</td><td class="lf-sign">+</td><td>        .headers()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">256</td><td class="lf-sign">+</td><td>        .get(ORIGIN)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">257</td><td class="lf-sign">+</td><td>        .and_then(|value| value.to_str().ok())</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">258</td><td class="lf-sign">+</td><td>    else {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">259</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">260</td><td class="lf-sign">+</td><td>    };</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">261</td><td class="lf-sign">+</td><td>    if origin != expected_origin {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">235</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">236</td><td class="lf-sign">+</td><td>    if rest == &quot;machine&quot; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">237</td><td class="lf-sign">+</td><td>        return handle_websocket(req, state);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">238</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">239</td><td class="lf-sign">+</td><td>    if let Some(encoded_file) = rest.strip_prefix(&quot;f/&quot;) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">240</td><td class="lf-sign">+</td><td>        return handle_file(encoded_file).await;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">241</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">242</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">243</td><td class="lf-sign">+</td><td>    empty(StatusCode::NOT_FOUND)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">244</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">245</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">246</td><td class="lf-sign">+</td><td>fn handle_websocket(req: Request&lt;Incoming&gt;, state: Arc&lt;State&gt;) -&gt; Response&lt;Full&lt;Bytes&gt;&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">247</td><td class="lf-sign">+</td><td>    if req.uri().query().is_some() {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">248</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">249</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">250</td><td class="lf-sign">+</td><td>    // Browser cross-origin WebSocket defense: Origin must be exact same-origin.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">251</td><td class="lf-sign">+</td><td>    if header_str(&amp;req, ORIGIN) != Some(state.handle.expected_origin().as_str()) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">252</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">253</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">254</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">255</td><td class="lf-sign">+</td><td>    let is_upgrade =</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">256</td><td class="lf-sign">+</td><td>        header_str(&amp;req, UPGRADE).is_some_and(|value| value.eq_ignore_ascii_case(&quot;websocket&quot;));</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">257</td><td class="lf-sign">+</td><td>    let has_connection_upgrade = req</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">258</td><td class="lf-sign">+</td><td>        .headers()</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">259</td><td class="lf-sign">+</td><td>        .get_all(CONNECTION)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">260</td><td class="lf-sign">+</td><td>        .iter()</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">261</td><td class="lf-sign">+</td><td>        .filter_map(|value| value.to_str().ok())</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Browser cross-origin WebSocket defense: foreign origins cannot upgrade even if they guess a port.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">262</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">263</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">264</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">262</td><td class="lf-sign">+</td><td>        .flat_map(|value| value.split(&#39;,&#39;))</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">263</td><td class="lf-sign">+</td><td>        .any(|token| token.trim().eq_ignore_ascii_case(&quot;upgrade&quot;));</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">264</td><td class="lf-sign">+</td><td>    let valid_version = header_str(&amp;req, SEC_WEBSOCKET_VERSION) == Some(&quot;13&quot;);</td></tr>
 </tbody></table></div></div>
 
 <p><code>lf page open</code> routes by caller context so headless Graph steps never pop browser windows while interactive Rex and Desktop sessions land where you already work:</p>
 
 <div class="lf-codeblock" data-path="rust/loopflow/src/lf/commands/page.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow/src/lf/commands/page.rs:70-135</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
-<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,280 @@</td></tr>
+<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,279 @@</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">70</td><td class="lf-sign">+</td><td>fn decide_open_route(host: PageHost) -&gt; OpenRoute {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">71</td><td class="lf-sign">+</td><td>    let caller = loopflow_execution::journal::agent_caller();</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">72</td><td class="lf-sign">+</td><td>    let in_desktop_env = std::env::var_os(&quot;LF_DESKTOP&quot;).is_some_and(|value| !value.is_empty());</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">73</td><td class="lf-sign">+</td><td>    let session_interactive = caller</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">74</td><td class="lf-sign">+</td><td>        .as_ref()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">75</td><td class="lf-sign">+</td><td>        .and_then(|c| load_session(&amp;c.session_id))</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">71</td><td class="lf-sign">+</td><td>    match host {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">72</td><td class="lf-sign">+</td><td>        PageHost::Desktop =&gt; return OpenRoute::Desktop,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">73</td><td class="lf-sign">+</td><td>        PageHost::Browser =&gt; return OpenRoute::Browser,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">74</td><td class="lf-sign">+</td><td>        PageHost::Auto =&gt; {}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">75</td><td class="lf-sign">+</td><td>    }</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Reads session.interactive from SQLite so interactive plain-terminal sessions (Ghostty/iTerm/Terminal) open the browser instead of falling into PrintQuiet.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">76</td><td class="lf-sign">+</td><td>        .map(|session| session.interactive);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">77</td><td class="lf-sign">+</td><td>    let placement = caller</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">78</td><td class="lf-sign">+</td><td>        .as_ref()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">79</td><td class="lf-sign">+</td><td>        .and_then(|_| viewed_placement())</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">80</td><td class="lf-sign">+</td><td>        .map(|(host, _)| host);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">81</td><td class="lf-sign">+</td><td>    route_for(</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">82</td><td class="lf-sign">+</td><td>        host,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">83</td><td class="lf-sign">+</td><td>        caller.is_some(),</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">84</td><td class="lf-sign">+</td><td>        in_desktop_env,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">85</td><td class="lf-sign">+</td><td>        session_interactive,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">86</td><td class="lf-sign">+</td><td>        placement,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">87</td><td class="lf-sign">+</td><td>    )</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">88</td><td class="lf-sign">+</td><td>}</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">89</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">90</td><td class="lf-sign">+</td><td>pub(super) fn load_session(</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">91</td><td class="lf-sign">+</td><td>    session_id: &amp;loopflow_model::id::LfSessionId,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">92</td><td class="lf-sign">+</td><td>) -&gt; Option&lt;loopflow_execution::session::LfSession&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">93</td><td class="lf-sign">+</td><td>    let store = loopflow_execution::store::read_existing_registry()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">94</td><td class="lf-sign">+</td><td>        .ok()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">95</td><td class="lf-sign">+</td><td>        .flatten()?;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">96</td><td class="lf-sign">+</td><td>    store.sqlite.session(session_id).ok().flatten()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">97</td><td class="lf-sign">+</td><td>}</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">98</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">99</td><td class="lf-sign">+</td><td>fn route_for(</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">100</td><td class="lf-sign">+</td><td>    host: PageHost,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">101</td><td class="lf-sign">+</td><td>    has_agent_caller: bool,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">102</td><td class="lf-sign">+</td><td>    in_desktop_env: bool,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">103</td><td class="lf-sign">+</td><td>    session_interactive: Option&lt;bool&gt;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">104</td><td class="lf-sign">+</td><td>    viewed_host: Option&lt;OpenHost&gt;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">105</td><td class="lf-sign">+</td><td>) -&gt; OpenRoute {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">106</td><td class="lf-sign">+</td><td>    match host {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">107</td><td class="lf-sign">+</td><td>        PageHost::Desktop =&gt; OpenRoute::Desktop,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">108</td><td class="lf-sign">+</td><td>        PageHost::Browser =&gt; OpenRoute::Browser,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">109</td><td class="lf-sign">+</td><td>        PageHost::Auto =&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">110</td><td class="lf-sign">+</td><td>            if !has_agent_caller {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">111</td><td class="lf-sign">+</td><td>                if in_desktop_env {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">112</td><td class="lf-sign">+</td><td>                    OpenRoute::Desktop</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">113</td><td class="lf-sign">+</td><td>                } else {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">114</td><td class="lf-sign">+</td><td>                    OpenRoute::Browser</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">115</td><td class="lf-sign">+</td><td>                }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">116</td><td class="lf-sign">+</td><td>            } else {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">117</td><td class="lf-sign">+</td><td>                match session_interactive {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">118</td><td class="lf-sign">+</td><td>                    Some(false) =&gt; OpenRoute::PrintQuiet,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">76</td><td class="lf-sign">+</td><td>    let caller = loopflow_execution::journal::agent_caller();</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">77</td><td class="lf-sign">+</td><td>    let in_desktop_env = std::env::var_os(&quot;LF_DESKTOP&quot;).is_some_and(|value| !value.is_empty());</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">78</td><td class="lf-sign">+</td><td>    let session_interactive = caller</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">79</td><td class="lf-sign">+</td><td>        .as_ref()</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">80</td><td class="lf-sign">+</td><td>        .and_then(|c| load_session(&amp;c.session_id))</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">81</td><td class="lf-sign">+</td><td>        .map(|session| session.interactive);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">82</td><td class="lf-sign">+</td><td>    let placement = caller</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">83</td><td class="lf-sign">+</td><td>        .as_ref()</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">84</td><td class="lf-sign">+</td><td>        .and_then(|_| viewed_placement())</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">85</td><td class="lf-sign">+</td><td>        .map(|(host, _)| host);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">86</td><td class="lf-sign">+</td><td>    route_for(</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">87</td><td class="lf-sign">+</td><td>        host,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">88</td><td class="lf-sign">+</td><td>        caller.is_some(),</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">89</td><td class="lf-sign">+</td><td>        in_desktop_env,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">90</td><td class="lf-sign">+</td><td>        session_interactive,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">91</td><td class="lf-sign">+</td><td>        placement,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">92</td><td class="lf-sign">+</td><td>    )</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">93</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">94</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">95</td><td class="lf-sign">+</td><td>pub(super) fn load_session(</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">96</td><td class="lf-sign">+</td><td>    session_id: &amp;loopflow_model::id::LfSessionId,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">97</td><td class="lf-sign">+</td><td>) -&gt; Option&lt;loopflow_execution::session::LfSession&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">98</td><td class="lf-sign">+</td><td>    let store = loopflow_execution::store::read_existing_registry()</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">99</td><td class="lf-sign">+</td><td>        .ok()</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">100</td><td class="lf-sign">+</td><td>        .flatten()?;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">101</td><td class="lf-sign">+</td><td>    store.sqlite.session(session_id).ok().flatten()</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">102</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">103</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">104</td><td class="lf-sign">+</td><td>fn route_for(</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">105</td><td class="lf-sign">+</td><td>    host: PageHost,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">106</td><td class="lf-sign">+</td><td>    has_agent_caller: bool,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">107</td><td class="lf-sign">+</td><td>    in_desktop_env: bool,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">108</td><td class="lf-sign">+</td><td>    session_interactive: Option&lt;bool&gt;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">109</td><td class="lf-sign">+</td><td>    viewed_host: Option&lt;OpenHost&gt;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">110</td><td class="lf-sign">+</td><td>) -&gt; OpenRoute {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">111</td><td class="lf-sign">+</td><td>    match (host, has_agent_caller) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">112</td><td class="lf-sign">+</td><td>        (PageHost::Desktop, _) =&gt; OpenRoute::Desktop,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">113</td><td class="lf-sign">+</td><td>        (PageHost::Browser, _) =&gt; OpenRoute::Browser,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">114</td><td class="lf-sign">+</td><td>        (PageHost::Auto, false) =&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">115</td><td class="lf-sign">+</td><td>            if in_desktop_env {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">116</td><td class="lf-sign">+</td><td>                OpenRoute::Desktop</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">117</td><td class="lf-sign">+</td><td>            } else {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">118</td><td class="lf-sign">+</td><td>                OpenRoute::Browser</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Headless agents (session.interactive == false) always print the URL quietly and never invoke the OS browser opener.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">119</td><td class="lf-sign">+</td><td>                    Some(true) =&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">120</td><td class="lf-sign">+</td><td>                        if matches!(viewed_host, Some(OpenHost::Desktop)) || in_desktop_env {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">121</td><td class="lf-sign">+</td><td>                            OpenRoute::Desktop</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">122</td><td class="lf-sign">+</td><td>                        } else {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">123</td><td class="lf-sign">+</td><td>                            OpenRoute::Browser</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">119</td><td class="lf-sign">+</td><td>            }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">120</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">121</td><td class="lf-sign">+</td><td>        (PageHost::Auto, true) =&gt; match session_interactive {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">122</td><td class="lf-sign">+</td><td>            Some(false) =&gt; OpenRoute::PrintQuiet,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">123</td><td class="lf-sign">+</td><td>            Some(true) if in_desktop_env || viewed_host == Some(OpenHost::Desktop) =&gt; {</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Interactive agents outside Desktop (Rex, tmux, or plain terminal) open the loopback URL in the browser.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">124</td><td class="lf-sign">+</td><td>                        }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">125</td><td class="lf-sign">+</td><td>                    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">126</td><td class="lf-sign">+</td><td>                    None =&gt; match viewed_host {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">127</td><td class="lf-sign">+</td><td>                        Some(OpenHost::Desktop) =&gt; OpenRoute::Desktop,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">128</td><td class="lf-sign">+</td><td>                        Some(_) =&gt; OpenRoute::Browser,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">129</td><td class="lf-sign">+</td><td>                        None =&gt; OpenRoute::PrintQuiet,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">130</td><td class="lf-sign">+</td><td>                    },</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">131</td><td class="lf-sign">+</td><td>                }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">132</td><td class="lf-sign">+</td><td>            }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">133</td><td class="lf-sign">+</td><td>        }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">134</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">135</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">124</td><td class="lf-sign">+</td><td>                OpenRoute::Desktop</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">125</td><td class="lf-sign">+</td><td>            }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">126</td><td class="lf-sign">+</td><td>            Some(true) =&gt; OpenRoute::Browser,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">127</td><td class="lf-sign">+</td><td>            None =&gt; match viewed_host {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">128</td><td class="lf-sign">+</td><td>                Some(OpenHost::Desktop) =&gt; OpenRoute::Desktop,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">129</td><td class="lf-sign">+</td><td>                Some(_) =&gt; OpenRoute::Browser,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">130</td><td class="lf-sign">+</td><td>                None =&gt; OpenRoute::PrintQuiet,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">131</td><td class="lf-sign">+</td><td>            },</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">132</td><td class="lf-sign">+</td><td>        },</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">133</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">134</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">135</td><td class="lf-sign">+</td><td></td></tr>
 </tbody></table></div></div>
 
 <p>In Loopflow Desktop, <code>TaskFileReadingView</code> attaches <code>TaskHTMLBridge</code> (a reply-capable <code>WKScriptMessageHandlerWithReply</code> named <code>loopflow</code>), while side-by-side HTML diffs in <code>ReviewRenderedView</code> leave it unset so historical commits stay read-only:</p>
 
 <div class="lf-codeblock" data-path="swift/LoopflowMac/Views/TaskHTMLView.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/Views/TaskHTMLView.swift:23-76</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
-<tr class="lf-hunk"><td colspan="4">@@ -1,14 +1,118 @@</td></tr>
+<tr class="lf-hunk"><td colspan="4">@@ -1,14 +1,114 @@</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">23</td><td class="lf-sign">+</td><td>    func handle(_ body: Any) async -&gt; (Any?, String?) {</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">24</td><td class="lf-sign">+</td><td>        guard let payload = body as? [String: Any],</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">25</td><td class="lf-sign">+</td><td>              let type = payload[&quot;type&quot;] as? String else {</td></tr>
@@ -756,127 +756,127 @@ button.lf-btn-quiet {
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">43</td><td class="lf-sign">+</td><td>                  let state = try? Self.jsonValue(from: rawState) else {</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">44</td><td class="lf-sign">+</td><td>                return (NSNull(), nil)</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">45</td><td class="lf-sign">+</td><td>            }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">46</td><td class="lf-sign">+</td><td>            let rawItems = payload[&quot;items&quot;] as? [[String: Any]] ?? []</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">47</td><td class="lf-sign">+</td><td>            let pageItems = rawItems.compactMap { entry -&gt; ReviewComments.PageItem? in</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">48</td><td class="lf-sign">+</td><td>                guard let reference = entry[&quot;reference&quot;] as? String, !reference.isEmpty else { return nil }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">49</td><td class="lf-sign">+</td><td>                return ReviewComments.PageItem(reference: reference, text: entry[&quot;text&quot;] as? String ?? &quot;&quot;)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">50</td><td class="lf-sign">+</td><td>            }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">51</td><td class="lf-sign">+</td><td>            store.comments.syncPage(path: path, buildID: buildID, state: state, items: pageItems)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">52</td><td class="lf-sign">+</td><td>            return (NSNull(), nil)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">53</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">54</td><td class="lf-sign">+</td><td>        case &quot;operation&quot;:</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">55</td><td class="lf-sign">+</td><td>            guard let rawOperation = payload[&quot;operation&quot;],</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">56</td><td class="lf-sign">+</td><td>                  case .object(var fields)? = try? Self.jsonValue(from: rawOperation) else {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">57</td><td class="lf-sign">+</td><td>                return ([&quot;error&quot;: &quot;Invalid operation payload&quot;], nil)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">58</td><td class="lf-sign">+</td><td>            }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">59</td><td class="lf-sign">+</td><td>            if store.machine != nil,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">46</td><td class="lf-sign">+</td><td>            let references = (payload[&quot;items&quot;] as? [String] ?? []).filter { !$0.isEmpty }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">47</td><td class="lf-sign">+</td><td>            store.comments.syncPage(path: path, buildID: buildID, state: state, items: references)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">48</td><td class="lf-sign">+</td><td>            return (NSNull(), nil)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">49</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">50</td><td class="lf-sign">+</td><td>        case &quot;operation&quot;:</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">51</td><td class="lf-sign">+</td><td>            guard let rawOperation = payload[&quot;operation&quot;],</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">52</td><td class="lf-sign">+</td><td>                  case .object(var fields)? = try? Self.jsonValue(from: rawOperation) else {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">53</td><td class="lf-sign">+</td><td>                return ([&quot;error&quot;: &quot;Invalid operation payload&quot;], nil)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">54</td><td class="lf-sign">+</td><td>            }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">55</td><td class="lf-sign">+</td><td>            if store.machine != nil,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">56</td><td class="lf-sign">+</td><td>               fields[&quot;directory&quot;] != nil,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">57</td><td class="lf-sign">+</td><td>               let localDirectory = store.localRepository ?? store.measurementRepository {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">58</td><td class="lf-sign">+</td><td>                fields[&quot;directory&quot;] = .string(localDirectory)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">59</td><td class="lf-sign">+</td><td>            }</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Peer-Machine pages swap the stamped remote checkout path for Desktop's local repository directory before forwarding to ServerClient.rawOperation.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">60</td><td class="lf-sign">+</td><td>               fields[&quot;directory&quot;] != nil,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">61</td><td class="lf-sign">+</td><td>               let localDirectory = store.localRepository ?? store.measurementRepository {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">62</td><td class="lf-sign">+</td><td>                fields[&quot;directory&quot;] = .string(localDirectory)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">63</td><td class="lf-sign">+</td><td>            }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">64</td><td class="lf-sign">+</td><td>            let requestID = payload[&quot;request_id&quot;] as? String</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">65</td><td class="lf-sign">+</td><td>            do {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">66</td><td class="lf-sign">+</td><td>                let raw = try await store.sendPageOperation(.object(fields), requestID)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">67</td><td class="lf-sign">+</td><td>                let result = try JSONSerialization.jsonObject(with: raw.bytes, options: .fragmentsAllowed)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">68</td><td class="lf-sign">+</td><td>                return ([&quot;result&quot;: result], nil)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">69</td><td class="lf-sign">+</td><td>            } catch {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">70</td><td class="lf-sign">+</td><td>                return ([&quot;error&quot;: error.localizedDescription], nil)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">71</td><td class="lf-sign">+</td><td>            }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">72</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">73</td><td class="lf-sign">+</td><td>        default:</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">74</td><td class="lf-sign">+</td><td>            return (nil, &quot;Unknown bridge message type: \(type)&quot;)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">75</td><td class="lf-sign">+</td><td>        }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">76</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-hunk"><td colspan="4">@@ -39,6 +143,12 @@ struct TaskHTMLView: View {</td></tr>
-<tr class="lf-ctx"><td class="lf-ln">39</td><td class="lf-ln">143</td><td class="lf-sign"> </td><td>            }</td></tr>
-<tr class="lf-ctx"><td class="lf-ln">40</td><td class="lf-ln">144</td><td class="lf-sign"> </td><td>        }</td></tr>
-<tr class="lf-ctx"><td class="lf-ln">41</td><td class="lf-ln">145</td><td class="lf-sign"> </td><td>        .task(id: html) { await show() }</td></tr>
-<tr class="lf-ctx"><td class="lf-ln">42</td><td class="lf-ln">152</td><td class="lf-sign"> </td><td>        .task(id: FileFind.Scan(query: find?.query, revision: loaded)) {</td></tr>
-<tr class="lf-ctx"><td class="lf-ln">43</td><td class="lf-ln">153</td><td class="lf-sign"> </td><td>            guard let page, loaded &gt; 0 else { return }</td></tr>
-<tr class="lf-ctx"><td class="lf-ln">44</td><td class="lf-ln">154</td><td class="lf-sign"> </td><td>            let needle = find?.query ?? &quot;&quot;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">60</td><td class="lf-sign">+</td><td>            let requestID = payload[&quot;request_id&quot;] as? String</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">61</td><td class="lf-sign">+</td><td>            do {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">62</td><td class="lf-sign">+</td><td>                let raw = try await store.sendPageOperation(.object(fields), requestID)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">63</td><td class="lf-sign">+</td><td>                let result = try JSONSerialization.jsonObject(with: raw.bytes, options: .fragmentsAllowed)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">64</td><td class="lf-sign">+</td><td>                return ([&quot;result&quot;: result], nil)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">65</td><td class="lf-sign">+</td><td>            } catch {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">66</td><td class="lf-sign">+</td><td>                return ([&quot;error&quot;: error.localizedDescription], nil)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">67</td><td class="lf-sign">+</td><td>            }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">68</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">69</td><td class="lf-sign">+</td><td>        default:</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">70</td><td class="lf-sign">+</td><td>            return (nil, &quot;Unknown bridge message type: \(type)&quot;)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">71</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">72</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">73</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">74</td><td class="lf-sign">+</td><td>    private static func jsonValue(from object: Any) throws -&gt; JSONValue {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">75</td><td class="lf-sign">+</td><td>        guard JSONSerialization.isValidJSONObject(object) else {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">76</td><td class="lf-sign">+</td><td>            throw RegistryQueryError(&quot;Expected a JSON object or array&quot;)</td></tr>
+<tr class="lf-hunk"><td colspan="4">@@ -39,6 +139,12 @@ struct TaskHTMLView: View {</td></tr>
+<tr class="lf-ctx"><td class="lf-ln">39</td><td class="lf-ln">139</td><td class="lf-sign"> </td><td>            }</td></tr>
+<tr class="lf-ctx"><td class="lf-ln">40</td><td class="lf-ln">140</td><td class="lf-sign"> </td><td>        }</td></tr>
+<tr class="lf-ctx"><td class="lf-ln">41</td><td class="lf-ln">141</td><td class="lf-sign"> </td><td>        .task(id: html) { await show() }</td></tr>
+<tr class="lf-ctx"><td class="lf-ln">42</td><td class="lf-ln">148</td><td class="lf-sign"> </td><td>        .task(id: FileFind.Scan(query: find?.query, revision: loaded)) {</td></tr>
+<tr class="lf-ctx"><td class="lf-ln">43</td><td class="lf-ln">149</td><td class="lf-sign"> </td><td>            guard let page, loaded &gt; 0 else { return }</td></tr>
+<tr class="lf-ctx"><td class="lf-ln">44</td><td class="lf-ln">150</td><td class="lf-sign"> </td><td>            let needle = find?.query ?? &quot;&quot;</td></tr>
 </tbody></table></div></div>
 
 <p><code>ReviewComments</code> stores page drafts alongside line-anchored Diff comments, skips line reconciliation for <code>.page</code> anchors, and clears both stored state and any mounted <code>WebPage</code> when sending succeeds:</p>
 
 <div class="lf-codeblock" data-path="swift/LoopflowMac/ReviewDiff.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/ReviewDiff.swift:880-957</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
-<tr class="lf-hunk"><td colspan="4">@@ -808,9 +877,42 @@ final class ReviewComments {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">880</td><td class="lf-sign">+</td><td>    /// Answer a review page&#39;s `ready` handshake. Returns saved state for `(path, buildID)`,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">881</td><td class="lf-sign">+</td><td>    /// or `nil` when absent, cleared after send, or rebuilt with a new `buildID` (clearing</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">882</td><td class="lf-sign">+</td><td>    /// any stale state and items left over from an earlier build of `path`).</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">883</td><td class="lf-sign">+</td><td>    func pageReady(path: String, buildID: String) -&gt; JSONValue? {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">884</td><td class="lf-sign">+</td><td>        if let saved = pageStates[PageKey(path: path, buildID: buildID)] { return saved }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">885</td><td class="lf-sign">+</td><td>        if removeStalePageStates(for: path, keeping: buildID) {</td></tr>
+<tr class="lf-hunk"><td colspan="4">@@ -808,9 +872,42 @@ final class ReviewComments {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">880</td><td class="lf-sign">+</td><td>        if removeStalePageStates(for: path, keeping: buildID) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">881</td><td class="lf-sign">+</td><td>            items.removeAll { $0.isPage(path) }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">882</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">883</td><td class="lf-sign">+</td><td>        return nil</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">884</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">885</td><td class="lf-sign">+</td><td></td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">A rebuild bumps build_id and automatically drops stale drafts and items from the earlier build of the same path.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">886</td><td class="lf-sign">+</td><td>            items.removeAll { $0.isPage(path) }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">887</td><td class="lf-sign">+</td><td>        }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">888</td><td class="lf-sign">+</td><td>        return nil</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">889</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">890</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">891</td><td class="lf-sign">+</td><td>    /// Store `state` for `(path, buildID)` and replace `path`&#39;s `.page` entries in `items`.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">892</td><td class="lf-sign">+</td><td>    func syncPage(path: String, buildID: String, state: JSONValue, items pageItems: [PageItem]) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">893</td><td class="lf-sign">+</td><td>        _ = removeStalePageStates(for: path, keeping: buildID)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">894</td><td class="lf-sign">+</td><td>        pageStates[PageKey(path: path, buildID: buildID)] = state</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">895</td><td class="lf-sign">+</td><td>        let firstIndex = items.firstIndex { $0.isPage(path) }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">896</td><td class="lf-sign">+</td><td>        items.removeAll { $0.isPage(path) }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">897</td><td class="lf-sign">+</td><td>        let replacements = pageItems.map { ReviewComment(pagePath: path, reference: $0.reference, text: $0.text) }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">898</td><td class="lf-sign">+</td><td>        if let firstIndex, firstIndex &lt;= items.count {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">899</td><td class="lf-sign">+</td><td>            items.insert(contentsOf: replacements, at: firstIndex)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">900</td><td class="lf-sign">+</td><td>        } else {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">901</td><td class="lf-sign">+</td><td>            items.append(contentsOf: replacements)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">902</td><td class="lf-sign">+</td><td>        }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">903</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">904</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">905</td><td class="lf-sign">+</td><td>    @discardableResult</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">906</td><td class="lf-sign">+</td><td>    private func removeStalePageStates(for path: String, keeping buildID: String) -&gt; Bool {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">907</td><td class="lf-sign">+</td><td>        let staleKeys = pageStates.keys.filter { $0.path == path &amp;&amp; $0.buildID != buildID }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">908</td><td class="lf-sign">+</td><td>        for stale in staleKeys { pageStates.removeValue(forKey: stale) }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">909</td><td class="lf-sign">+</td><td>        return !staleKeys.isEmpty</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">910</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">911</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-ctx"><td class="lf-ln">811</td><td class="lf-ln">912</td><td class="lf-sign"> </td><td>    func reconcile(_ document: TaskFileDocument) {</td></tr>
-<tr class="lf-ctx"><td class="lf-ln">812</td><td class="lf-ln">913</td><td class="lf-sign"> </td><td>        let indices = items.indices.filter {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">914</td><td class="lf-sign">+</td><td>            guard let original = items[$0].original else { return false }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">915</td><td class="lf-sign">+</td><td>            return original.path == document.path &amp;&amp; original.source.isFile</td></tr>
-<tr class="lf-ctx"><td class="lf-ln">814</td><td class="lf-ln">916</td><td class="lf-sign"> </td><td>        }</td></tr>
-<tr class="lf-ctx"><td class="lf-ln">815</td><td class="lf-ln">917</td><td class="lf-sign"> </td><td>        guard !indices.isEmpty else { return }</td></tr>
-<tr class="lf-ctx"><td class="lf-ln">816</td><td class="lf-ln">918</td><td class="lf-sign"> </td><td>        let lines = document.text.utf8.split(separator: 10, omittingEmptySubsequences: false).enumerated().map {</td></tr>
-<tr class="lf-hunk"><td colspan="4">@@ -822,14 +924,50 @@ final class ReviewComments {</td></tr>
-<tr class="lf-ctx"><td class="lf-ln">822</td><td class="lf-ln">924</td><td class="lf-sign"> </td><td></td></tr>
-<tr class="lf-ctx"><td class="lf-ln">823</td><td class="lf-ln">925</td><td class="lf-sign"> </td><td>    func reconcile(path: String, revision: String, file: ReviewFile?) {</td></tr>
-<tr class="lf-ctx"><td class="lf-ln">824</td><td class="lf-ln">926</td><td class="lf-sign"> </td><td>        for index in items.indices {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">927</td><td class="lf-sign">+</td><td>            guard let selection = items[index].original,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">928</td><td class="lf-sign">+</td><td>                  selection.path == path, selection.source.revision == revision else { continue }</td></tr>
-<tr class="lf-ctx"><td class="lf-ln">827</td><td class="lf-ln">929</td><td class="lf-sign"> </td><td>            items[index] = items[index].anchored(in: file.map { selection.numbered(in: $0) } ?? [:])</td></tr>
-<tr class="lf-ctx"><td class="lf-ln">828</td><td class="lf-ln">930</td><td class="lf-sign"> </td><td>        }</td></tr>
-<tr class="lf-ctx"><td class="lf-ln">829</td><td class="lf-ln">931</td><td class="lf-sign"> </td><td>    }</td></tr>
-<tr class="lf-ctx"><td class="lf-ln">830</td><td class="lf-ln">932</td><td class="lf-sign"> </td><td></td></tr>
-<tr class="lf-ctx"><td class="lf-ln">831</td><td class="lf-ln">933</td><td class="lf-sign"> </td><td>    func insert(into conversation: (String) -&gt; Bool) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">934</td><td class="lf-sign">+</td><td>        guard !items.isEmpty else { return }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">935</td><td class="lf-sign">+</td><td>        guard conversation(ReviewComment.message(items, receipts: pageReceipts())) else { return }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">936</td><td class="lf-sign">+</td><td>        items.removeAll()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">937</td><td class="lf-sign">+</td><td>        pageStates = pageStates.compactMapValues(Self.sentPageState)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">886</td><td class="lf-sign">+</td><td>    /// Store `state` for `(path, buildID)` and replace `path`&#39;s `.page` entries in `items`.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">887</td><td class="lf-sign">+</td><td>    func syncPage(path: String, buildID: String, state: JSONValue, items references: [String]) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">888</td><td class="lf-sign">+</td><td>        _ = removeStalePageStates(for: path, keeping: buildID)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">889</td><td class="lf-sign">+</td><td>        pageStates[PageKey(path: path, buildID: buildID)] = state</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">890</td><td class="lf-sign">+</td><td>        let firstIndex = items.firstIndex { $0.isPage(path) }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">891</td><td class="lf-sign">+</td><td>        items.removeAll { $0.isPage(path) }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">892</td><td class="lf-sign">+</td><td>        let replacements = references.map { ReviewComment(pagePath: path, reference: $0) }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">893</td><td class="lf-sign">+</td><td>        if let firstIndex, firstIndex &lt;= items.count {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">894</td><td class="lf-sign">+</td><td>            items.insert(contentsOf: replacements, at: firstIndex)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">895</td><td class="lf-sign">+</td><td>        } else {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">896</td><td class="lf-sign">+</td><td>            items.append(contentsOf: replacements)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">897</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">898</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">899</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">900</td><td class="lf-sign">+</td><td>    @discardableResult</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">901</td><td class="lf-sign">+</td><td>    private func removeStalePageStates(for path: String, keeping buildID: String) -&gt; Bool {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">902</td><td class="lf-sign">+</td><td>        let staleKeys = pageStates.keys.filter { $0.path == path &amp;&amp; $0.buildID != buildID }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">903</td><td class="lf-sign">+</td><td>        for stale in staleKeys { pageStates.removeValue(forKey: stale) }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">904</td><td class="lf-sign">+</td><td>        return !staleKeys.isEmpty</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">905</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">906</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-ctx"><td class="lf-ln">811</td><td class="lf-ln">907</td><td class="lf-sign"> </td><td>    func reconcile(_ document: TaskFileDocument) {</td></tr>
+<tr class="lf-ctx"><td class="lf-ln">812</td><td class="lf-ln">908</td><td class="lf-sign"> </td><td>        let indices = items.indices.filter {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">909</td><td class="lf-sign">+</td><td>            guard let original = items[$0].original else { return false }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">910</td><td class="lf-sign">+</td><td>            return original.path == document.path &amp;&amp; original.source.isFile</td></tr>
+<tr class="lf-ctx"><td class="lf-ln">814</td><td class="lf-ln">911</td><td class="lf-sign"> </td><td>        }</td></tr>
+<tr class="lf-ctx"><td class="lf-ln">815</td><td class="lf-ln">912</td><td class="lf-sign"> </td><td>        guard !indices.isEmpty else { return }</td></tr>
+<tr class="lf-ctx"><td class="lf-ln">816</td><td class="lf-ln">913</td><td class="lf-sign"> </td><td>        let lines = document.text.utf8.split(separator: 10, omittingEmptySubsequences: false).enumerated().map {</td></tr>
+<tr class="lf-hunk"><td colspan="4">@@ -822,14 +919,50 @@ final class ReviewComments {</td></tr>
+<tr class="lf-ctx"><td class="lf-ln">822</td><td class="lf-ln">919</td><td class="lf-sign"> </td><td></td></tr>
+<tr class="lf-ctx"><td class="lf-ln">823</td><td class="lf-ln">920</td><td class="lf-sign"> </td><td>    func reconcile(path: String, revision: String, file: ReviewFile?) {</td></tr>
+<tr class="lf-ctx"><td class="lf-ln">824</td><td class="lf-ln">921</td><td class="lf-sign"> </td><td>        for index in items.indices {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">922</td><td class="lf-sign">+</td><td>            guard let selection = items[index].original,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">923</td><td class="lf-sign">+</td><td>                  selection.path == path, selection.source.revision == revision else { continue }</td></tr>
+<tr class="lf-ctx"><td class="lf-ln">827</td><td class="lf-ln">924</td><td class="lf-sign"> </td><td>            items[index] = items[index].anchored(in: file.map { selection.numbered(in: $0) } ?? [:])</td></tr>
+<tr class="lf-ctx"><td class="lf-ln">828</td><td class="lf-ln">925</td><td class="lf-sign"> </td><td>        }</td></tr>
+<tr class="lf-ctx"><td class="lf-ln">829</td><td class="lf-ln">926</td><td class="lf-sign"> </td><td>    }</td></tr>
+<tr class="lf-ctx"><td class="lf-ln">830</td><td class="lf-ln">927</td><td class="lf-sign"> </td><td></td></tr>
+<tr class="lf-ctx"><td class="lf-ln">831</td><td class="lf-ln">928</td><td class="lf-sign"> </td><td>    func insert(into conversation: (String) -&gt; Bool) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">929</td><td class="lf-sign">+</td><td>        guard !items.isEmpty else { return }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">930</td><td class="lf-sign">+</td><td>        guard conversation(ReviewComment.message(items, receipts: pageReceipts())) else { return }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">931</td><td class="lf-sign">+</td><td>        items.removeAll()</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">932</td><td class="lf-sign">+</td><td>        pageStates = pageStates.compactMapValues(Self.sentPageState)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">933</td><td class="lf-sign">+</td><td>        pageClearGeneration += 1</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">934</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">935</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">936</td><td class="lf-sign">+</td><td>    /// What a page keeps once its items are sent: its receipts, marked reported, so a</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">937</td><td class="lf-sign">+</td><td>    /// remounted page still shows &quot;Filed …&quot; in place of the button.</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Clearing pageStates and bumping pageClearGeneration prevents notes from resurrecting if the person sent comments while viewing a source file.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">938</td><td class="lf-sign">+</td><td>        pageClearGeneration += 1</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">939</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">940</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">941</td><td class="lf-sign">+</td><td>    /// What a page keeps once its items are sent: its receipts, marked reported, so a</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">942</td><td class="lf-sign">+</td><td>    /// remounted page still shows &quot;Filed …&quot; in place of the button.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">943</td><td class="lf-sign">+</td><td>    private static func sentPageState(_ state: JSONValue) -&gt; JSONValue? {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">944</td><td class="lf-sign">+</td><td>        guard case .object(let fields) = state, case .array(let receipts) = fields[&quot;receipts&quot;],</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">945</td><td class="lf-sign">+</td><td>              !receipts.isEmpty else { return nil }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">946</td><td class="lf-sign">+</td><td>        let reported = receipts.map { entry -&gt; JSONValue in</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">947</td><td class="lf-sign">+</td><td>            guard case .object(var receipt) = entry else { return entry }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">948</td><td class="lf-sign">+</td><td>            receipt[&quot;reported&quot;] = .bool(true)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">949</td><td class="lf-sign">+</td><td>            return .object(receipt)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">950</td><td class="lf-sign">+</td><td>        }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">951</td><td class="lf-sign">+</td><td>        return .object([&quot;receipts&quot;: .array(reported)])</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">952</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">953</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">954</td><td class="lf-sign">+</td><td>    private func pageReceipts() -&gt; [String] {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">955</td><td class="lf-sign">+</td><td>        var ran: [String] = []</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">956</td><td class="lf-sign">+</td><td>        for key in pageStates.keys.sorted(by: { $0.path &lt; $1.path }) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">957</td><td class="lf-sign">+</td><td>            guard case .object(let fields) = pageStates[key],</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">938</td><td class="lf-sign">+</td><td>    private static func sentPageState(_ state: JSONValue) -&gt; JSONValue? {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">939</td><td class="lf-sign">+</td><td>        guard case .object(let fields) = state, case .array(let receipts) = fields[&quot;receipts&quot;],</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">940</td><td class="lf-sign">+</td><td>              !receipts.isEmpty else { return nil }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">941</td><td class="lf-sign">+</td><td>        let reported = receipts.map { entry -&gt; JSONValue in</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">942</td><td class="lf-sign">+</td><td>            guard case .object(var receipt) = entry else { return entry }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">943</td><td class="lf-sign">+</td><td>            receipt[&quot;reported&quot;] = .bool(true)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">944</td><td class="lf-sign">+</td><td>            return .object(receipt)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">945</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">946</td><td class="lf-sign">+</td><td>        return .object([&quot;receipts&quot;: .array(reported)])</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">947</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">948</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">949</td><td class="lf-sign">+</td><td>    private func pageReceipts() -&gt; [String] {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">950</td><td class="lf-sign">+</td><td>        var ran: [String] = []</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">951</td><td class="lf-sign">+</td><td>        for key in pageStates.keys.sorted(by: { $0.path &lt; $1.path }) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">952</td><td class="lf-sign">+</td><td>            guard case .object(let fields) = pageStates[key],</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">953</td><td class="lf-sign">+</td><td>                  case .array(let receipts) = fields[&quot;receipts&quot;] else { continue }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">954</td><td class="lf-sign">+</td><td>            for entry in receipts {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">955</td><td class="lf-sign">+</td><td>                guard case .object(let receipt) = entry,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">956</td><td class="lf-sign">+</td><td>                      case .string(let kind) = receipt[&quot;kind&quot;],</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">957</td><td class="lf-sign">+</td><td>                      receipt[&quot;reported&quot;] != .bool(true) else { continue }</td></tr>
 </tbody></table></div></div>
 
 <h2>Key data structures and APIs</h2>
@@ -967,7 +967,7 @@ button.lf-btn-quiet {
   <textarea rows="3" placeholder="Optional notes…"></textarea>
 </div>
 </main>
-<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1109"},"directory":"/Users/jack/src/loopflow.loo-1109-human-comprehension-review","base":"6d617de68638439a144601b3cb8cbaf6ec678630","head":"611edeb386","path":"scratch/ship-review.html","build_id":"2f6ae92429ccc1af","protocol":{"revision":10,"min_revision":10}}</script>
+<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1109"},"directory":"/Users/jack/src/loopflow.loo-1109-human-comprehension-review","base":"6d617de68638439a144601b3cb8cbaf6ec678630","head":"89be14c594","path":"scratch/ship-review.html","build_id":"7d3e90edbabbfea7","protocol":{"revision":10,"min_revision":10}}</script>
 <script>
 (function () {
   "use strict";
@@ -1033,6 +1033,19 @@ button.lf-btn-quiet {
     return result && ((result.task && result.task.identifier) || result.identifier);
   }
 
+  function errorMessage(err) {
+    return String(err && err.message ? err.message : err);
+  }
+
+  function makeButton(label, onClick, className) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    if (className) btn.className = className;
+    btn.textContent = label;
+    btn.addEventListener("click", onClick);
+    return btn;
+  }
+
   function randomId() {
     if (window.crypto && typeof window.crypto.randomUUID === "function") {
       return window.crypto.randomUUID();
@@ -1057,48 +1070,40 @@ button.lf-btn-quiet {
   function queueItems() {
     const items = [];
     for (const note of state.notes) {
-      const ref =
+      items.push(
         "`" +
-        pagePath +
-        "` § " +
-        oneLine(note.section) +
-        ' › "' +
-        oneLine(note.quote) +
-        '" ' +
-        oneLine(note.text);
-      items.push({ id: "note:" + note.id, reference: ref, text: oneLine(note.text) });
+          pagePath +
+          "` § " +
+          oneLine(note.section) +
+          ' › "' +
+          oneLine(note.quote) +
+          '" ' +
+          oneLine(note.text)
+      );
     }
     for (const [group, entry] of Object.entries(state.choices)) {
       if (!entry || !entry.value) continue;
-      const label = oneLine(entry.label || group);
-      const ref = "`" + pagePath + "` § " + label + ": " + oneLine(entry.value);
-      items.push({ id: "choice:" + group, reference: ref, text: oneLine(entry.value) });
+      items.push("`" + pagePath + "` § " + oneLine(entry.label || group) + ": " + oneLine(entry.value));
     }
     for (const [group, entry] of Object.entries(state.multiselects)) {
       if (!entry || !Array.isArray(entry.values) || entry.values.length === 0) continue;
-      const label = oneLine(entry.label || group);
-      const joined = entry.values.map(oneLine).join(", ");
-      const ref = "`" + pagePath + "` § " + label + ": " + joined;
-      items.push({ id: "multi:" + group, reference: ref, text: joined });
+      items.push(
+        "`" + pagePath + "` § " + oneLine(entry.label || group) + ": " + entry.values.map(oneLine).join(", ")
+      );
     }
     for (const [qid, entry] of Object.entries(state.questions)) {
       if (!entry || !oneLine(entry.answer)) continue;
-      const label = oneLine(entry.label || qid);
-      const ans = oneLine(entry.answer);
-      const ref = "`" + pagePath + "` § " + label + ": " + ans;
-      items.push({ id: "question:" + qid, reference: ref, text: ans });
+      items.push("`" + pagePath + "` § " + oneLine(entry.label || qid) + ": " + oneLine(entry.answer));
     }
     for (const act of state.offlineActions) {
-      const ref = "`" + pagePath + "` Run: " + oneLine(act.summary);
-      items.push({ id: "offline:" + act.id, reference: ref, text: oneLine(act.summary) });
+      items.push("`" + pagePath + "` Run: " + oneLine(act.summary));
     }
     return items;
   }
 
   function formatReplyMessage(items) {
     if (!items.length) return "";
-    const parts = items.map((item, idx) => "(" + (idx + 1) + ") " + oneLine(item.reference));
-    let message = parts.join(" ");
+    let message = items.map((ref, idx) => "(" + (idx + 1) + ") " + oneLine(ref)).join(" ");
     const unreported = state.receipts.filter((r) => !r.reported);
     if (unreported.length > 0) {
       const ran = unreported
@@ -1165,10 +1170,11 @@ button.lf-btn-quiet {
     refresh(false);
   }
 
-  // Desktop calls this with `null` after `ReviewComments.insert(into:)` sends the page's items.
+  // Desktop calls this with `null` after `ReviewComments.insert(into:)` sends the page's items;
+  // Swift has already updated its stored page state, so don't echo a redundant `sync` back.
   window.__lfDesktopApplyState = function (loaded) {
     if (loaded) applyState(loaded);
-    else clearDrafts({ markReported: true });
+    else clearDrafts({ markReported: true, persist: false });
   };
 
   // --- Loopback WebSocket carrier ---
@@ -1184,8 +1190,11 @@ button.lf-btn-quiet {
     return wsProto + "//" + window.location.host + "/" + token + "/machine";
   }
 
-  function disconnectedMessage(reason) {
-    return reason || "Loopflow server disconnected — run lf page open " + pagePath;
+  function markDisconnected(reason) {
+    hostMode = "clipboard";
+    serverDisconnected = true;
+    showBanner(reason || "Loopflow server disconnected — run lf page open " + pagePath);
+    renderStrip();
   }
 
   function connectLoopback() {
@@ -1193,18 +1202,14 @@ button.lf-btn-quiet {
     const url = loopbackWsUrl();
     if (!url) return;
     if (!Number.isInteger(protocolRevision) || !Number.isInteger(protocolMinRevision)) {
-      serverDisconnected = true;
-      showBanner("Review page is missing server protocol version — rebuild with lf page build");
-      renderStrip();
+      markDisconnected("Review page is missing server protocol version — rebuild with lf page build");
       return;
     }
     let ws;
     try {
       ws = new WebSocket(url);
     } catch (_) {
-      serverDisconnected = true;
-      showBanner(disconnectedMessage(""));
-      renderStrip();
+      markDisconnected("");
       return;
     }
     let handshakeError = "";
@@ -1258,10 +1263,7 @@ button.lf-btn-quiet {
       }
       pending.clear();
       if (closingForUnload) return;
-      hostMode = "clipboard";
-      serverDisconnected = true;
-      showBanner(disconnectedMessage(handshakeError));
-      renderStrip();
+      markDisconnected(handshakeError);
     });
     window.addEventListener("pagehide", () => {
       closingForUnload = true;
@@ -1350,9 +1352,7 @@ button.lf-btn-quiet {
           } else {
             state.choices[group] = { label, value };
           }
-          syncControlsFromState();
-          saveState();
-          renderStrip();
+          refresh(true);
         });
       });
     });
@@ -1369,9 +1369,7 @@ button.lf-btn-quiet {
           const next = idx >= 0 ? current.filter((v) => v !== value) : current.concat([value]);
           if (next.length === 0) delete state.multiselects[group];
           else state.multiselects[group] = { label, values: next };
-          syncControlsFromState();
-          saveState();
-          renderStrip();
+          refresh(true);
         });
       });
     });
@@ -1510,22 +1508,11 @@ button.lf-btn-quiet {
     wrap.className = "lf-action-confirm";
 
     const summary = actionNote("lf-action-summary", summarizeOperation(template));
-
-    const runBtn = document.createElement("button");
-    runBtn.type = "button";
-    runBtn.className = "lf-btn-accent";
-    runBtn.textContent = "Run";
-
-    const cancelBtn = document.createElement("button");
-    cancelBtn.type = "button";
-    cancelBtn.textContent = "Cancel";
+    const runBtn = makeButton("Run", execute, "lf-btn-accent");
+    const cancelBtn = makeButton("Cancel", () => showInSlot(action, action.btn));
 
     wrap.append(summary, runBtn, cancelBtn);
     showInSlot(action, wrap);
-
-    cancelBtn.addEventListener("click", () => {
-      showInSlot(action, action.btn);
-    });
 
     function execute() {
       showInSlot(action, wrap);
@@ -1541,17 +1528,11 @@ button.lf-btn-quiet {
         (err) => {
           const errWrap = document.createElement("span");
           errWrap.className = "lf-action-error";
-          const retryBtn = document.createElement("button");
-          retryBtn.type = "button";
-          retryBtn.textContent = "Retry";
-          retryBtn.addEventListener("click", execute);
-          errWrap.append(actionNote("", String(err && err.message ? err.message : err)), retryBtn);
+          errWrap.append(actionNote("", errorMessage(err)), makeButton("Retry", execute));
           showInSlot(action, errWrap);
         }
       );
     }
-
-    runBtn.addEventListener("click", execute);
   }
 
   // --- Highlight-to-comment ---
@@ -1595,24 +1576,12 @@ button.lf-btn-quiet {
     popover.style.top = Math.max(8, Math.min(window.innerHeight - 120, rect.bottom + 8)) + "px";
     popover.style.left = Math.max(8, Math.min(window.innerWidth - 280, rect.left)) + "px";
 
-    const trigger = document.createElement("button");
-    trigger.type = "button";
-    trigger.className = "lf-btn-accent";
-    trigger.textContent = "Note";
-    trigger.addEventListener("click", () => {
+    const trigger = makeButton("Note", () => {
       popover.innerHTML = "";
       const ta = document.createElement("textarea");
       ta.placeholder = "Add note…";
       const actions = document.createElement("div");
       actions.className = "lf-note-popover-actions";
-      const cancel = document.createElement("button");
-      cancel.type = "button";
-      cancel.textContent = "Cancel";
-      cancel.addEventListener("click", dismissPopover);
-      const save = document.createElement("button");
-      save.type = "button";
-      save.className = "lf-btn-accent";
-      save.textContent = "Save note";
       function commit() {
         const text = oneLine(ta.value);
         if (!text) return;
@@ -1621,12 +1590,8 @@ button.lf-btn-quiet {
         try {
           window.getSelection().removeAllRanges();
         } catch (_) {}
-        renderNotesTray();
-        renderHighlights();
-        saveState();
-        renderStrip();
+        refresh(true);
       }
-      save.addEventListener("click", commit);
       ta.addEventListener("keydown", (e) => {
         if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
           e.preventDefault();
@@ -1635,10 +1600,10 @@ button.lf-btn-quiet {
           dismissPopover();
         }
       });
-      actions.append(cancel, save);
+      actions.append(makeButton("Cancel", dismissPopover), makeButton("Save note", commit, "lf-btn-accent"));
       popover.append(ta, actions);
       ta.focus();
-    });
+    }, "lf-btn-accent");
     popover.append(trigger);
     document.body.append(popover);
   }
@@ -1665,17 +1630,10 @@ button.lf-btn-quiet {
       chip.className = "lf-note-chip";
       const body = document.createElement("span");
       body.textContent = note.section + ' › "' + note.quote + '" — ' + note.text;
-      const del = document.createElement("button");
-      del.type = "button";
-      del.className = "lf-btn-quiet";
-      del.textContent = "Remove";
-      del.addEventListener("click", () => {
+      const del = makeButton("Remove", () => {
         state.notes = state.notes.filter((n) => n.id !== note.id);
-        renderNotesTray();
-        renderHighlights();
-        saveState();
-        renderStrip();
-      });
+        refresh(true);
+      }, "lf-btn-quiet");
       chip.append(body, del);
       trayEl.append(chip);
     }
@@ -1772,12 +1730,13 @@ button.lf-btn-quiet {
   // Drop unsent drafts while keeping rendered receipts; mark receipts reported only after a reply is sent.
   function clearDrafts(options) {
     const markReported = Boolean(options && options.markReported);
+    const persist = !options || options.persist !== false;
     const receipts = markReported
       ? state.receipts.map((r) => Object.assign({}, r, { reported: true }))
       : state.receipts.slice();
     state = emptyState();
     state.receipts = receipts;
-    refresh(true);
+    refresh(persist);
   }
 
   function submitReply() {
@@ -1801,7 +1760,7 @@ button.lf-btn-quiet {
           clearDrafts({ markReported: true });
         },
         (err) => {
-          stripStatusText = String(err && err.message ? err.message : err);
+          stripStatusText = errorMessage(err);
           stripStatusKind = "error";
           renderStrip();
         }
@@ -1818,7 +1777,7 @@ button.lf-btn-quiet {
         renderStrip();
       },
       (err) => {
-        stripStatusText = "Copy failed: " + String(err && err.message ? err.message : err);
+        stripStatusText = "Copy failed: " + errorMessage(err);
         stripStatusKind = "error";
         renderStrip();
       }
@@ -1862,25 +1821,16 @@ button.lf-btn-quiet {
     }
 
     if (items.length > 0) {
-      const clearBtn = document.createElement("button");
-      clearBtn.type = "button";
-      clearBtn.className = "lf-btn-quiet";
-      clearBtn.textContent = "Clear";
-      clearBtn.addEventListener("click", () => {
+      const clearBtn = makeButton("Clear", () => {
         stripStatusText = "";
         stripStatusKind = "";
         clearDrafts({ markReported: false });
-      });
-
-      const sendBtn = document.createElement("button");
-      sendBtn.type = "button";
-      sendBtn.className = "lf-btn-accent";
-      sendBtn.textContent =
+      }, "lf-btn-quiet");
+      const sendLabel =
         hostMode === "loopback"
           ? "Steer " + steerTargetLabel() + " ⌘↩"
           : "Copy reply ⌘↩";
-      sendBtn.addEventListener("click", submitReply);
-      stripEl.append(clearBtn, sendBtn);
+      stripEl.append(clearBtn, makeButton(sendLabel, submitReply, "lf-btn-accent"));
     }
   }
 

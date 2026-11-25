@@ -1,6 +1,8 @@
 //! Unified diff parsing and `<lf-diff>` / `<lf-file>` rendering for `lf page build`.
 
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap};
+use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::LazyLock;
 
@@ -8,7 +10,7 @@ use anyhow::{bail, Context, Result};
 use loopflow_execution::ops::task::checkout_file_diff;
 use regex::Regex;
 
-use super::html::{escape_html, find_next_element, line_at, validate_repo_relative};
+use super::html::{escape_html, find_next_element, line_at, validate_repo_relative, ElementMatch};
 
 static HUNK_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@").expect("hunk regex"));
@@ -34,18 +36,15 @@ impl<'a> DiffExpander<'a> {
         while let Some(tag) = find_next_element(input, cursor, "lf-diff")? {
             out.push_str(&input[cursor..tag.start]);
             let line = line_at(input, tag.start);
-            let path = tag.attrs.get("path").cloned().ok_or_else(|| {
-                anyhow::anyhow!("line {line}: <lf-diff> requires a `path` attribute")
-            })?;
-            validate_repo_relative(&path, "lf-diff", line)?;
-            let range = tag
-                .attrs
-                .get("lines")
-                .map(|raw| parse_line_range(raw, "lf-diff", line))
-                .transpose()?;
-            let notes = parse_lf_notes(&tag.inner, line)?;
-            let parsed = self.get_diff(&path, line)?;
-            out.push_str(&render_diff_block(&path, range, parsed, &notes, line)?);
+            let args = parse_block_args(&tag, "lf-diff", line)?;
+            let parsed = self.get_diff(&args.path, line)?;
+            out.push_str(&render_diff_block(
+                &args.path,
+                args.range,
+                parsed,
+                &args.notes,
+                line,
+            )?);
             cursor = tag.end;
         }
         out.push_str(&input[cursor..]);
@@ -58,24 +57,27 @@ impl<'a> DiffExpander<'a> {
         while let Some(tag) = find_next_element(input, cursor, "lf-file")? {
             out.push_str(&input[cursor..tag.start]);
             let line = line_at(input, tag.start);
-            let path = tag.attrs.get("path").cloned().ok_or_else(|| {
-                anyhow::anyhow!("line {line}: <lf-file> requires a `path` attribute")
-            })?;
-            validate_repo_relative(&path, "lf-file", line)?;
-            let full = self.repo_root.join(&path);
+            let args = parse_block_args(&tag, "lf-file", line)?;
+            let full = self.repo_root.join(&args.path);
             if !full.is_file() {
-                bail!("line {line}: <lf-file path=\"{path}\"> does not exist in repository");
+                bail!(
+                    "line {line}: <lf-file path=\"{}\"> does not exist in repository",
+                    args.path
+                );
             }
             let content = std::fs::read_to_string(&full).with_context(|| {
-                format!("line {line}: failed to read <lf-file path=\"{path}\">")
+                format!(
+                    "line {line}: failed to read <lf-file path=\"{}\">",
+                    args.path
+                )
             })?;
-            let range = tag
-                .attrs
-                .get("lines")
-                .map(|raw| parse_line_range(raw, "lf-file", line))
-                .transpose()?;
-            let notes = parse_lf_notes(&tag.inner, line)?;
-            out.push_str(&render_file_block(&path, &content, range, &notes, line)?);
+            out.push_str(&render_file_block(
+                &args.path,
+                &content,
+                args.range,
+                &args.notes,
+                line,
+            )?);
             cursor = tag.end;
         }
         out.push_str(&input[cursor..]);
@@ -83,32 +85,54 @@ impl<'a> DiffExpander<'a> {
     }
 
     fn get_diff(&mut self, path: &str, line: usize) -> Result<&ParsedDiff> {
-        if !self.cache.contains_key(path) {
-            let snapshot = checkout_file_diff(self.repo_root, self.base, path).map_err(|err| {
-                anyhow::anyhow!("line {line}: <lf-diff path=\"{path}\"> failed: {err}")
-            })?;
-            if snapshot.binary {
-                bail!("line {line}: <lf-diff path=\"{path}\"> is a binary file");
-            }
-            let parsed = parse_unified_diff(&snapshot.patch);
-            if parsed.hunks.is_empty() {
-                if !self.repo_root.join(path).exists() {
+        match self.cache.entry(path.to_owned()) {
+            Entry::Occupied(entry) => Ok(entry.into_mut()),
+            Entry::Vacant(entry) => {
+                let snapshot =
+                    checkout_file_diff(self.repo_root, self.base, path).map_err(|err| {
+                        anyhow::anyhow!("line {line}: <lf-diff path=\"{path}\"> failed: {err}")
+                    })?;
+                if snapshot.binary {
+                    bail!("line {line}: <lf-diff path=\"{path}\"> is a binary file");
+                }
+                let parsed = parse_unified_diff(&snapshot.patch);
+                if parsed.hunks.is_empty() {
+                    if !self.repo_root.join(path).exists() {
+                        bail!(
+                            "line {line}: <lf-diff path=\"{path}\"> path does not exist in repository"
+                        );
+                    }
                     bail!(
-                        "line {line}: <lf-diff path=\"{path}\"> path does not exist in repository"
+                        "line {line}: <lf-diff path=\"{path}\"> has no diff against base `{}`",
+                        self.base
                     );
                 }
-                bail!(
-                    "line {line}: <lf-diff path=\"{path}\"> has no diff against base `{}`",
-                    self.base
-                );
+                Ok(entry.insert(parsed))
             }
-            self.cache.insert(path.to_owned(), parsed);
         }
-        Ok(self
-            .cache
-            .get(path)
-            .expect("diff was just inserted into cache"))
     }
+}
+
+struct CodeBlockArgs {
+    path: String,
+    range: Option<(usize, usize)>,
+    notes: Vec<LineNote>,
+}
+
+fn parse_block_args(tag: &ElementMatch, elem: &str, line: usize) -> Result<CodeBlockArgs> {
+    let path = tag
+        .attrs
+        .get("path")
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("line {line}: <{elem}> requires a `path` attribute"))?;
+    validate_repo_relative(&path, elem, line)?;
+    let range = tag
+        .attrs
+        .get("lines")
+        .map(|raw| parse_line_range(raw, elem, line))
+        .transpose()?;
+    let notes = parse_lf_notes(&tag.inner, line)?;
+    Ok(CodeBlockArgs { path, range, notes })
 }
 
 #[derive(Debug, Clone)]
@@ -290,10 +314,11 @@ fn render_diff_block(
         if selected.is_empty() {
             continue;
         }
-        rows.push_str(&format!(
-            "<tr class=\"lf-hunk\"><td colspan=\"4\">{}</td></tr>\n",
+        let _ = writeln!(
+            rows,
+            "<tr class=\"lf-hunk\"><td colspan=\"4\">{}</td></tr>",
             escape_html(&hunk.header)
-        ));
+        );
         for dl in selected {
             matched_lines += 1;
             let (cls, sign) = match dl.kind {
@@ -303,10 +328,11 @@ fn render_diff_block(
             };
             let old_str = dl.old_line.map(|n| n.to_string()).unwrap_or_default();
             let new_str = dl.new_line.map(|n| n.to_string()).unwrap_or_default();
-            rows.push_str(&format!(
-                "<tr class=\"{cls}\"><td class=\"lf-ln\">{old_str}</td><td class=\"lf-ln\">{new_str}</td><td class=\"lf-sign\">{sign}</td><td>{}</td></tr>\n",
+            let _ = writeln!(
+                rows,
+                "<tr class=\"{cls}\"><td class=\"lf-ln\">{old_str}</td><td class=\"lf-ln\">{new_str}</td><td class=\"lf-sign\">{sign}</td><td>{}</td></tr>",
                 escape_html(&dl.text)
-            ));
+            );
             for (idx, note) in notes.iter().enumerate() {
                 let attaches = match note.target {
                     NoteTarget::NewLine(n) => dl.new_line == Some(n),
@@ -314,10 +340,11 @@ fn render_diff_block(
                 };
                 if attaches {
                     matched_notes.insert(idx);
-                    rows.push_str(&format!(
-                        "<tr class=\"lf-line-note\" data-notes><td colspan=\"4\">{}</td></tr>\n",
+                    let _ = writeln!(
+                        rows,
+                        "<tr class=\"lf-line-note\" data-notes><td colspan=\"4\">{}</td></tr>",
                         note.html
-                    ));
+                    );
                 }
             }
         }
@@ -355,6 +382,15 @@ fn render_file_block(
     notes: &[LineNote],
     elem_line: usize,
 ) -> Result<String> {
+    for note in notes {
+        if matches!(note.target, NoteTarget::OldLine(_)) {
+            bail!(
+                "line {}: <lf-note old-line=…> is only valid inside <lf-diff>, not <lf-file>",
+                note.source_line
+            );
+        }
+    }
+
     let all_lines: Vec<&str> = content.lines().collect();
     let (start, end) = match range {
         Some((s, e)) => {
@@ -373,26 +409,19 @@ fn render_file_block(
     let mut matched_notes: BTreeSet<usize> = BTreeSet::new();
     for line_no in start..=end {
         let text = all_lines.get(line_no - 1).copied().unwrap_or("");
-        rows.push_str(&format!(
-            "<tr><td class=\"lf-ln\">{line_no}</td><td>{}</td></tr>\n",
+        let _ = writeln!(
+            rows,
+            "<tr><td class=\"lf-ln\">{line_no}</td><td>{}</td></tr>",
             escape_html(text)
-        ));
+        );
         for (idx, note) in notes.iter().enumerate() {
-            match note.target {
-                NoteTarget::NewLine(n) if n == line_no => {
-                    matched_notes.insert(idx);
-                    rows.push_str(&format!(
-                        "<tr class=\"lf-line-note\" data-notes><td colspan=\"2\">{}</td></tr>\n",
-                        note.html
-                    ));
-                }
-                NoteTarget::OldLine(_) => {
-                    bail!(
-                        "line {}: <lf-note old-line=…> is only valid inside <lf-diff>, not <lf-file>",
-                        note.source_line
-                    );
-                }
-                _ => {}
+            if matches!(note.target, NoteTarget::NewLine(n) if n == line_no) {
+                matched_notes.insert(idx);
+                let _ = writeln!(
+                    rows,
+                    "<tr class=\"lf-line-note\" data-notes><td colspan=\"2\">{}</td></tr>",
+                    note.html
+                );
             }
         }
     }

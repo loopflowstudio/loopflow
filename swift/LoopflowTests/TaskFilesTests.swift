@@ -2694,9 +2694,9 @@ struct TaskFilesTests {
         "receipts": [["key": "action-0", "kind": "task.create", "summary": "LOO-1200"]],
     ]
 
-    private static let sampleReviewPageItems: [[String: Any]] = [
-        ["id": "note:n1", "reference": "`scratch/ship-review.html` § Design › \"loopback carrier\" keep\tthis\nshort", "text": "keep this short"],
-        ["id": "choice:f1", "reference": "`scratch/ship-review.html` § Finding 1: File Task", "text": "File Task"],
+    private static let sampleReviewPageItems: [String] = [
+        "`scratch/ship-review.html` § Design › \"loopback carrier\" keep\tthis\nshort",
+        "`scratch/ship-review.html` § Finding 1: File Task",
     ]
 
     @Test func scratchPagesExcludePageSourceFragments() {

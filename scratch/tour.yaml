@@ -1,0 +1,46 @@
+at: e1a15bfcf349dd29e60362217b1791945d381046
+first:
+  - path: docs/work.md
+    why: Binding rule, split-checkout output, and checkout adoption behavior
+  - path: docs/dev/reference-models.md
+    why: Storage and workspace admission invariants for bound Sessions
+  - path: docs/sessions.md
+  - path: rust/loopflow-storage/src/sqlite/children.rs
+    why: Drops cwd rewrite from promote_task_prepared
+  - path: rust/loopflow-storage/src/sqlite/sessions.rs
+    why: Guards admission on capture/bind and filters adoption lookup
+  - path: rust/loopflow-execution/src/ops/task/adoption.rs
+    why: Removes directory switching and logs split-checkout diagnostic
+  - path: rust/loopflow-execution/src/ops/human_session/primary.rs
+    why: Restricts workspace admission to unstarted, unbound placeholders
+  - path: rust/loopflow-execution/src/ops/task.rs
+    why: Passes Task ID when adopting a checkout conversation
+  - path: rust/loopflow/src/lf/mod.rs
+    why: Updates lf session bind help text
+  - path: swift/LoopflowMac/Views/SessionActionSheet.swift
+    why: Updates Desktop bind sheet copy
+  - path: rust/loopflow-execution/src/ops/task/adoption/tests.rs
+    why: Verifies unchanged cwd, idle admission, and checkout adoption skip
+  - path: rust/loopflow-execution/src/store/admission_lifecycle_tests.rs
+    why: Verifies stale opening admission keeps bound directory
+  - path: rust/loopflow/tests/session_lifecycle_tests.rs
+    why: End-to-end bind diagnostic, worktree resume, and native continuity
+  - path: rust/loopflow/tests/session_launch_contract.rs
+    why: End-to-end agy-to-Claude resume in original worktree after bind
+  - path: swift/LoopflowTests/SessionControlsTests.swift
+    why: Updates Desktop bind expectations for unchanged cwd
+hide:
+  - path: rust/loopflow-execution/src/store/children.rs
+    why: Drops unused destination parameter from promote_task
+  - path: rust/loopflow-execution/src/store/ownership.rs
+    why: Drops unused destination parameter from promote_task
+  - path: rust/loopflow-execution/src/store/children_tests.rs
+    why: Signature update for promote_task
+  - path: rust/loopflow-execution/src/store/ownership/tests.rs
+    why: Signature update for promote_task
+  - path: rust/loopflow-execution/src/ops/human_session.rs
+    why: Passes None for_task to checkout_conversation
+  - path: rust/loopflow-execution/src/ops/human_session/setup.rs
+    why: Comment update for workspace placement
+  - path: rust/loopflow/tests/README.md
+    why: Test inventory update for renamed and added tests

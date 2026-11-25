@@ -27,5 +27,5 @@ dependencies. CLI behavior keeps its ordinary defaults when Cargo unifies dev
 features. Parser, help, dispatch and presentation assertions stay with the
 application; execution's unit tests compile independently.
 
-[Build and cache guidance](../../scripts/testing.md#builds) describes independent
+[Build and cache guidance](../../scripts/build_cache.md#builds) describes independent
 worktree targets, optional cross-root reuse and isolated source debugging.

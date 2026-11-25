@@ -39,7 +39,7 @@ Git registers its root before checkout returns. If the pinned daemon lacks the
 root, registration stops it and the next compile loads the list. An in-flight
 client compile can finish across that stop and lose its cache write.
 Each worktree owns its Cargo target. For setup, recovery and the measured
-edit-to-test times, see [the shared compilation cache](testing.md#shared-compilation-cache).
+edit-to-test times, see [the shared compilation cache](build_cache.md#shared-compilation-cache).
 
 ## Scheduled disk cleanup
 

@@ -22,7 +22,7 @@ that split with `loopflow-harness` beside storage.
 
 `test_loop.py` answers what a person waits for: `git worktree add`, one edit,
 then a focused `cargo test` that passes. It uses the Machine's own Cargo
-configuration from [`build_cache.py install`](../../testing.md#shared-compilation-cache)
+configuration from [`build_cache.py install`](../../build_cache.md#shared-compilation-cache)
 (the pinned wrapper and the Machine's `jobs`), with a private cache directory
 and socket plus a private root inventory so every counter belongs to the run.
 The driver removes any target supplied by the checkout hook before the first build.
@@ -73,7 +73,7 @@ survival rate under shared-cache eviction. The cap stays unchanged.
 
 ## Seeded worktrees
 
-`seed_probe.py` measures what [target seeding](../../testing.md#shared-compilation-cache)
+`seed_probe.py` measures what [target seeding](../../build_cache.md#shared-compilation-cache)
 saves. Each sample adds a worktree with the installed hook, then runs
 `cargo build -p loopflow --bin lf` and a passing
 `cargo test -p loopflow --lib <filter>`. The cold arm runs `rm -rf target` right

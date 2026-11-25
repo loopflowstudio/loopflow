@@ -198,7 +198,8 @@ CI failure. When work needs a tool the Machine lacks, install it (Homebrew on
 macOS) at Machine level and continue. Keep Machine-only tools out of config CI
 reads: sccache runs through `~/.cargo/config.toml`, written by
 `scripts/build_cache.py install`. `scripts/testing.md` holds
-the command list; module READMEs and `.github/CI.md` own their checks.
+verification commands and `scripts/build_cache.md` holds build and cache
+guidance; module READMEs and `.github/CI.md` own their checks.
 
 # Code Organization
 
@@ -445,7 +446,7 @@ function pointer.
 - **realign:** reconcile the plan; test only a repair or a real doubt.
 - **lint:** formatting and static analysis.
 - **rebase:** no tests when conflict-free; one focused test after conflicts.
-- **gate:** publish first so CI runs the suites, then review. A few named tests locally: feedback on a fix, a CI failure, a risk no suite covers.
+- **gate:** run Rust lint (when Rust changed) and DTO/iOS parity (when wire or shared Swift changed), then publish so CI runs the suites while gate reviews. Run a few named tests locally only for feedback on a fix, a CI failure, or a risk no suite covers.
 - **CI / release:** the full matrix and deployment checks.
 - **qa / demo / review:** the real product, as people use it.
 

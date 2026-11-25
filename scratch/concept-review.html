@@ -4,69 +4,174 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>LOO-1096 · A reply at a Graph breakpoint</title>
+<title>LOO-1096 · Concept review at HEAD</title>
 <style>
-:root{color-scheme:light dark;--bg:#f6f5f0;--paper:#fffefa;--ink:#1b2420;--muted:#4f5c56;--line:#c2c9bf;--accent:#1c604a;--wash:#e5efe7;--warn:#8e3f22;--warnwash:#f6e8df;font-family:"Instrument Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-@media(prefers-color-scheme:dark){:root{--bg:#151b19;--paper:#1d2521;--ink:#edf2e9;--muted:#b5c3b9;--line:#48574d;--accent:#99dbb5;--wash:#243c30;--warn:#ffb694;--warnwash:#3a2a23}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-size:16px;line-height:1.52}main{max-width:1000px;padding:clamp(20px,5vw,54px);margin:auto}
-header{border-top:5px solid var(--accent);padding-top:14px}header small,.label,.speaker{color:var(--accent);font-size:.78rem;font-weight:720;letter-spacing:.06em}header small,.label{text-transform:uppercase}
-h1,h2,h3,p{margin:0}h1,h2{font-family:"Iowan Old Style",Georgia,serif;font-weight:500;line-height:1.1;text-wrap:balance}h1{font-size:clamp(2.55rem,6vw,4.6rem);margin:.28em 0}h2{font-size:clamp(1.65rem,3.6vw,2.4rem);margin-bottom:.62em}h3{font-size:1.07rem;line-height:1.3;margin:.3em 0 .5em}header p{max-width:68ch}section{margin-top:2.7rem}a{color:var(--accent);text-underline-offset:.19em}code{font: .9em ui-monospace,"SFMono-Regular",Consolas,monospace;overflow-wrap:anywhere}p+p{margin-top:.75em}
-.pair,.trail{display:grid;gap:1rem}.pair{grid-template-columns:repeat(2,minmax(0,1fr))}.trail{grid-template-columns:repeat(3,minmax(0,1fr))}article,figure{margin:0;background:var(--paper);border:1px solid var(--line);padding:1.15rem;border-radius:5px}.before{border-top:3px solid var(--warn)}.before .label{color:var(--warn)}.after{border-top:3px solid var(--accent)}
-figure{margin-top:1rem;padding:0}figcaption,.turn{padding:.8rem 1.2rem}figcaption{color:var(--muted);border-bottom:1px solid var(--line);font-size:.9rem}.turn{display:grid;grid-template-columns:125px 1fr;gap:.8rem}.turn+.turn{border-top:1px solid var(--line)}.reply{background:var(--wash)}.speaker{letter-spacing:normal}.note{color:var(--muted);font-size:.9rem;margin-top:.7rem}
-table{border-collapse:collapse;width:100%}th,td{text-align:left;vertical-align:top;padding:.75rem .5rem;border-bottom:1px solid var(--line)}th{font-size:.85rem;color:var(--muted)}td:first-child{width:23%;font-weight:600}.yes,.no{font-weight:750}.yes{color:var(--accent)}.no{color:var(--warn)}ol{padding-left:1.4rem}li{padding:.25rem 0 .65rem .25rem}li p{margin:.28rem 0}.rail{padding:1rem 1.2rem;border-left:3px solid var(--accent);background:var(--wash);margin-top:1rem}
-@media(max-width:680px){.pair,.trail{grid-template-columns:1fr}.turn{grid-template-columns:1fr;gap:.2rem}td,th{padding:.6rem .25rem}td:first-child{width:26%}main{padding:20px 14px 40px}table{font-size:.9rem}}
+:root{color-scheme:light dark;--bg:#f6f5f0;--paper:#fffefa;--ink:#1b2420;--muted:#4f5c56;--line:#c2c9bf;--accent:#1c604a;--wash:#e5efe7;--warn:#8e3f22;--warnwash:#f6e8df;--codebg:#eeede6;font-family:"Instrument Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+@media(prefers-color-scheme:dark){:root{--bg:#151b19;--paper:#1d2521;--ink:#edf2e9;--muted:#b5c3b9;--line:#48574d;--accent:#99dbb5;--wash:#243c30;--warn:#ffb694;--warnwash:#3a2a23;--codebg:#111715}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-size:16px;line-height:1.52}main{max-width:1020px;padding:clamp(20px,5vw,54px);margin:auto}
+header{border-top:5px solid var(--accent);padding-top:14px}header small,.label,.speaker,.badge{color:var(--accent);font-size:.76rem;font-weight:720;letter-spacing:.06em;text-transform:uppercase}
+h1,h2,h3,p{margin:0}h1,h2{font-family:"Iowan Old Style",Georgia,serif;font-weight:500;line-height:1.12;text-wrap:balance}h1{font-size:clamp(2.3rem,5.4vw,4rem);margin:.28em 0}h2{font-size:clamp(1.55rem,3.3vw,2.2rem);margin-bottom:.62em}h3{font-size:1.05rem;line-height:1.3;margin:.3em 0 .5em}header p{max-width:72ch}section{margin-top:2.7rem}a{color:var(--accent);text-underline-offset:.19em}
+code{font:.88em ui-monospace,"SFMono-Regular",Consolas,monospace;overflow-wrap:anywhere}pre{margin:.65rem 0 0;padding:.75rem .9rem;background:var(--codebg);border:1px solid var(--line);border-radius:4px;font:.83rem/1.45 ui-monospace,"SFMono-Regular",Consolas,monospace;overflow-x:auto;white-space:pre-wrap}
+p+p{margin-top:.75em}.pair,.trail{display:grid;gap:1rem}.pair{grid-template-columns:repeat(2,minmax(0,1fr))}.trail{grid-template-columns:repeat(3,minmax(0,1fr))}
+article,figure{margin:0;background:var(--paper);border:1px solid var(--line);padding:1.15rem;border-radius:5px}
+.before{border-top:3px solid var(--warn)}.before .label{color:var(--warn)}.after{border-top:3px solid var(--accent)}
+.badge{display:inline-block;padding:.12rem .45rem;border-radius:3px;background:var(--wash);margin-right:.4rem}.badge.prop{background:var(--warnwash);color:var(--warn)}
+figure{margin-top:1rem;padding:0}figcaption,.turn{padding:.8rem 1.15rem}figcaption{color:var(--muted);border-bottom:1px solid var(--line);font-size:.9rem}.turn{display:grid;grid-template-columns:138px 1fr;gap:.8rem}.turn+.turn{border-top:1px solid var(--line)}.reply{background:var(--wash)}.warnrow{background:var(--warnwash)}.speaker{letter-spacing:normal;text-transform:none}
+.note{color:var(--muted);font-size:.9rem;margin-top:.7rem}
+table{border-collapse:collapse;width:100%}th,td{text-align:left;vertical-align:top;padding:.75rem .5rem;border-bottom:1px solid var(--line)}th{font-size:.84rem;color:var(--muted)}td:first-child{width:22%;font-weight:600}.yes,.no{font-weight:750;white-space:nowrap}.yes{color:var(--accent)}.no{color:var(--warn)}
+ol,ul{padding-left:1.35rem}li{padding:.22rem 0 .55rem .2rem}li p{margin:.28rem 0}.rail{padding:1rem 1.2rem;border-left:3px solid var(--warn);background:var(--warnwash);margin-top:1rem}.rail.ok{border-left-color:var(--accent);background:var(--wash)}
+@media(max-width:720px){.pair,.trail{grid-template-columns:1fr}.turn{grid-template-columns:1fr;gap:.2rem}td,th{padding:.58rem .25rem}td:first-child{width:26%}main{padding:20px 14px 40px}table{font-size:.9rem}}
 </style>
 </head>
 <body><main>
 <header>
-<small>LOO-1096 · Concept review</small>
-<h1>What does “2b” continue?</h1>
-<p>Do the product’s concepts and the code’s concepts line up when a Task stops for review? The decisive case is a person choosing a different next pass from the one the worker recommended.</p>
-<p class="note">Reviewed <code>7a8ecaa96b</code> against <code>80cced1bd4</code>. The kickoff committed the design and exploration. Breakpoints, result delivery and the reply action below are proposed.</p>
+<small>LOO-1096 · Post-build concept review</small>
+<h1>One stop, two stories</h1>
+<p><strong>Area reviewed:</strong> Task Graph breakpoints end to end — compilation, execution, handoff delivery, continuation, waits, CLI status, and Desktop/iOS projections — because LOO-1096 replaces <code>interactive:</code> steps across all of them. The core breakpoint mechanism works; four concept splits remain between what a person sees and what the code owns.</p>
+<p class="note"><span class="badge">Built &amp; committed</span> <code>4b295b5e3a</code> against <code>23ce1a69f9</code> (Passes 1–4, compress, and real-provider QA). <span class="badge prop">Proposed · Pass 5</span> Unify breakpoint action/condition ownership, step navigation, reply scope, and breakpoint waits in <a href="plan.md">scratch/plan.md</a>.</p>
 </header>
 
-<section aria-labelledby="mismatch"><h2 id="mismatch">A repeat can restart the wrong build</h2>
+<section aria-labelledby="mismatch"><h2 id="mismatch">Biggest mismatch: a breakpoint has no single owner across status, actions, and blocked runs</h2>
+<p>When a Task parks at a breakpoint, the product has one fact: <em>this Task is waiting for you at breakpoint X</em> (either ready to continue on the worker’s default, or blocked until you choose). The code at <code>HEAD</code> splits that fact across three disconnected owners that contradict each other at <code>after-ship-review</code>, at <code>after-verify</code>, and whenever a worker returns <code>blocked</code> under <code>auto: on</code>.</p>
+
 <div class="pair">
-<article class="before"><div class="label">Before · kickoff design</div><h3>“Go back to build.”</h3><p>The plan saves the worker’s default. For a different route, the conversation writes notes and uses <code>--from build</code>. Today that lookup takes the first matching place and constructs a fresh cursor. With two build occurrences, it can enter another branch. Even the right occurrence starts a fresh pass count.</p></article>
-<article class="after"><div class="label">After · proposed</div><h3>“Repeat this pass.”</h3><p>The reply belongs to one visit to the breakpoint. Its saved loop already knows which build to repeat. The Task applies the chosen decision there and carries the reply to the next worker. A deliberate request to start elsewhere still uses <code>--from</code>.</p></article>
+<article class="before"><div class="label">Before · HEAD (4b295b5e3a)</div>
+<h3>CLI and Desktop tell different stories</h3>
+<p><code>derive_task_actions</code> has no breakpoint field. Desktop’s <code>waves.rs</code> bolts an <code>else if let Some(breakpoint)</code> bypass around it, while CLI <code>lf task status</code> (<code>snapshot.rs</code>) calls <code>derive_task_actions</code> directly. Worse, both <code>waves.rs</code> and <code>snapshot.rs</code> only recognize a breakpoint when <code>execution.state == Idle</code>.</p>
+<pre>$ lf task status LOO-42   # parked at after-ship-review (PR open)
+  Graph feature: At breakpoint after-ship-review.
+  action: run  (PR is published but settlement is not armed; run `lf land`)
+
+$ lf task status LOO-42   # parked at after-verify (PR merged)
+  Graph feature: At breakpoint after-verify.
+  action: no_action  (Merged; complete the Task)
+
+# Worker returns blocked under auto: on -> Graph exits Blocked:
+  selections.rs : SelectionState::Breakpoint  ✓
+  waves.rs      : execution.state == Blocked -> drops Breakpoint!
+                  next_move.owner = Wave, action = no_action
+  Desktop bar   : still shows "Continue" -> clicking fails with error</pre>
+</article>
+
+<article class="after"><div class="label">After · Proposed Pass 5</div>
+<h3>One breakpoint projection feeds every surface</h3>
+<p>Pass the parked breakpoint (including whether its pending verdict is <code>blocked</code>) into <code>TaskActionEvidence</code> and <code>Finished::of</code>, and recognize a parked <code>task_graphs.breakpoint</code> whenever no live run owns the Task and any latest Graph <code>Blocked</code> exit belongs to that parked blocked verdict. Remove the <code>waves.rs</code> action bypass.</p>
+<pre>$ lf task status LOO-42   # parked at after-ship-review (PR open)
+  Graph feature: At breakpoint after-ship-review.
+  action: run  (At breakpoint after-ship-review.)
+
+$ lf task status LOO-42   # parked at after-verify (PR merged)
+  Graph feature: At breakpoint after-verify.
+  action: run  (At breakpoint after-verify.)
+
+# Worker returns blocked (auto on OR off):
+  selections.rs &amp; waves.rs : SelectionState::Breakpoint, Blocked, User
+  CLI &amp; Desktop action     : no_action (At breakpoint after-ship-review. Blocked: …)
+  Desktop workflow bar     : no broken plain "Continue" button; reply in conversation</pre>
+</article>
 </div>
-<figure><figcaption>Proposed interaction · ship-review finished while the primary conversation was closed</figcaption>
-<div class="turn"><span class="speaker">Task conversation</span><div>Ship-review ran the keyboard checks. <code>scratch/ship-review.html</code> shows where focus jumps to the first row after refresh. I recommend delivering this pass.
-<br><strong>1.</strong> Which finding needs discussion? <strong>2.</strong> Deliver this pass (a), or fix focus in build first (b)?</div></div>
-<div class="turn reply"><span class="speaker">You</span><div>2b — keep focus on the selected Task.</div></div>
-<div class="turn"><span class="speaker">Next build pass</span><div>On the same selected Graph path, the worker receives the focus finding and your exact reply. Ship-review will run again after the fix.</div></div>
-</figure></section>
 
-<section aria-labelledby="pairings"><h2 id="pairings">Where the concepts line up today</h2>
-<table><thead><tr><th scope="col">In the product</th><th scope="col">Fit at HEAD</th><th scope="col">What the code represents</th></tr></thead><tbody>
-<tr><td>A worker does the review</td><td class="no">No</td><td><code>ConcreteSkill.interactive</code> and <code>RunningGraph::stands_in</code> can stop before the review or ask a worker to speak for someone. Give the configured worker the work, then let an authored <code>break</code> stop the Graph. Direct skill sessions still collaborate.</td></tr>
-<tr><td>A recommendation to finish or repeat</td><td class="yes">Yes</td><td><code>GraphVerdict</code> pairs the decision with a summary or blocked reason. <code>finish_step</code> applies the loop edge. Reuse both for the default and the chosen continuation.</td></tr>
-<tr><td>One visit awaiting an answer</td><td class="no">No</td><td><code>TaskGraphPosition::At { step }</code> names a place. The same place can be visited twice. Keep the full <code>ExecutionCursor</code>, its pending verdict, the actual producer reference and a fresh arrival identity together on <code>task_graphs</code>.</td></tr>
-<tr><td>The finished worker’s answer</td><td class="yes">Yes</td><td>A step process names its Session input. Transcript and recorded-history readers can show the answer to that input. Carry the successful input through any correction. A command contributes its own recorded result.</td></tr>
-<tr><td>Discuss the result here</td><td class="no">No</td><td>The primary can receive steers and resume in a held terminal. Today a Task update and the <code>task-session</code> skill can merely name the waiting step. Deliver the result once per arrival to the primary, including its links, questions and default.</td></tr>
-<tr><td>Act on this answer</td><td class="no">No</td><td><code>lf task run</code> selects a start. <code>Place::cursor</code> rebuilds it for <code>--from</code>. Extend the run action to consume the presented arrival, keeping its route and applying the selected edge with the reply.</td></tr>
-<tr><td>A Task ready to discuss</td><td class="no">No</td><td>The shared workflow sentence and Now’s condition describe different aspects of the Task. Project both from the parked visit. Show the review at the top of active work and in Now. Deliberate shelving is separate.</td></tr>
-</tbody></table>
-<p class="note">Repository references · <a href="../rust/loopflow-execution/src/task_graph.rs">Task position and navigation</a> · <a href="../rust/loopflow-execution/src/graph/transitions.rs">Loop decisions</a> · <a href="../rust/loopflow/src/lf/commands/graph.rs">Worker launch and readback</a> · <a href="../rust/loopflow-execution/src/transcript/answer.rs">Answer history</a> · <a href="../rust/loopflow/src/server/wake.rs">Conversation wake</a> · <a href="../swift/Loopflow/Models/NowProjection.swift">Now</a></p>
+<figure>
+<figcaption>Counterexample walked through failure and recovery · <code>ship-review</code> returns <code>blocked</code> while <code>auto: on</code></figcaption>
+<div class="turn"><span class="speaker">1. Worker stops</span><div><code>ship-review</code> finishes with <code>{"decision":"blocked","reason":"Two incompatible schema migrations"}</code>. The runner advances to <code>after-ship-review</code>, parks <code>task_graphs.breakpoint</code> with that verdict, and queues the handoff to the primary conversation. Under <code>auto: on</code> / <code>-b</code>, the Graph process still exits non-zero so scripts know auto did not finish.</div></div>
+<div class="turn warnrow"><span class="speaker">At HEAD (broken)</span><div>Because the Graph exited non-zero, <code>task_execution</code> reads <code>TaskExecutionState::Blocked</code>. <code>waves.rs</code> checks <code>execution.state == Idle</code>, drops <code>breakpoint</code> to <code>None</code>, omits <code>SelectionState::Breakpoint</code> (disagreeing with <code>selections.rs</code>), hands <code>next_move</code> to <code>Wave</code>, and Desktop’s bar still renders plain <strong>Continue</strong>, which errors when clicked.</div></div>
+<div class="turn reply"><span class="speaker">Proposed Pass 5</span><div><code>task_graphs.breakpoint</code> is the single authority for the parked stop: both <code>selections.rs</code> and <code>waves.rs</code> keep <code>SelectionState::Breakpoint</code>, <code>NextMoveOwner::User</code>, and <code>TaskConditionState::Blocked</code>; both CLI and Desktop report <code>NoAction</code> with the blocker sentence instead of a broken plain Continue button. Answering in the conversation runs <code>lf task run --at-arrival &lt;id&gt; --decision iterate --reason "&lt;choice&gt;"</code> and resumes build on pass 2.</div></div>
+</figure>
 </section>
 
-<section aria-labelledby="lifecycle"><h2 id="lifecycle">What survives a closed conversation?</h2>
-<div class="trail"><article><h3>Finish and park</h3><p>The worker finishes. The carrier saves the cursor at the marker and the producing step, then relinquishes ownership in the same write. The breakpoint launches zero processes. Auto and batch take the saved default directly.</p></article>
-<article><h3>Reopen and discuss</h3><p>The Machine wakes the primary for this arrival. If launch fails, the Task stays ready and its result remains readable on reopen. A missing provider transcript can fall back to the saved turn. Missing artifacts are identified by path.</p></article>
-<article><h3>Continue once</h3><p>The run action compares the arrival, saves accepted direction and installs the next cursor together. A worker launch failure can retry there. A competing continue sees where the Task moved. A question or a closed pane leaves the visit open.</p></article></div>
-<div class="rail"><strong>Counterexample.</strong> Auto carries pass one through the marker. Pass two stops at the identically named marker before a delayed “2b” arrives. Comparing the marker name would accept it. Comparing the visit leaves pass two untouched. The old words remain visible in the conversation.</div>
-<p class="note">A blocked default retains its reason. A leading break or a direct jump to a marker has no finished worker to quote and shows its forward destination. A legacy Task parked before an interactive worker still runs that worker on its next continuation. LOO-1100 covers retiring the old reader. Idle Antigravity wake belongs to LOO-1098. Until then an open idle Antigravity conversation receives pending input at its next turn.</p>
+<section aria-labelledby="pairings"><h2 id="pairings">Do the product’s concepts and the code’s concepts line up at HEAD?</h2>
+<table>
+<thead><tr><th scope="col">In the product</th><th scope="col">Fit at HEAD</th><th scope="col">What the code represents</th></tr></thead>
+<tbody>
+<tr>
+<td>A worker runs the step on its own model, then <code>- break</code> pauses</td>
+<td class="yes">Yes</td>
+<td><strong>Committed.</strong> <code>ConcreteStep::Breakpoint</code> replaces per-skill <code>interactive</code> flags; <code>RunningGraph::stands_in</code> is gone; builtin skills operate in two modes (interactive vs. headless); legacy <code>interactive: &lt;skill&gt;</code> YAML and captures translate until LOO-1100.</td>
+</tr>
+<tr>
+<td>One visit to a breakpoint awaiting a reply</td>
+<td class="yes">Yes</td>
+<td><strong>Committed.</strong> <code>task_graphs.breakpoint</code> holds <code>BreakpointArrival { id, cursor }</code> (enforced mutually exclusive with <code>lf_process_id</code> by SQLite <code>CHECK</code>). <code>arrive_task_graph</code> parks and writes the <code>breakpoint:&lt;task&gt;</code> steer in one transaction; <code>--at-arrival</code> claims one exact visit and refuses late replies.</td>
+</tr>
+<tr>
+<td>Present finished work in the Task conversation</td>
+<td class="yes">Yes</td>
+<td><strong>Committed.</strong> <code>breakpoint_review</code> reads worker answers, verdicts, or command outcomes, resolves <code>scratch/</code> paths on the execution Machine with missing-file fallback, and wakes or held-starts the primary once per arrival.</td>
+</tr>
+<tr>
+<td>What this Task needs right now (status, action, condition, Now)</td>
+<td class="no">No</td>
+<td><strong>No single owner.</strong> <code>derive_task_actions</code> ignores breakpoints so <code>lf task status</code> recommends <code>lf land</code> at <code>after-ship-review</code> and <code>complete the Task</code> at <code>after-verify</code>. <code>waves.rs</code> bypasses it and gates on <code>execution.state == Idle</code>, hiding blocked-auto breakpoints and disagreeing with <code>sqlite::selections</code>. <code>TaskActions.swift</code> offers plain <em>Continue</em> even on a blocked breakpoint.</td>
+</tr>
+<tr>
+<td>Start from a step or re-run a review</td>
+<td class="no">No</td>
+<td><strong>Breakpoint confused with runnable step.</strong> Desktop’s <em>Start from…</em> menu (<code>TaskWorkView.swift</code>) lists synthetic <code>after-*</code> breakpoints instead of real steps, so clicking one parks empty with no worker output. Jumping via CLI <code>--from after-ship-review</code> leaves <code>verdict: None</code>, causing <code>--decision iterate</code> to fail even though the node has <code>returns: Some(…)</code>. <code>TaskGraph::read</code> still says <em>“Auto stands in next at …”</em>.</td>
+</tr>
+<tr>
+<td>Carry a review reply to the next pass</td>
+<td class="no">No</td>
+<td><strong>One idea under two mechanisms, plus unbounded leak.</strong> <code>task_place</code> writes <code>--reason</code> into both <code>cursor.progress.direction</code> and a Task comment steer (<code>append_task_comment(..., true)</code>). Because <code>finish_step</code> only clears <code>progress.direction</code> when a deciding step advances, an <code>after-explore</code> reply keeps injecting into <code>kickoff</code>, <code>concept-review</code>, <code>write-docs</code>, <code>implement</code>, <code>sync</code>, and <code>realign</code> — and an <code>advance --reason</code> reply at <code>after-ship-review</code> re-attaches after <code>finish_step</code> cleared it, leaking into <code>deliver</code> and <code>verify</code>.</td>
+</tr>
+<tr>
+<td>Wait for the Task to reach a review</td>
+<td class="no">No</td>
+<td><strong>One flag for two concepts.</strong> QA patched <code>|| row.breakpoint.is_some()</code> onto <code>lf task wait --until submitted</code> (<code>TaskWaitUntil::Open</code>). That works on Pass 1 before any PR exists, but once <code>build</code> opens a PR, <code>pr.phase() == PrPhase::Open</code> makes <code>--until submitted</code> return immediately while <code>ship-review</code> or Pass 2 of <code>build</code> is still running.</td>
+</tr>
+</tbody>
+</table>
+<p class="note">Code inspected at <code>4b295b5e3a</code> · <a href="../rust/loopflow-execution/src/ops/task_actions.rs">task_actions.rs</a> · <a href="../rust/loopflow-execution/src/ops/task/snapshot.rs">snapshot.rs</a> · <a href="../rust/loopflow/src/lf/commands/waves.rs">waves.rs</a> · <a href="../rust/loopflow-storage/src/sqlite/selections.rs">selections.rs</a> · <a href="../rust/loopflow-execution/src/ops/task.rs">ops/task.rs</a> · <a href="../rust/loopflow-execution/src/graph/transitions.rs">transitions.rs</a> · <a href="../rust/loopflow/src/lf/commands/graph.rs">commands/graph.rs</a> · <a href="../swift/LoopflowMac/Views/TaskWorkView.swift">TaskWorkView.swift</a> · <a href="../swift/Loopflow/Design/TaskActions.swift">TaskActions.swift</a></p>
 </section>
 
-<section aria-labelledby="slice"><h2 id="slice">Build the smallest complete interaction first</h2>
-<p>Run <code>loop: [research, break]</code> with separate worker and primary harnesses. Close the primary before research finishes, restart the Machine server after the Task parks, and read the numbered alternatives in the original conversation. Change “finish” to “research again”. The second worker must see pass two and the exact words. Replay the old reply at the second visit. It must still be waiting. This is the proposed first implementation check. <a href="plan.md">Implementation plan</a></p>
+<section aria-labelledby="other-fixes"><h2 id="other-fixes">The other three splits to close in Pass 5</h2>
+<div class="trail">
+<article>
+<div class="label">Navigation</div>
+<h3>Start from real steps, decide any loop breakpoint</h3>
+<p>Populate Desktop’s <em>Start from…</em> menu with <code>start</code> plus real top-level work steps (<code>explore</code>, <code>plan</code>, <code>build</code>, <code>ship-review</code>, <code>deliver</code>, <code>verify</code>), not synthetic <code>after-*</code> stop markers. In Rust, base loop-decision eligibility on <code>return_target(body, leaf.index).is_some()</code> instead of <code>verdict.is_some()</code> so CLI <code>--from after-ship-review</code> + <code>--decision iterate</code> works. Replace leftover <em>“Auto stands in next at …”</em> with <em>“Auto continues through …”</em>.</p>
+</article>
+<article>
+<div class="label">Reply scope</div>
+<h3>Separate one-step handoff from loop iteration</h3>
+<p>Keep <code>progress.direction</code> strictly for loop iteration (set by <code>finish_step</code> on <code>Iterate</code>, cleared on <code>Advance</code>). Give a non-loop or <code>advance</code> breakpoint reply its own single-step handoff (consumed once by the next step and cleared when that step finishes, surviving crash/retry without leaking into downstream steps) and record the durable Task comment without double-steering the same worker.</p>
+</article>
+<article>
+<div class="label">Waits</div>
+<h3>Don’t confuse “PR open” with “stopped for review”</h3>
+<p>Add <code>--until breakpoint</code> (or <code>stopped</code>: returns when parked at a breakpoint, stopped/blocked without a live run, or terminal) for <code>task-session</code> and operators waiting on the next review, while keeping <code>--until submitted</code> honest for PR submission (or gating its PR check when a Graph is still running toward a breakpoint). Pass 2 of <code>build</code> with an already-open PR will actually wait for <code>ship-review</code>’s breakpoint.</p>
+</article>
+</div>
 </section>
 
-<section aria-labelledby="questions"><h2 id="questions">Choices for review</h2>
-<ol><li><strong>If you pick “fix it first”, how should build resume?</strong>
-<p><b>1a · Chosen.</b> Repeat the current build pass with your reply. Keep the branch and earlier pass count.</p>
-<p><b>1b.</b> Start build again from a named step. This gives you a fresh start and requires identifying which build you intended.</p></li>
-<li><strong>If a reply arrives after its review has passed, what should the conversation do?</strong>
-<p><b>2a · Chosen.</b> Show where the Task is now and leave your words in the original discussion. You can give fresh direction if they still apply.</p>
-<p><b>2b.</b> Show where the Task is now and immediately ask whether to send those same words to the current work. This adds a decision each time an old reply arrives.</p></li></ol>
-</section></main></body></html>
+<section aria-labelledby="outside"><h2 id="outside">Outside LOO-1096 (left separate on purpose)</h2>
+<ul>
+<li><strong>Claude Esc during a tool call fires no Stop hook</strong> — affects every idle wake across Loopflow; predates breakpoints. Requires hook/activity fallback outside this Task.</li>
+<li><strong>Provider limit retry keeps the agent captured at step start</strong> — changing <code>skills.*.agent</code> during a rate-limit wait still requires interrupt + fresh run; belongs to limit recovery, not breakpoints.</li>
+<li><strong>Builtin <code>build.yaml</code> names <code>qa</code> bare</strong> — a repository Graph named <code>qa</code> shadows the builtin <code>qa</code> skill (unlike <code>research.yaml</code>/<code>feature.yaml</code> which now use <code>step:</code>). Separate builtin-Graph hardening.</li>
+<li><strong>Running-step status prints a process UUID</strong> — <code>Step d148293b-… is running explore</code> in <code>task_execution.rs</code>; cosmetic execution status cleanup outside breakpoints.</li>
+<li><strong>Antigravity immediate idle wake (LOO-1098)</strong> and <strong>retiring released <code>interactive:</code> YAML/capture compatibility readers (LOO-1100)</strong> — already tracked as separate Tasks.</li>
+</ul>
+</section>
+
+<section aria-labelledby="questions"><h2 id="questions">Choices made for Pass 5 review &amp; open product questions</h2>
+<p>Nothing below is irreversible once shipped, so Pass 5 builds the bold choices directly for you to review in the running app and CLI. Reply with numbers (e.g. <code>1b 2a 3a</code>) to change any of them.</p>
+<ol>
+<li><strong>When a worker blocks at a breakpoint, what should Desktop’s main button do?</strong>
+<p><b>1a · Chosen for Pass 5.</b> Don’t show a plain <em>Continue</em> button — show the blocker reason and let you answer in the Task conversation, because continuing without choosing a direction always fails.</p>
+<p><b>1b.</b> Keep the <em>Continue</em> button visible and focus the Task conversation input when clicked, instead of sending a run request.</p>
+</li>
+<li><strong>What should Desktop’s “Start from…” menu list?</strong>
+<p><b>2a · Chosen for Pass 5.</b> List real work stages (<code>start</code>, <code>explore</code>, <code>plan</code>, <code>build</code>, <code>ship-review</code>, <code>deliver</code>, <code>verify</code>) so picking <code>ship-review</code> actually runs a fresh review and stops with its results.</p>
+<p><b>2b.</b> Keep listing the stop markers (<code>after-explore</code>, <code>after-ship-review</code>, <code>after-verify</code>) and make picking one start at the step immediately after that marker.</p>
+</li>
+<li><strong>How should the workflow bar show breakpoints?</strong>
+<p><b>3a · Kept as built for now.</b> Show each breakpoint as its own marked item beside its step (<code>explore · 👤 after-explore · plan · …</code>), matching <code>lf graph show</code>.</p>
+<p><b>3b.</b> Fold the person badge onto the step before the breakpoint (<code>explore 👤 · plan · build · ship-review 👤 · deliver · verify 👤</code>) so the bar stays short enough to fit without collapsing to text-only on narrower windows.</p>
+</li>
+<li><strong>When “Sort by status” is off in Desktop’s sidebar, where should a Task at a breakpoint sit?</strong>
+<p><b>4a · Kept as built (still open from Pass 4).</b> Keep your manual drag order intact in the sidebar; surface breakpoints first in <strong>Now</strong> and when <strong>Sort by status</strong> is turned on.</p>
+<p><b>4b.</b> Temporarily float Tasks waiting at a breakpoint to the top of the sidebar even when <strong>Sort by status</strong> is off.</p>
+</li>
+</ol>
+</section>
+</main></body></html>

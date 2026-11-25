@@ -25,8 +25,8 @@ pub struct LandOptions {
     pub agent: Option<String>,
 }
 
-/// How a prepared PR is handed off once it is synced, cleaned up if configured, and
-/// marked ready.
+/// How a prepared PR is handed off once it is synced, cleared of added scratch,
+/// and marked ready.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Finalize {
     /// Request auto-merge and retain delivery for later finite checks.
@@ -42,8 +42,8 @@ enum Integration {
     Completed,
 }
 
-/// Prepare one PR: commit, merge main when GitHub needs it, apply configured
-/// cleanup, mark ready, and finalize per `finalize`. `arm` requests auto-merge;
+/// Prepare one PR: commit, merge main when GitHub needs it, clear branch-added
+/// scratch, mark ready, and finalize per `finalize`. `arm` requests auto-merge;
 /// `submit` leaves the PR for manual merge. Neither rotates the worktree.
 /// Returns the resulting PR, or `None` for a local merge.
 fn prepare_pr(
@@ -172,27 +172,19 @@ fn prepare_pr(
                 .to_string(),
         ));
     }
-    let main_branch = match integration {
+    match integration {
         Integration::Required if resync => {
-            sync_land(&repo_root, &main_repo, !options.local, progress)?
+            sync_land(&repo_root, &main_repo, !options.local, progress)?;
         }
         Integration::Required => {
             let base = crate::git::scratch::base(&repo_root)?;
-            crate::ops::scratch::clear(&repo_root, &base)?;
+            crate::ops::scratch::clear_for_delivery(&repo_root, &base)?;
             crate::ops::task::require_task_pr_range_nonempty(&repo_root)?;
-            if crate::git::rev_parse(&repo_root, "HEAD^{tree}")?
-                == crate::git::rev_parse(&repo_root, &format!("{base}^{{tree}}"))?
-            {
-                return Err(OpsError::Message(
-                    "no authored changes remain after integration; refusing to publish an empty PR"
-                        .to_string(),
-                ));
-            }
             crate::ops::commit::push_with_upstream_if_needed(&repo_root, &|_| {})?;
-            get_default_branch(&main_repo)?
         }
-        Integration::Completed => get_default_branch(&main_repo)?,
-    };
+        Integration::Completed => {}
+    }
+    let main_branch = get_default_branch(&main_repo)?;
     // Sync may advance the fork point. Re-run the authoritative proof to heal
     // the recorded base and refuse an empty range before any `gh pr` side effect.
     crate::ops::task::require_task_pr_range_nonempty(&repo_root)?;
@@ -200,7 +192,13 @@ fn prepare_pr(
         crate::ops::pr::retarget_open_pr(&repo_root, &main_branch, inherit_pr)?;
     }
     if options.local {
-        finalize_local(&repo_root, &main_branch, &feature_branch, progress)?;
+        finalize_local(
+            &repo_root,
+            &main_repo,
+            &main_branch,
+            &feature_branch,
+            progress,
+        )?;
         return Ok(None);
     }
 
@@ -299,7 +297,7 @@ pub fn finish_arm_after_sync(
 }
 
 /// Prepare a PR to land without arming auto-merge: commit, sync onto main,
-/// apply configured scratch cleanup and mark ready. Reviewer requests and
+/// clear branch-added scratch and mark ready. Reviewer requests and
 /// assignments remain unchanged. A teammate merges on GitHub.
 /// Like `arm`, this never rotates the worktree.
 pub fn submit(
@@ -407,8 +405,7 @@ fn sync_land(
     main_repo: &Path,
     push: bool,
     progress: &impl Progress,
-) -> OpsResult<String> {
-    let main_branch = get_default_branch(main_repo)?;
+) -> OpsResult<()> {
     let onto = crate::git::integration_base(main_repo)?;
     // Use the recorded parent base when integrating a squash-landed stack.
     let stacked = crate::ops::task::stack_for_landing(repo_root)?;
@@ -421,21 +418,21 @@ fn sync_land(
         },
         progress,
     )?;
-    Ok(main_branch)
+    Ok(())
 }
 
 fn finalize_local(
     repo_root: &Path,
+    main_repo: &Path,
     main_branch: &str,
     feature_branch: &str,
     progress: &impl Progress,
 ) -> OpsResult<()> {
-    let main_repo = main_repo_root(repo_root)?;
     let merged_head = crate::git::rev_parse(repo_root, "HEAD")?;
-    let remote_head = if crate::git::has_origin(&main_repo)? {
+    let remote_head = if crate::git::has_origin(main_repo)? {
         let reference = format!("refs/heads/{feature_branch}");
         let refs =
-            crate::git::git_stdout(&main_repo, &["ls-remote", "--heads", "origin", &reference])?;
+            crate::git::git_stdout(main_repo, &["ls-remote", "--heads", "origin", &reference])?;
         match refs.split_whitespace().next() {
             Some(sha)
                 if crate::git::commit_exists(repo_root, sha)?
@@ -452,7 +449,7 @@ fn finalize_local(
     let _ = git_land(repo_root, LandStrategy::LocalMerge, main_branch)?;
     // Delete the remote branch only when its head is already merged into
     // `merged_head`; a remote that moved since carries new work.
-    let remote = crate::ops::wt::branch_copies_at(&main_repo, feature_branch, remote_head, None);
+    let remote = crate::ops::wt::branch_copies_at(main_repo, feature_branch, remote_head, None);
     crate::ops::wt::apply_delete(remote, progress)
 }
 

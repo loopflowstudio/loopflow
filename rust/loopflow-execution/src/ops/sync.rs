@@ -206,7 +206,9 @@ pub fn sync_with_plan(
     start_owned_sync(repo, options, Some(plan), false, progress)
 }
 
-/// Delivery must not publish an empty tree, even for an unmanaged branch.
+/// Delivery sync: drops pure branch-added scratch conflicts, clears remaining
+/// branch-added scratch against the integration target, refuses an empty tree,
+/// and pushes a clean Noop head when needed.
 pub(crate) fn sync_for_delivery(
     repo: &Path,
     options: &SyncOptions,
@@ -367,9 +369,7 @@ fn continue_delivery_scratch_conflicts(
         }
         scratch_paths.push(path_str);
     }
-    let mut args = vec!["--literal-pathspecs", "rm", "-f", "--"];
-    args.extend(scratch_paths);
-    crate::git::git_stdout(repo, &args)?;
+    crate::git::scratch::remove(repo, &scratch_paths)?;
     progress.status("Completing merge after dropping branch-added scratch conflicts...");
     Ok(continue_merge(repo, None)?.success)
 }
@@ -435,13 +435,7 @@ fn verify_sync(
         )));
     }
     if expected.delivery {
-        crate::ops::scratch::clear(repo, target_sha)?;
-        if rev_parse(repo, "HEAD^{tree}")? == rev_parse(repo, &format!("{target_sha}^{{tree}}"))? {
-            return Err(OpsError::Message(
-                "no authored changes remain after integration; refusing to publish an empty PR"
-                    .to_string(),
-            ));
-        }
+        crate::ops::scratch::clear_for_delivery(repo, target_sha)?;
     }
     Ok(SyncVerification {
         branch: owner.branch.clone(),

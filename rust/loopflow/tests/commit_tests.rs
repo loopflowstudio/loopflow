@@ -497,9 +497,8 @@ fn persistent_workspace_checkpoints_added_scratch_until_explicit_cleanup() {
         git_output(&persistent.path, &["show", "HEAD:scratch/design.md"]),
         "repository content"
     );
-    let base = loopflow_execution::ops::scratch::default_base(&persistent.path).unwrap();
     assert_eq!(
-        loopflow_execution::ops::scratch::clear(&persistent.path, &base).unwrap(),
+        loopflow_execution::ops::scratch::clear(&persistent.path).unwrap(),
         1
     );
     assert!(!persistent.path.join("scratch/design.md").exists());

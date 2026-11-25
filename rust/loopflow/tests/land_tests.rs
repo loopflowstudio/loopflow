@@ -2611,6 +2611,33 @@ fn remote_scratch_files(bare: &std::path::Path, branch: &str) -> Vec<String> {
         .collect()
 }
 
+fn recorded_pushes(push_log: &std::path::Path) -> Vec<String> {
+    fs::read_to_string(push_log)
+        .expect("read push log")
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+fn run_lf_isolated(
+    dir: &std::path::Path,
+    home: &std::path::Path,
+    args: &[&str],
+) -> std::process::Output {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_lf"));
+    for (name, _) in
+        std::env::vars_os().filter(|(name, _)| name.to_string_lossy().starts_with("LF_"))
+    {
+        cmd.env_remove(name);
+    }
+    cmd.args(args)
+        .current_dir(dir)
+        .env("LF_HOME", home)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap()
+}
+
 #[test]
 fn delivery_clears_scratch_after_conflict_resolution_and_pushes_once() {
     for mode in ["submit", "land"] {
@@ -2670,12 +2697,6 @@ for _ in sys.stdin:
             home.path(),
         );
 
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_lf"));
-        for (name, _) in
-            std::env::vars_os().filter(|(name, _)| name.to_string_lossy().starts_with("LF_"))
-        {
-            cmd.env_remove(name);
-        }
         let args: &[&str] = if mode == "submit" {
             &[
                 "pr",
@@ -2696,13 +2717,7 @@ for _ in sys.stdin:
                 "Cleared after conflict resolution",
             ]
         };
-        let output = cmd
-            .args(args)
-            .current_dir(repo.path())
-            .env("LF_HOME", home.path())
-            .stdin(Stdio::null())
-            .output()
-            .unwrap();
+        let output = run_lf_isolated(repo.path(), home.path(), args);
         assert!(
             output.status.success(),
             "{mode} failed:\nstdout: {}\nstderr: {}",
@@ -2725,10 +2740,7 @@ for _ in sys.stdin:
             "feature and main\n"
         );
         assert_eq!(
-            fs::read_to_string(&push_log)
-                .expect("one push")
-                .lines()
-                .collect::<Vec<_>>(),
+            recorded_pushes(&push_log),
             vec!["refs/heads/feature"],
             "{mode}: delivery must push the clean head once"
         );
@@ -2854,26 +2866,18 @@ fn stacked_child_land_drops_inherited_scratch_conflict_without_agent_and_pushes_
     let push_log = repo.bare_path().join("push-stacked.log");
     install_push_log_hook(repo.bare_path(), &push_log);
 
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_lf"));
-    for (name, _) in
-        std::env::vars_os().filter(|(name, _)| name.to_string_lossy().starts_with("LF_"))
-    {
-        cmd.env_remove(name);
-    }
-    let output = cmd
-        .args([
+    let output = run_lf_isolated(
+        &child_path,
+        home.path(),
+        &[
             "land",
             "--strict",
             "--title",
             "Stacked child",
             "--body",
             "Drops inherited scratch conflict mechanically",
-        ])
-        .current_dir(&child_path)
-        .env("LF_HOME", home.path())
-        .stdin(Stdio::null())
-        .output()
-        .unwrap();
+        ],
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -2890,13 +2894,7 @@ fn stacked_child_land_drops_inherited_scratch_conflict_without_agent_and_pushes_
         remote_scratch_files(repo.bare_path(), "child"),
         vec!["scratch/.gitkeep"]
     );
-    assert_eq!(
-        fs::read_to_string(&push_log)
-            .expect("one push")
-            .lines()
-            .collect::<Vec<_>>(),
-        vec!["refs/heads/child"]
-    );
+    assert_eq!(recorded_pushes(&push_log), vec!["refs/heads/child"]);
     let updated_child = runtime
         .block_on(parent.store.get_task(&child.id))
         .unwrap()
@@ -2967,10 +2965,7 @@ fn noop_delivery_clears_committed_scratch_and_pushes_once() {
         "untracked local note\n"
     );
     assert_eq!(
-        fs::read_to_string(&push_log)
-            .expect("one push")
-            .lines()
-            .collect::<Vec<_>>(),
+        recorded_pushes(&push_log),
         vec![format!("refs/heads/{}", persistent.branch)]
     );
 }

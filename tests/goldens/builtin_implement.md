@@ -33,6 +33,10 @@ found it, as someone who will maintain it.
 breaks isn't worth keeping, and a flaky test is a broken test. The test:
 break the feature in your head; does this fail?
 
+**Spend compute deliberately.** Compute is either shared with other agents or
+metered: run the smallest check that answers your question, leave broad suites
+to CI, and clean up what you start.
+
 **Protect the person's flow.** Don't ask permission for work that can be
 undone. Say what's needed, then stop.
 
@@ -187,9 +191,12 @@ the ones named in "Done when", so a full run here only makes everything wait.
 Maximize the throughput of the whole software factory, not the certainty of
 this step.
 
-One build at a time. Skip builds for prose-only edits, and don't rerun a
-passing command without a change. A check that can't run here goes to CI; a
-real failure still gets fixed.
+Many agents share this Machine: run one build at a time, and avoid release
+builds (`--release`, release wheels), workspace-wide compiles or linters, and
+heavyweight E2E or browser suites unless this slice specifically requires
+them — defer full suites to CI. Skip builds for prose-only edits, and don't
+rerun a passing command without a change. A check that can't run here goes to
+CI; a real failure still gets fixed.
 
 Run the slice the way a person would and reread the docs against what you
 built. Where behavior is missing, say so rather than weakening the docs.

@@ -1520,8 +1520,7 @@ pub fn restart_provider(store: &SqliteStore, session: &LfSession) -> Result<()> 
             crate::ops::recovery::start_failure_reason(&failure)
         );
     }
-    crate::harness::agent_process::require_server()?;
-    let mut server = crate::machine::client::Connection::open()?;
+    let mut server = crate::harness::agent_process::require_server()?;
     crate::harness::agent_process::stop_session_agent(
         store,
         &session.id,

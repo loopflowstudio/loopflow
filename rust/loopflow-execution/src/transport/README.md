@@ -21,9 +21,9 @@ holder to start the agent on a PTY and keeps everything else: the terminal
 registry, one libghostty-vt terminal per held terminal, views, viewing
 records, queued input, the child's control requests and exit settlement.
 
-`local_session_kind` answers which `LaunchKind` runs in this process;
-`delegate` and `delegate_launch` start a held terminal for the rest and relay
-its view. Launches are bare or managed, with
+`session_host` selects where a resumed Session runs. `delegate_chat`
+starts a new terminal chat on the running Machine server and attaches the
+caller's view. Launches are bare or managed, with
 [four launch names](../../../../docs/glossary.md#loopflows-words). Only a work
 session goes to a held terminal; every other kind runs in its caller's process.
 
@@ -47,7 +47,7 @@ reruns them detached from their terminal so the Graph outlives the caller;
 To open a held work session from the CLI, `lf` calls `session.start` and becomes
 a view of the returned terminal. Direct interactive launches and bare
 `lf resume` probe whether the Machine server accepts a connection
-(`Connection::open().is_ok()`): when it is unreachable they do not start a
+with `Connection::open()`. When it is unreachable they do not start a
 server or fail, and instead fall back directly to a foreground `Chat`. Bound
 and primary Sessions, Desktop panes, and framed `lf --machine` views still
 require the server and fail with
@@ -68,26 +68,19 @@ Every launch belonging to a Task counts toward its usage and receives its
 steers. Work sessions and workers report turn boundaries to the Machine server;
 chats and batches read their steers directly.
 
-Direct interactive TTY launches (`lf`, `lf -a <agent>`, inline prompts, and
-Skills — after resolving the target and `move_default_agent_to_worktree`, and
-excluding Graphs, which spawn their own steps) delegate to `start_held` when
-outside a holder (`current().is_none()`), not detached, and the Machine server
-is reachable. Inside the holder `current().is_some()`, so `LaunchInput::kind()`
-returns `LaunchKind::WorkSession`, hooks run managed, and the launcher hands its
-exit record to the server and execs the provider directly. When the server is
-unreachable or stdin/stdout is not a terminal, direct launches run locally:
-`--batch` selects a batch, otherwise `--interactive`, a terminal, or no prompt
-selects a foreground chat.
+On a direct default or inline chat, a terminal with both stdin and stdout
+attached opens the server connection once and uses it for `session.start`.
+The child runs the original arguments from the original working directory,
+including worktree selection. Inside the holder, `LaunchInput::kind()` selects
+a work session. The child prints the context header and hands its exit record
+to the server before executing the provider. Without a server or terminal the
+launcher runs locally. Direct Graphs own their steps.
 
-A Session reopened in this process runs as the kind `local_session_kind`
-returns; any other goes to a held terminal through `delegate`. Reopening a
-Session with no message reads its binding and primary scope once to choose its
-kind: bound and primary conversations always require a held work session (as do
-Desktop panes and framed `lf --machine` viewers), while bare Sessions
-(`store.is_bare`) resolve to a held work session whenever the server is
-reachable and fall back to a foreground chat only when the server is
-unreachable. An unreadable store falls back to a work session and logs a
-recording gap.
+On resume, bound and primary conversations, Desktop panes and framed
+`lf --machine` viewers require a holder. A standalone conversation uses the
+server when it is running and both stdin and stdout are terminals. Otherwise
+it opens as a foreground chat. An unreadable store selects a work session and
+logs a recording gap.
 
 ### Chats at a terminal (no-server fallback)
 

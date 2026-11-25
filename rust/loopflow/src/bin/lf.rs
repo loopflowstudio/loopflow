@@ -3033,6 +3033,11 @@ fn dispatch_launch(
     args: &[String],
     binding: Option<&loopflow_execution::ops::WorkBinding>,
 ) -> anyhow::Result<()> {
+    if matches!(cli.command, None | Some(Commands::Inline { .. }))
+        && loopflow_execution::transport::delegate_chat(kind)?
+    {
+        return Ok(());
+    }
     match resolve_cli_target(cli)? {
         Some((target, message)) => {
             execute_target(kind, target, message.as_deref(), cli, args, binding)

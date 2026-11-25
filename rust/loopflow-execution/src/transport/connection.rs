@@ -211,7 +211,7 @@ impl Status {
     pub fn connect(
         &mut self,
         terminal: &loopflow_model::id::TerminalId,
-        session: &loopflow_model::id::LfSessionId,
+        session: Option<&loopflow_model::id::LfSessionId>,
         initial: bool,
         input: &mut super::RelayInput,
     ) -> Result<Option<(UnixStream, bool)>> {
@@ -259,7 +259,7 @@ impl Status {
                         return Ok(None);
                     }
                 }
-                let (terminal, session) = (terminal.clone(), session.clone());
+                let (terminal, session) = (terminal.clone(), session.cloned());
                 let (send, receive) = mpsc::sync_channel(1);
                 std::thread::spawn(move || {
                     let result = super::registry::connect(&terminal);
@@ -268,6 +268,7 @@ impl Status {
                         .ok()
                         .flatten()
                         .and_then(|store| {
+                            let session = session.as_ref()?;
                             let current = store
                                 .sqlite
                                 .session_attachment(session.as_str())

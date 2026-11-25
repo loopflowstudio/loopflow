@@ -4,6 +4,38 @@ Brief, verbatim: "whenever i open an agy session in a different viewer Eg Rex
 or Loopflow Desktop it seems to close thea gy client... is agy not being held
 in the the holder the same way as other clients"
 
+## Current implementation
+
+Fresh default and inline chats, including `lf -a agy`, and bare terminal
+resumes use the running Machine server. A new chat registers its Session when
+the holder accepts the provider's exit record. A replay starts in the original
+invocation directory so relative `--cwd` and `--repo` still resolve. The held
+child performs default-agent worktree placement once. Starting the replay in
+the already selected directory produced `Error: enter subdir: No such file or
+directory (os error 2)` in the PTY check with `--cwd subdir`. A fresh Desktop
+pane connects by terminal ID while its child creates the Session.
+
+`cargo test -p loopflow --test transport_tests direct_chat_` passed all three
+PTY checks with an agy stand-in. Two viewers submitted one shared draft, and
+the same provider answered after the Machine server restarted. The no-server
+and fresh Desktop pane checks passed. `cargo fmt` and
+`cargo clippy --all-targets -- -D warnings` passed. Gate owns native UI checks.
+
+Two parts remain before the feature ships.
+
+- **Standalone Skills.** The proposed blanket delegation bypasses
+  `with_skill_runtime`'s completion event and `commit_skill_step` in
+  `bin/lf.rs`. A successful native exec never returns there. Keep the Skill
+  launcher responsible for completion after the last view detaches, or hand
+  that responsibility to the holder. Exercise a Skill that writes a file,
+  detach, then check its commit and its completion event. Direct Graph steps
+  continue under their Graph's launcher.
+- **Idle retirement.** Implement pass 2 before release. In the current schema
+  use `primary_scope_sql` for Task, Wave and repository primaries. The
+  terminal host accepts a close notice unconditionally, so also check live
+  viewers at the point of retirement. A delayed store observation alone cannot
+  authorize closing a newly viewed terminal.
+
 ## What is happening
 
 agy is wired into the holder the same way as the other four harnesses. What is
@@ -63,8 +95,8 @@ Hosting (shared held PTY vs direct TTY) is separated from unviewed lifetime
      `--yolo`, `--chrome`, `-c`, `--task`, `--wave`, inline prompt, skill) and
      `print_context_header` carry across unchanged, and Desktop sees the
      context header in scrollback too.
-   - For `run_default_agent`, resolve `move_default_agent_to_worktree` first so
-     the held terminal starts in the moved worktree `cwd`.
+   - Replay the command in its original directory. The child resolves
+     `move_default_agent_to_worktree` and runs the provider in that worktree.
    - When the Machine server is NOT reachable (`Connection::open()` fails in
      <1 ms — containers, CI, `lf server stop`, isolated test homes without a
      server), do NOT spawn a server and do NOT fail: run directly in the
@@ -247,8 +279,7 @@ delegation seam, `native_session::run_client`, `Request::ExitRecord`, and
 
 ## Passes
 
-1. **Hold direct launches & bind dynamic Sessions in `Registry`** (the slice
-   that proves the whole design soonest).
+1. **Hold direct launches & bind dynamic Sessions in `Registry`.** Default, inline and bare resume implemented. Standalone Skills require the completion work above.
    - Update `transport/hosted.rs` + `transport/registry.rs` so
      `Request::ExitRecord` binds `Registry::live[terminal] = Some(session)` and
      persists `meta.session` (with `exit-record.json` fallback on server

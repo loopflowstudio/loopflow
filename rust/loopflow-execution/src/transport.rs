@@ -36,6 +36,8 @@ use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
 
 use crate::harness::native_exit::{NativeExit, Settled};
+use crate::harness::LaunchKind;
+use crate::machine::client::Connection;
 use input::{Paste, PendingInput};
 use loopflow_model::id::{LfSessionId, TerminalId};
 use loopflow_storage::sqlite::ViewerHold;
@@ -148,6 +150,9 @@ impl Settling {
         let _ = self.settled.recv_timeout(SETTLE_LINGER);
     }
 }
+
+// A replay of the command line resolves relative --cwd and --repo from here.
+static INVOCATION_CWD: OnceLock<PathBuf> = OnceLock::new();
 static HANDOFF: OnceLock<Handoff> = OnceLock::new();
 
 #[derive(Debug)]
@@ -206,6 +211,9 @@ impl Handoff {
 /// Consume the direct execution handoff. Provider tools and nested lf calls do
 /// not inherit the right to run inside this execution's held terminal.
 pub fn initialize() {
+    if let Ok(cwd) = std::env::current_dir() {
+        let _ = INVOCATION_CWD.set(cwd);
+    }
     crate::os_process::detached::initialize();
     if let Some(handoff) = Handoff::take() {
         let _ = HANDOFF.set(handoff);
@@ -267,16 +275,41 @@ impl LaunchInput {
     }
 }
 
+/// A standalone chat shares its PTY when the local server is already up.
+pub fn delegate_chat(kind: LaunchKind) -> Result<bool> {
+    if kind != LaunchKind::Chat || !can_delegate_command() {
+        return Ok(false);
+    }
+    let Some(server) = terminal_server() else {
+        return Ok(false);
+    };
+    let (argv, cwd) = replay_current()?;
+    let terminal = start_held_on(server, &argv, &cwd, None, &|_| {})?;
+    attach(&terminal, None, ViewerOptions::default())?;
+    Ok(true)
+}
+
+fn terminal_server() -> Option<Connection> {
+    if io::stdin().is_terminal() && io::stdout().is_terminal() {
+        Connection::open().ok()
+    } else {
+        None
+    }
+}
+
+fn can_delegate_command() -> bool {
+    !cfg!(test)
+        && current().is_none()
+        && !crate::os_process::detached::launched()
+        && !crate::journal::graph_step()
+}
+
 /// `lf task run` and `lf task auto on` leave their terminal: the Graph they start outlives the caller,
 /// and `lf -b task run` waits for it. Returns whether a detached child ran the
 /// command; in a held terminal, an already detached process or a Graph step it
 /// runs here.
 pub fn detach_current() -> Result<bool> {
-    if cfg!(test)
-        || current().is_some()
-        || crate::os_process::detached::launched()
-        || crate::journal::graph_step()
-    {
+    if !can_delegate_command() {
         return Ok(false);
     }
     let mut argv: Vec<String> = std::env::args().collect();
@@ -311,16 +344,17 @@ pub(crate) fn delegate_session(
     preview: bool,
     launch_lock: File,
 ) -> Result<Option<(crate::harness::LaunchKind, File)>> {
-    if let Some(kind) = local_session_kind(id) {
-        return Ok(Some((kind, launch_lock)));
-    }
+    let server = match session_host(id)? {
+        SessionHost::Here(kind) => return Ok(Some((kind, launch_lock))),
+        SessionHost::Held(server) => server,
+    };
     drop(launch_lock);
-    let mut argv: Vec<String> = std::env::args().collect();
+    let (mut argv, cwd) = replay_current()?;
     if viewer.json {
         // The viewer owns this continuation, including an early detach.
         argv.retain(|arg| arg != "--json");
     }
-    delegate(id, viewer, preview, argv)?;
+    delegate(*server, id, viewer, preview, &argv, &cwd)?;
     Ok(None)
 }
 
@@ -330,30 +364,49 @@ pub(crate) fn delegate_prepared_session(
     id: &str,
     viewer: ViewerOptions,
 ) -> Result<Option<crate::harness::LaunchKind>> {
-    if let Some(kind) = local_session_kind(id) {
-        return Ok(Some(kind));
-    }
-    delegate(
-        id,
-        viewer,
-        true,
-        vec![String::new(), "session".into(), "resume".into(), id.into()],
-    )?;
+    let server = match session_host(id)? {
+        SessionHost::Here(kind) => return Ok(Some(kind)),
+        SessionHost::Held(server) => server,
+    };
+    let mut argv = vec![String::new(), "session".into(), "resume".into(), id.into()];
+    let cwd = admit_current(&mut argv)?;
+    delegate(*server, id, viewer, true, &argv, &cwd)?;
     Ok(None)
 }
 
-/// Chats reopen as chats; bound and primary Sessions as work sessions. A held
-/// child keeps its parent's choice. A relayed viewer (a Desktop pane or a
-/// framed `lf --machine` stream) is no terminal a chat can own, so the holder
-/// keeps what it opens.
-fn session_kind(id: &str) -> crate::harness::LaunchKind {
-    use crate::harness::LaunchKind;
+enum SessionHost {
+    Here(LaunchKind),
+    Held(Box<Connection>),
+}
 
+/// Bound conversations and remote viewers require the holder. At a terminal a
+/// standalone conversation can also use a holder that is already running.
+fn session_host(id: &str) -> Result<SessionHost> {
+    let required = requires_holder(id);
+    if cfg!(test) || current().is_some() || crate::os_process::detached::launched() {
+        return Ok(SessionHost::Here(if required {
+            LaunchKind::WorkSession
+        } else {
+            LaunchKind::Chat
+        }));
+    }
+    if required {
+        return Ok(SessionHost::Held(Box::new(
+            crate::harness::agent_process::require_server()?,
+        )));
+    }
+    if let Some(server) = terminal_server() {
+        return Ok(SessionHost::Held(Box::new(server)));
+    }
+    Ok(SessionHost::Here(LaunchKind::Chat))
+}
+
+fn requires_holder(id: &str) -> bool {
     if current().is_some()
         || std::env::var_os("LF_SERVER_STATUS").is_some()
         || std::env::var_os(STREAM_ENV).is_some()
     {
-        return LaunchKind::WorkSession;
+        return true;
     }
     static GAP: LazyLock<Mutex<crate::store::RecordingGap>> = LazyLock::new(Default::default);
     let bare = crate::journal::process_ledger().and_then(|store| {
@@ -367,17 +420,19 @@ fn session_kind(id: &str) -> crate::harness::LaunchKind {
         Ok(_) => gap.recovered(),
         Err(error) => gap.note("resume lifetime", error),
     }
-    if matches!(bare, Ok(Some(true))) {
-        LaunchKind::Chat
-    } else {
-        LaunchKind::WorkSession
-    }
+    !matches!(bare, Ok(Some(true)))
 }
 
 /// Launch the Session in a held terminal and relay its view here.
-fn delegate(id: &str, viewer: ViewerOptions, preview: bool, mut argv: Vec<String>) -> Result<()> {
+fn delegate(
+    server: Connection,
+    id: &str,
+    viewer: ViewerOptions,
+    preview: bool,
+    argv: &[String],
+    cwd: &Path,
+) -> Result<()> {
     let preview_session = preview.then_some(id);
-    let cwd = admit_current(&mut argv)?;
     let preview = if std::env::var_os(STREAM_ENV).is_some() {
         if let Some(screen) = preview_session.and_then(snapshot::last_screen) {
             io::stdout().write_all(&wire::frame(Tag::Snapshot, &screen))?;
@@ -387,7 +442,7 @@ fn delegate(id: &str, viewer: ViewerOptions, preview: bool, mut argv: Vec<String
         ViewerTerminal::preview(preview_session)?
     };
     let session = preview_session.map(LfSessionId::from);
-    let terminal = start_held(&argv, &cwd, session.as_ref(), &|_| {})?;
+    let terminal = start_held_on(server, argv, cwd, session.as_ref(), &|_| {})?;
     relay_with_preview(
         &terminal,
         session.as_ref(),
@@ -397,14 +452,11 @@ fn delegate(id: &str, viewer: ViewerOptions, preview: bool, mut argv: Vec<String
     )
 }
 
-/// Only a work Session outside a holder or detached process needs delegation.
-fn local_session_kind(id: &str) -> Option<crate::harness::LaunchKind> {
-    let kind = session_kind(id);
-    (cfg!(test)
-        || current().is_some()
-        || crate::os_process::detached::launched()
-        || kind != crate::harness::LaunchKind::WorkSession)
-        .then_some(kind)
+/// Replay the original arguments from the directory in which they were typed.
+fn replay_current() -> Result<(Vec<String>, PathBuf)> {
+    let mut argv: Vec<_> = std::env::args().collect();
+    let cwd = admit_current(&mut argv)?;
+    Ok((argv, INVOCATION_CWD.get().cloned().unwrap_or(cwd)))
 }
 
 /// Admit this invocation before another process takes over its work, and point
@@ -423,6 +475,22 @@ fn admit_current(argv: &mut [String]) -> Result<PathBuf> {
 /// server. `inherit` edits the caller's environment for it. With no server it
 /// fails.
 pub fn start_held(
+    argv: &[String],
+    cwd: &Path,
+    session: Option<&LfSessionId>,
+    inherit: &dyn Fn(&mut Command),
+) -> Result<TerminalId> {
+    start_held_on(
+        crate::harness::agent_process::require_server()?,
+        argv,
+        cwd,
+        session,
+        inherit,
+    )
+}
+
+fn start_held_on(
+    mut server: Connection,
     argv: &[String],
     cwd: &Path,
     session: Option<&LfSessionId>,
@@ -447,8 +515,6 @@ pub fn start_held(
         .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
         .collect();
     let (rows, cols) = size();
-    crate::harness::agent_process::require_server()?;
-    let mut server = crate::machine::client::Connection::open()?;
     let answer = server.request(ServerOperation::SessionStart {
         session: session.cloned(),
         request: uuid::Uuid::new_v4().to_string(),
@@ -1678,9 +1744,7 @@ fn attach_with_terminal(
     let mut status = connection::Status::from_env();
     let mut recovering = false;
     let socket = if let Some(status) = &mut status {
-        let Some((socket, recovered)) =
-            status.connect(id, bridged_session(session)?, true, input)?
-        else {
+        let Some((socket, recovered)) = status.connect(id, session, true, input)? else {
             return Ok(());
         };
         recovering = recovered;
@@ -1761,12 +1825,6 @@ struct RelayRoute<'a> {
     recovering: bool,
 }
 
-/// The server attaches by Session; only Desktop's Session panes bridge through
-/// it, and they always name theirs.
-fn bridged_session(session: Option<&LfSessionId>) -> Result<&LfSessionId> {
-    session.context("A server-bridged terminal relay names its Session (`--session`)")
-}
-
 fn view(
     mut socket: stream::Stream,
     id: Option<&TerminalId>,
@@ -1814,7 +1872,7 @@ fn view(
             let held = id.context("only a known terminal reconnects")?;
             let next = if let Some(status) = &mut status {
                 status
-                    .connect(held, bridged_session(session)?, false, input)?
+                    .connect(held, session, false, input)?
                     .map(|(socket, _)| socket)
             } else {
                 tracing::debug!(%reason, terminal = %held, "view reconnecting");

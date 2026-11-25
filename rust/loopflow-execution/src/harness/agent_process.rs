@@ -112,14 +112,15 @@ pub(crate) fn spawn_native(
 /// A managed launch reports turns to the Machine server, so its agent starts
 /// once the server welcomes a connection. The selected installation starts
 /// a stopped server, as it does when opening a work session.
-pub(crate) fn require_server() -> Result<()> {
+pub(crate) fn require_server() -> Result<crate::machine::client::Connection> {
     use crate::machine::client::Connection;
-    if Connection::open().is_ok() {
-        return Ok(());
+    if let Ok(server) = Connection::open() {
+        return Ok(server);
     }
     let setup = crate::installation::server::readiness_command()?.output()?;
-    let Err(down) = Connection::open() else {
-        return Ok(());
+    let down = match Connection::open() {
+        Ok(server) => return Ok(server),
+        Err(error) => error,
     };
     let setup = String::from_utf8_lossy(&setup.stderr);
     let reason = match setup.trim() {

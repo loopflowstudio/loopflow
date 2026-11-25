@@ -219,7 +219,7 @@ impl Hosted {
     }
 
     /// Serve every connection, move input and output, and judge the ending.
-    pub fn pass(&mut self, child: &mut Source) -> Result<Pass> {
+    pub fn pass(&mut self, child: &mut Source, mut bind_session: impl FnMut(&str)) -> Result<Pass> {
         let child_pid = child.pid();
         let previous_owner = self.sizing.id().map(str::to_owned);
         let mut size_change = false;
@@ -382,6 +382,7 @@ impl Hosted {
                                 if let Some(directory) = kept {
                                     keep(&directory.join(EXIT_RECORD), &record);
                                 }
+                                bind_session(&record.session);
                                 attachment.set(Some(&record));
                                 *departure = None;
                                 *exit_record = Some(record);

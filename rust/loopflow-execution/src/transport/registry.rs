@@ -62,7 +62,14 @@ impl Meta {
 
     fn read(place: &Place, terminal: &TerminalId) -> Option<Self> {
         let bytes = std::fs::read(Self::path(place, terminal)).ok()?;
-        serde_json::from_slice(&bytes).ok()
+        let mut meta: Self = serde_json::from_slice(&bytes).ok()?;
+        if meta.session.is_none() {
+            meta.session = super::hosted::read_kept::<crate::harness::native_exit::NativeExit>(
+                &exit_record_file(place, terminal),
+            )
+            .map(|record| record.session.into());
+        }
+        Some(meta)
     }
 
     fn write(&self, place: &Place, terminal: &TerminalId) -> Result<()> {
@@ -903,7 +910,9 @@ fn run(
             // One terminal's failure is never another's.
             let pass = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 entry.nudge();
-                let pass = entry.hosted.pass(&mut entry.child);
+                let pass = entry.hosted.pass(&mut entry.child, |session| {
+                    bind_session(&live, &entry.place, terminal, session)
+                });
                 entry.report(terminal, &statuses);
                 pass
             }));
@@ -1053,6 +1062,27 @@ impl Entry {
             Some(Nudge::Narrowed { since }) => Some(since + NUDGE),
             _ => None,
         }
+    }
+}
+
+/// A direct launch creates its Session in the child. Publish it before the
+/// native client starts, just as a resume publishes its Session at start.
+fn bind_session(live: &Live, place: &Place, terminal: &TerminalId, session: &str) {
+    {
+        let mut live = live.lock().expect("registry lock poisoned");
+        let Some(slot @ None) = live.get_mut(terminal) else {
+            return;
+        };
+        *slot = Some(session.into());
+    }
+    let saved = Meta::read(place, terminal)
+        .context("terminal has no readable meta.json")
+        .and_then(|mut meta| {
+            meta.session = Some(session.into());
+            meta.write(place, terminal)
+        });
+    if let Err(error) = saved {
+        tracing::warn!(%error, %terminal, "could not save the terminal's Session in meta.json");
     }
 }
 

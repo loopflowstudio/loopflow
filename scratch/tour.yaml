@@ -1,0 +1,15 @@
+at: 016ef7deaae3004663cd2a9045b385d8b3e10932
+first:
+  - path: docs/sessions.md
+    why: What a steer does when the conversation reopens
+  - path: scratch/plan.md
+    why: Why paste mode cannot identify an empty prompt
+  - path: rust/loopflow-execution/src/harness/mod.rs
+    why: How a harness starts its resumed turn
+  - path: rust/loopflow-execution/src/harness/native_session.rs
+    why: Waiting news starts Antigravity's prompt hook
+  - path: rust/loopflow-execution/src/agent/mod.rs
+    why: Parent conversation markers removed before launch
+  - path: rust/loopflow/tests/session_launch_contract.rs
+    why: Public resume, delivery receipt and quiet reopen
+hide: []

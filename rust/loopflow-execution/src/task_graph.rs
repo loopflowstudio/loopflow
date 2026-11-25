@@ -11,7 +11,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::LoadError;
 use crate::graph::runner::{ExecutionCursor, NestedCursor};
-use crate::graph::{compile_graph, load_authored_graph, ConcreteSkill, ConcreteStep};
+use crate::graph::{
+    compile_graph, load_authored_graph, return_target, ConcreteSkill, ConcreteStep,
+};
 use loopflow_definitions::text::first_prose_line;
 use loopflow_storage::sqlite::{Auto, AutoState};
 
@@ -229,6 +231,83 @@ impl CapturedGraph {
         }
     }
 
+    /// Whether a run from `place` can reach a merging step (`landing_name`) before
+    /// stopping. When `through` is false, each path stops at an interactive step;
+    /// when `through` is true, scanning continues past interactive steps to `end`.
+    pub fn reaches_landing(
+        &self,
+        place: &Place,
+        through: bool,
+        merges: fn(&[String]) -> bool,
+    ) -> bool {
+        #[derive(Clone, Copy, PartialEq, Eq)]
+        enum Reach {
+            Landing,
+            Stopped,
+            Continue,
+        }
+        fn scan(
+            body: &[ConcreteStep],
+            from: usize,
+            through: bool,
+            merges: fn(&[String]) -> bool,
+        ) -> Reach {
+            for (offset, step) in body[from..].iter().enumerate() {
+                let index = from + offset;
+                match step {
+                    ConcreteStep::Skill(skill) => {
+                        // Matches runtime: an interactive step stops before landing runs.
+                        if !through && skill.interactive {
+                            return Reach::Stopped;
+                        }
+                        if landing_name(step, merges).is_some() {
+                            return Reach::Landing;
+                        }
+                        if let Some(target) = return_target(body, index) {
+                            if target < from
+                                && scan(&body[..from], target, through, merges) == Reach::Landing
+                            {
+                                return Reach::Landing;
+                            }
+                        }
+                    }
+                    ConcreteStep::Command(_) => {
+                        if landing_name(step, merges).is_some() {
+                            return Reach::Landing;
+                        }
+                    }
+                    ConcreteStep::Xor(branch) => {
+                        let mut all_stopped = !branch.paths.is_empty();
+                        for alternative in branch.paths.values() {
+                            match scan(&alternative.steps, 0, through, merges) {
+                                Reach::Landing => return Reach::Landing,
+                                Reach::Stopped => {}
+                                Reach::Continue => all_stopped = false,
+                            }
+                        }
+                        if all_stopped {
+                            return Reach::Stopped;
+                        }
+                    }
+                }
+            }
+            Reach::Continue
+        }
+        let mut path = place.path.clone();
+        let mut from = place.index;
+        loop {
+            match scan(body(&self.steps, &path), from, through, merges) {
+                Reach::Landing => return true,
+                Reach::Stopped => return false,
+                Reach::Continue => {}
+            }
+            let Some((index, _)) = path.pop() else {
+                return false;
+            };
+            from = index + 1;
+        }
+    }
+
     /// The place `cursor` stands at, if the graph has it.
     pub fn place_of(&self, cursor: &ExecutionCursor) -> Option<Place> {
         let mut path = Vec::new();
@@ -363,7 +442,7 @@ pub struct WorkflowOutline {
     pub steps: Vec<WorkflowStep>,
     /// Every step where a person takes part, as `TaskGraph` carries them.
     pub interactive_steps: Vec<InteractiveStep>,
-    /// "You take part at explore, ship-review and verify." or "Runs on its own."
+    /// "You take part at explore and ship-review." or "Runs on its own."
     pub sentence: String,
 }
 
@@ -602,7 +681,7 @@ mod tests {
             .into_iter()
             .map(|step| step.name)
             .collect();
-        assert_eq!(steps, ["explore", "ship-review", "verify"]);
+        assert_eq!(steps, ["explore", "ship-review"]);
         let pursue = CapturedGraph::load("pursue", repo.path()).unwrap().unwrap();
         assert!(pursue.interactive_steps().is_empty());
         assert!(CapturedGraph::load("no-such-graph", repo.path())
@@ -632,11 +711,10 @@ mod tests {
         );
         assert_eq!(graph.find("start").unwrap().cursor().index, 0);
         assert!(graph.find("no-such-step").is_none());
-        // After the last interactive step nothing remains.
-        let verify = graph.interactive_step("verify").unwrap();
-        assert!(graph
-            .after(&verify)
-            .is_none_or(|place| graph.next_interactive(&place).is_none()));
+        // After the last interactive step no interactive step remains.
+        let review = graph.interactive_step("ship-review").unwrap();
+        let after_review = graph.after(&review).unwrap();
+        assert_eq!(graph.next_interactive(&after_review), None);
     }
 
     #[test]
@@ -719,7 +797,6 @@ mod tests {
                 ("build", false),
                 ("ship-review", true),
                 ("deliver", false),
-                ("verify", true)
             ]
         );
         assert_eq!(
@@ -780,5 +857,134 @@ mod tests {
             })
             .collect();
         assert_eq!(labels, ["plan", "build"]);
+    }
+
+    fn test_merges(argv: &[String]) -> bool {
+        matches!(
+            argv,
+            [_, cmd, ..] if cmd == "land"
+        ) || matches!(
+            argv,
+            [_, cmd, sub, ..] if cmd == "pr" && matches!(sub.as_str(), "land" | "arm")
+        )
+    }
+
+    #[test]
+    fn reaches_landing_follows_landing_steps_through_stops_xors_and_loops() {
+        let repo = tempfile::tempdir().unwrap();
+        let load = |name| CapturedGraph::load(name, repo.path()).unwrap().unwrap();
+
+        // Builtin code: stops at ship-review before deliver; reaches land after it or with through.
+        let code = load("code");
+        let start = code.find("start").unwrap();
+        assert!(!code.reaches_landing(&start, false, test_merges));
+        assert!(code.reaches_landing(&start, true, test_merges));
+        let after_review = code
+            .after(&code.interactive_step("ship-review").unwrap())
+            .unwrap();
+        assert!(code.reaches_landing(&after_review, false, test_merges));
+
+        // Builtin feature: stops at explore, then ship-review, then lands in deliver.
+        let feature = load("feature");
+        let start = feature.find("start").unwrap();
+        assert!(!feature.reaches_landing(&start, false, test_merges));
+        assert!(feature.reaches_landing(&start, true, test_merges));
+        let after_explore = feature
+            .after(&feature.interactive_step("explore").unwrap())
+            .unwrap();
+        assert!(!feature.reaches_landing(&after_explore, false, test_merges));
+        assert!(feature.reaches_landing(&after_explore, true, test_merges));
+        let after_review = feature
+            .after(&feature.interactive_step("ship-review").unwrap())
+            .unwrap();
+        assert!(feature.reaches_landing(&after_review, false, test_merges));
+
+        // Builtin quick: no interactive steps, lands immediately.
+        let quick = load("quick");
+        assert!(quick.reaches_landing(&quick.find("start").unwrap(), false, test_merges));
+
+        // Non-merging builtins never report reaching a landing step.
+        for name in ["pursue", "research", "deep-clean", "incident"] {
+            let graph = load(name);
+            let start = graph.find("start").unwrap();
+            assert!(!graph.reaches_landing(&start, false, test_merges), "{name}");
+            assert!(!graph.reaches_landing(&start, true, test_merges), "{name}");
+        }
+
+        // Custom post-merge-stop Graph warns when crossing land, not before review or at post-merge stop.
+        write(
+            repo.path(),
+            ".lf/graphs/post-merge.yaml",
+            "- implement\n- interactive: demo\n- cmd: land\n- interactive: research\n",
+        );
+        let post_merge = load("post-merge");
+        let start = post_merge.find("start").unwrap();
+        assert!(!post_merge.reaches_landing(&start, false, test_merges));
+        assert!(post_merge.reaches_landing(&start, true, test_merges));
+        let after_demo = post_merge
+            .after(&post_merge.interactive_step("demo").unwrap())
+            .unwrap();
+        assert!(post_merge.reaches_landing(&after_demo, false, test_merges));
+        let post_stop = post_merge.interactive_step("research").unwrap();
+        assert!(!post_merge.reaches_landing(&post_stop, false, test_merges));
+        assert!(!post_merge.reaches_landing(&post_stop, true, test_merges));
+
+        // Interactive landing skill stops before landing unless running through.
+        write(
+            repo.path(),
+            ".lf/graphs/interactive-land.yaml",
+            "- interactive: pr-land\n",
+        );
+        let interactive_land = load("interactive-land");
+        let start = interactive_land.find("start").unwrap();
+        assert!(!interactive_land.reaches_landing(&start, false, test_merges));
+        assert!(interactive_land.reaches_landing(&start, true, test_merges));
+
+        // XOR: any branch reaching land returns true; a trailing land is only blocked when every branch stops.
+        write(
+            repo.path(),
+            ".lf/graphs/xor-merge.yaml",
+            "- xor:\n    paths:\n      ship:\n        description: Land it\n        steps:\n          - pr-land\n      hold:\n        description: Wait\n        steps:\n          - interactive: demo\n",
+        );
+        let xor_merge = load("xor-merge");
+        assert!(xor_merge.reaches_landing(&xor_merge.find("start").unwrap(), false, test_merges));
+
+        write(
+            repo.path(),
+            ".lf/graphs/xor-gated.yaml",
+            "- xor:\n    paths:\n      one:\n        description: First\n        steps:\n          - interactive: demo\n          - implement\n      two:\n        description: Second\n        steps:\n          - interactive: research\n- cmd: land\n",
+        );
+        let xor_gated = load("xor-gated");
+        let start = xor_gated.find("start").unwrap();
+        assert!(!xor_gated.reaches_landing(&start, false, test_merges));
+        assert!(xor_gated.reaches_landing(&start, true, test_merges));
+        // Resuming inside an XOR branch ascends to the trailing `cmd: land`.
+        let inside_xor = xor_gated
+            .after(&xor_gated.interactive_step("demo").unwrap())
+            .unwrap();
+        assert!(xor_gated.reaches_landing(&inside_xor, false, test_merges));
+
+        write(
+            repo.path(),
+            ".lf/graphs/xor-partial.yaml",
+            "- xor:\n    paths:\n      review:\n        description: Review\n        steps:\n          - interactive: demo\n      skip:\n        description: Skip\n- cmd: land\n",
+        );
+        let xor_partial = load("xor-partial");
+        assert!(xor_partial.reaches_landing(
+            &xor_partial.find("start").unwrap(),
+            false,
+            test_merges
+        ));
+
+        // Loop back-edge: starting at an interactive step that iterates back to a landing step.
+        write(
+            repo.path(),
+            ".lf/graphs/loop-back.yaml",
+            "- loop:\n    - cmd: land\n    - interactive: demo\n",
+        );
+        let loop_back = load("loop-back");
+        let demo = loop_back.interactive_step("demo").unwrap();
+        assert!(!loop_back.reaches_landing(&demo, false, test_merges));
+        assert!(loop_back.reaches_landing(&demo, true, test_merges));
     }
 }

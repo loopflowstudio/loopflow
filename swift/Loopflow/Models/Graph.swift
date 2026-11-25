@@ -260,7 +260,7 @@ public struct WorkflowOutline: Decodable, Sendable, Hashable {
     public let steps: [TaskGraph.Step]
     /// Every step where a person takes part, XOR paths included.
     public let interactiveSteps: [TaskGraph.InteractiveStep]
-    /// "You take part at explore, ship-review and verify." or "Runs on its own."
+    /// "You take part at explore and ship-review." or "Runs on its own."
     public let sentence: String
 
     enum CodingKeys: String, CodingKey {

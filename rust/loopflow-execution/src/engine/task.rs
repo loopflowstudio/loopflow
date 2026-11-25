@@ -30,8 +30,8 @@ pub enum TaskRun {
         issue: String,
         /// The graph and where the run set out: `code from implement`.
         run: String,
-        /// The run may merge the PR: auto is on, or no interactive step is
-        /// left ahead, and nobody turned auto off.
+        /// The run can reach a merging step before stopping, and nobody turned
+        /// auto off.
         merges: bool,
         graph_process: LfProcessId,
         /// Where the run's output goes once its launcher lets go; null while a

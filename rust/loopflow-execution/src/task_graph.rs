@@ -481,19 +481,14 @@ impl WorkflowControl {
     }
 
     fn paused(step: &str, resume: bool, stopping: bool) -> Self {
-        if stopping {
-            return Self {
-                action: WorkflowAction::Pausing,
-                label: format!("Pausing: {step}"),
-            };
-        }
+        let (action, prefix) = match (stopping, resume) {
+            (true, _) => (WorkflowAction::Pausing, "Pausing"),
+            (false, true) => (WorkflowAction::Resume, "Paused"),
+            (false, false) => (WorkflowAction::Unpause, "Paused"),
+        };
         Self {
-            action: if resume {
-                WorkflowAction::Resume
-            } else {
-                WorkflowAction::Unpause
-            },
-            label: format!("Paused: {step}"),
+            action,
+            label: format!("{prefix}: {step}"),
         }
     }
 
@@ -623,6 +618,7 @@ impl TaskGraph {
             let index = place.path.first().map_or(place.index, |(index, _)| *index);
             indices[index]
         };
+        let top_name = |place: &Place| steps[top(place) as usize].name.as_str();
         let resumes = pause.is_some()
             && graph.resumes_on_unpause(&step, run.as_ref().map(|run| run.cursor), auto);
         let pausing = pause == Some(PauseStage::Stopping)
@@ -640,7 +636,7 @@ impl TaskGraph {
                         (
                             None,
                             "Not started.".to_owned(),
-                            WorkflowControl::start(&steps),
+                            WorkflowControl::run(first),
                             first.to_owned(),
                         )
                     }
@@ -655,14 +651,14 @@ impl TaskGraph {
                     ),
                     step => match graph.interactive_step(step) {
                         Some(place) => {
-                            let top_name = steps[top(&place) as usize].name.as_str();
                             let next = graph.after(&place).map(|next| {
                                 if top(&place) == top(&next) {
                                     graph.step_name(&next)
                                 } else {
-                                    steps[top(&next) as usize].name.clone()
+                                    top_name(&next).to_owned()
                                 }
                             });
+                            let chip = chip_step(Some(top_name(&place)), step);
                             (
                                 Some(place),
                                 format!("Waiting for you at {step}."),
@@ -673,37 +669,24 @@ impl TaskGraph {
                                         next.as_deref().unwrap_or(END)
                                     ),
                                 },
-                                chip_step(Some(top_name), step),
-                            )
-                        }
-                        None if auto == Some(AutoState::Off) => {
-                            let place = graph.find(step);
-                            let top_name = place
-                                .as_ref()
-                                .map(|place| steps[top(place) as usize].name.as_str());
-                            let chip = chip_step(top_name, step);
-                            (
-                                place,
-                                format!("Waiting at {step}: auto is off."),
-                                WorkflowControl {
-                                    action: WorkflowAction::Wait,
-                                    label: format!("Waiting: {chip}"),
-                                },
                                 chip,
                             )
                         }
                         None => {
                             let place = graph.find(step);
-                            let top_name = place
-                                .as_ref()
-                                .map(|place| steps[top(place) as usize].name.as_str());
-                            let chip = chip_step(top_name, step);
-                            (
-                                place,
-                                format!("Waiting at {step}."),
-                                WorkflowControl::run(&chip),
-                                chip,
-                            )
+                            let chip = chip_step(place.as_ref().map(top_name), step);
+                            let (sentence, control) = if auto == Some(AutoState::Off) {
+                                (
+                                    format!("Waiting at {step}: auto is off."),
+                                    WorkflowControl {
+                                        action: WorkflowAction::Wait,
+                                        label: format!("Waiting: {chip}"),
+                                    },
+                                )
+                            } else {
+                                (format!("Waiting at {step}."), WorkflowControl::run(&chip))
+                            };
+                            (place, sentence, control, chip)
                         }
                     },
                 };
@@ -728,7 +711,7 @@ impl TaskGraph {
                     .as_ref()
                     .map_or_else(|| step.clone(), |place| graph.step_name(place));
                 let current = place.as_ref().map(top);
-                let top_name = current.map(|index| steps[index as usize].name.as_str());
+                let top_name = place.as_ref().map(top_name);
                 let label = top_name.unwrap_or(at.as_str());
                 let chip = chip_step(top_name, &at);
                 let location = || {

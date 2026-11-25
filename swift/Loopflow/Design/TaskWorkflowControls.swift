@@ -104,7 +104,7 @@ public struct TaskWorkflowControls<Items: View>: View {
                 }
                 if actions.control?.action == .pause {
                     Button("Interrupt step") { interrupt() }.disabled(pending != nil)
-                } else if actions.control?.action != .pausing, actions.pause == .pause {
+                } else if actions.pause == .pause {
                     Button("Pause") { pause(.pause) }.disabled(pending != nil)
                 }
             }
@@ -172,14 +172,13 @@ public struct TaskWorkflowControls<Items: View>: View {
         case (_, PendingChanges.pausing?), (.pause, nil), (.pausing, _): "pause.fill"
         default: "play.fill"
         }
-        return Button {
-            switch control?.action {
-            case .run: run(nil)
-            case .pause: pause(.pause)
-            case .unpause, .resume: pause(.unpause)
-            case .done, .wait, .pausing, nil: break
-            }
-        } label: {
+        let primaryAction: (() -> Void)? = switch control?.action {
+        case .run: { run(nil) }
+        case .pause: { pause(.pause) }
+        case .unpause, .resume: { pause(.unpause) }
+        case .done, .wait, .pausing, nil: nil
+        }
+        return Button { primaryAction?() } label: {
             Image(systemName: glyph)
                 .imageScale(.small)
                 .foregroundStyle(filled ? palette.background : ink)
@@ -188,7 +187,7 @@ public struct TaskWorkflowControls<Items: View>: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(control == nil || control?.action == .done || control?.action == .wait || control?.action == .pausing || pending != nil || actions.primaryRefusal != nil)
+        .disabled(primaryAction == nil || pending != nil || actions.primaryRefusal != nil)
         .help(pending ?? actions.primaryRefusal ?? title)
         .accessibilityLabel(pending ?? title)
         .accessibilityIdentifier("task-workflow-primary")

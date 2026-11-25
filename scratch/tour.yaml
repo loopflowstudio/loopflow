@@ -1,4 +1,4 @@
-at: fc5a407bb5028551c6aa610c3153490566bab9f2
+at: 8d7e02d2686889ed064eb4537d3edfd6ed59eeb7
 first:
   - path: docs/work.md
     why: Pause and resume from the saved step
@@ -7,7 +7,7 @@ first:
   - path: swift/README.md
     why: The workflow track as the Mac shows it
   - path: rust/loopflow-execution/src/task_graph.rs
-    why: Word the chip and read the saved cursor
+    why: Word the chip, pausing action and saved cursor
   - path: rust/loopflow-execution/src/store/task_work.rs
     why: One resume-on-unpause read for release and the board
   - path: rust/loopflow-execution/src/engine/task.rs
@@ -23,7 +23,7 @@ first:
   - path: rust/loopflow-execution/src/ops/task.rs
     why: Keep admission until the run claims its cursor
   - path: rust/loopflow/src/lf/commands/graph.rs
-    why: Carry resumed and ordinary Graph runs alike
+    why: Carry runs and advance draining commands on exit 0
   - path: rust/loopflow-execution/src/harness/agent_process.rs
     why: Capture worker sessions under their attachment locks
   - path: rust/loopflow-execution/src/os_process.rs
@@ -49,9 +49,9 @@ first:
   - path: rust/loopflow-definitions/src/builtins/task/skill/verify.md
     why: Check the merge promptly and record follow-ups
   - path: swift/LoopflowMac/WorkModel.swift
-    why: Order sidebar rows and their keyboard shortcuts together
+    why: Track .task reads, group sidebar rows and Complete Undo
   - path: swift/LoopflowiOS/TaskListView.swift
-    why: Group each repository’s Working Tasks on iPhone
+    why: Group Working Tasks and share Complete Undo on iPhone
   - path: swift/Loopflow/Models/WaveWorkMap.swift
     why: Clear Portfolio Now as soon as pause takes effect
   - path: swift/Loopflow/Design/TaskActions.swift
@@ -65,7 +65,7 @@ first:
   - path: swift/LoopflowMac/Views/TaskWorkView.swift
     why: Unpause from every Mac menu before opening the workspace
   - path: swift/LoopflowiOS/TaskWorkspaceView.swift
-    why: Run or resume work beside the phone conversation
+    why: Patch Task rows, track .task reads and toolbar actions
   - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
     why: Resume workers and keep parked Graphs waiting
   - path: rust/loopflow/tests/machine_commands.rs

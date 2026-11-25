@@ -184,7 +184,7 @@ struct TaskActionItems: View {
                         .accessibilityIdentifier("task-workflow-move-\(step)")
                 }
             }
-            .disabled(model.runRefusal(task) != nil || actions.control?.action == .pause)
+            .disabled(model.runRefusal(task) != nil || actions.control?.action == .pause || actions.control?.action == .pausing)
             .accessibilityIdentifier("task-workflow-move")
         } else if work != nil, !task.isCompleted {
             TaskStartGraphMenu(model: model, task: task)
@@ -193,7 +193,8 @@ struct TaskActionItems: View {
             Button(action == .pause ? "Pause" : "Unpause") {
                 model.setPause(action, task: task)
             }
-            .disabled(model.changeRefusal != nil || model.pendingChanges.controlRequest(for: task.task.identifier) != nil || task.runControl.pausing)
+            .disabled(model.changeRefusal != nil || model.pendingChanges.controlRequest(for: task.task.identifier) != nil
+                      || task.runControl.pausing || actions.control?.action == .pausing)
         }
         TaskLifecycleItems(model: model, task: task)
         if !task.isCompleted {

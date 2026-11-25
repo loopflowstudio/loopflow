@@ -244,9 +244,7 @@ mod tests {
     use crate::task_graph::CapturedGraph;
     use loopflow_storage::process::Starter;
     use loopflow_storage::sqlite::{Auto, AutoState};
-    use loopflow_storage::work::task::{
-        LinearWritebackState, Observation, Task, TaskId, TaskPr, TaskPrId,
-    };
+    use loopflow_storage::work::task::{NewTask, TaskId};
 
     #[test]
     fn parked_names_the_command_for_human_stops_landing_waits_and_end() {
@@ -262,64 +260,29 @@ mod tests {
                 home.path().join("loopflow.db"),
             )))
             .unwrap();
-        let now = time::OffsetDateTime::now_utc();
-        let task = Task {
-            parent_task_id: None,
-            repository_id: crate::repository::location::ensure_repository(
-                &store.sqlite,
-                &repo.path().display().to_string(),
-            )
-            .unwrap(),
-            id: TaskId::new(),
-            tracker_id: None,
-            revision: 0,
-            identifier: "INF-42".into(),
-            title: "Parked check".into(),
-            description: String::new(),
-            tracker_synced_at: None,
-            tracker_writeback: LinearWritebackState::Current,
-            wave_id: None,
-            project_id: None,
-            worktree: Some(repo.path().to_path_buf()),
-            workspace_slug: "parked".into(),
-            branch: "main".into(),
-            base_commit: "deadbeef".into(),
-            parent_pr_id: None,
-            created_at: now,
-            updated_at: now,
-            rank: 0,
-            assignee: None,
-            due_date: None,
-            state: None,
-            completed_at: None,
-            observation: Observation::NotRequired,
-        };
-        let pr = TaskPr {
-            id: TaskPrId::new(),
-            task_id: task.id.clone(),
-            sequence: 1,
-            slug: "parked".into(),
-            branch: "main".into(),
-            base_commit: "deadbeef".into(),
-            parent_pr_id: None,
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            ci_observation: None,
-            github_observation: None,
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-            created_at: now,
-            updated_at: now,
-        };
-        runtime.block_on(store.seed_task(&task, &pr)).unwrap();
+        let repository_id = crate::repository::location::ensure_repository(
+            &store.sqlite,
+            &repo.path().display().to_string(),
+        )
+        .unwrap();
+        let task = store
+            .sqlite
+            .create_task(&NewTask {
+                id: TaskId::new(),
+                repository_id,
+                parent_task_id: None,
+                project_id: None,
+                title: "Parked check".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let id = &task.identifier;
 
         let graph = CapturedGraph::load("code", repo.path()).unwrap().unwrap();
-        let graph_json = serde_json::to_string(&graph).unwrap();
         store
             .sqlite
-            .take_up_task_graph(&task.id, &graph_json)
+            .take_up_task_graph(&task.id, &serde_json::to_string(&graph).unwrap())
             .unwrap();
 
         store
@@ -327,8 +290,11 @@ mod tests {
             .set_task_graph_step(&task.id, "ship-review")
             .unwrap();
         assert_eq!(
-            parked("INF-42").unwrap().as_deref(),
-            Some("Waiting for you at ship-review. `lf task run INF-42` continues past it.")
+            parked(id).unwrap().as_deref(),
+            Some(
+                format!("Waiting for you at ship-review. `lf task run {id}` continues past it.")
+                    .as_str()
+            )
         );
 
         let person = Starter::Person {
@@ -351,14 +317,19 @@ mod tests {
             .set_task_graph_step(&task.id, "land --wait-and-fix")
             .unwrap();
         assert_eq!(
-            parked("INF-42").unwrap().as_deref(),
-            Some("Waiting at land --wait-and-fix: auto is off. `lf task auto on INF-42` lands it.")
+            parked(id).unwrap().as_deref(),
+            Some(
+                format!(
+                    "Waiting at land --wait-and-fix: auto is off. `lf task auto on {id}` lands it."
+                )
+                .as_str()
+            )
         );
 
         store.sqlite.set_task_graph_step(&task.id, "end").unwrap();
         assert_eq!(
-            parked("INF-42").unwrap().as_deref(),
-            Some("At its end. `lf task complete INF-42` finishes it.")
+            parked(id).unwrap().as_deref(),
+            Some(format!("At its end. `lf task complete {id}` finishes it.").as_str())
         );
 
         // Still paused -> parked returns None.
@@ -366,8 +337,8 @@ mod tests {
             .sqlite
             .begin_task_pause(&task.id, &person, Vec::new())
             .unwrap();
-        assert_eq!(parked("INF-42").unwrap(), None);
+        assert_eq!(parked(id).unwrap(), None);
         store.sqlite.settle_task_pause(&task.id, false).unwrap();
-        assert_eq!(parked("INF-42").unwrap(), None);
+        assert_eq!(parked(id).unwrap(), None);
     }
 }

@@ -36,7 +36,7 @@ final class TaskActionsTests: XCTestCase {
         return .value(TaskWorkspaceView.Reading(
             work: try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: work)),
             row: try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row)),
-            execution: nil))
+            execution: nil, readAt: nil))
     }
 
     func testPausedTaskOffersUnpauseInWorking() throws {

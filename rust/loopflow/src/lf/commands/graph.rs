@@ -1660,106 +1660,65 @@ mod tests {
                     sources: Vec::new(),
                 })
             };
+            let run_draining = |tag: &str, exit_code: i32, steps: &[ConcreteStep]| {
+                let started = fixture.directory.path().join(format!("started-{tag}"));
+                let release = fixture.directory.path().join(format!("release-{tag}"));
+                let child = fixture.directory.path().join(format!("lf-{tag}"));
+                fs::write(
+                    &child,
+                    format!(
+                        "#!/bin/sh\n: > '{}'\nwhile [ ! -f '{}' ]; do sleep 0.02; done\nexit {exit_code}\n",
+                        started.display(),
+                        release.display()
+                    ),
+                )
+                .unwrap();
+                fs::set_permissions(&child, fs::Permissions::from_mode(0o755)).unwrap();
+                std::env::set_var("LF_BIN", &child);
+                let running = super::RunningGraph {
+                    store: fixture.store.clone(),
+                    process: loopflow_model::id::LfProcessId::new(),
+                    graph: tag,
+                    steps,
+                    message: None,
+                    cwd: repo,
+                    launcher: &cli,
+                    position: Mutex::new(ExecutionCursor::default()),
+                    task: Some(task.id.clone()),
+                    task_run: None,
+                    interrupt: Some(
+                        runtime
+                            .block_on(super::interrupt_cursor(&fixture.store, &task.id))
+                            .unwrap(),
+                    ),
+                };
+                record_run(&running);
+                let result = runtime.block_on(async {
+                    let interrupt = async {
+                        while !started.exists() {
+                            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                        }
+                        fixture.store.append_interrupt(&task.id).await.unwrap();
+                        fs::write(&release, "").unwrap();
+                    };
+                    let runner = GraphRunner::new(&running);
+                    let (result, ()) = tokio::join!(runner.run(steps, 0), interrupt);
+                    result
+                });
+                (result, running.position.into_inner().unwrap())
+            };
 
             // A draining command that exits non-zero fails instead of reading Interrupted.
-            let started = fixture.directory.path().join("started-fail");
-            let release = fixture.directory.path().join("release-fail");
-            let child = fixture.directory.path().join("lf-fail");
-            fs::write(
-                &child,
-                format!(
-                    "#!/bin/sh\n: > '{}'\nwhile [ ! -f '{}' ]; do sleep 0.02; done\nexit 1\n",
-                    started.display(),
-                    release.display()
-                ),
-            )
-            .unwrap();
-            fs::set_permissions(&child, fs::Permissions::from_mode(0o755)).unwrap();
-            std::env::set_var("LF_BIN", &child);
-            let steps = [op("first"), op("second")];
-            let running = super::RunningGraph {
-                store: fixture.store.clone(),
-                process: loopflow_model::id::LfProcessId::new(),
-                graph: "drain-fail",
-                steps: &steps,
-                message: None,
-                cwd: repo,
-                launcher: &cli,
-                position: Mutex::new(ExecutionCursor::default()),
-                task: Some(task.id.clone()),
-                task_run: None,
-                interrupt: Some(
-                    runtime
-                        .block_on(super::interrupt_cursor(&fixture.store, &task.id))
-                        .unwrap(),
-                ),
-            };
-            record_run(&running);
-            let result = runtime.block_on(async {
-                let interrupt = async {
-                    while !started.exists() {
-                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                    }
-                    fixture.store.append_interrupt(&task.id).await.unwrap();
-                    fs::write(&release, "").unwrap();
-                };
-                let runner = GraphRunner::new(&running);
-                let (result, ()) = tokio::join!(runner.run(&steps, 0), interrupt);
-                result
-            });
+            let (failed, _) = run_draining("drain-fail", 1, &[op("first"), op("second")]);
             assert!(
-                result.is_err(),
-                "a non-zero draining command must fail, not read Interrupted: {result:?}"
+                failed.is_err(),
+                "a non-zero draining command must fail, not read Interrupted: {failed:?}"
             );
 
             // A draining final command that exits 0 completes the Graph.
-            let started = fixture.directory.path().join("started-last");
-            let release = fixture.directory.path().join("release-last");
-            let child = fixture.directory.path().join("lf-ok");
-            fs::write(
-                &child,
-                format!(
-                    "#!/bin/sh\n: > '{}'\nwhile [ ! -f '{}' ]; do sleep 0.02; done\nexit 0\n",
-                    started.display(),
-                    release.display()
-                ),
-            )
-            .unwrap();
-            fs::set_permissions(&child, fs::Permissions::from_mode(0o755)).unwrap();
-            std::env::set_var("LF_BIN", &child);
-            let last_step = [op("final")];
-            let running = super::RunningGraph {
-                store: fixture.store.clone(),
-                process: loopflow_model::id::LfProcessId::new(),
-                graph: "drain-last",
-                steps: &last_step,
-                message: None,
-                cwd: repo,
-                launcher: &cli,
-                position: Mutex::new(ExecutionCursor::default()),
-                task: Some(task.id.clone()),
-                task_run: None,
-                interrupt: Some(
-                    runtime
-                        .block_on(super::interrupt_cursor(&fixture.store, &task.id))
-                        .unwrap(),
-                ),
-            };
-            record_run(&running);
-            let outcome = runtime.block_on(async {
-                let interrupt = async {
-                    while !started.exists() {
-                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                    }
-                    fixture.store.append_interrupt(&task.id).await.unwrap();
-                    fs::write(&release, "").unwrap();
-                };
-                let runner = GraphRunner::new(&running);
-                let (outcome, ()) = tokio::join!(runner.run(&last_step, 0), interrupt);
-                outcome.unwrap()
-            });
-            assert_eq!(outcome, GraphOutcome::Completed);
-            assert_eq!(running.position.lock().unwrap().index, 1);
+            let (completed, cursor) = run_draining("drain-last", 0, &[op("final")]);
+            assert_eq!(completed.unwrap(), GraphOutcome::Completed);
+            assert_eq!(cursor.index, 1);
         });
     }
 

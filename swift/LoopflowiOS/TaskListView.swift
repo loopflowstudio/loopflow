@@ -76,14 +76,17 @@ final class TaskFeed {
     /// refusal brings it back and says why, its Show running `show` to open the Task.
     func complete(_ task: WorkViewPlan.Content, show: @escaping @MainActor () -> Void) {
         guard let directory = directory(of: task) else { return }
-        let issue = task.identifier ?? task.work.id
+        complete(issue: task.identifier ?? task.work.id, directory: directory, show: Notice.Action("Show", perform: show))
+    }
+
+    func complete(issue: String, directory: String, show: Notice.Action? = nil) {
         notices.post(Notice("\(issue) completed", key: "complete-\(issue)", action: Notice.Action("Undo") { [weak self] in
             self?.change(.reopen(task: issue), issue: issue, verb: "reopened",
                          write: .taskReopen(directory: directory, issue: issue))
         }))
         pendingChanges.make(.complete(task: issue), subject: issue, verb: "completed",
                             write: .taskComplete(directory: directory, issue: issue), notices: notices,
-                            show: Notice.Action("Show", perform: show)) { [weak self] in
+                            show: show) { [weak self] in
             try? await self?.observation?.refresh()
         }
     }

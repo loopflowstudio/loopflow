@@ -117,13 +117,6 @@ struct TaskWorkspaceView: View {
         let execution: TaskExecution?
         let readAt: Revisions?
 
-        init(work: TaskOverview, row: RoadmapTask?, execution: TaskExecution?, readAt: Revisions? = nil) {
-            self.work = work
-            self.row = row
-            self.execution = execution
-            self.readAt = readAt
-        }
-
         func actions(for row: RoadmapTask, outline: WorkflowOutline? = nil, autoPending: Bool? = nil) -> TaskActions {
             TaskActions(work: work, row: row, execution: execution, outline: outline, autoPending: autoPending)
         }
@@ -220,12 +213,7 @@ struct TaskWorkspaceView: View {
                 } else {
                     change(.auto(task: issue, on: true), "put on auto", .taskAutoOn(directory: directory, issue: issue))
                 }
-            }, complete: {
-                feed.notices.post(Notice("\(issue) completed", key: "complete-\(issue)", action: Notice.Action("Undo") {
-                    feed.change(.reopen(task: issue), issue: issue, verb: "reopened", write: .taskReopen(directory: directory, issue: issue))
-                }))
-                change(.complete(task: issue), "completed", .taskComplete(directory: directory, issue: issue))
-            }) {
+            }, complete: { feed.complete(issue: issue, directory: directory) }) {
                 if row.isCompleted {
                     Button("Reopen Task") { change(.reopen(task: issue), "reopened", .taskReopen(directory: directory, issue: issue)) }
                 } else {

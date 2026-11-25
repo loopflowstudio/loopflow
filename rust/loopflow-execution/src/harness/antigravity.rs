@@ -482,10 +482,9 @@ impl super::Launcher for loopflow_harness::Antigravity {
         if let Some(trust) = cwd.and_then(trust) {
             args.extend(["--settings".into(), trust]);
         }
-        let opening = input.filter(|input| !input.is_empty());
-        if let Some(input) = &opening {
-            crate::agent::validate_terminal_turn(input)?;
-            args.extend(["-i".into(), input.clone()]);
+        if let Some(input) = input.filter(|input| !input.is_empty()) {
+            crate::agent::validate_terminal_turn(&input)?;
+            args.extend(["-i".into(), input]);
         } else if launch.kind.is_managed() {
             // `agy` runs no start hook until a turn begins, so a work session
             // opened without `-i` records itself idle here; the held terminal's
@@ -566,10 +565,6 @@ pub(crate) fn prompt_ready(terminal: &loopflow_terminal::ghostty_vt::Terminal) -
         return false;
     }
     let footer = &lines[bottom + 1..];
-    let has_shortcuts = footer.iter().any(|line| line.contains("? for shortcuts"));
-    if !has_shortcuts {
-        return false;
-    }
     let blocked = [
         "esc to cancel",
         "↑/↓ Navigate",
@@ -577,9 +572,10 @@ pub(crate) fn prompt_ready(terminal: &loopflow_terminal::ghostty_vt::Terminal) -
         "enter Confirm",
         "enter Select",
     ];
-    !footer
-        .iter()
-        .any(|line| blocked.iter().any(|marker| line.contains(marker)))
+    footer.iter().any(|line| line.contains("? for shortcuts"))
+        && !footer
+            .iter()
+            .any(|line| blocked.iter().any(|marker| line.contains(marker)))
 }
 
 /// Settings for one session that let the TUI start in a worktree lf created

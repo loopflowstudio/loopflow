@@ -483,7 +483,6 @@ fn a_transient_failure_is_lfs_to_retry_only_where_the_provider_does_not() {
 fn every_harness_reads_a_synced_skill() {
     use crate::skills::{sync_skills, SkillSyncOptions};
     use loopflow_definitions::text::split_frontmatter;
-    use loopflow_harness::HarnessKind;
     use std::fs;
 
     let home = tempfile::TempDir::new().unwrap();

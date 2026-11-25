@@ -101,7 +101,6 @@ Deferred to gate / CI (high local Machine load ~100+): `cargo clippy --all-targe
 ## Remaining
 
 - **Live QA on real `agy 1.5.17` (qa / gate):** demo 1 end to end — open idle wake from `lf steer`, a Graph settling at an interactive step, and a draft, `/` menu or model picker left untouched until the prompt is empty. No live run of the Pass 4 path exists yet; only unit fixtures and the 2026-11-25 probes.
-- **Small shape fix (compress):** `server/wake.rs::wake` handles `IdleReach::Terminal` in an early `if let` and then needs `unreachable!("handled above")` in the later match; fold it into one match on `reach`.
 - Clippy, `documented_commands::` and the acceptance list below were not run locally (Machine load); gate runs them.
 
 ## Acceptance at gate

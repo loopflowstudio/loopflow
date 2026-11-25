@@ -1,41 +1,45 @@
-at: 24dd0805da9a0db23f8b1967fd3240c9091d8e64
+at: edfc41596f06d0f05247efeeb1225c776ed3fb2c
 first:
   - path: docs/sessions.md
-    why: When open and reopened conversations receive steers across all five harnesses
-  - path: scratch/plan.md
-    why: Pass 1-4 history, native probes, and VT-guarded held-terminal wake design
+    why: When open and reopened conversations hear steers across all five harnesses
+  - path: docs/config.md
+    why: Antigravity reopen and idle-wake behavior
   - path: docs/dev/codebase.md
     why: What adding a provider requires
+  - path: docs/dev/environment.md
+    why: Per-harness caller-session environment markers cleared on launch
+  - path: scratch/plan.md
+    why: Pass 1-4 history, probes, and held-terminal wake design
   - path: rust/loopflow-harness/src/lib.rs
-    why: Required caller markers, driver recognition and sign-in advice
+    why: Required caller markers, driver recognition, and sign-in advice
   - path: rust/loopflow-execution/src/harness/mod.rs
-    why: Idle reach, reopen delivery and empty-thread replay
+    why: Idle reach, reopen delivery, and empty-thread replay
   - path: rust/loopflow-terminal/src/ghostty_vt.rs
-    why: Bracketed paste mode and visible screen text exposed on held terminals
+    why: Bracketed paste mode and visible screen text on held terminals
   - path: rust/loopflow-storage/src/sqlite/steers.rs
-    why: Endpoints and held terminal IDs recorded for each idle candidate
+    why: Endpoints and held terminal IDs recorded for idle candidates
   - path: rust/loopflow-execution/src/steer.rs
     why: IdleReach::Terminal, shared WAKE_PROMPT, and endpoint selection
   - path: rust/loopflow-execution/src/harness/antigravity.rs
-    why: Held-terminal idle reach, opening idle recording, and VT prompt_ready guard
+    why: Held-terminal idle reach, opening idle recording, and prompt_ready guard
   - path: rust/loopflow-execution/src/transport/input.rs
     why: Filtering terminal replies and mouse events from user keystrokes
   - path: rust/loopflow-execution/src/transport/hosted.rs
-    why: VT-guarded bracketed-paste wake injection with typing/paste/replay guards
+    why: VT-guarded bracketed-paste wake with typing, paste, and replay checks
   - path: rust/loopflow-execution/src/transport/registry.rs
     why: Registry::wake_idle_prompt dispatch on the held-terminals thread
   - path: rust/loopflow/src/server/wake.rs
-    why: Option A held-terminal wake, deferred retries, and unconditional 5-harness parity
+    why: Unified reach match, deferred retries, and unconditional 5-harness wake tests
   - path: rust/loopflow/src/server/boundary.rs
-    why: Post-Stop held-terminal wake retries while TUI redraws
+    why: Post-Stop held-terminal wake retries while the TUI redraws
   - path: rust/loopflow-execution/src/harness/native_session.rs
     why: Waiting news starts the Antigravity prompt hook on reopen
   - path: rust/loopflow/tests/session_launch_contract.rs
-    why: Resume delivers once and stays quiet afterward
+    why: Reopen delivers waiting steers once and stays quiet afterward
   - path: rust/loopflow-execution/tests/support/agy_cli.py
     why: Which hook replies the native provider drops
   - path: rust/loopflow-execution/src/harness/launch_matrix.rs
     why: Four launch kinds under both permission settings
   - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
-    why: Worker outcomes through Task commands
+    why: Worker outcomes across HarnessKind::ALL through Task commands
 hide: []

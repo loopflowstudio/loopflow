@@ -79,6 +79,12 @@ pub(super) fn keys(mut bytes: &[u8]) -> impl Iterator<Item = u8> + '_ {
     })
 }
 
+fn csi_params_len(body: &[u8]) -> usize {
+    body.iter()
+        .take_while(|byte| byte.is_ascii_digit() || **byte == b';')
+        .count()
+}
+
 /// The length of the terminal report `bytes` starts with: an OSC or DCS
 /// string, a cursor position, status, device attributes, mode or window
 /// report, or a focus event.
@@ -94,12 +100,7 @@ fn report_length(bytes: &[u8]) -> Option<usize> {
         [0x1b, b'[', body @ ..] => {
             let private = matches!(body.first(), Some(b'?' | b'>' | b'='));
             let mut at = usize::from(private);
-            while body
-                .get(at)
-                .is_some_and(|byte| byte.is_ascii_digit() || *byte == b';')
-            {
-                at += 1;
-            }
+            at += csi_params_len(&body[at..]);
             let dollar = body.get(at) == Some(&b'$');
             at += usize::from(dollar);
             let report = match *body.get(at)? {
@@ -138,28 +139,13 @@ fn mouse_event_length(bytes: &[u8]) -> Option<usize> {
         [0x1b, b'[', b'M', _, _, _, ..] => Some(6),
         // SGR mouse tracking: ESC [ < digits ; digits ; digits (M | m)
         [0x1b, b'[', b'<', body @ ..] => {
-            let mut at = 0;
-            while body
-                .get(at)
-                .is_some_and(|byte| byte.is_ascii_digit() || *byte == b';')
-            {
-                at += 1;
-            }
+            let at = csi_params_len(body);
             (at > 0 && matches!(body.get(at), Some(b'M' | b'm'))).then_some(at + 4)
         }
         // URXVT mouse tracking: ESC [ digits ; digits ; digits M
         [0x1b, b'[', body @ ..] => {
-            let mut at = 0;
-            let mut semicolons = 0;
-            while body
-                .get(at)
-                .is_some_and(|byte| byte.is_ascii_digit() || *byte == b';')
-            {
-                if body[at] == b';' {
-                    semicolons += 1;
-                }
-                at += 1;
-            }
+            let at = csi_params_len(body);
+            let semicolons = body[..at].iter().filter(|&&byte| byte == b';').count();
             (semicolons == 2 && body.get(at) == Some(&b'M')).then_some(at + 3)
         }
         _ => None,

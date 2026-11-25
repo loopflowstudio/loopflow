@@ -940,7 +940,6 @@ that lapses for the next boundary:
   another conversation, or whose provider refuses, closes without answering.
   A turn already running takes the message as a steer. OpenCode's TUI shows
   the answer but not the message that caused it.
-
 - Antigravity: its held terminal (`agent_sessions.held_terminal_id`). When the
   held terminal's retained `libghostty-vt` screen shows `agy`'s empty idle
   prompt (`───` / `>` / `───` with `? for shortcuts`, bracketed paste enabled,

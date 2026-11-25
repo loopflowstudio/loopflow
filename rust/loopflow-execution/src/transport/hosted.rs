@@ -233,19 +233,17 @@ impl Hosted {
         use super::registry::WakeTerminal;
         if self.exit.is_some()
             || self.settling.is_some()
-            || (self.replayed_through > 0 && child.position() < self.replayed_through)
+            || child.position() < self.replayed_through
             || self.pending_input.in_paste()
             || !self.pending_input.is_empty()
             || self
                 .last_user_key
                 .is_some_and(|at| at.elapsed() < USER_KEY_QUIET)
+            || !self
+                .output
+                .terminal()
+                .is_some_and(crate::harness::antigravity::prompt_ready)
         {
-            return WakeTerminal::NotReady;
-        }
-        let Some(terminal) = self.output.terminal() else {
-            return WakeTerminal::NotReady;
-        };
-        if !crate::harness::antigravity::prompt_ready(terminal) {
             return WakeTerminal::NotReady;
         }
         let payload = format!("\x1b[200~{prompt}\x1b[201~\r");

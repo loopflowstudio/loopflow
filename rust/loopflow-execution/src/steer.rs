@@ -219,7 +219,7 @@ pub fn idle_conversations(
         .into_iter()
         .filter_map(|candidate| {
             // Check the harness endpoint before querying the OS process table
-            // so unreachable sessions (e.g. Antigravity) cost no syscalls.
+            // so sessions without one cost no syscalls.
             let reach = idle_reach(&candidate)?;
             is_live(candidate.identity).then_some(IdleConversation {
                 adapter: candidate.adapter,

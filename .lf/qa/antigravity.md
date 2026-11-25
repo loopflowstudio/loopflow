@@ -117,8 +117,9 @@ reopen with nothing waiting has no `-i` and adds no `USER_INPUT` row. Wait
 for the answer line before Esc: an Esc while the model still reads the steer
 file interrupts the turn, and the steer still reads `delivered`. `lf comment <task>` names the Task,
 so the server starts the closed conversation itself with the same line.
-While agy is open and idle, a repository steer stays pending until the next
-typed turn (LOO-1099).
+While agy is open and idle at an empty prompt, a steer or Task update wakes
+its held terminal with the same line; drafts, `/` menus, model pickers, and
+trust dialogs hold off the wake until the prompt is empty again.
 
 # Checking inline steer display
 

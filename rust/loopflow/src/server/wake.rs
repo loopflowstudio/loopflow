@@ -109,33 +109,34 @@ impl Watcher {
         let Some(store) = &self.store else {
             return;
         };
-        let nudged = DEFERRED.swap(false, Ordering::AcqRel);
         match store
             .task_update_revision()
             .and_then(|updates| Ok((updates, store.steer_revision()?)))
         {
-            Ok(revision) if self.seen != Some(revision) => {
-                self.seen = Some(revision);
-                if let Some(terminals) = &self.terminals {
-                    let mut agents = loopflow_execution::agent::MachineAgents::default();
-                    start_stopped(
-                        store,
-                        |session| {
-                            loopflow_execution::ops::recovery::launch_failure(
-                                store,
-                                session,
-                                &mut agents,
-                            )
-                        },
-                        |session, request| hold(terminals, session, request),
-                    );
+            Ok(revision) => {
+                let moved = self.seen != Some(revision);
+                let nudged = DEFERRED.swap(false, Ordering::AcqRel);
+                if moved {
+                    self.seen = Some(revision);
+                    if let Some(terminals) = &self.terminals {
+                        let mut agents = loopflow_execution::agent::MachineAgents::default();
+                        start_stopped(
+                            store,
+                            |session| {
+                                loopflow_execution::ops::recovery::launch_failure(
+                                    store,
+                                    session,
+                                    &mut agents,
+                                )
+                            },
+                            |session, request| hold(terminals, session, request),
+                        );
+                    }
                 }
-                self.deferred = wake_idle(store, None, self.terminals.as_deref());
+                if moved || self.deferred || nudged {
+                    self.deferred = wake_idle(store, None, self.terminals.as_deref());
+                }
             }
-            Ok(_) if self.deferred || nudged => {
-                self.deferred = wake_idle(store, None, self.terminals.as_deref());
-            }
-            Ok(_) => {}
             Err(error) => {
                 tracing::warn!(%error, "steer and Task update revisions unread");
                 self.store = None;
@@ -235,32 +236,33 @@ fn wake(
         if !store.has_undelivered_steers(session)? {
             return Ok(false);
         }
-        if let IdleReach::Terminal(terminal) = reach {
-            let Some(terminals) = terminals else {
-                return Ok(false);
-            };
-            return match terminals.wake_idle_prompt(terminal, WAKE_PROMPT)? {
-                WakeTerminal::Injected => {
-                    store.record_woken(adapter)?;
-                    Ok(false)
-                }
-                WakeTerminal::NotReady => Ok(true),
-                WakeTerminal::Absent => Ok(false),
-            };
-        }
-        let Some(thread) = thread.as_deref() else {
-            return Ok(false);
-        };
         // Connect before claiming, so an unreachable conversation keeps its
         // news for its next boundary.
-        let reach = match reach {
-            IdleReach::Inbox(Inbox::Claude(key)) => match open_inbox(key, thread)? {
-                Some((socket, token)) => Reach::Claude(socket, token),
-                None => return Ok(false),
-            },
-            IdleReach::Codex(endpoint) => Reach::Codex(endpoint),
-            IdleReach::Inbox(Inbox::Socket(socket)) => Reach::Socket(open_socket(socket)?),
-            IdleReach::Terminal(_) => unreachable!("handled above"),
+        let (thread, reach) = match (reach, thread.as_deref()) {
+            (IdleReach::Terminal(terminal), _) => {
+                let Some(terminals) = terminals else {
+                    return Ok(false);
+                };
+                return match terminals.wake_idle_prompt(terminal, WAKE_PROMPT)? {
+                    WakeTerminal::Injected => {
+                        store.record_woken(adapter)?;
+                        Ok(false)
+                    }
+                    WakeTerminal::NotReady => Ok(true),
+                    WakeTerminal::Absent => Ok(false),
+                };
+            }
+            (IdleReach::Inbox(Inbox::Claude(key)), Some(thread)) => {
+                match open_inbox(key, thread)? {
+                    Some((socket, token)) => (thread, Reach::Claude(socket, token)),
+                    None => return Ok(false),
+                }
+            }
+            (IdleReach::Codex(endpoint), Some(thread)) => (thread, Reach::Codex(endpoint)),
+            (IdleReach::Inbox(Inbox::Socket(socket)), Some(thread)) => {
+                (thread, Reach::Socket(open_socket(socket)?))
+            }
+            (_, None) => return Ok(false),
         };
         let steers = loopflow_execution::steer::claim(
             store,
@@ -829,6 +831,21 @@ mod tests {
         (registry, terminal)
     }
 
+    fn wait_until(what: &str, mut ready: impl FnMut() -> bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !ready() {
+            assert!(std::time::Instant::now() < deadline, "timed out: {what}");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    fn agy_idle_screen() -> String {
+        let rule = "─".repeat(80);
+        format!(
+            r"\033[?2004h\033[2J\033[H{rule}\r\n\033[94m>\033[m\r\n{rule}\r\n? for shortcuts   auto · Gemini 4 Neon · high\r\n"
+        )
+    }
+
     #[test]
     fn every_harness_wakes_its_idle_work_session() {
         for harness in HarnessKind::ALL {
@@ -938,10 +955,10 @@ mod tests {
             }
             HarnessKind::Antigravity => {
                 let pasted = fixture.home.path().join("pasted");
-                let rule = "─".repeat(80);
+                let idle = agy_idle_screen();
                 let script = format!(
                     r#"stty -echo
-printf '\033[?2004h\033[2J\033[H{rule}\r\n\033[94m>\033[m\r\n{rule}\r\n? for shortcuts   auto · Gemini 4 Neon · high\r\n'
+printf '{idle}'
 IFS= read -r line
 printf '%s' "$line" > "{}"
 "#,
@@ -955,15 +972,7 @@ printf '%s' "$line" > "{}"
                 (
                     None,
                     Box::new(move || {
-                        let deadline =
-                            std::time::Instant::now() + std::time::Duration::from_secs(5);
-                        while !pasted.exists() {
-                            assert!(
-                                std::time::Instant::now() < deadline,
-                                "held agy terminal never received wake paste"
-                            );
-                            std::thread::sleep(std::time::Duration::from_millis(20));
-                        }
+                        wait_until("held agy terminal received wake paste", || pasted.exists());
                         assert_eq!(
                             std::fs::read_to_string(&pasted).unwrap(),
                             format!("\x1b[200~{}\x1b[201~", super::WAKE_PROMPT)
@@ -1085,11 +1094,12 @@ printf '%s' "$line" > "{}"
         let cleared = fixture.home.path().join("cleared");
         let pasted = fixture.home.path().join("pasted");
         let rule = "─".repeat(80);
+        let idle = agy_idle_screen();
         let script = format!(
             r#"stty -echo
 printf '\033[?2004h\033[2J\033[H{rule}\r\n> keep this draft\r\n{rule}\r\nauto · Gemini 4 Neon · high\r\n'
 while [ ! -f "{clear}" ]; do sleep 0.05; done
-printf '\033[2J\033[H{rule}\r\n\033[94m>\033[m\r\n{rule}\r\n? for shortcuts   auto · Gemini 4 Neon · high\r\n'
+printf '{idle}'
 : > "{cleared}"
 IFS= read -r line
 printf '%s' "$line" > "{pasted}"
@@ -1128,26 +1138,13 @@ printf '%s' "$line" > "{pasted}"
         // Once the person clears the draft, the next watcher tick wakes it
         // without needing another steer or revision move.
         std::fs::write(&clear, "").unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while !cleared.exists() {
-            assert!(std::time::Instant::now() < deadline);
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
+        wait_until("draft cleared", || cleared.exists());
         // Poll until Hosted has read the cleared screen from the holder.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while watcher.deferred {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "deferred wake never fired"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(50));
+        wait_until("deferred wake fired", || {
             watcher.read(&path);
-        }
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while !pasted.exists() {
-            assert!(std::time::Instant::now() < deadline);
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
+            !watcher.deferred
+        });
+        wait_until("wake prompt pasted", || pasted.exists());
         assert_eq!(
             std::fs::read_to_string(&pasted).unwrap(),
             format!("\x1b[200~{}\x1b[201~", super::WAKE_PROMPT)

@@ -2470,7 +2470,7 @@
           "type": "string"
         },
         "extends": {
-          "description": "Skill named by `extends:` in frontmatter (`lf:<name>`, `<name>`, or\n`builtin`), when the skill extends another.",
+          "description": "Parent skill named by `extends:` (`lf:<name>` for a builtin, or `<name>`),\nwhen the skill extends another.",
           "type": [
             "string",
             "null"

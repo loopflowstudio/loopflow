@@ -107,6 +107,7 @@ impl SkillSource {
     }
 }
 
+#[derive(Clone, Copy)]
 enum ExtendsTarget<'a> {
     Builtin(&'static str),
     Catalog(&'a SkillSource),
@@ -139,8 +140,7 @@ fn merge_extension(
     } else {
         // Native Claude/Codex frontmatter (e.g. `context: fork`, `agent: Explore`)
         // belongs to the provider's schema, not Loopflow launch settings.
-        let mut map = serde_yaml_ng::Mapping::new();
-        if let Some(description) = serde_yaml_ng::from_str::<Value>(parent_frontmatter)
+        let map = serde_yaml_ng::from_str::<Value>(parent_frontmatter)
             .ok()
             .and_then(|value| {
                 value
@@ -148,29 +148,25 @@ fn merge_extension(
                     .and_then(Value::as_str)
                     .map(str::to_string)
             })
-        {
-            map.insert("description".into(), description.into());
-        }
+            .map(|description| {
+                serde_yaml_ng::Mapping::from_iter([("description".into(), description.into())])
+            })
+            .unwrap_or_default();
         Value::Mapping(map)
     };
     let mut child = Value::Mapping(child_meta);
     crate::config::normalize_context(&mut child);
     if let (Some(parent_map), Some(child_map)) = (merged.as_mapping_mut(), child.as_mapping()) {
-        if child_map.get("agent").is_some_and(|value| !value.is_null()) {
-            parent_map.remove("default_agent");
-        }
-        if child_map
-            .get("default_agent")
-            .is_some_and(|value| !value.is_null())
-        {
-            parent_map.remove("agent");
+        for (set, clear) in [("agent", "default_agent"), ("default_agent", "agent")] {
+            if child_map.get(set).is_some_and(|value| !value.is_null()) {
+                parent_map.remove(clear);
+            }
         }
     }
     crate::config::files::overlay(&mut merged, &child);
     let merged = merged
-        .as_mapping_mut()
+        .as_mapping()
         .expect("normalized skill frontmatter is a mapping");
-    merged.remove(Value::String("extends".to_string()));
     let body = match (parent_body.trim_end(), child_body.trim_start()) {
         ("", child) => child.to_string(),
         (base, "") => format!("{base}\n"),
@@ -299,7 +295,7 @@ impl SkillCatalog {
         else {
             return Ok(content);
         };
-        let Some(extends) = child_meta.remove(Value::String("extends".into())) else {
+        let Some(extends) = child_meta.remove("extends") else {
             return Ok(content);
         };
         let Some(target) = extends.as_str().map(str::trim).filter(|s| !s.is_empty()) else {
@@ -319,18 +315,20 @@ impl SkillCatalog {
         path: &Path,
         target: &str,
     ) -> Result<ExtendsTarget<'_>, LoadError> {
-        if target == "builtin" {
-            // Temporary compatibility alias for released lf 0.16.0; LOO-1107 removes
-            // this and migrates `.lf/skills/*.md` to `extends: lf:<name>`.
-            return builtins::resolve_builtin_skill(&source.name)
+        let resolve_builtin = |name: &str| {
+            builtins::resolve_builtin_skill(name)
                 .map(ExtendsTarget::Builtin)
                 .ok_or_else(|| {
                     LoadError::InvalidSkill(format!(
-                        "{}: extends `builtin`, but no builtin skill is named {:?}",
-                        path.display(),
-                        source.name
+                        "{}: no builtin skill is named {name:?}",
+                        path.display()
                     ))
-                });
+                })
+        };
+        if target == "builtin" {
+            // Temporary compatibility alias for released lf 0.16.0; LOO-1107 removes
+            // this and migrates `.lf/skills/*.md` to `extends: lf:<name>`.
+            return resolve_builtin(&source.name);
         }
         if let Some(builtin_name) = target.strip_prefix("lf:") {
             let builtin_name = builtin_name.trim();
@@ -340,33 +338,13 @@ impl SkillCatalog {
                     path.display()
                 )));
             }
-            return builtins::resolve_builtin_skill(builtin_name)
-                .map(ExtendsTarget::Builtin)
-                .ok_or_else(|| {
-                    LoadError::InvalidSkill(format!(
-                        "{}: no builtin skill is named {:?}",
-                        path.display(),
-                        builtin_name
-                    ))
-                });
+            return resolve_builtin(builtin_name);
         }
         let parent = self.resolve(target)?.ok_or_else(|| {
-            LoadError::InvalidSkill(format!(
-                "{}: no skill is named {:?}",
-                path.display(),
-                target
-            ))
+            LoadError::InvalidSkill(format!("{}: no skill is named {target:?}", path.display()))
         })?;
         if parent.name == source.name {
-            return builtins::resolve_builtin_skill(&source.name)
-                .map(ExtendsTarget::Builtin)
-                .ok_or_else(|| {
-                    LoadError::InvalidSkill(format!(
-                        "{}: no builtin skill is named {:?}",
-                        path.display(),
-                        source.name
-                    ))
-                });
+            return resolve_builtin(&source.name);
         }
         Ok(ExtendsTarget::Catalog(parent))
     }
@@ -424,17 +402,17 @@ impl SkillCatalog {
         let raw_extends = (source.dialect == SkillDialect::Loopflow)
             .then(|| declared_extends(&content))
             .flatten();
-        let extends = raw_extends.as_deref().map(|target| {
-            match self.resolve_extends_target(source, path, target) {
-                Ok(ExtendsTarget::Builtin(canonical)) => format!("lf:{canonical}"),
-                _ => target.to_string(),
-            }
+        let first_step = raw_extends
+            .as_deref()
+            .and_then(|target| self.resolve_extends_target(source, path, target).ok());
+        let extends = raw_extends.map(|target| match first_step {
+            Some(ExtendsTarget::Builtin(canonical)) => format!("lf:{canonical}"),
+            _ => target,
         });
         let builtin = builtins::resolve_builtin_skill(&source.name).and_then(|canonical| {
             let builtin = builtins::get_builtin_skill(canonical)?;
-            let relation = if raw_extends
-                .as_deref()
-                .is_some_and(|target| self.chain_extends_builtin(source, path, target, canonical))
+            let relation = if first_step
+                .is_some_and(|step| self.chain_extends_builtin(&source.name, step, canonical))
             {
                 BuiltinRelation::Extends
             } else if content.trim() == builtin.trim() {
@@ -449,13 +427,12 @@ impl SkillCatalog {
 
     fn chain_extends_builtin(
         &self,
-        source: &SkillSource,
-        path: &Path,
-        target: &str,
+        start: &str,
+        first: ExtendsTarget<'_>,
         canonical: &str,
     ) -> bool {
-        let mut visited = HashSet::from([source.name.as_str()]);
-        let mut next = self.resolve_extends_target(source, path, target).ok();
+        let mut visited = HashSet::from([start]);
+        let mut next = Some(first);
         while let Some(step) = next {
             match step {
                 ExtendsTarget::Builtin(name) => return name == canonical,
@@ -464,20 +441,18 @@ impl SkillCatalog {
                         return false;
                     }
                     let Some(parent_path) = parent.path.as_ref() else {
-                        return builtins::resolve_builtin_skill(&parent.name) == Some(canonical);
+                        return parent.name == canonical;
                     };
                     if parent.dialect != SkillDialect::Loopflow {
                         return false;
                     }
-                    let Ok(content) = crate::observe::read_to_string(parent_path) else {
-                        return false;
-                    };
-                    let Some(parent_target) = declared_extends(&content) else {
-                        return false;
-                    };
-                    next = self
-                        .resolve_extends_target(parent, parent_path, &parent_target)
-                        .ok();
+                    next = crate::observe::read_to_string(parent_path)
+                        .ok()
+                        .and_then(|content| declared_extends(&content))
+                        .and_then(|target| {
+                            self.resolve_extends_target(parent, parent_path, &target)
+                                .ok()
+                        });
                 }
             }
         }

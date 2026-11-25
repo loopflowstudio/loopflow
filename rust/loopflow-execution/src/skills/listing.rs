@@ -18,8 +18,8 @@ pub struct Entry {
     /// there is no such builtin or the entry is the builtin.
     #[serde(deserialize_with = "Option::deserialize")]
     pub builtin: Option<BuiltinRelation>,
-    /// Skill named by `extends:` in frontmatter (`lf:<name>`, `<name>`, or
-    /// `builtin`), when the skill extends another.
+    /// Parent skill named by `extends:` (`lf:<name>` for a builtin, or `<name>`),
+    /// when the skill extends another.
     #[serde(deserialize_with = "Option::deserialize")]
     pub extends: Option<String>,
 }

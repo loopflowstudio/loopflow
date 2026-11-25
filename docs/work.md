@@ -144,8 +144,20 @@ lf task create --session SESSION --title "Finish the prototype"
 lf session bind SESSION --task LOO-12          # make SESSION this Task's primary conversation
 ```
 
-Adopting preserves the branch, uncommitted and untracked files, and the
-Session's provider history and live terminal attachment.
+Binding and creation change what a conversation belongs to, never where it runs.
+The conversation keeps its directory, uncommitted files, provider history, and
+live terminal attachment:
+
+```text
+$ lf session bind session_94d9963b --task LOO-12
+Session session_94d9963b belongs to LOO-12.
+Conversation stays in /src/repo.research; LOO-12's checkout is /src/repo.loo-12.
+```
+
+In an unowned worktree like `/src/repo.research`, `lf resume` and
+`lf resume -a <agent>` keep finding the bound conversation there. From anywhere
+(including a shared `main` or Wave checkout), `lf resume LOO-12` opens it in
+that same directory.
 
 - Plain `lf task create` always files new top-level work, even inside an
   existing Task checkout or Session. Pass `--parent <ID>` to file a
@@ -153,16 +165,16 @@ Session's provider history and live terminal attachment.
   explicitly to adopt.
 - `--worktree` without `--run` adopts the checkout only; adding `--run` also
   starts the Task's conversation and Graph.
-- Main and Wave checkouts stay shared: binding a Session there transfers the
-  conversation to the Task without moving its directory until you run
-  `lf task checkout`.
-- Binding an unfinished interactive Session to a Task that already has a
-  worktree switches that Session's working directory to the Task's worktree
-  (existing files stay where they were). Closed or headless Sessions cannot
-  become primary.
+- An open Task with no checkout adopts an unowned linked worktree on
+  `lf task create --session` or `lf session bind`. Main and Wave checkouts stay
+  shared, and done Tasks stay done without adopting a checkout.
+- When a Task already has a different checkout, `lf session bind` notes both
+  paths and leaves the conversation where it is. Graph workers,
+  `lf task changes`, PR delivery, and `lf task move` still act on the Task's
+  checkout. Closed or headless Sessions cannot become primary.
 - In Loopflow Desktop, use **Create Task from this conversation**, **Bind to
   Task**, or **Make primary Task conversation** from the Task menu or command
-  palette.
+  palette. The conversation and its files stay in their current directory.
 
 ## File follow-ups from a Task
 

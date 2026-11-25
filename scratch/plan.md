@@ -164,13 +164,11 @@ lf resume -a claude:fable                   # same Session, new thread, still in
   - `lf session bind` `after_help` (`rust/loopflow/src/lf/mod.rs:1829`): remove
     the directory-switch sentences; state that the conversation stays in its
     current directory.
-  - `docs/work.md:156-162`: fix both the false `lf task checkout` claim (lines
-    156-158) and the bind directory-switch claim (lines 159-161) so the doc
-    states one rule: binding and creation both keep the conversation in its
-    directory, while an open Task without a worktree adopts an unowned linked
-    checkout.
-  - `docs/dev/reference-models.md:478-484`: update binding rules to state that
-    binding leaves `cwd` unchanged.
+  - `docs/work.md`, `docs/sessions.md`, `docs/dev/reference-models.md`: updated
+    in `write-docs` to state that binding and creation leave a conversation in
+    its directory, document the split-checkout bind output and resume behavior
+    (unowned worktree vs. shared `main`/Wave checkouts), and update workspace
+    admission rules.
 - **Desktop (`swift/`):**
   - `swift/LoopflowMac/Views/SessionActionSheet.swift:75`: replace the
     four-sentence split copy with `"This conversation and its files stay in their current directory."`
@@ -249,11 +247,11 @@ the moves cleanly in one pass:
      `a_closed_tasks_conversations_reopen_in_the_main_checkout` still pass).
    - Emit the one-line factual split-directory diagnostic in `adoption::save`
      when `existing.worktree` differs from the Session's checkout root.
-3. **Update CLI help, docs, and Swift copy/tests:**
+3. **Update CLI help and Swift copy/tests (docs updated in `write-docs`):**
    - `rust/loopflow/src/lf/mod.rs:1829`
-   - `docs/work.md:156-162`, `docs/dev/reference-models.md:478-484`
    - `swift/LoopflowMac/Views/SessionActionSheet.swift:75`
    - `swift/LoopflowTests/SessionControlsTests.swift` (lines 98, 128, 210)
+   - Verify implementation matches `docs/work.md`, `docs/sessions.md`, and `docs/dev/reference-models.md`
 4. **Verify:**
 
 ```bash

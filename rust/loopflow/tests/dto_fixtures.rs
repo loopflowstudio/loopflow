@@ -1249,25 +1249,6 @@ fn task_locations_preserve_owner_freshness_and_unavailable_evidence() {
 }
 
 #[test]
-fn task_files_frames_preserve_checkout_identity_and_heartbeat() {
-    use loopflow_execution::ops::task::TaskFilesFrame;
-    let wire: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/task_files_frames.json"
-    ))
-    .unwrap();
-    let frames: Vec<TaskFilesFrame> = serde_json::from_value(wire.clone()).unwrap();
-    assert_eq!(frames[0].paths, ["note.txt", ".git/index", ""]);
-    assert!(frames[1].paths.is_empty());
-    assert_eq!(frames[0].request, frames[1].request);
-    assert_eq!(serde_json::to_value(frames).unwrap(), wire);
-    for field in ["request", "task_id", "machine_id", "checkout", "paths"] {
-        let mut missing = wire[0].clone();
-        missing.as_object_mut().unwrap().remove(field);
-        assert!(serde_json::from_value::<TaskFilesFrame>(missing).is_err());
-    }
-}
-
-#[test]
 fn task_overview_excludes_diagnostic_process_history() {
     let input = include_str!("../../../tests/fixtures/dto/task_overview.json");
     let overview: loopflow_execution::task_work::TaskOverview =

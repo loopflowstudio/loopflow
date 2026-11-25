@@ -1532,6 +1532,9 @@ pub fn restart_provider(store: &SqliteStore, session: &LfSession) -> Result<()> 
         request: uuid::Uuid::new_v4().to_string(),
         rows: 0,
         cols: 0,
+        task: None,
+        machine: None,
+        agent: None,
     })?;
     Ok(())
 }

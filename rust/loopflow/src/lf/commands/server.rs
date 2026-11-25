@@ -4,13 +4,14 @@ use crate::lf::ServerCommand;
 
 pub fn run(command: &ServerCommand) -> anyhow::Result<()> {
     match command {
-        ServerCommand::Receipt { request_id, .. } => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&loopflow_execution::engine::creation::lookup(
-                    request_id
-                )?)?
-            );
+        ServerCommand::Receipt {
+            request_id, task, ..
+        } => {
+            let read = super::read::Read::CreationGet {
+                request_id: request_id.clone(),
+                task: task.clone(),
+            };
+            println!("{}", serde_json::to_string_pretty(&read.read()?)?);
             Ok(())
         }
         ServerCommand::Run => crate::server::run(),

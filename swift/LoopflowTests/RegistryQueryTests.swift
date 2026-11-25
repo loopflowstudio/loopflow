@@ -47,16 +47,14 @@ struct RegistryQueryTests {
         #expect(value["step"] as? String == "write-code")
     }
 
-    @Test("Graph logs read captured execution from the content Machine, never a peer path locally")
-    func contentRoutedGraphLog() async throws {
+    @Test("A Graph log subscribes to the Task alone; the server reads it wherever the Task runs")
+    func taskRoutedGraphLog() async throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let detail = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/graph_detail.json"), encoding: .utf8)
         let expected = try JSONDecoder().decode(GraphProcessDetail.self, from: Data(detail.utf8))
         let overview = "{\"sessions\":[],\"graph_processes\":[],\"graph\":{\"name\":\"feature\",\"interactive_steps\":[],\"position\":{\"kind\":\"at\",\"step\":\"demo\"},\"steps\":[{\"name\":\"demo\",\"interactive\":true}],\"current_step\":0,\"sentence\":\"Waiting for you at demo.\"}}"
-        let query = RegistryQuery(subscribeRead: { args, cwd in
-            guard args == ["--machine", "peer", "--repo-id", "plan", "task", "show", "task", "--json", "--subscribe"], cwd == nil else {
-                throw RegistryQueryError("A peer run page must never use local execution")
-            }
+        let query = RegistryQuery(subscribeRead: { read in
+            #expect(read == .taskGet(directory: "/", issue: "task"))
             let body = "{\"overview\":\(overview),\"graph_processes\":[\(detail)],\"comments\":{\"identifier\":\"task\",\"comments\":[],\"pending_sync\":[],\"conflicts\":{},\"refresh_error\":null},\"execution\":null,\"row\":null}"
             let lines = AsyncThrowingStream<Data, any Error> { continuation in
                 continuation.yield(Data("{\"answers\":null,\"unavailable\":null,\"body\":\(body),\"read_at\":{\"planning\":7}}".utf8))
@@ -64,7 +62,7 @@ struct RegistryQueryTests {
             }
             return LineSubscription(lines: lines, checkpoint: { _ in }, cancel: {}, unreadable: { nil })
         }) { _, _ in throw RegistryQueryError("Unexpected one-shot read") }
-        let subscription = try await query.onMachine("peer", repository: "plan").subscribeTask(task: "task")
+        let subscription = try query.subscribeTask(task: "task")
         var iterator = subscription.lines.makeAsyncIterator()
         let line = try #require(await iterator.next())
         let frame = try WorkFrame.decode(part: .task,
@@ -73,17 +71,6 @@ struct RegistryQueryTests {
         guard case .task(let reading?) = frame.content else { Issue.record("Missing Task reading"); return }
         #expect(reading.graphProcesses == [expected])
         #expect(reading.work.graph?.position == .at(step: "demo"))
-    }
-
-    @Test("Session history routes to the content Machine")
-    func contentRoutedSessionHistory() async throws {
-        let query = RegistryQuery { args, cwd in
-            guard args == ["--machine", "peer", "--repo-id", "plan", "session", "history", "show", "session-1"], cwd == nil else {
-                throw RegistryQueryError("Wrong Session history owner")
-            }
-            return "gate failed: exit 1"
-        }
-        #expect(try await query.onMachine("peer", repository: "plan").sessionHistoryText(id: "session-1") == "gate failed: exit 1")
     }
 
     /// The JSON `read::tests::desktop_encodings_name_their_reads` decodes in Rust.
@@ -109,6 +96,13 @@ struct RegistryQueryTests {
         #expect(try object(view) == object(#"{"kind":"desktop.view.get","directory":"/r","expression":"state:backlog"}"#))
         #expect(view.cwd == "/r")
         #expect(ServedRead.waveList.cwd == nil)
+        #expect(try object(ServedRead.taskFilesWatch(issue: "FIX-1"))
+            == object(#"{"kind":"task.files.watch","issue":"FIX-1"}"#))
+        let receipt = ServedRead.creationGet(requestID: "reset", task: "LOO-1")
+        #expect(try object(receipt) == object(#"{"kind":"creation.get","request_id":"reset","task":"LOO-1"}"#))
+        #expect(receipt.argv == ["server", "receipt", "reset", "--task", "LOO-1", "--json"])
+        #expect(try object(ServedRead.creationGet(requestID: "new", task: nil))
+            == object(#"{"kind":"creation.get","request_id":"new","task":null}"#))
     }
 
     /// The JSON `write::tests::desktop_encodings_name_their_writes` decodes in Rust.
@@ -150,9 +144,9 @@ struct RegistryQueryTests {
         #expect(try object(task) == object(
             #"{"kind":"session.resume","directory":"/r","id":null,"task":"FIX-1","wave":null,"agent":null}"#))
         #expect(task.argv == ["session", "resume", "--task", "FIX-1", "--prepare", "--json"])
-        let restart = ServedWrite.sessionNew(directory: "/r", requestID: "fixture-thread", id: "session_1", agent: "codex")
+        let restart = ServedWrite.sessionNew(directory: "/r", requestID: "fixture-thread", id: "session_1", task: "FIX-1", agent: "codex")
         #expect(try object(restart) == object(
-            #"{"kind":"session.new","directory":"/r","request_id":"fixture-thread","id":"session_1","agent":"codex"}"#))
+            #"{"kind":"session.new","directory":"/r","request_id":"fixture-thread","id":"session_1","task":"FIX-1","agent":"codex"}"#))
         #expect(restart.argv == ["--agent", "codex", "session", "new", "session_1", "--request-id", "fixture-thread", "--prepare", "--json"])
     }
 
@@ -180,25 +174,6 @@ struct RegistryQueryTests {
             #expect(write.argv == argv)
             #expect(write.cwd == "/r")
         }
-    }
-
-    @Test("Recording a remote reading preserves its Machine and transport", arguments: [false, true])
-    func recordingRemoteQuery(recordFirst: Bool) async throws {
-        let json = #"{"id":"peer"}"#
-        let local = RegistryQuery { args, cwd in
-            guard args.starts(with: ["--machine", "peer", "--repo-id", "plan"]), cwd == nil else {
-                throw RegistryQueryError("The reading lost its remote selectors")
-            }
-            return json
-        }
-        let record: @Sendable (String) -> Void = { #expect($0 == json) }
-        let query = recordFirst
-            ? local.recording(record).onMachine("peer", repository: "plan")
-            : local.onMachine("peer", repository: "plan").recording(record)
-        #expect(query.remoteMachine == "peer")
-        #expect(try await query.localMachineId() == "peer")
-        #expect(!query.streamsWork)
-        #expect(local.remoteMachine == nil)
     }
 
     @Test("Session pages return a stable continuation and preserve renamed records")

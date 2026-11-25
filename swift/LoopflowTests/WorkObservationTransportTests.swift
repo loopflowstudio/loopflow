@@ -122,45 +122,6 @@ struct WorkObservationTransportTests {
         await observation.cancel()
     }
 
-    @Test("The line reader accepts its frame limit and rejects the next byte", arguments: [false, true])
-    func frameLimit(terminated: Bool) async throws {
-        let allowed = String(repeating: "x", count: 32)
-        let oversized = allowed + "x" + (terminated ? "\n" : "")
-        let process = shell("printf '%s\\n' '\(allowed)'; printf '%s' '\(oversized)'; IFS= read -r request")
-        let reader = try LocalLineObservation<Data>.start(
-            name: "Workspace", process: process, frameLimit: 32,
-            configurationChanged: { false }, decode: { $0 }
-        )
-        var frames = reader.frames.makeAsyncIterator()
-        #expect(try await frames.next() == Data(allowed.utf8))
-        do {
-            _ = try await frames.next()
-            Issue.record("Oversized frame was accepted")
-        } catch {
-            #expect(error.localizedDescription.contains("frame exceeds"))
-        }
-        await reader.cancel()
-        #expect(!process.isRunning)
-    }
-
-    @Test("Silence after the first frame expires a reader that must speak, not a subscription")
-    func stalled() async throws {
-        let process = shell("echo ready; exec /bin/sleep 30")
-        let reader = try LocalLineObservation<Data>.start(
-            name: "Task files", process: process, frameLimit: 32,
-            configurationChanged: { false }, decode: { $0 })
-        var iterator = reader.frames.makeAsyncIterator()
-        #expect(try await iterator.next() == Data("ready".utf8))
-        do {
-            _ = try await iterator.next()
-            Issue.record("A stalled pipe was accepted")
-        } catch {
-            #expect(error.localizedDescription.contains("10 seconds"))
-        }
-        await reader.cancel()
-        #expect(!process.isRunning)
-    }
-
     /// One private Machine for this serialized suite.
     private static let home: URL = {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -206,12 +167,4 @@ private final class FakeSubscriptions: @unchecked Sendable {
     }
 }
 
-private func shell(_ script: String, cwd: URL? = nil) -> Process {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/bin/sh")
-    process.arguments = ["-c", script]
-    process.currentDirectoryURL = cwd
-    process.environment = ["PATH": "/usr/bin:/bin"]
-    return process
-}
 #endif

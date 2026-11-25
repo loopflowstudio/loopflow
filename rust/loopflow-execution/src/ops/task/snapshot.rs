@@ -15,6 +15,7 @@ use crate::ops::error::OpsResult;
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::store::SharedStore;
 use base64::Engine as _;
+use loopflow_model::durable::MachineId;
 use loopflow_storage::child::ChildRef;
 use loopflow_storage::work::task::{PrPhase, Task, TaskPr};
 use sha2::{Digest, Sha256};
@@ -26,7 +27,25 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
     })
 }
 
-pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsResult<TaskSnapshot> {
+pub(super) async fn read_task_snapshot(
+    store: &SharedStore,
+    mut task: Task,
+) -> OpsResult<TaskSnapshot> {
+    let (local, ownership) = store
+        .sqlite
+        .saved_task_ownership(&task.id)
+        .map_err(task_error)?;
+    if ownership.owner_elsewhere(&local).is_some() {
+        task.worktree = None;
+    }
+    snapshot_here(store, task, local).await
+}
+
+pub(super) async fn snapshot_here(
+    store: &SharedStore,
+    task: Task,
+    local: MachineId,
+) -> OpsResult<TaskSnapshot> {
     let wave = owning_wave(store, &task).await?;
     let repo = repository_for_task(store, &task)?;
     let project = match &task.project_id {
@@ -140,9 +159,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         wave.as_ref().map(|w| w.slug()),
     );
     let provider = agent.ok().map(|agent| agent.harness.as_str().to_owned());
-    // A Task's worktree is its checkout on this Machine.
-    let local_machine = store.local_machine().await.map_err(task_error)?;
-    let machine_id = task.worktree.is_some().then(|| local_machine.id.clone());
+    let machine_id = task.worktree.is_some().then_some(local);
     let worktree = task.worktree.as_ref().map(|path| {
         crate::git::worktree_root(path)
             .ok()

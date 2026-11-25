@@ -667,7 +667,7 @@ struct DesktopPaneControlTests {
         }
         #expect(store.layout.allPanes.count == 3)
         let files = try #require(store.browserPane)
-        guard case .browser(_, let tabs, _, _, _) = files.content else { Issue.record("Missing browser"); return }
+        guard case .browser(_, let tabs, _, _) = files.content else { Issue.record("Missing browser"); return }
         #expect(tabs == [.files, .graphLog])
         #expect(files.content.location == identity)
         store.setCollapsed(paneId: files.id, collapsed: true)
@@ -745,16 +745,13 @@ struct DesktopPaneControlTests {
         #expect(!page.isLoading && condition(page), "\(String(describing: page.url)) \(page.title ?? "")")
     }
 
-    @Test func remoteShellRefusalPreservesTheWorkspace() throws {
+    @Test func anotherMachinesTaskOpensAShellThere() throws {
         let registry = SessionsWorkspaceRegistry(localMachineId: "other"), router = WorkLinkRouter(), window = UUID()
         let store = registry.open(workKey, title: "Task", location: identity).multiplexer
-        let before = store.layout
         register(router, window: window, registry: registry)
-        #expect(throws: RegistryQueryError.self) {
-            try router.perform(DesktopActionRequest("run", at: target(store.focusedPane, window: window)))
-        }
-        #expect(store.layout == before)
-        #expect(store.shellPane?.content.selectedShell == nil)
+        // The server starts it wherever the Task runs; the tab names that Machine.
+        _ = try router.perform(DesktopActionRequest("run", at: target(store.focusedPane, window: window)))
+        #expect(store.shellPane?.content.selectedShell?.location == identity)
     }
 
     @Test func hideRestoreRetainsContentAndIgnoresLaterFocus() throws {

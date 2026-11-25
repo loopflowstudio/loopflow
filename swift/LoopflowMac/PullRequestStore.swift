@@ -130,10 +130,13 @@ struct TaskDelivery: Equatable {
     /// A reading this old no longer stands for the PR.
     static let staleAfter: TimeInterval = 120
 
+    /// `runsOn` names the Machine whose checkout the changes come from when it
+    /// is not this Mac.
     static func describe(record: PrSnapshot?, taskOpen: Bool, reading: GitHubPullRequest?, error: String?,
-                         readAt: Date?, localHead: String?, now: Date = .now) -> TaskDelivery {
+                         readAt: Date?, localHead: String?, runsOn: String?, now: Date = .now) -> TaskDelivery {
         let stillOpen = taskOpen ? "Task still open" : nil
-        let none = TaskDelivery(headline: "No pull request yet. Changes below are local.", detail: nil,
+        let place = runsOn.map { "on \($0)" } ?? "local"
+        let none = TaskDelivery(headline: "No pull request yet. Changes below are \(place).", detail: nil,
                                 warning: false, readingIsCurrent: false)
         guard let record else { return none }
         switch record.phase {
@@ -164,7 +167,8 @@ struct TaskDelivery: Equatable {
                                     warning: true, readingIsCurrent: false)
             }
             if let localHead, localHead != reading.headRefOid {
-                return TaskDelivery(headline: "\(state) · read \(age) ago", detail: "Local checkout is ahead of the PR",
+                let checkout = runsOn.map { "The checkout on \($0)" } ?? "Local checkout"
+                return TaskDelivery(headline: "\(state) · read \(age) ago", detail: "\(checkout) is ahead of the PR",
                                     warning: true, readingIsCurrent: false)
             }
             let detail = reading.state == "MERGED" ? stillOpen : reading.reviewLabel

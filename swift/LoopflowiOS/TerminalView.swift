@@ -1,22 +1,23 @@
 import Loopflow
 import SwiftUI
 
-/// One Task's Session: the live terminal, and a reply field under your thumb.
-struct SessionView: View {
+/// One terminal of a Task, its Session or its shell: the live terminal, and a
+/// reply field under your thumb.
+struct TerminalView: View {
     @Environment(\.theme) private var theme
     let showChanges: () -> Void
     @Binding var draft: String
-    @State private var link: SessionLink
+    @State private var link: TerminalLink
     @State private var actions = TerminalActions()
     @State private var showingKeys = false
     @FocusState private var replying: Bool
     @Environment(\.scenePhase) private var scenePhase
 
-    init(client: RemoteMobileClient, task: MobileTask, session: String, draft: Binding<String>,
+    init(client: RemoteMobileClient, task: MobileTask, target: TerminalTarget, draft: Binding<String>,
          showChanges: @escaping () -> Void) {
         self.showChanges = showChanges
         _draft = draft
-        _link = State(initialValue: SessionLink(client: client, task: task, session: session))
+        _link = State(initialValue: TerminalLink(client: client, task: task, target: target))
     }
 
     var body: some View {
@@ -35,8 +36,6 @@ struct SessionView: View {
             }
         }
         .background(theme.palette.background)
-        .navigationTitle(link.task.title)
-        .navigationBarTitleDisplayMode(.inline)
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { link.suspend() }
         }
@@ -46,19 +45,23 @@ struct SessionView: View {
         .onDisappear { link.close() }
     }
 
-    /// Shown only when the terminal is not live here; a healthy Session has no status chrome.
+    /// Shown only when the terminal is not live here; a healthy terminal has no status chrome.
     @ViewBuilder
     private var notice: some View {
-        switch link.state {
-        case .live, .unavailable: EmptyView()
-        case .opening: ProgressView().controlSize(.large)
-        case .elsewhere:
-            state("This Session is open on another device.", action: "Continue here") { link.continueHere() }
-        case .ended:
+        switch (link.state, link.target) {
+        case (.live, _), (.unavailable, _): EmptyView()
+        case (.opening, _): ProgressView().controlSize(.large)
+        case (.elsewhere, _):
+            state("This terminal is open on another device.", action: "Continue here") { link.continueHere() }
+        case (.ended, .session):
             state("The Session ended.", action: "Start it again") { Task { await link.start() } }
-        case .notRunning:
+        case (.ended, .shell):
+            state("This shell has ended.", action: "New shell") { Task { await link.start() } }
+        case (.notRunning, _):
             state("The Session is saved, but not running.", action: "Start it") { Task { await link.start() } }
-        case .disconnected(let reason):
+        case (.notStarted, _):
+            state("Not started", sentence: "The Task has no checkout yet.", action: "Try again") { Task { await link.start() } }
+        case (.disconnected(let reason), _):
             state("Disconnected", sentence: reason, action: "Reconnect") { Task { await link.open() } }
         }
     }

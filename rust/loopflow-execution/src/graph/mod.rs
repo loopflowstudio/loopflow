@@ -1542,10 +1542,7 @@ mod tests {
         let pursue = compile_graph(&load_graph("pursue", tmp.path()).unwrap(), tmp.path()).unwrap();
         assert_eq!(
             edges(&pursue),
-            [
-                ("realign".to_string(), 2),
-                ("concept-review".to_string(), 5)
-            ]
+            [("implement".to_string(), 1), ("realign".to_string(), 3)]
         );
 
         // A block's last step returns to its first; nesting needs no names.

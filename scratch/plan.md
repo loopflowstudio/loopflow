@@ -413,16 +413,12 @@ uv run python scripts/test.py --reuse-passing \
 
 One pass; it is prose, four YAML files, docs, and test expectations.
 
-1. The four Graph YAML files (`build.yaml`, `plan.yaml`, `ui.yaml`, `fix.yaml`)
-   and the three Rust test updates (`compiled.rs`, `graph/mod.rs`,
-   `commands/graph.rs`).
-2. The skills: `concept-review.md`, `realign.md`, `wave_session.md`,
-   `implement.md`, `demo.md`, `verify.md`, `kickoff.md`, `advance.md`,
-   `write-docs.md`, `ship-review.md`. Regenerate prompt goldens.
-3. Docs: `docs/orchestration.md`, `docs/index.md`, `README.md`, `docs/surfaces.md`,
-   `docs/work.md` (drafted in `write-docs`; verify against final `ui.yaml` / `fix.yaml` descriptions).
-4. Read each changed skill once in every Graph position it holds and run the
-   acceptance check.
+- Built in one pass:
+  - Reordered `build.yaml` and `plan.yaml`; added `ui.yaml` (two-sentence description so Desktop's Start menu fits on one line, synced with `docs/surfaces.md`) and `fix.yaml`.
+  - Updated `concept-review.md`, `realign.md`, `wave_session.md`, `implement.md` (110 lines), `demo.md`, `verify.md`, `kickoff.md`, `advance.md`, `write-docs.md`, `ship-review.md`; regenerated `tests/goldens/builtin_{implement,realign}.md`.
+  - Updated Rust graph expectations in `compiled.rs` (including `fix` and `ui` cases), `graph/mod.rs` (`edges()` reports relative offsets `1` and `3`, not absolute indices), `commands/graph.rs`, and `task_graph.rs:631` (`write-docs` shifted by +1 after `realign` joined `plan`).
+  - Verified `builtins::`, `graph::`, `task_graph::`, `lf::commands::graph::tests::`, `golden_prompt`, `documented_commands::`, and live `lf graph show` / `lf list graph` in an empty repo.
+- Remaining: none; ready for review, compress, qa, and gate.
 
 Done when `lf list graph` shows `ui` and `fix` beside the reordered `build`
 and `plan`; `lf graph show code` runs `concept-review` and `realign` before

@@ -1,7 +1,7 @@
 ---
 description: Write the user docs before implementation, ready to read and edit while work continues.
 requires: a chosen direction
-produces: user docs edited in place, with their paths shared and shown in an attached Desktop
+produces: user docs edited in place, with their paths shared
 action_style: procedural
 ---
 Write the docs people will use when the change ships, before it is built.
@@ -28,10 +28,10 @@ surprising prerequisite is design feedback.
    real product choice, write the exact question into the plan and
    report it.
 
-4. **Show it.** Run `lf open --host desktop --file <path>`, repeating `--file`
-   for several. It uses an open Loopflow Desktop and never launches one; with
-   none, report the paths and continue. Record the changed paths in the plan so
-   the next step reads them.
+4. **Show it.** Run `lf open --file <path>`, repeating `--file` for several.
+   It shows the files in an attached Files view and never launches anything;
+   with none attached, report the paths and continue. Record the changed paths
+   in the plan so the next step reads them.
 
 Finish with the paths and any open question, and an invitation to edit the
 docs or discuss them while work continues. Don't wait for a review nobody

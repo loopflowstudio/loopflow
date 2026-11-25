@@ -604,17 +604,24 @@ mod tests {
                 &[
                     "kickoff",
                     "concept-review",
+                    "realign",
                     "write-docs",
-                    "implement",
                     "sync",
+                    "implement",
+                    "concept-review",
                     "realign",
                     "compress",
                     "qa",
-                    "concept-review",
                     "pr-publish",
                 ],
                 &[],
                 2,
+            ),
+            (
+                "fix",
+                &["sync", "implement", "qa", "gate", "land --wait-and-fix"],
+                &[],
+                1,
             ),
             (
                 "deliver",
@@ -697,17 +704,18 @@ mod tests {
             [
                 "kickoff",
                 "concept-review",
+                "realign",
                 "write-docs",
-                "implement",
                 "sync",
+                "implement",
+                "concept-review",
                 "realign",
                 "compress",
                 "qa",
-                "concept-review",
                 "pr-publish",
             ]
         );
-        let implement = compiled.steps[3].key;
+        let sync = compiled.steps[4].key;
         let returns: Vec<_> = compiled
             .steps
             .iter()
@@ -716,8 +724,8 @@ mod tests {
         assert_eq!(
             returns,
             [
-                (compiled.steps[5].key, &implement),
-                (compiled.steps[8].key, &implement)
+                (compiled.steps[5].key, &sync),
+                (compiled.steps[7].key, &sync)
             ]
         );
         // Review and landing are the conversation's to launch, not this Graph's.
@@ -727,6 +735,49 @@ mod tests {
             .iter()
             .all(|node| node.kind != GraphNodeKind::Op || node.label == "sync"));
         assert_eq!(compiled.steps[4].sources, ["pursue", "build"]);
+    }
+
+    #[test]
+    fn ui_loops_through_interactive_demo_then_compresses_and_delivers() {
+        let repo = tempfile::tempdir().unwrap();
+        let graph = load_graph("ui", repo.path()).unwrap();
+        let compiled = crate::graph::compiled::compile(
+            &graph.name,
+            &compile_graph(&graph, repo.path()).unwrap(),
+        );
+        let labels: Vec<_> = compiled
+            .steps
+            .iter()
+            .map(|node| node.label.as_str())
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                "kickoff",
+                "sync",
+                "implement",
+                "qa",
+                "demo",
+                "compress",
+                "reflect",
+                "gate",
+                "land --wait-and-fix",
+            ]
+        );
+        let interactive: Vec<_> = compiled
+            .steps
+            .iter()
+            .enumerate()
+            .filter_map(|(i, node)| node.interactive.then_some(i))
+            .collect();
+        assert_eq!(interactive, [4]);
+        let sync = compiled.steps[1].key;
+        let returns: Vec<_> = compiled
+            .steps
+            .iter()
+            .filter_map(|node| node.returns_to.as_ref().map(|to| (node.key, to)))
+            .collect();
+        assert_eq!(returns, [(compiled.steps[4].key, &sync)]);
     }
 
     #[test]

@@ -10,9 +10,9 @@ whether the change is right. This is not a code review and not a go/no-go.
 
 **Gather what exists before writing anything.**
 
-- `scratch/plan.md`: what was to be built, what remains, choices agents made.
-- `scratch/concept-review.html`: what the review found, and what it put
-  outside this PR.
+- `scratch/plan.md`: what was to be built, what remains, choices agents made,
+  and `## Deferred findings` written by `realign`.
+- `scratch/concept-review.html`: the review page behind those findings.
 - What `qa` used and saw, and what it says is still wrong.
 - `git log` against the base: each step's commit says what that step changed.
 - `scratch/questions.md`: what was left open.

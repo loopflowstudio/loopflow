@@ -52,3 +52,8 @@ identity and never by name, and keep anything that holds history.
 
 With nobody there, nobody can feel it. Say the demo didn't happen and why, then
 finish. Don't act out a person's reactions or invent feedback.
+
+When standing in as a loop decider, inspect what `qa` produced
+(`scratch/qa.html`, screenshots, transcripts): return `iterate` only when
+promised UI behavior or visual quality is visibly broken; otherwise note that
+no person tried it and return `advance`.

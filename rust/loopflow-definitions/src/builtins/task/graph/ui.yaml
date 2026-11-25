@@ -1,0 +1,10 @@
+description: Build and try a UI change, then deliver it. You try the running Desktop, mobile or web UI each pass.
+steps:
+- kickoff
+- loop:
+    - cmd: sync
+    - implement
+    - qa
+    - interactive: demo     # you use it; iterate goes back to sync → implement with your words
+- compress
+- graph: deliver

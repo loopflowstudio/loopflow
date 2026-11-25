@@ -282,19 +282,19 @@ the repository's. ▾ lists the others, each with its description and how many
 times it stops for you:
 
 ```text
-✓ feature                 Explore, build, deliver and verify                         3 stops
-  code                    Build, deliver and verify                                  2 stops
-  redesign                Rethink a started Task                                     1 stop
-  research                Investigate and report, with no PR                         1 stop
-  ui                      Build a Desktop, mobile or web UI change you try as it…    1 stop
+✓ feature                 Explore, build, deliver and verify              3 stops
+  code                    Build, deliver and verify                       2 stops
+  redesign                Rethink a started Task                          1 stop
+  research                Investigate and report, with no PR              1 stop
+  ui                      Build and try a UI change, then deliver it      1 stop
   More ›
   Run without stopping
-  deep-clean              Delete what an area no longer needs                        never stops
-  fix                     Fix a bounded bug or small tweak and land it               merges without asking
-  incident                Restore first, then fix the cause                          never stops
-  optimize                Move one number                                            never stops
-  queue                   Compress, integrate upstream changes                       never stops
-  task-design             Draft the Task design                                      never stops
+  deep-clean              Delete what an area no longer needs             never stops
+  fix                     Fix a bounded bug or small tweak and land it    merges without asking
+  incident                Restore first, then fix the cause               never stops
+  optimize                Move one number                                 never stops
+  queue                   Compress, integrate upstream changes            never stops
+  task-design             Draft the Task design                           never stops
 ```
 
 Several Tasks whose workflows differ show the split,

@@ -23,9 +23,10 @@ with what you passed over.
 
 2. **De-risk.** Find what could sink the approach and answer it: read the docs,
    call the API, run the probe. Start with risks already flagged, then look for
-   the ones nobody named. Come back with answers, not a worry list: "Linear's
-   API has no conditional assignment, so we read-then-assign with conflict
-   detection", not "there might be API limitations". When two explanations
+   the ones nobody named. Come back with answers, not a worry list: "the
+   tracker's API has no conditional assignment, so we read-then-assign with
+   conflict detection", not "there might be API limitations". When two
+   explanations
    fit, run the smallest probe that tells them apart. Keep the finding even
    when it kills the attractive approach.
 

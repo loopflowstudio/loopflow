@@ -41,7 +41,6 @@ pub struct LinearIssueState {
     pub revision: Option<String>,
     pub observed_at: Option<i64>,
     pub project_id: Option<String>,
-    pub initiative_ids: Vec<String>,
     pub project_team_ids: Vec<String>,
     pub team_id: Option<String>,
     pub state: PlanningState,

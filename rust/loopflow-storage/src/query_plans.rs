@@ -516,6 +516,18 @@ mod tests {
     }
 
     #[test]
+    fn a_wave_lists_its_own_tasks_by_index() {
+        let (_home, store, _task, _viewer) = fixture();
+        let wave = loopflow_model::id::WaveId::new();
+        let traced = statements(&store, || {
+            store.open_task_count(&wave).unwrap();
+            store.task_ids_in_wave(&wave).unwrap();
+        });
+        let scans = growing_scans(&store, &traced);
+        assert!(scans.is_empty(), "{}", scans.join("\n"));
+    }
+
+    #[test]
     fn auto_reads_and_writes_plan_by_index() {
         let (_home, store, _task, _viewer) = fixture();
         let task = TaskId::new();

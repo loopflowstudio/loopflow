@@ -4,7 +4,6 @@ use crate::process::attachment;
 use crate::session::WorkSource;
 use loopflow_model::durable::{ProjectId, TaskId};
 use loopflow_model::id::WaveId;
-use loopflow_storage::planning::{LinearIssueId, LinearProjectId};
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::test_fixture::{unpublished_conversation, unregistered_task};
 use std::sync::{Arc, Barrier};
@@ -23,109 +22,19 @@ fn store_with_task() -> (tempfile::TempDir, SqliteStore, TaskId) {
 }
 
 #[test]
-fn configured_project_admission_preserves_started_continuation() {
-    let (dir, store, task_id) = store_with_task();
-    let task = store.task(&task_id).unwrap().unwrap();
-    let mut other = store
-        .project(task.project_id.as_ref().unwrap())
-        .unwrap()
-        .unwrap();
-    other.id = ProjectId::new();
-    other.tracker_id = Some(LinearProjectId::new("218967b6-a760-4b7c-9a46-11d9d61a42c2").unwrap());
-    other.name = "An unrelated ordinary plan".into();
-    store.insert_project(&other).unwrap();
-    // Another Started Project does not compete with the configured identity.
-    // An unclaimed Task is new work again; the newly placed checkout claims its Task.
-    crate::store::ownership::unassign_task(&store, &task_id).unwrap();
-    let (new_task, pr) = unregistered_task(&store, &task_id, dir.path().join("new"));
-    let me = crate::store::ownership::acquire(
-        &store,
-        store
-            .new_task_scope(&new_task.repository_id, new_task.project_id.as_ref())
-            .unwrap(),
-    )
-    .unwrap();
-    store.seed_task(&new_task, &pr, Some(&me)).unwrap();
-    store.require_task_launch(&task_id).unwrap();
-    assert!(!store.task_owned(&task_id).unwrap());
-    assert!(store.task_owned(&new_task.id).unwrap());
-    let guard = crate::store::PlanningLocks::new(tempfile::tempfile().unwrap());
-    loopflow_storage::sqlite::project_selection::write_project_binding(
-        &store,
-        task.wave_id.as_ref().unwrap(),
-        Some("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3"),
-        other.tracker_id.as_ref().unwrap().as_str(),
-        &guard,
-    )
-    .unwrap();
-    let (mut rejected, mut rejected_pr) =
-        unregistered_task(&store, &task_id, dir.path().join("rejected"));
-    rejected.tracker_id = Some(LinearIssueId::new("third-issue").unwrap());
-    rejected.identifier = "PROBE-3".into();
-    rejected.workspace_slug = "rejected".into();
-    rejected_pr.slug = "rejected".into();
-    rejected_pr.branch = "rejected".into();
-    store.seed_unplaced_task(&rejected);
-    assert!(crate::store::ownership::place_task(
-        &store,
-        &rejected.id,
-        rejected.worktree.as_ref().unwrap(),
-        &rejected.workspace_slug,
-        &rejected_pr
-    )
-    .is_err());
-    assert!(store
-        .task(&rejected.id)
-        .unwrap()
-        .unwrap()
-        .worktree
-        .is_none());
-    assert!(store.task_prs(&rejected.id).unwrap().is_empty());
-    assert!(store.require_task_launch(&task_id).is_err());
-    // An owned Task remains eligible after its Project becomes history.
-    {
-        let conn = store.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE projects SET status='completed' WHERE id=?1",
-            [task.project_id.as_ref().unwrap().as_str()],
-        )
-        .unwrap();
-    }
-    store.require_task_launch(&new_task.id).unwrap();
-    assert!(store.task_owned(&new_task.id).unwrap());
-    assert_eq!(
-        store.task(&task_id).unwrap().unwrap().worktree,
-        task.worktree
-    );
-}
-
-#[test]
-fn configured_project_admission_requires_a_selected_active_project() {
+fn a_task_launches_whatever_its_project_s_status() {
     let (_dir, store, task_id) = store_with_task();
     let task = store.task(&task_id).unwrap().unwrap();
-    // Owned Tasks are exempt; an unowned one must be in the selected active Project.
+    // Launching claims nothing.
     crate::store::ownership::unassign_task(&store, &task_id).unwrap();
-    store
-        .conn
-        .lock()
-        .unwrap()
-        .execute(
-            "UPDATE waves SET current_project_id=NULL WHERE id=?1",
-            [&task.wave_id],
-        )
-        .unwrap();
-    assert!(store.require_task_launch(&task_id).is_err());
-    assert!(!store.task_owned(&task_id).unwrap());
-    store
-        .conn
-        .lock()
-        .unwrap()
-        .execute(
-            "UPDATE waves SET current_project_id=?2 WHERE id=?1",
-            rusqlite::params![task.wave_id, task.project_id.as_ref().unwrap().as_str()],
-        )
-        .unwrap();
-    for status in ["backlog", "planned", "paused", "completed", "canceled"] {
+    for status in [
+        "started",
+        "backlog",
+        "planned",
+        "paused",
+        "completed",
+        "canceled",
+    ] {
         store
             .conn
             .lock()
@@ -135,18 +44,9 @@ fn configured_project_admission_requires_a_selected_active_project() {
                 rusqlite::params![task.project_id.as_ref().unwrap().as_str(), status],
             )
             .unwrap();
-        assert!(store.require_task_launch(&task_id).is_err());
+        store.require_task_launch(&task_id).unwrap();
     }
-    store
-        .conn
-        .lock()
-        .unwrap()
-        .execute(
-            "UPDATE projects SET status='started' WHERE id=?1",
-            [task.project_id.as_ref().unwrap().as_str()],
-        )
-        .unwrap();
-    store.require_task_launch(&task_id).unwrap();
+    assert!(!store.task_owned(&task_id).unwrap());
 }
 
 #[test]
@@ -290,11 +190,13 @@ fn checkout_session_membership_survives_project_transfer_without_binding() {
     assert_eq!(session.work_source, Some(WorkSource::Checkout));
     assert!(store.task_begun(&task_id).unwrap());
 
-    let successor = ProjectId::new();
-    store.conn.lock().unwrap().execute(
-            "INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'successor',2)",
-            rusqlite::params![successor.as_str(), task.wave_id.as_ref().unwrap().as_str()],
-        ).unwrap();
+    // The Task moves to another Wave's Project.
+    let (other, successor) = (WaveId::new(), ProjectId::new());
+    store.conn.lock().unwrap().execute_batch(&format!(
+            "INSERT INTO waves(id,name,repo,created_at) SELECT '{other}','successor',repo,2 FROM waves WHERE id='{}';
+             INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('{successor}','{other}','successor',2);",
+            task.wave_id.as_ref().unwrap(),
+        )).unwrap();
     store
         .conn
         .lock()
@@ -310,7 +212,10 @@ fn checkout_session_membership_survives_project_transfer_without_binding() {
     assert_eq!(retained.worktree, task.worktree);
     let after = crate::store::task_work::task_work(&store, &task_id).unwrap();
     assert_eq!(after.sessions, before.sessions);
-    assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+    // The conversation follows its Task into the other Wave.
+    let mut moved = session;
+    moved.wave_id = Some(other);
+    assert_eq!(store.session(&moved.id).unwrap().unwrap(), moved);
 }
 
 #[test]
@@ -431,7 +336,7 @@ fn binding_keeps_its_directory_when_an_earlier_opening_admits_a_workspace() {
     conversation.interactive = true;
     conversation.cwd = dir.path().to_path_buf();
     let session = crate::store::sessions::create_session(&store, conversation, None).unwrap();
-    crate::store::ownership::promote_task(&store, &task_id, None, None, Some(&session), None)
+    crate::store::ownership::promote_task(&store, &task_id, None, None, None, Some(&session), None)
         .unwrap();
 
     let admitted = store
@@ -470,6 +375,7 @@ fn promotion_binding_survives_completion_after_placement_preparation() {
         let bound = crate::store::ownership::promote_task(
             &store,
             &task_id,
+            None,
             None,
             Some(&placement),
             Some(&session),

@@ -19,14 +19,6 @@ impl From<&Wave> for Identity {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderChange {
-    pub wave: String,
-    pub initiative: String,
-    pub title: Option<String>,
-    pub done: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Operation {
     pub id: String,
     /// Repository where the request is retried, even if the old checkout is gone.
@@ -39,7 +31,6 @@ pub struct Operation {
     pub waves: Vec<Identity>,
     pub destination: Option<WaveId>,
     pub delete_backlog: bool,
-    pub providers: Vec<ProviderChange>,
     pub changes: Vec<FileChange>,
     pub planning_done: bool,
     pub applied: bool,
@@ -48,7 +39,7 @@ pub struct Operation {
 
 impl Operation {
     pub fn complete(&self) -> bool {
-        self.planning_done && self.files_done && self.providers.iter().all(|provider| provider.done)
+        self.planning_done && self.files_done
     }
 
     pub fn matches(&self, name: &str, target: Option<&str>) -> bool {

@@ -17,16 +17,6 @@ pub enum WaveConfigError {
     },
 }
 
-/// The Linear Initiative linked to this Wave.
-#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
-pub struct WaveLinearConfig {
-    #[serde(
-        deserialize_with = "loopflow_model::id::deserialize_uuid_option",
-        default
-    )]
-    pub initiative: Option<String>,
-}
-
 /// One existing Discord guild text channel bound to this Wave's chat.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "provider", rename_all = "snake_case", deny_unknown_fields)]
@@ -41,13 +31,14 @@ pub enum WaveChatConfig {
 
 /// Keys only a Wave's `config.yaml` carries; every other key is shared
 /// `Config` layered over the repository's (see `crate::config::load_wave_config`).
+/// `linear` held the Initiative a Wave linked; released lf still reads it, so
+/// it stays a Wave key that nothing here reads.
 const WAVE_ONLY_KEYS: [&str; 3] = ["id", "linear", "chat"];
 
 /// The Wave's own identity and bindings from its `config.yaml`.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WaveConfig {
     pub id: Option<loopflow_model::id::WaveId>,
-    pub linear: Option<WaveLinearConfig>,
     /// One external presentation binding. Discord is the only supported
     /// provider and remains a concrete variant rather than a registry.
     pub chat: Option<WaveChatConfig>,
@@ -349,7 +340,7 @@ mod tests {
         let repo = ConfigRepo::new();
         let unrelated = repo.path().join("wave/scan");
         std::fs::create_dir_all(&unrelated).unwrap();
-        let original = "linear:\n  initiative: unrelated\n";
+        let original = "agent: unrelated\n";
         std::fs::write(unrelated.join("config.yaml"), original).unwrap();
         assert!(read_wave_config(repo.path(), "scan").is_none());
 
@@ -407,14 +398,11 @@ mod tests {
         assert!(goal.ends_with(body));
         assert_eq!(repo.layer()["agent"].as_str(), Some("codex"));
         assert_eq!(repo.layer()["graph"].as_str(), Some("code"));
-        assert_eq!(
-            read_wave_config(repo.path(), "scan")
+        // A Wave-only key nothing reads still moves with the rest.
+        assert!(
+            std::fs::read_to_string(repo.path().join(".lf/wave/scan/config.yaml"))
                 .unwrap()
-                .linear
-                .unwrap()
-                .initiative
-                .as_deref(),
-            Some("lin-123")
+                .contains("initiative: lin-123")
         );
     }
 

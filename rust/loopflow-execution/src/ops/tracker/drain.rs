@@ -111,7 +111,40 @@ pub(crate) async fn drain_repository(
             return Ok(Pass::default());
         }
     };
+    create_named_projects(store, Path::new(repo), &tracker, &actions).await;
     drain(store, repo, &tracker, actions, scope, bound).await
+}
+
+/// A live Wave's Project the tracker does not hold yet (the upgrade made it
+/// locally) is created here, before the Tasks that name it are sent. A failure
+/// leaves those Tasks to say why.
+async fn create_named_projects(
+    store: &Store,
+    repo: &Path,
+    tracker: &Tracker,
+    actions: &[TrackerAction],
+) {
+    let named: HashSet<_> = actions
+        .iter()
+        .flat_map(parents_named)
+        .filter_map(|parent| match parent {
+            ActionOwner::Project(project) => Some(project),
+            _ => None,
+        })
+        .collect();
+    for id in named {
+        let Ok(Some(project)) = store.sqlite.project(&id) else {
+            continue;
+        };
+        let live =
+            matches!(store.sqlite.get_wave(&project.wave_id), Ok(Some(wave)) if !wave.is_retired());
+        if project.tracker_id.is_some() || !live {
+            continue;
+        }
+        if let Err(error) = tracker.create_project(store, repo, &project).await {
+            tracing::warn!(project = %id, %error, "Wave Project not created in the tracker");
+        }
+    }
 }
 
 /// The repository's unconfirmed actions for `tracker`, after queueing a
@@ -173,8 +206,8 @@ async fn drain(
         resolved: AtomicUsize::new(0),
     };
     pass.round(grouped(actions, scope), bound.concurrency).await;
-    // Owners run concurrently, so a Task can wait on a Project or a parent
-    // created in the same round; those get one more turn once it has resolved.
+    // Owners run concurrently, so a Task can wait on a parent created in the
+    // same round; those get one more turn once it has resolved.
     if !pass.creating.is_empty() {
         let mut owners = grouped(
             store
@@ -295,7 +328,7 @@ struct Drain<'a> {
     store: &'a Store,
     repo: &'a Path,
     tracker: &'a Tracker,
-    /// Projects and Tasks whose creation is queued.
+    /// Tasks whose creation is queued.
     creating: HashSet<ActionOwner>,
     limit: usize,
     until: Instant,
@@ -337,8 +370,8 @@ impl Drain<'_> {
         false
     }
 
-    /// Whether this action names a Project or a parent Task being created
-    /// that has no remote id yet.
+    /// Whether this action names a parent Task being created that has no
+    /// remote id yet.
     fn parent_uncreated(&self, action: &TrackerAction) -> bool {
         parents_named(action)
             .iter()
@@ -472,17 +505,13 @@ impl Drain<'_> {
     }
 
     async fn send(&self, action: &TrackerAction) -> OpsResult<Step> {
-        if let Some(reason) = self.tracker.blocked(self.store, self.repo, action).await {
-            self.error(action, &reason)?;
-            return Ok(Step::Wait);
-        }
         if !self.take() {
             return Ok(Step::Spent);
         }
         if !self
             .store
             .sqlite
-            .attempt_tracker_action(&action.id)
+            .attempt_tracker_action(action)
             .map_err(message)?
         {
             return Ok(Step::Done);
@@ -702,55 +731,6 @@ mod tests {
                 .len(),
             80
         );
-    }
-
-    #[tokio::test]
-    async fn a_blocked_creation_costs_the_pass_nothing() {
-        const NO_INITIATIVE: &str = "Wave has no Linear Initiative; its Projects stay local";
-        let mut fake = Fake::new();
-        fake.blocked =
-            |action| matches!(action.owner, ActionOwner::Project(_)).then(|| NO_INITIATIVE.into());
-        let mut f = fixture();
-        f.fake = Arc::new(fake);
-        f.tracker = Tracker::Fake(f.fake.clone());
-        for at in 0..21 {
-            loopflow_storage::test_fixture::project(
-                &f.store.sqlite,
-                "/repo",
-                &format!("project-{at}"),
-            );
-        }
-        // The creations queue ahead of the edit, so a charged block would
-        // spend the pass before the edit's turn.
-        f.store
-            .sqlite
-            .enqueue_tracker_creations("/repo", TrackerKind::Linear)
-            .unwrap();
-        let task = f.bound_task();
-        f.title(&task, "Renamed", "queued", None);
-        let pass = f.pass().await;
-        assert_eq!(f.fake.requests(), 1);
-        assert_eq!(pass.requests, 1);
-        assert_eq!(f.phases(&task), [ActionPhase::Confirmed]);
-        let blocked: Vec<_> = f.store.sqlite.unconfirmed_tracker_actions("/repo").unwrap();
-        assert_eq!(blocked.len(), 21);
-        assert!(blocked
-            .iter()
-            .all(|action| action.phase == ActionPhase::Queued
-                && action.error.as_deref() == Some(NO_INITIATIVE)
-                && action.sent_at.is_none()));
-        // A later pass decides the same block without writing the rows again.
-        let revision = f.store.sqlite.revisions().unwrap().planning;
-        let pass = f.pass().await;
-        assert_eq!(pass.requests, 0);
-        assert_eq!(f.store.sqlite.revisions().unwrap().planning, revision);
-        assert!(f
-            .store
-            .sqlite
-            .unconfirmed_tracker_actions("/repo")
-            .unwrap()
-            .iter()
-            .all(|action| action.phase == ActionPhase::Queued && action.sent_at.is_none()));
     }
 
     #[tokio::test]

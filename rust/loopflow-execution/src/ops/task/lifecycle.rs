@@ -7,6 +7,7 @@ use crate::ops::wt::BranchDeletion;
 use crate::ops::{NullProgress, OpsResult, Progress};
 use crate::store::SharedStore;
 use loopflow_model::durable::{WorkRef, WorkStatus};
+use loopflow_storage::sqlite::tracker_actions::ActionOwner;
 use loopflow_storage::work::task::{Task, TaskPr};
 
 use super::{block_on_task, repository_for_task, task_error, task_store};
@@ -140,7 +141,7 @@ async fn save_abandon(store: &SharedStore, task: &Task) -> OpsResult<()> {
     crate::ops::planning_sync::sync_after_save(
         store,
         &repository_for_task(store, task)?.to_string_lossy(),
-        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
+        Some(&ActionOwner::Task(task.id.clone())),
     )
     .await;
     Ok(())
@@ -165,14 +166,12 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<(String, bool)> {
         crate::ops::planning_sync::sync_after_save(
             &store,
             &repository_for_task(&store, &task)?.to_string_lossy(),
-            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
+            Some(&ActionOwner::Task(task.id.clone())),
         )
         .await;
         let pending = store
             .sqlite
-            .tracker_actions_for(
-                &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
-            )
+            .tracker_actions_for(&ActionOwner::Task(task.id.clone()))
             .map_err(task_error)?
             .iter()
             .any(|action| {

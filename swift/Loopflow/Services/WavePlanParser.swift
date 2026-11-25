@@ -1,7 +1,7 @@
 import Foundation
 
 /// Reads the one piece of wave planning state that remains in the repository.
-/// Projects and KRs come from `RegistryQuery`'s SQLite-backed PM snapshot.
+/// Projects come from `RegistryQuery`'s SQLite-backed PM snapshot.
 public enum WavePlanParser {
     public static func objective(repoRoot: URL, waveName: String) -> String? {
         let normalizedName = waveName.trimmingCharacters(in: .whitespacesAndNewlines)

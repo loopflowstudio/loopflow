@@ -27,7 +27,7 @@ Put each instruction in the narrowest place that uses it:
 | --- | --- | --- |
 | Skill | One repeatable job and how to do it | Repo conventions, Wave policy |
 | Graph | The order of Skills and where a person takes part | How to do a step |
-| Wave `GOAL.md` | What the Wave owns and refuses, how it picks work | KRs, task lists, implementation steps |
+| Wave `GOAL.md` | What the Wave owns and refuses, how it picks work | Task lists, implementation steps |
 | Wave `MEMORY.md` | Decisions and lessons that change future work | A second plan, a transcript |
 | Agent guide | Rules every task in the repository follows | One feature's design |
 | Inline prompt | One concrete request | Guidance that deserves a skill |
@@ -81,5 +81,4 @@ A `GOAL.md` body is a prompt run over and over. Five things make it loop well:
 4. **An honest question** — the check a lazy loop can't game.
 5. **A stop rule** — when to record a blocker instead of inventing work.
 
-Goals give judgment, not procedure. KRs and targets live in the Wave's
-Project; implementation lives in Tasks.
+Goals give judgment, not procedure; implementation lives in Tasks.

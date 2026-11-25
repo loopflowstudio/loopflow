@@ -162,6 +162,7 @@ pub async fn save(
     main: &Path,
     id: TaskId,
     creation: Option<NewTask>,
+    creation_wave: Option<loopflow_model::id::WaveId>,
     source: Source,
     acquisition: Option<Arc<PlanningLocks>>,
     receipt: Option<loopflow_storage::sqlite::creation::TaskCreationRecord>,
@@ -213,6 +214,7 @@ pub async fn save(
         .promote_task(
             &id,
             creation,
+            creation_wave,
             placement,
             source.session,
             acquisition,
@@ -253,8 +255,8 @@ fn prepare(main: &Path, root: &Path) -> OpsResult<TaskPlacement> {
 pub async fn bind_session(store: &SharedStore, session: &LfSession, task: &Task) -> OpsResult<()> {
     let repo = super::repository_for_task(store, task)?;
     let source = resolve_checkout(store, &repo, Some(session.clone()), None).await?;
-    let acquisition = match super::owning_wave(store, task).await? {
-        Some(wave) => Some(crate::ops::planning_sync::lock_wave_planning(&wave).await?),
+    let acquisition = match &task.wave_id {
+        Some(wave) => Some(crate::ops::planning_sync::lock_wave_planning(wave).await?),
         None => None,
     };
     let checkout = source.checkout.clone();
@@ -262,6 +264,7 @@ pub async fn bind_session(store: &SharedStore, session: &LfSession, task: &Task)
         store,
         &repo,
         task.id.clone(),
+        None,
         None,
         source,
         acquisition,

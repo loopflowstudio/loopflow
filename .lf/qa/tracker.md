@@ -4,7 +4,7 @@ Read when the change touches `lf repo tracker`, the `tracker:` config key, Git p
 
 A fresh Git repository with no remote is the first-visit case: `lf repo
 tracker` reads `Plan: this Machine.` and `lf task create`, `lf wave
-edit-project` all run. Then `git init --bare` a sibling, `git remote add origin
+create` both run. Then `git init --bare` a sibling, `git remote add origin
 <it>`, push `main`: `lf repo tracker` reads `Plan: Git origin, N unsent.` with
 the records listed. `lf task sync <id>` (it needs an id) exchanges now, and
 `git ls-remote origin` shows `refs/loopflow/plan/<machine id>`: one JSON file
@@ -30,7 +30,11 @@ That skew is #1957's, not a vocabulary rename's; compare against an `lf`
 built from main for mirror-table checks.
 
 The `sqlite3` CLI here refuses `-readonly` on a WAL store (error 14); read with
-Python: `sqlite3.connect("file:…/loopflow.db?mode=ro", uri=True)`.
+Python: `sqlite3.connect("file:…/loopflow.db?mode=ro", uri=True)`. With no `lf`
+running there may be no `loopflow.db-shm`, and `mode=ro` then fails with
+"unable to open database file"; a plain `sqlite3.connect(path)` works then.
+Queued tracker work is the `tracker_actions` table (`kind`, `phase`, `error`,
+`project_id`, `task_id`).
 
 A second Machine is a second `HOME`/`LF_HOME` pair on a fresh clone of the
 same bare origin: its first `lf task list` fetches and shows the other
@@ -132,7 +136,121 @@ both remotes away, make the Wave on both, bring only the hub back and
 clears it and the mini's list holds both. `lf task sync` still exits 1 on
 Git's error while the remotes are away.
 
+To exercise a Project ending through Git exchange, copy the Wave's
+`projects/<id>.json` record and the `repository` file into a fresh Git
+repository. Keep the Project ID and set `project_status` to `completed`
+with a later `at` and the sending Machine's ID. Push the commit to
+`refs/loopflow/plan/<that machine>` on the bare remote. After
+`lf task sync <id>`, `lf wave status` shows the same Project as completed.
+Fields this build doesn't know (`project_krs`,
+`wave_project`) are `WARN loopflow_storage::work::edit: skipped an unknown
+plan field` lines.
+
+For a returning user on a stacked branch, the installed `lf` may be newer than
+the branch base and its store refuses the branch ("migration … is unknown").
+Build the base instead: `git worktree add --detach <dir> <base>` and
+`CARGO_TARGET_DIR=<other dir> cargo build -p loopflow --bin lf` (about four
+minutes), write the home with it, then open it with the branch.
+
 For the minute, run the laptop's `lf server run` in the background (record
 its PID), type nothing on the laptop and poll `lf task list` there after a
 save on the mini: 40 to 60 s. The minute's exchange is silent; a split Wave
 is one `skipped a plan record` WARN per exchange in `logs/lf.log`.
+
+A Wave has exactly one Project, made with it (`ProjectId::for_wave`, the
+Wave's UUID); a Task's Wave is its Project's. Read both in `loopflow.db`:
+`projects(id, wave_id, project_name, status, external_project_id)` and
+`tasks.project_id`; `tasks` has no `wave_id`. The plan's demo runs offline:
+`lf wave create billing`, `lf wave create billing/refunds`, `lf task create
+--wave billing/refunds 'x'`, `lf task move <id> --wave billing`, and
+`lf wave status <wave>` prints `Project   <name> (local|linked) · <status>`.
+For a returning user, write the home with the installed `lf` (it names a child
+Wave's Project `billing/refunds`; the branch names it `refunds`), then open it
+with the branch. Every recorded Task keeps its Wave. A second clone on another
+home lists each Task under the same Wave after `lf task list`; a move on one
+home reaches the other on `lf task sync <id>`.
+
+A Wave's queued tracker actions are rows in `tracker_actions` (`kind`,
+`phase`, `project_id`, `task_id`, `value_json`, `error`); with a Linear team
+set and no login, Task actions stay `queued`. Nothing queues a Project
+`create`: `lf wave create` and `lf wave plan connect <wave>` make the Project
+in the tracker before they return; `lf wave sync` (and served `wave.sync`,
+Desktop's five-minute clock) never makes one and succeeds with no login. With
+no login, `lf wave create x` exits 1 with "wave/x has no tracker Project yet:
+No Linear credential found… Run `lf wave create x` to make it", yet the
+Wave is recorded and committed, its Project unbound. `lf wave status x` then
+prints "not in Linear yet; `lf wave create x` makes it" under the
+Project line (also for a Wave made before the team was set, renamed, or
+upgraded); the same sentence is `project.value.unbound` in `--json`,
+`wave.sync`, `wave.plan` and `plan.list`, null with no tracker. An Asana
+repository (`repo.tracker.asana.team "'1209'"`) reads the same with "Asana";
+`lf wave plan connect` there asks for a Linear login. A second create makes
+no second commit. Rename
+and removal of an unbound Wave leave no Project rows in `tracker_actions`.
+Served `wave.create` returns the same message as `outcome_unknown` with ";
+inspect the affected work before retrying" appended. Copy `loopflow.db` to
+read it: `?mode=ro` on a live private home fails to open.
+
+For the upgrade, write a home with the installed `lf` (team set, a Wave and
+a Task: `lf repo tracker` lists the Wave's `create` and the Task's), then run
+any branch command on it: the Project create is `retired` ("Wave Projects
+are created by lf wave create or lf wave plan connect") and only the Task's
+remains open. The installed `lf` at v0.16.0 opens fine under the branch.
+
+Without a Linear login no command links a Wave's Project. To see what a
+linked one does (status line, its URL, a rename's `project_name` action),
+write the link the tracker read would: set `projects.external_project_id`
+and insert a `tracker_projects` row with the same `id`, `repo` (the
+`/private/tmp/…` spelling `waves.repo` holds), `tracker` `linear` and a
+`url`. `lf wave status <wave>` then prints `(linked)` and the URL under it.
+This skips the tracker read itself, so it shows the branch's handling of a
+link, not the import.
+
+A Wave with no Project (`Project   none`, `"project": {"state": "ok",
+"value": null}`) only arrives from another Machine: push a `waves/<uuid>.json`
+record (`wave_name`, `wave_parent`, a `home_<32 hex>` machine) with the
+`repository` file as above and `lf task sync <id>`. Its first Task makes the
+Project.
+
+To see what the branch does to this Machine's real data without touching it,
+copy the store with SQLite's backup API (`sqlite3.connect(src).backup(dst)`)
+into a private `LF_HOME`, and run the branch `lf` under `sandbox-exec -f` a
+profile of `(allow default)`, `(deny network-outbound (remote ip))` and
+`(deny file-write* (subpath …))` for the real checkout and `~/.lf`. Run it
+from the real checkout: Waves belong to a repository by path, so a clone
+lists none. Its first command applies the branch's migrations; the Linear
+credential then fails to read, so every tracker action stays queued and
+`lf repo tracker` lists what an upgrade would send. Delete the copy after
+(about 1.4 GB with its backup).
+
+`lf wave plan connect <new wave> <project>` with no Linear login fails at the
+credential before it touches the Wave: no Wave, commit or queued action is
+left. To see what a failed connect leaves, compare `lf wave list` and
+`lf repo tracker` before and after, and read `tracker_actions` from a copy.
+
+There is no Linear stand-in for a release `lf`: `LINEAR_BASE_URL` is a
+constant, and reqwest verifies TLS with the macOS platform verifier, so a
+local HTTPS proxy needs a keychain trust change (a prompt). A successful
+connect or reclaim is reached only by execution's simulated-Linear tests
+(`ops::linear::task_planning_tests::connect_*`).
+
+What a removal leaves for the tracker shows offline: complete a Task in a
+Wave, `lf wave remove` it, run any save (`lf task create 'x'`), then `lf repo
+tracker`. A completed Task left in a removed, unlinked Wave's Project has no
+open actions (retired "its Wave was removed"); with the link written by hand,
+its `create` stays queued for the linked Linear Project. Do it once with the
+team set before the Wave, once with it set after the removal.
+
+A released Wave with two Projects (a chapter) is the slice-8 upgrade case.
+The installed `lf` has no command that makes a second Project, and `lf wave
+plan bind` refuses one ("Wave already has a different configured Project").
+Make it arrive instead: before setting a tracker, push a `projects/<proj_…>.json`
+record for the Wave (fields `project_wave`, `project_slug`, `project_name`,
+`project_status`, stamped by another `home_<32 hex>` with a later `at`) to that
+Machine's ref and `lf task sync <id>`; `lf wave status` lists it as
+`historical`. Then set `repo.tracker.linear.team`, commit, push and save once:
+the installed `lf` queues one Project `create` for the Wave's own Project and a
+Task `create` per Task. Copy the home (`cp -R`), then run any branch command
+on it. A Task record pushed the same way, with `task_project` naming the second
+Project, is how a released writer's Task in that Project arrives at a branch
+Machine.

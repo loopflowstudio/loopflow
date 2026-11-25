@@ -185,14 +185,10 @@ fn unsent_count(conn: &Connection, repo: &str, sent_seq: i64) -> StoreResult<usi
 }
 
 /// What a record cannot be written without: a comment's Task, a Task's
-/// Project and its parent in the same repository, a Project's Wave, a Wave's
-/// parent and the Project it selects.
+/// Project and its parent in the same repository, a Project's Wave, a Wave's parent.
 fn needs(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<(String, String)>> {
     let sql = match table {
-        "waves" => {
-            "SELECT 'waves',parent_wave_id FROM waves WHERE id=?1
-             UNION ALL SELECT 'projects',current_project_id FROM waves WHERE id=?1"
-        }
+        "waves" => "SELECT 'waves',parent_wave_id FROM waves WHERE id=?1",
         "projects" => "SELECT 'waves',wave_id FROM projects WHERE id=?1",
         "tasks" => {
             "SELECT 'projects',project_id FROM tasks WHERE id=?1
@@ -504,8 +500,7 @@ fn why_not_taken(
 /// Write `records` together; when one cannot be written here (a Wave whose
 /// name another Wave already holds, a comment whose Task is missing), take
 /// them a record at a time, parents first, skip and log what fails, so the
-/// rest of the plan still arrives. A Wave goes with its Projects: each names
-/// the other. Returns what was written and what was skipped.
+/// rest of the plan still arrives. Apply a Wave with its incoming Project records.
 fn apply_each(
     tx: &mut rusqlite::Transaction<'_>,
     repo: &str,
@@ -683,7 +678,7 @@ mod tests {
     fn task(store: &SqliteStore, title: &str) -> (WaveId, TaskId) {
         let wave = Wave::new(WaveId::new(), "plan".into(), REPO.into());
         crate::test_fixture::wave(store, &wave);
-        let project = store.ensure_project(wave.id(), "Plan").unwrap();
+        let project = store.seed_project(wave.id()).unwrap().id;
         let task = TaskId::new();
         store
             .create_task(&NewTask {

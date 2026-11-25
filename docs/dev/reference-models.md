@@ -98,7 +98,7 @@ reject a noncanonical write with `canonical identity required: <table>`.
 
 | Domain | Canonical form |
 | --- | --- |
-| Wave, Trace, LfProcess/Graph, steer, attachment and owned UUIDs; Linear Issue, Project, Initiative, Team, comment, attachment and assignee IDs | Lowercase, punctuation retained (simple, hyphenated, braced, URN) |
+| Wave, Trace, LfProcess/Graph, steer, attachment and owned UUIDs; Linear Issue, Project, Team, comment, attachment and assignee IDs | Lowercase, punctuation retained (simple, hyphenated, braced, URN) |
 | Task, Project, repository, Machine, PR, landing, tool response | Lowercase prefix and UUID (`task_`, `proj_`, `repo_`, `home_`, `pr_`, `landing_`, `response_`) |
 | LfSession (`LfSessionId`) | Lowercase `session_<hex>` or bare 32 hex; other historical names keep their bytes |
 | Task label | Lowercase local `lf-<hex>`; uppercase Linear `<TEAM>-<n>` |
@@ -109,8 +109,7 @@ capture locators, names, slugs, paths and arbitrary payload content. A Task
 selector resolves each domain separately (`TaskSelector`), so an opaque
 external ID is never treated as a ticket; a Session selector tries the
 canonical LfSession first and gives native lookup the original text.
-Metric evidence keeps its originally hashed Wave spelling while its Work
-association is canonical. Files named from an identity keep their retained
+Files named from an identity keep their retained
 locators (below). The `canonical_structured_ids` migration converts released
 rows and declared JSON paths in one transaction and aborts on any collision.
 
@@ -120,7 +119,7 @@ These are the accepted product owners; see [cutover status](reference-cutover.md
 for the current implementation boundary.
 
 ```text
-Wave --< Task --< Graph run       a Wave's planning binds one Linear Project
+Wave --- Project --< Task --< Graph run
 
 LfSession --- AgentProcess         one current provider, recorded on the Session
 LfSession --> attached lf          nullable current attachment, fenced by token
@@ -131,10 +130,10 @@ Graph run --< step                 graph_process_steps; result is the step's exi
 | Concept | Owns |
 | --- | --- |
 | Repository | Wave membership |
-| Wave | Enduring objective, memory, cadence, budget and metric instruments; its planning holds status, Tasks, KRs and targets (one Linear Project when connected) |
+| Wave | Enduring objective, memory, cadence and budget; its one Project (a Linear Project when connected) groups its Tasks and carry name, summary and status |
 | Task | Worktree, optional PR, captured graph and position, and every associated Session and Graph run; independent Graphs do not move that position |
 | Graph | Reusable authored graph of agent/mechanical/router nodes; a running one is a Graph run and its steps |
-| LfProcess | One lf invocation's opaque id (`LfProcessId`, `LF_PROCESS_ID`); no table holds it. The record that owns the work (Session attachment, Graph run, step, Task carrier, CI repair, project activation) carries its pid, OS start and result |
+| LfProcess | One lf invocation's opaque id (`LfProcessId`, `LF_PROCESS_ID`); no table holds it. The record that owns the work (Session attachment, Graph run, step, Task carrier, CI repair) carries its pid, OS start and result |
 | AgentProcess | The provider OS process Loopflow started: durable `id` (`AgentProcessId`) with its launching lf, pid, OS start, spawn state, exit, endpoint, inbox and socket, recorded on its Session's row; the Session also holds the attached lf, that lf's pid, OS start and terminal, and the attachment token. A Session runs one agent at a time; a replaced one has exited |
 | LfSession | Loopflow conversation identity, title, feedback, current AgentSession and provider history |
 | AgentSession | Provider-owned conversation, identified by opaque AgentSessionId for resume, turn matching and account attribution; no separate table |
@@ -204,8 +203,8 @@ provider generation in caller provenance, turn origin and Program Status.
 | `task_checkouts` | This Machine's checkout of a Task (worktree path, branch, base commit, parent PR); absent on every other Machine |
 | `task_primary_sessions` | The conversation this Machine opens for a Task, with or without a checkout; absent on every other Machine |
 | `task_ownership` | Append-only `claim`/`unclaim` entries (`own_…`; `lf task unassign` writes `unclaim`, shown as unassign) with person, the Machine they name, the Machine that wrote them and time; a move is a claim naming another Machine, and earlier `handoff` entries read as one |
-| `projects` | A Wave's plan: stable local identity, optional provider binding, status, prose, KRs and targets; the default graph belongs to the Wave |
-| `waves` | Stable identity and repository address; objective, memory and instruments are read from checkout files |
+| `projects` | A Wave's one Project, holding its Tasks: stable local identity, optional provider binding, status and prose; the default graph belongs to the Wave |
+| `waves` | Stable identity and repository address; objective and memory are read from checkout files |
 
 ### Conversation and attachment lifetime
 
@@ -518,11 +517,12 @@ not imported. Runtime readers use only the final schema and current encodings.
 
 ### Planning
 
-Linear statuses are the owner: one In Progress Linear Project per Wave. Planned
-Linear Projects express future plans; Completed ones retain history. A Task without
+A Wave is exactly one Project, made with it; its status mirrors the
+tracker's, and an ended Project stays the Wave's. A Task in a Wave is in its
+Project, and its Wave is read through that Project. A Task without
 a graph takes up an explicitly named one, its Wave default, repository `graph:`, then builtin `code`.
-There is no packet or local switch. A Wave's Project is replaced in place, preserving
-active Task identity/worktree/PR/execution and refusing unrelated competing plans.
+There is no packet or local switch. Started Tasks keep their identity, worktree,
+PR and execution whatever happens to their Project.
 A second Machine adopts the same state through ordinary synchronization.
 
 Adjacent APIs keep their own authority: Task PR operations own Git/GitHub;

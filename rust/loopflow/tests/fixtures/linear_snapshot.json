@@ -1,26 +1,14 @@
 {
-  "projects": [
-    {
-      "id": "project-gmail",
-      "slug": "gmail",
-      "name": "Gmail",
-      "summary": "Keep mail flowing.",
-      "krs": [
-        {
-          "text": "Mail processing survives restart",
-          "holds": true
-        }
-      ],
-      "initiative_ids": [
-        "initiative-infrastructure"
-      ],
-      "team_ids": [
-        "team-loo"
-      ],
-      "metric_targets": [],
-      "status": "started"
-    }
-  ],
+  "project": {
+    "id": "project-gmail",
+    "slug": "gmail",
+    "name": "Gmail",
+    "summary": "Keep mail flowing.",
+    "team_ids": [
+      "team-loo"
+    ],
+    "status": "started"
+  },
   "items": [
     {
       "id": "issue-gmail",

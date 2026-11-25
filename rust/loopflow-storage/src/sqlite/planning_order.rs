@@ -23,18 +23,40 @@ pub(super) fn reorder_in(conn: &Connection, task: &Task, rank: u32) -> StoreResu
         let moved = order.remove(from);
         order.insert(to, moved);
         if let Some(project) = &task.project_id {
-            let base = observed_order(conn, project)?.map(|value| json!({"value":value}));
-            tracker_actions::enqueue(
-                conn,
-                &ActionOwner::Project(project.clone()),
-                ActionKind::Order,
-                None,
-                &json!(order),
-                base.as_ref(),
-            )?;
+            enqueue_order(conn, project, &order)?;
         }
         apply_order(conn, &order, WriteOrigin::Local)?;
     }
+    Ok(())
+}
+
+/// Queue a newly bound Project's local order, which its Tasks may have taken
+/// while no tracker held it. One Task has no order to send.
+pub(super) fn send_local_order_in(conn: &Connection, project: &ProjectId) -> StoreResult<()> {
+    let order = conn
+        .prepare(
+            "SELECT id FROM tasks WHERE project_id=?1 AND planning_deleted_at IS NULL
+             ORDER BY planning_rank,id",
+        )?
+        .query_map([project.as_str()], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if order.len() > 1 {
+        enqueue_order(conn, project, &order)?;
+    }
+    Ok(())
+}
+
+/// Queue `order` as `project`'s desired order, against the tracker's.
+fn enqueue_order(conn: &Connection, project: &ProjectId, order: &[String]) -> StoreResult<()> {
+    let base = observed_order(conn, project)?.map(|value| json!({"value":value}));
+    tracker_actions::enqueue(
+        conn,
+        &ActionOwner::Project(project.clone()),
+        ActionKind::Order,
+        None,
+        &json!(order),
+        base.as_ref(),
+    )?;
     Ok(())
 }
 

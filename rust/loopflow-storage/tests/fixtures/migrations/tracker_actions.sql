@@ -1,11 +1,11 @@
 -- Released receipts, one unconfirmed row of each kind, plus rows the queue drops.
 INSERT INTO repository_plans(id,repo,selected) VALUES('repo-proof','/repo',1);
-INSERT INTO waves(id,name,repo,created_at) VALUES('wave-proof','proof','/repo',1);
+INSERT INTO waves(id,name,repo,created_at) VALUES('wave-proof','proof','/repo',1),('wave-new','new','/repo',1);
 INSERT INTO projects(id,wave_id,external_project_id,created_at,project_name,status)
 VALUES('project-bound','wave-proof','linear-project',1,'Bound','started'),
-      ('project-new','wave-proof',NULL,1,'New','planned');
+      ('project-new','wave-new',NULL,1,'New','planned');
 INSERT INTO project_transitions(wave_id,successor_id,created_at,local_plan_json,export_attempted,export_link_attempted,export_json)
-VALUES('wave-proof','project-new',1,'{}',1,0,
+VALUES('wave-new','project-new',1,'{}',1,0,
 '{"id":"project-new-uuid","baseline":[{"field":"project_name","value":"New"}],"task_state":null,"through":0,"input":{"teamIds":["team"]},"initiative":"initiative-proof","link_id":"link-proof"}');
 INSERT INTO tasks(id,repository_id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,created_at,updated_at,planning_completed_at)
 VALUES('task-bound','repo-proof','project-bound','linear-issue','PROOF-1','Bound','',1,1,'2026-11-01T00:00:00Z'),

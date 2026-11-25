@@ -38,7 +38,7 @@ struct DesignDisciplineTests {
     func everyFontComesFromTheRamp() throws {
         let violations = try Self.violations(in: ["Loopflow", "LoopflowMac", "LoopflowiOS"], [
             (#"(Font)?\.custom\("#, "a face chosen outside Design/", true),
-            (#"\.system\("#, "a system font", false),
+            (#"\.system\("#, "a system font outside the design ramp's fallback", true),
             (#"\.font\(\.(largeTitle|title|title2|title3|headline|subheadline|body|callout|footnote|caption|caption2)\b"#, "a system text style", false),
             (#"Typography\.\w+\("#, "a sized Typography call", false),
         ])

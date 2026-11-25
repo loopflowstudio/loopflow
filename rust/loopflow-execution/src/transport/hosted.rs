@@ -219,9 +219,7 @@ impl Hosted {
 
     /// The Program Status the execution's output reported, once it has a screen.
     pub fn program_status(&self) -> Option<&loopflow_model::program_status::Records> {
-        self.output
-            .terminal()
-            .map(|terminal| terminal.program_status())
+        self.output.program_status()
     }
 
     /// Serve every connection, move input and output, and judge the ending.
@@ -293,6 +291,9 @@ impl Hosted {
                                     pending_input.push(&typed),
                                     "Provider input is busy"
                                 );
+                                if input::keys(&typed).next().is_some() {
+                                    output.acknowledge_results();
+                                }
                                 *writer = Some(viewer.id.clone());
                                 sizing.touch(viewer);
                                 continue;

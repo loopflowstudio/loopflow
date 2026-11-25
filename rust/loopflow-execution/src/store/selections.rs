@@ -3,13 +3,28 @@ use crate::store::session_projection::Reading;
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::durable::RepositoryId;
 use loopflow_storage::sqlite::selections::{repository_default, TaskSelectionReading};
+use loopflow_storage::sqlite::sessions::{SessionProjection, SessionProjectionInputs};
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::selection::{
-    move_into_place, Arrangement, ArrangementEdit, ArrangementMode, Dashboard, DashboardId,
-    DashboardReading, Selection, SelectionResolution, ViewPlan, WorkWorkspaceKey,
+    Arrangement, ArrangementEdit, ArrangementMode, Dashboard, DashboardId, DashboardReading,
+    Selection, SelectionResolution, ViewPlan,
 };
+
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
+}
+
+// A process can change between observation and pinning the SQL snapshot.
+fn read_projected<T>(
+    store: &SqliteStore,
+    read: impl Fn(&SessionProjectionInputs, &SessionProjection) -> StoreResult<Option<T>>,
+) -> StoreResult<T> {
+    loop {
+        let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
+        if let Some(value) = read(&reading.inputs, &reading.values)? {
+            return Ok(value);
+        }
+    }
 }
 
 pub fn plan_selection(
@@ -17,19 +32,16 @@ pub fn plan_selection(
     repository: &RepositoryId,
     selection: Selection,
 ) -> StoreResult<ViewPlan> {
-    loop {
-        let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
-        if let Some(result) = store.projected_plan_selection(
+    let plan = read_projected(store, |inputs, projection| {
+        store.projected_plan_selection(
             repository,
             selection.clone(),
-            &reading.inputs,
-            &reading.values,
-        )? {
-            let mut plan = result;
-            prepare_plan(store, &mut plan)?;
-            return Ok(plan);
-        }
-    }
+            inputs,
+            projection,
+            running_step,
+        )
+    })?;
+    prepare_plan(store, plan)
 }
 
 pub fn all_view_plans(
@@ -37,36 +49,26 @@ pub fn all_view_plans(
     source: Option<&str>,
     repos: &[String],
 ) -> StoreResult<Vec<ViewPlan>> {
-    loop {
-        let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
-        if let Some(result) =
-            store.projected_all_view_plans(source, repos, &reading.inputs, &reading.values)?
-        {
-            let mut plans = result;
-            for plan in &mut plans {
-                prepare_plan(store, plan)?;
-            }
-            return Ok(plans);
-        }
-    }
+    let plans = read_projected(store, |inputs, projection| {
+        store.projected_all_view_plans(source, repos, inputs, projection, running_step)
+    })?;
+    plans
+        .into_iter()
+        .map(|plan| prepare_plan(store, plan))
+        .collect()
 }
 
 pub fn selection_plans(
     store: &SqliteStore,
     repository: &RepositoryId,
 ) -> StoreResult<Vec<ViewPlan>> {
-    loop {
-        let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
-        if let Some(result) =
-            store.projected_selection_plans(repository, &reading.inputs, &reading.values)?
-        {
-            let mut plans = result;
-            for plan in &mut plans {
-                prepare_plan(store, plan)?;
-            }
-            return Ok(plans);
-        }
-    }
+    let plans = read_projected(store, |inputs, projection| {
+        store.projected_selection_plans(repository, inputs, projection, running_step)
+    })?;
+    plans
+        .into_iter()
+        .map(|plan| prepare_plan(store, plan))
+        .collect()
 }
 
 pub fn resolve_selection(
@@ -74,31 +76,18 @@ pub fn resolve_selection(
     repository: &RepositoryId,
     selection: &Selection,
 ) -> StoreResult<SelectionResolution> {
-    loop {
-        let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
-        if let Some(result) = store.projected_resolve_selection(
-            repository,
-            selection,
-            &reading.inputs,
-            &reading.values,
-        )? {
-            return Ok(result);
-        }
-    }
+    read_projected(store, |inputs, projection| {
+        store.projected_resolve_selection(repository, selection, inputs, projection)
+    })
 }
 
 pub fn task_selection_reading(
     store: &SqliteStore,
     repository: &RepositoryId,
 ) -> StoreResult<TaskSelectionReading> {
-    loop {
-        let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
-        if let Some(result) =
-            store.projected_task_selection_reading(repository, &reading.inputs, &reading.values)?
-        {
-            return Ok(result);
-        }
-    }
+    read_projected(store, |inputs, projection| {
+        store.projected_task_selection_reading(repository, inputs, projection)
+    })
 }
 
 pub fn read_dashboard(
@@ -106,14 +95,9 @@ pub fn read_dashboard(
     repository: &RepositoryId,
     id: &DashboardId,
 ) -> StoreResult<Option<DashboardReading>> {
-    loop {
-        let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
-        if let Some(result) =
-            store.projected_read_dashboard(repository, id, &reading.inputs, &reading.values)?
-        {
-            return Ok(result);
-        }
-    }
+    read_projected(store, |inputs, projection| {
+        store.projected_read_dashboard(repository, id, inputs, projection)
+    })
 }
 
 /// Resolve text/defaults and saved intent without creating Work or acquiring a client.
@@ -121,7 +105,7 @@ pub fn view_plan(
     store: &SqliteStore,
     repository: &RepositoryId,
     source: Option<&str>,
-) -> StoreResult<loopflow_storage::work::selection::ViewPlan> {
+) -> StoreResult<ViewPlan> {
     let selection = match source {
         Some(source) => Selection::parse(source, None).map_err(StoreError::from)?,
         None => repository_default(),
@@ -171,40 +155,18 @@ pub fn edit_dashboard(
     )
 }
 
-pub fn reorder_dashboard(
-    store: &SqliteStore,
-    repository: &RepositoryId,
-    id: &DashboardId,
-    expected_revision: i64,
-    work: &WorkWorkspaceKey,
-    to: &WorkWorkspaceKey,
-) -> StoreResult<Dashboard> {
-    let reading = read_dashboard(store, repository, id)?.ok_or(StoreError::NotFound)?;
-    let mut arrangement = reading.arrangement;
-    let from = arrangement.winner(work).ok_or(StoreError::NotFound)?;
-    let target = arrangement.winner(to).ok_or(StoreError::NotFound)?;
-    move_into_place(&mut arrangement.order, from, target);
-    // A concurrent edit since this read advances the revision and is rejected there.
-    save_dashboard(
-        store,
-        repository,
-        id,
-        Some(expected_revision),
-        &reading.saved.selection,
-        &arrangement.to_edit(),
-    )
+fn running_step(graph: &str, cursor: &str) -> StoreResult<Option<String>> {
+    let graph: crate::task_graph::CapturedGraph = serde_json::from_str(graph)?;
+    Ok(graph.step_name_of(&serde_json::from_str(cursor)?))
 }
 
-fn prepare_plan(store: &SqliteStore, plan: &mut ViewPlan) -> StoreResult<()> {
+fn prepare_plan(store: &SqliteStore, mut plan: ViewPlan) -> StoreResult<ViewPlan> {
     plan.viewer = crate::store::ownership::viewer(
         store,
         &RepositoryId::from_raw(plan.repository.clone()),
         std::path::Path::new(&plan.repo_path),
     )?;
-    for content in plan.contents.iter_mut().filter(|content| {
-        content.work.kind == loopflow_storage::work::selection::WorkWorkspaceKind::Task
-            && content.identifier.is_some()
-    }) {
+    for content in &mut plan.contents {
         if let (Some(session_id), Some(location)) = (&content.primary_session, &content.location) {
             match crate::ops::human_session::human_session_argv(session_id) {
                 Ok(mut argv) => {
@@ -225,7 +187,7 @@ fn prepare_plan(store: &SqliteStore, plan: &mut ViewPlan) -> StoreResult<()> {
             }
         }
     }
-    Ok(())
+    Ok(plan)
 }
 
 /// Prepare without a write lock; SQL checks the saved revision at commit.
@@ -241,66 +203,57 @@ pub fn save_dashboard(
     if id.0.is_empty() {
         return Err(invalid("Dashboard ID must be nonempty"));
     }
-    let stale = || StoreError::Stale("Dashboard changed; read it again before editing".into());
-    loop {
-        let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
-        let Some(inputs) = store.dashboard_edit_inputs(
-            repository,
-            id,
-            &selection.expression_key(),
-            &reading.inputs,
-            &reading.values,
-        )?
-        else {
-            continue;
-        };
-        let catalog = inputs.catalog;
-        let prior = catalog.iter().find(|saved| &saved.id == id).cloned();
-        if prior.as_ref().map(|saved| saved.revision) != expected_revision {
-            return Err(stale());
-        }
-        let work = inputs.work;
-        let mut definitions: std::collections::BTreeMap<_, _> = catalog
-            .iter()
-            .map(|saved| (saved.id.clone(), saved.selection.clone()))
-            .collect();
-        definitions.insert(id.clone(), selection.clone());
-        // Any cycle introduced by this edit must pass through this selection.
-        // Unrelated Dashboards may have ambiguous references and still be repairable.
-        let resolution = selection
-            .resolve(repository.as_str(), &work, &definitions)
-            .map_err(StoreError::from)?;
-        let mut expected = inputs
-            .arrangement
-            .or_else(|| prior.as_ref().map(|saved| saved.arrangement.clone()))
-            .unwrap_or_else(|| Arrangement::automatic(&[]));
-        expected.reconcile(&resolution);
-        let arrangement = Arrangement {
-            order: edit.order.clone(),
-            hidden: edit.hidden.clone(),
-            mode: if edit.order == expected.order {
-                expected.mode
-            } else {
-                ArrangementMode::Touched
-            },
-        };
-        arrangement
-            .validate(&expected.order)
-            .map_err(StoreError::from)?;
-        let saved = Dashboard {
-            repository: repository.to_string(),
-            id: id.clone(),
-            revision: expected_revision.unwrap_or(0) + 1,
-            name: prior.as_ref().and_then(|saved| saved.name.clone()),
-            pinned: prior.as_ref().is_some_and(|saved| saved.pinned),
-            slots: prior.as_ref().and_then(|saved| saved.slots.clone()),
-            selection: selection.clone(),
-            arrangement,
-        };
-
-        return store.commit_dashboard(repository, expected_revision, saved);
+    let expression = selection.expression_key();
+    let inputs = read_projected(store, |inputs, projection| {
+        store.dashboard_edit_inputs(repository, id, &expression, inputs, projection)
+    })?;
+    let catalog = inputs.catalog;
+    let prior = catalog.iter().find(|saved| &saved.id == id);
+    if prior.map(|saved| saved.revision) != expected_revision {
+        return Err(StoreError::Stale(
+            "Dashboard changed; read it again before editing".into(),
+        ));
     }
-}
+    let work = inputs.work;
+    let mut definitions: std::collections::BTreeMap<_, _> = catalog
+        .iter()
+        .map(|saved| (saved.id.clone(), saved.selection.clone()))
+        .collect();
+    definitions.insert(id.clone(), selection.clone());
+    // Any cycle introduced by this edit must pass through this selection.
+    // Unrelated Dashboards may have ambiguous references and still be repairable.
+    let resolution = selection
+        .resolve(repository.as_str(), &work, &definitions)
+        .map_err(StoreError::from)?;
+    let mut expected = inputs
+        .arrangement
+        .or_else(|| prior.map(|saved| saved.arrangement.clone()))
+        .unwrap_or_else(|| Arrangement::automatic(&[]));
+    expected.reconcile(&resolution);
+    let arrangement = Arrangement {
+        order: edit.order.clone(),
+        hidden: edit.hidden.clone(),
+        mode: if edit.order == expected.order {
+            expected.mode
+        } else {
+            ArrangementMode::Touched
+        },
+    };
+    arrangement
+        .validate(&expected.order)
+        .map_err(StoreError::from)?;
+    let saved = Dashboard {
+        repository: repository.to_string(),
+        id: id.clone(),
+        revision: expected_revision.unwrap_or(0) + 1,
+        name: prior.and_then(|saved| saved.name.clone()),
+        pinned: prior.is_some_and(|saved| saved.pinned),
+        slots: prior.and_then(|saved| saved.slots.clone()),
+        selection: selection.clone(),
+        arrangement,
+    };
 
+    store.commit_dashboard(repository, expected_revision, saved)
+}
 #[cfg(test)]
 mod tests;

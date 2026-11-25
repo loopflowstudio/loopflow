@@ -457,7 +457,8 @@ while no view is attached and keeps the latest 64 records from providers and
 lf together. Reattaching replaces the view's records with that current
 status, including completed work and pending questions. Clear removes the
 named record and its children; a shell prompt retires live claims, and a
-terminal reset removes all records. The same validated records are sent as
+terminal reset removes all records. Typing or pasting dismisses done and error
+reports for every viewer and the Session. The same validated records are sent as
 `program_status` on attachment and after changes, coalesced at complete
 output boundaries. Mobile consumes this shape without parsing OSC reports
 again. These snapshots confer no control or Task-completion authority; CLI

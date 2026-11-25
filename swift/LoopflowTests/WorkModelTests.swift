@@ -816,9 +816,10 @@ struct WorkModelStreamTests {
         answered.continuation.finish()
         let request = try await feed.request(2)
         #expect(request == .checkpoint(id: request.id, replay: []))
-        // The CLI answers without revisions, so there is no reading to wait for.
-        #expect(model.pendingChanges.changes.isEmpty)
+        // The CLI answers without revisions: the preview holds through the reread it asked for.
+        #expect(!model.pendingChanges.changes.isEmpty)
         await feed.send(try fixture.frame("checkpoint", sequence: 2, answers: request.id, body: "null"))
+        try await eventually { model.pendingChanges.changes.isEmpty }
     }
 
     @Test("A held Claim shows the owner the repository reading names, before the reply")
@@ -1015,7 +1016,7 @@ struct WorkModelStreamTests {
 }
 
 @MainActor
-private func eventually(_ condition: @MainActor () -> Bool) async throws {
+func eventually(_ condition: @MainActor () -> Bool) async throws {
     let deadline = ContinuousClock.now + .seconds(3)
     while !condition() {
         guard ContinuousClock.now < deadline else {
@@ -1032,7 +1033,7 @@ private actor Flag {
 }
 
 /// A scripted reader: the test decides which frames arrive and when.
-private actor WorkFeed {
+actor WorkFeed {
     private var continuations: [AsyncThrowingStream<WorkFrame, any Error>.Continuation] = []
     private var requests: [WorkRequest] = []
     var openCount: Int { continuations.count }
@@ -1263,7 +1264,7 @@ struct TaskPlanningReadabilityTests {
 
     private func plan(title: String = "Readable local Task") -> WorkViewPlan {
         let content = WorkViewPlan.Content(work: key, title: title,
-            states: [.working], identifier: "LOO-905", primarySession: nil, location: nil, argv: nil, unavailable: [])
+            states: [.working], identifier: "LOO-905", graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
         return fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [content])
     }
 
@@ -1295,7 +1296,7 @@ struct TaskPlanningReadabilityTests {
         let record = try #require(fixture.roadmap.tasks.items.first { $0.id == "issue-now" })
         let work = WorkWorkspaceKey(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id)
         let member = WorkViewPlan.Content(work: work, title: "Fresh list name",
-            states: [.working], identifier: record.task.identifier, primarySession: nil, location: nil, argv: nil, unavailable: [])
+            states: [.working], identifier: record.task.identifier, graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
         let list = fixtureViewPlan(owner: key, members: [member])
         func planning(_ failed: Bool) {
             model.applyFixture(roadmap: failed ? .unavailable(lastGood: fixture.roadmap, reason: "Planning offline") : .available(fixture.roadmap),
@@ -1420,7 +1421,7 @@ struct TaskPlanningReadabilityTests {
         let member = WorkViewPlan.Content(
             work: .init(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id),
             title: record.task.name, states: [.working], identifier: record.task.identifier,
-            primarySession: nil, location: nil, argv: nil, unavailable: [])
+            graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
         model.applyTaskList(fixtureViewPlan(owner: key, members: [member]), wave: nil, reason: "")
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         #expect(try navigator.inspect().find(text: record.task.name).string() == record.task.name)
@@ -1539,7 +1540,7 @@ struct TaskPlanningReadabilityTests {
         let content = WorkViewPlan.Content(
             work: .init(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id),
             title: "Fresh local name", states: [.working], identifier: record.task.identifier,
-            primarySession: nil, location: nil, argv: nil, unavailable: [])
+            graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
         model.applyTaskList(fixtureViewPlan(owner: key, members: [content]), wave: nil, reason: "")
         #expect(model.sidebarTaskIDs == [record.id])
         #expect(model.taskPresentation(id: record.id).title == record.task.name, "current roadmap identity keeps priority")

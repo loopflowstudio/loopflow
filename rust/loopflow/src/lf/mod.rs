@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use loopflow_storage::work::selection::DropSide;
 
 pub mod aliases;
 mod desktop_inputs;
@@ -1100,6 +1101,9 @@ pub enum DashboardCommand {
         /// Tile whose place it takes
         #[arg(long)]
         destination: String,
+        /// Place the tile before or after the destination in the current order
+        #[arg(long, value_enum)]
+        side: Option<DropSide>,
     },
     /// Resize the divider between two tiles on a saved Dashboard; ratio is the addressed one's share
     Resize {
@@ -1111,40 +1115,6 @@ pub enum DashboardCommand {
         #[arg(long)]
         ratio: f64,
     },
-}
-
-impl DashboardCommand {
-    /// The verb a saved tile edit names, with its arguments, or none for a
-    /// Dashboard record edit.
-    pub fn tile_verb(&self) -> Option<(&str, &str, std::collections::BTreeMap<String, String>)> {
-        match self {
-            Self::Hide { tile } => Some(("hide", tile, Default::default())),
-            Self::Show { tile } => Some(("show", tile, Default::default())),
-            Self::Move { tile, destination } => Some((
-                "move",
-                tile,
-                [("destination".to_owned(), destination.clone())].into(),
-            )),
-            Self::Resize {
-                tile,
-                toward,
-                ratio,
-            } => Some((
-                "resize",
-                tile,
-                [
-                    ("toward".to_owned(), toward.clone()),
-                    ("ratio".to_owned(), ratio.to_string()),
-                ]
-                .into(),
-            )),
-            Self::Query { .. }
-            | Self::Pin { .. }
-            | Self::Unpin { .. }
-            | Self::Rename { .. }
-            | Self::Slots { .. } => None,
-        }
-    }
 }
 
 // ── Which commands change state ─────────────────────────────────────────────

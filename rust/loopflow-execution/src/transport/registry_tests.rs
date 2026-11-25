@@ -745,7 +745,9 @@ fn a_held_terminal_with_no_view_reports_that_it_waits() {
         r"printf '\033]7501;state=working:app=claude-code\033\\'
 while [ ! -e '{ask}' ]; do sleep 0.02; done
 printf 'May I?\r\n\033]7501;state=blocked:app=claude-code\033\\'
-read answer",
+read answer
+printf '\033]7501;state=done:app=claude-code\033\\\033]7501;id=child:state=error\033\\'
+read next",
         ask = ask.display()
     );
     let terminal = registry
@@ -768,7 +770,7 @@ read answer",
     store
         .record_agent_process_identity(session.id.as_str(), &attachment, pid, started)
         .unwrap();
-    let available = || {
+    let summary = || {
         session_projection::session_summary(
             &store,
             session.id.as_str(),
@@ -776,11 +778,36 @@ read answer",
         )
         .unwrap()
         .unwrap()
-        .available
     };
-    assert!(!available(), "a working agent waits on nobody");
+    assert!(!summary().available, "a working agent waits on nobody");
     std::fs::write(&ask, "").unwrap();
-    wait_until("the unviewed question to read as waiting", available);
+    wait_until("the unviewed question to read as waiting", || {
+        summary().available
+    });
+    let mut view = View::attach(&terminal);
+    view.wait_for("May I?");
+    view.type_in(b"yes\n");
+    wait_until("the finished turn to read as available", || {
+        let row = summary();
+        row.available
+            && row.program_status.is_some_and(|status| {
+                status
+                    .records
+                    .iter()
+                    .any(|r| r.state == loopflow_model::program_status::State::Done)
+            })
+    });
+    view.type_in(b"x");
+    wait_until(
+        "typing to dismiss the stored done and error reports",
+        || {
+            let row = summary();
+            !row.available
+                && row
+                    .program_status
+                    .is_some_and(|status| status.seen && status.records.is_empty())
+        },
+    );
     registry.close();
     kill(&place, &terminal);
 }

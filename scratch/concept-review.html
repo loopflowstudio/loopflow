@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept review: LOO-1109 review pages across hosts</title>
+<style>
+  :root {
+    --background: #faf8f5;
+    --surface: #fffdf9;
+    --surface-muted: #f3eee7;
+    --surface-element: #ece6dd;
+    --border: #e6dfd6;
+    --border-strong: #d6ccc0;
+    --border-active: #8b8277;
+    --text: #2a2624;
+    --text-secondary: #5f5752;
+    --text-tertiary: #65605d;
+    --accent: #722f37;
+    --accent-hover: #5e2630;
+    --accent-text: #faf8f5;
+    --accent-soft: #f3e8e9;
+    --working-ink: #2f629f;
+    --working-fill: #e2eaf2;
+    --warning-ink: #7f5a19;
+    --warning-fill: #efe7d8;
+    --failure-ink: #a64038;
+    --failure-fill: #f3e2df;
+    --success-ink: #386c48;
+    --success-fill: #e1ebe3;
+    --serif: "Old Standard TT", Georgia, "Times New Roman", serif;
+    --sans: "Atkinson Hyperlegible Next", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono: "Spline Sans Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --background: #161413;
+      --surface: #1e1b19;
+      --surface-muted: #26221f;
+      --surface-element: #302b27;
+      --border: #322d29;
+      --border-strong: #463f3a;
+      --border-active: #968b80;
+      --text: #ede9e3;
+      --text-secondary: #b0a79f;
+      --text-tertiary: #8f867e;
+      --accent: #c46b75;
+      --accent-hover: #d4828b;
+      --accent-text: #161413;
+      --accent-soft: #2e1d20;
+      --working-ink: #7bb0eb;
+      --working-fill: #1f2b38;
+      --warning-ink: #dfb464;
+      --warning-fill: #302819;
+      --failure-ink: #e07b72;
+      --failure-fill: #331e1c;
+      --success-ink: #79b88b;
+      --success-fill: #1c2c21;
+    }
+  }
+  :root[data-theme="dark"] {
+    --background: #161413;
+    --surface: #1e1b19;
+    --surface-muted: #26221f;
+    --surface-element: #302b27;
+    --border: #322d29;
+    --border-strong: #463f3a;
+    --border-active: #968b80;
+    --text: #ede9e3;
+    --text-secondary: #b0a79f;
+    --text-tertiary: #8f867e;
+    --accent: #c46b75;
+    --accent-hover: #d4828b;
+    --accent-text: #161413;
+    --accent-soft: #2e1d20;
+    --working-ink: #7bb0eb;
+    --working-fill: #1f2b38;
+    --warning-ink: #dfb464;
+    --warning-fill: #302819;
+    --failure-ink: #e07b72;
+    --failure-fill: #331e1c;
+    --success-ink: #79b88b;
+    --success-fill: #1c2c21;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.58;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .column {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 36px 20px 84px;
+  }
+
+  .page-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  h1 {
+    margin: 0 0 8px;
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 32px;
+    line-height: 1.15;
+    letter-spacing: -0.03em;
+    font-variant-ligatures: none;
+  }
+  .lede {
+    margin: 0;
+    font-size: 15px;
+    color: var(--text-secondary);
+    max-width: 68ch;
+  }
+
+  h2 {
+    margin: 40px 0 10px;
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 19px;
+    line-height: 1.3;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 {
+    margin: 22px 0 6px;
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 15.5px;
+    line-height: 1.35;
+  }
+  p { margin: 0 0 12px; }
+  ul, ol { margin: 0 0 14px; padding-left: 20px; }
+  li { margin-bottom: 6px; }
+
+  .small { font-size: 13.5px; color: var(--text-secondary); }
+  code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: var(--surface-muted);
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+  pre {
+    margin: 8px 0 12px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.5;
+    background: var(--surface-muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  button {
+    font-family: var(--sans);
+    font-size: 13px;
+    line-height: 1.2;
+    padding: 5px 11px;
+    border-radius: 4px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  button:hover { background: var(--surface-muted); border-color: var(--border-active); }
+  button[aria-pressed="true"] {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .status::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+  }
+  .status.yes { color: var(--success-ink); }
+  .status.no { color: var(--failure-ink); }
+  .status.proposed { color: var(--accent); }
+  .status.existing { color: var(--text-secondary); }
+  .status.work { color: var(--working-ink); }
+
+  .jump-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    font-size: 13.5px;
+    margin: 0 0 22px;
+  }
+  .jump-bar a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    border-bottom: 1px solid var(--border-strong);
+    padding-bottom: 1px;
+  }
+  .jump-bar a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .state-band {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    padding: 14px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin: 14px 0 22px;
+    font-size: 14px;
+  }
+  @media (max-width: 680px) { .state-band { grid-template-columns: 1fr; } }
+  .state-band > div + div { border-left: 1px solid var(--border); padding-left: 16px; }
+  @media (max-width: 680px) {
+    .state-band > div + div { border-left: none; padding-left: 0; border-top: 1px solid var(--border); padding-top: 12px; }
+  }
+
+  .table-wrap { overflow-x: auto; margin: 12px 0 20px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  th, td {
+    text-align: left;
+    vertical-align: top;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    background: var(--surface-muted);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  tr:last-child td { border-bottom: none; }
+
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin: 14px 0 22px;
+  }
+  @media (max-width: 720px) { .compare { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-size: 14px;
+  }
+  .panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-title { font-weight: 600; font-size: 14.5px; }
+
+  .trace {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 8px 0;
+  }
+  .step {
+    background: var(--surface-muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 13.5px;
+  }
+  .step.bad {
+    background: var(--failure-fill);
+    border-color: var(--failure-ink);
+  }
+  .step.good {
+    background: var(--success-fill);
+    border-color: var(--success-ink);
+  }
+
+  .sim-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin: 12px 0;
+  }
+
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin: 14px 0 20px;
+  }
+
+  .q-list { list-style: none; padding-left: 0; }
+  .q-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+  }
+  .q-title { font-weight: 600; margin-bottom: 8px; }
+  .q-opts { list-style: none; padding-left: 0; margin: 0; }
+  .q-opts li { margin-bottom: 6px; font-size: 14px; }
+  .q-key { font-weight: 600; color: var(--accent); margin-right: 4px; }
+</style>
+</head>
+<body>
+<div class="column">
+  <header class="page-head">
+    <div>
+      <h1>Do the review-page concepts line up?</h1>
+      <p class="lede">
+        Pre-implementation concept review for <code>LOO-1109</code>. Area reviewed:
+        review pages end-to-end — compiling with <code>lf page build</code>, opening
+        across hosts with <code>lf page open</code>, annotating and triggering
+        <code>data-lf</code> actions, and delivering replies into Rex, Loopflow
+        Desktop, and offline <code>file://</code>.
+      </p>
+    </div>
+    <button type="button" id="theme-toggle">Dark</button>
+  </header>
+
+  <nav class="jump-bar" aria-label="Sections">
+    <a href="#status">Build status</a>
+    <a href="#pairings">Concept pairings</a>
+    <a href="#biggest">Biggest mismatches</a>
+    <a href="#walkthrough">Failure walkthrough</a>
+    <a href="#plan-changes">Updated plan</a>
+    <a href="#questions">Open questions</a>
+  </nav>
+
+  <section id="status">
+    <div class="state-band">
+      <div>
+        <span class="status existing">Built and committed today</span>
+        <p class="small" style="margin-top:6px;">
+          No production code for <code>LOO-1109</code> has been written yet. This
+          branch sits on <code>LOO-1104</code> (skill inheritance) and holds only
+          <code>scratch/explore.html</code>, <code>scratch/review-infra-notes.md</code>,
+          <code>scratch/questions.md</code>, and <code>scratch/plan.md</code>.
+          Existing code it builds on: <code>server/remote.rs</code>,
+          <code>lf desktop files</code> (#2034), <code>TaskHTMLView</code>,
+          <code>ReviewCommentsStrip</code>, and <code>task.steer</code>.
+        </p>
+      </div>
+      <div>
+        <span class="status proposed">Proposed by this review</span>
+        <p class="small" style="margin-top:6px;">
+          Six conceptual mismatches were found in the kickoff plan and fixed
+          directly in <code>scratch/plan.md</code> before Pass 1 starts: steer
+          targeting, separating <code>data-lf</code> from the reply queue,
+          single-owner Desktop draft state, quiet headless <code>lf page open</code>,
+          dropping unused loopback <code>/ticket</code>, and reusing Loopflow's
+          diff machinery with an explicit component contract.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section id="pairings">
+    <h2>Product concepts vs. code concepts</h2>
+    <p class="small">
+      Each row pairs what a person understands and does with the representation
+      proposed in the kickoff plan. Every <strong>No</strong> was revised in
+      <code>scratch/plan.md</code>.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:20%;">Product concept</th>
+            <th style="width:28%;">Kickoff plan code concept</th>
+            <th style="width:9%;">Match</th>
+            <th style="width:43%;">What was wrong and how the plan now fixes it</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Answering the work</strong><br><span class="small">Press <code>⌘↩</code> and the right agent gets it</span></td>
+            <td>Page stamp stores the building agent's <code>session</code>; runtime sends <code>session.steer</code> first, else <code>task.steer</code>.</td>
+            <td><span class="status no">No</span></td>
+            <td><strong>Silent data loss on every Graph-built page.</strong> A headless <code>concept-review</code>, <code>qa</code>, or <code>ship-review</code> worker exits right after building the page. <code>session.steer</code> returns OK and writes into that dead worker Session (<code>engine/session.rs:34-46</code>) where nothing ever reads it. <strong>Fix:</strong> stamp <code>work</code> (<code>task</code> / <code>wave</code> / interactive <code>session</code> / <code>repository</code>); Task pages always send <code>task.steer</code>, which reaches live work, wakes the primary Session, forwards to peer Machines, and returns <code>delivery.sentence</code>.</td>
+          </tr>
+          <tr>
+            <td><strong>Reply queue vs. direct action</strong><br><span class="small">Notes &amp; choices wait for <code>⌘↩</code>; action buttons run one thing now</span></td>
+            <td><code>data-lf</code> runs on click + confirm, then appends <code>"Ran task.create → LOO-1200"</code> to the unsent queue; authored as raw wire JSON.</td>
+            <td><span class="status no">No</span></td>
+            <td><strong>One name for two lifecycles + unauthorable wire JSON.</strong> (1) Pushing an already-executed action into the unsent queue pops the reply strip when nothing is left to steer, puts a fake comment in Desktop's <code>ReviewCommentsStrip</code>, and makes Clear lie. (2) Wire <code>Operation</code>s use <code>deny_unknown_fields</code> with zero defaults (10 required keys for <code>task.create</code>). <strong>Fix:</strong> keep <code>decision</code> cards as <code>data-choice</code>; keep <code>data-lf</code> strictly in-place with a durable receipt (appending <code>[already ran: …]</code> only if the person also sends a queued reply); let <code>lf page build</code> expand and validate partial <code>data-lf</code> JSON into strict wire JSON, with per-click UUID <code>request_id</code>.</td>
+          </tr>
+          <tr>
+            <td><strong>Drafts in Desktop</strong><br><span class="small">Notes &amp; choices sit beside Diff comments, survive switching files, clear once sent</span></td>
+            <td>JS runtime owns drafts in <code>localStorage</code> and pushes <code>items</code> one-way to Swift; bridge wired into both <code>TaskFileReadingView</code> and <code>ReviewRenderedView</code>.</td>
+            <td><span class="status no">No</span></td>
+            <td><strong>Two state owners + peer-Machine crash + Diff collision.</strong> (1) Peer Tasks load HTML on <code>about:blank</code>, where WebKit throws <code>SecurityError</code> on <code>localStorage</code>. (2) Switching to a code file unmounts <code>TaskHTMLView</code>; sending <code>⌘↩</code> clears Swift without clearing <code>localStorage</code>, so returning resurrects sent comments. (3) <code>ReviewRenderedView</code> mounts two WebViews (old &amp; new) for the same path. <strong>Fix:</strong> Swift <code>ReviewComments</code> is the sole draft owner in Desktop (<code>ready</code> / <code>sync</code> / clear on send, keyed by <code>path + build_id</code>); <code>ReviewRenderedView</code> stays read-only.</td>
+          </tr>
+          <tr>
+            <td><strong>Opening a page where you work</strong><br><span class="small">Desktop in Desktop, browser beside Rex, quiet when headless</span></td>
+            <td><code>lf page open</code>: "Desktop when the conversation is viewed there, else the browser." No <code>--host</code> flag.</td>
+            <td><span class="status no">No</span></td>
+            <td><strong>Focus theft during headless Graph steps.</strong> A background Graph run has no viewer, so "else the browser" opens a surprise browser tab on the person's desktop on every auto run. <strong>Fix:</strong> headless agent calls print the URL and never pop a window; direct CLI calls and interactive non-Desktop viewers open the browser; add <code>--host auto|desktop|browser</code>; refuse raw <code>.page.html</code> sources with the build command.</td>
+          </tr>
+          <tr>
+            <td><strong>Loopback carrier</strong><br><span class="small">Local browser talks to <code>lf server</code> safely</span></td>
+            <td><code>loopback.rs</code> serves <code>/f/&lt;path&gt;</code>, <code>/machine</code>, and <code>/ticket</code>; <code>ServerOperation::PageUrl</code> returns the URL.</td>
+            <td><span class="status no">No</span></td>
+            <td><strong>Unused route + carrier-authority gap.</strong> Nothing in a page speaks the &gt;1 MB bulk/terminal ticket protocol, so <code>/ticket</code> is dead code. And <code>ServerOperation::PageUrl</code> must be local-Unix-socket-only (like <code>mobile.status</code>), never exposed to Tailscale peers or loopback pages. <strong>Fix:</strong> drop <code>/ticket</code>; restrict <code>page.url</code> to local Unix socket connections.</td>
+          </tr>
+          <tr>
+            <td><strong>Compiling a page with real diffs</strong><br><span class="small">Short source fragment with real hunks and repo components</span></td>
+            <td>Raw <code>git diff &lt;base&gt;</code> with mandatory <code>lines</code> and ambiguous <code>line</code>; <code>&lt;lf-component&gt;</code> with no specified slot/attribute contract; drafts keyed by <code>head</code>.</td>
+            <td><span class="status no">No</span></td>
+            <td><strong>Untracked files fail + deleted-line ambiguity + unspecified template engine.</strong> Raw <code>git diff</code> drops newly created untracked files and renames; <code>line="22"</code> cannot name a deleted line; keying drafts by <code>head</code> leaks <code>explore</code> round 1 drafts into round 2. <strong>Fix:</strong> reuse <code>ops::task::snapshot::diff_snapshot</code>; make <code>lines</code> optional and add <code>old-line</code>; fix <code>&lt;lf-component&gt;</code> to <code>{{attr}}</code> + <code>&lt;slot&gt;</code> with zero control flow; stamp <code>build_id</code> (compiled body hash).</td>
+          </tr>
+          <tr>
+            <td><strong>One message format</strong><br><span class="small">Same reply text from browser, Desktop, and clipboard</span></td>
+            <td>Single one-line formatter in runtime; Desktop joins with Diff comments.</td>
+            <td><span class="status yes">Yes</span></td>
+            <td>Matches <code>GhosttyTerminalView.insertText</code> (no control characters or newlines) and existing <code>(1) … (2) …</code> Diff comment format.</td>
+          </tr>
+          <tr>
+            <td><strong>Shared skill kit</strong><br><span class="small">Five skills share rules and compose with <code>extends:</code></span></td>
+            <td>Shared authoring rules in <code>lf help page</code>; skills say only what their page must show; <code>tour</code> untouched.</td>
+            <td><span class="status yes">Yes</span></td>
+            <td>Removes duplicated HTML crafting prose across five skills and composes cleanly with <code>LOO-1104</code>.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="biggest">
+    <h2>The three biggest mismatches, before and after</h2>
+    <p class="small">
+      These three directly break real workflows on the first day if left as drafted.
+    </p>
+
+    <h3>1. Steer target: dead Graph worker vs. live Task</h3>
+    <div class="compare">
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-title">Before (kickoff plan)</span>
+          <span class="status no">Drops reviews</span>
+        </div>
+        <div class="trace">
+          <div class="step">1. Headless Graph step runs <code>ship-review</code> in worker <code>session_9f1a</code> and calls <code>lf page build</code>.</div>
+          <div class="step">2. Stamp records <code>"session": "session_9f1a"</code>. Worker finishes and exits.</div>
+          <div class="step">3. Person opens <code>scratch/ship-review.html</code> beside Rex, writes 3 notes, presses <code>⌘↩</code>.</div>
+          <div class="step bad">4. Page sends <code>session.steer(session_9f1a)</code> → server saves steer and returns OK. Page clears the queue. <strong>Nothing ever reads <code>session_9f1a</code> again.</strong></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-title">After (revised plan)</span>
+          <span class="status proposed">Proposed</span>
+        </div>
+        <div class="trace">
+          <div class="step">1. <code>lf page build</code> stamps <code>"work": {"kind": "task", "issue": "LOO-1109"}</code> (never a finished worker ID).</div>
+          <div class="step">2. Person opens page beside Rex, writes 3 notes, presses <code>⌘↩</code>.</div>
+          <div class="step good">3. Page sends <code>task.steer(LOO-1109)</code> → reaches the live Rex agent (or wakes the Task's primary Session, or forwards to a peer Machine).</div>
+          <div class="step good">4. Strip shows the server's exact <code>delivery.sentence</code> (e.g. <code>session_4b2c reads it at its next boundary</code>).</div>
+        </div>
+      </div>
+    </div>
+
+    <h3>2. Desktop state ownership: split-brain <code>localStorage</code> vs. single owner in Swift</h3>
+    <div class="compare">
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-title">Before (kickoff plan)</span>
+          <span class="status no">Resurrects &amp; crashes</span>
+        </div>
+        <div class="trace">
+          <div class="step">1. Person highlights 2 notes on <code>scratch/ship-review.html</code> in Desktop Files. Saved in WebView <code>localStorage</code> and copied to <code>ReviewComments</code>.</div>
+          <div class="step">2. Person opens <code>loopback.rs</code> to verify a line (<code>TaskHTMLView</code> unmounts), adds 1 code comment, hits <code>Send to conversation ⌘↩</code>.</div>
+          <div class="step bad">3. Swift sends all 3 comments and empties <code>ReviewComments</code>. Unmounted WebView never learns the queue is spent.</div>
+          <div class="step bad">4. Person clicks back to <code>ship-review.html</code> → <code>localStorage</code> reloads the 2 sent notes and re-posts them into <code>ReviewCommentsStrip</code>. On peer Tasks (<code>about:blank</code>), <code>localStorage</code> throws <code>SecurityError</code> immediately.</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-title">After (revised plan)</span>
+          <span class="status proposed">Proposed</span>
+        </div>
+        <div class="trace">
+          <div class="step">1. Under Desktop's bridge, the runtime never touches <code>localStorage</code>. Every edit posts <code>{type: "sync", path, build_id, state, items}</code> to Swift.</div>
+          <div class="step">2. Person switches to <code>loopback.rs</code>, adds a code comment, presses <code>⌘↩</code>.</div>
+          <div class="step good">3. <code>ReviewComments.insert</code> sends all 3 on one line and wipes both <code>items</code> and stored page <code>state</code> — even while <code>TaskHTMLView</code> is unmounted.</div>
+          <div class="step good">4. Clicking back sends <code>ready(path, build_id)</code> → Swift replies <code>null</code> (clean). Works identically on peer Machines (<code>about:blank</code>); <code>ReviewRenderedView</code> stays read-only.</div>
+        </div>
+      </div>
+    </div>
+
+    <h3>3. Direct actions (<code>data-lf</code>) vs. queued reply</h3>
+    <div class="compare">
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-title">Before (kickoff plan)</span>
+          <span class="status no">Mixed lifecycles</span>
+        </div>
+        <pre>&lt;button data-lf='{"kind":"task.create",
+  "directory":"/Users/jack/src/...",
+  "request_id":"...", "title":null,
+  "request":"Retry bind", "wave":null,
+  "parent":null, "graph":null,
+  "session":null, "run":false}'&gt;
+  File Task
+&lt;/button&gt;</pre>
+        <p class="small">
+          Author must spell all 10 strict DTO fields. Clicking runs
+          <code>task.create</code> immediately, then adds
+          <code>"Ran task.create → LOO-1200"</code> to the unsent reply queue —
+          popping Desktop's <code>1 comment · Send to conversation ⌘↩</code>
+          bar for something already done.
+        </p>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-title">After (revised plan)</span>
+          <span class="status proposed">Proposed</span>
+        </div>
+        <pre>&lt;!-- In source .page.html --&gt;
+&lt;button data-lf='{"kind":"task.create",
+  "request":"Retry loopback bind"}'&gt;
+  File Task now
+&lt;/button&gt;</pre>
+        <p class="small">
+          <code>lf page build</code> expands and validates the partial JSON into
+          a complete strict wire <code>Operation</code> (runtime fills per-click
+          UUID <code>request_id</code>). Clicking confirms inline, runs, and
+          becomes an in-place receipt <code>Filed LOO-1200</code>. Never enters
+          the unsent queue or Desktop's comments strip; rides along as
+          <code>[already ran: …]</code> only if you also send a steer.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section id="walkthrough">
+    <h2>Interactive failure &amp; recovery check</h2>
+    <p class="small">
+      Switch scenarios to compare how the kickoff plan and the revised plan
+      handle each failure or recovery path.
+    </p>
+    <div class="sim-bar" role="group" aria-label="Scenarios">
+      <button type="button" class="sc-btn" data-sc="headless" aria-pressed="true">Headless Graph step</button>
+      <button type="button" class="sc-btn" data-sc="round2" aria-pressed="false">Explore round 2 (same HEAD)</button>
+      <button type="button" class="sc-btn" data-sc="untracked" aria-pressed="false">Untracked file in &lt;lf-diff&gt;</button>
+      <button type="button" class="sc-btn" data-sc="restart" aria-pressed="false">lf server restarted</button>
+    </div>
+    <div class="compare" id="sc-view"></div>
+  </section>
+
+  <section id="plan-changes">
+    <h2>What changed in <code>scratch/plan.md</code></h2>
+    <p class="small">
+      The plan is updated in place with zero contradictions left from the
+      earlier draft. Pass order stays the same (Pass 1 still proves the riskiest
+      piece: the loopback carrier + answering page).
+    </p>
+    <ul>
+      <li><strong>Work-scoped stamp &amp; <code>task.steer</code> first:</strong> <code>lf-page</code> stamps <code>work</code> (<code>task</code> / <code>wave</code> / interactive <code>session</code> / <code>repository</code>) plus <code>build_id</code>. Task pages steer with <code>task.steer</code> and display <code>delivery.sentence</code>.</li>
+      <li><strong><code>data-lf</code> separated and compiled:</strong> partial JSON in <code>.page.html</code> expands into validated strict wire JSON at build time; runtime generates per-click <code>request_id</code>; receipts stay in place and never pollute the reply queue or Desktop comments strip.</li>
+      <li><strong>Swift sole owner of Desktop drafts:</strong> <code>ready</code>/<code>sync</code>/<code>operation</code> bridge on <code>TaskFileReadingView</code> only; no <code>localStorage</code> in Desktop; <code>ReviewRenderedView</code> stays read-only.</li>
+      <li><strong>Quiet headless <code>lf page open</code>:</strong> background Graph steps print the URL without opening a browser window; adds <code>--host auto|desktop|browser</code> and rejects raw <code>.page.html</code> inputs.</li>
+      <li><strong>Leaner loopback carrier:</strong> drops unused <code>/&lt;token&gt;/ticket</code>; restricts <code>ServerOperation::PageUrl</code> to local Unix socket connections.</li>
+      <li><strong><code>lf page build</code> grounded in Loopflow:</strong> reuses <code>diff_snapshot</code> / <code>task_diff_base</code>, makes <code>lines</code> optional, adds <code>old-line</code> for deleted lines, and defines <code>&lt;lf-component&gt;</code> strictly as <code>{{attr}}</code> + <code>&lt;slot&gt;</code>.</li>
+    </ul>
+  </section>
+
+  <section id="questions">
+    <h2>Questions for review</h2>
+    <p class="small">
+      All choices below are reversible and already recorded in
+      <code>scratch/plan.md</code> and <code>scratch/questions.md</code> so
+      implementation can proceed. Reply with codes like <code>1b, 2a</code> if
+      you want any of them changed.
+    </p>
+    <ol class="q-list">
+      <li class="q-item">
+        <div class="q-title">1. When you click an action button like "File Task now" on a review page, should it run immediately or wait for ⌘↩?</div>
+        <ul class="q-opts">
+          <li><span class="q-key">1a.</span> <strong>Chosen in plan:</strong> Finding choices ("Fix here", "File Task", "Drop") stay in the <code>⌘↩</code> reply queue; explicit action buttons confirm inline, run immediately, show their result on the button, and stay out of the reply queue.</li>
+          <li><span class="q-key">1b.</span> Queue every action button into the bottom strip so nothing executes until one final <code>⌘↩</code> (requires handling partial failure if one of three actions fails mid-batch).</li>
+        </ul>
+      </li>
+      <li class="q-item">
+        <div class="q-title">2. When you press ⌘↩ on a page open in the browser beside Rex, what should happen to your reply?</div>
+        <ul class="q-opts">
+          <li><span class="q-key">2a.</span> <strong>Chosen in plan:</strong> Send it immediately to the Task (waking or steering the agent right away, with a status line saying who reads it).</li>
+          <li><span class="q-key">2b.</span> Type it into your Rex terminal's unsent input box without pressing Enter so you can edit it first, falling back to immediate steer only when no interactive session is open.</li>
+        </ul>
+      </li>
+      <li class="q-item">
+        <div class="q-title">3. Where should a review page open when an interactive agent in Rex presents it?</div>
+        <ul class="q-opts">
+          <li><span class="q-key">3a.</span> <strong>Chosen in plan:</strong> Open in your Mac's default browser beside Rex (and stay silent during background/headless runs, printing only the URL).</li>
+          <li><span class="q-key">3b.</span> Launch or attach a dedicated browser tool (such as <code>agent-browser</code>, if installed) instead of the OS default browser.</li>
+        </ul>
+      </li>
+      <li class="q-item">
+        <div class="q-title">4. Should review pages keep two files in <code>scratch/</code> (source fragment + compiled page)?</div>
+        <ul class="q-opts">
+          <li><span class="q-key">4a.</span> <strong>Chosen in plan:</strong> Agents write short <code>scratch/&lt;name&gt;.page.html</code> fragments and compile to <code>scratch/&lt;name&gt;.html</code>; Desktop hides <code>.page.html</code> from the page list so you only see the finished page.</li>
+          <li><span class="q-key">4b.</span> Keep compiled output in a hidden cache directory (or compile on the fly when serving) so <code>scratch/</code> holds only one file per page (trade-off: you lose a double-clickable offline <code>scratch/&lt;name&gt;.html</code>).</li>
+        </ul>
+      </li>
+    </ol>
+  </section>
+</div>
+
+<script>
+(function () {
+  const root = document.documentElement;
+  const themeBtn = document.getElementById("theme-toggle");
+  function isDark() {
+    const t = root.getAttribute("data-theme");
+    if (t === "dark") return true;
+    if (t === "light") return false;
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+  function syncTheme() { themeBtn.textContent = isDark() ? "Light" : "Dark"; }
+  syncTheme();
+  themeBtn.addEventListener("click", function () {
+    root.setAttribute("data-theme", isDark() ? "light" : "dark");
+    syncTheme();
+  });
+
+  const scenarios = {
+    headless: {
+      before: [
+        "Background Graph step runs concept-review or ship-review with nobody watching.",
+        "Skill runs lf page open scratch/ship-review.html.",
+        "viewed_placement() is None, so 'Desktop else browser' pops a Safari/Chrome tab over whatever you are doing.",
+        "Later, pressing ⌘↩ steers the dead worker session and vanishes."
+      ],
+      after: [
+        "Background Graph step runs with agent_caller() and no viewer.",
+        "lf page open prints the loopback URL to the log and exits 0 — zero focus stolen.",
+        "If Desktop has the Task open, its scratch_pages watcher shows the quiet 'Updated' notice.",
+        "When you open the page later and press ⌘↩, task.steer wakes or steers the Task's primary Session."
+      ]
+    },
+    round2: {
+      before: [
+        "Round 1 of /explore writes scratch/explore.html on HEAD abc1234. You select 2b and add a note.",
+        "You steer the agent for Round 2. No code is committed yet, so HEAD is still abc1234.",
+        "Round 2 overwrites scratch/explore.html. Browser reloads.",
+        "Drafts are keyed by path + head (unchanged) — Round 1's stale choice and broken highlight reappear on Round 2."
+      ],
+      after: [
+        "lf page build stamps build_id = short hash of the compiled body HTML.",
+        "Reloading Round 1 or switching tabs in Desktop keeps the same build_id, preserving every draft.",
+        "Round 2 produces a new build_id even on the same HEAD.",
+        "Both browser localStorage and Desktop's ReviewComments start Round 2 clean automatically."
+      ]
+    },
+    untracked: {
+      before: [
+        "Agent creates a brand-new file rust/loopflow/src/server/loopback.rs (not yet git-added).",
+        "Page source includes <lf-diff path=\"rust/loopflow/src/server/loopback.rs\">.",
+        "Raw git diff <base> -- path returns empty for untracked files.",
+        "lf page build fails with 'path not in diff', blocking every pre-commit review page."
+      ],
+      after: [
+        "lf page build reuses Loopflow's diff_snapshot (which diffs untracked files via git diff --no-index and preserves renames).",
+        "lines is optional, so <lf-diff path=\"...\"> renders the whole new file or any slice.",
+        "<lf-note line=\"12\"> attaches to new-side line 12; <lf-note old-line=\"8\"> attaches to deleted lines."
+      ]
+    },
+    restart: {
+      before: [
+        "lf server restarts (upgrade or reboot); port and in-memory token rotate.",
+        "Open browser page loses its WebSocket, shows a banner with lf page open <path>, and ⌘↩ copies to clipboard.",
+        "Survives cleanly — same in both plans."
+      ],
+      after: [
+        "Same recovery: WebSocket closes → banner shows lf page open <path> → ⌘↩ falls back to clipboard copy.",
+        "Draft notes and choices remain intact in localStorage under path + build_id while you reopen or paste."
+      ]
+    }
+  };
+
+  const view = document.getElementById("sc-view");
+  function renderScenario(key) {
+    const s = scenarios[key];
+    view.innerHTML =
+      '<div class="panel"><div class="panel-head"><span class="panel-title">Before (kickoff plan)</span><span class="status ' +
+      (key === "restart" ? "yes" : "no") + '">' + (key === "restart" ? "Works" : "Breaks") +
+      '</span></div><div class="trace">' +
+      s.before.map(function (line, i) {
+        const cls = key !== "restart" && i >= s.before.length - 2 ? "step bad" : "step";
+        return '<div class="' + cls + '">' + line.replace(/</g, "&lt;") + "</div>";
+      }).join("") +
+      '</div></div><div class="panel"><div class="panel-head"><span class="panel-title">After (revised plan)</span><span class="status yes">Holds</span></div><div class="trace">' +
+      s.after.map(function (line, i) {
+        const cls = i >= s.after.length - 2 ? "step good" : "step";
+        return '<div class="' + cls + '">' + line.replace(/</g, "&lt;") + "</div>";
+      }).join("") +
+      "</div></div>";
+  }
+
+  document.querySelectorAll(".sc-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      document.querySelectorAll(".sc-btn").forEach(function (b) {
+        b.setAttribute("aria-pressed", String(b === btn));
+      });
+      renderScenario(btn.getAttribute("data-sc"));
+    });
+  });
+  renderScenario("headless");
+})();
+</script>
+</body>
+</html>

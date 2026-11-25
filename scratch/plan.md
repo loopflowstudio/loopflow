@@ -1,329 +1,457 @@
 # LOO-1109: review pages a person can answer from any host
 
 Direction and exact words: `scratch/review-infra-notes.md`. Prototype of the
-page and its three hosts: `scratch/explore.html` (round 3). Stacked on LOO-1104.
+page and its three hosts: `scratch/explore.html` (round 3). Concept review:
+`scratch/concept-review.html`. Stacked on LOO-1104.
 
 ## Outcome
 
 A review page (`ship-review`, `explore`, `concept-review`, `qa`, `demo`) is
-written as a short source fragment and compiled by `lf page build`. The
-compiled page is one self-contained file. On it a person drags across any
-text to leave a note, clicks choices, answers questions, and presses `⌘↩`
-once. Where that goes depends on where the page is open, and the text is the
-same in all three:
+written as a short body fragment (`scratch/<name>.page.html`) and compiled by
+`lf page build` into one self-contained file (`scratch/<name>.html`). On it a
+person drags across any text to leave a note, clicks choices, answers
+questions, and presses `⌘↩` once. Where that goes depends on where the page is
+open, and the message format is the same in all three:
 
 | Host | Opens with | `⌘↩` |
 | --- | --- | --- |
-| Browser beside Rex or any terminal | `lf page open` → `http://127.0.0.1:<port>/<token>/f/<path>` | `session.steer` (else `task.steer`) over the page's WebSocket to `lf server` |
-| Loopflow Desktop | `lf page open` → Files, as `lf desktop files` does today | notes and choices sit in `ReviewCommentsStrip` beside Diff comments; "Send to conversation" puts them in the unsent input |
-| `file://`, or `lf server` stopped | double-click | copies the message |
+| Browser beside Rex or any terminal | `lf page open` → `http://127.0.0.1:<port>/<token>/f/<path>` | `task.steer` (for Task pages) or `session.steer` (Wave / interactive Session / repo) over WebSocket to `lf server`; strip shows the server's `delivery.sentence` |
+| Loopflow Desktop | `lf page open` → Desktop Files (`lf desktop files`), quietly | Swift `ReviewComments` owns the page's draft state; notes, choices and answers sit in `ReviewCommentsStrip` beside Diff comments; "Send to conversation" puts them in the unsent input |
+| Headless Graph step (auto / `-b`) | `lf page open` prints the URL and never pops a browser window | Desktop's `scratch_pages` watcher shows a quiet `Updated` notice if open; person opens the URL or file when ready |
+| `file://`, or `lf server` stopped | double-click | copies the one-line message |
 
-A `data-lf` button is a different thing from the queue: it runs one typed
-`Operation` now (`task.create`, `pr.land`, anything the Machine server takes),
-after an inline confirm that shows the operation, and leaves a line in the
-queue saying what ran.
+Direct actions (`data-lf`) are distinct from the reply queue. A `data-lf`
+button runs one typed Machine `Operation` now (`task.create`, `pr.land`, etc.)
+after an inline confirm showing its kind and fields, then turns into an
+in-place receipt (`Filed LOO-1200`). It never enters the unsent reply queue or
+Desktop's `ReviewCommentsStrip`; if the person also sends a queued reply via
+`⌘↩`, a short `[already ran: …]` suffix rides along so the agent does not
+duplicate the work.
 
-The page's content changes too: what was built, how it works, the key data
-structures and APIs, the trade-offs and invariants to know going forward. No
-passing-test counts, no routine CI state, no invented terminal transcripts,
-no filler choices.
+The page's content changes too: what was built, how it works on real diffs, the
+key data structures and APIs, and the trade-offs and invariants to know going
+forward. No passing-test counts, no routine CI state, no invented terminal
+transcripts, no filler choices.
 
 ## Demo
 
 ```sh
 lf page build scratch/ship-review.page.html   # → scratch/ship-review.html, real hunks in it
-lf page open scratch/ship-review.html         # browser opens beside the Rex pane running the agent
+lf page open scratch/ship-review.html         # browser opens beside Rex, or Files opens in Desktop
 ```
 
-Drag across a sentence, type a note, click "File Task" on a finding, press
-`⌘↩`: the agent in the Rex pane receives the steer and acts. Open the same
-file in Desktop Files: the same gestures land in the comments strip next to
-Diff comments.
+Drag across a sentence, type a note, pick "File Task" on a finding (`decision`
+choice), press `⌘↩`: `task.steer` delivers the single-line message to the Task
+and the strip prints the server's `delivery.sentence` while the agent in Rex
+acts. Click an explicit `data-lf` action button (e.g. "File Task now") and
+confirm: the Task is created immediately and the button shows its new ID in
+place without popping the reply strip. Open the same file in Desktop Files: the
+same notes and choices land in `ReviewCommentsStrip` beside Diff comments,
+survive switching to a code file, and stay cleared after sending.
 
 ## Findings that shape the design
 
 - **`lf open --file` is gone.** #2034 removed it and
   `rust/loopflow/src/lf/commands/open/files.rs`; `lf desktop files PATH`
   replaced it (`rust/loopflow/src/lf/commands/desktop.rs:1788`,
-  `docs/surfaces.md`). The brief's "update `lf open --file`" becomes a new
-  `lf page open`, and the six skills present with it.
-- **Rex has no browser pane.** `rex block types --json` lists three creators:
-  onboarding, `terminal.shell`, tunnel. `agent-browser` is not installed on
-  this Machine and nothing in the repository names it. "Open it in rex" is
-  therefore the OS default browser beside Rex. Made for review; see
-  `scratch/questions.md` 1.
+  `docs/surfaces.md`). `lf page open` handles review pages across hosts and
+  calls `lf desktop files` when the conversation is viewed in Desktop.
+- **Rex has no browser pane.** `rex block types --json` lists onboarding,
+  `terminal.shell` and tunnel. `agent-browser` is not installed on this Machine
+  and nothing in the repository names it. Opening beside Rex therefore uses the
+  OS default browser. Made for review; see `scratch/questions.md` 1.
+- **`session.steer` silently black-holes steers sent to a finished worker.**
+  `engine/session.rs:34-46` saves a steer on any existing Session without error,
+  even a finished Graph worker nothing will ever resume. Because headless Graph
+  steps (`explore`, `concept-review`, `qa`, `ship-review`) exit right after
+  building their page, stamping and steering the building `session` would lose
+  reviews. `task.steer` (`write.rs:1482`, `engine/session.rs:91`) resolves the
+  Task's active work or starts its primary interactive Session, forwards to peer
+  Machines automatically, and returns `delivery.sentence`.
+- **Wire `Operation` types have `deny_unknown_fields` and zero defaults.**
+  `task.create` and `pr.land` each require 10 keys including `directory` and
+  (for `task.create`) `request_id`. Authors cannot reliably hand-write complete
+  wire JSON in HTML attributes; `lf page build` expands partial JSON into
+  strict, validated `Operation` JSON using the build context, and the runtime
+  generates a fresh UUID `request_id` per confirmation.
 - **The server already speaks its protocol over WebSocket.**
   `rust/loopflow/src/server/remote.rs` wraps a `WebSocketStream` as
-  `Messages<S>: Carrier` and hands it to `service::welcome` /
-  `service::session` / `service::ticketed`. Its handshake refuses any request
-  with an `Origin` header (`remote.rs:361`). The loopback carrier is the same
-  code with the opposite admission rule, not a new protocol.
+  `Messages<S>: Carrier` and hands it to `service::welcome` / `service::session`.
+  Its handshake refuses any request with an `Origin` header (`remote.rs:361`).
+  The loopback carrier reuses `Messages<S>` and `service::session` with the
+  opposite admission rule (`Host` + same-origin `Origin` + constant-time token).
+  No `/ticket` route is added until a page consumer needs bulk or terminal
+  bridging.
 - **A token on the loopback is the whole user.** `session.start` runs a
   caller's `argv`; `task.file` reads checkouts. Nothing is gained by an
-  allowlist in front of that, which matches "its basically another proxy for
-  the lf machine server interface". What needs defending is the browser:
-  other origins can open WebSockets to `127.0.0.1` and CORS does not apply to
-  them. Hence the three checks under Transport.
+  allowlist in front of that ("its basically another proxy for the lf machine
+  server interface"). What needs defending is the browser (foreign origins can
+  open WebSockets to `127.0.0.1` without CORS) and remote peers (`page.url`
+  must be local-Unix-socket-only, like `mobile.status` / `mobile.configure`).
 - **`hello.client.kind` is a free string** (`machine/wire.rs:93`), so a page
   names itself `page` with no wire change.
-- **Desktop's page view can take a script handler without touching the
-  offline rule.** `TaskHTMLView` builds `WebPage.Configuration()` and adds the
-  `WKContentRuleList` to `userContentController`
+- **Loopflow already owns diffing with untracked files and renames.**
+  `ops::task::snapshot::diff_snapshot` and `task_diff_base` handle untracked
+  files (`git diff --no-index`) and renames; raw `git diff <base>` misses both.
+- **Desktop `TaskHTMLView` runs offline and loads peer pages on `about:blank`.**
+  `TaskHTMLView` adds `WKContentRuleList` to `userContentController`
   (`swift/LoopflowMac/Views/TaskHTMLView.swift:128-137`); a script message is
-  not a network load. It loads an HTML string, so a page read from a peer
-  Machine gets the bridge too.
-- **Desktop comments are line-anchored.** `ReviewComment` holds a
-  `ReviewSelection` (path, source, first, last) and
-  `ReviewComment.message` formats `reference + words`
-  (`swift/LoopflowMac/ReviewDiff.swift:748-790`). `ReviewSelection.Source` has
-  no case for a rendered page, and `reconcile` assumes numbered lines. A page
-  note is anchored to a section and quoted text, so the comment's anchor
-  becomes one of two kinds.
-- **The message is one line.** `addToConversation` ends in
-  `insertText` (`GhosttyTerminalView.swift:311`), which refuses any control
-  character, newlines included; `ReviewComment.message` already collapses
-  whitespace and numbers items `(1) … (2) …`. The page's format follows it.
-- **Desktop sends typed writes only.** `RegistryQuery.write` is private and
-  takes a `ServedWrite` case (`Loopflow/Services/RegistryQuery.swift:323`,
-  `:791`); nothing in the Mac app steers. A page's operation arrives as JSON,
-  so `ServerClient` gains one send that forwards a JSON operation as the
-  request's `operation` and lets the server validate it.
-- **Nothing in the app registers a script handler today**, and `WebPage`
-  tests need `.requiresDisplay` (`LOOPFLOW_NATIVE_TESTS=1`). The handler's
-  receiving function is plain Swift, tested headless without a page.
-- **No JavaScript runs in CI.** No node, no browser. The runtime stays small,
-  the compiler (Rust) does what can be done ahead of time, and the runtime is
-  exercised in `qa` in a real browser and in Desktop.
-- **`tour` writes `scratch/tour.yaml`, not a page.** It shares nothing with
-  the kit and is left alone; `ship-review` keeps writing the tour.
+  not a network load. When `store.machine != nil`, `baseURL` is `nil` →
+  `about:blank`, where `window.localStorage` throws `SecurityError`. Furthermore,
+  switching to a source file unmounts `TaskHTMLView`, so sending comments while
+  unmounted would leave `localStorage` dirty and resurrect sent notes on return.
+  Therefore Swift (`ReviewComments`) is the sole owner of page draft state in
+  Desktop; `localStorage` is never touched under the Desktop bridge.
+- **`ReviewRenderedView` renders two copies of the same HTML file (old vs. new
+  in Diff).** Wiring the interactive bridge there would collide both sides on
+  the same path and expose live `data-lf` mutations on historical commits. Only
+  `TaskFileReadingView` (`TaskFilesView.swift:545`) attaches the bridge;
+  `ReviewRenderedView` stays read-only.
+- **Desktop comments are line-anchored and one line.** `ReviewComment` holds a
+  `ReviewSelection` (path, source, first, last) and `ReviewComment.message`
+  collapses whitespace onto one line (`GhosttyTerminalView.swift:311` refuses
+  control characters including newlines). `ReviewComment`'s anchor becomes
+  lines or page (with the reference the runtime wrote); page items skip line
+  reconciling.
+- **Draft identity must survive reloads without surviving page rewrites on the
+  same `HEAD`.** `explore` round 2 rewrites `scratch/explore.html` without a
+  new commit. Stamping a `build_id` (short hash of the compiled page body)
+  keeps drafts across reloads and Desktop tab switches while resetting cleanly
+  on any rebuild.
+- **Desktop sends typed writes only.** `ServerClient` (`ServerClient.swift`)
+  sends `ServerOperation` cases; adding one raw-JSON `Operation` send lets a
+  page's validated `data-lf` payload execute through the existing connection,
+  substituting Desktop's local repository directory when a peer-Machine page
+  carries a remote path.
+- **No JavaScript runs in CI.** The runtime stays small, Rust does all ahead-of-time
+  expansion and validation, and `qa` exercises the runtime in Chrome and Dev
+  Desktop.
+- **`tour` writes `scratch/tour.yaml`, not a page.** Left untouched;
+  `ship-review` keeps writing it.
 
 ## Design
 
 ### Transport: `server/loopback.rs`
 
 A third listener in `lf server` beside the Unix socket and the Tailscale
-carrier: TCP `127.0.0.1:0`, plain HTTP. The token is 32 random bytes made at
+carrier: TCP `127.0.0.1:0`, plain HTTP. A 32-byte random token is generated at
 server start and held in memory.
 
 | Route | Answer |
 | --- | --- |
-| `GET /<token>/f/<absolute path>` | the file, typed by extension. HTML carries `Referrer-Policy: no-referrer`, `Cache-Control: no-store` and a CSP of `default-src 'self' 'unsafe-inline' data: blob:; connect-src 'self'`, so a served page reaches nothing but this server, as Desktop's rule list already ensures there |
-| `GET /<token>/machine` (upgrade) | the Machine protocol, one text frame per message, `Admission::Local` |
-| `GET /<token>/ticket` (upgrade) | a bulk message, as `/v1/ticket` |
+| `GET /<token>/f/<absolute path>` | the file, typed by extension, capped at `MAX_BULK`. Sets `Referrer-Policy: no-referrer`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`. HTML also carries `Content-Security-Policy: default-src 'self' 'unsafe-inline' data: blob:; connect-src 'self'`, matching Desktop's offline rule |
+| `GET /<token>/machine` (upgrade) | the Machine protocol, one text frame per message, `Admission::Local`, `remote_control: None`, `loopback: None` |
 
-Every request must carry `Host: 127.0.0.1:<port>` (DNS rebinding); an upgrade
-must carry `Origin: http://127.0.0.1:<port>`; the token compares in constant
-time. Anything else is 404 with no body. There are no CORS headers and no
-`OPTIONS`.
+Every request must carry `Host: 127.0.0.1:<port>` (DNS rebinding); upgrades
+must also carry `Origin: http://127.0.0.1:<port>`; the token compares in
+constant time. Anything else returns 404 with no body. No CORS headers, no
+`OPTIONS`, no `/<token>/ticket`.
 
-`remote.rs::connection` is generalized over its handshake check and reused;
-`Messages<S>` moves beside `Carrier`. GET is served by `hyper` (already in the
-lock file through axum) with the upgrade passed to
+`Messages<S>` moves beside `Carrier` in `service.rs` (or a shared module) and
+both `remote.rs` and `loopback.rs` reuse it. HTTP GET and upgrade run on
+`hyper` (already in the lock file), handing upgraded streams to
 `WebSocketStream::from_raw_socket`.
 
-The CLI learns the URL from the server over the Unix socket: a
-`ServerOperation` `page.url {path}` → `{url}`. The token is never printed by
-`lf server status`. A server restart changes port and token; an open page
-then shows "lf server restarted; run `lf page open <path>`" and its `⌘↩`
-copies.
+The CLI asks the server for a page's URL over the local Unix socket via a
+local-only `ServerOperation` `page.url { path }` → `{ url }` (refused on remote
+Tailscale and loopback connections, matching `mobile.status` /
+`mobile.configure`). The token is never printed by `lf server status`. A server
+restart changes port and token; an open page then shows a banner
+`lf server restarted; run lf page open <path>` and its `⌘↩` copies.
 
-Passed over: a token file in the lf home so URLs survive a restart (a secret
-on disk for little gain), and Task-relative URLs (pages outside a Task, in a
-repository or Wave conversation, would need a second form).
+Passed over: a token file on disk (a secret on disk for little gain), a
+`/<token>/ticket` route (no page caller), and Task-relative URLs (wave/repo
+pages have no Task, and `/<token>/f/<absolute path>` lets relative assets like
+`qa.html` screenshots resolve naturally).
 
 ### `lf page`
 
 ```sh
-lf page build <source> [--base <rev>]   # scratch/x.page.html → scratch/x.html
-lf page open <page> [--print]           # Desktop when the conversation is viewed there, else the browser
+lf page build <source> [--base <rev>]                           # scratch/x.page.html → scratch/x.html
+lf page open <page> [--host auto|desktop|browser] [--print]     # open where you work, or print URL
 ```
 
-**Source** is body HTML only: no `<html>`, `<style>` or `<script>`. The
-compiler wraps it with the theme and the runtime and expands:
+#### `lf page open` routing (`--host auto`)
 
-- `<lf-diff path="…" lines="142-150">` with `<lf-note line="145">` children →
-  the real hunk from `git diff <base>` (default base: the Task's, else the
-  merge base with the default branch), each note a callout on its line under
-  a "Hide line notes" toggle (`data-notes`). A path or range the diff does not
-  contain is an error.
-- `<lf-file path="…" lines="…">` → the lines as they stand, for code that did
-  not change.
-- `<lf-component name="…">` → `.lf/components/<name>/template.html` (plus its
-  `style.css`), over the builtin of that name. Builtins: `decision`
-  (fix here / its own Task / drop), `question`, `concepts` (type or table or
-  API, shape and location, ownership and invariant), `before-after`.
-- `data-choice`, `data-multiselect`, `data-question`, `data-lf` pass through
-  for the runtime.
+1. **Direct CLI call** (`agent_caller().is_none()`): if `LF_DESKTOP` is set,
+   present in Desktop Files (`lf desktop files <page>`); otherwise open the
+   loopback URL in the OS default browser and print it.
+2. **Interactive agent call** (`agent_caller()` present and conversation has a
+   viewer): if `viewed_placement()` is `OpenHost::Desktop`, present via
+   `lf desktop files <page>`; if viewed in Rex / cmux / tmux / herdr (or an
+   interactive terminal), open the loopback URL in the browser and print it.
+3. **Headless agent call** (`agent_caller()` present, no active viewer — e.g.
+   background Graph step or `lf -b`): **never pop a browser window**; print the
+   loopback URL and exit 0. Desktop's `scratch_pages` watcher surfaces the
+   quiet `Updated` notice if the Task is open there.
+4. **`--host desktop` / `--host browser`**: explicit override; fails cleanly
+   without falling back to another host.
+5. **`--print`**: prints the loopback URL without opening anything (starts
+   `lf server` if needed).
+6. Passing a `*.page.html` source path fails with the exact `lf page build`
+   command rather than serving raw custom tags.
+
+#### `lf page build`
+
+**Source** is body HTML only: no `<html>`, `<head>`, `<style>`, or `<script>`.
+The compiler wraps it with the theme CSS, base CSS, runtime JS, and JSON stamp,
+and expands:
+
+- `<lf-diff path="…" [lines="142-150"]>` with optional `<lf-note line="145">`
+  (new-side line) and `<lf-note old-line="140">` (deleted line) children →
+  real hunks from Loopflow's diff machinery (`ops::task::snapshot::diff_snapshot`
+  + `task_diff_base` when in a Task, falling back to `git diff` + `--no-index`
+  for untracked files so newly created uncommitted files and renames work).
+  Omitting `lines` renders all hunks for `path`. Notes sit under a "Hide line
+  notes" toggle (`data-notes`). A path or line range not in the diff is an
+  error naming element and line.
+- `<lf-file path="…" [lines="1-40"]>` with optional `<lf-note line="…">` →
+  numbered lines as they stand on disk, for code that did not change.
+- `<lf-component name="…">` → `.lf/components/<name>/template.html` (plus
+  optional `style.css`), overriding the builtin of that name. Substitution is
+  intentionally tiny: HTML-escaped `{{attr}}` from the element's attributes and
+  `<slot>` / `<slot name="…">` for child HTML. Zero loops, zero conditionals.
+  Builtins:
+  - `decision` (`id`, `title`, `recommendation`, body `<slot>`, renders
+    `data-choice` buttons for Fix here / File Task / Drop)
+  - `before-after` (named slots `before` and `after`)
+  Plain HTML `<table>` and `<div data-choice="…">` stay plain HTML instead of
+  forced component wrappers.
+- `data-choice`, `data-multiselect`, `data-question` pass through unchanged.
+- `data-lf='<partial JSON>'`: expanded into a complete, strict wire `Operation`
+  (injecting `directory` from the build checkout and `null`/`false` defaults
+  for omitted nullable/boolean fields from the operation schema, keeping a
+  sentinel for per-click `request_id` on `task.create` / `session.new`) and
+  validated by deserializing as `Operation`. Unknown fields, unknown `kind`, or
+  missing required fields fail the build naming element and line.
 
 **Theme** is `.lf/theme.css` when the repository has one, else the builtin.
-This repository gets one from `DESIGN.md`'s tokens. A theme sets custom
-properties only; light and dark both.
+This repository gets one from `DESIGN.md`'s tokens. Themes set CSS custom
+properties only, covering light and dark.
 
-**Checks**, each an error naming the element and line: a repository path that
-does not exist, a 7–40 hex SHA that `git cat-file -e` cannot find, a
-`data-lf` value that is not a known `Operation` (validated with the type
-behind `lf server describe`), a leftover `<script>` or `<style>`.
+**Checks**, each a build error naming element and line:
+- missing repository path in `<lf-diff>`, `<lf-file>`, or `[data-path]`;
+- unknown 7–40 hex SHA in `<code>` (containing at least one digit and one hex
+  letter, skipping `data-no-check`) verified with `git cat-file -e`;
+- invalid `data-lf` operation;
+- leftover `<script>` or `<style>` in source.
 
-**Stamp**: `<script type="application/json" id="lf-page">` with `task`,
-`session` (the building agent's), `directory`, `base`, `head`, `path`. All
-three hosts read it; nothing is asked of the server to learn where a page
-belongs.
+**Stamp**: `<script type="application/json" id="lf-page">` containing:
+- `work`: `{ "kind": "task", "issue": "…" }` | `{ "kind": "wave", "wave": "…" }`
+  | `{ "kind": "session", "session": "…" }` (only when the building caller is
+  an interactive standalone Session, never a headless worker/batch) |
+  `{ "kind": "repository" }`
+- `directory`, `base`, `head`, `path`, `build_id` (short SHA-256 prefix of the
+  compiled body HTML).
 
 Kit assets (runtime JS, base CSS, builtin components) live in
 `rust/loopflow-definitions/src/builtins/page/` and are embedded like skills.
-`*.page.html` is left out of `scratch_pages` so Desktop lists the compiled
-page once.
+`is_scratch_page` excludes `*.page.html` so Desktop lists only the compiled
+page.
 
 ### Runtime
 
-One script, inlined by the build. No page writes JavaScript.
+One small script, inlined by `lf page build`. No page writes JavaScript.
 
-- **Notes**: a selection inside the page offers "Note"; the note keeps the
-  nearest heading and the quoted text, and the quote stays highlighted
-  (CSS Highlight API, as `TaskHTMLView`'s find already uses).
-- **Controls**: `data-choice` (one of a group), `data-multiselect`,
-  `data-question` (free text). Each is one queued line.
-- **`data-lf`**: click → inline confirm showing kind and fields → the
-  operation runs → its result or error shows in place and "Ran `task.create`
-  → LOO-1200" joins the queue. On `file://` there is nothing to run it, so it
-  queues "Requested: …" for the agent.
-- **Strip**: fixed at the bottom while anything is queued: count, Clear, and
-  one button named for the host (Steer agent / Copy reply). `⌘↩` presses it.
-- **Drafts** persist in `localStorage` under the page's path and `head`, so a
-  regenerated page starts clean and a reload does not.
-- **One message format** for all hosts, written once in the runtime, on one
-  line: `(1) \`scratch/ship-review.html\` § <section> › "<quote>" <words> (2) …`.
-  The runtime builds each item's reference; Desktop receives it ready-made
-  and only joins it with its Diff comments.
+- **Notes**: dragging across text offers a "Note" popover; saving keeps the
+  nearest heading and quoted text and highlights the quote with the CSS
+  Highlight API (`::highlight(lf-note)`).
+- **Controls**: `data-choice` (single select per group), `data-multiselect`,
+  `data-question` (free text). Each contributes one item to the reply queue.
+- **Reply strip**: fixed at the bottom while the reply queue is non-empty
+  (hidden in Desktop, where `ReviewCommentsStrip` is the one strip): count,
+  Clear, and one action button named for the host (`Steer <target> ⌘↩` in
+  loopback browser, `Copy reply ⌘↩` offline). `⌘↩` triggers it.
+  - On loopback submit: sends `task.steer` when `work.kind == "task"`, else
+    `session.steer` scoped to `wave` / `session` / repository. Shows the
+    server's `delivery.sentence` (or error) in the strip; clears the queue only
+    on success.
+- **Direct actions (`data-lf`)**: separate from the reply queue. Click → inline
+  confirm showing `kind` and non-null fields → runtime injects a fresh
+  `crypto.randomUUID()` `request_id` when required (reused on retry of the same
+  confirm) and sends the `Operation` → button becomes an in-place receipt
+  (`Filed LOO-1200` or inline error). Receipts never trigger the reply strip and
+  never enter Desktop's `ReviewCommentsStrip`. If the person later submits a
+  non-empty reply queue via `⌘↩`, the runtime appends
+  `[already ran: task.create → LOO-1200]` to that message. Offline (`file://`),
+  clicking a `data-lf` button cannot execute, so it notes `"Offline — added to
+  reply"` and queues `Run: …` for clipboard copy.
+- **Draft & receipt persistence**:
+  - In browser / `file://`: `localStorage` keyed by `path + build_id` (guarded
+    with `try/catch`). Reload preserves work; rebuild starts clean.
+  - In Desktop: **never touches `localStorage`**. Swift owns state via the
+    bridge below.
+- **One message format** across all hosts, on one line:
+  `(1) \`scratch/ship-review.html\` § <section> › "<quote>" <words> (2) …`.
+  The runtime formats each item's reference; Desktop joins page items with Diff
+  comments using the same one-line formatter.
 
-Host is chosen once at load: `window.webkit.messageHandlers.loopflow` →
-Desktop; an `http:` origin whose `/machine` socket welcomes → loopback; else
-clipboard.
+Host detection runs once at load: `window.webkit?.messageHandlers?.loopflow` →
+Desktop; `http:` origin whose `/<token>/machine` WebSocket completes
+`hello`/`welcome` → loopback; else clipboard.
 
 ### Desktop bridge
 
-`TaskHTMLView` registers a reply-capable script handler named `loopflow`.
+`TaskFileReadingView` (`TaskFilesView.swift:545`) registers a reply-capable
+`WKScriptMessageHandler` named `loopflow` on `TaskHTMLView`.
+`ReviewRenderedView` (`ReviewRenderedView.swift:82`, Diff old vs. new HTML)
+leaves the handler unset so historical/diff HTML stays read-only.
 
-- `items`: the page's whole queue, replacing what Desktop held for that page.
-  They join `ReviewComments.items`; `ReviewComment`'s anchor becomes lines or
-  page (the reference the runtime wrote), and `ReviewComment.message` joins
-  both. Page items skip line reconciling. The
-  page's own strip is hidden in Desktop: `ReviewCommentsStrip` is the one
-  strip, count and "Send to conversation ⌘↩" unchanged. After a send Desktop
-  tells the page its queue is spent.
-- `operation`: the page's JSON operation, forwarded by `ServerClient` as it
-  is and answered to the page with the server's result or error.
+Messages from the page to Swift:
+- `{ "type": "ready", "path": "…", "build_id": "…" }` → Swift replies with the
+  saved opaque `state` for `(path, build_id)` (or `null` if none or spent).
+  Survives switching away to code files and back, works on peer Machines
+  (`baseURL == nil` / `about:blank`), and resets cleanly on rebuild or send.
+- `{ "type": "sync", "path": "…", "build_id": "…", "state": {…}, "items": […] }`
+  → Swift stores `state` under `(path, build_id)` and replaces that page's
+  entries in `ReviewComments.items`. `ReviewComment` gets a two-case anchor
+  (`.lines(ReviewSelection)` | `.page(path: String, reference: String)`),
+  skipping line reconciliation for `.page`. `ReviewCommentsStrip` counts and
+  sends both together on one line. When `ReviewComments.insert(into:)` succeeds
+  (even while another file is open and `TaskHTMLView` is unmounted), Swift
+  clears all stored page `state` entries and notifies the active `WebPage` if
+  mounted.
+- `{ "type": "operation", "operation": {…} }` → Swift forwards the strict JSON
+  `Operation` through a new raw-operation send on `ServerClient` (substituting
+  the local repository directory when viewing a peer-Machine checkout whose
+  stamped path is remote) and replies to the page with the server's JSON result
+  or error.
 
-Both call sites get it (`TaskFilesView.swift:545`,
-`ReviewRenderedView.swift:82`). The offline rule list, link handling, find
-and reload-in-place are untouched. A page without the runtime behaves as
-today.
+The offline `WKContentRuleList`, link handling, find, and reload-in-place are
+untouched. A hand-written page without the runtime behaves identically to today.
 
 ### Skills
 
-`explore`, `concept-review`, `qa`, `demo` and `ship-review` each say what
-their page must show and stop describing how to build HTML. The shared part
-(write `scratch/<name>.page.html`, the elements, `lf page build`,
-`lf page open`, and the writing rules: real code and output over commentary,
-numbered questions so "2b" answers, proposed marked apart from existing,
-nothing that reports routine checks) is one section printed by
-`lf help page`, which each skill points to, as `ship-review` already points
-to `lf help tour`. A repository's `extends: lf:<skill>` adds its own
-components and rules on top.
+`explore`, `concept-review`, `qa`, `demo`, and `ship-review` each say what
+their page must show and stop describing how to hand-craft HTML/CSS/JS. The
+shared authoring contract (`scratch/<name>.page.html`, `<lf-diff>`, `<lf-file>`,
+`<lf-component>`, `data-choice`/`data-multiselect`/`data-question`/`data-lf`,
+`lf page build`, `lf page open`, and the writing rules: real code and output
+over commentary, numbered questions so "2b" answers, proposed marked apart from
+existing, no passing test counts or routine CI checks) lives once in
+`lf help page`, which each skill points to (as `ship-review` already points to
+`lf help tour`). A repository's `extends: lf:<skill>` adds its own components
+and rules on top without restating the base.
 
-`ship-review`'s page order becomes: what was built; how it works, on real
-hunks; the key data structures and APIs; trade-offs and invariants going
-forward; findings as `decision` components; questions. "How to try it" stays
-as one line with the command.
+`ship-review`'s page order becomes: what was built; how it works on real hunks;
+key data structures and APIs; trade-offs and invariants going forward; findings
+as `decision` components; numbered questions. "How to try it" stays as one line
+with the command. `LOOPFLOW.md` updates its presentation line to mention
+`lf page open` for review pages alongside `lf desktop files` for source files.
 
 ## Acceptance check at gate
 
-Headless, one Rust integration test in `rust/loopflow/tests/` with a
-`MachineServer`, a `TestRepo` Task and a held work session:
+Headless Rust integration test in `rust/loopflow/tests/` with a `MachineServer`,
+a `TestRepo` Task, and a held work session:
 
-1. `lf page build scratch/ship-review.page.html` on a fixture fragment → the
-   output contains the fixture's real `+` lines, the runtime, the stamp; a
-   fragment naming a missing path exits non-zero naming it.
-2. `lf page open scratch/ship-review.html --print` → a `127.0.0.1` URL; GET
-   returns the page with the CSP header.
-3. Upgrade without `Origin`, with a foreign `Origin`, with a wrong `Host`,
+1. `lf page build scratch/ship-review.page.html` on a fixture fragment (including
+   an untracked file `<lf-diff>`, a `<lf-note old-line="…">`, a `decision`
+   component, and a partial `data-lf` `task.create`) → output contains real `+`
+   lines, strict validated `data-lf` JSON, runtime, and `build_id` + `work.task`
+   stamp. Missing path, unknown SHA, or invalid `data-lf` exits non-zero naming
+   element and line.
+2. `lf page open scratch/ship-review.html --print` → `127.0.0.1` URL; GET
+   returns HTML with CSP, `Referrer-Policy: no-referrer`, and
+   `Cache-Control: no-store`. Passing `.page.html` exits non-zero with the build
+   command. Calling `page.url` from a non-local carrier is refused.
+3. Upgrade without `Origin`, with a foreign `Origin`, with a wrong `Host`, or
    with a wrong token → 404 each.
-4. Upgrade with the right three → `hello`/`welcome`, then `task.steer` →
-   the steer is in the Task's Session history.
+4. Upgrade with the right three → `hello`/`welcome` (`client.kind = "page"`),
+   then `task.steer` → steer is saved on the Task and returns `delivery.sentence`.
+   Headless `lf page open` (with `agent_caller` and no viewer) prints the URL
+   without invoking the OS browser opener.
 
-Swift, headless: an `items` message given to the handler's receiving function
-yields comments in `store.comments`; a Diff comment and a page note send
-through `ReviewCommentsStrip` as one line with no control character.
+Swift, headless:
+- `ready` → `sync` → send (`insert(into:)`) → `ready` again returns `nil` state
+  (proving no resurrection after unmounted send).
+- Diff line comment + page note send through `ReviewCommentsStrip` as one line
+  with no control characters; `reconcile` skips `.page` comments without crash.
 
-`qa` owns what CI cannot run: the runtime in Chrome against the branch
-`lf server`, and in the Dev app.
+`qa` owns what CI cannot run: Chrome against branch `lf server`, and Dev
+Desktop (including switching files before sending and clicking a `data-lf`
+button).
 
 ## Absent and error states
 
 | State | What the person sees |
 | --- | --- |
-| `lf server` not running at `lf page open` | the command starts it as every client does; `--print` likewise |
-| Server restarted under an open page | banner with the `lf page open` command; `⌘↩` copies |
-| Steer target gone (Session ended, Task done) | the server's error sentence in the strip; the queue stays |
-| `data-lf` operation fails | its error in place; nothing joins the queue |
-| Desktop, no conversation open | the strip's existing disabled state and help text |
-| Page built without the kit (old or hand-written) | renders as today, no strip |
-| Peer-owned Task | Desktop works (routes by Task). `lf page open` on another Machine prints the owning Machine's loopback URL, unreachable from here: excluded |
+| `lf server` not running at `lf page open` | command starts it as every client does; `--print` likewise |
+| Server restarted under an open page | banner with `lf page open <path>`; `⌘↩` copies |
+| Steer target finished or unavailable | server's `delivery.sentence` or error in the strip; queue stays on error |
+| `data-lf` operation fails | inline error on the button; retryable with same `request_id` |
+| Desktop, no conversation open | `ReviewCommentsStrip`'s existing disabled state and help text |
+| Page built without the kit (hand-written) | renders as today, no strip |
+| Peer-owned Task | Desktop works (Swift owns drafts — no `about:blank` `localStorage` error; `ServerClient` forwards operations). Browser loopback `lf page open` on another Machine is excluded |
 
 ## Operational boundary
 
-- Loopback connections count against the server's 64-connection limit and
-  the five-second first-message rule; a page holds one connection and closes
-  it on `pagehide`.
-- A served file is read whole, capped at the existing bulk limit.
-- `lf page build` runs `git diff` once per source file path, not per element.
+- Loopback connections count against the server's 64-connection limit and the
+  5-second first-message rule; a page holds one connection and closes on
+  `pagehide`.
+- Served files are read whole, capped at `MAX_BULK`.
+- `lf page build` computes diffs once per file path, not per `<lf-diff>` tag.
 
 ## Exclusions
 
-- A Rex web pane, remote Rex hosts (`rex forward`) and phone access to pages.
-- Typing into the agent's unsent terminal input from the browser (the
-  prototype's 2b); the loopback host steers.
-- Live subscriptions on a page (a diff that updates as the agent works). The
-  socket allows it; no builtin component uses it yet.
+- A Rex web pane, remote Rex hosts (`rex forward`), and phone access to pages.
+- Typing into the agent's unsent terminal input from the browser (prototype 2b);
+  the loopback host steers via `task.steer` / `session.steer`.
+- Live subscriptions on a page (diffs updating as the agent works). The socket
+  supports it; no builtin component uses it yet.
+- `/<token>/ticket` bulk/terminal bridge over loopback.
 - `measure`'s `scratch/measure.html` table and `tour`.
 
 ## What goes
 
-- The HTML-crafting paragraphs in `explore.md`, `concept-review.md`,
-  `qa.md`, `demo.md`, `ship-review.md` ("One self-contained file, readable in
-  light and dark…", "borrow its palette, type and layout"), replaced by the
-  pointer to `lf help page`; the visual-language sentence added in
-  2b6b03ad5e lives on as `.lf/theme.css`.
+- HTML/CSS/JS crafting paragraphs in `explore.md`, `concept-review.md`,
+  `qa.md`, `demo.md`, `ship-review.md`, replaced by the pointer to
+  `lf help page`; the visual-language sentence from `2b6b03ad5e` lives on as
+  `.lf/theme.css`.
 - `lf desktop files scratch/<page>.html` in those five skills and the page
-  example in `docs/surfaces.md` → `lf page open`. `lf desktop files` itself
-  stays for files and line ranges.
-- `remote.rs`'s private `connection` and `Messages` in their one-carrier form.
-- Survives: every existing `scratch/*.html` keeps opening; Diff comments,
-  their re-anchoring and `⌘↩`; the offline rule; `lf help tour`.
+  example in `docs/surfaces.md` → `lf page open`. `lf desktop files` stays for
+  source files and line ranges.
+- `remote.rs`'s private `Messages` in its one-carrier form (moved beside
+  `Carrier`).
+- Survives: every existing `scratch/*.html` keeps opening; Diff comments, their
+  re-anchoring, and `⌘↩`; the offline `WKContentRuleList`; `ReviewRenderedView`
+  side-by-side HTML diffs; `lf help tour`.
 
 ## Passes
 
-1. **Loopback carrier and one answering page.** `loopback.rs`, `page.url`,
-   `lf page open`, a hand-wrapped page with the minimum runtime (queue, strip,
-   steer). Shows whether a browser page can drive the Machine protocol through
-   `service::session` unchanged and whether the three admission checks hold.
-   Gate steps 2–4 pass. This is the pass that could prove the plan wrong.
-2. **`lf page build` and the full runtime.** Elements, components, theme,
-   checks, stamp; notes by highlight, controls, `data-lf`, drafts.
-   `.lf/theme.css` for this repository. Gate step 1.
-3. **Desktop bridge.** Handler, the two-kind anchor, one strip. Swift tests.
-4. **Skills and docs.** The five skills, `lf help page`, `docs/surfaces.md`,
-   `server/README.md`, goldens. This Task's own `ship-review` is the first
-   page built with the kit.
+1. **Loopback carrier and one answering page.** `loopback.rs`, shared
+   `Messages<S>`, local-only `page.url`, `lf page open` (with headless quiet
+   rule + `--host`/`--print`), minimal runtime (queue, strip, `task.steer` /
+   `session.steer` with `delivery.sentence`). Gate steps 2–4 pass. Proves the
+   riskiest piece first.
+2. **`lf page build` and the full runtime.** `<lf-diff>` (reusing
+   `diff_snapshot` / `task_diff_base`, optional `lines`, `old-line`),
+   `<lf-file>`, `<lf-component>` (`{{attr}}` + `<slot>`, `decision` +
+   `before-after`), partial→strict `data-lf` compiler, checks, `build_id` +
+   `work` stamp, `.lf/theme.css` from `DESIGN.md`; full runtime (CSS Highlight
+   notes, choices, questions, immediate `data-lf` with in-place receipts
+   separate from queue, `build_id`-keyed drafts). Gate step 1.
+3. **Desktop bridge.** `TaskFileReadingView` handler (`ready`/`sync`/`operation`),
+   Swift `ReviewComments` as sole state owner (two-case anchor, clear on
+   unmounted send), `ServerClient` raw JSON `Operation` forward,
+   `ReviewRenderedView` kept read-only. Swift headless tests.
+4. **Skills and docs.** The five skills, `lf help page`, `LOOPFLOW.md`,
+   `docs/surfaces.md`, `server/README.md`, goldens. LOO-1109's own
+   `ship-review.page.html` is the first page built with the kit.
 
 ## Done when
 
-- A page built by `lf page build` and opened by `lf page open` from a Rex
-  pane takes a highlighted note and a choice, and `⌘↩` reaches the agent.
-- The same file in Desktop puts the same items in the comments strip beside
-  Diff comments and sends them as one message.
-- The same file double-clicked copies that message.
-- A `data-lf` button files a Task from the page.
-- The five builtin skills produce their pages through the kit, and a
-  repository skill with `extends: lf:ship-review` and a `.lf/components/`
-  override changes the page without restating the base.
+- A page built by `lf page build` and opened by `lf page open` from Rex takes a
+  highlighted note and a finding choice, and `⌘↩` delivers a `task.steer` that
+  reaches the agent even if a headless Graph worker built the page.
+- A `data-lf` button confirms inline, executes `task.create`, and shows its new
+  Task ID in place without polluting the reply queue or Desktop's comments strip.
+- The same compiled file in Desktop puts notes and choices in
+  `ReviewCommentsStrip` beside Diff comments, preserves them across file
+  switches (including peer Machines), clears them cleanly after sending, and
+  leaves `ReviewRenderedView` diffs read-only.
+- The same compiled file double-clicked on `file://` copies the exact same
+  one-line message.
+- Headless `lf page open` prints the URL and never pops a browser window.
+- The five builtin skills build their pages through the kit, and a repository
+  skill with `extends: lf:ship-review` plus `.lf/components/` overrides changes
+  the page without restating the base.

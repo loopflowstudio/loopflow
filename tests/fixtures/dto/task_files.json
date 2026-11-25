@@ -149,5 +149,18 @@
       }
     ],
     "next_cursor": null
+  },
+  "watch": {
+    "task_id": "task-files",
+    "machine_id": "home_peer",
+    "machine_label": "mini",
+    "checkout": "/peer/checkout",
+    "revision": "r1",
+    "scratch_pages": [
+      {
+        "path": "scratch/notes.md",
+        "stamp": "1732500000.0:10"
+      }
+    ]
   }
 }

@@ -49,37 +49,17 @@ Keep `Brief`, `Diff` and `Files` in the pane strip. Cleanly separate **working-t
 
 **Focus and shortcut ownership:** Attach a descendant-aware `PaneFocusTarget` to `.files, .changes` in `WorkspacePanesView`. Register Files' pane shortcuts (`⌘F`, `⌘P`, `⇧⌘F`, `⇧⌘O`, `⌃⌘E`, and `files-back`/`files-forward` on `⌘[`/`⌘]`) in `DesktopAction`. `⌘F` opens one bordered inline find bar (keeping its query across file switches until closed, choice 4a for review) across Read, Edit (`NSTextView`), Markdown blocks, rendered HTML (`WebPage.callJavaScript`), and visible per-file Diff sides.
 
-## Next pass — structural repairs from concept review
-
-Execute in this order so the highest-risk architecture change proves itself first:
-
-1. **Slice 1 — Native TextKit 2 `TaskCodeReader` (proves the core reading, click, selection, inline-slot, and large-file model):**
-   - Replace the per-line SwiftUI `LazyVStack` inside `TaskCodeReader` with a dedicated read-only TextKit 2 `CodeReaderTextView` (`NSTextView(usingTextLayoutManager: true)`, `isEditable = false`, `isSelectable = true`, non-wrapping horizontal scroll) beside a pinned `CodeReaderGutterView` (line numbers, change bars, comment-selection click/Shift-click).
-   - Delete `ReaderClicks`, `RowFrames`, `NumberedLine`, the 3,766-line `CTLine` width pre-scan, `CTLine` hit-testing, and the `RunLoop.default` + `NSApp.currentEvent` workaround.
-   - Render plain monospace text immediately on open; run one detached Tree-sitter parse to apply syntax colors and publish `FileOutline`.
-   - Implement direct `mouseDown(with:)` in `CodeReaderTextView`: single `⌘-click` hit-tests via TextKit and triggers definition lookup without entering AppKit's modal tracking loop; plain click lets `super.mouseDown` handle native single- and multi-line drag-selection and underlines the clicked identifier when `selectedRange().length == 0` (clearing any stale visit highlight).
-   - Apply underline, Find match, Grep byte hit, comment-selection, and `FileVisit` highlights via temporary/rendering attributes; keep horizontal Find/hit scrolling at `x = 0` when the range fits.
-   - Open inline slots for `ReviewCommentEditor`, `ReviewCommentRow`, and `FileSymbolPeek` using `paragraphSpacing` on their anchor line's paragraph with viewport-wide `NSHostingView` subviews; keep detached comments above the reader.
-   - Verify with real AppKit `mouseDown` tests for `⌘-click`, click-to-underline, multi-line drag-select, and gutter Shift-click, plus `LargeFileReaderTests` (verify fast open, far Find, click, and scroll on `WorkModel.swift`).
-
-2. **Slice 2 — Explicit `FileVisit` landing highlights & `FilePosition` source-vs-rendered mode:**
-   - Update `FilePosition(path: String, line: Int?)` (`nil` = rendered Markdown/HTML) and `FileVisit` (`showsSource: Bool`, explicit highlight `.lines(ClosedRange<Int>)` or `.hit(TaskGrepHit)`).
-   - Populate `.lines(line...line)` on definition jumps (`gd`/`⌘-click`), outline picks (`⇧⌘O`), and Back/Forward to source lines so every landed jump marks its line.
-   - Preserve rendered Markdown/HTML on `⌘[` Back when returning to a rendered page (`line == nil`), and clear stale visit highlights when clicking another line in Read.
-   - Add focused tests in `TaskFilesTests` covering definition landing highlight, Back to rendered Markdown/HTML, and clearing visit highlight on click.
-
-3. **Slice 3 — State-based peer scratch observation (`TaskFilesRevision.scratch_pages`) & oversize file fast-path:**
-   - In `rust/loopflow-execution/src/ops/task/workspace.rs`, split `invalidates_tree` into tree/Git changes (bumps `revision`) vs. ignored scratch page changes (updates `scratch_pages: Vec<TaskScratchPage>` with `{ path, stamp }` from mtime + length without bumping `revision`).
-   - Mirror `scratch_pages` in `swift/Loopflow/Models/TaskWorkspace.swift` (`TaskFilesRevision`), `tests/fixtures/dto/server_schema.json`, and DTO tests.
-   - In `TaskFilesStore.receive(_ revision:)`, diff `scratchPages` against `seenScratchStamps` to update `scratchPaths`, re-read only changed open scratch documents, and call `browser.noteWrites` without running `workingTree.refresh()` when `revision` is unchanged.
-   - Update `RemoteTaskWorkspaceTests` / `TaskFileBrowserJourneyTests` so peer scratch writes are verified end-to-end through `task.files.watch` (confirming rail badge, `Updated` notice, atomic rename filtering, and no spurious `git diff`).
-   - In `rust/loopflow-execution/src/ops/task/snapshot.rs`, check size and sniff a short prefix before reading 1 MB into `observe::Cache` for >1 MB non-binary files; show a labeled loading indicator in `TaskFilesView`.
-
 ## Completed increments & verified baseline
 
-All prior increments are built on this branch (`3c9f1979fc..69280f85c9`):
-- Per-file Read/Edit/Diff, lazy `TaskFileDocument.retainedEditor`, `lf task find|grep|symbols`, `observe::checkout_files`, `FileOutline`, `FileFind` across all five renderers, unified Read+Diff `ReviewComments`, `lf desktop files` presentation (legacy `lf open --file` deleted), responsive 236 pt rail with distinct section IDs, bordered `SearchBox`, deep-path `… / folder / file` breadcrumb, and #2040 remote-workspace merge.
-- Latest checks on `69280f85c9`: `swift build --build-tests --package-path swift`, `TaskFilesTests` (82 passed), `LargeFileReaderTests` (scroll median 23–45 ms, far Find 271–600 ms, open 3–6 s — to be dramatically improved by Slice 1), third-pass QA (`scratch/qa.html`).
+All planned increments (including the post-demo concept review rebuild Slices 1–3) are built on this branch:
+- **Slice 1 (TextKit 2 `TaskCodeReader`):** Replaced per-line SwiftUI `LazyVStack`, `ReaderClicks`, `RowFrames`, `NumberedLine`, `CTLine` pre-scan/hit-testing, and `RunLoop.default` + `NSApp.currentEvent` with `CodeReaderContainerView` + read-only TextKit 2 `CodeReaderTextView` + pinned `CodeReaderGutterView`, immediate plain-text mount + detached Tree-sitter parse/outline, direct `mouseDown` for `⌘-click` / native multi-line selection / plain-click underline, temporary rendering attributes, and `paragraphSpacing` inline slots (`ReviewCommentEditor`, `ReviewCommentRow`, `FileSymbolPeek`).
+- **Slice 2 (Explicit `FileVisit` highlights & `FilePosition` rendered-vs-source):** `FilePosition.line: Int?` (`nil` = rendered Markdown/HTML) and `FileVisit(line:showsSource:highlight:)`; definition, outline, and Back/Forward source jumps mark `.lines(line...line)`; `⌘[` Back to rendered Markdown/HTML stays rendered; clicking another line in Read clears stale `visit.highlight` without scrolling or leaving raw source.
+- **Slice 3 (State-based peer `scratch_pages` watch & oversize fast-path):** `TaskFilesRevision.scratch_pages` (`{ path, stamp }` from mtime + size) tracks ignored `scratch/` Markdown/HTML writes independently of `revision` (no spurious `git diff` over SSH); `TaskFilesStore` diffs `seenScratchStamps` across reconnects to update `scratchPaths`, re-read matching open docs, and raise rail badges + `Updated` notices; `snapshot::file_snapshot` and `committed_file_snapshot` sniff an 8 KiB prefix for >1 MB files before reading 1 MB; `TaskFilesView` and `TaskFilePickerView` show labeled `ProgressView("Loading…")`.
+- Prior increments: Per-file Read/Edit/Diff, lazy `TaskFileDocument.retainedEditor`, `lf task find|grep|symbols`, `observe::checkout_files`, `FileOutline`, `FileFind` across all five renderers, unified Read+Diff `ReviewComments`, `lf desktop files` presentation (legacy `lf open --file` deleted), responsive 236 pt rail with distinct section IDs, bordered `SearchBox`, deep-path `… / folder / file` breadcrumb, and #2040 remote-workspace merge.
+- Latest verified checks:
+  - Rust: `ops::task::workspace::tests` (1), `ops::task::snapshot::tests` (1), `server::schema::tests` (8), `dto_fixtures::` (50).
+  - Swift: `LargeFileReaderTests` (open ~279–727 ms vs prior 3–6 s, idle 0.0–0.1 ms, far Find step ~62–216 ms vs 271–600 ms, scroll median ~24–62 ms), `TaskFilesTests`, `ServerProtocolTests`, `DTOFixtureTests`, `TaskFileBrowserJourneyTests` (local + peer over real `task.files.watch`), `RemoteTaskWorkspaceTests` (162 tests across 5 suites).
+- Remaining for display QA / gate: unlocked-display frame timing, physical drag-select/`⌘-click`, and dark/light visual inspection in Loopflow Dev.
 - Run the end-to-end journey from the repository root with the source-built CLI:
 
 ```sh

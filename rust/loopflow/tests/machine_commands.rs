@@ -5071,6 +5071,7 @@ fn server_routed_task_workspace() {
             "machine_label": "mini",
             "checkout": null,
             "revision": null,
+            "scratch_pages": [],
         })
     );
 

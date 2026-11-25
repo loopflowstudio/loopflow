@@ -641,6 +641,8 @@ pub fn task_workspace_context(task: &Task) -> OpsResult<String> {
 
 /// Largest binary file whose bytes a read carries, base64, in `data`.
 pub const MAX_BINARY_DATA_BYTES: usize = 16 * 1024 * 1024;
+/// Prefix sniffed for NUL bytes before reading an oversize (>1 MB) file into `observe::Cache`.
+const BINARY_SNIFF_BYTES: usize = 8_192;
 
 /// One file of a Task: the working tree, or the version at `at` (`parent`,
 /// `head` or a resolved commit SHA), which is read-only and has no recoveries.
@@ -724,6 +726,15 @@ pub(super) fn file_snapshot(
         crate::observe::file_bytes(&absolute, limit)
             .map_err(|error| task_error(format!("cannot read Task file {relative:?}: {error}")))
     };
+    // Sniff only a short prefix for >1 MB files so oversize text never buffers 1 MB in observe::Cache.
+    if std::fs::metadata(&absolute).is_ok_and(|metadata| metadata.len() > MAX_FILE_BYTES as u64) {
+        let (size, prefix) = read(BINARY_SNIFF_BYTES)?;
+        if size > MAX_FILE_BYTES as u64 {
+            snapshot.size_bytes = size;
+            read_oversize_contents(&mut snapshot, prefix, || Ok(read(MAX_BINARY_DATA_BYTES)?.1))?;
+            return Ok(snapshot);
+        }
+    }
     let (size, bytes) = read(MAX_FILE_BYTES + 1)?;
     snapshot.size_bytes = size;
     read_contents(&mut snapshot, bytes, || Ok(read(MAX_BINARY_DATA_BYTES)?.1))?;
@@ -761,11 +772,35 @@ pub(super) fn committed_file_snapshot(
     snapshot.size_bytes = size
         .parse()
         .map_err(|_| task_error(format!("Git listed no size for {relative:?}")))?;
-    let bytes = git_blob_prefix(workspace.worktree, object, MAX_FILE_BYTES + 1)?;
-    read_contents(&mut snapshot, bytes, || {
-        git_output_bytes(workspace.worktree, &["cat-file", "blob", object])
-    })?;
+    if snapshot.size_bytes > MAX_FILE_BYTES as u64 {
+        let prefix = git_blob_prefix(workspace.worktree, object, BINARY_SNIFF_BYTES)?;
+        read_oversize_contents(&mut snapshot, prefix, || {
+            git_output_bytes(workspace.worktree, &["cat-file", "blob", object])
+        })?;
+    } else {
+        let bytes = git_blob_prefix(workspace.worktree, object, MAX_FILE_BYTES + 1)?;
+        read_contents(&mut snapshot, bytes, || {
+            git_output_bytes(workspace.worktree, &["cat-file", "blob", object])
+        })?;
+    }
     Ok(snapshot)
+}
+
+/// Classifies a file known to exceed `MAX_FILE_BYTES` from its sniffed prefix.
+fn read_oversize_contents(
+    snapshot: &mut TaskFileSnapshot,
+    prefix: Vec<u8>,
+    whole: impl FnOnce() -> OpsResult<Vec<u8>>,
+) -> OpsResult<()> {
+    if prefix.contains(&0) {
+        snapshot.state = TaskFileState::Binary;
+        if snapshot.size_bytes <= MAX_BINARY_DATA_BYTES as u64 {
+            snapshot.data = Some(base64::engine::general_purpose::STANDARD.encode(whole()?));
+        }
+    } else {
+        snapshot.state = TaskFileState::Truncated;
+    }
+    Ok(())
 }
 
 /// Classifies a file from its first bytes (at most `MAX_FILE_BYTES + 1`).
@@ -1070,4 +1105,39 @@ pub(super) fn git_output_bytes(worktree: &Path, args: &[&str]) -> OpsResult<Vec<
         )));
     }
     Ok(output.stdout)
+}
+
+#[cfg(test)]
+mod tests {
+    use loopflow_model::durable::TaskId;
+
+    use super::{file_snapshot, TaskFileState, TaskWorkspace, MAX_FILE_BYTES};
+
+    #[test]
+    fn oversize_files_classify_from_prefix_without_buffering_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let task_id = TaskId::new();
+        let workspace = TaskWorkspace {
+            issue_identifier: "TEST-1",
+            task_id: &task_id,
+            worktree: dir.path(),
+        };
+
+        let large_text = dir.path().join("large.log");
+        std::fs::write(&large_text, vec![b'a'; MAX_FILE_BYTES + 10_000]).unwrap();
+        let text_snap = file_snapshot(workspace, "large.log").unwrap();
+        assert_eq!(text_snap.state, TaskFileState::Truncated);
+        assert_eq!(text_snap.size_bytes, (MAX_FILE_BYTES + 10_000) as u64);
+        assert!(text_snap.content.is_none());
+        assert!(text_snap.data.is_none());
+
+        let mut binary = vec![b'x'; MAX_FILE_BYTES + 10_000];
+        binary[16] = 0;
+        let large_bin = dir.path().join("large.bin");
+        std::fs::write(&large_bin, &binary).unwrap();
+        let bin_snap = file_snapshot(workspace, "large.bin").unwrap();
+        assert_eq!(bin_snap.state, TaskFileState::Binary);
+        assert_eq!(bin_snap.size_bytes, binary.len() as u64);
+        assert!(bin_snap.data.is_some());
+    }
 }

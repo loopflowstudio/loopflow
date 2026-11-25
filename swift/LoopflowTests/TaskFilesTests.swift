@@ -19,6 +19,7 @@ private struct FilesFixture: Decodable {
     let file: TaskFileSnapshot
     let image: TaskFileSnapshot
     let save: TaskFileSave
+    let watch: TaskFilesRevision
 }
 
 @Suite("TaskFiles", .serialized)
@@ -144,6 +145,45 @@ struct TaskFilesTests {
         store = nil
         #expect(retained == nil)
         try await eventually { peer.cancelled }
+    }
+
+    @Test func peerScratchWatchBadgesUpdatesReReadsOnlyMatchingOpenDocsAndSkipsDiff() async throws {
+        let peer = RemoteFilesFixture()
+        let query = RegistryQuery(subscribeRead: { peer.subscribe($0) }) { args, cwd in try peer.read(args, cwd: cwd) }
+        let store = TaskFilesStore(issue: "remote-task", cwd: "/peer/checkout", machine: "peer", query: query)
+        store.autosave = false
+        store.selectFile("note.txt", mode: .edit)
+        await store.loadFile()
+        store.observeFiles()
+        try await eventually { peer.watching }
+        let readsBefore = peer.reads.count
+
+        // An ignored scratch write updates scratch_pages without bumping tree revision:
+        // zero git diff calls, note.txt is not re-read, Open & Scratch badges + Updated banner appear.
+        peer.writeScratch("scratch/report.html", content: "<h1>v1</h1>", stamp: "100.1:11")
+        try await eventually { store.browser.updated == ["scratch/report.html"] }
+        #expect(store.browser.notice == .updated("scratch/report.html"))
+        #expect(store.scratchPaths == ["scratch/report.html"])
+        #expect(peer.reads.count == readsBefore)
+
+        // Open the scratch page in Read and rewrite it on the peer: only that open doc is re-read,
+        // no Updated banner fires while it is visibleReadPath, and still zero git diff calls.
+        store.selectFile("scratch/report.html", mode: .read)
+        await store.loadFile()
+        store.browser.visibleReadPath = "scratch/report.html"
+        peer.writeScratch("scratch/report.html", content: "<h1>v2</h1>", stamp: "101.2:11")
+        try await eventually { store.document("scratch/report.html").text == "<h1>v2</h1>" }
+        #expect(store.browser.notice == nil && store.browser.updated.isEmpty)
+        #expect(peer.reads.allSatisfy { $0.starts(with: ["task", "file"]) })
+
+        // An atomic-save temp sibling that vanishes disappears from scratchPaths and updated cleanly.
+        store.browser.visibleReadPath = nil
+        peer.writeScratch("scratch/.!123!temp.html", content: "tmp", stamp: "102.0:3")
+        try await eventually { store.browser.updated.contains("scratch/.!123!temp.html") }
+        peer.removeScratch("scratch/.!123!temp.html")
+        try await eventually { !store.browser.updated.contains("scratch/.!123!temp.html") }
+        #expect(!store.scratchPaths.contains("scratch/.!123!temp.html"))
+        #expect(store.browser.notice == nil)
     }
 
     @Test func anUnstartedTaskSaysNotStarted() async throws {
@@ -2682,6 +2722,8 @@ private actor HeldTaskSave {
 private final class RemoteFilesFixture: Sendable {
     private struct State {
         var content = "one\ntwo\n"
+        var files: [String: String] = [:]
+        var scratchPages: [String: String] = [:]
         var machine = "peer"
         var checkout: String? = "/peer/checkout"
         var revision = 0
@@ -2709,6 +2751,20 @@ private final class RemoteFilesFixture: Sendable {
         state.withLock { $0.content = text; $0.revision += 1 }
         emit()
     }
+    func writeScratch(_ path: String, content: String, stamp: String) {
+        state.withLock {
+            $0.files[path] = content
+            $0.scratchPages[path] = stamp
+        }
+        emit()
+    }
+    func removeScratch(_ path: String) {
+        state.withLock {
+            $0.files.removeValue(forKey: path)
+            $0.scratchPages.removeValue(forKey: path)
+        }
+        emit()
+    }
     func move(to machine: String, checkout: String, content: String) {
         state.withLock { $0.machine = machine; $0.checkout = checkout; $0.content = content; $0.revision += 1 }
         emit()
@@ -2727,10 +2783,12 @@ private final class RemoteFilesFixture: Sendable {
         emit()
     }
     private func emit() {
-        let (machine, checkout, revision) = state.withLock { ($0.machine, $0.checkout, $0.revision) }
+        let (machine, checkout, revision, scratch) = state.withLock { ($0.machine, $0.checkout, $0.revision, $0.scratchPages) }
+        let pages: [[String: String]] = checkout == nil ? [] : scratch.keys.sorted().map { ["path": $0, "stamp": scratch[$0]!] }
         let body: [String: Any] = ["task_id": "remote-task", "machine_id": machine, "machine_label": "\(machine) label",
                                    "checkout": checkout ?? NSNull(),
-                                   "revision": checkout == nil ? NSNull() : "r\(revision)"]
+                                   "revision": checkout == nil ? NSNull() : "r\(revision)",
+                                   "scratch_pages": pages]
         let frame: [String: Any] = ["answers": NSNull(), "unavailable": NSNull(), "body": body, "read_at": NSNull()]
         stream.continuation.yield(try! JSONSerialization.data(withJSONObject: frame))
     }
@@ -2739,9 +2797,10 @@ private final class RemoteFilesFixture: Sendable {
         guard cwd == nil, args.starts(with: ["task", "file", "remote-task"]) else {
             throw RegistryQueryError("Task reads name the Task, never a Machine or path")
         }
-        let content = state.withLock { $0.content }
+        let path = args.count > 3 ? args[3] : "note.txt"
+        let content = state.withLock { $0.files[path] ?? $0.content }
         return String(decoding: try JSONSerialization.data(withJSONObject: [
-            "recoveries": [], "issue_identifier": "TEST-1", "task_id": "remote-task", "path": "note.txt",
+            "recoveries": [], "issue_identifier": "TEST-1", "task_id": "remote-task", "path": path,
             "content": content, "state": "text", "revision": content, "read_only_reason": NSNull(), "size_bytes": content.utf8.count
         ]), as: UTF8.self)
     }

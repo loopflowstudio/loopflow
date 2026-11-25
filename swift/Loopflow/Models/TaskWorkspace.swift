@@ -268,10 +268,21 @@ public struct TaskFileSnapshot: Decodable, Sendable, Hashable {
     }
 }
 
+/// One eligible Markdown or HTML page under `scratch/` with a metadata stamp
+/// derived from modification time and byte length.
+public struct TaskScratchPage: Decodable, Sendable, Equatable {
+    public let path: String
+    public let stamp: String
+
+    public init(path: String, stamp: String) {
+        self.path = path
+        self.stamp = stamp
+    }
+}
+
 /// One `task.files.watch` reading: the Machine running the Task, its checkout
-/// there and an opaque revision of its whole tree. `checkout` and `revision`
-/// are nil until the Task has a checkout there. A changed Machine or checkout
-/// is a move.
+/// there, an opaque revision for working-tree/Git changes, and stamped
+/// `scratch/` pages tracked independently so ignored scratch writes skip `git diff`.
 public struct TaskFilesRevision: Decodable, Sendable, Equatable {
     public let taskID: String
     public let machineID: String
@@ -279,12 +290,14 @@ public struct TaskFilesRevision: Decodable, Sendable, Equatable {
     public let machineLabel: String?
     public let checkout: String?
     public let revision: String?
+    public let scratchPages: [TaskScratchPage]
 
     public var notStarted: Bool { checkout == nil }
 
     enum CodingKeys: String, CodingKey {
         case checkout, revision
         case taskID = "task_id", machineID = "machine_id", machineLabel = "machine_label"
+        case scratchPages = "scratch_pages"
     }
 
     public init(from decoder: any Decoder) throws {
@@ -294,5 +307,6 @@ public struct TaskFilesRevision: Decodable, Sendable, Equatable {
         machineLabel = try values.decode(String?.self, forKey: .machineLabel)
         checkout = try values.decode(String?.self, forKey: .checkout)
         revision = try values.decode(String?.self, forKey: .revision)
+        scratchPages = try values.decode([TaskScratchPage].self, forKey: .scratchPages)
     }
 }

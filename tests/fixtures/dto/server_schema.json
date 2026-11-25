@@ -14537,7 +14537,7 @@
       "type": "string"
     },
     "TaskFilesRevision": {
-      "description": "A Task's file invalidation on this Machine. `checkout` and `revision` are\nnull until the Task has a checkout here; readers rescan on a new revision,\nincluding when multiple changes coalesce while their connection is busy.",
+      "description": "A Task's file invalidation on this Machine. `checkout` and `revision` are\nnull until the Task has a checkout here; `revision` moves only on working-tree\nor Git metadata changes, while `scratch_pages` tracks ignored `scratch/`\nMarkdown/HTML writes independently so remote readers skip `git diff`.",
       "properties": {
         "checkout": {
           "type": [
@@ -14560,6 +14560,12 @@
             "null"
           ]
         },
+        "scratch_pages": {
+          "items": {
+            "$ref": "#/$defs/TaskScratchPage"
+          },
+          "type": "array"
+        },
         "task_id": {
           "type": "string"
         }
@@ -14569,7 +14575,8 @@
         "machine_id",
         "machine_label",
         "checkout",
-        "revision"
+        "revision",
+        "scratch_pages"
       ],
       "type": "object"
     },
@@ -15567,6 +15574,22 @@
         "updated_at",
         "provider",
         "owner"
+      ],
+      "type": "object"
+    },
+    "TaskScratchPage": {
+      "description": "One eligible Markdown or HTML page under `scratch/` with a metadata stamp\nderived from modification time and byte length.",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "stamp": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "stamp"
       ],
       "type": "object"
     },

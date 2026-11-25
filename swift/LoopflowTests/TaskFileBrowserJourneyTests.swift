@@ -167,16 +167,21 @@ struct TaskFileBrowserJourneyTests {
         #expect(changedPicker.results.map(\.path) == [call] && files.openAndScratch.contains(page))
         files.filePicker = nil
 
-        try await checkPresentations(context: context, files: files, doc: doc, checkout: root, lf: lf)
+        try await checkPresentations(context: context, files: files, doc: doc, checkout: root, lf: lf, peer: peer)
     }
 
     private func checkPresentations(context: DesktopActionContext, files: TaskFilesStore, doc: TaskFileDocument,
-                                    checkout: URL, lf: BuiltLf) async throws {
+                                    checkout: URL, lf: BuiltLf, peer: Bool) async throws {
         let workspace = try #require(context.workspace)
         let terminal = try #require(workspace.multiplexer.sessionPane)
         workspace.multiplexer.setFocusedPane(terminal.id)
         let fromTerminal = DesktopActionContext(model: context.model, workspaces: context.workspaces, workspace: workspace, pane: terminal)
         #expect(DesktopAction.binding(characters: "f", modifiers: .command, context: fromTerminal) == nil)
+        if peer {
+            // Observe peer scratch writes through the real task.files.watch stream, not a direct invalidate shortcut.
+            files.observeFiles()
+            for await cwd in Observations({ files.cwd }) where cwd == checkout.path { break }
+        }
         files.mode = .edit
         let editor = doc.editor
         let range = NSRange(location: 3, length: 4)
@@ -189,11 +194,12 @@ struct TaskFileBrowserJourneyTests {
             let path = "scratch/\(panePage.rawValue)-\(mode.rawValue).html"
             for text in ["first", "settled"] {
                 try write(text, to: path, in: checkout)
-                files.invalidate([path])
+                if !peer { files.invalidate([path]) }
             }
             // Wait for the watcher batch to reach the rail before checking what stayed in place.
             for await updates in Observations({ files.browser.updated }) where updates.contains(path) { break }
             try #require(files.openAndScratch.contains(path) && files.browser.updated.filter { $0 == path }.count == 1)
+            #expect(files.browser.notice == .updated(path))
             #expect(files.page == panePage && files.mode == mode && files.selection == call)
             #expect(doc.dirty && editor.selectedRange() == range && workspace.multiplexer.focusedPane.id == terminal.id)
         }

@@ -236,6 +236,8 @@ final class TaskFilesStore {
     @ObservationIgnored private var servedObservation: Task<Void, Never>?
     /// What the served watch last answered, so a repeat after a reconnect reads nothing.
     @ObservationIgnored private var servedRevision: String?
+    /// Last seen metadata stamps for `scratch/` pages on a peer Machine, retained across reconnects.
+    @ObservationIgnored private var seenScratchStamps: [String: String]?
 
     private var invalidation: Task<Void, Never>?
     private var pendingPaths: Set<String> = []
@@ -274,6 +276,7 @@ final class TaskFilesStore {
         servedObservation?.cancel()
         servedObservation = nil
         servedRevision = nil
+        seenScratchStamps = nil
         self.machine = machine
         self.cwd = cwd
         arriving = Set(documents.keys)
@@ -328,30 +331,92 @@ final class TaskFilesStore {
         }
     }
 
-    /// Apply a served reading. A peer sends a revision, never paths: a new one
-    /// rescans what Files shows, including scratch pages an ignored `scratch/` holds.
+    /// Apply a served reading. Working-tree/Git changes move `revision` and rescan
+    /// the checkout; ignored `scratch/` page writes move `scratchPages` alone so
+    /// Desktop badges Open & Scratch and reloads open scratch pages without `git diff`.
     private func receive(_ revision: TaskFilesRevision) {
         let wasNotStarted = watchNotStarted
         watchNotStarted = revision.notStarted
         if revision.machineID != machine {
             arriving = Set(documents.keys)
             machine = revision.machineID
+            seenScratchStamps = nil
         }
         machineLabel = revision.machineLabel
+        let checkoutChanged = revision.checkout != nil && revision.checkout != cwd
         if let checkout = revision.checkout, checkout != cwd {
             cwd = checkout
-        } else if revision.revision == servedRevision {
+            seenScratchStamps = nil
+        }
+        guard !revision.notStarted else {
+            servedRevision = nil
+            seenScratchStamps = nil
             return
         }
+
         let first = servedRevision == nil
+        let treeChanged = checkoutChanged || (!first && revision.revision != servedRevision)
         servedRevision = revision.revision
-        guard !revision.notStarted else { return }
+
+        let incomingStamps = Dictionary(uniqueKeysWithValues: revision.scratchPages.map { ($0.path, $0.stamp) })
         if wasNotStarted {
+            seenScratchStamps = incomingStamps
             // The checkout appeared: read what Not started hid.
             Task { await retry() }
-        } else if !first {
-            // The first reading is the tree already read; later ones mean it changed.
+            return
+        }
+
+        var changedScratch = Set<String>()
+        var touchedScratch = Set<String>()
+        if let previous = seenScratchStamps {
+            let removed = Set(previous.keys).subtracting(incomingStamps.keys)
+            changedScratch = Set(incomingStamps.compactMap { path, stamp in previous[path] != stamp ? path : nil })
+            touchedScratch = removed.union(changedScratch)
+            seenScratchStamps = incomingStamps
+            if !touchedScratch.isEmpty {
+                scratchPaths = Set(scratchPaths).subtracting(removed).union(changedScratch).sorted()
+                browser.noteWrites(touchedScratch, present: changedScratch)
+            }
+        } else {
+            seenScratchStamps = incomingStamps
+        }
+
+        if treeChanged {
             invalidate([""])
+        } else if !touchedScratch.isEmpty {
+            let paths = touchedScratch
+            Task { [weak self] in
+                await self?.applyPeerScratchWrites(paths)
+            }
+        }
+    }
+
+    private func applyPeerScratchWrites(_ paths: Set<String>) async {
+        if tree.showIgnored {
+            await tree.rereadDirectories(holding: paths)
+            guard !Task.isCancelled else { return }
+        }
+        await rereadDocuments(matching: paths)
+    }
+
+    private func rereadDocuments(matching changed: Set<String>) async {
+        for (path, document) in documents where Self.touches(changed, path) {
+            do {
+                let revision = document.snapshot?.revision
+                let next = try await query.taskFile(issue: issue, path: path)
+                guard !Task.isCancelled else { return }
+                guard revision == document.snapshot?.revision else {
+                    invalidate([path])
+                    continue
+                }
+                if arriving.remove(path) != nil {
+                    await document.arrive(next)
+                } else {
+                    await document.reconcile(next)
+                }
+            } catch is CancellationError {
+                return
+            } catch { self.error = error.localizedDescription }
         }
     }
 
@@ -401,24 +466,7 @@ final class TaskFilesStore {
         if !pages.isEmpty { await reconcileScratchWrites(pages) }
         guard !Task.isCancelled else { return }
         // Re-read retained documents even when another file or terminal is visible.
-        for (path, document) in documents where Self.touches(changed, path) {
-            do {
-                let revision = document.snapshot?.revision
-                let next = try await query.taskFile(issue: issue, path: path)
-                guard !Task.isCancelled else { return }
-                guard revision == document.snapshot?.revision else {
-                    invalidate([path])
-                    continue
-                }
-                if arriving.remove(path) != nil {
-                    await document.arrive(next)
-                } else {
-                    await document.reconcile(next)
-                }
-            } catch is CancellationError {
-                return
-            } catch { self.error = error.localizedDescription }
-        }
+        await rereadDocuments(matching: changed)
         guard !Task.isCancelled, comparisonChanged else { return }
         await workingTree.refresh(afterWrite: true)
         if page == .changes, diffReview.reviewReading !== workingTree { await diffReview.reviewReading.refresh() }

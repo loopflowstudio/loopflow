@@ -169,7 +169,7 @@ struct WorkNavigationTests {
         #expect(model.navigation.showsSelection)
         #expect(model.navigation.selectedSessionId == nil)
         #expect(model.breadcrumb == nil)
-        #expect(model.workingTaskMembers.map(\.work.id) == ["issue-review", "issue-now"])
+        #expect(model.boardTiles(.workingTasks).map(\.work.id) == ["issue-review", "issue-now"])
         model.select(.task(id: "issue-now"))
         #expect(model.navigation.destination == .entered(from: .workingTasks, work: .task(id: "issue-now")))
         #expect(model.breadcrumb?.task?.task.id == "issue-now")
@@ -253,23 +253,231 @@ struct WorkNavigationTests {
         }
     }
 
-    @Test("A dropped Task row takes its place before the order is written")
-    func droppedRowMovesBeforeTheWrite() async throws {
-        let model = WorkModel(query: RegistryQuery { args, _ in
-            if args.contains("move") { try await Task.sleep(for: .seconds(30)) }
-            throw RegistryQueryError("unused")
-        }, repoPath: "/src/loopflow")
-        model.applyFixture(roadmap: .available(try roadmap()), waves: .available([]), workActivity: .loading, repos: [])
-        func task(_ id: String) -> WorkViewPlan.Content {
-            fixtureViewContent(work: .init(repository: "repo", kind: .task, id: id), title: id)
+    @Test func statusToggleRestoresSavedOrderWithoutChangingTheGrid() throws {
+        let model = WorkModel(query: RegistryQuery { _, _ in
+            Issue.record("Toggling the sidebar contacted the Machine")
+            throw RegistryQueryError("Unexpected command")
+        }, repoPath: "/repo")
+        let saved = fixtureStartedPlan([
+            ("busy", [.working, .available, .busy]), ("idle", [.working]), ("z", [.working, .available]),
+            ("error", [.working, .error, .busy]), ("a", [.working, .available]), ("blocked", [.working, .blocked, .error]),
+        ])
+        model.applySelectionPlans([saved], reason: "")
+        model.applyTaskList(saved, wave: nil, reason: "")
+        let stack = saved.resolution.members.map(\.work.id)
+        let sidebar = WorkNavigator(model: model, onOpenSession: { _ in })
+        for isOn in [false, true] {
+            let button = try sidebar.inspect().find(SidebarStatusToggle.self).find(ViewType.Button.self)
+            #expect(try button.accessibilityValue().string() == (isOn ? "On" : "Off"))
+            #expect(try button.help().string().contains(isOn ? "restore saved order" : "Blocked, Error, Available, Idle, Busy"))
+            let action = try #require(model.searchDestinations("Sort by status").first)
+            #expect(action.id == .sortWorkingTasks && action.detail.hasPrefix(isOn ? "On" : "Off"))
+            #expect(model.sidebarTaskIDs == (isOn ? ["blocked", "error", "z", "a", "idle", "busy"] : stack))
+            #expect(model.workingTaskIDs == stack)
+            try button.tap()
         }
-        model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
-                                                   members: [task("issue-review"), task("issue-now")])], reason: "")
-        #expect(model.workingTaskIDs == ["issue-review", "issue-now"])
-        let write = model.reorderWorkingTask("issue-now", to: "issue-review")
-        #expect(model.workingTaskIDs == ["issue-now", "issue-review"])
-        write.cancel()
+        #expect(model.sidebarTaskIDs == stack)
+        #expect(model.pendingChanges.changes.isEmpty)
+    }
+
+    @Test func openTaskKeepsItsStatusGroupUntilAnotherTaskIsSelected() {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected command") }, repoPath: "/repo")
+        func report(_ state: WorkSelectionState) {
+            model.applyStartedFixture([("idle", [.working]), ("open", [.working, state]), ("other", [.working, .available])])
+        }
+        model.applySelectionPlans([fixtureWorkingPlan(["idle", "open", "other"])], reason: "")
+        model.selectWorkingTasksDashboard()
+        report(.available)
+        model.selectSidebarTask(slot: 1)
+        model.toggleSidebarSortByStatus()
+        #expect(model.sidebarTaskIDs == ["open", "other", "idle"])
+        report(.busy)
+        model.selectSidebarTask(slot: 0)
+        #expect(model.navigation.destination == .entered(from: .workingTasks, work: .task(id: "open")))
+        #expect(model.sidebarTaskIDs == ["open", "other", "idle"])
+        model.cycleSidebarTask(1)
+        #expect(model.selection == .task(id: "other"))
+        #expect(model.sidebarTaskIDs == ["other", "idle", "open"])
+    }
+
+    @Test func sortingAnOpenBusyTaskStartsItInTheBusyGroup() {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected command") }, repoPath: "/repo")
+        func report(_ state: WorkSelectionState) {
+            model.applyStartedFixture([("open", [.working, state]), ("ready", [.working, .available]), ("blocked", [.working, .blocked])])
+        }
+        report(.busy)
+        model.selectSidebarTask(slot: 0)
+        model.toggleSidebarSortByStatus()
+        #expect(model.sidebarTaskIDs == ["blocked", "ready", "open"])
+        report(.available)
+        #expect(model.sidebarTaskIDs == ["blocked", "ready", "open"])
+        model.navigation.sidebarFilter = .available
+        #expect(model.sidebarTaskIDs == ["open", "ready"])
+    }
+
+    @Test func aTurnAfterSwitchingFiltersKeepsTheOpenTaskInItsGroup() {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected command") }, repoPath: "/repo")
+        func report(_ state: WorkSelectionState) {
+            model.applyStartedFixture([("busy", [.working, .busy]), ("open", [.working, state]), ("idle", [.working])])
+        }
+        report(.available)
+        model.select(.task(id: "open"))
+        model.toggleSidebarSortByStatus()
+        #expect(model.sidebarTaskIDs == ["open", "idle", "busy"])
+        model.navigation.sidebarFilter = .available
+        model.navigation.sidebarFilter = .working
+        report(.busy)
+        #expect(model.sidebarTaskIDs == ["open", "idle", "busy"])
+    }
+
+    @Test func selectingAnotherTaskDirectlyReleasesTheHeldGroup() {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected command") }, repoPath: "/repo")
+        func report(_ state: WorkSelectionState) {
+            model.applyStartedFixture([("open", [.working, state]), ("other", [.working, .available]), ("idle", [.working])])
+        }
+        report(.available)
+        model.select(.task(id: "open"))
+        model.toggleSidebarSortByStatus()
+        report(.busy)
+        #expect(model.sidebarTaskIDs == ["open", "other", "idle"])
+        model.navigation.selection = .task(id: "other")
+        #expect(model.navigation.heldStatusGroup == nil)
+        #expect(model.sidebarTaskIDs == ["other", "idle", "open"])
+    }
+
+    @Test func firstReadingHoldsTheGroupWhenRowsAboveTheOpenTaskLeave() {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected command") }, repoPath: "/repo")
+        model.applySelectionPlans([fixtureWorkingPlan(["open"])], reason: "")
+        model.select(.task(id: "open"))
+        #expect(model.selection == .task(id: "open"))
+        model.toggleSidebarSortByStatus()
+        model.applyStartedFixture([("busy", [.working, .busy]), ("blocked", [.working, .blocked]), ("open", [.working, .available])])
+        #expect(model.sidebarTaskIDs == ["blocked", "open", "busy"])
+        model.applyStartedFixture([("busy", [.working, .busy]), ("open", [.working, .available])])
+        #expect(model.sidebarTaskIDs == ["open", "busy"])
+        model.applyStartedFixture([("busy", [.working, .busy]), ("open", [.working, .busy])])
+        #expect(model.sidebarTaskIDs == ["open", "busy"])
+        model.selectWorkingTasksDashboard()
+        #expect(model.sidebarTaskIDs == ["busy", "open"])
+    }
+
+    @Test func waveSidebarOffersStatusSortingAndSavedDashboardUsesItsArrangement() throws {
+        let model = try dashboardModel()
+        let sidebar = WorkNavigator(model: model, onOpenSession: { _ in })
+        model.toggleSidebarSortByStatus()
+        model.select(.wave(id: "wave-1"))
+        model.applyStartedFixture([("busy", [.working, .busy]), ("ready", [.working, .available])], wave: "wave-1")
+        let button = try sidebar.inspect().find(SidebarStatusToggle.self).find(ViewType.Button.self)
+        #expect(try button.accessibilityValue().string() == "On")
+        #expect(model.searchDestinations("Sort by status").first?.id == .sortWorkingTasks)
+        #expect(model.sidebarTaskIDs == ["ready", "busy"])
+        #expect(!model.navigation.canReorderSidebar)
+        try button.tap()
+        #expect(model.sidebarTaskIDs == ["busy", "ready"])
+        #expect(!model.navigation.canReorderSidebar)
+
+        model.toggleSidebarSortByStatus()
+        var dashboard = try #require(model.dashboard("review"))
+        dashboard.contents[0].states.append(.busy)
+        model.applySelectionPlans([dashboard], reason: "")
+        model.selectDashboard("review")
+        #expect(model.sidebarTaskIDs == ["issue-now", "issue-later", "issue-review"])
+        #expect(model.searchDestinations("Sort by status").isEmpty)
+        #expect(throws: (any Error).self) { try sidebar.inspect().find(SidebarStatusToggle.self) }
+    }
+
+    private func dropModel(machine: HeldMachine, feed: WorkFeed, side: DropSide) -> WorkModel {
+        let query = RegistryQuery(change: { write, requestID in
+            let json = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(write))
+            #expect(json["side"] == .string(side.rawValue))
+            return try await machine.send(write, requestID)
+        }, subscribeWork: { await feed.open() }) { _, _ in
+            throw RegistryQueryError("Unexpected one-shot read")
+        }
+        return WorkModel(query: query, repoPath: "/repo")
+    }
+
+    @Test("A refused drop reveals the last reading in the sidebar and grid even when the reread fails",
+          arguments: [nil, Revisions(["planning": 5])])
+    func refusedWorkingTaskDrop(concurrentWrite: Revisions?) async throws {
+        let machine = HeldMachine()
+        let feed = WorkFeed()
+        let model = dropModel(machine: machine, feed: feed, side: .before)
+        let observing = Task { await model.keepWorkCurrent() }
+        defer { observing.cancel() }
+        let scope = try await feed.request(1)
+        func read(_ ids: [String], sequence: Int, grid: [String]? = nil) async throws {
+            let plan = fixtureWorkingPlan(ids)
+            await feed.send(WorkFrame(sequence: sequence, answers: scope.id, unavailable: nil, content: .selections([grid.map(fixtureWorkingPlan) ?? plan]), wire: nil))
+            await feed.send(WorkFrame(sequence: sequence, answers: scope.id, unavailable: nil, content: .taskList(plan), wire: nil))
+            try await eventually { model.taskListReading.current == plan }
+        }
+        func expectOrder(_ ids: [String]) {
+            #expect(model.sidebarTaskIDs == ids)
+            #expect(model.boardTiles(.workingTasks).map(\.work.id) == ids)
+        }
+
+        // The sidebar can receive the new order before the grid.
+        try await read(["a", "b"], sequence: 1, grid: ["b", "a"])
+        let source = try #require(model.sidebarRows.last?.work)
+        let write = model.reorderWorkingTask(source, to: "a", side: .before)
+        expectOrder(["b", "a"])
+        // Another Task arrived while the Machine was deciding the drop.
+        try await read(["c", "a", "b"], sequence: 2)
+        expectOrder(["c", "b", "a"])
+        await machine.fail(ServerError(code: "conflict", message: "Order changed", data: .null, revisions: concurrentWrite))
+        let confirmation = try await feed.request(scope.id + 1)
+        expectOrder(["c", "a", "b"])
+        for content in [WorkFrame.Content.selections(nil), .taskList(nil), .checkpoint] {
+            await feed.send(WorkFrame(sequence: 3, answers: confirmation.id, unavailable: "Read unavailable", content: content, wire: nil))
+        }
         await write.value
+        expectOrder(["c", "a", "b"])
+        #expect(model.taskListReading.failure == "Read unavailable")
+        #expect(model.navigation.notices.current?.text == "b couldn't be reordered: Order changed")
+        try await read(["b", "c"], sequence: 4)
+        expectOrder(["b", "c"])
+        observing.cancel()
+        await observing.value
+    }
+
+    @Test("A drop stays on the chosen side until each reading covers the Machine's answer")
+    func workingTaskDropAcrossReceipt() async throws {
+        let machine = HeldMachine()
+        let feed = WorkFeed()
+        let model = dropModel(machine: machine, feed: feed, side: .after)
+        let observing = Task { await model.keepWorkCurrent() }
+        defer { observing.cancel() }
+        let scope = try await feed.request(1)
+        func frame(_ sequence: Int, _ revision: Int64, _ content: WorkFrame.Content) async {
+            await feed.send(WorkFrame(sequence: sequence, answers: scope.id, unavailable: nil, content: content,
+                                      wire: nil, readAt: Revisions(["planning": revision])))
+        }
+        let initial = fixtureWorkingPlan(["a", "b", "c"])
+        let moved = fixtureWorkingPlan(["b", "c", "a"])
+        await frame(1, 4, .selections([initial]))
+        await frame(1, 4, .taskList(initial))
+        try await eventually { model.sidebarTaskIDs == ["a", "b", "c"] }
+        let source = try #require(model.boardTiles(.workingTasks).first?.work)
+        let write = model.reorderWorkingTask(source, to: "c", side: .after)
+        // The sidebar observed the commit before the answer. A positional swap would undo it.
+        await frame(2, 5, .taskList(moved))
+        try await eventually { model.taskListReading.value == moved }
+        #expect(model.sidebarTaskIDs == ["b", "c", "a"])
+        await machine.answer(Revisions(["planning": 5]))
+        let checkpoint = try await feed.request(scope.id + 1)
+        await feed.send(WorkFrame(sequence: 3, answers: checkpoint.id, unavailable: nil, content: .checkpoint, wire: nil))
+        await write.value
+        #expect(model.workingTaskIDs == ["b", "c", "a"])
+        // A later writer reversed the move. The grid hears first.
+        await frame(4, 6, .selections([initial]))
+        try await eventually { model.workingTaskIDs == ["a", "b", "c"] }
+        #expect(model.sidebarTaskIDs == ["b", "c", "a"])
+        await frame(5, 6, .taskList(initial))
+        try await eventually { model.sidebarTaskIDs == model.workingTaskIDs }
+        #expect(model.navigation.notices.current == nil)
+        observing.cancel()
+        await observing.value
     }
 
     @Test("Ready and Working-now filters read the started list's Task states, as the phone's filters do")
@@ -326,14 +534,14 @@ struct WorkNavigationTests {
                        "b": CGRect(x: 0, y: 65, width: 200, height: 60),
                        "c": CGRect(x: 0, y: 130, width: 200, height: 60)]
         drag.move("a", by: 10, at: 40, order: ["a", "b", "c"])
-        #expect(drag.target == nil)
+        #expect(drag.landing(on: "a") == nil)
         drag.move("a", by: 120, at: 150, order: ["a", "b", "c"])
         #expect(drag.landing(on: "c") == .bottom)
         drag.move("a", by: 80, at: 90, order: ["a", "b", "c"])
         #expect(drag.landing(on: "b") == .bottom)
         let landed = drag.end()
-        #expect(landed?.0 == "a" && landed?.1 == "b")
-        #expect(drag.source == nil && drag.target == nil && drag.offset == 0)
+        #expect(landed?.target == "b" && landed?.side == .after)
+        #expect(drag.source == nil && drag.landing(on: "b") == nil && drag.offset == 0)
     }
 
     @Test("The sidebar header names the Dashboard as written under the repository, and ⌘1 marks its first member")
@@ -358,7 +566,7 @@ struct WorkNavigationTests {
         }
         model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: tasks)], reason: "")
         model.selectWorkingTasksDashboard()
-        let member = try #require(model.workingTaskMembers.first { $0.work.id == "issue-now" })
+        let member = try #require(model.boardTiles(.workingTasks).first { $0.work.id == "issue-now" })
         model.enterTile(member.work, origin: nil)
         #expect(model.navigation.trailBoard == .workingTasks)
         #expect(model.breadcrumb?.task?.task.id == "issue-now")

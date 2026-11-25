@@ -40,17 +40,17 @@ with a conversation come first; started Tasks nobody has opened a conversation
 for fold under "N without a conversation". Search covers title and checkout
 path. Pull to refresh.
 
-A row is the Mac sidebar's row: the Task's whole title, wrapped rather than
-cut, then its ID and status word.
+Each row shows the Task’s full title, then its ID, status and current Graph
+step when it has one.
 
 ```text
 Loopflow for iPhone uses the shared design
 tokens and components
-LOO-5  Busy  Auto
+LOO-5  Busy  Auto  implement
 ```
 
 The word is the one the Mac shows for that Task: what its conversation reports
-(**Blocked**, **Busy**, **Available**), or its lifecycle word (**Unstarted**,
+(**Blocked**, **Error**, **Busy**, **Available**), or its lifecycle word (**Unstarted**,
 **Idle**, **Active**, **Moving**, **Done**) while nothing reports. **Auto**
 follows while Auto-Ship is on. A Task whose reading carries
 neither says **Unavailable**. The row carries no stripe: colour is on the word.

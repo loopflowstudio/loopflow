@@ -8,7 +8,7 @@ public enum ProgramStatusState: String, Codable, Sendable, Hashable {
         switch self {
         case .idle: "Available"
         case .working: "Busy"
-        case .done: "Done"
+        case .done: "Finished"
         case .blocked: "Blocked"
         case .error: "Error"
         case .clear: "Clear"
@@ -17,7 +17,7 @@ public enum ProgramStatusState: String, Codable, Sendable, Hashable {
 
     /// Attention order for summaries within a terminal or across Sessions.
     /// Clear removes records; it is never a summary state.
-    public static let summaryOrder: [Self] = [.blocked, .error, .working, .done, .idle]
+    public static let summaryOrder: [Self] = [.blocked, .error, .working, .idle, .done]
 }
 
 public enum ProgramStatusKind: String, Codable, Sendable, Hashable {

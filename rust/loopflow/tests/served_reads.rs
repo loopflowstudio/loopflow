@@ -346,6 +346,133 @@ fn configuration_edits_use_the_server_without_work_processes() {
 }
 
 #[test]
+fn working_task_drop_keeps_its_side_after_another_window_reorders() {
+    use loopflow::lf::commands::read::Read;
+    use loopflow::lf::commands::write::Write;
+    use loopflow_storage::work::selection::{DropSide, ViewPlan};
+
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+    let repo = TestRepo::new();
+    let _server = Server::start(repo.path(), home.path());
+    for name in ["first", "second", "third"] {
+        let checkout = home.path().join(name);
+        assert!(std::process::Command::new("git")
+            .current_dir(repo.path())
+            .args(["worktree", "add", "-q"])
+            .arg(&checkout)
+            .status()
+            .unwrap()
+            .success());
+        read(
+            repo.path(),
+            home.path(),
+            &[
+                "task",
+                "create",
+                "--worktree",
+                checkout.to_str().unwrap(),
+                "--title",
+                name,
+                "--json",
+            ],
+            None,
+        );
+    }
+    let working = || {
+        let plan = server_read(Read::DesktopViewGet {
+            directory: repo.path().to_owned(),
+            expression: Some("kind:task state:working".into()),
+        });
+        serde_json::from_value::<ViewPlan>(plan)
+            .unwrap()
+            .resolution
+            .task_ids()
+    };
+    let [a, b, c]: [String; 3] = working().try_into().unwrap();
+    let move_tile = |member: &str, target: &str, side| Write::DesktopDashboardMove {
+        directory: repo.path().to_owned(),
+        board: "working-tasks".into(),
+        member: format!("task:{member}"),
+        destination: format!("task:{target}"),
+        side,
+    };
+
+    // One window still shows A, B, C while another moves A to C's slot.
+    assert_eq!(
+        server_write(move_tile(&a, &c, None)),
+        serde_json::json!([b, c, a])
+    );
+    for (change, expected) in [
+        (move_tile(&b, &a, Some(DropSide::Before)), [&c, &b, &a]),
+        (move_tile(&a, &c, Some(DropSide::After)), [&c, &a, &b]),
+    ] {
+        let args = spelled(&change);
+        let expected = expected.map(String::as_str);
+        assert_eq!(server_write(change), serde_json::json!(expected));
+        assert_eq!(working(), expected);
+
+        // Repeating a relative move through the one-shot CLI leaves it on that side.
+        let cli = read(
+            repo.path(),
+            home.path(),
+            &args.iter().map(String::as_str).collect::<Vec<_>>(),
+            None,
+        );
+        assert_eq!(serde_json::from_str::<Vec<String>>(&cli).unwrap(), expected);
+        assert_eq!(working(), expected);
+    }
+
+    // A drop onto a Task that has left Working is refused by name, and the
+    // client hears that nothing happened.
+    let gone = "task_00000000000000000000000000000000";
+    let refused = loopflow_execution::machine::client::Connection::open()
+        .unwrap()
+        .request(loopflow::server::wire::Operation::Write(move_tile(
+            &b,
+            gone,
+            Some(DropSide::Before),
+        )))
+        .unwrap_err()
+        .downcast::<loopflow_execution::engine::Error>()
+        .unwrap();
+    assert_eq!(
+        (refused.code, refused.message.as_str()),
+        (
+            loopflow_execution::engine::ErrorCode::NotFound,
+            "task_00000000000000000000000000000000 is not a Working Task here; nothing changed."
+        )
+    );
+    assert_eq!(working(), [c.as_str(), a.as_str(), b.as_str()]);
+
+    // A saved board can move the same Tasks without changing their shared order.
+    server_write(Write::DesktopDashboardQuery {
+        directory: repo.path().to_owned(),
+        id: "board".into(),
+        expression: "kind:task state:working".into(),
+        revision: None,
+    });
+    let board = server_write(Write::DesktopDashboardMove {
+        directory: repo.path().to_owned(),
+        board: "query:board".into(),
+        member: format!("task:{b}"),
+        destination: format!("task:{c}"),
+        side: None,
+    });
+    let board: loopflow_storage::work::selection::Dashboard =
+        serde_json::from_value(board).unwrap();
+    let order: Vec<_> = board
+        .arrangement
+        .order
+        .iter()
+        .map(|tile| &tile.work.id)
+        .collect();
+    assert_eq!(order, [&b, &c, &a]);
+    assert_eq!(working(), [&c, &a, &b].map(String::as_str));
+}
+
+#[test]
 fn served_binding_moves_the_conversation_to_the_task_checkout() {
     use loopflow::lf::commands::write::Write;
 
@@ -1641,6 +1768,7 @@ fn server_operations_match_their_lf_commands() {
                     board: "query:served".into(),
                     member: format!("task:{task_id}"),
                     destination: format!("task:{task_id}"),
+                    side: None,
                 }) as Box<dyn Fn() -> Write>,
                 Box::new(|| Write::DesktopDashboardPin {
                     directory: directory.clone(),
@@ -2210,14 +2338,35 @@ struct Server(std::process::Child);
 
 impl Server {
     fn start(repo: &Path, home: &Path) -> Self {
-        let server = Self(isolated_lf(repo, home, &["server", "run"]));
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
-        // This test binary is another executable than the server's, and the
-        // server is as ready for it as for its own `lf`.
-        while !loopflow_execution::machine::client::status().unwrap().ready {
-            assert!(std::time::Instant::now() < deadline, "server did not start");
-            std::thread::sleep(Duration::from_millis(20));
-        }
+        use std::io::{ErrorKind, Write};
+        use std::os::unix::net::UnixStream;
+
+        let mut server = Self(isolated_lf(repo, home, &["server", "run"]));
+        let path = loopflow::server::socket_path().unwrap();
+        let mut socket = loop {
+            match UnixStream::connect(&path) {
+                Ok(socket) => break socket,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        ErrorKind::NotFound | ErrorKind::ConnectionRefused
+                    ) =>
+                {
+                    assert!(
+                        server.0.try_wait().unwrap().is_none(),
+                        "server exited before listening on {}",
+                        path.display()
+                    );
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(error) => panic!("connect to {}: {error}", path.display()),
+            }
+        };
+        // The listener binds before the server hashes its executable. Wait for the
+        // answer on this connection, including on a cold debug build.
+        socket.write_all(b"{\"type\":\"status\"}\n").unwrap();
+        let answer: Value = serde_json::from_reader(socket).unwrap();
+        assert_eq!(answer["type"], "status", "{answer}");
         server
     }
 }
@@ -3057,17 +3206,28 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             board,
             member,
             destination,
-        } => (
-            path(directory),
-            words(&[
+            side,
+        } => {
+            let mut args = words(&[
                 "desktop",
                 "dashboard",
                 "move",
                 &format!("{board}/{member}"),
                 "--destination",
                 destination,
-            ]),
-        ),
+            ]);
+            if let Some(side) = side {
+                use loopflow_storage::work::selection::DropSide;
+                args.extend(words(&[
+                    "--side",
+                    match side {
+                        DropSide::Before => "before",
+                        DropSide::After => "after",
+                    },
+                ]));
+            }
+            (path(directory), args)
+        }
         Write::ConfigSet { .. }
         | Write::ConfigPromote { .. }
         | Write::ConfigPreview { .. }

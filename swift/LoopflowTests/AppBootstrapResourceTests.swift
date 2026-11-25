@@ -5,6 +5,19 @@ import Testing
 
 @Suite("App Bootstrap Resources")
 struct AppBootstrapResourceTests {
+    @Test("The New Task title and workflow labels have glyphs in their bundled faces")
+    func newTaskGlyphs() throws {
+        for (face, text) in [(Typography.serifFace, "What do you want?"),
+                             (Typography.sansFace, "implement · ship-review"),
+                             (Typography.sansStrongFace, "verify")] {
+            let font = try #require(AppFontRegistration.font(face, size: 18))
+            let characters = Array(text.utf16)
+            var glyphs = [CGGlyph](repeating: 0, count: characters.count)
+            #expect(CTFontGetGlyphsForCharacters(font, characters, &glyphs, characters.count))
+            #expect(!glyphs.contains(0))
+        }
+    }
+
     @Test("packaged app resolves the SwiftPM bundle from Contents/Resources")
     func packagedBundleResolvesFromResources() throws {
         let root = FileManager.default.temporaryDirectory

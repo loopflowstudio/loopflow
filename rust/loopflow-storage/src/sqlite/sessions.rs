@@ -351,7 +351,10 @@ fn available_sql(session: &str, now: i64) -> String {
             AND CASE WHEN act.program_status IS NOT NULL THEN
                 EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
                     WHERE json_extract(r.value,'$.state')='blocked'
-                    OR ({session}.interactive=1 AND json_extract(r.value,'$.state')='idle'))
+                    OR ({session}.interactive=1 AND (json_extract(r.value,'$.state')='idle'
+                        OR (json_extract(r.value,'$.state')='done' AND NOT EXISTS(
+                            SELECT 1 FROM json_each(act.program_status,'$.records') other
+                            WHERE json_extract(other.value,'$.state')='working')))))
             ELSE act.attachment_token={session}.attachment_token
                 AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
                     OR {now}-act.observed_at>={quiet}))) END)",

@@ -169,11 +169,10 @@ mod tests {
         assert!(get_builtin_graph("task").is_none());
         let first = get_builtin_graph("task-design").expect("Task first graph");
         assert!(first.contains("- kickoff"));
-        // Interactive steps belong to the Task graphs; the Graphs they compose run on their own.
+        // Breakpoints belong to the Task graphs; the Graphs they compose run on their own.
         for graph in ["task-design", "pursue", "incident"] {
-            assert!(!get_builtin_graph(graph)
-                .unwrap_or_else(|| panic!("{graph} is builtin"))
-                .contains("interactive:"));
+            let content = get_builtin_graph(graph).unwrap_or_else(|| panic!("{graph} is builtin"));
+            assert!(!content.contains("interactive:") && !content.contains("- break"));
         }
         assert!(get_builtin_graph("build")
             .expect("Task loop graph")

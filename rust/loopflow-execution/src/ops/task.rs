@@ -986,19 +986,22 @@ pub fn select_task_run(
         .reason
         .as_deref()
         .filter(|text| !text.trim().is_empty());
-    let mut iterated = false;
-    let mut start = match (from, row.as_ref().and_then(|row| row.run.as_ref()), parked) {
-        (Some(name), _, _) => Some(
-            graph
-                .find(name)
-                .ok_or_else(|| {
-                    task_error(format!(
-                        "graph {} has no step {name:?}. Steps: {}",
-                        graph.name,
-                        graph.describe_steps()
-                    ))
-                })?
-                .into(),
+    let (mut start, iterated) = match (from, row.as_ref().and_then(|row| row.run.as_ref()), parked)
+    {
+        (Some(name), _, _) => (
+            Some(
+                graph
+                    .find(name)
+                    .ok_or_else(|| {
+                        task_error(format!(
+                            "graph {} has no step {name:?}. Steps: {}",
+                            graph.name,
+                            graph.describe_steps()
+                        ))
+                    })?
+                    .into(),
+            ),
+            false,
         ),
         // A run that stopped starts again at the step it stopped at, with the
         // passes and routes it had: the steps before it are done.
@@ -1008,64 +1011,15 @@ pub fn select_task_run(
             if cursor.child.is_some() && graph.place_of(&cursor).is_none() {
                 cursor.finish(&graph.steps).map_err(task_error)?;
             }
-            match graph.place_of(&cursor) {
+            let start = match graph.place_of(&cursor) {
                 Some(place) => Some(RunStart { place, cursor }),
                 None if cursor.index == graph.steps.len() && cursor.child.is_none() => None,
                 None => return Err(task_error("saved cursor is outside its captured graph")),
-            }
+            };
+            (start, false)
         }
-        (None, None, Some(arrival)) => {
-            let mut cursor = arrival.cursor.clone();
-            if let Some(decision) = options.decision {
-                let (body, leaf) = cursor.current_body(&graph.steps);
-                if crate::graph::return_target(body, leaf.index).is_none() {
-                    return Err(task_error("this breakpoint has no loop decision"));
-                }
-                let progress = &mut cursor.leaf_mut().progress;
-                match progress.verdict.as_mut() {
-                    Some(verdict) => {
-                        verdict.decision = decision;
-                        if let Some(reason) = reason {
-                            verdict.summary = reason.to_owned();
-                        }
-                    }
-                    None => {
-                        let summary = match reason {
-                            Some(reason) => reason.to_owned(),
-                            None if decision
-                                == crate::graph::transitions::GraphDecision::Iterate =>
-                            {
-                                return Err(task_error(
-                                    "iterating at this breakpoint requires `--reason <direction>`",
-                                ));
-                            }
-                            None => "continue".to_owned(),
-                        };
-                        progress.verdict = Some(crate::graph::transitions::GraphVerdict {
-                            decision,
-                            summary,
-                        });
-                    }
-                }
-            } else if let Some(reason) = reason.filter(|_| !options.auto_on) {
-                if let Some(verdict) = cursor.leaf_mut().progress.verdict.as_mut() {
-                    if verdict.decision == crate::graph::transitions::GraphDecision::Iterate {
-                        verdict.summary = reason.to_owned();
-                    }
-                }
-            }
-            iterated = cursor
-                .leaf()
-                .progress
-                .verdict
-                .as_ref()
-                .is_some_and(|verdict| {
-                    verdict.decision == crate::graph::transitions::GraphDecision::Iterate
-                });
-            cursor.finish(&graph.steps).map_err(task_error)?;
-            graph.place_of(&cursor).map(|place| RunStart { place, cursor })
-        }
-        (None, None, None) if step == START => graph.find(START).map(RunStart::from),
+        (None, None, Some(arrival)) => continue_from_breakpoint(&graph, arrival, options, reason)?,
+        (None, None, None) if step == START => (graph.find(START).map(RunStart::from), false),
         (None, None, None) if step == END => {
             return Err(task_error(format!(
                 "Task {issue} is at the end of graph {}; `lf task run {issue} --from <step>` runs part of it again, `lf task run {issue} <graph>` takes up another. Steps: {}",
@@ -1079,7 +1033,7 @@ pub fn select_task_run(
                     "Task {issue} is at {step:?}, which graph {} no longer names; `lf task run {issue} --from <step>` chooses where to go on. Steps: {}",
                     graph.name, graph.describe_steps()
                 )))?;
-            Some(place.into())
+            (Some(place.into()), false)
         }
     };
     if let (Some(_), Some(start), Some(reason)) = (parked, &mut start, reason) {
@@ -1094,6 +1048,62 @@ pub fn select_task_run(
         take_up,
         start,
     })
+}
+
+fn continue_from_breakpoint(
+    graph: &crate::task_graph::CapturedGraph,
+    arrival: &crate::store::task_work::BreakpointArrival,
+    options: &TaskProcessOptions,
+    reason: Option<&str>,
+) -> OpsResult<(Option<RunStart>, bool)> {
+    use crate::graph::transitions::{GraphDecision, GraphVerdict};
+    let mut cursor = arrival.cursor.clone();
+    if let Some(decision) = options.decision {
+        let (body, leaf) = cursor.current_body(&graph.steps);
+        if crate::graph::return_target(body, leaf.index).is_none() {
+            return Err(task_error("this breakpoint has no loop decision"));
+        }
+        let progress = &mut cursor.leaf_mut().progress;
+        match progress.verdict.as_mut() {
+            Some(verdict) => {
+                verdict.decision = decision;
+                if let Some(reason) = reason {
+                    verdict.summary = reason.to_owned();
+                }
+            }
+            None => {
+                let summary = match reason {
+                    Some(reason) => reason.to_owned(),
+                    None if decision == GraphDecision::Iterate => {
+                        return Err(task_error(
+                            "iterating at this breakpoint requires `--reason <direction>`",
+                        ));
+                    }
+                    None => "continue".to_owned(),
+                };
+                progress.verdict = Some(GraphVerdict { decision, summary });
+            }
+        }
+    } else if let Some(reason) = reason.filter(|_| !options.auto_on) {
+        if let Some(verdict) = cursor.leaf_mut().progress.verdict.as_mut() {
+            if verdict.decision == GraphDecision::Iterate {
+                verdict.summary = reason.to_owned();
+            }
+        }
+    }
+    let iterated = cursor
+        .leaf()
+        .progress
+        .verdict
+        .as_ref()
+        .is_some_and(|verdict| verdict.decision == GraphDecision::Iterate);
+    cursor.finish(&graph.steps).map_err(task_error)?;
+    Ok((
+        graph
+            .place_of(&cursor)
+            .map(|place| RunStart { place, cursor }),
+        iterated,
+    ))
 }
 
 /// Put the Task where `lf task run` sets out: on a run carried by this
@@ -3737,18 +3747,23 @@ pub fn append_task_comment(
     })
 }
 
+enum CommentKind<'a> {
+    Progress,
+    Steer,
+    Breakpoint(&'a loopflow_model::id::LfProcessId),
+}
+
 fn append_breakpoint_reply_comment(
     store: &Store,
     task: &Task,
     message: &str,
     arrival: &loopflow_model::id::LfProcessId,
 ) -> OpsResult<String> {
-    append_task_comment_with_marker(
+    append_task_comment_inner(
         store,
         task,
         message,
-        false,
-        Some(&format!("<!-- loopflow-breakpoint:{arrival} -->")),
+        CommentKind::Breakpoint(arrival),
         || crate::config::participant_name().map_err(task_error),
     )
 }
@@ -3760,25 +3775,31 @@ pub(crate) fn append_task_comment_as(
     steer: bool,
     participant: impl FnOnce() -> OpsResult<Option<String>>,
 ) -> OpsResult<String> {
-    append_task_comment_with_marker(store, task, message, steer, None, participant)
+    let kind = if steer {
+        CommentKind::Steer
+    } else {
+        CommentKind::Progress
+    };
+    append_task_comment_inner(store, task, message, kind, participant)
 }
 
-fn append_task_comment_with_marker(
+fn append_task_comment_inner(
     store: &Store,
     task: &Task,
     message: &str,
-    steer: bool,
-    custom_marker: Option<&str>,
+    kind: CommentKind<'_>,
     participant: impl FnOnce() -> OpsResult<Option<String>>,
 ) -> OpsResult<String> {
     validate_task_comment_input(message)?;
     let id = uuid::Uuid::new_v4().to_string();
-    let capture = crate::session_record::inherited_capture_key().map_err(task_error)?;
-    let provenance =
-        capture.or_else(|| crate::journal::agent_caller().map(|caller| caller.session_id.into()));
-    let (body, author) = if let Some(provenance) =
-        provenance.filter(|_| !steer && custom_marker.is_none())
-    {
+    let provenance = if matches!(kind, CommentKind::Progress) {
+        crate::session_record::inherited_capture_key()
+            .map_err(task_error)?
+            .or_else(|| crate::journal::agent_caller().map(|caller| caller.session_id.into()))
+    } else {
+        None
+    };
+    let (body, author) = if let Some(provenance) = provenance {
         (
             format!(
                 "{}\n\n<!-- loopflow-progress:{provenance}:{id} -->",
@@ -3818,9 +3839,10 @@ fn append_task_comment_with_marker(
             },
             None => loopflow_model::comment::TaskCommentAuthor::Person { name },
         };
-        let suffix = custom_marker
-            .map(str::to_owned)
-            .unwrap_or_else(|| format!("<!-- loopflow-steer:{id} -->"));
+        let suffix = match kind {
+            CommentKind::Breakpoint(arrival) => format!("<!-- loopflow-breakpoint:{arrival} -->"),
+            CommentKind::Progress | CommentKind::Steer => format!("<!-- loopflow-steer:{id} -->"),
+        };
         (
             format!("{}{requester}{marker}\n\n{suffix}", message.trim()),
             author,

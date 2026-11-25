@@ -81,25 +81,23 @@ pub(super) async fn snapshot_here(
     let mut breakpoint_evidence = None;
     if let Some(graph) = work_set.graph.as_ref() {
         match &graph.position {
-            crate::task_graph::TaskGraphPosition::Breakpoint { step, blocked, .. }
-                if execution.state == crate::ops::task_execution::TaskExecutionState::Idle
-                    || (execution.state
-                        == crate::ops::task_execution::TaskExecutionState::Blocked
-                        && *blocked) =>
-            {
-                // A run that parked ended its carrier; the Graph itself goes on.
-                execution.reason = if *blocked {
-                    graph.sentence.clone()
-                } else {
-                    format!(
-                        "Graph {} stopped at breakpoint {step}; `lf task run {}` continues it",
-                        graph.name, task.identifier
-                    )
-                };
-                breakpoint_evidence = Some(crate::ops::task_actions::BreakpointActionEvidence {
+            crate::task_graph::TaskGraphPosition::Breakpoint { step, blocked, .. } => {
+                let evidence = crate::ops::task_actions::BreakpointActionEvidence {
                     blocked: *blocked,
                     sentence: graph.sentence.as_str(),
-                });
+                };
+                if evidence.owns_execution(execution.state) {
+                    // A run that parked ended its carrier; the Graph itself goes on.
+                    execution.reason = if *blocked {
+                        graph.sentence.clone()
+                    } else {
+                        format!(
+                            "Graph {} stopped at breakpoint {step}; `lf task run {}` continues it",
+                            graph.name, task.identifier
+                        )
+                    };
+                    breakpoint_evidence = Some(evidence);
+                }
             }
             _ if execution.state == crate::ops::task_execution::TaskExecutionState::Idle => {
                 if let Some(wait) = graph.waiting_to_land(auto.as_ref(), &task.identifier) {

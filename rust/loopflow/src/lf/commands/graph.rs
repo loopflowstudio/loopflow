@@ -632,28 +632,9 @@ fn execute(
                 _ => None,
             };
             if let Some(step) = step {
-                let review = if matches!(current, Some(ConcreteStep::Breakpoint(_))) {
-                    let cursor = running
-                        .position
-                        .lock()
-                        .expect("Graph position mutex poisoned")
-                        .clone();
-                    let mut text = running.breakpoint_review(step, &cursor)?;
-                    let (body, leaf) = cursor.current_body(running.steps);
-                    let deciding = return_target(body, leaf.index).is_some();
-                    text.push_str(&format!("\nPresent the result, links, proposed next action and questions in this conversation. Discuss questions here. When the person chooses, continue with `lf task run --at-arrival {carrier} --reason <their-reply-and-selected-option>`."));
-                    if deciding {
-                        text.push_str(" To change the loop decision, include `--decision advance` or `--decision iterate`.");
-                    }
-                    eprintln!("{text}");
-                    let arrival = loopflow_execution::store::task_work::BreakpointArrival {
-                        id: carrier.clone(),
-                        cursor,
-                    };
-                    Some((serde_json::to_string(&arrival)?, text))
-                } else {
-                    None
-                };
+                let review = matches!(current, Some(ConcreteStep::Breakpoint(_)))
+                    .then(|| running.breakpoint_handoff(step, carrier))
+                    .transpose()?;
                 running.store.sqlite.arrive_task_graph(
                     task,
                     carrier,
@@ -789,13 +770,10 @@ fn render_pipeline_lines(items: &[ConcreteStep]) -> Vec<String> {
     let mut lines = Vec::new();
     for (index, item) in items.iter().enumerate() {
         let suffix = return_target(items, index).map(|target| {
-            let label = match &items[target] {
-                ConcreteStep::Skill(skill) => skill.skill.name.clone(),
-                ConcreteStep::Breakpoint(stop) => stop.name.clone(),
-                ConcreteStep::Command(command) => command.item.display_name(),
-                ConcreteStep::Xor(branch) => branch.router.name.clone(),
-            };
-            format!(" (returns to {label})")
+            format!(
+                " (returns to {})",
+                loopflow_execution::task_graph::step_name(&items[target])
+            )
         });
         let suffix = suffix.as_deref().unwrap_or("");
         match item {
@@ -1129,6 +1107,28 @@ impl RunningGraph<'_> {
             .sqlite
             .process_input(step)?
             .map(|(session, input, _)| (session, input)))
+    }
+
+    fn breakpoint_handoff(&self, step: &str, carrier: &LfProcessId) -> Result<(String, String)> {
+        let cursor = self
+            .position
+            .lock()
+            .expect("Graph position mutex poisoned")
+            .clone();
+        let mut text = self.breakpoint_review(step, &cursor)?;
+        let (body, leaf) = cursor.current_body(self.steps);
+        text.push_str(&format!("\nPresent the result, links, proposed next action and questions in this conversation. Discuss questions here. When the person chooses, continue with `lf task run --at-arrival {carrier} --reason <their-reply-and-selected-option>`."));
+        if return_target(body, leaf.index).is_some() {
+            text.push_str(
+                " To change the loop decision, include `--decision advance` or `--decision iterate`.",
+            );
+        }
+        eprintln!("{text}");
+        let arrival = loopflow_execution::store::task_work::BreakpointArrival {
+            id: carrier.clone(),
+            cursor,
+        };
+        Ok((serde_json::to_string(&arrival)?, text))
     }
 
     fn breakpoint_review(&self, name: &str, cursor: &ExecutionCursor) -> Result<String> {

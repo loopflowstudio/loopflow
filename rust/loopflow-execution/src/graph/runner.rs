@@ -285,7 +285,6 @@ impl ExecutionCursor {
                     .insert(format!("{prefix}{key}"), *count);
             }
             self.progress.direction = cursor.progress.direction.clone();
-            self.progress.handoff = None;
             self.child = None;
         } else if let Some(ConcreteStep::Xor(branch)) = steps.get(self.index) {
             let selected = self

@@ -474,7 +474,7 @@ struct TaskGraphProofTests {
         #expect((try? find("compiled-node-4")) == nil, "composition starts folded")
         try find("composition-group-group-0").disclosureGroup().expand()
         try await settle(window)
-        #expect(try find("compiled-node-4").accessibilityLabel().string() == "demo, interactive step, pending")
+        #expect(try find("compiled-node-4").accessibilityLabel().string() == "demo, breakpoint, pending")
 
         let oldRevision = try #require(model.graphCatalog.value?.first?.composition?.revision)
         try await source.reviseTemplate()

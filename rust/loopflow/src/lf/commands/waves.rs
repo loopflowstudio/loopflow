@@ -2347,7 +2347,13 @@ async fn snapshot_task_detail(
                 Ok::<_, serde_json::Error>((blocked, sentence))
             })
             .transpose()?
-            .filter(|(blocked, _)| execution.state == TaskExecutionState::Idle || *blocked)
+            .filter(|(blocked, sentence)| {
+                loopflow_execution::ops::task_actions::BreakpointActionEvidence {
+                    blocked: *blocked,
+                    sentence,
+                }
+                .owns_execution(execution.state)
+            })
     } else {
         None
     };
@@ -2457,9 +2463,6 @@ async fn snapshot_task_detail(
         local_progress,
         Some(&action_evidence),
         Some(&execution),
-        breakpoint
-            .as_ref()
-            .map(|(blocked, sentence)| (*blocked, sentence.as_str())),
         observed_at,
     );
     let actions = if elsewhere.is_some() {
@@ -2667,7 +2670,6 @@ fn derive_task_condition(
     local_progress: LocalProgressEvidence,
     action_evidence: Option<&TaskActionEvidence>,
     execution: Option<&TaskExecutionSnapshot>,
-    breakpoint: Option<(bool, &str)>,
     observed_at: time::OffsetDateTime,
 ) -> TaskConditionSnapshot {
     // A removed historical checkout does not reopen settled work.
@@ -2691,22 +2693,21 @@ fn derive_task_condition(
         && local_progress.authored_commits == Some(true)
         && matches!(active_pr_phase, Some(PrPhase::Open | PrPhase::Publishing));
     let execution = action_evidence.and_then(|evidence| evidence.execution);
+    let breakpoint = action_evidence.and_then(|evidence| evidence.breakpoint);
     // Settled work keeps its retained history without asking anyone to act.
     let settled = runtime
         .map(|runtime| runtime.status)
         .filter(|status| status.is_terminal() && !unresolved_execution);
-    let blocked_breakpoint = execution
-        .is_some_and(|execution| execution.state == TaskExecutionState::Blocked)
-        && breakpoint.is_some_and(|(blocked, _)| blocked);
     let (state, reason) = if let Some(status) = settled {
         let reason = match status {
             TaskState::Abandoned => "Task is abandoned",
             _ => "Task is complete",
         };
         (TaskConditionState::Clear, reason.to_string())
-    } else if let Some(execution) = execution
-        .filter(|execution| execution.state != TaskExecutionState::Idle && !blocked_breakpoint)
-    {
+    } else if let Some(execution) = execution.filter(|execution| {
+        execution.state != TaskExecutionState::Idle
+            && !breakpoint.is_some_and(|breakpoint| breakpoint.owns_execution(execution.state))
+    }) {
         let state = match execution.state {
             TaskExecutionState::Starting
             | TaskExecutionState::Running
@@ -2720,14 +2721,14 @@ fn derive_task_condition(
         (state, execution.reason.clone())
     } else if launch_blocked {
         (TaskConditionState::Blocked, next_move.reason.clone())
-    } else if let Some((blocked, sentence)) = breakpoint {
+    } else if let Some(breakpoint) = breakpoint {
         (
-            if blocked {
+            if breakpoint.blocked {
                 TaskConditionState::Blocked
             } else {
                 TaskConditionState::Waiting
             },
-            sentence.to_owned(),
+            breakpoint.sentence.to_owned(),
         )
     } else if local_progress.state == LocalProgressEvidenceState::Missing
         && local_progress.recovery_required == Some(false)
@@ -4167,7 +4168,6 @@ mod tests {
                 },
                 None,
                 execution,
-                None,
                 OffsetDateTime::now_utc(),
             )
             .unresolved_execution
@@ -4258,7 +4258,6 @@ mod tests {
             evidence(),
             None,
             None,
-            None,
             OffsetDateTime::now_utc(),
         );
         assert_eq!(advisory.state, TaskConditionState::Clear);
@@ -4270,7 +4269,6 @@ mod tests {
                 reason: "Waiting for Project selection".to_string(),
             },
             evidence(),
-            None,
             None,
             None,
             OffsetDateTime::now_utc(),
@@ -4287,11 +4285,31 @@ mod tests {
             evidence(),
             None,
             None,
-            None,
             OffsetDateTime::now_utc(),
         );
         assert_eq!(user_handoff.state, TaskConditionState::Waiting);
 
+        let breakpoint_evidence = |blocked, sentence| TaskActionEvidence {
+            status: WorkStatus::Ready,
+            execution: None,
+            latest_pr_phase: None,
+            latest_pr_merge_request: None,
+            latest_pr_presentation_current: None,
+            at_end: false,
+            breakpoint: Some(
+                loopflow_execution::ops::task_actions::BreakpointActionEvidence {
+                    blocked,
+                    sentence,
+                },
+            ),
+            open_children: 0,
+            completion_refusal: None,
+            run_refusal: None,
+            ci: None,
+            predecessor_phase: None,
+            launch_refusal: None,
+        };
+        let clear_actions = breakpoint_evidence(false, "At breakpoint after-explore.");
         let clear_at_breakpoint = derive_task_condition(
             Some(&TaskRuntimeSnapshot {
                 status: TaskState::Active,
@@ -4299,14 +4317,17 @@ mod tests {
             }),
             &next_move,
             evidence(),
+            Some(&clear_actions),
             None,
-            None,
-            Some((false, "At breakpoint after-explore.")),
             OffsetDateTime::now_utc(),
         );
         assert_eq!(clear_at_breakpoint.state, TaskConditionState::Waiting);
         assert_eq!(clear_at_breakpoint.reason, "At breakpoint after-explore.");
 
+        let blocked_actions = breakpoint_evidence(
+            true,
+            "At breakpoint after-ship-review. Blocked: needs a decision",
+        );
         let blocked_at_breakpoint = derive_task_condition(
             Some(&TaskRuntimeSnapshot {
                 status: TaskState::Active,
@@ -4314,12 +4335,8 @@ mod tests {
             }),
             &next_move,
             evidence(),
+            Some(&blocked_actions),
             None,
-            None,
-            Some((
-                true,
-                "At breakpoint after-ship-review. Blocked: needs a decision",
-            )),
             OffsetDateTime::now_utc(),
         );
         assert_eq!(blocked_at_breakpoint.state, TaskConditionState::Blocked);
@@ -4376,7 +4393,6 @@ mod tests {
                 },
                 Some(&actions),
                 None,
-                None,
                 OffsetDateTime::now_utc(),
             );
             assert_eq!(condition.state, expected);
@@ -4404,7 +4420,6 @@ mod tests {
                             ..actions
                         }),
                         None,
-                        None,
                         OffsetDateTime::now_utc(),
                     );
                     assert_eq!(terminal.state, TaskConditionState::Blocked);
@@ -4426,7 +4441,6 @@ mod tests {
                             completion_refusal: Some("Pull request has not merged"),
                             ..actions
                         }),
-                        None,
                         None,
                         OffsetDateTime::now_utc(),
                     );
@@ -4489,7 +4503,6 @@ mod tests {
                     launch_refusal: Some("worktree is missing"),
                 }),
                 Some(&failed),
-                None,
                 OffsetDateTime::now_utc(),
             );
             assert_eq!(condition.state, TaskConditionState::Clear);
@@ -4530,7 +4543,6 @@ mod tests {
             },
             local_progress,
             Some(&action_evidence),
-            None,
             None,
             OffsetDateTime::now_utc(),
         );

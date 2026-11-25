@@ -3121,7 +3121,7 @@ fn breakpoint_in_a_task_terminal_still_waits_for_its_conversation() {
 #[tokio::test]
 async fn breakpoint_edges_cover_launch_failure_terminal_auto_race_and_named_restart() {
     let repo = loopflow_test_support::TestRepo::new();
-    let mut fx = task_fixture_at("EDGE-1", repo.path().canonicalize().unwrap()).await;
+    let fx = task_fixture_at("EDGE-1", repo.path().canonicalize().unwrap()).await;
     let checkout = repo.path().canonicalize().unwrap();
     std::fs::create_dir_all(checkout.join(".lf/graphs")).unwrap();
     std::fs::create_dir_all(checkout.join(".lf/skills")).unwrap();
@@ -3356,8 +3356,6 @@ async fn breakpoint_edges_cover_launch_failure_terminal_auto_race_and_named_rest
         .task_completion_pending(&fx.task.id)
         .unwrap()
         .is_some());
-    // Clear mutable borrow warning if any.
-    let _ = &mut fx.task;
 }
 
 #[test]

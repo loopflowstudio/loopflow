@@ -37,6 +37,14 @@ pub struct BreakpointActionEvidence<'a> {
     pub sentence: &'a str,
 }
 
+impl BreakpointActionEvidence<'_> {
+    /// Whether this parked breakpoint owns the Task's execution state: always when
+    /// idle, and when blocked if the worker's pending verdict is blocked.
+    pub fn owns_execution(self, state: TaskExecutionState) -> bool {
+        state == TaskExecutionState::Idle || (state == TaskExecutionState::Blocked && self.blocked)
+    }
+}
+
 #[derive(Debug)]
 pub struct TaskActionEvidence<'a> {
     pub status: WorkStatus,
@@ -72,17 +80,13 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
         evidence.at_end,
         evidence.breakpoint.is_some(),
     );
-    let blocked_breakpoint = evidence
-        .execution
-        .is_some_and(|execution| execution.state == TaskExecutionState::Blocked)
-        && evidence
-            .breakpoint
-            .is_some_and(|breakpoint| breakpoint.blocked);
     if finished.is_none() {
-        if let Some(execution) = evidence
-            .execution
-            .filter(|execution| execution.state != TaskExecutionState::Idle && !blocked_breakpoint)
-        {
+        if let Some(execution) = evidence.execution.filter(|execution| {
+            execution.state != TaskExecutionState::Idle
+                && !evidence
+                    .breakpoint
+                    .is_some_and(|breakpoint| breakpoint.owns_execution(execution.state))
+        }) {
             return action(TaskAction::NoAction, &execution.reason);
         }
         if let Some(refusal) = evidence.launch_refusal {

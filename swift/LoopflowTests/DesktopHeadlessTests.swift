@@ -113,7 +113,7 @@ struct DesktopHeadlessTests {
         #expect(answers.map(\.2) == [.keepTheirs, .useMine])
     }
 
-    @Test("A builtin Workflow offers Customize beside its interactive steps")
+    @Test("A builtin Workflow offers Customize beside its breakpoints")
     func customizedWorkflow() async throws {
         var entries = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
             fixtures.appendingPathComponent("graph_catalog.json"))) as? [[String: Any]])
@@ -399,7 +399,7 @@ struct DesktopHeadlessTests {
         _ = try invalid.inspect().find(button: "Edit")
     }
 
-    @Test("A Task's Workflow shows its running run, offers a stopped one again, continues after an interactive step, and starts from any step")
+    @Test("A Task's Workflow shows its running run, offers a stopped one again, continues from a breakpoint, and starts from any runnable step")
     func taskWorkflow() async throws {
         let planning = try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json"))
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: planning)

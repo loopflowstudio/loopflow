@@ -54,8 +54,7 @@ takes nothing else (a never-run Task takes up the repository's graph), and
 `task.auto.off` takes `"reason":null` beside them and answers `{issue, was_on}`.
 Check `lf task auto on` on a Task parked at `after-ship-review` (it continues
 past the breakpoint) and on a never-run Task (one Graph run); `lf ship` names no command ("skill or graph not found: ship").
-With `--json` the run is the only thing on stdout; "standing in at …" goes to
-stderr. Two at the same moment on a never-run Task leave one run:
+With `--json` the run is the only thing on stdout. Two at the same moment on a never-run Task leave one run:
 both print it and exit 0, and `lf task status` shows one Graph run. The losing
 paths are rare, so repeat it: a dozen fresh `lf task create '<words>' --json`
 Tasks (`.task.identifier`), three `lf task auto on <id> &` each with the stand-in
@@ -80,8 +79,7 @@ them in its start hook. They are not in the step's stdin or `.lf/prompts`.
 With auto off at a landing step, `lf task status` reads `latest Graph: Waiting
 at land: auto is off (Demo). \`lf task auto on <id>\` lands it.` and `action: no_action`;
 `execution.state` is `waiting`. The run's own log (`$LF_HOME/logs/graph-<run>.log`) ends in that sentence
-alone; an interactive stop ends in "Stopped at <step>; the Task waits there for
-its conversation." What a Task conversation is handed: `lf --task <id> --context
+alone; a parked breakpoint logs its review summary and `--at-arrival` continuation command. What a Task conversation is handed: `lf --task <id> --context
 <skill>` prints its input (the Task brief, no Graph position), and each held
 conversation's `--append-system-prompt-file` is in `ps` under its `lf holder run`.
 An unknown ID answers `no Task exists for …`

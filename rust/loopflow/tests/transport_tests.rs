@@ -151,6 +151,29 @@ impl Fixture {
             std::env::var("PATH").unwrap_or_default()
         )
     }
+    // An interactive agy that lets two views finish the same line of input.
+    fn agy(&self) -> String {
+        self.named_provider(
+            "agy",
+            r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '1.5.13'; exit; fi
+stty echo < /dev/tty
+printf '%s:%s\n' "$$" "$LF_CAPTURE_KEY" >> "$HOME/launches"
+printf 'provider ready\n'
+while IFS= read -r line < /dev/tty; do
+    [ "$line" != quit ] || exit 0
+    [ "$line" != crash ] || exit 7
+    printf 'received %s\n' "$line"
+done
+"#,
+        )
+    }
+    fn chat(&self, path: &str, args: &[&str]) -> Terminal {
+        let mut command = self.command(args);
+        command.env("PATH", path);
+        take_controlling_terminal(&mut command);
+        Terminal::spawn_with_placement(command, Some(false))
+    }
     /// Log each launch to `launches` and wait on its terminal.
     fn waiting_provider(&self) -> String {
         self.provider(
@@ -318,6 +341,52 @@ read -r answer < /dev/tty
             .unwrap();
         assert!(!ended, "{terminal} ended");
     }
+    fn session_card(&self, session: &str) -> Value {
+        let output = self
+            .command(&["session", "card", session, "--json"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()["session"].clone()
+    }
+
+    fn assert_retired_chat(&self, session: &str, launch: &str) {
+        let card = self.session_card(session);
+        let line = card["status_line"].as_str().unwrap();
+        assert!(line.starts_with("closed "), "{line}");
+        assert!(
+            line.ends_with(&format!(
+                " (15 minutes without a viewer); `lf resume {session}` opens it"
+            )),
+            "{line}"
+        );
+        assert_eq!(card["outlook"]["kind"], "waiting_for_you");
+        assert_eq!(card["outlook"]["reason"], "15 minutes without a viewer");
+        assert!(card["ended"]["exit_code"].is_null());
+
+        let key = launch.split(':').nth(1).unwrap();
+        let capture =
+            loopflow_execution::session_record::record_dir(self.home.path(), key).unwrap();
+        let receipt: Value =
+            serde_json::from_slice(&std::fs::read(capture.join("terminal.json")).unwrap()).unwrap();
+        assert_eq!(receipt["outcome"], "completed");
+        let snapshot = std::fs::read(
+            self.home
+                .path()
+                .join("screens")
+                .join(format!("{session}.ghostsnp")),
+        )
+        .unwrap();
+        let (_, encoded) =
+            snapshot.split_at(snapshot.iter().position(|byte| *byte == b'\n').unwrap() + 1);
+        let screen = loopflow_terminal::ghostty_vt::Terminal::decode(encoded)
+            .unwrap()
+            .text()
+            .unwrap();
+        assert!(screen.contains("15 minutes without a viewer"), "{screen}");
+        assert!(!screen.contains("exited with 137"), "{screen}");
+    }
+
     /// Wait until a held terminal's exit is recorded.
     fn held_ends(&self, terminal: &str) {
         let deadline = Instant::now() + Duration::from_secs(20);
@@ -673,6 +742,299 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
         terminal.stop();
         assert_eq!(placement.as_deref(), valid.then_some("desktop-shell"));
     }
+}
+
+/// A chat started without a server can resume at a shared terminal once the
+/// server is up, even when the invocation selects a relative directory.
+#[test]
+fn direct_chat_resumes_in_the_terminal_or_holder_as_the_server_becomes_available() {
+    let fixture = Fixture::new();
+    let path = fixture.agy();
+    let launch = |args: &[&str]| fixture.chat(&path, args);
+    let mut original = launch(&["-a", "agy", ":", "shared conversation"]);
+    original.wait_text("provider ready");
+    let session = session_of(&fixture.sql(), &fixture.launches(1)[0]);
+    original.type_keys(b"quit\n");
+    assert!(original.wait_exit().success());
+
+    assert_eq!(fixture.session_card(&session)["outlook"]["kind"], "quit");
+
+    let mut local = launch(&["resume", &session]);
+    local.wait_text("provider ready");
+    let held: Option<String> = fixture
+        .sql()
+        .query_row(
+            "SELECT held_terminal_id FROM agent_sessions WHERE id=?1",
+            [&session],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(held.is_none());
+    local.type_keys(b"quit\n");
+    assert!(local.wait_exit().success());
+
+    let _server = fixture.machine_server();
+    std::fs::create_dir(fixture.repo.path().join("subdir")).unwrap();
+    let mut first = launch(&["--cwd", "subdir", "resume", &session]);
+    first.wait_text("provider ready");
+    let held = fixture.terminal_of(&session);
+    first.type_keys(b"quit\n");
+    assert!(first.wait_exit().success());
+    fixture.held_ends(&held);
+    assert_eq!(fixture.launches(3).len(), 3);
+}
+
+#[test]
+fn direct_chat_keeps_one_agy_and_its_draft_across_viewers_and_server_restart() {
+    let fixture = Fixture::new();
+    fixture.repo.create_branch("chat");
+    let path = fixture.agy();
+    let launch = |args: &[&str]| fixture.chat(&path, args);
+    let server = fixture.machine_server();
+    let mut first = launch(&["-a", "agy"]);
+    first.wait_text("provider ready");
+    let session = session_of(&fixture.sql(), &fixture.launches(1)[0]);
+    let held = fixture.terminal_of(&session);
+    let attach = || {
+        let socket = loopflow_execution::machine::client::attach(
+            &fixture.endpoint("machine"),
+            &session.as_str().into(),
+        )
+        .unwrap();
+        Viewer::new(socket).attach(json!({"kind":"attach","rows":24,"cols":80}))
+    };
+    let mut desktop = attach();
+    desktop.input("first view\n");
+    first.wait_text("received first view");
+    drop(desktop);
+    first.type_keys(b"unfinished ");
+    first.wait_text("unfinished ");
+    let mut second = launch(&["resume", &session]);
+    second.wait_text("provider ready");
+    second.type_keys(b"draft\n");
+    first.wait_text("received unfinished draft");
+    second.wait_text("received unfinished draft");
+
+    drop(server);
+    let _restarted = fixture.machine_server();
+    let mut desktop = attach();
+    desktop.input("after restart\n");
+    first.wait_text("received after restart");
+    second.wait_text("received after restart");
+    desktop.input("quit\n");
+    assert!(first.wait_exit().success());
+    assert!(second.wait_exit().success());
+    fixture.held_ends(&held);
+    assert_eq!(fixture.launches(1).len(), 1);
+}
+
+#[test]
+fn standalone_skill_commits_and_completes_after_its_last_view_detaches() {
+    use loopflow_execution::journal::{read_events, traces_root, LfEventType, LfNode};
+
+    let fixture = Fixture::new();
+    fixture
+        .repo
+        .create_file(".lf/skills/write-note.md", "Write a note.\n");
+    fixture.repo.stage_all();
+    fixture.repo.commit("Define the note Skill");
+    fixture.named_provider(
+        "agy",
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '1.5.13'; exit; fi
+printf '%s:%s\n' "$$" "$LF_CAPTURE_KEY" >> "$HOME/launches"
+printf 'skill ready\n'
+while [ ! -f "$HOME/finish" ]; do sleep 0.05; done
+printf 'written after detach\n' > note.txt
+"#,
+    );
+    // Pin the independent commit-message run to a fixture executable too.
+    fixture.provider(&support::answering_claude_script(
+        r#"{"title":"Write the note","body":""}"#,
+        &fixture.home.path().join("commit-prompt"),
+    ));
+    let path = format!("{}/bin:/usr/bin:/bin", fixture.home.path().display());
+    let configured = fixture
+        .command(&["set", "--global", "default_agent", "claude"])
+        .output()
+        .unwrap();
+    assert!(configured.status.success(), "{configured:?}");
+    let _server = fixture.machine_server();
+    let mut pane = fixture.chat(&path, &["-a", "agy", "write-note"]);
+    pane.wait_text("skill ready");
+    let session = session_of(&fixture.sql(), &fixture.launches(1)[0]);
+    let held = fixture.terminal_of(&session);
+    let mut second = fixture.chat(&path, &["resume", &session]);
+    second.wait_text("skill ready");
+    second.type_keys(b"\x1d");
+    assert!(second.wait_exit().success());
+    pane.type_keys(b"\x1d");
+    assert!(pane.wait_exit().success());
+    std::fs::write(fixture.home.path().join("finish"), "").unwrap();
+    fixture.held_ends(&held);
+
+    assert_eq!(fixture.session_card(&session)["outlook"]["kind"], "quit");
+
+    let note = Command::new("git")
+        .current_dir(fixture.repo.path())
+        .args(["show", "HEAD:note.txt"])
+        .output()
+        .unwrap();
+    assert!(note.status.success(), "{note:?}");
+    assert_eq!(note.stdout, b"written after detach\n");
+    let events: Vec<_> = std::fs::read_dir(traces_root(fixture.repo.path()))
+        .unwrap()
+        .flat_map(|trace| read_events(&trace.unwrap().path()).unwrap())
+        .filter(|event| event.node == LfNode::Skill && event.skill.as_deref() == Some("write-note"))
+        .map(|event| event.event)
+        .collect();
+    assert_eq!(events, [LfEventType::Started, LfEventType::Completed]);
+    assert_eq!(fixture.launches(1).len(), 1);
+}
+
+#[test]
+fn standalone_chat_retires_only_after_detach_and_turn_completion() {
+    let fixture = Fixture::new();
+    let server = fixture.machine_server();
+    let path = fixture.agy();
+    let mut pane = fixture.chat(&path, &["-a", "agy", ":", "idle retirement"]);
+    pane.wait_text("provider ready");
+    let session = session_of(&fixture.sql(), &fixture.launches(1)[0]);
+    let held = fixture.terminal_of(&session);
+    let sql = fixture.sql();
+    let expire = || {
+        sql.execute(
+            "UPDATE held_terminals SET viewer_hold='absent',
+             viewer_hold_at=unixepoch()-960,viewed=0 WHERE id=?1",
+            [&held],
+        )
+        .unwrap();
+    };
+    let sweep = || {
+        let output = fixture.command(&["task", "retire"]).output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+    };
+    // Deliver an already-issued sweep request after a viewer returned. The
+    // same request just after detach must honor the new grace as well.
+    let delayed_close = || {
+        let (mut socket, _) = fixture.held_entrance(&held);
+        socket
+            .write_all(&frame(REQUEST, br#"{"id":1,"kind":"retire_chat"}"#))
+            .unwrap();
+        let (tag, reply) = read_frame(&mut socket).unwrap();
+        assert_eq!(tag, REPLY);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&reply).unwrap()["kind"],
+            "accepted"
+        );
+    };
+    delayed_close();
+    pane.type_keys(b"still here\n");
+    pane.wait_text("received still here");
+    pane.type_keys(b"\x1d");
+    assert!(pane.wait_exit().success());
+    delayed_close();
+    fixture.assert_held_hosted(&held);
+    drop(server);
+    // Model an elapsed grace while the host was down. The new host sees
+    // the saved deadline, but a pending native request still owns this turn.
+    sql.execute("INSERT OR REPLACE INTO session_activity
+        (session_id,agent_process_id,attachment_token,observed_at,open_tools,pending_input,yielded)
+        SELECT id,agent_process_id,attachment_token,unixepoch(),0,1,0 FROM agent_sessions WHERE id=?1",
+        [&session]).unwrap();
+    expire();
+    let restarted = fixture.machine_server();
+    sweep();
+    fixture.assert_held_hosted(&held);
+    sql.execute(
+        "UPDATE session_activity SET pending_input=0,yielded=1 WHERE session_id=?1",
+        [&session],
+    )
+    .unwrap();
+    sweep();
+    fixture.held_ends(&held);
+    fixture.assert_retired_chat(&session, &fixture.launches(1)[0]);
+
+    drop(restarted);
+    let mut resumed = fixture.chat(&path, &["resume", &session]);
+    resumed.wait_text("provider ready");
+    resumed.type_keys(b"crash\n");
+    resumed.wait_exit();
+    let card = fixture.session_card(&session);
+    assert_eq!(card["ended"]["exit_code"], 7);
+    let line = card["status_line"].as_str().unwrap();
+    assert!(
+        line.starts_with("died ") && line.contains("(exit 7)"),
+        "{line}"
+    );
+}
+
+#[test]
+fn retired_skill_settles_its_capture_when_the_launcher_cannot_return() {
+    let fixture = Fixture::new();
+    fixture.repo.create_file(".lf/skills/idle.md", "Wait here.");
+    let server = fixture.machine_server();
+    let mut pane = fixture.chat(&fixture.agy(), &["-a", "agy", "idle"]);
+    pane.wait_text("provider ready");
+    let launch = &fixture.launches(1)[0];
+    let session = session_of(&fixture.sql(), launch);
+    let held = fixture.terminal_of(&session);
+    pane.type_keys(b"\x1d");
+    assert!(pane.wait_exit().success());
+    drop(server);
+    fixture.sql().execute(
+        "UPDATE held_terminals SET viewed=0,viewer_hold='absent',viewer_hold_at=unixepoch()-960 WHERE id=?1",
+        [&held],
+    ).unwrap();
+    let _restarted = fixture.machine_server();
+    fixture.held_ends(&held);
+    fixture.assert_retired_chat(&session, launch);
+}
+
+#[test]
+fn standalone_chat_past_its_grace_is_retired_by_server_recovery() {
+    let fixture = Fixture::new();
+    let server = fixture.machine_server();
+    // A held chat can start without ever receiving its first view.
+    let path = format!("PATH={}", fixture.agy());
+    let held = fixture.start_held(&[
+        "/usr/bin/env",
+        &path,
+        env!("CARGO_BIN_EXE_lf"),
+        "-a",
+        "agy",
+        ":",
+        "unviewed",
+    ]);
+    let session = session_of(&fixture.sql(), &fixture.launches(1)[0]);
+    assert_eq!(fixture.terminal_of(&session), held);
+    drop(server);
+    fixture
+        .sql()
+        .execute(
+            "UPDATE held_terminals SET created_at=unixepoch()-960 WHERE id=?1",
+            [&held],
+        )
+        .unwrap();
+    let _restarted = fixture.machine_server();
+    fixture.held_ends(&held);
+}
+
+#[test]
+fn direct_chat_with_desktop_status_attaches_before_the_session_is_named() {
+    let fixture = Fixture::new();
+    let _server = fixture.machine_server();
+    let status = ConnectionStatus::new(fixture.home.path().join("status.sock"));
+    let mut command = fixture.command(&["-a", "agy", ":", "from a fresh pane"]);
+    command
+        .env("PATH", fixture.agy())
+        .env("LF_SERVER_STATUS", &status.path);
+    let mut pane = Terminal::spawn_with_placement(command, Some(true));
+    pane.wait_text("provider ready");
+    wait_server_status(&status, "connected", 1);
+    pane.type_keys(b"quit\n");
+    assert!(pane.wait_exit().success());
+    wait_server_status(&status, "ended", 1);
 }
 
 /// Bare `lf` behaves as its provider would started from the shell: the
@@ -1199,6 +1561,10 @@ impl Terminal {
             keyboard,
         }
     }
+    fn type_keys(&mut self, keys: &[u8]) {
+        self.keyboard.as_mut().unwrap().write_all(keys).unwrap();
+    }
+
     /// Panics with the screen when the viewer has left the conversation.
     fn assert_viewing(&mut self, what: &str) {
         if let Some(status) = self.child.try_wait().unwrap() {

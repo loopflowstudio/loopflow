@@ -50,7 +50,7 @@ pub(crate) fn exit_line(provider: &str, code: u8) -> String {
 /// Record a handed-off provider's exit as its launcher would have. Every record
 /// is best-effort: the provider's own exit is what the person gets back, and a
 /// store that is locked, refused or missing only loses the records, logged.
-pub fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
+pub fn settle(exit: &NativeExit, status: ExitStatus, retired: Option<&str>) -> Settled {
     let owner: Option<Recording> = match open_store() {
         Ok(store) => Some(Recording {
             store,
@@ -70,11 +70,6 @@ pub fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
             false
         })
     };
-    if let (Some(owner), false) = (&owner, exit.client) {
-        if let Err(error) = record_exit(owner) {
-            tracing::warn!(%error, session = %exit.session, "cannot record the provider's exit");
-        }
-    }
     // A mover that stopped this provider also took its attachment.
     let lost = owner.as_ref().is_some_and(|owner| {
         judged(
@@ -84,9 +79,20 @@ pub fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
     });
     let command = crate::harness::native_session::NativeOutcome {
         status,
-        interrupted: lost,
+        interrupted: lost || retired.is_some(),
         moved: lost.then(|| owner.as_ref().and_then(departure)).flatten(),
     };
+    let failed = command.failed();
+    let code = if failed {
+        crate::transport::provider_exit_code(status)
+    } else {
+        0
+    };
+    if let Some(owner) = &owner {
+        if let Err(error) = record_exit(owner, code, retired, exit.client) {
+            tracing::warn!(%error, session = %exit.session, "cannot record the provider's exit");
+        }
+    }
     let outcome = command.capture_outcome();
     if let Some(Recording {
         store,
@@ -119,14 +125,6 @@ pub fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
             tracing::warn!(%error, session = %exit.session, "cannot settle the Session capture");
         }
     }
-    // A failure carries the provider's own code, so the person and the store
-    // read it.
-    let failed = command.failed();
-    let code = if failed {
-        crate::transport::provider_exit_code(status)
-    } else {
-        0
-    };
     let mut settled = Settled {
         code,
         moved: command.moved.is_some(),
@@ -145,25 +143,19 @@ pub fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
         store, attachment, ..
     }) = &owner
     {
-        // The launcher became the provider, so its end is written here: on
-        // the Session, whose exit code tells a person's quit from a death,
-        // and, as a Graph's step, on its step.
+        // If the launcher was a Graph step, finish the step too.
         // A plain interrupt is no error: it reads as interrupted.
         let error = settled
             .lines
             .first()
             .filter(|_| !matches!(settled.code, 0 | 130));
-        let recorded = store
-            .record_agent_exit_code(&attachment.agent_process_id, i32::from(settled.code))
-            .and_then(|()| {
-                store.finish_run(
-                    loopflow_storage::graph_process::RunOwner::GraphStep,
-                    &attachment.launcher_lf_process_id,
-                    time::OffsetDateTime::now_utc().unix_timestamp(),
-                    Some(i32::from(settled.code)),
-                    error.map(String::as_str),
-                )
-            });
+        let recorded = store.finish_run(
+            loopflow_storage::graph_process::RunOwner::GraphStep,
+            &attachment.launcher_lf_process_id,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+            Some(i32::from(settled.code)),
+            error.map(String::as_str),
+        );
         if let Err(error) = recorded {
             tracing::warn!(%error, session = %exit.session, "cannot record the launcher's exit");
         }
@@ -178,12 +170,22 @@ fn open_store() -> Result<SqliteStore> {
 }
 
 /// Record the provider's exit under its attachment.
-pub(crate) fn record_exit(owner: &Recording) -> Result<()> {
+pub(crate) fn record_exit(
+    owner: &Recording,
+    code: u8,
+    retired: Option<&str>,
+    client: bool,
+) -> Result<()> {
     let Recording {
         store,
         session,
         attachment,
     } = owner;
+    store.record_native_end(&attachment.agent_process_id, code, retired)?;
+    // A remote client did not wait for the provider process.
+    if client {
+        return Ok(());
+    }
     match store.with_session_attachment(session, attachment, || {
         store.record_agent_process_exit(session, attachment, true)
     }) {
@@ -334,7 +336,7 @@ mod tests {
                 .unwrap()
                 .execute_batch("ALTER TABLE agent_sessions RENAME TO agent_sessions_gone")
                 .unwrap();
-            let settled = settle(&exit, ExitStatus::from_raw(0));
+            let settled = settle(&exit, ExitStatus::from_raw(0), None);
             assert_eq!(settled.code, 0);
             assert!(settled.lines.is_empty(), "{:?}", settled.lines);
             let terminal: serde_json::Value = serde_json::from_slice(
@@ -399,7 +401,7 @@ mod tests {
 
                     diagnostics: (home.join("absent.log"), 0),
                 };
-                let settled = settle(&exit, ExitStatus::from_raw(status));
+                let settled = settle(&exit, ExitStatus::from_raw(status), None);
                 assert_eq!(settled.code, code, "{status}");
                 assert_eq!(settled.lines, [format!("claude exited with {code}.")]);
                 assert_eq!(
@@ -488,7 +490,7 @@ mod tests {
                 .agent_process(&next.agent_process_id)
                 .unwrap()
                 .unwrap();
-            let settled = settle(&exit, ExitStatus::from_raw(7 << 8));
+            let settled = settle(&exit, ExitStatus::from_raw(7 << 8), None);
             assert_eq!(settled.code, 0);
             assert!(settled.moved);
             assert!(settled

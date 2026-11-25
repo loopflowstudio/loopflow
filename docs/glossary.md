@@ -19,22 +19,22 @@ Every term the docs use, in one plain sentence.
 | **KR** | Key result: an observable outcome stated for a Wave's Project. |
 | **Memory** | `MEMORY.md`, where a Wave keeps decisions and context across Tasks. |
 | **Session** (**LfSession**) | A continuable agent conversation (interactive or headless) with identity, steers, and native provider history. |
-| **Work session** | A Task, Wave, or repository conversation running in a held terminal; survives window close and `lf install`, and wakes on steers. |
+| **Work session** | An interactive conversation running in a held terminal (a direct terminal chat, Skill, or resume while the server is running, plus Task, Wave, and repository conversations); survives window close and `lf install`, supports multiple live views, and wakes on steers. |
 | **Worker** | A headless step of a Task Graph (or Discord Wave reply) whose turns are reported to the server. |
-| **Chat** | A direct terminal conversation (`lf`, `lf <skill>`) that runs straight in your terminal and ends with it. |
+| **Chat** | A direct interactive conversation (`lf`, `lf <skill>`, or bare `lf resume`) running straight in your terminal when no local server is running (or without a TTY); ends with the terminal. |
 | **Batch** | A direct headless run (`lf -b <skill>`) that prints its answer and exits. |
 | **Available** | A conversation ready for your next turn (its last turn ended or it asked for input). |
 | **Machine** | One OS user's Loopflow authority and data directory, used as a local or SSH execution destination. |
-| **Server** | The local client-access process on a Machine that connects Desktop, starts work sessions in a holder, and records turns. |
-| **Holder** | The process beside the server that keeps held work-session terminals and Desktop shells alive across `lf install`. |
+| **Server** | The local client-access process on a Machine that connects Desktop, starts held conversations in a holder, and records turns. |
+| **Holder** | The process beside the server that keeps held conversation terminals and Desktop shells alive across window close and `lf install`. |
 | **Data directory** | Local Loopflow state (`~/.lf` by default; `LF_HOME` overrides it). |
 | **Steer** | A message sent to running or idle work to redirect it at its next turn or step. |
 | **Harness** / **provider** | The coding agent Loopflow drives: Claude Code, Codex, OpenCode, Pi, or Antigravity. |
 | **Scratch** | The `scratch/` directory for temporary working notes; `lf scratch clear` removes added files on submit/land. |
 
 Work session, worker, chat, and batch are launch kinds; a Session can change
-kind between launches (for example, binding a chat to a Task reopens it as a
-work session). Contributors looking for internal runtime contracts can check
+kind between launches (for example, a chat started while the server is stopped
+reopens as a held work session once the server is running). Contributors looking for internal runtime contracts can check
 [cutover status](dev/reference-cutover.md#cutover-status).
 
 ## Borrowed from software engineering

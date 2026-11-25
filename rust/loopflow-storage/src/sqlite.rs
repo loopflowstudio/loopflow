@@ -64,7 +64,7 @@ mod task_details;
 pub mod task_moves;
 mod task_retirement;
 mod transport;
-pub use task_retirement::{TaskRetirement, ViewerHold, WORKSPACE_GRACE};
+pub use task_retirement::{TaskRetirement, ViewerHold, VIEWER_OBSERVATION_GRACE, WORKSPACE_GRACE};
 mod task_state;
 pub mod task_summaries;
 pub mod task_work;

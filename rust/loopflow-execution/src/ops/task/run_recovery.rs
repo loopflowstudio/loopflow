@@ -58,6 +58,7 @@ impl DiedRun {
         let facts = DownConversation {
             here,
             exit_code: None,
+            retired: false,
             starts_since_turn: self.restarts.count,
             last_started_at: self.restarts.at,
         };

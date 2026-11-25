@@ -1583,7 +1583,7 @@ after that point publish the same bytes under the same tag.</p>
 <p>Each area page starts with a real command or artifact, follows its request or
 data flow, and ends with the contracts that neighboring areas may rely on.</p>
 <h2 id="what-runs-on-a-machine">What runs on a Machine<a class="anchor-link" href="#what-runs-on-a-machine" title="Link to this section">#</a></h2>
-<pre tabindex="0"><code class="language-bash">lf implement                 # the agent is this command's child
+<pre tabindex="0"><code class="language-bash">lf implement                 # runs in a holder when the server is up; direct child otherwise
 lf resume --task LOO-12      # a view of a terminal the holder keeps
 lf task run LOO-12           # starts a Graph process and returns
 ps -axo command | grep '^lf '
@@ -1594,7 +1594,7 @@ ps -axo command | grep '^lf '
 <p>Three processes stay up: one Machine server, a holder for each build that
 still has agents, and a Graph process for each running Graph. Every other <code>lf</code>
 is a command that ends.</p>
-<pre tabindex="0"><code class="language-text">your terminal            lf &lt;skill&gt; ──────────────────────────► agent        chat
+<pre tabindex="0"><code class="language-text">terminal (no server)     lf &lt;skill&gt; ──────────────────────────► agent        chat
 script or pipe           lf -b &lt;skill&gt; ───────────────────────► agent        batch
 
 your terminal ─ view ─┐
@@ -1607,8 +1607,12 @@ lf task run / lf task auto on ──────────► Graph process �
         └─ one startup line, then gone   └─ logs/graph-&lt;id&gt;.log
 </code></pre>
 <p>Transport selects one of the <a href="https://loopflow.studio/docs/glossary#loopflows-words">four launch kinds</a>
-before delegation. Managed launches report turns to the Machine server and
-require it at startup.</p>
+before delegation. Direct terminal chats, Skills and bare resumes share a held work session when
+the Machine server is reachable, and fall back to a direct foreground chat when
+no server is running (or stdin/stdout is not a terminal). Bound/primary
+conversations and Desktop panes require the server at startup. A standalone Skill's
+launcher stays in its held terminal through provider exit to checkpoint edits and
+record completion. A direct Graph keeps its steps in its own terminal.</p>
 <table tabindex="0">
 <thead>
 <tr>
@@ -1623,7 +1627,7 @@ require it at startup.</p>
 <td>Chat</td>
 <td>No</td>
 <td>In the caller's terminal, which owns its lifetime</td>
-<td><code>lf &lt;skill&gt;</code> at a terminal, including <code>lf research --task LOO-12</code></td>
+<td>Direct interactive <code>lf</code> / <code>lf &lt;skill&gt;</code> / bare <code>lf resume</code> when no Machine server is running, or without a TTY</td>
 </tr>
 <tr>
 <td>Batch</td>
@@ -1634,8 +1638,8 @@ require it at startup.</p>
 <tr>
 <td>Work session</td>
 <td>Yes</td>
-<td>On a PTY in a holder, independent of its viewers</td>
-<td>Task, Wave and repository conversations, or a conversation opened in a held terminal through Desktop or a framed <code>lf --machine</code> view</td>
+<td>On a PTY in a holder, independent of its viewers (standalone chats retire 15 minutes after their last view leaves when idle)</td>
+<td>Interactive <code>lf</code> / <code>lf &lt;skill&gt;</code> / bare <code>lf resume</code> when the Machine server is running; Task, Wave and repository conversations; Desktop panes and framed <code>lf --machine</code> views</td>
 </tr>
 <tr>
 <td>Worker</td>
@@ -1699,8 +1703,9 @@ and the server. The holder never opens it.</p>
 starts one now, and nothing sweeps them. <code>lf resume</code> of one, or opening its
 Desktop pane, restarts it: lf ends that process by its verified pid and birth,
 waits for it to exit and resumes the thread from provider history where any
-resume of it would run: in a held terminal for a work session, in the caller's
-terminal for a chat. One it cannot verify, or that does not exit, keeps running
+resume of it would run: in a held terminal when the server is running (always
+for a bound or primary work session), or in the caller's terminal for a bare
+chat without a server. One it cannot verify, or that does not exit, keeps running
 and the message names its pid.</p>
 <p>The <a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow-execution/src/transport/README.md">transport README</a> owns the
 holder and view protocols; the

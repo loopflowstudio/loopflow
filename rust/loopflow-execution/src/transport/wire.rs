@@ -187,6 +187,8 @@ pub enum Request {
     CloseNotice {
         text: String,
     },
+    /// Retire a standalone chat only while its last viewing grace is still expired.
+    RetireChat,
     /// The view's terminal gained or lost focus (DEC mode 1004). Gaining it
     /// gives this view the size; the agent hears it only if it asked for focus
     /// reports itself.
@@ -237,6 +239,12 @@ pub enum Request {
         /// A holder from an earlier build ignores it.
         #[serde(skip_serializing_if = "Option::is_none")]
         ready: Option<String>,
+    },
+    /// The launcher waits for its provider and checkpoints the Skill. If
+    /// retirement ends them both, the host finishes the capture instead.
+    BindSession {
+        key: String,
+        record: Box<crate::harness::native_exit::NativeExit>,
     },
     /// Transfer the direct child's exit recording to its host before exec.
     ExitRecord {

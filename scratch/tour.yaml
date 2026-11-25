@@ -1,0 +1,35 @@
+at: 3bef9525faa0ac2607193ad2329dcbdebf4df7dc
+first:
+  - path: docs/sessions.md
+    why: Share a draft, detach, and read the ending
+  - path: rust/loopflow-execution/src/transport/README.md
+    why: Who owns the provider and the Skill checkpoint
+  - path: rust/loopflow-storage/src/migrations/agent_end_reason.sql
+    why: Each agent generation can carry its retirement reason
+  - path: rust/loopflow-storage/src/sqlite/processes.rs
+    why: Record the first ending and clear it on resume
+  - path: rust/loopflow-execution/src/transport/wire.rs
+    why: Requests for standalone retirement and waiting Skill handoff
+  - path: rust/loopflow/src/bin/lf.rs
+    why: Direct launches choose their terminal
+  - path: rust/loopflow-execution/src/transport.rs
+    why: Hand off the wait and attach viewers
+  - path: rust/loopflow-storage/src/sqlite/task_retirement.rs
+    why: Find idle conversations eligible for closure
+  - path: rust/loopflow-execution/src/transport/hosted.rs
+    why: Check returning viewers before closing the terminal
+  - path: rust/loopflow-execution/src/harness/native_exit.rs
+    why: Settle the capture and return the observed outcome
+  - path: rust/loopflow-execution/src/transport/registry.rs
+    why: Finish the same retirement after a server restart
+  - path: rust/loopflow-execution/src/ops/recovery.rs
+    why: Decide which conversations the server starts again
+  - path: rust/loopflow-execution/src/ops/human_session.rs
+    why: Render the ending and the resume command
+  - path: rust/loopflow/tests/transport_tests.rs
+    why: Exercise shared drafts, Skill checkpoints, retirement, and resume
+hide:
+  - path: docs/dev/index.html
+    why: Generated from the architecture guide
+  - path: rust/loopflow-storage/SCHEMA.md
+    why: Generated from the migrations

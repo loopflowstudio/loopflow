@@ -60,9 +60,18 @@ impl Meta {
         place.terminal(terminal.as_str()).join("meta.json")
     }
 
-    fn read(place: &Place, terminal: &TerminalId) -> Option<Self> {
+    fn read_raw(place: &Place, terminal: &TerminalId) -> Option<Self> {
         let bytes = std::fs::read(Self::path(place, terminal)).ok()?;
         serde_json::from_slice(&bytes).ok()
+    }
+
+    fn read(place: &Place, terminal: &TerminalId) -> Option<Self> {
+        let mut meta = Self::read_raw(place, terminal)?;
+        if meta.session.is_none() {
+            meta.session = super::hosted::read_kept_exit(&place.terminal(terminal.as_str()), true)
+                .map(|record| record.session.into());
+        }
+        Some(meta)
     }
 
     fn write(&self, place: &Place, terminal: &TerminalId) -> Result<()> {
@@ -267,6 +276,7 @@ struct Unsettled {
     terminal: TerminalId,
     place: Place,
     code: Option<u8>,
+    recording: Option<super::Settling>,
     retry_at: Instant,
 }
 
@@ -282,6 +292,7 @@ impl Unsettled {
             terminal,
             place: place.clone(),
             code,
+            recording: None,
             retry_at: Instant::now(),
         }
     }
@@ -629,6 +640,7 @@ impl Registry {
                     terminal,
                     place: place.clone(),
                     code: Some(exit.status()),
+                    recording: None,
                     retry_at: Instant::now(),
                 });
                 continue;
@@ -903,30 +915,28 @@ fn run(
             // One terminal's failure is never another's.
             let pass = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 entry.nudge();
-                let pass = entry.hosted.pass(&mut entry.child);
+                let pass = entry.hosted.pass(&mut entry.child, |session| {
+                    bind_session(&live, &entry.place, terminal, session)
+                });
                 entry.report(terminal, &statuses);
                 pass
             }));
             match pass {
                 Ok(Ok(Pass::Continue)) => {}
                 Ok(Ok(Pass::Ended(code, settling))) => {
-                    // Exit records still being written finish off this loop.
-                    if let Some(settling) = settling {
-                        std::thread::spawn(move || settling.linger());
-                    }
                     let code = (!entry.child.outcome_unknown()).then_some(code);
-                    ended.push((terminal.clone(), code));
+                    ended.push((terminal.clone(), code, settling));
                 }
                 Ok(Err(error)) => {
                     tracing::warn!(%error, %terminal, "held terminal pass failed; continuing")
                 }
                 Err(_) => {
                     tracing::error!(%terminal, "held terminal host panicked; its agent keeps running in the holder");
-                    ended.push((terminal.clone(), None));
+                    ended.push((terminal.clone(), None, None));
                 }
             }
         }
-        for (terminal, code) in ended {
+        for (terminal, code, recording) in ended {
             let Some(entry) = terminals.remove(&terminal) else {
                 continue;
             };
@@ -941,6 +951,7 @@ fn run(
                 terminal,
                 place: entry.place,
                 code,
+                recording,
                 retry_at: Instant::now(),
             });
         }
@@ -997,10 +1008,11 @@ impl Entry {
         watchers: &Watchers,
     ) -> Result<Self> {
         let mut hosted = Hosted::new(terminal.clone(), control_key, waker.try_clone()?, watchers)?;
-        hosted.keep_in(place.terminal(terminal.as_str()));
+        let child = Source::new(place.clone(), terminal.clone(), pid, at);
+        hosted.keep_in(place.terminal(terminal.as_str()), &child);
         Ok(Self {
             hosted,
-            child: Source::new(place.clone(), terminal.clone(), pid, at),
+            child,
             place: place.clone(),
             nudge: None,
             reported: None,
@@ -1056,30 +1068,64 @@ impl Entry {
     }
 }
 
-/// Where a held terminal keeps the exit record its launcher handed off.
-fn exit_record_file(place: &Place, terminal: &TerminalId) -> PathBuf {
-    place
-        .terminal(terminal.as_str())
-        .join(super::hosted::EXIT_RECORD)
+/// A direct launch creates its Session in the child. Publish it before the
+/// native client starts, just as a resume publishes its Session at start.
+fn bind_session(live: &Live, place: &Place, terminal: &TerminalId, session: &str) {
+    {
+        let mut live = live.lock().expect("registry lock poisoned");
+        let Some(slot @ None) = live.get_mut(terminal) else {
+            return;
+        };
+        *slot = Some(session.into());
+    }
+    let saved = Meta::read_raw(place, terminal)
+        .context("terminal has no readable meta.json")
+        .and_then(|mut meta| {
+            meta.session = Some(session.into());
+            meta.write(place, terminal)
+        });
+    if let Err(error) = saved {
+        tracing::warn!(%error, %terminal, "could not save the terminal's Session in meta.json");
+    }
 }
 
 /// Record an ended terminal, then drop its ring and its directory. The
 /// directory is the receipt: it goes only once the store has the exit, so a
 /// store outage leaves it for the next attempt. Whether it is settled.
 fn settle(exit: &mut Unsettled) -> bool {
-    // An exit no server was hosting for still settles its launcher's record,
-    // once: the record goes before the terminal's end is written.
-    let file = exit_record_file(&exit.place, &exit.terminal);
-    if let Some(record) = super::hosted::read_kept::<crate::harness::native_exit::NativeExit>(&file)
+    // Keep the handoff on disk even if the viewer stopped waiting for its
+    // result. Another server can finish it if this one stops mid-write.
+    if exit
+        .recording
+        .as_ref()
+        .is_some_and(super::Settling::writing)
     {
-        use std::os::unix::process::ExitStatusExt;
-        // An end nobody saw reads as killed.
-        let status = exit.code.map_or(libc::SIGKILL, |code| i32::from(code) << 8);
-        crate::harness::native_exit::settle(&record, std::process::ExitStatus::from_raw(status));
-        super::hosted::remove_kept(&file);
+        exit.retry_at = Instant::now() + SETTLE_RETRY;
+        return false;
     }
-    let recorded = crate::journal::process_ledger()
-        .and_then(|store| store.end_terminal(&exit.terminal, exit.code));
+    let directory = exit.place.terminal(exit.terminal.as_str());
+    let retirement =
+        super::hosted::read_kept::<String>(&directory.join(super::hosted::RETIRE_REASON));
+    if exit.recording.is_none() {
+        if let Some(record) = super::hosted::read_kept_exit(&directory, retirement.is_some()) {
+            use std::os::unix::process::ExitStatusExt;
+            let status = exit.code.map_or(libc::SIGKILL, |code| i32::from(code) << 8);
+            crate::harness::native_exit::settle(
+                &record,
+                std::process::ExitStatus::from_raw(status),
+                retirement.as_deref(),
+            );
+            super::hosted::remove_kept(&directory.join(super::hosted::EXIT_RECORD));
+            super::hosted::remove_kept(&directory.join(super::hosted::SKILL_EXIT));
+        }
+    }
+    let code = if retirement.is_some() {
+        Some(0)
+    } else {
+        exit.code
+    };
+    let recorded =
+        crate::journal::process_ledger().and_then(|store| store.end_terminal(&exit.terminal, code));
     if let Err(error) = recorded {
         tracing::warn!(%error, terminal = %exit.terminal, "terminal exit not recorded; keeping its receipt");
         exit.retry_at = Instant::now() + SETTLE_RETRY;
@@ -1088,7 +1134,7 @@ fn settle(exit: &mut Unsettled) -> bool {
     if let Ok(mut client) = Client::connect(&exit.place) {
         let _ = client.forget(exit.terminal.as_str());
     }
-    remove_receipt(&exit.place.terminal(exit.terminal.as_str()));
+    remove_receipt(&directory);
     true
 }
 

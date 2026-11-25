@@ -28,6 +28,7 @@ pub struct TaskConversation {
     /// the end: the holder died, or the Machine restarted. It is written
     /// just before the end, so it is read on its own.
     pub exit_code: Option<i32>,
+    pub retired: bool,
     /// The agent's recorded OS identity.
     pub identity: Option<(u32, i64)>,
     pub starts_since_turn: u32,
@@ -55,7 +56,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare_cached(&format!(
             "SELECT s.id,t.id,s.agent_process_id,s.agent_ended_at,s.agent_exit_code,
-                s.agent_pid,s.agent_os_started_at,s.starts_since_turn,s.last_started_at,s.start_failure
+                s.agent_pid,s.agent_os_started_at,s.starts_since_turn,s.last_started_at,s.start_failure,s.agent_end_reason IS NOT NULL
              FROM task_primary_sessions tp
              JOIN tasks t ON t.id=tp.task_id
              JOIN task_checkouts c ON c.task_id=t.id
@@ -75,6 +76,7 @@ impl SqliteStore {
                 starts_since_turn: row.get(7)?,
                 last_started_at: row.get(8)?,
                 start_failure: row.get(9)?,
+                retired: row.get(10)?,
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)

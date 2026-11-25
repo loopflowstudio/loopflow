@@ -90,3 +90,35 @@ and prefixes the last argument, lf's remote command, with `. <remote env>;`.
 remote-TTY view is `ssh -tt <host> '<env>; lf resume --task <id>'`; read the
 stand-in's log over SSH. Stop the remote server by `lsof -t` on its store,
 then its `lf holder run`, and delete the directory: that disk is nearly full.
+
+# Shared terminal chats
+
+With the private server running, a typed `lf -a agy` (or `lf default '…' -a
+agy`) is held: `pgrep -P <holder>` shows `agy` (a Skill shows its `lf
+<skill>` launcher, with `agy` under it) and the PTY runs `lf session attach
+--terminal …`. From a main checkout the chat runs in a `<repo>.agent`
+worktree. Stop the server first and the same command runs `agy` as the PTY's
+child instead. A second view is `lf resume <session>` in another PTY; a typed,
+unsent draft shows in both, and Enter from either answers in both with the
+same `agy` PID. Detach with Ctrl+] (`\x1d`); closing a tab is dropping the PTY
+master (kill the driver, not the viewer). `lf session list --all` reads
+**Open here** while a view is open and **Reconnect** after. An unviewed
+standalone chat retires about 15 minutes after its last view leaves (the
+minute pass); a Task's conversation stays. Drive views with a `pty.fork()`
+driver reading keys from a FIFO, render with `pyte` at the view's width, and
+grep the raw bytes when two widths garble the render. pyte prints kitty
+keyboard pops (`ESC[<65535u`) as `65535u`; they are not input.
+
+A fresh `LF_HOME` on a debug build migrates for about 90 s after `lf server
+run` reports ready (`held the store write lock` in `logs/lf.log` marks the
+end). A chat typed in that window gets no welcome and runs unheld. Wait for
+that line first.
+
+Quit and retired standalone chats both leave `lf session list --all`: the
+capture ends `completed`, which sets `completed_at`. Read a retired one's
+ending with `lf session resume --prepare --json <id>` (`status_line`: `closed
+HH:MM (15 minutes without a viewer); …`) or the store's `agent_sessions`
+`agent_exit_code` and `agent_end_reason`. A reopened view shows "Session
+closed after 15 minutes without a viewer" above the restored screen.
+Retirement kills the whole PTY group, so a retired Skill's edits stay
+uncommitted in its worktree.

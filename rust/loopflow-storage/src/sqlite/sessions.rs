@@ -490,7 +490,8 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         a.starts_since_turn,a.last_started_at,a.start_failure,
         EXISTS(SELECT 1 FROM task_checkouts pc WHERE pc.task_id=t.id AND {here}),
         a.agent_pid IS NULL AND a.agent_ended_at IS NULL
-         AND EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL)
+         AND EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL),
+        a.agent_end_reason
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
         LEFT JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id
@@ -580,8 +581,11 @@ fn read_summary(
             agent_end: row
                 .get::<_, Option<i64>>(40)?
                 .map(|at| {
-                    row.get(41)
-                        .map(|exit_code| crate::session::AgentEnd { at, exit_code })
+                    Ok::<_, rusqlite::Error>(crate::session::AgentEnd {
+                        at,
+                        exit_code: row.get(41)?,
+                        reason: row.get(47)?,
+                    })
                 })
                 .transpose()?,
             starts_since_turn: row.get(42)?,

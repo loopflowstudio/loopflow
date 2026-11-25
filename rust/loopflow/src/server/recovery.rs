@@ -73,6 +73,7 @@ impl Watcher {
         self.conversations_due
             .into_iter()
             .chain(self.runs_due)
+            .chain(self.agents_checked_at.map(|at| at + UNREAD))
             .min()
     }
 
@@ -159,6 +160,11 @@ impl Watcher {
         let refresh = due(self.agents_checked_at, now, UNREAD);
         if refresh {
             self.agents_checked_at = Some(now);
+            if let Err(error) =
+                loopflow_execution::ops::task::retirement::close_unviewed_chats(store)
+            {
+                tracing::warn!(%error, "standalone chat retirement pass failed");
+            }
         }
         let mut agents = loopflow_execution::agent::MachineAgents::default();
         let readiness = |conversation: &TaskConversation| {

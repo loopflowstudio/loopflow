@@ -7,6 +7,8 @@ use loopflow_model::durable::TaskId;
 use loopflow_model::id::TerminalId;
 
 pub const WORKSPACE_GRACE: i64 = 15 * 60;
+/// A disconnected host's last heartbeat retains the view for thirty seconds.
+pub const VIEWER_OBSERVATION_GRACE: i64 = 30;
 const VIEWED: &str = "Retained by an open Task Session viewer";
 
 /// What a held terminal's host knows about its viewers, recorded on the terminal.
@@ -53,6 +55,41 @@ pub struct TaskRetirement {
 }
 
 impl SqliteStore {
+    /// Due standalone chats, starting at the index of unfinished agents.
+    pub fn unviewed_chat_candidates(&self, now: i64) -> StoreResult<Vec<TerminalId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&format!(
+            "SELECT DISTINCT t.id FROM agent_sessions s INDEXED BY agent_sessions_unended_agent
+             CROSS JOIN held_terminals t ON t.id=s.held_terminal_id
+             WHERE s.agent_process_id IS NOT NULL AND s.agent_ended_at IS NULL
+               AND s.interactive=1 AND s.completed_at IS NULL AND t.ended_at IS NULL
+               AND COALESCE(t.viewer_hold_at,t.created_at)
+                   + CASE WHEN t.viewer_hold='viewed' THEN ?2 ELSE 0 END <= ?1
+               AND s.bound_at IS NULL AND {} IS NULL",
+            super::sessions::primary_scope_sql("s"),
+        ))?;
+        let rows = query.query_map(
+            params![now - WORKSPACE_GRACE, VIEWER_OBSERVATION_GRACE],
+            |r| r.get(0),
+        )?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Recheck every open Session in the terminal after selecting candidates.
+    /// A chat may have joined a scope while an earlier terminal was closing.
+    pub fn terminal_has_scoped_session(&self, terminal: &TerminalId) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            &format!(
+                "SELECT EXISTS(SELECT 1 FROM agent_sessions s WHERE s.held_terminal_id=?1
+                AND s.completed_at IS NULL AND (s.bound_at IS NOT NULL OR {} IS NOT NULL))",
+                super::sessions::primary_scope_sql("s")
+            ),
+            [terminal],
+            |r| r.get(0),
+        )?)
+    }
+
     /// Completion and each newly launched held terminal receive the same
     /// viewing grace.
     pub fn task_close_candidates(
@@ -86,6 +123,25 @@ impl SqliteStore {
             })?
             .collect::<rusqlite::Result<_>>()?;
         Ok(terminals)
+    }
+
+    /// A new host starts with no connections. Keep a saved absence; date a
+    /// lost viewer from its last heartbeat, no later than this restart.
+    pub fn release_disconnected_viewers(&self, terminal: &TerminalId) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let departed = conn
+            .query_row(
+                "SELECT MIN(unixepoch(),viewer_hold_at+?2) FROM held_terminals
+             WHERE id=?1 AND viewer_hold='viewed'",
+                params![terminal, VIEWER_OBSERVATION_GRACE],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()?;
+        drop(conn);
+        if let Some(at) = departed {
+            self.record_viewer_hold(terminal, Some(ViewerHold::Absent(at)))?;
+        }
+        Ok(())
     }
 
     /// Record one observation for both Session activity and checkout retention.
@@ -392,6 +448,51 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap()
+    }
+
+    #[test]
+    fn unviewed_chat_candidates_follow_grace_and_current_scope() {
+        let (_home, store, task) = fixture();
+        let chat = session_terminal(&store, &task, "chat");
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE agent_sessions SET agent_process_id='running' WHERE id='chat'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE held_terminals SET created_at=100 WHERE id=?1",
+            [&chat],
+        )
+        .unwrap();
+        drop(conn);
+        let due = |now| store.unviewed_chat_candidates(now).unwrap().contains(&chat);
+        assert!(!due(999));
+        assert!(due(1000));
+        store
+            .record_viewer_hold(&chat, Some(ViewerHold::Viewed(1000)))
+            .unwrap();
+        assert!(!due(1929));
+        assert!(due(1930));
+        store.release_disconnected_viewers(&chat).unwrap();
+        assert!(!due(1929));
+        assert!(due(1930));
+        store
+            .record_viewer_hold(&chat, Some(ViewerHold::Absent(1920)))
+            .unwrap();
+        assert!(!due(2819));
+        assert!(due(2820));
+        for change in [
+            "UPDATE agent_sessions SET bound_at=1 WHERE id='chat'",
+            "UPDATE agent_sessions SET primary_scope='wave' WHERE id='chat'",
+            "UPDATE agent_sessions SET primary_scope='repository' WHERE id='chat'",
+            "INSERT INTO task_primary_sessions(task_id,session_id) SELECT task_id,id FROM agent_sessions WHERE id='chat'",
+        ] {
+            store.conn.lock().unwrap().execute(change, []).unwrap();
+            assert!(!due(2820), "{change}");
+            assert!(store.terminal_has_scoped_session(&chat).unwrap(), "{change}");
+            store.conn.lock().unwrap().execute_batch("UPDATE agent_sessions SET bound_at=NULL,primary_scope=NULL WHERE id='chat'; DELETE FROM task_primary_sessions;").unwrap();
+        }
     }
 
     #[test]

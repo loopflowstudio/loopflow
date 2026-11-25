@@ -296,6 +296,7 @@ fn a_task_conversation_says_how_it_ended_and_what_happens_next() {
     use super::SessionState;
     let died = |at| {
         Some(crate::session::AgentEnd {
+            reason: None,
             at,
             exit_code: Some(137),
         })
@@ -412,6 +413,7 @@ fn a_task_conversation_says_how_it_ended_and_what_happens_next() {
     assert_eq!(gave_up.command.as_deref(), Some("lf resume --task INF-123"));
 
     summary.agent_end = Some(crate::session::AgentEnd {
+        reason: None,
         at: 3_000,
         exit_code: Some(0),
     });
@@ -518,6 +520,7 @@ fn a_task_conversation_says_how_it_ended_and_what_happens_next() {
     summary.primary_scope = None;
     summary.agent_process_evidence = crate::store::ProcessIdentityEvidence::Dead;
     summary.agent_end = Some(crate::session::AgentEnd {
+        reason: None,
         at: 4_000,
         exit_code: None,
     });
@@ -652,7 +655,11 @@ fn the_pass_starts_what_the_outlook_says_the_server_starts() {
     );
     set("starts_since_turn=0,last_started_at=NULL,agent_exit_code=0");
     assert_eq!(read(), (Some((Quit, false)), false), "quit");
-    set(&format!("agent_exit_code=1,completed_at={NOW}"));
+    set("agent_exit_code=NULL,agent_end_reason='Task completed'");
+    assert_eq!(read(), (Some((WaitingForYou, false)), false), "retired");
+    set(&format!(
+        "agent_end_reason=NULL,agent_exit_code=1,completed_at={NOW}"
+    ));
     assert_eq!(read(), (Some((WaitingForYou, false)), false), "completed");
     set("completed_at=NULL,cwd='/elsewhere'");
     assert_eq!(
@@ -2302,6 +2309,7 @@ fn a_stopped_session_that_is_not_a_tasks_says_why_its_start_failed() {
     summary.agent_process_id = Some(loopflow_model::id::AgentProcessId::new());
     summary.agent_process_evidence = crate::store::ProcessIdentityEvidence::Dead;
     summary.agent_end = Some(crate::session::AgentEnd {
+        reason: None,
         at: 4_000,
         exit_code: Some(1),
     });

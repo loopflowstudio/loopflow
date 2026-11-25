@@ -787,7 +787,7 @@ nonce, so unfinished terminal escapes cannot swallow the reason.
 | --- | --- | --- |
 | `replaced` | This attachment yielded to another place or provider. | Request `session.attach` again for the same Session with `terminal_id: null`; retry with a bound while the next terminal becomes available. |
 | `finished` | Execution finished. | Stop automatic attachment and keep the final screen. |
-| `retired` | Task cleanup or shell Close ended this terminal. | Stop automatic attachment; deliberately resume when needed. |
+| `retired` | Task cleanup, standalone idle retirement, or shell Close ended this terminal. | Stop automatic attachment; deliberately resume when needed. |
 
 Attachment finds existing execution. It never launches a provider or replays
 keystrokes. A replacement terminal needs a fresh attach; every attached view
@@ -806,17 +806,17 @@ reported, never started by an attachment attempt.
 
 `Launch::kind` carries whether a launch is bare or managed and its mode.
 [Work sessions, workers, chats and batches are defined here](../../../../docs/glossary.md#loopflows-words).
-`transport::LaunchInput::kind` selects chats or batches for skill and Graph
-commands launched in the caller's terminal or pipe. `lf -b steer <ID> TEXT`
-is a batch. A Graph's correction turn in a Task run remains a worker.
-Interactive Task, Wave, repository and bound conversations are work sessions,
-as are conversations opened in a held terminal through Desktop or a framed
-`lf --machine` view. Workers run headless Task Graph steps, the `ci-fix` run
-landing starts, and Discord answers for a Wave. The checkout, `--task` and
-`LF_AS` only decide Task membership: accounting and Task steers always travel
-together. Resume retains a Session's bare or managed lifetime, reading its
-binding and primary scope once before delegation; attribution alone leaves it
-bare. Every launch [reads its own steers from the store](#every-launch-reads-its-own-steers).
+Interactive `lf`, inline prompts, Skills, and bare `lf resume` delegate to a
+held work session whenever the Machine server is reachable, and fall back to a
+bare foreground chat when it is unreachable (or stdin/stdout is not a TTY).
+`lf -b <skill>` and `lf -b steer <ID> TEXT` are batches; a Graph's correction
+turn in a Task run remains a worker. Interactive Task, Wave, repository and
+bound conversations are always work sessions, as are conversations opened in a
+held terminal through Desktop or a framed `lf --machine` view. Workers run
+headless Task Graph steps, the `ci-fix` run landing starts, and Discord answers
+for a Wave. The checkout, `--task` and `LF_AS` only decide Task membership:
+accounting and Task steers always travel together. Every launch
+[reads its own steers from the store](#every-launch-reads-its-own-steers).
 Chats and batches report no boundaries. Work sessions and workers
 report turn boundaries to the Machine server.
 

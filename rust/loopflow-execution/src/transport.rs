@@ -36,6 +36,8 @@ use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
 
 use crate::harness::native_exit::{NativeExit, Settled};
+use crate::harness::LaunchKind;
+use crate::machine::client::Connection;
 use input::{Paste, PendingInput};
 use loopflow_model::id::{LfSessionId, TerminalId};
 use loopflow_storage::sqlite::ViewerHold;
@@ -47,6 +49,7 @@ const HELD_ENV: &str = "LF_TRANSPORT_HELD";
 pub(crate) const WITHIN_ENV: &str = "LF_HELD_TERMINAL";
 const PARENT_ENV: &str = "LF_TRANSPORT_PARENT";
 const CONTROL_ENV: &str = "LF_TRANSPORT_CONTROL";
+const SKILL_CHECKPOINT_ENV: &str = "LF_SKILL_CHECKPOINT";
 const LIMIT: usize = 4 * 1024 * 1024;
 // Short liveness timers use uptime: laptop sleep is not a silent connection.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
@@ -61,9 +64,6 @@ const COMMAND_ATTACH_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long a person's terminal waits for exit records before it gets the
 /// provider's own exit back. A locked or refused store never holds a quit.
 const SETTLE_WAIT: Duration = Duration::from_millis(800);
-
-/// How long a server that hosted an exit stays to finish its records.
-const SETTLE_LINGER: Duration = Duration::from_secs(20);
 
 /// The exit code a provider's status reports on its own.
 pub(crate) fn provider_exit_code(status: std::process::ExitStatus) -> u8 {
@@ -91,6 +91,7 @@ impl Settling {
         status: std::process::ExitStatus,
         waker: UnixStream,
         departure: Option<Settled>,
+        retirement: Option<String>,
     ) -> Self {
         let process = format!(
             "lf/{}",
@@ -100,16 +101,25 @@ impl Settling {
                 .as_str()
                 .replace('-', "")
         );
+        let code = if retirement.is_some() {
+            0
+        } else {
+            provider_exit_code(status)
+        };
         let (sender, settled) = mpsc::channel();
         std::thread::spawn(move || {
-            let _ = sender.send(crate::harness::native_exit::settle(&record, status));
+            let _ = sender.send(crate::harness::native_exit::settle(
+                &record,
+                status,
+                retirement.as_deref(),
+            ));
             let _ = (&waker).write_all(&[1]);
         });
         Self {
             settled,
             since: Instant::now(),
             fallback: departure.unwrap_or_else(|| Settled {
-                code: provider_exit_code(status),
+                code,
                 moved: false,
                 lines: Vec::new(),
             }),
@@ -143,11 +153,15 @@ impl Settling {
         Some(settled)
     }
 
-    /// Give records still being written time to land before the host lets go.
-    fn linger(self) {
-        let _ = self.settled.recv_timeout(SETTLE_LINGER);
+    /// The viewer may already have its timeout result while the worker still
+    /// owns the receipt. A received result or a closed channel ends the wait.
+    fn writing(&self) -> bool {
+        matches!(self.settled.try_recv(), Err(mpsc::TryRecvError::Empty))
     }
 }
+
+// A replay of the command line resolves relative --cwd and --repo from here.
+static INVOCATION_CWD: OnceLock<PathBuf> = OnceLock::new();
 static HANDOFF: OnceLock<Handoff> = OnceLock::new();
 
 #[derive(Debug)]
@@ -155,6 +169,8 @@ struct Handoff {
     terminal: TerminalId,
     key: String,
     parent: u32,
+    // A delegated Skill owns completion. Its original caller decides who commits.
+    checkpoint_skill: Option<bool>,
 }
 
 impl Handoff {
@@ -167,6 +183,10 @@ impl Handoff {
             .ok()
             .and_then(|id| TerminalId::parse(&id).ok());
         let key = std::env::var(CONTROL_ENV).ok();
+        let checkpoint_skill = std::env::var(SKILL_CHECKPOINT_ENV)
+            .ok()
+            .and_then(|value| value.parse().ok());
+        std::env::remove_var(SKILL_CHECKPOINT_ENV);
         std::env::remove_var(CONTROL_ENV);
         std::env::remove_var(PARENT_ENV);
         std::env::remove_var(HELD_ENV);
@@ -176,6 +196,7 @@ impl Handoff {
             terminal: terminal?,
             key: key?,
             parent,
+            checkpoint_skill,
         })
     }
 
@@ -206,6 +227,9 @@ impl Handoff {
 /// Consume the direct execution handoff. Provider tools and nested lf calls do
 /// not inherit the right to run inside this execution's held terminal.
 pub fn initialize() {
+    if let Ok(cwd) = std::env::current_dir() {
+        let _ = INVOCATION_CWD.set(cwd);
+    }
     crate::os_process::detached::initialize();
     if let Some(handoff) = Handoff::take() {
         let _ = HANDOFF.set(handoff);
@@ -267,20 +291,56 @@ impl LaunchInput {
     }
 }
 
+/// Whether this held Skill's original invocation owns its checkpoint.
+pub fn skill_checkpoint() -> Option<bool> {
+    HANDOFF.get()?.checkpoint_skill
+}
+
+/// A standalone chat or Skill shares its PTY when the local server is already up.
+pub fn delegate_chat(kind: LaunchKind, skill: bool) -> Result<bool> {
+    if kind != LaunchKind::Chat || !can_delegate_command() {
+        return Ok(false);
+    }
+    let Some(server) = terminal_server() else {
+        return Ok(false);
+    };
+    let (argv, cwd) = replay_current()?;
+    let terminal = start_held_on(server, &argv, &cwd, None, &|command| {
+        if skill {
+            command.env(
+                SKILL_CHECKPOINT_ENV,
+                (!crate::journal::has_caller()).to_string(),
+            );
+        }
+    })?;
+    attach(&terminal, None, ViewerOptions::default())?;
+    Ok(true)
+}
+
+fn terminal_server() -> Option<Connection> {
+    if io::stdin().is_terminal() && io::stdout().is_terminal() {
+        Connection::open().ok()
+    } else {
+        None
+    }
+}
+
+fn can_delegate_command() -> bool {
+    !cfg!(test)
+        && current().is_none()
+        && !crate::os_process::detached::launched()
+        && !crate::journal::graph_step()
+}
+
 /// `lf task run` and `lf task auto on` leave their terminal: the Graph they start outlives the caller,
 /// and `lf -b task run` waits for it. Returns whether a detached child ran the
 /// command; in a held terminal, an already detached process or a Graph step it
 /// runs here.
 pub fn detach_current() -> Result<bool> {
-    if cfg!(test)
-        || current().is_some()
-        || crate::os_process::detached::launched()
-        || crate::journal::graph_step()
-    {
+    if !can_delegate_command() {
         return Ok(false);
     }
-    let mut argv: Vec<String> = std::env::args().collect();
-    let cwd = admit_current(&mut argv)?;
+    let (argv, cwd) = replay_current()?;
     let code = crate::os_process::detached::run(&argv, &cwd, false, &|command| {
         // No terminal shows detached work; it claims none.
         command
@@ -311,16 +371,17 @@ pub(crate) fn delegate_session(
     preview: bool,
     launch_lock: File,
 ) -> Result<Option<(crate::harness::LaunchKind, File)>> {
-    if let Some(kind) = local_session_kind(id) {
-        return Ok(Some((kind, launch_lock)));
-    }
+    let server = match session_host(id)? {
+        SessionHost::Here(kind) => return Ok(Some((kind, launch_lock))),
+        SessionHost::Held(server) => server,
+    };
     drop(launch_lock);
-    let mut argv: Vec<String> = std::env::args().collect();
+    let (mut argv, cwd) = replay_current()?;
     if viewer.json {
         // The viewer owns this continuation, including an early detach.
         argv.retain(|arg| arg != "--json");
     }
-    delegate(id, viewer, preview, argv)?;
+    delegate(*server, id, viewer, preview, &argv, &cwd)?;
     Ok(None)
 }
 
@@ -330,30 +391,49 @@ pub(crate) fn delegate_prepared_session(
     id: &str,
     viewer: ViewerOptions,
 ) -> Result<Option<crate::harness::LaunchKind>> {
-    if let Some(kind) = local_session_kind(id) {
-        return Ok(Some(kind));
-    }
-    delegate(
-        id,
-        viewer,
-        true,
-        vec![String::new(), "session".into(), "resume".into(), id.into()],
-    )?;
+    let server = match session_host(id)? {
+        SessionHost::Here(kind) => return Ok(Some(kind)),
+        SessionHost::Held(server) => server,
+    };
+    let mut argv = vec![String::new(), "session".into(), "resume".into(), id.into()];
+    let cwd = admit_current(&mut argv)?;
+    delegate(*server, id, viewer, true, &argv, &cwd)?;
     Ok(None)
 }
 
-/// Chats reopen as chats; bound and primary Sessions as work sessions. A held
-/// child keeps its parent's choice. A relayed viewer (a Desktop pane or a
-/// framed `lf --machine` stream) is no terminal a chat can own, so the holder
-/// keeps what it opens.
-fn session_kind(id: &str) -> crate::harness::LaunchKind {
-    use crate::harness::LaunchKind;
+enum SessionHost {
+    Here(LaunchKind),
+    Held(Box<Connection>),
+}
 
-    if current().is_some()
-        || std::env::var_os("LF_SERVER_STATUS").is_some()
-        || std::env::var_os(STREAM_ENV).is_some()
-    {
-        return LaunchKind::WorkSession;
+/// Bound conversations and remote viewers require the holder. At a terminal a
+/// standalone conversation can also use a holder that is already running.
+fn session_host(id: &str) -> Result<SessionHost> {
+    if current().is_some() {
+        return Ok(SessionHost::Here(LaunchKind::WorkSession));
+    }
+    let required = requires_holder(id);
+    if cfg!(test) || crate::os_process::detached::launched() {
+        return Ok(SessionHost::Here(if required {
+            LaunchKind::WorkSession
+        } else {
+            LaunchKind::Chat
+        }));
+    }
+    if required {
+        return Ok(SessionHost::Held(Box::new(
+            crate::harness::agent_process::require_server()?,
+        )));
+    }
+    if let Some(server) = terminal_server() {
+        return Ok(SessionHost::Held(Box::new(server)));
+    }
+    Ok(SessionHost::Here(LaunchKind::Chat))
+}
+
+fn requires_holder(id: &str) -> bool {
+    if std::env::var_os("LF_SERVER_STATUS").is_some() || std::env::var_os(STREAM_ENV).is_some() {
+        return true;
     }
     static GAP: LazyLock<Mutex<crate::store::RecordingGap>> = LazyLock::new(Default::default);
     let bare = crate::journal::process_ledger().and_then(|store| {
@@ -367,17 +447,19 @@ fn session_kind(id: &str) -> crate::harness::LaunchKind {
         Ok(_) => gap.recovered(),
         Err(error) => gap.note("resume lifetime", error),
     }
-    if matches!(bare, Ok(Some(true))) {
-        LaunchKind::Chat
-    } else {
-        LaunchKind::WorkSession
-    }
+    !matches!(bare, Ok(Some(true)))
 }
 
 /// Launch the Session in a held terminal and relay its view here.
-fn delegate(id: &str, viewer: ViewerOptions, preview: bool, mut argv: Vec<String>) -> Result<()> {
+fn delegate(
+    server: Connection,
+    id: &str,
+    viewer: ViewerOptions,
+    preview: bool,
+    argv: &[String],
+    cwd: &Path,
+) -> Result<()> {
     let preview_session = preview.then_some(id);
-    let cwd = admit_current(&mut argv)?;
     let preview = if std::env::var_os(STREAM_ENV).is_some() {
         if let Some(screen) = preview_session.and_then(snapshot::last_screen) {
             io::stdout().write_all(&wire::frame(Tag::Snapshot, &screen))?;
@@ -387,7 +469,7 @@ fn delegate(id: &str, viewer: ViewerOptions, preview: bool, mut argv: Vec<String
         ViewerTerminal::preview(preview_session)?
     };
     let session = preview_session.map(LfSessionId::from);
-    let terminal = start_held(&argv, &cwd, session.as_ref(), &|_| {})?;
+    let terminal = start_held_on(server, argv, cwd, session.as_ref(), &|_| {})?;
     relay_with_preview(
         &terminal,
         session.as_ref(),
@@ -397,14 +479,11 @@ fn delegate(id: &str, viewer: ViewerOptions, preview: bool, mut argv: Vec<String
     )
 }
 
-/// Only a work Session outside a holder or detached process needs delegation.
-fn local_session_kind(id: &str) -> Option<crate::harness::LaunchKind> {
-    let kind = session_kind(id);
-    (cfg!(test)
-        || current().is_some()
-        || crate::os_process::detached::launched()
-        || kind != crate::harness::LaunchKind::WorkSession)
-        .then_some(kind)
+/// Replay the original arguments from the directory in which they were typed.
+fn replay_current() -> Result<(Vec<String>, PathBuf)> {
+    let mut argv: Vec<_> = std::env::args().collect();
+    let cwd = admit_current(&mut argv)?;
+    Ok((argv, INVOCATION_CWD.get().cloned().unwrap_or(cwd)))
 }
 
 /// Admit this invocation before another process takes over its work, and point
@@ -423,6 +502,22 @@ fn admit_current(argv: &mut [String]) -> Result<PathBuf> {
 /// server. `inherit` edits the caller's environment for it. With no server it
 /// fails.
 pub fn start_held(
+    argv: &[String],
+    cwd: &Path,
+    session: Option<&LfSessionId>,
+    inherit: &dyn Fn(&mut Command),
+) -> Result<TerminalId> {
+    start_held_on(
+        crate::harness::agent_process::require_server()?,
+        argv,
+        cwd,
+        session,
+        inherit,
+    )
+}
+
+fn start_held_on(
+    mut server: Connection,
     argv: &[String],
     cwd: &Path,
     session: Option<&LfSessionId>,
@@ -447,8 +542,6 @@ pub fn start_held(
         .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
         .collect();
     let (rows, cols) = size();
-    crate::harness::agent_process::require_server()?;
-    let mut server = crate::machine::client::Connection::open()?;
     let answer = server.request(ServerOperation::SessionStart {
         session: session.cloned(),
         request: uuid::Uuid::new_v4().to_string(),
@@ -936,6 +1029,18 @@ fn viewer_hold(viewers: &[Viewer], previous: Option<ViewerHold>, now: i64) -> Op
     }
 }
 
+/// Keep a saved absence on `None` and date a lost viewer from its last heartbeat.
+pub(super) fn record_viewer_hold(
+    store: &loopflow_storage::sqlite::SqliteStore,
+    terminal: &TerminalId,
+    hold: Option<ViewerHold>,
+) -> loopflow_storage::StoreResult<()> {
+    match hold {
+        Some(hold) => store.record_viewer_hold(terminal, Some(hold)),
+        None => store.release_disconnected_viewers(terminal),
+    }
+}
+
 /// Ending execution releases its remaining viewers without restarting an
 /// absence clock that already ran while requested work finished.
 fn release_viewer_hold(terminal: &TerminalId, previous: Option<ViewerHold>) {
@@ -944,8 +1049,8 @@ fn release_viewer_hold(terminal: &TerminalId, previous: Option<ViewerHold>) {
         previous,
         time::OffsetDateTime::now_utc().unix_timestamp(),
     );
-    let recorded =
-        crate::journal::process_ledger().and_then(|store| store.record_viewer_hold(terminal, hold));
+    let recorded = crate::journal::process_ledger()
+        .and_then(|store| record_viewer_hold(&store, terminal, hold));
     if let Err(error) = recorded {
         tracing::warn!(%error, %terminal, "cannot record Session viewer release; last observation expires");
     }
@@ -1678,9 +1783,7 @@ fn attach_with_terminal(
     let mut status = connection::Status::from_env();
     let mut recovering = false;
     let socket = if let Some(status) = &mut status {
-        let Some((socket, recovered)) =
-            status.connect(id, bridged_session(session)?, true, input)?
-        else {
+        let Some((socket, recovered)) = status.connect(id, session, true, input)? else {
             return Ok(());
         };
         recovering = recovered;
@@ -1836,12 +1939,6 @@ struct RelayRoute<'a> {
     recovering: bool,
 }
 
-/// The server attaches by Session; only Desktop's Session panes bridge through
-/// it, and they always name theirs.
-fn bridged_session(session: Option<&LfSessionId>) -> Result<&LfSessionId> {
-    session.context("A server-bridged terminal relay names its Session (`--session`)")
-}
-
 fn view(
     mut socket: stream::Stream,
     id: Option<&TerminalId>,
@@ -1890,7 +1987,7 @@ fn view(
             let held = id.context("only a known terminal reconnects")?;
             let next = if let Some(status) = &mut status {
                 status
-                    .connect(held, bridged_session(session)?, false, input)?
+                    .connect(held, session, false, input)?
                     .map(|(socket, _)| socket)
             } else {
                 tracing::debug!(%reason, terminal = %held, "view reconnecting");
@@ -2457,8 +2554,8 @@ fn write_output(terminal: &mut Option<ViewerTerminal>, stream: u8, bytes: &[u8])
 }
 
 /// Hand the terminal's host what to record when this process, about to exec
-/// into its provider, exits. A nested launcher keeps its own wait and returns
-/// false.
+/// into its provider, exits. A delegated Skill registers its Session and keeps
+/// its wait for checkpoint and completion. Nested launchers keep their wait too.
 pub(crate) fn hand_exit_record(record: &NativeExit) -> Result<bool> {
     let handoff = HANDOFF
         .get()
@@ -2467,16 +2564,22 @@ pub(crate) fn hand_exit_record(record: &NativeExit) -> Result<bool> {
     socket.set_write_timeout(Some(Duration::from_secs(1)))?;
     // A delayed reply does not undo the host's acceptance. Wait for its
     // decision or a closed connection before choosing who records the exit.
-    send(
-        &mut socket,
+    let launcher_waits = handoff.checkpoint_skill.is_some();
+    let request = if launcher_waits {
+        Request::BindSession {
+            key: handoff.key.clone(),
+            record: Box::new(record.clone()),
+        }
+    } else {
         Request::ExitRecord {
             key: handoff.key.clone(),
             pid: std::process::id(),
             record: Box::new(record.clone()),
-        },
-    )?;
+        }
+    };
+    send(&mut socket, request)?;
     match receive_reply(&mut socket)? {
-        Reply::Accepted => Ok(true),
+        Reply::Accepted => Ok(!launcher_waits),
         Reply::Busy => Ok(false),
         other => bail!("held terminal refused the exit record: {other:?}"),
     }
@@ -2511,12 +2614,20 @@ pub fn viewed(id: &TerminalId) -> Result<bool> {
     attachment(id).map(|(viewed, _)| viewed)
 }
 
-/// End a held terminal with `text` for its viewers. No decision is stored.
+/// Close the held terminal with the reason its viewers and Session will show.
 pub(crate) fn close_notice(id: &TerminalId, text: &str) -> Result<()> {
+    request_close(id, Request::CloseNotice { text: text.into() })
+}
+
+pub(crate) fn retire_chat(id: &TerminalId) -> Result<()> {
+    request_close(id, Request::RetireChat)
+}
+
+fn request_close(id: &TerminalId, request: Request) -> Result<()> {
     let mut socket = registry::connect(id)?;
     socket.set_read_timeout(Some(Duration::from_secs(1)))?;
     socket.set_write_timeout(Some(Duration::from_secs(1)))?;
-    send(&mut socket, Request::CloseNotice { text: text.into() })?;
+    send(&mut socket, request)?;
     match receive_reply(&mut socket)? {
         Reply::Accepted => Ok(()),
         other => bail!("unexpected close notice reply {other:?}"),
@@ -2694,6 +2805,9 @@ pub fn configure_child(command: &mut Command) {
 pub(crate) fn carry_across_exec(command: &mut Command) {
     if let Some(handoff) = HANDOFF.get() {
         handoff.pass(command, handoff.parent);
+        if let Some(checkpoint) = handoff.checkpoint_skill {
+            command.env(SKILL_CHECKPOINT_ENV, checkpoint.to_string());
+        }
     }
     pass_open(command);
 }
@@ -2884,7 +2998,7 @@ mod tests {
 
     #[test]
     fn slow_exit_recording_keeps_an_already_observed_move() {
-        let (_sender, settled) = std::sync::mpsc::channel();
+        let (sender, settled) = std::sync::mpsc::channel();
         let mut settling = super::Settling {
             settled,
             since: std::time::Instant::now() - super::SETTLE_WAIT,
@@ -2901,6 +3015,9 @@ mod tests {
         assert!(outcome.moved);
         assert_eq!(outcome.lines, ["This conversation moved to tmux %9"]);
         assert!(settling.poll().is_none());
+        assert!(settling.writing());
+        drop(sender);
+        assert!(!settling.writing());
     }
 
     #[test]

@@ -49,8 +49,13 @@ with a plain log of the work so far. See
 | Interactive, with or without a Task | Keeps the thread and refusal visible; wait for your retry or `lf -a <harness> resume` |
 | Explicit agent (`-a` or `agent:`) | Keeps the harness (bare Claude still tries its other models; `claude:opus` pins the model) |
 | Graph step's order exhausted on a usage limit | Wait 5, 15, 30, then 60 minutes, retrying from the first entry after each; then stop with the error |
-| Revoked or missing login | Skips that provider's remaining models; tries the next provider or stops with the `lf machine login` command that fixes it |
-| Graph step's agent is not installed | Skips to the next entry and logs why; if none left, fails with the install command |
+| Revoked or missing login | Skips that provider's remaining models and tries the next provider, or stops with sign-in instructions |
+| Configured harness missing or unsigned-in on this Machine | Falls back to the first usable configured fallback, then a usable installed native harness; explicit `-a` and established threads keep their harness |
+| No usable harness or login on this Machine | Reports which executables or logins are missing and stops recovery until inputs change (no backoff retry loop) |
+
+Before selecting a new conversation or worker, Loopflow checks each candidate's
+executable. For Claude and Codex it also asks the native client for its login
+status. Other clients handle model-specific authentication when they start.
 
 Each retry after a wait restarts at the first entry of `agents` using whatever
 native login is active on the Machine, so renewing usage or signing in picks up
@@ -155,13 +160,13 @@ lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 \
 lf task run LOO-570 --rent code
 ```
 
-A rented Machine is signed in as it is prepared, at most one approval per
-provider: to the template's `--logins`, or with none set, to every provider
-signed in here that reaches another Machine (Codex, GitHub, Linear,
-OpenCode). With command approvers set, no one has to be there. Claude needs no
-sign-in at prepare: each launch on the rental carries the forwarded token. A
-rental with neither, no forwarded `CLAUDE_CODE_OAUTH_TOKEN` and no Codex to
-sign in, stops before anything is rented.
+Task placement signs in to the template's `--logins` or, when unset, to the
+providers signed in here that reach another Machine (Codex, GitHub, Linear,
+OpenCode). Preparation also signs in to GitHub for a GitHub origin and Linear
+for a Linear-backed repository. Each provider needs at most one approval.
+Command approvers let sign-in run unattended. Claude uses a forwarded token on
+each launch. Task placement requires either a forwarded
+`CLAUDE_CODE_OAUTH_TOKEN` or a Codex sign-in before renting.
 
 ### Per-run secrets
 
@@ -192,6 +197,19 @@ Claude and Codex launches never see an exported `ANTHROPIC_API_KEY`,
 `OPENAI_API_KEY` or `CODEX_API_KEY`, so a key in your shell cannot move them
 onto API billing. Machine routing, repository setup and execution restrictions
 still apply. See [Security](security.md).
+
+Refresh configured `forward.files` on a live Machine with `lf machine forward`.
+
+```bash
+lf machine forward modal-1
+lf machine forward modal-1 --task LOO-570
+lf machine forward modal-1 --session session_…
+```
+
+The refresh replaces each named file atomically over SSH stdin and reads only
+`forward.files`. With `--task` or `--session`, it then restarts the selected
+Session's provider on its owning Machine, keeping the same conversation.
+The provider keeps running if delivery fails or the refreshed login is unusable.
 
 ## Service authentication
 

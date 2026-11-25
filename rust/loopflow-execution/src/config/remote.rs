@@ -42,10 +42,7 @@ pub fn project(value: &Value) -> Value {
     fn setting(value: &Value, key: &str) -> Option<Value> {
         let definition = super::catalog::definition(key)?;
         let prefix = format!("{key}.");
-        if super::catalog::definitions()
-            .iter()
-            .any(|child| child.key.starts_with(&prefix))
-        {
+        if super::catalog::has_child_settings(key) {
             let projected = value
                 .as_mapping()?
                 .iter()
@@ -251,7 +248,9 @@ pub fn incoming() -> Result<Option<Profile>> {
 }
 
 fn parse(text: &str) -> Result<Profile> {
-    let profile: Profile = serde_json::from_str(text)?;
+    let mut profile: Profile = serde_json::from_str(text)?;
+    // Older senders carried their installation stream in the global profile.
+    super::files::remove(&mut profile.global, &["stream"]);
     anyhow::ensure!(
         profile.global == project(&profile.global)
             && profile.repository_values == project(&profile.repository_values),
@@ -285,9 +284,15 @@ fn update_projection<T>(
     match kind {
         Some(kind) => super::definitions::update(path, kind, change),
         None => super::files::update(path, |document| {
-            let mut portable = project(document);
+            let mut folded = document.clone();
+            super::keys::fold(&mut folded);
+            let before = project(&folded);
+            let mut portable = before.clone();
             let result = change(&mut portable)?;
-            replace_projection(document, &portable);
+            if portable != before {
+                replace_projection(&mut folded, &portable);
+                *document = folded;
+            }
             Ok(result)
         }),
     }
@@ -301,8 +306,81 @@ fn read_receipts(path: &Path) -> Result<BTreeMap<PathBuf, Retention>> {
     if text.is_empty() {
         Ok(BTreeMap::new())
     } else {
-        Ok(serde_json::from_str(&text)?)
+        let mut records: BTreeMap<PathBuf, Retention> = serde_json::from_str(&text)?;
+        for record in records.values_mut().filter(|r| r.definition_kind.is_none()) {
+            super::files::remove(&mut record.incoming, &["stream"]);
+            if let Some(applied) = &mut record.applied {
+                super::files::remove(applied, &["stream"]);
+            }
+        }
+        Ok(records)
     }
+}
+
+/// A declaration is addressed within its Wave, skill or Graph step. A setting
+/// with a structured value (such as an ordered agent list) travels whole.
+fn declarations<'a>(
+    document: &'a Value,
+    path: &mut Vec<&'a str>,
+    values: &mut BTreeMap<Vec<&'a str>, &'a Value>,
+) {
+    let scoped = match path.as_slice() {
+        ["waves", _, rest @ ..] => rest,
+        parts => parts,
+    };
+    let setting = match scoped {
+        ["skills", _, rest @ ..] | ["graphs", _, "steps", _, rest @ ..] => rest,
+        parts => parts,
+    };
+    let key = setting.join(".");
+    if super::catalog::definition(&key).is_some_and(|d| d.key == key)
+        && !super::catalog::has_child_settings(&key)
+    {
+        values.insert(path.clone(), document);
+    } else if let Some(map) = document.as_mapping() {
+        for (name, child) in map {
+            if let Some(name) = name.as_str() {
+                path.push(name);
+                declarations(child, path, values);
+                path.pop();
+            }
+        }
+    }
+}
+
+/// Change a saved declaration only if it still matches this origin's last
+/// write, or if both Machines already agree. A missing local value can thus
+/// mean either a new setting or a deliberate deletion.
+fn retain_settings(document: &mut Value, applied: &mut Value, incoming: &Value) -> bool {
+    let mut before = BTreeMap::new();
+    let mut after = BTreeMap::new();
+    let baseline = applied.clone();
+    declarations(&baseline, &mut Vec::new(), &mut before);
+    declarations(incoming, &mut Vec::new(), &mut after);
+    let mut complete = true;
+    for path in before
+        .keys()
+        .chain(after.keys())
+        .collect::<std::collections::BTreeSet<_>>()
+    {
+        let current = path
+            .iter()
+            .try_fold(&*document, |value, key| value.get(*key));
+        let old = before.get(path).copied();
+        let new = after.get(path).copied();
+        if current != old && current != new {
+            complete = false;
+            continue;
+        }
+        for target in [&mut *document, &mut *applied] {
+            if let Some(value) = new {
+                super::settings::insert(target, path, value.clone());
+            } else {
+                super::files::remove(target, path);
+            }
+        }
+    }
+    complete
 }
 
 fn retain(
@@ -353,6 +431,21 @@ fn retain(
         .transpose()?
         .unwrap_or(true);
     update_projection(path, kind, |document| {
+        if kind.is_none()
+            && previous.as_ref().is_none_or(|record| {
+                record.status != "kept"
+                    && record.applied_origin.as_ref().unwrap_or(&record.origin) == &profile.origin
+            })
+        {
+            let saved = applied.get_or_insert_with(|| Value::Mapping(Default::default()));
+            status = if retain_settings(document, saved, incoming) {
+                "retained"
+            } else {
+                "conflict"
+            };
+            applied_origin = Some(profile.origin.clone());
+            return Ok(());
+        }
         let current = document.clone();
         let owned = previous.as_ref().is_some_and(|previous| {
             previous.applied_origin.as_deref() == Some(profile.origin.as_str())
@@ -465,6 +558,20 @@ pub(super) fn layers(
         }
     }
     Ok(layers)
+}
+
+/// Install global preferences before the rental server starts accepting work.
+pub fn provision(text: &str) -> Result<()> {
+    let profile = parse(text)?;
+    let home = crate::store::lf_home_dir();
+    retain(
+        &home,
+        &home.join("config.yaml"),
+        &profile,
+        &profile.global,
+        None,
+    )?;
+    retain_definitions(&home, &profile)
 }
 
 /// Retention is an inbound execution effect, never a side effect of resolution.
@@ -632,8 +739,8 @@ mod tests {
             "---\nagent: claude:shared\n---\nProbe.",
         );
         let path = home.path().join("config.yaml");
-        std::fs::write(&path, "agent: codex:executor\nchrome: true\n").unwrap();
-        let mut carried = profile("default_agent: codex:origin", 1);
+        std::fs::write(&path, "agent: codex:executor\nyolo: false\nchrome: true\n").unwrap();
+        let mut carried = profile("default_agent: codex:origin\nyolo: true", 1);
         carried.repository_values = serde_yaml_ng::from_str("{}").unwrap();
         let selected = || {
             let config = crate::config::load_config(Some(repo.path()))
@@ -675,6 +782,34 @@ mod tests {
         assert_eq!(selected(), "claude:shared");
         repo.create_file(".lf/skills/probe.md", "Probe.");
         assert_eq!(selected(), "codex:origin");
+    }
+
+    #[test]
+    fn a_retry_repairs_a_dev_stream_conflict_recorded_by_an_older_rental() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("config.yaml");
+        std::fs::write(&path, "stream: dev\n").unwrap();
+        let sent = profile("stream: stable\nagent: codex", 2);
+        let receipt = serde_json::json!({
+            "definition_kind": null, "origin": sent.origin, "revision": sent.revision,
+            "seen": {"origin": 2}, "applied": null, "applied_origin": null,
+            "incoming": sent.global, "status": "conflict"
+        });
+        let records = std::collections::BTreeMap::from([(&path, receipt)]);
+        std::fs::write(
+            super::receipts(home.path()),
+            serde_json::to_vec(&records).unwrap(),
+        )
+        .unwrap();
+
+        let retry = super::parse(&serde_json::to_string(&sent).unwrap()).unwrap();
+        retain(home.path(), &path, &retry, &retry.global, None).unwrap();
+        let saved = crate::config::files::read(&path).unwrap();
+        assert_eq!(saved["stream"], "dev");
+        assert_eq!(saved["agent"], "codex");
+        let records = super::read_receipts(&super::receipts(home.path())).unwrap();
+        assert_eq!(records[&path].status, "retained");
+        assert_eq!(records[&path].applied.as_ref(), Some(&retry.global));
     }
 
     #[test]

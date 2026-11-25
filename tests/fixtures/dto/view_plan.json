@@ -141,6 +141,7 @@
         "backlog"
       ],
       "identifier": "LOO-1",
+      "graph_step": "review",
       "primary_session": null,
       "location": null,
       "argv": null,

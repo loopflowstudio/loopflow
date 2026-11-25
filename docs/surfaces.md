@@ -49,8 +49,8 @@ own settings.
 
 The native macOS app reads the same local store as `lf`; it keeps no copy of its own:
 
-- **Sidebar (⌘1–9):** your working Tasks in rank order. Dragging a Task changes
-  its rank in CLI lists and on the connected tracker.
+- **Sidebar (⌘1–9):** your [Working Tasks](#working-tasks-in-the-sidebar) in
+  shared order (dragging reorders them for Wave views and CLI lists too).
 - **Task workspace:** three resizable panes: `session` (conversation), `shell`
   (at the Task's worktree), and `browser` (Files, Graph log, local dev URLs).
 - **Dashboards:** saved side-by-side grids of Tasks selected by query. Each
@@ -70,6 +70,23 @@ The native macOS app reads the same local store as `lf`; it keeps no copy of its
 - **⌘,:** [Settings](#settings) for appearance, shortcuts, phone access,
   Machines, and scoped configuration files.
 
+### A Task on another Machine
+
+Open a Task that runs on mini, a pool Machine or a rental, and its workspace
+is mini's: **Files** browses and saves mini's working copy, **Changes** and
+**Diff** show mini's uncommitted work, **Shell** starts in mini's checkout, and
+**Session** attaches to the conversation running there. The workspace header
+and each terminal name the Machine. Desktop asks your local Loopflow server,
+which reaches mini over SSH; Desktop itself runs no `ssh`. A checkout of the
+Task left on your Mac from before it moved is never shown in its place.
+
+| When | Desktop shows |
+|---|---|
+| The Task has no checkout yet | **Not started** in Files, Changes and Shell |
+| mini doesn't answer | An error naming mini, with **Retry**; never an empty diff or a shell on your Mac |
+| The Task moves to code-1 | The header names code-1 and Files and Changes reload from it. Shells and Sessions already open stay on mini, labelled, until they end; **New shell** starts one on code-1 |
+| You have unsaved edits when it moves | Save writes them to code-1 if the file there is unchanged since you opened it; otherwise Desktop shows both versions and keeps your edit |
+
 Save and open Dashboards from the CLI too:
 
 ```bash
@@ -78,7 +95,7 @@ lf desktop dashboard query attention 'state:available or state:blocked'
 ```
 
 Queries support `wave:`, `task:`, `kind:task|wave`, and
-`state:open|available|busy|blocked|unstarted|idle|active|moving|backlog|working|done|auto`
+`state:open|available|busy|blocked|error|unstarted|idle|active|moving|backlog|working|done|auto`
 (`auto`: an open Task with auto on), combined with whitespace (AND), `or`, and parentheses.
 
 ### Changes show at once
@@ -103,6 +120,39 @@ Tasks.
 If the Machine pauses briefly, edits still show immediately and flush once it
 reconnects. After ~10 seconds offline, mutation controls disable until the
 connection returns. See [Connect clients](server.md) for connection recovery.
+
+### Working Tasks in the sidebar
+
+In the default order, open the second Working Task and send a prompt. Its row
+stays second as the conversation turns Busy and then Available again.
+
+Drag a row in the repository sidebar or the Working Tasks grid to save its
+position on this Machine. Wave views, `lf task list`, `lf wave show`, and the
+phone feed follow the same relative order. Working Tasks start newest first,
+with canonical Task ID breaking ties. New arrivals appear above rows you’ve
+arranged. Sidebar and phone rows show the current Graph step beside the status
+when the Machine reports it.
+
+Turn on **Sort by status** in a repository or Wave sidebar, or from **⌘K**,
+to group rows by Blocked, Error, Available, Idle and Busy. A Task with both
+busy and available conversations sorts as Busy. Each group follows the shared
+Working order.
+Sending a prompt updates the open Task’s status, but its row stays in the
+group it occupied when you opened it or turned sorting on. Other rows can
+move above or below it. Leaving the Task or changing the filter releases
+its group. Turn sorting off to restore the shared order and drag rows in
+the repository sidebar. The Working Tasks grid uses the shared order, and
+saved Dashboards use their own arrangement.
+
+A drop shows immediately. If another window has already reordered the list,
+the Task still lands on the side of the target you chose. A refused drop
+restores the last confirmed order in both lists and shows a Notice.
+
+In **⌘K → Sidebar shows**, choose **Working tasks**, **Available**, or **Busy**.
+Filters use current activity. A Task with both available and busy
+conversations appears in both filters. **⌘1–9** and **⌃Tab / ⌃⇧Tab** follow
+the visible rows. The open conversation stays selected if its row leaves the
+filter.
 
 ### The backlog
 
@@ -451,6 +501,8 @@ lf help desktop --all --json              # full schema of every Desktop command
 
 Programs running in a Desktop shell can also emit OSC 7501 (Rex's Program
 Status protocol) to mark a pane available when waiting for input.
+A live interactive Session that reports a finished turn is Available once
+its last working report clears. Typing dismisses finished and error reports.
 
 ## Reference
 

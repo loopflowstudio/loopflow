@@ -2411,8 +2411,11 @@ fn program_status_cli_observes_available_without_completing_work() {
             .status
             .success());
         let item = watch_for(Some(state));
-        if matches!(state, "working" | "done") {
-            assert!(item["availability"].is_null());
+        // A finished interactive turn waits for its person, like idle.
+        if state == "working" {
+            assert!(item["availability"].is_null(), "{state}: {item}");
+        } else {
+            assert_eq!(item["availability"], "available", "{state}: {item}");
         }
     }
     sequence += 1;

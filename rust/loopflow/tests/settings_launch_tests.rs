@@ -1481,3 +1481,97 @@ fn automatic_agent_selection_requires_exactly_one_installed_harness() {
     assert_eq!(inspect()["value"], "claude");
     assert!(!home.path().join("provider-started").exists());
 }
+
+/// The same portable routes reach a prepared primary, a Graph worker, and
+/// the commit helper it starts. Only the native login differs by Machine.
+#[test]
+fn a_machine_uses_each_skills_first_signed_in_agent() {
+    let answer = r#"{"title":"Record the edit","body":""}"#;
+    for signed_in in [false, true] {
+        let home = tempfile::tempdir().unwrap();
+        let repo = TestRepo::new();
+        let codex = support::codex_app_server_script(answer, "echo edit > edited.txt");
+        fs::write(
+            home.path().join("claude.py"),
+            support::answering_claude_script(answer, &repo.path().join("edited.txt")),
+        )
+        .unwrap();
+        if signed_in {
+            fs::write(home.path().join("claude-login"), "").unwrap();
+        }
+        let claude = r#"#!/bin/sh
+if [ "$1 $2" = "auth status" ]; then
+    if [ -f "$LF_HOME/claude-login" ]; then echo '{"loggedIn":true}'; exit 0; fi
+    echo '{"loggedIn":false}'
+    exit 1
+fi
+exec /usr/bin/python3 "$LF_HOME/claude.py" "$@"
+"#;
+        let _env = support::EnvGuard::with_home(
+            &[("codex", &codex), ("claude", claude)],
+            Some(home.path()),
+        );
+        let _server = loopflow_test_support::MachineServer::start_with_path(
+            env!("CARGO_BIN_EXE_lf"),
+            home.path(),
+            &std::env::var("PATH").unwrap(),
+        );
+        repo.create_file(".lf/graphs/routing.yaml", "- loop-or-next\n");
+        repo.create_file(".lf/skills/loop-or-next.md", "Make one edit.");
+        repo.stage_all();
+        repo.commit("Define one worker");
+        write_preferences(home.path(), "default_agent: codex:parent\nskills:\n  task-session: {agents: ['claude:sonnet', 'codex:conversation']}\n  loop-or-next: {agents: ['claude:haiku', 'codex:worker']}\n  commit-message: {agents: ['claude:opus', 'codex:writer']}\n").unwrap();
+        let run = |args: &[&str]| {
+            let output = command(repo.path(), home.path(), args)
+                .env_remove("CLAUDE_CODE_OAUTH_TOKEN")
+                .env_remove("CODEX_ACCESS_TOKEN")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap()
+        };
+        // Prepare keeps the primary's chosen provider without starting it.
+        let created: serde_json::Value =
+            serde_json::from_str(&run(&["task", "create", "Route me", "--json"])).unwrap();
+        let id = created["task"]["id"].as_str().unwrap();
+        let primary: serde_json::Value =
+            serde_json::from_str(&run(&["resume", "--task", id, "--prepare", "--json"])).unwrap();
+        let (provider, conversation, worker, writer) = if signed_in {
+            ("claude", "sonnet", "haiku", "opus")
+        } else {
+            ("codex", "conversation", "worker", "writer")
+        };
+        assert_eq!(primary["provider"], provider, "{primary}");
+        assert_eq!(primary["model"], conversation);
+        let ran = |model: &str| {
+            let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+            db.query_row("SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE provider=?1 AND model=?2 AND interactive=0 AND completed_at IS NOT NULL)", [provider, model], |row| row.get::<_, bool>(0)).unwrap()
+        };
+        run(&["-b", "graph", "routing"]);
+        assert!(ran(worker), "worker should run on {provider}:{worker}");
+        assert!(ran(writer), "commit should run on {provider}:{writer}");
+        let committed = Command::new("git")
+            .args(["log", "-1", "--format=%s"])
+            .current_dir(repo.path())
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&committed.stdout).contains("Record the edit"),
+            "{committed:?}"
+        );
+        if !signed_in {
+            fs::remove_file(repo.path().join("edited.txt")).unwrap();
+            repo.stage_all();
+            repo.commit("Reset the edit");
+            run(&["-a", "codex:exact", "-b", "graph", "routing"]);
+            assert!(ran("exact"));
+            let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+            let count: i64 = db.query_row("SELECT count(*) FROM agent_sessions WHERE model='writer' AND completed_at IS NOT NULL", [], |row| row.get(0)).unwrap();
+            assert_eq!(count, 2, "the parent override belongs to the worker");
+        }
+    }
+}

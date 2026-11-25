@@ -85,7 +85,7 @@ claims and runs. To jump into the conversation directly, run
 ## See where everything stands
 
 ```bash
-lf wave show                                   # each Wave's plan and Tasks, sorted by what needs attention
+lf wave show                                   # each Wave's plan and Tasks in shared order
 lf task status LOO-12                          # state, Graph step, PR, Sessions, and Graph runs
 lf task changes LOO-12                         # diff summary so far
 lf task wait LOO-13                            # block until done or abandoned
@@ -461,6 +461,21 @@ tracker:
 
 In Linear, a Wave maps to an Initiative and its current Project maps to a
 Linear Project. In Asana, it maps to a team project.
+
+Cloning a repository with existing `.lf/wave/` files onto a new Machine (or
+rental) registers those Waves read-only without editing `.lf/wave/` or
+committing to `main`. When a Wave's Linear Initiative has one In Progress
+Project, Loopflow binds it automatically. If the Initiative has none or
+several, or Linear is unreachable, the Wave stays unbound and lists its
+available Projects so you can pick one explicitly:
+
+```bash
+lf wave plan bind coverage <project-uuid>            # bind an unbound Wave to a Linear Project
+lf wave plan bind coverage <project-uuid> --replace  # switch a misselected Wave without losing prior work or history
+```
+
+Re-running `lf wave plan connect` on an already-bound Team and Initiative is a
+no-op that leaves `.lf/config.yaml`, `.lf/wave/`, and `main` untouched.
 
 ### Offline queue and conflict resolution
 

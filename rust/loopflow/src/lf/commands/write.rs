@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
+use super::desktop::TileEdit;
 use anyhow::{anyhow, Context};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -53,18 +54,18 @@ macro_rules! writes {
         }
 
         impl Write {
-            /// Run the shared operation where its Work lives and keep its
-            /// declared result until serialization.
-            pub(crate) fn run(&self) -> anyhow::Result<WriteResult> {
-                self.execute(self.remote()?, None)
-            }
-
             /// Run a write another Machine sent here, never sending it on: in
             /// this Machine's checkout of the sender's repository, a launch
             /// it starts running with the sender's selection and secrets.
             pub(crate) fn run_here(mut self, sender: &Sender) -> anyhow::Result<WriteResult> {
                 if let Some(directory) = self.directory_mut() {
                     *directory = super::work_route::repository_path(&sender.repository)?;
+                }
+                if let Self::TaskSave { issue, .. }
+                | Self::SessionResume { task: Some(issue), .. }
+                | Self::SessionNew { task: Some(issue), .. } = &mut self
+                {
+                    *issue = super::work_route::peer_task_id(&sender.repository, issue)?;
                 }
                 self.execute(None, Some(sender))
             }
@@ -430,6 +431,9 @@ writes! {
         directory: PathBuf,
         request_id: String,
         id: String,
+        /// The Task whose conversation this is; it is prepared where that Task runs.
+        #[serde(deserialize_with = "Option::deserialize")]
+        task: Option<String>,
         agent: Option<String>,
     } => loopflow_execution::ops::human_session::SessionRecord;
     { .. } => self.prepare_session(remote)?,
@@ -513,12 +517,13 @@ writes! {
     /// bound as the Wave's current Project.
     #[serde(rename = "wave.plan.bind")]
     WavePlanBind {
+        replace: bool,
         directory: PathBuf,
         wave: String,
         project: String,
     } => loopflow_storage::work::project::Project;
-    { wave, project, .. } => {
-        loopflow_execution::engine::wave::planning_bind(directory, wave, project)?
+    { wave, project, replace, .. } => {
+        loopflow_execution::engine::wave::planning_bind(directory, wave, project, *replace)?
     },
 
     /// `lf wave plan connect [<wave>|--all] [--team-key <key>]
@@ -974,8 +979,7 @@ writes! {
         directory,
         &format!("query:{id}"),
         member,
-        "hide",
-        &Default::default(),
+        TileEdit::Hide,
     )?,
 
     /// `lf desktop dashboard show query:<id>/<member>`.
@@ -990,8 +994,7 @@ writes! {
         directory,
         &format!("query:{id}"),
         member,
-        "show",
-        &Default::default(),
+        TileEdit::Show,
     )?,
 
     /// `lf desktop dashboard slots query:<id> --revision <revision>`, with
@@ -1019,26 +1022,27 @@ writes! {
     )?,
 
     /// `lf desktop dashboard move <board>/<member> --destination <destination>`:
-    /// a Dashboard's tile (`query:<id>`) or the shared Task order (`working-tasks`).
+    /// move to the target's slot, or place the member on its chosen side with `--side before|after`.
     #[serde(rename = "desktop.dashboard.move")]
     DesktopDashboardMove {
         directory: PathBuf,
         board: String,
         member: String,
         destination: String,
+        side: Option<loopflow_storage::work::selection::DropSide>,
     } => crate::lf::commands::desktop::DesktopTileRecord;
     {
         board,
         member,
         destination,
+        side,
         ..
     } => super::desktop::save_tile(
         None,
         directory,
         board,
         member,
-        "move",
-        &[("destination".to_owned(), destination.clone())].into(),
+        TileEdit::Move { to: destination, side: *side },
     )?,
 
     /// `lf config set <key> <value> <destination flags> --json`: declare a
@@ -1177,18 +1181,46 @@ macro_rules! directory_of {
 }
 
 impl Write {
-    /// Where an ordinary write must run. A steer handles its carrier fallback
-    /// inside `steer_task` before the first request is sent.
+    pub(crate) fn run(&self) -> anyhow::Result<WriteResult> {
+        self.run_with(Remote::request)
+    }
+
+    pub(crate) fn run_with(
+        &self,
+        save: impl FnOnce(
+            &loopflow_model::durable::Machine,
+            Sender,
+            &Write,
+        ) -> anyhow::Result<loopflow_execution::machine::client::Response>,
+    ) -> anyhow::Result<WriteResult> {
+        let remote = self.remote()?;
+        match (self, remote) {
+            (Self::TaskSave { .. }, Some(remote)) => {
+                let answer = save(&remote.machine, remote.sender, &remote.change)?;
+                Ok(WriteResult::TaskSave(Box::new(serde_json::from_value(
+                    answer.result,
+                )?)))
+            }
+            (_, remote) => self.execute(remote, None),
+        }
+    }
+
+    /// The Machine a Task or Session write goes to when its Work runs
+    /// elsewhere, with the write naming that Work exactly. `None` runs it here.
+    /// A steer handles its carrier fallback inside `steer_task` instead.
     fn remote(&self) -> anyhow::Result<Option<Remote>> {
         use loopflow_execution::machine::task::{remote_ownership_writer, remote_task};
         let (route, launching) = match self {
-            Self::SessionResume { .. } => return self.remote_session(),
+            Self::SessionResume { .. } | Self::SessionNew { .. } => return self.remote_session(),
             Self::TaskRun { issue, .. } | Self::TaskAutoOn { issue, .. } => {
-                (remote_task(issue)?, true)
+                (remote_task(issue, None)?, true)
             }
-            Self::TaskAutoOff { issue, .. } => (remote_task(issue)?, false),
+            Self::TaskSave {
+                issue, directory, ..
+            } => (remote_task(issue, Some(directory))?, false),
+            Self::TaskAutoOff { issue, .. } => (remote_task(issue, None)?, false),
             Self::TaskClaim { issue, .. } | Self::TaskUnassign { issue, .. } => {
-                (remote_ownership_writer(issue)?, false)
+                (remote_ownership_writer(issue, None)?, false)
             }
             _ => return Ok(None),
         };
@@ -1207,7 +1239,9 @@ impl Write {
             _ => None,
         };
         let mut write = self.clone();
-        if let Self::TaskRun { issue, .. }
+        if let Self::TaskSave { issue, .. } = &mut write {
+            *issue = route.peer_selector;
+        } else if let Self::TaskRun { issue, .. }
         | Self::TaskAutoOn { issue, .. }
         | Self::TaskAutoOff { issue, .. }
         | Self::TaskClaim { issue, .. }
@@ -1222,29 +1256,43 @@ impl Write {
         Remote::new(machine, route.repository_id, write, launching, source).map(Some)
     }
 
-    /// A resume of a conversation that lives on another Machine, carrying the
-    /// Task and Wave this host resolved.
+    /// A conversation that lives on another Machine, prepared there. A named
+    /// Task decides the Machine, wherever its Session last moved; otherwise
+    /// `lf` routes the spelling as it would from a terminal.
     fn remote_session(&self) -> anyhow::Result<Option<Remote>> {
-        let Self::SessionResume {
-            directory,
-            id,
-            task,
-            wave,
-            agent,
-        } = self
-        else {
-            return Ok(None);
+        let (directory, task) = match self {
+            Self::SessionResume {
+                directory, task, ..
+            }
+            | Self::SessionNew {
+                directory, task, ..
+            } => (directory, task),
+            _ => return Ok(None),
         };
-        let (cli, args) = self.session_spelling()?;
-        let Some(forward) = super::work_route::forward(&cli, &args, directory)? else {
-            return Ok(None);
+        let (machine, route, wave, repository) = match task {
+            Some(task) => {
+                let Some(route) =
+                    loopflow_execution::machine::task::remote_task(task, Some(directory))?
+                else {
+                    return Ok(None);
+                };
+                (route.machine_id.clone(), Some(route), None, None)
+            }
+            None => {
+                let (cli, args) = self.session_spelling()?;
+                let Some(forward) = super::work_route::forward(&cli, &args, directory)? else {
+                    return Ok(None);
+                };
+                (
+                    forward.machine,
+                    forward.route,
+                    forward.wave,
+                    forward.repository,
+                )
+            }
         };
-        let machine = find_machine(forward.machine.as_str())?;
-        let repository = match forward.repository.clone().or(forward
-            .route
-            .as_ref()
-            .map(|route| route.repository_id.clone()))
-        {
+        let machine = find_machine(machine.as_str())?;
+        let repository = match repository.or(route.as_ref().map(|route| route.repository_id.clone())) {
             Some(repository) => repository,
             None => loopflow_execution::machine::task::current_repository(directory)?
                 .ok_or_else(|| {
@@ -1254,17 +1302,18 @@ impl Write {
                     )
                 })?,
         };
-        let write = Self::SessionResume {
-            directory: directory.clone(),
-            id: id.clone(),
-            task: match (&forward.route, id) {
-                (Some(route), None) => Some(route.task_id.to_string()),
-                _ => task.clone(),
-            },
-            wave: wave.clone().or(forward.wave),
-            agent: agent.clone(),
-        };
-        Remote::new(machine, repository, write, false, None).map(Some)
+        let mut write = self.clone();
+        if let (Self::SessionResume { task, .. } | Self::SessionNew { task, .. }, Some(route)) =
+            (&mut write, &route)
+        {
+            *task = Some(route.peer_selector.clone());
+        }
+        if let Self::SessionResume { wave: resumed, .. } = &mut write {
+            *resumed = resumed.take().or(wave);
+        }
+        let mut remote = Remote::new(machine, repository, write, false, None)?;
+        remote.route = route;
+        Ok(Some(remote))
     }
 
     /// `session.resume` / `session.new`: the conversation prepared where it
@@ -1282,11 +1331,10 @@ impl Write {
             loopflow_execution::ops::session_move::move_session(
                 id,
                 remote.machine.id.as_str(),
-                false,
                 run_task,
             )?;
         }
-        super::ssh::prepared_remotely(remote.call()?, &remote.machine, false)
+        super::ssh::prepared_remotely(remote.call()?, &remote.machine, remote.route.as_ref())
     }
 
     /// The Session preparation as `lf` spells it. Its local preparation still
@@ -1376,6 +1424,8 @@ pub(super) struct Remote {
     machine: loopflow_model::durable::Machine,
     change: Write,
     sender: Sender,
+    /// The Task this Machine routed the change for, as it knows it.
+    route: Option<loopflow_execution::durable::TaskExecutionRoute>,
 }
 
 impl Remote {
@@ -1389,10 +1439,15 @@ impl Remote {
         launching: bool,
         source: Option<loopflow_execution::ops::task::remote::TaskSource>,
     ) -> anyhow::Result<Self> {
-        let selection = Selection::capture(change.directory(), source)?;
+        // What this Machine runs with comes from its own checkout of the
+        // repository, as `read::peer_of` captures it: a client may name the
+        // owner's checkout path, which does not exist here.
+        let local = super::work_route::repository_path(&repository)
+            .unwrap_or_else(|_| change.directory().to_path_buf());
+        let selection = Selection::capture(&local, source)?;
         let secrets = match launching {
             true => {
-                let mut forwarded = loopflow_execution::machine::forward::read(change.directory())?;
+                let mut forwarded = loopflow_execution::machine::forward::read(&local)?;
                 let mut secrets = forwarded.take_secrets();
                 // Sign-in advice a launch there prints names it as this Machine does.
                 secrets.carry_launcher_name(machine.name());
@@ -1413,19 +1468,23 @@ impl Remote {
                 selection,
                 secrets,
             },
+            route: None,
         })
     }
 
     /// The answer of the destination's server; nothing runs here instead.
     pub(super) fn call<T: DeserializeOwned>(&self) -> anyhow::Result<T> {
-        let mut connection = loopflow_execution::machine::client::Connection::open_on(
-            &self.machine,
-            self.sender.clone(),
-            None,
-        )?;
-        let answer =
-            connection.request(crate::server::wire::Operation::Write(self.change.clone()))?;
+        let answer = Self::request(&self.machine, self.sender.clone(), &self.change)?;
         Ok(serde_json::from_value(answer.result)?)
+    }
+
+    fn request(
+        machine: &loopflow_model::durable::Machine,
+        sender: Sender,
+        change: &Write,
+    ) -> anyhow::Result<loopflow_execution::machine::client::Response> {
+        loopflow_execution::machine::client::Connection::open_on(machine, sender, None)?
+            .request(change)
     }
 }
 
@@ -1606,7 +1665,7 @@ mod tests {
             r#"{"kind":"task.auto.off","directory":"/r","issue":"FIX-1","reason":null}"#,
             r#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#,
             r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#,
-            r#"{"kind":"session.new","directory":"/r","request_id":"new-thread","id":"session_1","agent":"codex"}"#,
+            r#"{"kind":"session.new","directory":"/r","request_id":"new-thread","id":"session_1","task":"FIX-1","agent":"codex"}"#,
             r#"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#,
             r#"{"kind":"task.run","directory":"/r","issue":"FIX-1","graph":null,"from":"implement","agent":"claude","approve":false}"#,
             r#"{"kind":"task.auto.on","directory":"/r","issue":"FIX-1"}"#,
@@ -1614,7 +1673,7 @@ mod tests {
             r#"{"kind":"task.report","directory":"/r","issue":"FIX-1","message":"landed"}"#,
             r#"{"kind":"task.interrupt","directory":"/r","issue":"FIX-1"}"#,
             r#"{"kind":"session.steer","directory":"/r","session":null,"wave":"product","message":"ship by Friday"}"#,
-            r#"{"kind":"wave.plan.bind","directory":"/r","wave":"product","project":"3f1c"}"#,
+            r#"{"kind":"wave.plan.bind","replace":false,"directory":"/r","wave":"product","project":"3f1c"}"#,
             r#"{"kind":"wave.plan.connect","directory":"/r","wave":null,"all":true,"team_key":null,"team_name":null}"#,
             r#"{"kind":"wave.plan.reteam","directory":"/r","apply":false}"#,
             r#"{"kind":"repo.release","directory":"/r","version":"minor","target":null}"#,

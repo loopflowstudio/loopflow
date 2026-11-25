@@ -14,8 +14,10 @@ mobile`. Its server already answers with the same executable, so no launchd
 job is registered; the listener takes another port on the same tailnet name,
 and `lf server mobile --status` in that home prints the endpoint to type.
 Machine settings for the phone to read (`theme:`) go in `$LF_HOME/config.yaml`;
-New Task's portfolio is `$HOME/src`. "Forget Machine" in the Machine menu
-unpairs; the pairing survives `simctl uninstall`.
+the default portfolio discovers repositories under `$HOME/src`. A private
+repository outside it appears in the feed after `lf desktop portfolio manual`
+and `lf desktop portfolio add <repo>` on the private Machine. "Forget Machine"
+in the Machine menu unpairs; the pairing survives `simctl uninstall`.
 
 ```sh
 brew install cameroncooke/axe/axe          # taps, typing, swipes and the accessibility tree, headless
@@ -28,8 +30,9 @@ xcrun simctl install $U swift/.build/ios/Build/Products/Debug-iphonesimulator/Lo
 xcrun simctl launch $U com.loopflow.ios.dev
 ```
 
-Run `xcodebuild` with `LF_*` unset. `scripts/test_ios.py` generates the
-project; run it once first in a fresh checkout. No Simulator window is needed.
+Run `xcodebuild` with `LF_*` unset. Run
+`xcodegen generate --spec swift/ios.yml` before building. A project generated
+before a sync can miss Swift files added on main. No Simulator window is needed.
 
 Drive it with `axe … --udid $U`: `describe-ui` (JSON tree with labels,
 identifiers and frames in points), `tap --label` / `--id` / `-x -y`, `type`,

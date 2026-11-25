@@ -12,8 +12,10 @@ enum SessionProgramStatus {
         if let unavailable { self = .unavailable(unavailable); return }
         // Preserve report identity: different terminals can use the same record id.
         let ordered = sessions.sorted(by: Self.precedes)
-        let reports = ordered.compactMap { session in
-            session.programStatus?.summary.map { (session, $0) }
+        let reports = ordered.compactMap { session -> (SessionRecord, ProgramStatusReport)? in
+            guard let report = session.programStatus?.summary,
+                  report.state != .done || session.availability == .available else { return nil }
+            return (session, report)
         }
         for state in ProgramStatusState.summaryOrder {
             if let (session, report) = reports.first(where: { $0.1.state == state }) {
@@ -52,7 +54,8 @@ enum SessionProgramStatus {
     var row: TaskRowStatus? {
         switch self {
         case .reported(_, let report):
-            .program(report.state, kind: report.kind, progress: report.progress, detail: help, ask: ask)
+            .program(report.state == .done ? .idle : report.state,
+                     kind: report.kind, progress: report.progress, detail: help, ask: ask)
         case .available: .program(.idle, inferred: true, detail: help)
         case .unknown: nil
         case .unavailable: .unread(help)
@@ -107,13 +110,14 @@ struct TaskRowSlotHint: View {
 extension TaskRow where Trailing == TaskRowSlotHint {
     /// The Mac sidebar's row, from what the Work model and its Sessions hold.
     init(id: String, presentation: WorkModel.TaskPresentation, task: RoadmapTask?, status: SessionProgramStatus,
-         auto: Bool = false, selected: Bool = false, muted: Bool = false,
+         graphStep: String? = nil, auto: Bool = false, selected: Bool = false, muted: Bool = false,
          slotHint: String? = nil, showsSlotHint: Bool = false, hover: HoverFlag? = nil) {
+        let context = [graphStep, presentation.context ?? (task == nil ? "Loading planning…" : nil)]
+            .compactMap { $0 }.joined(separator: " · ")
         self.init(id: id, title: presentation.title, identifier: task?.task.identifier ?? presentation.identifier,
                   link: task?.reference.issueUrl,
                   status: task.map { TaskRowStatus(task: $0, status: status) } ?? status.row, auto: auto,
-                  // A row named by its list before planning answers says so.
-                  context: presentation.context ?? (task == nil ? "Loading planning…" : nil),
+                  context: context.isEmpty ? nil : context,
                   selected: selected, muted: muted) {
             TaskRowSlotHint(hint: slotHint, shown: showsSlotHint, hover: hover)
         }

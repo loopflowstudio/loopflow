@@ -106,14 +106,17 @@ impl Error {
         self
     }
 
+    /// The [`Error`] anywhere in `error`'s chain, including one an
+    /// [`OpsError::Refused`](crate::ops::OpsError::Refused) carries.
     fn named(error: &anyhow::Error) -> Option<&Self> {
+        use crate::ops::OpsError;
         error.chain().find_map(|cause| {
-            cause.downcast_ref::<Self>().or_else(|| {
-                let crate::ops::OpsError::Refused(refusal) = cause.downcast_ref()? else {
-                    return None;
-                };
-                Some(refusal)
-            })
+            cause
+                .downcast_ref::<Self>()
+                .or_else(|| match cause.downcast_ref() {
+                    Some(OpsError::Refused(named)) => Some(named),
+                    _ => None,
+                })
         })
     }
 

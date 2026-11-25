@@ -4,7 +4,7 @@ use loopflow::id::WaveId;
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{PlanningLocks, Store, StoreResult};
 use loopflow_storage::planning::TrackerItem;
-use loopflow_storage::planning::TrackerProject;
+use loopflow_storage::planning::{InitiativeProjects, TrackerProject};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -56,7 +56,7 @@ impl SeedLinear for Store {
             self,
             input.wave_id,
             input.initiative,
-            input.snapshot.projects,
+            InitiativeProjects::from_inventory(input.snapshot.projects),
             input.snapshot.items,
             input.synced_at,
             locks,
@@ -100,7 +100,7 @@ impl SeedLinearSqlite for SqliteStore {
             self,
             &input.wave_id,
             &input.initiative,
-            &input.snapshot.projects,
+            &InitiativeProjects::from_inventory(input.snapshot.projects.clone()),
             &input.snapshot.items,
             input.synced_at,
         )

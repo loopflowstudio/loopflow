@@ -903,7 +903,6 @@ pub struct TaskListArgs {
 pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
-        loopflow_execution::ops::plan_carriers::before_first_read(repo).await;
         let store = loopflow_execution::store::read_existing_registry()?.map(std::sync::Arc::new);
         let tasks = match &store {
             Some(store) => open_tasks(store, repo, query).await?,
@@ -980,7 +979,7 @@ fn peer_status(repo: &Path, task: &Task) -> super::read::Read {
     }
 }
 
-fn owner_detail(peer: &TaskPeer, repo: &Path, task: &Task) -> Result<TaskDetail> {
+pub(super) fn owner_detail(peer: &TaskPeer, repo: &Path, task: &Task) -> Result<TaskDetail> {
     let mut connection = peer.connect(repo, task, Some(TaskPeer::deadline()))?;
     let answer = connection.request(crate::server::wire::Operation::Read(peer_status(
         repo, task,
@@ -2127,11 +2126,17 @@ async fn snapshot_tasks(
     {
         orders.insert(repository.as_str(), shared.selections(store, repository)?);
     }
+    let starts = store.sqlite.task_start_times(
+        details
+            .iter()
+            .filter(|task| task.section == TaskSection::Working)
+            .map(|task| task.task.id.as_str()),
+    )?;
     details.sort_by_cached_key(|task| {
         orders[task.task.repository_id.as_str()].order.key(
-            task.task.project_id.as_deref(),
-            task.task.rank,
             &task.task.id,
+            task.task.rank,
+            starts.get(&task.task.id).copied(),
         )
     });
     unavailable_tasks.sort_by(|left, right| {
@@ -2358,6 +2363,19 @@ async fn snapshot_task_detail(
     let ownership = facts.ownership.get(&task.id);
     let owner = ownership.and_then(|ownership| ownership.owner.clone());
     let runs_on = ownership.and_then(|ownership| ownership.runs_on(&shared.local_machine));
+    // A Task another Machine runs has no checkout here; one left from before
+    // it moved is history, never its workspace or its progress.
+    let moved;
+    let task = match &runs_on {
+        Some(_) => {
+            moved = Task {
+                worktree: None,
+                ..task.clone()
+            };
+            &moved
+        }
+        None => task,
+    };
     let wave = task
         .wave_id
         .as_ref()
@@ -2371,14 +2389,13 @@ async fn snapshot_task_detail(
         task.worktree.as_deref().unwrap_or(repo),
         repo,
         wave,
-        None,
     )
     .ok()
     .map(|agent| agent.harness.as_str().to_owned());
     let runtime = snapshot_task_runtime(&execution, task, status, pending, owner, provider);
     let reference = task_reference(
         facts.issue_urls.get(&task.id).cloned(),
-        Some(task),
+        task,
         &shared.machines,
         &shared.local_machine,
     );
@@ -2815,15 +2832,14 @@ fn derive_task_condition(
     }
 }
 
-/// A Task's workspace is its checkout on this Machine, if it has one.
+/// A checkout left here after a move is absent from the Task's workspace.
 fn task_reference(
     issue_url: Option<String>,
-    task: Option<&Task>,
+    task: &Task,
     machines: &[loopflow_model::durable::Machine],
     local_machine: &loopflow_model::durable::MachineId,
 ) -> TaskReferenceSnapshot {
-    let workspace = task.and_then(|task| {
-        let task_worktree = task.worktree.as_ref()?;
+    let workspace = task.worktree.as_ref().map(|task_worktree| {
         let branch = Some(task.branch.clone());
         // A removed checkout has no root to resolve.
         let worktree = if loopflow_execution::observe::is_dir(task_worktree) {
@@ -2834,7 +2850,7 @@ fn task_reference(
         } else {
             task_worktree.clone()
         };
-        Some(TaskWorktreeSnapshot {
+        TaskWorktreeSnapshot {
             machine_label: machines
                 .iter()
                 .find(|machine| &machine.id == local_machine)
@@ -2845,7 +2861,7 @@ fn task_reference(
             base_commit: task.base_commit.clone(),
             worktree: worktree.display().to_string(),
             local_exists: loopflow_execution::observe::try_exists(&worktree).ok(),
-        })
+        }
     });
     TaskReferenceSnapshot {
         issue_url,
@@ -3687,7 +3703,9 @@ mod tests {
 
     #[tokio::test]
     async fn task_concepts_share_lifecycle_activity_membership_and_order() {
-        use loopflow_model::durable::{RepositoryId, TaskId};
+        use loopflow_execution::store::selections;
+        use loopflow_model::durable::RepositoryId;
+        use loopflow_model::program_status::{Records, Report, State};
         use loopflow_storage::work::selection::{Selection, SelectionState};
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("registry.db");
@@ -3799,13 +3817,6 @@ mod tests {
             [other],
         )
         .unwrap();
-        store
-            .sqlite
-            .reorder_task(
-                &TaskId::parse(active).unwrap(),
-                &TaskId::parse(other).unwrap(),
-            )
-            .unwrap();
         let attachment = attachment::claim_session_attachment(
             &store.sqlite,
             "bound",
@@ -3828,7 +3839,7 @@ mod tests {
             .sqlite
             .begin_program_status("bound", Some(&attachment.agent_process_id), "concepts")
             .unwrap();
-        let report = |state| loopflow_model::program_status::Report {
+        let report = |state| Report {
             state,
             id: Some(format!("{state:?}").to_lowercase()),
             kind: None,
@@ -3837,29 +3848,85 @@ mod tests {
             title: None,
             msg: None,
         };
-        store
-            .sqlite
-            .record_program_status(
-                "bound",
-                Some(&attachment.agent_process_id),
-                "concepts",
-                1,
-                &loopflow_model::program_status::Records {
-                    seen: true,
-                    records: vec![
-                        report(loopflow_model::program_status::State::Done),
-                        report(loopflow_model::program_status::State::Working),
-                    ],
-                },
+        let report_states = |sequence, states: &[State]| {
+            store
+                .sqlite
+                .record_program_status(
+                    "bound",
+                    Some(&attachment.agent_process_id),
+                    "concepts",
+                    sequence,
+                    &Records {
+                        seen: true,
+                        records: states.iter().copied().map(report).collect(),
+                    },
+                )
+                .unwrap();
+        };
+        let check_order = |frame: &serde_json::Value, expected: [&str; 2]| {
+            let working: Vec<_> = frame["tasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|task| task["section"] == "working")
+                .map(|task| task["task"]["id"].as_str().unwrap())
+                .collect();
+            assert_eq!(working, expected, "roadmap {}", frame["name"]);
+            let plans = selections::selection_plans(&store.sqlite, &repo).unwrap();
+            for id in [
+                "repository-default",
+                "wave-default:11111111-1111-1111-1111-111111111111",
+            ] {
+                let plan = plans.iter().find(|p| p.selection.id.0 == id).unwrap();
+                assert_eq!(plan.resolution.task_ids(), expected, "{id}");
+            }
+            let phone = selections::all_view_plans(
+                &store.sqlite,
+                Some("kind:task state:working"),
+                &["/repo".into()],
             )
             .unwrap();
+            assert_eq!(phone.len(), 1);
+            assert_eq!(phone[0].resolution.task_ids(), expected);
+        };
+        let check_filters = |available: &[&str], busy: &[&str]| {
+            for (query, expected) in [("state:available", available), ("state:busy", busy)] {
+                let plan = selections::view_plan(&store.sqlite, &repo, Some(query)).unwrap();
+                assert_eq!(plan.resolution.task_ids(), expected, "{query}");
+            }
+        };
+
+        report_states(1, &[State::Idle]);
+        let owned_available = read(&store, "owned_available").await;
+        check_order(&owned_available, [other, active]);
+        check_filters(&[active], &[]);
+
+        report_states(2, &[State::Done, State::Working]);
         let owned_working = read(&store, "owned_working").await;
+        check_order(&owned_working, [other, active]);
+        check_filters(&[], &[active]);
+
+        report_states(3, &[State::Idle]);
+        check_order(&read(&store, "hand_back").await, [other, active]);
+        check_filters(&[active], &[]);
+
+        store
+            .sqlite
+            .reorder_working_task(&repo, active, other, None)
+            .unwrap();
+        check_order(&read(&store, "after_drag").await, [active, other]);
+        report_states(4, &[State::Done, State::Working]);
         db.execute_batch(include_str!(
             "../../../tests/fixtures/task_concepts_unassigned.sql"
         ))
         .unwrap();
         let working = read(&store, "unassigned_working").await;
-        let task = &working["tasks"][0];
+        let task = working["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["task"]["id"] == active)
+            .unwrap();
         assert_eq!(task["task"]["id"], active);
         assert_eq!(task["lifecycle"], "active");
         assert_eq!(task["section"], "backlog");
@@ -3881,22 +3948,7 @@ mod tests {
         );
         db.execute("INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,writer_machine_id,written_here)
             VALUES('own_55555555555555555555555555555555',?1,'recorded',NULL,NULL,3,3000,(SELECT id FROM machines WHERE is_local=1),1)", [active]).unwrap();
-        store
-            .sqlite
-            .record_program_status(
-                "bound",
-                Some(&attachment.agent_process_id),
-                "concepts",
-                2,
-                &loopflow_model::program_status::Records {
-                    seen: true,
-                    records: vec![
-                        report(loopflow_model::program_status::State::Blocked),
-                        report(loopflow_model::program_status::State::Working),
-                    ],
-                },
-            )
-            .unwrap();
+        report_states(5, &[State::Blocked, State::Working]);
         let available = read(&store, "reclaimed_available_and_busy").await;
         let states: std::collections::BTreeSet<SelectionState> =
             serde_json::from_value(available["tasks"][0]["selection_states"].clone()).unwrap();
@@ -3914,7 +3966,23 @@ mod tests {
                 [active]
             );
         }
-        let fixture = serde_json::json!([initial, owned_working, working, available]);
+        report_states(6, &[State::Working]);
+        check_order(&read(&store, "busy_after_drag").await, [active, other]);
+        report_states(7, &[State::Done]);
+        check_filters(&[active], &[]);
+        report_states(8, &[State::Working, State::Idle]);
+        check_filters(&[active], &[active]);
+        report_states(9, &[State::Working, State::Error]);
+        check_filters(&[], &[active]);
+        let errors = selections::view_plan(&store.sqlite, &repo, Some("state:error")).unwrap();
+        assert_eq!(errors.resolution.task_ids(), [active]);
+        assert!(errors
+            .resolution
+            .attention
+            .contains(&errors.resolution.members[0].work));
+        report_states(10, &[State::Blocked, State::Working]);
+        let fixture =
+            serde_json::json!([initial, owned_available, owned_working, working, available]);
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../tests/fixtures/dto/task_concepts.json");
         if std::env::var_os("UPDATE_TASK_CONCEPT_FIXTURE").is_some() {
@@ -4025,6 +4093,31 @@ mod tests {
         );
         assert_eq!(workspace.worktree, "/local/checkout");
         assert_eq!(workspace.local_exists, Some(false));
+        assert_ne!(
+            detail.condition.local_progress.state,
+            super::LocalProgressEvidenceState::NotApplicable
+        );
+
+        db.execute(
+            "INSERT INTO task_ownership(id,task_id,kind,machine_id,at,ordered_at,writer_machine_id,written_here)
+             VALUES('own_55555555555555555555555555555555',?1,'claim',?2,1,1000,?2,0)",
+            [task.id.as_str(), peer.as_str()],
+        )
+        .unwrap();
+        let reads = super::DetailReads::read(&store, &[&task], &shared).unwrap();
+        let detail = super::snapshot_task_detail(&store, &task, false, &reads)
+            .await
+            .unwrap();
+        assert_eq!(
+            detail.runtime.unwrap().owner.unwrap().machine.id,
+            Some(peer)
+        );
+        assert!(detail.reference.workspace.is_none());
+        // The checkout left here is not the Task's progress either.
+        assert_eq!(
+            detail.condition.local_progress.state,
+            super::LocalProgressEvidenceState::NotApplicable
+        );
     }
 
     #[tokio::test]
@@ -4346,14 +4439,7 @@ mod tests {
                 "initiative_ids":["initiative"], "team_ids":["team"]
             }], "items":[]})).unwrap(),
         }, None).await.unwrap();
-        loopflow_storage::sqlite::project_selection::write_project_binding(
-            &store.sqlite,
-            wave.id(),
-            None,
-            "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3",
-            &loopflow_execution::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
-        )
-        .unwrap();
+        // The Initiative's sole In Progress Project binds when its inventory arrives.
         let super::Evidence::Ok { items, .. } = super::project_planning(&store, &wave).await else {
             panic!("Project plan unavailable");
         };

@@ -3,13 +3,14 @@ extends: builtin
 ---
 ## In this repository
 
-**Read the history of the code before patching it.** When the brief asks to
-fix or tune a subsystem, find its earlier Tasks and PRs (`git log` on its
-files, the Tasks they name). If it was built for a model the repository has
-since replaced, such as plan sync written before Machines owned their work,
-or this would be its third patch, plan its redesign instead and say so in
-the plan.
+**Read the code's history before patching it.** Find the subsystem's earlier
+Tasks and PRs (`git log` on its files). If it was built for a replaced model,
+or this would be its third patch, plan a redesign instead and say so.
 
-**A replacement keeps everything the old one gave people.** When the plan
-swaps an engine, list what the old code covered (languages, formats, cases)
-and keep each one. Trim nothing people would notice losing.
+**Check every sibling variant.** A fix framed from one provider, harness,
+tracker or host shares code with its siblings (Daytona beside Modal, Asana
+beside Linear, every harness). Check each variant for differing assumptions
+and cover it or note why it doesn't apply.
+
+**A replacement keeps what the old code covered.** When swapping an engine,
+list its languages, formats and cases and keep each one.

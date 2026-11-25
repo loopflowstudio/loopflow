@@ -35,3 +35,10 @@ def test_a_member_the_contract_dropped_is_no_longer_listed():
     files = FILES | {"drop_pools.sql": b"-- expand: stop_hue\nDROP TABLE pools;\n"}
     removals = due_removals.removals(files, {"stop_hue.sql": MERGED})
     assert [r.task for r in removals] == ["LOO-1"]
+
+
+def test_a_kept_member_is_no_longer_listed():
+    files = FILES | {"keep_pools.sql": b"-- keeping: pools LOO-3\n"}
+    added = {"stop_hue.sql": MERGED, "keep_pools.sql": MERGED}
+    removals = due_removals.removals(files, added)
+    assert [(r.task, r.members) for r in removals] == [("LOO-1", ["waves.hue"])]

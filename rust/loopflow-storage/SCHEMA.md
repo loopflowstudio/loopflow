@@ -120,6 +120,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `machine_records`: origin_machine_id, kind, key, row, observed_at
 - `pool_machines`: machine_id, pool, cost_usd, expires_at
 - `rentals`: id, ondemand, provider, provider_name, provider_id, machine_id, by_hand, hardware, usd_per_hour, cap_usd, deadline, state, created_at, ended_at, cost_usd
+- `session_export_changes`: position, session_id
 
 ## LfProcess
 
@@ -182,7 +183,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 
 - `dashboard_arrangements`: repository_id, dashboard_id, expression_key, selection_json, arrangement_json
 - `dashboards`: repository_id, id, revision, expression_key, name, pinned, slots_json
-- `task_orders` — **leaving → LOO-877, task_facts_once**: repository_id, task_ids_json
+- `task_orders`: repository_id, task_ids_json
 
 ## Desktop shell
 

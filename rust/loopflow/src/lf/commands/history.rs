@@ -34,6 +34,9 @@ pub struct HistoryFeed {
 /// `session.usage`: provider-authored usage from recorded Session inputs.
 #[derive(Debug, clap::Args)]
 pub struct UsageArgs {
+    /// All recorded turn usage for one local or copied Session, with its origin
+    #[arg(long, conflicts_with_all = ["days","weekly","binds","parent","wave","project","task","context"])]
+    pub session: Option<String>,
     /// Emit Session usage evidence as JSON
     #[arg(long)]
     pub json: bool,
@@ -122,9 +125,11 @@ pub enum HistoryCommand {
         /// Captured input identity or an unambiguous displayed prefix
         run: String,
     },
-    /// Write this Machine's Sessions and captures as JSON lines, for the
-    /// Machine that copies them before giving this one back
+    /// Export Session history, transcripts, usage and captures as JSON lines
     Export {
+        /// Resume at the checkpoint from an earlier export
+        #[arg(long)]
+        after: Option<String>,
         /// Relative window (7d, 24h, 30m) or RFC3339 start
         #[arg(long)]
         since: String,
@@ -143,7 +148,7 @@ impl HistoryCommand {
     }
 }
 
-fn export(since: &str) -> anyhow::Result<()> {
+fn export(since: &str, after: Option<&str>) -> anyhow::Result<()> {
     let since = loopflow_execution::output::parse_since(since, time::OffsetDateTime::now_utc())?;
     let runtime = tokio::runtime::Runtime::new()?;
     let store = runtime.block_on(open_store(&storage_config_from_env()?))?;
@@ -153,6 +158,7 @@ fn export(since: &str) -> anyhow::Result<()> {
         &store.sqlite,
         &loopflow_execution::store::lf_home_dir(),
         since.unix_timestamp(),
+        after.map(serde_json::from_str).transpose()?,
         &mut out,
     )?;
     std::io::Write::flush(&mut out)?;
@@ -162,6 +168,11 @@ fn export(since: &str) -> anyhow::Result<()> {
 /// `lf session usage`.
 pub fn usage(args: &UsageArgs) -> anyhow::Result<()> {
     match args {
+        UsageArgs {
+            session: Some(session),
+            json,
+            ..
+        } => super::usage::session(session, *json),
         UsageArgs {
             json, binds: true, ..
         } => super::bind_attribution::run(*json),
@@ -187,6 +198,7 @@ pub fn usage(args: &UsageArgs) -> anyhow::Result<()> {
             wave,
             project,
             task,
+            session: None,
             weekly: false,
             binds: false,
             context,
@@ -206,7 +218,7 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
     match command {
         HistoryCommand::Replay { run } => super::replay::run(run),
         HistoryCommand::Linear { since, json } => super::linear_requests::run(since, *json),
-        HistoryCommand::Export { since } => export(since),
+        HistoryCommand::Export { since, after } => export(since, after.as_deref()),
         HistoryCommand::Search {
             text,
             since,
@@ -260,15 +272,9 @@ pub(crate) fn render(
     input: Option<&str>,
     view: SessionView,
 ) -> anyhow::Result<String> {
-    let copied = tokio::runtime::Runtime::new()?.block_on(async {
-        let store = open_store(&storage_config_from_env()?).await?;
-        if store.session(id).await?.is_none() {
-            // A Session copied from a given-back Machine, when nothing here is it.
-            let copied = loopflow_execution::store::machines::copied_history(&store.sqlite, id)?;
-            return Ok(Some(
-                copied.with_context(|| format!("Session {id} was not found"))?,
-            ));
-        }
+    let runtime = tokio::runtime::Runtime::new()?;
+    let store = runtime.block_on(open_store(&storage_config_from_env()?))?;
+    if runtime.block_on(store.session(id))?.is_some() {
         if let Some(input) = input {
             let captured =
                 loopflow_execution::store::sessions::input_history(&store.sqlite, input)?;
@@ -277,23 +283,40 @@ pub(crate) fn render(
                 "Input does not belong to Session {id}"
             );
         }
-        Ok::<_, anyhow::Error>(None)
-    })?;
-    match copied {
-        Some(copied) => {
-            anyhow::ensure!(
-                !json && input.is_none() && view == SessionView::Summary,
-                "Session {id} is a copy from {}; it reads as text",
-                copied.session.origin_name()
-            );
-            Ok(format!(
-                "{}\n",
-                loopflow_execution::machine_records::render(
-                    &copied,
-                    &loopflow_execution::store::lf_home_dir()
-                )
-            ))
+        return super::session_history::render(input.unwrap_or(id), view, json);
+    }
+    let copied = loopflow_execution::store::machines::copied_history(&store.sqlite, id)?
+        .with_context(|| format!("Session {id} was not found"))?;
+    let origin = copied.session.origin_name();
+    match (view, input) {
+        (SessionView::Final, _) => anyhow::bail!(
+            "The copy of {id} from {origin} keeps no final answer here; `--transcript` shows how it ended"
+        ),
+        (SessionView::Transcript, _) => {
+            super::history_transcript::copied(&store.sqlite, &copied, json)
         }
-        None => super::session_history::render(input.unwrap_or(id), view, json),
+        (SessionView::Summary, None) if json => {
+            Ok(format!("{}\n", serde_json::to_string(&copied)?))
+        }
+        (SessionView::Summary, None) => Ok(format!(
+            "{}\n",
+            loopflow_execution::machine_records::render(
+                &copied,
+                &loopflow_execution::store::lf_home_dir()
+            )
+        )),
+        // An input's own views read its copied capture.
+        (SessionView::Summary | SessionView::Context | SessionView::Instructions, input) => {
+            let mut captures = copied
+                .events
+                .iter()
+                .filter_map(|event| event.artifact_key.as_deref())
+                .filter(|key| input.is_none_or(|input| key.starts_with(input)));
+            let key = captures.next_back().with_context(|| match input {
+                Some(_) => format!("Input does not belong to Session {id}"),
+                None => format!("The copy of {id} from {origin} recorded no input"),
+            })?;
+            super::session_history::render(key, view, json)
+        }
     }
 }

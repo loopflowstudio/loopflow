@@ -6,7 +6,6 @@ use std::time::Instant;
 
 use anyhow::{anyhow, Context, Result};
 
-use crate::engine::{Error, ErrorCode};
 use crate::machine::client::Connection;
 use crate::machine::wire::{PlanApplied, PlanChanges, Secrets, Selection, Sender, ServerOperation};
 use loopflow_model::durable::{Machine, RepositoryId};
@@ -147,11 +146,7 @@ fn open(
         },
         secrets: Secrets::default(),
     };
-    let connection = Connection::open_on(hub, sender, until)?;
-    if connection.welcome().server_revision < crate::machine::wire::PLAN_REVISION {
-        return Err(Error::new(ErrorCode::Incompatible, crate::machine::ssh::outdated(hub)).into());
-    }
-    Ok(connection)
+    Connection::open_on(hub, sender, until)
 }
 
 fn request<T: serde::de::DeserializeOwned>(

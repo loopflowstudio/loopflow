@@ -23,13 +23,13 @@ type ClientMessage = super::wire::ClientMessage;
 /// How long the server has to answer `status`, `hello`, `session.attach` or
 /// a ticket. A session's later waits are unbounded unless the caller sets its
 /// own limit.
-const HANDSHAKE: Duration = Duration::from_secs(10);
+pub const HANDSHAKE: Duration = Duration::from_secs(10);
 /// How long another Machine's server has to answer a request over SSH. A
 /// subscription's quiet stream is not bounded.
-const ANSWER: Duration = Duration::from_secs(120);
+pub const ANSWER: Duration = Duration::from_secs(120);
 
 /// `lf server status`: readiness observed without opening Work.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct Status {
     pub socket: PathBuf,
     pub ready: bool,
@@ -102,7 +102,9 @@ fn resets(error: &anyhow::Error) -> bool {
         .is_some_and(|error| {
             matches!(
                 error.kind(),
-                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::BrokenPipe
+                std::io::ErrorKind::UnexpectedEof
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::BrokenPipe
             )
         })
 }
@@ -117,30 +119,52 @@ pub struct Response {
     pub result: serde_json::Value,
 }
 
+/// A peer's answer can be a refusal on a healthy connection. Losing the
+/// connection before an answer is a separate decision for a caller that retries.
+#[derive(Debug, thiserror::Error)]
+pub enum RequestError {
+    #[error(transparent)]
+    Refused(Error),
+    #[error(transparent)]
+    Disconnected(anyhow::Error),
+    #[error(transparent)]
+    Failed(anyhow::Error),
+}
+
+impl RequestError {
+    pub fn into_error(self) -> anyhow::Error {
+        match self {
+            Self::Refused(error) => error.into(),
+            Self::Disconnected(error) | Self::Failed(error) => error,
+        }
+    }
+}
+
+impl From<anyhow::Error> for RequestError {
+    fn from(error: anyhow::Error) -> Self {
+        if resets(&error) {
+            Self::Disconnected(error)
+        } else {
+            Self::Failed(error)
+        }
+    }
+}
+
 /// What carries a connection's bytes to a server.
 #[derive(Debug, Clone)]
 enum Carrier {
     /// This Machine's server, at its socket.
     Socket(PathBuf),
-    /// Another Machine's server, through `lf server connect` there, which
-    /// runs every request with what `sender` says this `lf` runs with.
-    Ssh(Machine, Box<Sender>),
+    /// Another Machine's server through its SSH entry.
+    Ssh(Machine),
 }
 
 impl Carrier {
-    /// What each request says of the `lf` that sent it; null on this Machine.
-    fn sender(&self) -> Option<Sender> {
-        match self {
-            Self::Socket(_) => None,
-            Self::Ssh(_, sender) => Some(Sender::clone(sender)),
-        }
-    }
-
     /// A fresh connection that reads at most `capacity` bytes ahead.
     fn open(&self, capacity: usize) -> Result<Socket> {
         match self {
             Self::Socket(path) => Socket::local(connect(path)?, capacity),
-            Self::Ssh(machine, _) => {
+            Self::Ssh(machine) => {
                 let (pipe, output, input) = super::ssh::Pipe::open(machine)?;
                 let output = Timed::new(output);
                 Ok(Socket {
@@ -163,11 +187,32 @@ pub struct Connection {
     pending: VecDeque<ServerMessage>,
     /// Where ticketed connections for bulk messages open.
     carrier: Carrier,
+    /// CLI connections may use the same sender for their lifetime.
+    sender: Option<Sender>,
     /// When the caller stops waiting for another Machine's answers.
     until: Option<Instant>,
 }
 
 impl Connection {
+    /// A ticket for a running Session, addressed by Task or Machine when
+    /// its record lives on a peer.
+    pub fn session_ticket(
+        &mut self,
+        session: &LfSessionId,
+        terminal_id: Option<loopflow_model::id::TerminalId>,
+        task: Option<&str>,
+        machine: Option<&loopflow_model::durable::MachineId>,
+    ) -> Result<SessionAttached> {
+        let answer = self.query(ServerOperation::SessionAttach {
+            session: session.clone(),
+            terminal_id,
+            task: task.map(str::to_owned),
+            machine: machine.cloned(),
+        })?;
+        serde_json::from_value(answer.result)
+            .context("Loopflow server answered session.attach without a ticket")
+    }
+
     /// The selected Machine's server.
     pub fn open() -> Result<Self> {
         Self::open_at(&super::socket_path()?)
@@ -187,12 +232,19 @@ impl Connection {
     /// With `until`, the welcome and every answer have what is left of it,
     /// and [`ANSWER`] at most.
     pub fn open_on(machine: &Machine, sender: Sender, until: Option<Instant>) -> Result<Self> {
+        let mut connection = Self::open_peer(machine, until)?;
+        connection.sender = Some(sender);
+        Ok(connection)
+    }
+
+    /// An SSH connection shared by requests that each name their sender.
+    pub fn open_peer(machine: &Machine, until: Option<Instant>) -> Result<Self> {
         let mut connection = Self::start(
-            Carrier::Ssh(machine.clone(), Box::new(sender)),
+            Carrier::Ssh(machine.clone()),
             identity(super::wire::MACHINE_CLIENT, "lf"),
-            // The entry may start the server first.
-            left(until),
-        )?;
+            left(until).min(HANDSHAKE),
+        )
+        .map_err(|error| unavailable_on(machine, error))?;
         connection.until = until;
         connection.set_read_timeout(None)?;
         Ok(connection)
@@ -217,7 +269,7 @@ impl Connection {
             });
         }
         let answer = socket.receive().map_err(|error| match &carrier {
-            Carrier::Ssh(machine, _) => unanswered(error, machine, within, ErrorCode::Unavailable),
+            Carrier::Ssh(machine) => unanswered(error, machine, within, ErrorCode::Unavailable),
             Carrier::Socket(_) => stalled(error, "welcome the connection", within),
         })?;
         match answer.map(accepted).transpose()? {
@@ -226,6 +278,7 @@ impl Connection {
                 welcome,
                 pending: VecDeque::new(),
                 carrier,
+                sender: None,
                 until: None,
             }),
             Some(ServerMessage::Error {
@@ -257,39 +310,71 @@ impl Connection {
     /// [`Self::request`] or [`Self::reading`]. A request over the control limit
     /// travels on a ticketed connection and is answered here like any other.
     pub fn send(&mut self, operation: impl serde::Serialize) -> Result<String> {
+        self.send_as(operation, self.sender.clone(), None)
+            .map_err(RequestError::into_error)
+    }
+
+    fn send_as(
+        &mut self,
+        operation: impl serde::Serialize,
+        sender: Option<Sender>,
+        request_id: Option<String>,
+    ) -> Result<String, RequestError> {
         let id = uuid::Uuid::new_v4().to_string();
         let line = Socket::line(&ClientMessage::Request {
             id: id.clone(),
-            operation: serde_json::to_value(operation)?,
+            operation: serde_json::to_value(operation).map_err(anyhow::Error::from)?,
             select: None,
-            sender: self.carrier.sender(),
-            request_id: None,
+            sender: sender.clone(),
+            request_id,
         })?;
         if line.len() <= MAX_MESSAGE {
             self.socket.write(&line)?;
         } else {
-            self.upload(line)?;
+            self.upload(line, sender)?;
         }
         Ok(id)
     }
 
-    fn upload(&mut self, line: String) -> Result<()> {
-        anyhow::ensure!(
-            line.len() <= MAX_BULK,
-            "Server request exceeds {MAX_BULK} bytes"
-        );
+    fn upload(&mut self, line: String, sender: Option<Sender>) -> Result<(), RequestError> {
+        if line.len() > MAX_BULK {
+            return Err(RequestError::Failed(anyhow::anyhow!(
+                "Server request exceeds {MAX_BULK} bytes"
+            )));
+        }
         let ticket = self
-            .request(ServerOperation::RequestUpload { bytes: line.len() })?
+            .request_as(
+                ServerOperation::RequestUpload { bytes: line.len() },
+                sender,
+                None,
+                ErrorCode::Unavailable,
+            )?
             .result;
         let ticket = ticket["ticket"]
             .as_str()
             .context("Server did not issue an upload ticket")?;
-        redeem(&self.carrier, ticket)?.write(&line)
+        let mut socket = redeem(&self.carrier, ticket)?;
+        socket.write(&line)?;
+        if matches!(self.carrier, Carrier::Ssh(_)) {
+            // The SSH child may still be forwarding the final bytes in its
+            // stdin pipe. The peer closes the ticket once it has the request.
+            if let Some(message) = socket.receive()? {
+                accepted(message)?;
+                return Err(RequestError::Failed(anyhow::anyhow!(
+                    "Unexpected reply on upload connection"
+                )));
+            }
+        }
+        Ok(())
     }
 
-    /// One message the server moved to a ticketed connection.
-    fn fetch(&self, ticket: &str) -> Result<ServerMessage> {
-        let mut socket = redeem(&self.carrier, ticket)?;
+    /// Read one bulk message using a ticket from the named Machine.
+    pub fn fetch_peer(machine: Machine, ticket: &str) -> Result<ServerMessage> {
+        Self::fetch_from(&Carrier::Ssh(machine), ticket)
+    }
+
+    fn fetch_from(carrier: &Carrier, ticket: &str) -> Result<ServerMessage> {
+        let mut socket = redeem(carrier, ticket)?;
         let mut line = Vec::new();
         (&mut socket.reader)
             .take(MAX_BULK as u64 + 1)
@@ -303,36 +388,83 @@ impl Connection {
 
     /// One request and its answer; other ids' messages wait in `pending`.
     pub fn request(&mut self, operation: impl serde::Serialize) -> Result<Response> {
-        let id = self.send(operation)?;
+        self.request_as(
+            operation,
+            self.sender.clone(),
+            None,
+            ErrorCode::OutcomeUnknown,
+        )
+        .map_err(RequestError::into_error)
+    }
+
+    /// A read has no effect to recover if the Machine loses the connection.
+    pub fn query(&mut self, operation: impl serde::Serialize) -> Result<Response> {
+        self.request_as(operation, self.sender.clone(), None, ErrorCode::Unavailable)
+            .map_err(RequestError::into_error)
+    }
+
+    /// Send one operation in the sender's repository. A request ID names a
+    /// repeatable write. `disconnected` is the outcome if no reply arrives.
+    pub fn request_as(
+        &mut self,
+        operation: impl serde::Serialize,
+        sender: Option<Sender>,
+        request_id: Option<String>,
+        disconnected: ErrorCode,
+    ) -> Result<Response, RequestError> {
+        let sent = self.send_as(operation, sender, request_id);
+        let within = left(self.until);
+        if matches!(self.carrier, Carrier::Ssh(_)) {
+            self.set_read_timeout(Some(within))?;
+        }
+        let exchange = sent.and_then(|id| self.wait(disconnected, |message| answers(message, &id)));
         let answer = match &self.carrier {
-            Carrier::Ssh(machine, _) => {
-                let machine = machine.clone();
-                let within = left(self.until);
-                self.set_read_timeout(Some(within))?;
-                let answer = self.wait(|message| answers(message, &id)).map_err(|error| {
-                    unanswered(error, &machine, within, ErrorCode::OutcomeUnknown)
-                });
+            Carrier::Socket(_) => exchange?,
+            Carrier::Ssh(machine) => {
                 self.set_read_timeout(None)?;
-                answer?
+                let name_failure = |error| match disconnected {
+                    ErrorCode::Unavailable => unavailable_on(machine, error),
+                    code => unanswered(error, machine, within, code),
+                };
+                exchange.map_err(|failure| match failure {
+                    RequestError::Disconnected(error) => {
+                        let error = if disconnected == ErrorCode::OutcomeUnknown {
+                            Error::refused(&error, ErrorCode::OutcomeUnknown).into()
+                        } else {
+                            name_failure(error)
+                        };
+                        RequestError::Disconnected(error)
+                    }
+                    RequestError::Failed(error) => RequestError::Failed(name_failure(error)),
+                    refusal => refusal,
+                })?
             }
-            Carrier::Socket(_) => self.wait(|message| answers(message, &id))?,
         };
         match answer {
             ServerMessage::Response {
                 trace_id, result, ..
             } => Ok(Response { trace_id, result }),
             ServerMessage::Error {
+                id,
                 code,
                 message,
                 data,
                 ..
-            } => Err(Error {
-                code,
-                message,
-                data,
+            } => {
+                let error = Error {
+                    code,
+                    message,
+                    data,
+                };
+                Err(if id.is_some() {
+                    RequestError::Refused(error)
+                } else {
+                    RequestError::Failed(error.into())
+                })
             }
-            .into()),
-            other => anyhow::bail!("unexpected server message: {other:?}"),
+            other => Err(RequestError::Failed(anyhow::anyhow!(
+                "unexpected server message: {other:?}"
+            ))),
         }
     }
 
@@ -349,9 +481,12 @@ impl Connection {
             operation: serde_json::to_value(operation)?,
             select,
             resume: None,
-            sender: self.carrier.sender(),
+            sender: self.sender.clone(),
         })?;
-        match self.wait(|message| answers(message, &id))? {
+        match self
+            .wait(ErrorCode::Unavailable, |message| answers(message, &id))
+            .map_err(RequestError::into_error)?
+        {
             ServerMessage::Response { .. } => Ok(id),
             ServerMessage::Error {
                 code,
@@ -381,13 +516,15 @@ impl Connection {
     /// its last; an error for it ends the subscription.
     pub fn reading(&mut self, id: &str) -> Result<Option<serde_json::Value>> {
         loop {
-            let message = self.wait(|message| {
-                matches!(message,
-                    ServerMessage::Event { id: of, .. }
-                    | ServerMessage::Reading { id: of, .. }
-                    | ServerMessage::Ended { id: of } if of == id
-                ) || answers(message, id)
-            })?;
+            let message = self
+                .wait(ErrorCode::Unavailable, |message| {
+                    matches!(message,
+                        ServerMessage::Event { id: of, .. }
+                        | ServerMessage::Reading { id: of, .. }
+                        | ServerMessage::Ended { id: of } if of == id
+                    ) || answers(message, id)
+                })
+                .map_err(RequestError::into_error)?;
             match message {
                 // Reading-only consumers must not accumulate an unused event queue.
                 ServerMessage::Event { .. } => continue,
@@ -419,34 +556,37 @@ impl Connection {
         })
     }
 
-    /// The first message `matches`; a refusal among them is the error.
-    fn wait(&mut self, mut matches: impl FnMut(&ServerMessage) -> bool) -> Result<ServerMessage> {
+    /// The first matching frame, including a refusal from the peer.
+    fn wait(
+        &mut self,
+        disconnected: ErrorCode,
+        mut matches: impl FnMut(&ServerMessage) -> bool,
+    ) -> Result<ServerMessage, RequestError> {
         if let Some(index) = self.pending.iter().position(&mut matches) {
-            return accepted(
-                self.pending
-                    .remove(index)
-                    .expect("position names a pending message"),
-            );
+            return Ok(self
+                .pending
+                .remove(index)
+                .expect("position names a pending message"));
         }
         loop {
             let Some(mut message) = self.socket.receive()? else {
-                return Err(self.socket.ended(
-                    "Loopflow server closed the connection; the outcome is unknown",
-                    ErrorCode::OutcomeUnknown,
-                ));
+                return Err(RequestError::Disconnected(self.socket.ended(
+                    "Loopflow server closed the connection before answering",
+                    disconnected,
+                )));
             };
             if let ServerMessage::Bulk { ticket, .. } = &message {
-                message = self.fetch(ticket)?;
+                message = Self::fetch_from(&self.carrier, ticket)?;
             }
             if matches(&message) {
-                return accepted(message);
+                return Ok(message);
             }
             self.pending.push_back(message);
         }
     }
 }
 
-fn identity(kind: &str, name: &str) -> ClientIdentity {
+pub fn identity(kind: &str, name: &str) -> ClientIdentity {
     ClientIdentity {
         kind: kind.into(),
         platform: std::env::consts::OS.into(),
@@ -513,16 +653,16 @@ fn accepted(message: ServerMessage) -> Result<ServerMessage> {
 /// so no terminal byte is left in a buffer.
 pub fn attach(path: &Path, session: &LfSessionId) -> Result<UnixStream> {
     let carrier = Carrier::Socket(path.to_path_buf());
-    let mut connection = Connection::start(carrier.clone(), identity("cli", "lf"), HANDSHAKE)?;
+    let mut connection = Connection::start(carrier, identity("cli", "lf"), HANDSHAKE)?;
     let issued = connection
-        .request(ServerOperation::SessionAttach {
-            session: session.clone(),
-            terminal_id: None,
-        })
+        .session_ticket(session, None, None, None)
         .map_err(|error| stalled(error, "issue the attach ticket", HANDSHAKE))?;
-    let issued: SessionAttached = serde_json::from_value(issued.result)
-        .context("Loopflow server answered session.attach without a ticket")?;
-    drop(connection);
+    redeem_terminal(path, issued)
+}
+
+/// Open a single-use terminal ticket at the server that issued it.
+pub fn redeem_terminal(path: &Path, issued: SessionAttached) -> Result<UnixStream> {
+    let carrier = Carrier::Socket(path.to_path_buf());
     let mut socket = carrier.open(1)?;
     socket.set_read_timeout(Some(HANDSHAKE))?;
     socket.send(&ClientMessage::Attach {
@@ -567,8 +707,34 @@ fn left(until: Option<Instant>) -> Duration {
     })
 }
 
-/// A wait for another Machine's answer that `within` cut short. `code` says
-/// whether the work may have happened there.
+/// Name the unreachable Machine while retaining a peer's typed refusal.
+pub fn unavailable_on(machine: &Machine, error: anyhow::Error) -> anyhow::Error {
+    let refusal = Error::refused(&error, ErrorCode::Unavailable);
+    if refusal.code != ErrorCode::Unavailable || refusal.data.is_some() {
+        return error;
+    }
+    // A message that already names an `ssh` check (SSH's own failure,
+    // `unanswered`, an exited `lf` there) names the Machine too.
+    let message = if refusal.message.contains("`ssh ") {
+        refusal.message
+    } else {
+        format!(
+            "{} is unavailable: {}; check `ssh {} lf server status`",
+            machine.name(),
+            refusal.message,
+            machine.route,
+        )
+    };
+    Error::new(ErrorCode::Unavailable, message)
+        .with(serde_json::json!({
+            "resource": "machine",
+            "machine_id": machine.id,
+            "machine_label": machine.label,
+            "machine_name": machine.name(),
+        }))
+        .into()
+}
+
 fn unanswered(
     error: anyhow::Error,
     machine: &Machine,
@@ -769,18 +935,20 @@ impl Socket {
             line.len() <= MAX_MESSAGE,
             "Server message exceeds {MAX_MESSAGE} bytes"
         );
-        anyhow::ensure!(
-            line.ends_with(b"\n"),
-            "Loopflow server closed the connection mid-message"
-        );
+        if !line.ends_with(b"\n") {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Loopflow server closed the connection mid-message",
+            )
+            .into());
+        }
         Ok(Some(serde_json::from_slice(&line)?))
     }
 }
 
-/// A ticketed connection, admitted. It reads one byte at a time until then,
-/// so no byte meant for the ticket's purpose waits in a buffer.
+/// An admitted bulk connection. Its reader keeps any prefetched body bytes.
 fn redeem(carrier: &Carrier, ticket: &str) -> Result<Socket> {
-    let mut socket = carrier.open(1)?;
+    let mut socket = carrier.open(64 * 1024)?;
     socket.set_read_timeout(Some(HANDSHAKE))?;
     socket.send(&ClientMessage::Attach {
         ticket: ticket.into(),
@@ -798,7 +966,7 @@ fn redeem(carrier: &Carrier, ticket: &str) -> Result<Socket> {
             ))
         }
     }
-    socket.set_read_timeout(None)?;
+    socket.set_read_timeout(Some(ANSWER))?;
     Ok(socket)
 }
 

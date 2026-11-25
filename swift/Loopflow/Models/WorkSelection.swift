@@ -1,5 +1,10 @@
 import Foundation
 
+/// Where a dragged member lands relative to its target in the Machine's current order.
+public enum DropSide: String, Encodable, Sendable {
+    case before, after
+}
+
 /// Authored identity and expression, evaluated only by the shared Rust Work reader.
 public struct WorkSelection: Codable, Equatable, Sendable {
     public let id: String
@@ -73,8 +78,8 @@ public struct WorkSelection: Codable, Equatable, Sendable {
     }
 }
 
-public enum WorkSelectionState: String, Codable, Sendable, Hashable {
-    case open, available, busy, blocked, unstarted, idle, active, moving, backlog, working, done
+public enum WorkSelectionState: String, CaseIterable, Codable, Sendable, Hashable {
+    case open, available, busy, blocked, error, unstarted, idle, active, moving, backlog, working, done
     /// An open Task whose auto setting is on.
     case auto
 }
@@ -173,6 +178,7 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
         public var states: [WorkSelectionState]
         /// A Task's short name, as people say it: `LOO-809`.
         public let identifier: String?
+        public let graphStep: String?
         public let primarySession: String?
         public let location: Location?
         public let argv: [String]?
@@ -181,7 +187,7 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
         public let openChildren: Int?
         enum CodingKeys: String, CodingKey {
             case work, title, states, identifier, location, argv, unavailable
-            case primarySession = "primary_session"
+            case graphStep = "graph_step", primarySession = "primary_session"
             case openChildren = "open_children"
         }
     }
@@ -206,8 +212,45 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
         case viewer
     }
 
+    /// Task tiles follow a saved Dashboard's visible arrangement or the built-in plan's member order.
+    public var taskTiles: [WorkMemberRef] {
+        let members = dashboardID == nil ? resolution.members : projection.visible
+        var seen = Set<WorkWorkspaceKey>()
+        return members.filter { $0.work.kind == .task && seen.insert($0.work).inserted }
+    }
+
     /// The name people see for the repository: its directory's.
     public var repositoryName: String { URL(fileURLWithPath: repositoryPath).lastPathComponent }
+}
+
+extension WorkViewPlan.Content {
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(work: try c.decode(WorkWorkspaceKey.self, forKey: .work),
+                  title: try c.decode(String.self, forKey: .title),
+                  states: try c.decode([WorkSelectionState].self, forKey: .states),
+                  identifier: try c.decode(String?.self, forKey: .identifier),
+                  graphStep: try c.decodeIfPresent(String.self, forKey: .graphStep),
+                  primarySession: try c.decode(String?.self, forKey: .primarySession),
+                  location: try c.decode(WorkViewPlan.Location?.self, forKey: .location),
+                  argv: try c.decode([String]?.self, forKey: .argv),
+                  unavailable: try c.decode([String].self, forKey: .unavailable),
+                  openChildren: try c.decode(Int?.self, forKey: .openChildren))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(work, forKey: .work)
+        try c.encode(title, forKey: .title)
+        try c.encode(states, forKey: .states)
+        try c.encode(identifier, forKey: .identifier)
+        try c.encode(graphStep, forKey: .graphStep)
+        try c.encode(primarySession, forKey: .primarySession)
+        try c.encode(location, forKey: .location)
+        try c.encode(argv, forKey: .argv)
+        try c.encode(unavailable, forKey: .unavailable)
+        try c.encode(openChildren, forKey: .openChildren)
+    }
 }
 
 extension WorkViewPlan {
@@ -432,35 +475,5 @@ public enum ChangeComparison: Codable, Hashable, Sendable {
         case .pullRequest(let number, _, let head):
             try c.encode(Kind.pullRequest, forKey: .kind); try c.encode(number, forKey: .number); try c.encode(head, forKey: .head)
         }
-    }
-}
-
-extension WorkViewPlan.Content {
-    // Required nullable keys decode with `decode(T?.self)` and encode as null:
-    // synthesized coding would accept, and write, a frame that omits them.
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        work = try c.decode(WorkWorkspaceKey.self, forKey: .work)
-        title = try c.decode(String.self, forKey: .title)
-        states = try c.decode([WorkSelectionState].self, forKey: .states)
-        identifier = try c.decode(String?.self, forKey: .identifier)
-        primarySession = try c.decode(String?.self, forKey: .primarySession)
-        location = try c.decode(WorkViewPlan.Location?.self, forKey: .location)
-        argv = try c.decode([String]?.self, forKey: .argv)
-        unavailable = try c.decode([String].self, forKey: .unavailable)
-        openChildren = try c.decode(Int?.self, forKey: .openChildren)
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(work, forKey: .work)
-        try c.encode(title, forKey: .title)
-        try c.encode(states, forKey: .states)
-        try c.encode(identifier, forKey: .identifier)
-        try c.encode(primarySession, forKey: .primarySession)
-        try c.encode(location, forKey: .location)
-        try c.encode(argv, forKey: .argv)
-        try c.encode(unavailable, forKey: .unavailable)
-        try c.encode(openChildren, forKey: .openChildren)
     }
 }

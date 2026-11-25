@@ -40,17 +40,17 @@ with a conversation come first; started Tasks nobody has opened a conversation
 for fold under "N without a conversation". Search covers title and checkout
 path. Pull to refresh.
 
-A row is the Mac sidebar's row: the Task's whole title, wrapped rather than
-cut, then its ID and status word.
+Each row shows the Task’s full title, then its ID, status and current Graph
+step when it has one.
 
 ```text
 Loopflow for iPhone uses the shared design
 tokens and components
-LOO-5  Busy  Auto
+LOO-5  Busy  Auto  implement
 ```
 
 The word is the one the Mac shows for that Task: what its conversation reports
-(**Blocked**, **Busy**, **Available**), or its lifecycle word (**Unstarted**,
+(**Blocked**, **Error**, **Busy**, **Available**), or its lifecycle word (**Unstarted**,
 **Idle**, **Active**, **Moving**, **Done**) while nothing reports. **Auto**
 follows while Auto-Ship is on. A Task whose reading carries
 neither says **Unavailable**. The row carries no stripe: colour is on the word.
@@ -99,10 +99,27 @@ screen. An action the Machine already knows it would refuse is greyed, and
 the reason stands in full under the workflow sentence; any other refusal shows
 in that line.
 
-**Changes** lists the files the Task changed; each opens its diff, and the diff
-opens the whole file. A Task with no conversation opens on its Changes; one
-that has not started says "No changes yet" and offers **Start**. Once it
-starts, its conversation opens in place, without going back to the list. Task
+Under it, **Session · Files · Changes · Shell** switch what the screen shows.
+All four come through the one Machine the phone is paired with, which reaches
+the Task wherever it runs; a Task running on another Machine names it under
+the sentence (**On mini**).
+
+- **Session** is the Task's conversation: its primary, as the Machine running
+  the Task saved it.
+- **Files** is the checkout's tree, changed files or not; a folder opens the
+  next level and a file opens as it stands. It re-reads itself when the
+  checkout changes or the Task moves.
+- **Changes** lists the files the Task changed; each opens its diff, and the
+  diff opens the whole file. It re-reads when the Task moves.
+- **Shell** is a shell in the Task's checkout, started the first time you open
+  it and kept running when you leave. After the Task moves, it says the shell
+  has ended and offers **New shell**, which starts one on the new Machine.
+
+A Task with no conversation opens on its Changes. One with no checkout yet
+says **Not started** on Files, Changes and Shell, with **Try again** on
+Changes and Shell; Files fills in by itself once the Task starts. When the Machine running the Task
+doesn’t answer, each view names it and offers **Try again** (**Reconnect** in a terminal). Once a
+conversation starts, it opens in place, without going back to the list. Task
 actions follow the Task itself, so they stay when the list's filter no longer
 shows it.
 
@@ -166,11 +183,12 @@ cd swift && swift test --filter DesignDisciplineTests
 |---|---|
 | `MachineConnection.swift`, `SavedMachine.swift` | The WebSocket that carries `Loopflow`'s shared `ServerLink`; saved address |
 | `RemoteMobileClient.swift`, `RemoteTaskObservation.swift` | Requests, the live Task reading (resumed after a lost connection), a Session attachment |
-| `SessionLink.swift` | The phone's hold on one Session |
-| `GhosttySurface.swift` | Ghostty's app and one terminal surface fed with the Session's bytes |
-| `SessionTerminal.swift`, `SessionView.swift` | Terminal scrolling, reply field and keys |
+| `TerminalLink.swift` | The phone's hold on one terminal: a Session or the Task's shell |
+| `GhosttySurface.swift` | Ghostty's app and one terminal surface fed with the terminal's bytes |
+| `SessionTerminal.swift`, `TerminalView.swift` | Terminal scrolling, reply field and keys |
 | `TaskListView.swift` | Repository, filter, search and the Task list |
-| `TaskWorkspaceView.swift` | A Task's conversation and its Changes |
+| `TaskWorkspaceView.swift` | A Task's Session, Changes, diffs and files |
+| `TaskFilesTree.swift` | Files: the checkout's tree, followed through `task.files.watch` |
 | `MobileTaskCreation.swift`, `MobileNewTaskView.swift` | New Task |
 
 ```sh

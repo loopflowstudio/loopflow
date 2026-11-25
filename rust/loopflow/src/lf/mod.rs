@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use loopflow_storage::work::selection::DropSide;
 
 pub mod aliases;
 mod desktop_inputs;
@@ -320,6 +321,25 @@ impl Cli {
     /// Reject argument combinations the derive cannot express, as the usage
     /// errors they are, before anything runs.
     pub fn checked(mut self) -> Result<Self, clap::Error> {
+        if let Some(Commands::Open(open)) = &mut self.command {
+            if let Some(machine) = self.machine.take() {
+                if open.selection.machine.replace(machine).is_some() {
+                    return Err(clap::Error::raw(
+                        clap::error::ErrorKind::ArgumentConflict,
+                        "select a Machine only once",
+                    ));
+                }
+            }
+            if open.selection.machine.is_some()
+                && (open.selection.session.is_none()
+                    || self.task.is_some()
+                    || self.wave.is_some()
+                    || open.selection.url.is_some())
+            {
+                return Err(clap::Error::raw(clap::error::ErrorKind::ArgumentConflict,
+                    "use --machine with --session for a Session on that Machine; a Task selects its own Machine"));
+            }
+        }
         if let Some(Commands::Session { cmd }) = &self.command {
             let selected = match cmd {
                 SessionCommand::Resume { id, connection, .. }
@@ -728,7 +748,7 @@ pub enum RepoCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum DesktopCommand {
-    /// Desktop shell runtime on the recorded Machine; does not contact the GUI.
+    /// Desktop's Task shell viewer: the local server runs the shell wherever the Task runs; does not contact the GUI.
     #[command(hide = true)]
     Shell {
         #[command(flatten)]
@@ -1081,6 +1101,9 @@ pub enum DashboardCommand {
         /// Tile whose place it takes
         #[arg(long)]
         destination: String,
+        /// Place the tile before or after the destination in the current order
+        #[arg(long, value_enum)]
+        side: Option<DropSide>,
     },
     /// Resize the divider between two tiles on a saved Dashboard; ratio is the addressed one's share
     Resize {
@@ -1092,40 +1115,6 @@ pub enum DashboardCommand {
         #[arg(long)]
         ratio: f64,
     },
-}
-
-impl DashboardCommand {
-    /// The verb a saved tile edit names, with its arguments, or none for a
-    /// Dashboard record edit.
-    pub fn tile_verb(&self) -> Option<(&str, &str, std::collections::BTreeMap<String, String>)> {
-        match self {
-            Self::Hide { tile } => Some(("hide", tile, Default::default())),
-            Self::Show { tile } => Some(("show", tile, Default::default())),
-            Self::Move { tile, destination } => Some((
-                "move",
-                tile,
-                [("destination".to_owned(), destination.clone())].into(),
-            )),
-            Self::Resize {
-                tile,
-                toward,
-                ratio,
-            } => Some((
-                "resize",
-                tile,
-                [
-                    ("toward".to_owned(), toward.clone()),
-                    ("ratio".to_owned(), ratio.to_string()),
-                ]
-                .into(),
-            )),
-            Self::Query { .. }
-            | Self::Pin { .. }
-            | Self::Unpin { .. }
-            | Self::Rename { .. }
-            | Self::Slots { .. } => None,
-        }
-    }
 }
 
 // ── Which commands change state ─────────────────────────────────────────────
@@ -1173,7 +1162,6 @@ impl TaskCommand {
             | Self::List { .. }
             | Self::Show { .. }
             | Self::Location { .. }
-            | Self::WatchFiles { .. }
             | Self::Status { .. }
             | Self::Diff { .. }
             | Self::Changes { .. }
@@ -1388,6 +1376,9 @@ pub enum ServerCommand {
     /// Look up a submitted creation without retrying it
     Receipt {
         request_id: String,
+        /// The Task the creation was for, read where that Task runs
+        #[arg(long)]
+        task: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -1440,6 +1431,7 @@ impl MachineCommand {
             },
             Self::Hub { machine, clear } => machine.is_some() || *clear,
             Self::Prune { .. }
+            | Self::Forward { .. }
             | Self::Login { .. }
             | Self::Logout { .. }
             | Self::Public { .. }
@@ -1473,7 +1465,8 @@ impl SelfCommand {
     pub fn changes_work(&self) -> bool {
         match self {
             Self::Install { cmd, .. } => match cmd {
-                Some(InstallCommand::Server | InstallCommand::Preflight { .. }) => false,
+                Some(InstallCommand::Server { profile_stdin }) => *profile_stdin,
+                Some(InstallCommand::Preflight { .. }) => false,
                 None
                 | Some(
                     InstallCommand::Schedule { .. }
@@ -2032,6 +2025,9 @@ pub enum WavePlanCommand {
     Bind {
         wave: String,
         project: String,
+        /// Replace the current selection, retaining its Project and Tasks.
+        #[arg(long)]
+        replace: bool,
         #[arg(long)]
         json: bool,
     },
@@ -2365,14 +2361,6 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     /// Run one cleanup pass for a Task, or all pending Tasks on this Machine
     #[command(hide = true)]
     Retire { issue: Option<String> },
-    /// Stream invalidations from an existing Task checkout (JSON lines)
-    WatchFiles {
-        issue: String,
-        #[arg(long)]
-        checkout: std::path::PathBuf,
-        #[arg(long)]
-        request: String,
-    },
     /// Show durable Task facts and its recorded work
     Status {
         /// Task issue; defaults to the Task in this checkout
@@ -2562,7 +2550,6 @@ impl TaskCommand {
             Self::Auto { cmd } => cmd.issue().as_deref(),
             Self::Detail { issue, .. }
             | Self::Show { issue, .. }
-            | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
             | Self::Unassign { issue, .. }
@@ -2596,7 +2583,6 @@ impl TaskCommand {
             Self::Auto { cmd } => cmd.issue_mut().as_mut(),
             Self::Detail { issue, .. }
             | Self::Show { issue, .. }
-            | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
             | Self::Unassign { issue, .. }
@@ -2633,7 +2619,11 @@ pub enum InstallFrequency {
 pub enum InstallCommand {
     /// Reconcile the selected installation's local server for a client.
     #[command(hide = true)]
-    Server,
+    Server {
+        /// Retain a rental caller’s portable profile from stdin before starting.
+        #[arg(long)]
+        profile_stdin: bool,
+    },
     /// Run `lf install` on your stream on a schedule (launchd, also at login; cron on Linux),
     Schedule {
         /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time).
@@ -3027,6 +3017,16 @@ pub enum ConfigCommand {
 /// Name and connect to machines.
 #[derive(Debug, Subcommand)]
 pub enum MachineCommand {
+    /// Replace configured forward.files on the named Machine and optionally restart one conversation.
+    Forward {
+        label: String,
+        /// Restart this Task's primary Session after all files arrive
+        #[arg(long, conflicts_with = "session")]
+        task: Option<String>,
+        /// Restart this Session's provider after all files arrive
+        #[arg(long)]
+        session: Option<String>,
+    },
     /// Sign Machines in through each provider's own login, approved in this
     /// Machine's browser; with no Machine named, this one
     Login {
@@ -3195,6 +3195,9 @@ pub enum OndemandCommand {
         /// the provider may end it early, losing unpushed work
         #[arg(long)]
         spot: bool,
+        /// Reserve the full CPU and memory limits on Modal
+        #[arg(long)]
+        reserved: bool,
         /// Hard deadline for each machine it rents, at most 24
         #[arg(long, default_value_t = loopflow_storage::rental::DEFAULT_HOURS)]
         hours: f64,
@@ -3234,6 +3237,14 @@ pub enum OndemandCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum MachineCredentialCommand {
+    /// Resume the selected conversation with the newly delivered files.
+    #[command(hide = true)]
+    Restart {
+        /// Select the Task's primary Session
+        #[arg(long)]
+        task: bool,
+        id: String,
+    },
     /// Receive a fresh login as JSON on stdin; preserve existing accounts.
     Receive,
 }
@@ -3461,17 +3472,21 @@ mod tests {
     fn desktop_shell_runtime_needs_no_gui_and_task_shell_is_removed() {
         assert!(Cli::try_parse_from(["lf", "task", "shell", "task-id"]).is_err());
         let cli = Cli::try_parse_from([
+            "lf", "desktop", "shell", "task-id", "--id", "shell-id", "--create",
+        ])
+        .unwrap();
+        // Only Close names the Machine that started the shell.
+        assert!(Cli::try_parse_from([
             "lf",
             "desktop",
             "shell",
             "task-id",
-            "--checkout",
-            "/checkout",
             "--id",
-            "shell-id",
-            "--create",
+            "s",
+            "--started-on",
+            "home_1",
         ])
-        .unwrap();
+        .is_err());
         let Some(Commands::Desktop { cmd }) = cli.command else {
             panic!("Desktop runtime command");
         };

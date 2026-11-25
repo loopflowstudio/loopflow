@@ -551,15 +551,8 @@ mod tests {
                 items: vec![],
             },
         };
+        // The Initiative's sole In Progress Project binds when its inventory arrives.
         store.seed_inventory(snapshot.clone(), None).await.unwrap();
-        loopflow_storage::sqlite::project_selection::write_project_binding(
-            &store.sqlite,
-            wave.id(),
-            None,
-            &projects[0].id,
-            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
-        )
-        .unwrap();
         let untargeted = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
             .await
             .unwrap();

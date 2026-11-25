@@ -625,7 +625,6 @@ struct GraphProcessLog: View {
     let model: WorkModel
     let taskId: String
     let location: WorkspaceIdentity?
-    var execution: TaskLocationObservation? = nil
     var query: RegistryQuery = RegistryQueryLocal.shared
     var openFiles: (() -> Void)? = nil
     /// The Task page prints the sentence in its workflow header above, so its log has no header row.
@@ -638,8 +637,10 @@ struct GraphProcessLog: View {
     var body: some View {
         let task = model.task(id: taskId)?.task
         let reading = task.map { model.taskWork[$0.id] }
-        let readsWindow = (execution == nil || execution?.machineID == model.observingMachineId) && query.remoteMachine == nil && location != nil
-            && location?.machineId == model.observingMachineId && location == task?.reference.workspace?.identity
+        // This Mac's window already reads its own Tasks; any other is read
+        // through the server from wherever it runs.
+        let readsWindow = location != nil && location?.machineId == model.observingMachineId
+            && location == task?.reference.workspace?.identity
         let work = readsWindow ? reading?.value : captured?.work
         let graphs = readsWindow ? work?.graphProcesses : captured?.graphProcesses.map(\.entry)
         let details = readsWindow ? model.graphProcesses : Dictionary(uniqueKeysWithValues:
@@ -702,23 +703,8 @@ struct GraphProcessLog: View {
         .task(id: refresh) {
             guard !readsWindow else { return }
             do {
-                let ownerQuery: RegistryQuery
-                let subject: String
-                if let execution {
-                    guard case .recorded(let ownerTask, _) = execution.location else {
-                        throw RegistryQueryError("Task log location is unavailable.")
-                    }
-                    ownerQuery = query.onMachine(execution.machineID, repository: execution.repositoryID).pinTaskLocation(to: execution)
-                    subject = ownerTask
-                } else {
-                    guard let location, location.machineId == model.savedMachineId,
-                          query.remoteMachine == nil else {
-                        throw RegistryQueryError("Task log location is unavailable; no local fallback was used.")
-                    }
-                    ownerQuery = query
-                    subject = task?.runtime?.workId ?? taskId
-                }
-                let subscription = try await ownerQuery.subscribeTask(task: subject)
+                let subject = task?.runtime?.workId ?? taskId
+                let subscription = try query.subscribeTask(task: subject)
                 do {
                     for try await line in subscription.lines {
                         try Task.checkCancellation()

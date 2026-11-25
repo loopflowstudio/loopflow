@@ -198,7 +198,7 @@ final class WorkCache: @unchecked Sendable {
                 object["run_control"] = ["unavailable": savedReason]
             }
             if let states = object["selection_states"] as? [String] {
-                object["selection_states"] = states.filter { !["available", "busy", "blocked"].contains($0) }
+                object["selection_states"] = states.filter { !["available", "busy", "blocked", "error"].contains($0) }
             }
 
             return object.mapValues(quiet)

@@ -12,6 +12,7 @@ use base64::Engine as _;
 use tokio::sync::mpsc;
 
 use super::wire::{ClientMessage, TICKET_LIFETIME};
+use loopflow_model::durable::Machine;
 use loopflow_model::id::TerminalId;
 
 /// Who a connection was admitted as; a ticket is redeemable by the same party.
@@ -28,6 +29,13 @@ pub(super) enum Admission {
 pub(super) enum Purpose {
     /// The viewer protocol of a held terminal, copied byte for byte.
     Terminal(TerminalId),
+    /// Another Machine's held terminal: redeeming presents `ticket`, which
+    /// that Machine's server issued, and copies its bridge byte for byte.
+    RemoteTerminal {
+        machine: Machine,
+        ticket: String,
+        terminal_id: TerminalId,
+    },
     /// One server message too large for the control connection.
     Download {
         message: String,
@@ -93,7 +101,10 @@ impl Tickets {
         if found.admission == *admission {
             return Some(found.purpose);
         }
-        if !matches!(found.purpose, Purpose::Terminal(_)) {
+        if !matches!(
+            found.purpose,
+            Purpose::Terminal(_) | Purpose::RemoteTerminal { .. }
+        ) {
             issued.insert(ticket.to_owned(), found);
         }
         None

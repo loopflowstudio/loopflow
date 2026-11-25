@@ -695,7 +695,7 @@ impl SqliteStore {
     #[cfg(any(test, feature = "test-support"))]
     pub fn apply_migration_for_test(&self, name: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        if crate::migration_runner::migration_is_applied_for_test(&conn, name)? {
+        if crate::migration_runner::migration_is_applied(&conn, name)? {
             return Ok(());
         }
         conn.execute_batch(&crate::migration_runner::migration_sql_for_test(name))?;

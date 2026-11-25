@@ -581,6 +581,7 @@ mod tests {
             title: "Task".into(),
             states: Default::default(),
             identifier: None,
+            graph_step: None,
             primary_session: None,
             location: None,
             argv: None,

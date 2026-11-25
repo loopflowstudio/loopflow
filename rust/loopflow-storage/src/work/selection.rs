@@ -110,6 +110,7 @@ pub enum SelectionState {
     /// Session axis: a current Task Session report says it is working.
     Busy,
     Blocked,
+    Error,
     /// Task axis: effective lifecycle, including withdrawal of never-started work.
     Unstarted,
     Idle,
@@ -192,6 +193,8 @@ fn wave_descendants<'a>(
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum SelectionError {
+    #[error("{0} is not a Working Task here; nothing changed.")]
+    NotWorking(String),
     #[error("ambiguous Work reference: {0}; use its canonical ID")]
     Ambiguous(String),
     #[error("invalid query: {0}")]
@@ -279,7 +282,8 @@ impl Selection {
             .filter(|item| {
                 selected.contains(&item.key)
                     && (item.states.contains(&SelectionState::Available)
-                        || item.states.contains(&SelectionState::Blocked))
+                        || item.states.contains(&SelectionState::Blocked)
+                        || item.states.contains(&SelectionState::Error))
             })
             .map(|item| item.key.clone())
             .collect();
@@ -418,10 +422,25 @@ pub enum ArrangementMode {
     Touched,
 }
 
-/// The one reorder gesture: the item at `from` takes `to`'s place.
-pub fn move_into_place<T>(order: &mut Vec<T>, from: usize, to: usize) {
+/// Where a dragged member lands relative to its target.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, clap::ValueEnum,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum DropSide {
+    Before,
+    After,
+}
+
+/// Place the member on the chosen side, or in the target's slot for a destination-only move.
+pub fn move_into_place<T>(order: &mut Vec<T>, from: usize, target: usize, side: Option<DropSide>) {
     let moved = order.remove(from);
-    order.insert(to, moved);
+    let slot = match side {
+        Some(DropSide::Before) if from < target => target - 1,
+        Some(DropSide::After) if from > target => target + 1,
+        _ => target,
+    };
+    order.insert(slot, moved);
 }
 
 /// Occurrence order. Geometry belongs to the slot layout; members fill it in order.
@@ -749,6 +768,9 @@ pub struct ViewContent {
     pub states: BTreeSet<SelectionState>,
     /// A Task's short name, as people say it: `LOO-809`.
     pub identifier: Option<String>,
+    /// Where this Task stands on its captured Graph, including a running step.
+    /// Older Machines omit this field.
+    pub graph_step: Option<String>,
     pub primary_session: Option<String>,
     pub location: Option<ViewLocation>,
     /// An explicit connect command, never a fallback shell or provider launch argv.

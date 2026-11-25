@@ -6,7 +6,7 @@ use crate::lf::{Cli, Commands, SessionCommand, TaskCommand};
 use anyhow::{anyhow, Result};
 use loopflow_execution::durable::TaskExecutionRoute;
 use loopflow_execution::machine::task::{read_registry, resolve_task_id};
-use loopflow_execution::ops::human_session::moves::conversation_task;
+use loopflow_execution::ops::human_session::moves::other_machine;
 use loopflow_model::durable::{
     Machine, MachineId, RepositoryId, RepositoryIdentity, TaskId, TaskRunsOn,
 };
@@ -124,6 +124,21 @@ pub fn repository_path(id: &RepositoryId) -> Result<std::path::PathBuf> {
     Ok(path.into())
 }
 
+/// Translate a peer's portable Task selector to this repository's local Task ID.
+pub(crate) fn peer_task_id(repository: &RepositoryId, issue: &str) -> Result<String> {
+    let missing = || {
+        loopflow_execution::engine::Error::new(
+            loopflow_execution::engine::ErrorCode::NotFound,
+            format!("Task {issue} was not found in repository {repository}"),
+        )
+    };
+    let store = read_registry()?.ok_or_else(missing)?;
+    let id = store
+        .repository_task_id(repository, issue)?
+        .ok_or_else(missing)?;
+    Ok(id.to_string())
+}
+
 /// Resolve scoped selectors once, carrying exact IDs to downstream consumers.
 /// Routing reads existing records only: initialization and schema upgrades
 /// belong to the operation that takes up Work, and that command fetches
@@ -195,14 +210,10 @@ fn launch_task(cli: &Cli) -> Option<&str> {
         Some(Commands::Task {
             cmd: TaskCommand::Run { issue, .. } | TaskCommand::Checkout { issue, .. },
         }) => issue.as_deref().or(cli.task.as_deref()),
-        // `resume --task X` opens the Task's conversation where the Task runs.
+        // `resume [<session>] --task X` opens the Task's conversation where
+        // the Task runs, wherever that Session last moved.
         Some(Commands::Session {
-            cmd:
-                SessionCommand::Resume {
-                    id: None,
-                    connection,
-                    ..
-                },
+            cmd: SessionCommand::Resume { connection, .. },
         }) if connection.task.is_some() => connection.task.as_deref(),
         Some(Commands::Steer {
             target: Some(target),
@@ -314,11 +325,11 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
 /// Where `lf <args>` run from `directory` goes instead of running here, if
 /// anywhere. Reads records only; nothing is sent.
 pub fn forward(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Forward>> {
-    if let Some(forward) = moved_session(cli, args)? {
-        return Ok(Some(forward));
-    }
     let worktree_task = worktree_task(cli, directory)?;
     let Some(selector) = launch_task(cli).or(worktree_task.as_deref()) else {
+        if let Some(forward) = moved_session(cli, args)? {
+            return Ok(Some(forward));
+        }
         return primary_session(cli, args, directory);
     };
     let Some(store) = read_registry()? else {
@@ -436,17 +447,7 @@ fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    let id = loopflow_model::id::canonical_session(id);
-    let machine = match conversation_task(&store, &id)? {
-        Some(task) => {
-            let runs_on =
-                loopflow_execution::store::ownership::task_execution_route(&store, &task)?
-                    .machine_id;
-            (runs_on != loopflow_execution::store::machines::local_machine(&store)?.id)
-                .then_some(runs_on)
-        }
-        None => store.session_moved_to(&id)?,
-    };
+    let machine = session_machine(&store, id)?;
     Ok(machine.map(|machine| Forward {
         machine,
         args: args[1..].to_vec(),
@@ -454,6 +455,41 @@ fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
         wave: None,
         repository: None,
     }))
+}
+
+/// The other Machine a Session recorded here runs on: where its Task runs,
+/// else where the Session moved.
+fn session_machine(store: &SqliteStore, id: &str) -> Result<Option<MachineId>> {
+    let id = loopflow_model::id::canonical_session(id);
+    other_machine(store, &id)
+}
+
+/// The other Machine whose held terminal runs `session`: the Task's owner
+/// when `task` is named, else `machine`, else what this Machine's records say.
+/// `None` runs it here.
+pub(crate) fn terminal_machine(
+    session: &loopflow_model::id::LfSessionId,
+    task: Option<&str>,
+    machine: Option<MachineId>,
+) -> Result<Option<loopflow_model::durable::Machine>> {
+    let runs_on = match (task, machine) {
+        (Some(task), _) => loopflow_execution::machine::task::remote_task(task, None)?
+            .map(|route| route.machine_id),
+        (None, Some(machine)) => {
+            let here = match read_registry()? {
+                Some(store) => Some(loopflow_execution::store::machines::local_machine(&store)?.id),
+                None => None,
+            };
+            (here.as_ref() != Some(&machine)).then_some(machine)
+        }
+        (None, None) => match read_registry()? {
+            Some(store) => session_machine(&store, session.as_str())?,
+            None => None,
+        },
+    };
+    runs_on
+        .map(|machine| super::write::find_machine(machine.as_str()))
+        .transpose()
 }
 
 /// `lf task run`'s `--pool`, `--rent` and `--quote`, removed before `--`.

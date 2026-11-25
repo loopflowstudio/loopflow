@@ -157,11 +157,27 @@ pub struct SessionUsage {
     pub cost_usd: Option<f64>,
 }
 
+/// The Machine a collected Session was read from.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+pub struct SessionOrigin {
+    pub machine_id: loopflow_model::durable::MachineId,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub label: Option<String>,
+}
+
+impl SessionOrigin {
+    pub fn name(&self) -> &str {
+        self.label.as_deref().unwrap_or(self.machine_id.as_str())
+    }
+}
+
 /// History beneath one conversation's immutable captured input. This is not a
 /// resumable object. Provider records retain separate outcomes and driving Processes;
 /// recorder completion is historical evidence, never native success or process exit.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct SessionHistory {
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub origin: Option<SessionOrigin>,
     pub session_id: loopflow_model::id::LfSessionId,
     pub captured: Option<i64>,
     pub artifact_key: Option<String>,

@@ -1,13 +1,12 @@
 import Foundation
 
-/// Revision 9 of the server protocol: one connection per client, a negotiated
+/// Revision 10 of the server protocol: one connection per client, a negotiated
 /// revision, requests multiplexed by id. Mirrors `rust/loopflow/src/server/wire.rs`;
 /// carriers add no Work authority.
 public enum ServerProtocol {
-    public static let revision = 9
-    /// Revision 8 requires `sender` on `request` and `subscribe`; it keeps 7's
-    /// write revisions and request IDs, which pending changes rely on.
-    public static let minRevision = 8
+    public static let revision = 10
+    /// Session attach and continue require Task and Machine selectors.
+    public static let minRevision = 10
     /// The largest control-connection message; larger ones travel by ticket.
     public static let maxMessage = 1024 * 1024
     /// The largest message a ticketed connection carries.
@@ -94,8 +93,8 @@ public struct ServerError: LocalizedError, Sendable, Equatable {
     public let code: ServerErrorCode?
     public let message: String
     public let data: JSONValue
-    /// The domains a failed write advanced before it failed; nil when it
-    /// changed nothing, so the change was refused.
+    /// Domains that advanced while the write ran, including concurrent writes.
+    /// Nil when the Machine observed no advance.
     public let revisions: Revisions?
 
     public init(code: String, message: String, data: JSONValue, revisions: Revisions? = nil) {
@@ -111,6 +110,14 @@ public struct ServerError: LocalizedError, Sendable, Equatable {
 
     public var errorDescription: String? {
         mayHaveHappened ? "\(message). It may have happened; refresh before retrying." : message
+    }
+}
+
+extension ServerError {
+    /// A Task with no checkout yet, wherever it runs: `not_found {reason: "not_started"}`.
+    public var notStarted: Bool {
+        guard code == .notFound, case .object(let fields) = data else { return false }
+        return fields["reason"] == .string("not_started")
     }
 }
 
@@ -208,8 +215,8 @@ public enum ServerOperation: Encodable, Sendable {
     /// The unchanged payload of a submitted creation; never arbitrary command replay.
     case submittedCreation(JSONValue)
     /// A ticket for the Session's held terminal, answered `{ticket, terminal_id,
-    /// expires_in_ms}`.
-    case sessionAttach(session: String)
+    /// expires_in_ms}`. Naming the Task attaches wherever it runs.
+    case sessionAttach(session: String, task: String?)
     case requestUpload(bytes: Int)
     /// Start `argv` in a terminal held beside the server, answered `{terminal_id}`.
     /// Repeating `request` answers the same terminal and starts nothing. `placement` is the
@@ -217,14 +224,23 @@ public enum ServerOperation: Encodable, Sendable {
     case sessionStart(session: String?, request: String, argv: [String], cwd: String, env: [(String, String)], rows: Int, cols: Int, placement: String?)
     /// Continue an existing Session in a held terminal the server starts with its own
     /// environment, answered `{terminal_id}`. Repeating `request` starts nothing.
-    case sessionContinue(session: String, request: String, rows: Int, cols: Int)
+    /// Naming the Task continues it wherever it runs.
+    case sessionContinue(session: String, request: String, rows: Int, cols: Int, task: String?, agent: String?)
+    /// Start a Task shell named `shellID` in the checkout of the Machine that runs
+    /// the Task, answered `{terminal_id}`; repeating `shellID` starts nothing.
+    /// A Task with no checkout is `not_found {reason: "not_started"}`.
+    case taskShellStart(issue: String, shellID: String, rows: Int, cols: Int)
+    /// A ticket for a Task shell's running terminal, like `sessionAttach`; an
+    /// ended or unknown shell is `not_found`.
+    case taskShellAttach(issue: String, shellID: String)
     /// A provider hook's turn or tool boundary, answered `{steers, update, waiting}`.
     /// Desktop never sends it; `lf __context-block` and the OpenCode and Pi plugins do.
     case sessionBoundary(moment: String, delivery: String, adapter: JSONValue, callback: JSONValue, gap: JSONValue?,
                          printed: [String], inbox: JSONValue?)
 
     private enum Keys: String, CodingKey {
-        case kind, bytes, session, request, argv, cwd, env, rows, cols, placement, terminalID = "terminal_id"
+        case kind, bytes, session, request, argv, cwd, env, rows, cols, placement, task, machine, agent, terminalID = "terminal_id"
+        case issue, shellID = "shell_id", bootstrap, command
         case moment, delivery, adapter, callback, gap, printed, inbox, query, change
     }
     public func encode(to encoder: Encoder) throws {
@@ -249,12 +265,14 @@ public enum ServerOperation: Encodable, Sendable {
             try box.encode(bytes, forKey: .bytes)
         case .submittedCreation(let payload): try payload.encode(to: encoder)
         case .config(let operation): try operation.encode(to: encoder)
-        case .sessionAttach(let session):
+        case .sessionAttach(let session, let task):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("session.attach", forKey: .kind)
             try box.encode(session, forKey: .session)
             // Any of the Session's held terminals; naming one pins it.
             try box.encodeNil(forKey: .terminalID)
+            try box.encode(task, forKey: .task)
+            try box.encodeNil(forKey: .machine)
         case .sessionStart(let session, let request, let argv, let cwd, let env, let rows, let cols, let placement):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("session.start", forKey: .kind)
@@ -266,13 +284,31 @@ public enum ServerOperation: Encodable, Sendable {
             try box.encode(rows, forKey: .rows)
             try box.encode(cols, forKey: .cols)
             try box.encode(placement, forKey: .placement)
-        case .sessionContinue(let session, let request, let rows, let cols):
+        case .sessionContinue(let session, let request, let rows, let cols, let task, let agent):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("session.continue", forKey: .kind)
             try box.encode(session, forKey: .session)
             try box.encode(request, forKey: .request)
             try box.encode(rows, forKey: .rows)
             try box.encode(cols, forKey: .cols)
+            try box.encode(task, forKey: .task)
+            try box.encodeNil(forKey: .machine)
+            try box.encode(agent, forKey: .agent)
+        case .taskShellStart(let issue, let shellID, let rows, let cols):
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("task.shell.start", forKey: .kind)
+            try box.encode(issue, forKey: .issue)
+            try box.encode(shellID, forKey: .shellID)
+            try box.encode(rows, forKey: .rows)
+            try box.encode(cols, forKey: .cols)
+            // A login shell with no Ghostty startup: the phone draws it itself.
+            try box.encodeNil(forKey: .bootstrap)
+            try box.encode([String](), forKey: .command)
+        case .taskShellAttach(let issue, let shellID):
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("task.shell.attach", forKey: .kind)
+            try box.encode(issue, forKey: .issue)
+            try box.encode(shellID, forKey: .shellID)
         case .sessionBoundary(let moment, let delivery, let adapter, let callback, let gap, let printed, let inbox):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("session.boundary", forKey: .kind)
@@ -406,8 +442,8 @@ public enum ServerMessage: Sendable {
     /// `id` is nil before a request exists. An error for a subscription ends it.
     /// `code` is the Rust `ErrorCode`'s wire name: incompatible, invalid,
     /// not_found, conflict, unavailable, outcome_unknown or busy. `data` is
-    /// structured detail, `.null` when there is none. `revisions` is what a
-    /// failed write advanced first; nil when it changed nothing.
+    /// structured detail, `.null` when there is none. `revisions` has the
+    /// same meaning as `ServerError.revisions`.
     case error(id: String?, code: String, message: String, data: JSONValue, revisions: Revisions?)
 
     /// One message's line. The envelope is scanned, not parsed: a reading of

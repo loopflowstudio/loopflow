@@ -23,9 +23,13 @@ asking; `executable_sha256` names the server's own executable.
 | Focus a Desktop window or script its panes | `lf desktop` |
 
 Machine commands choose **where work runs**. The client server lets local
-clients (Desktop, `lf open`, `lf resume`) reach Work and held conversations on
-this Machine. Ordinary CLI commands work without the server; opening a Task or
-Wave conversation is the exception because the server starts its held agent.
+clients (Desktop, `lf open`, `lf resume`, the phone) reach Work and held
+conversations on this Machine, and the Tasks that run on your other Machines:
+it opens a Task's files, changes, shells and Sessions on the Machine that owns
+it, over SSH connections it keeps open for a minute after use. Lists and the
+board read only this Machine. Ordinary CLI commands work without the server;
+opening a Task or Wave conversation is the exception because the server starts
+its held agent.
 
 Connected views share the server's live observations of processes, Git state,
 PR/CI status, and repository files, updating automatically as things change on
@@ -88,7 +92,15 @@ lf server mobile --status   # show the saved approval and current readiness
 lf server mobile --off      # close phone connections
 ```
 
-A phone signed into the same Tailscale account can attach to running Sessions.
+A phone signed into the same Tailscale account opens your Tasks with four
+views: **Session**, **Files** (the whole tree, changed or not), **Changes** and
+**Shell**. One pairing covers every Machine: a Task running on mini or a rental
+opens through this server, with **Not started** before it has a checkout and
+an error naming the Machine, with **Try again**, when that Machine doesn't
+answer. When a Task moves, its views reload from the new Machine. A Shell
+already open keeps running on the old one; reopened after the move, it shows
+ended and offers **New shell**.
+
 In Desktop, open **Settings → Mobile** (**⌘,**) to toggle phone access, check
 readiness, or scan the pairing QR code with your phone. The green sidebar dot
 and pairing code follow the same status while Settings is open.
@@ -104,6 +116,6 @@ running. When the approved account returns, the saved QR address works again.
 Retries start after five seconds and back off to once every 30 seconds.
 
 Local server access and SSH Machines work independently of phone access.
-Keep the local Unix socket private.
+Local-only access uses the private Unix socket without opening a network port.
 
 Next: [Surfaces](surfaces.md) · [Connection troubleshooting](troubleshooting.md#desktop-cannot-connect).

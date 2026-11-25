@@ -13,6 +13,203 @@ use loopflow_test_support::TestRepo;
 use serde_json::Value;
 use support::{register_task_with_pr, EnvGuard};
 
+#[cfg(target_os = "linux")]
+#[test]
+fn container_connects_share_one_server_and_restart_it_after_exit() {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::{Command, Stdio};
+
+    let home = tempfile::tempdir().unwrap();
+    let machine = home.path().join("machine");
+    let write_tool = |name: &str, script: &str| {
+        let path = home.path().join(name);
+        fs::write(&path, script).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    };
+    write_tool(
+        "systemctl",
+        "#!/bin/sh\necho 'Failed to connect to user scope bus: No medium found' >&2\nexit 1\n",
+    );
+    let binary = env!("CARGO_BIN_EXE_lf");
+    let launcher = write_tool("launch", &format!(
+        "#!/bin/sh\n[ \"$*\" != \"server run\" ] || echo $$ >> \"$LF_HOME/starts\"\nexec '{binary}' \"$@\"\n"
+    ));
+    let lf = || {
+        let mut command = Command::new(binary);
+        command
+            .env_clear()
+            .env("HOME", home.path())
+            .env("LF_HOME", &machine)
+            .env("LF_BIN", &launcher)
+            .env("PATH", format!("{}:/usr/bin:/bin", home.path().display()))
+            .current_dir(home.path());
+        command
+    };
+    // A first server waits out first-open migrations before it answers, which
+    // a debug build can take longer than the readiness deadline to finish.
+    let migrated = lf()
+        .args(["desktop", "portfolio", "--json"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        migrated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&migrated.stderr)
+    );
+    let connect = || {
+        let mut child = lf()
+            .args(["server", "connect"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"{\"type\":\"status\"}\n")
+            .unwrap();
+        child
+    };
+    let instance = |child: std::process::Child| {
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let status: Value = serde_json::from_slice(&output.stdout).unwrap();
+        status["instance"].as_str().unwrap().to_owned()
+    };
+    // Each PID comes from this home's own launcher. Clean up on assertion failure too.
+    struct Starts(std::path::PathBuf);
+    impl Starts {
+        fn stop(&self) -> usize {
+            let Ok(recorded) = fs::read_to_string(&self.0) else {
+                return 0;
+            };
+            fs::remove_file(&self.0).unwrap();
+            for pid in recorded.lines() {
+                let _ = Command::new("/bin/kill").args(["-TERM", pid]).status();
+            }
+            recorded.lines().count()
+        }
+    }
+    impl Drop for Starts {
+        fn drop(&mut self) {
+            self.stop();
+        }
+    }
+    let starts = Starts(machine.join("starts"));
+    let first = connect();
+    let second = connect();
+    let initial = instance(first);
+    assert_eq!(instance(second), initial);
+    assert_eq!(starts.stop(), 1);
+    let directory = loopflow_execution::transport::directory(&machine).unwrap();
+    let lock = fs::File::open(directory.join("machine.lock")).unwrap();
+    fs2::FileExt::lock_exclusive(&lock).unwrap();
+    drop(lock);
+    assert_ne!(instance(connect()), initial);
+    assert_eq!(starts.stop(), 1);
+    assert!(machine.join("logs/server.log").is_file());
+}
+
+#[test]
+fn a_dev_rental_keeps_its_stream_and_receives_the_callers_skill_routes() {
+    use loopflow_execution::config::remote;
+
+    let repo = TestRepo::new();
+    let caller = tempfile::tempdir().unwrap();
+    let profile = {
+        let _env = EnvGuard::with_home(&[], Some(caller.path()));
+        std::env::set_var("LF_HOME", caller.path());
+        fs::write(
+            caller.path().join("config.yaml"),
+            "stream: stable\n\
+             forward: {env: [TEST_TOKEN]}\n\
+             default_agent: codex:general\n\
+             skills: {probe: {agents: [codex:small]}}\n\
+             yolo: true\n",
+        )
+        .unwrap();
+        remote::outgoing(None, "caller").unwrap()
+    };
+    assert!(profile.global.get("stream").is_none());
+    assert!(profile.global.get("forward").is_none());
+    repo.create_file(".lf/skills/probe.md", "Probe.");
+
+    for (local, conflict) in [
+        ("", false),
+        ("skill: {probe: {agents: [codex:small]}}\n", false),
+        ("yolo: false\ntheme: Linen\n", true),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let _env = EnvGuard::with_home(&[], Some(home.path()));
+        std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+        let file = home.path().join("config.yaml");
+        fs::write(&file, format!("stream: dev\n{local}")).unwrap();
+        let _server = Server::start(repo.path(), home.path());
+        let assert_saved = |model: &str| {
+            let show = read(
+                repo.path(),
+                home.path(),
+                &["config", "show", "--skill", "probe", "--json"],
+                None,
+            );
+            let shown: Value = serde_json::from_str(&show).unwrap();
+            assert_eq!(shown[0]["settings"]["agent"]["value"], model);
+            let general = read(repo.path(), home.path(), &["config", "show"], None);
+            assert!(general.contains("codex:general"), "{general}");
+            let records: Value = serde_json::from_str(&read(
+                repo.path(),
+                home.path(),
+                &["config", "retained"],
+                None,
+            ))
+            .unwrap();
+            let receipt = &records[0]["receipt"];
+            assert_eq!(receipt["applied"]["skills"]["probe"]["agents"][0], model);
+            assert_eq!(
+                receipt["status"],
+                if conflict { "conflict" } else { "retained" }
+            );
+            let saved: serde_yaml_ng::Value =
+                serde_yaml_ng::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+            assert_eq!(saved["stream"], "dev");
+            assert_eq!(saved["yolo"], !conflict);
+            if conflict {
+                assert_eq!(saved["theme"], "Linen");
+            }
+        };
+        let mut profile = profile.clone();
+        let initial = serde_json::to_string(&profile).unwrap();
+        read(
+            repo.path(),
+            home.path(),
+            &["install", "server", "--profile-stdin"],
+            Some(&initial),
+        );
+        assert_saved("codex:small");
+
+        profile.global["skills"]["probe"]["agents"][0] = "codex:updated".into();
+        profile.revision += 1;
+        {
+            let input = serde_json::to_string(&profile).unwrap();
+            let _profile = loopflow_execution::config::environment::EnvVarGuard::set(
+                remote::PROFILE_ENV,
+                &input,
+            );
+            remote::receive(Some(repo.path())).unwrap();
+        }
+        assert_saved("codex:updated");
+    }
+}
+
 #[test]
 fn configuration_readiness_recognizes_an_older_server_for_replacement() {
     use std::io::Read;
@@ -146,6 +343,133 @@ fn configuration_edits_use_the_server_without_work_processes() {
     assert!(frame["read_at"].is_null());
     assert_eq!(theme["value"], "Hearth");
     assert_eq!(fs::read(&database).unwrap(), before);
+}
+
+#[test]
+fn working_task_drop_keeps_its_side_after_another_window_reorders() {
+    use loopflow::lf::commands::read::Read;
+    use loopflow::lf::commands::write::Write;
+    use loopflow_storage::work::selection::{DropSide, ViewPlan};
+
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+    let repo = TestRepo::new();
+    let _server = Server::start(repo.path(), home.path());
+    for name in ["first", "second", "third"] {
+        let checkout = home.path().join(name);
+        assert!(std::process::Command::new("git")
+            .current_dir(repo.path())
+            .args(["worktree", "add", "-q"])
+            .arg(&checkout)
+            .status()
+            .unwrap()
+            .success());
+        read(
+            repo.path(),
+            home.path(),
+            &[
+                "task",
+                "create",
+                "--worktree",
+                checkout.to_str().unwrap(),
+                "--title",
+                name,
+                "--json",
+            ],
+            None,
+        );
+    }
+    let working = || {
+        let plan = server_read(Read::DesktopViewGet {
+            directory: repo.path().to_owned(),
+            expression: Some("kind:task state:working".into()),
+        });
+        serde_json::from_value::<ViewPlan>(plan)
+            .unwrap()
+            .resolution
+            .task_ids()
+    };
+    let [a, b, c]: [String; 3] = working().try_into().unwrap();
+    let move_tile = |member: &str, target: &str, side| Write::DesktopDashboardMove {
+        directory: repo.path().to_owned(),
+        board: "working-tasks".into(),
+        member: format!("task:{member}"),
+        destination: format!("task:{target}"),
+        side,
+    };
+
+    // One window still shows A, B, C while another moves A to C's slot.
+    assert_eq!(
+        server_write(move_tile(&a, &c, None)),
+        serde_json::json!([b, c, a])
+    );
+    for (change, expected) in [
+        (move_tile(&b, &a, Some(DropSide::Before)), [&c, &b, &a]),
+        (move_tile(&a, &c, Some(DropSide::After)), [&c, &a, &b]),
+    ] {
+        let args = spelled(&change);
+        let expected = expected.map(String::as_str);
+        assert_eq!(server_write(change), serde_json::json!(expected));
+        assert_eq!(working(), expected);
+
+        // Repeating a relative move through the one-shot CLI leaves it on that side.
+        let cli = read(
+            repo.path(),
+            home.path(),
+            &args.iter().map(String::as_str).collect::<Vec<_>>(),
+            None,
+        );
+        assert_eq!(serde_json::from_str::<Vec<String>>(&cli).unwrap(), expected);
+        assert_eq!(working(), expected);
+    }
+
+    // A drop onto a Task that has left Working is refused by name, and the
+    // client hears that nothing happened.
+    let gone = "task_00000000000000000000000000000000";
+    let refused = loopflow_execution::machine::client::Connection::open()
+        .unwrap()
+        .request(loopflow::server::wire::Operation::Write(move_tile(
+            &b,
+            gone,
+            Some(DropSide::Before),
+        )))
+        .unwrap_err()
+        .downcast::<loopflow_execution::engine::Error>()
+        .unwrap();
+    assert_eq!(
+        (refused.code, refused.message.as_str()),
+        (
+            loopflow_execution::engine::ErrorCode::NotFound,
+            "task_00000000000000000000000000000000 is not a Working Task here; nothing changed."
+        )
+    );
+    assert_eq!(working(), [c.as_str(), a.as_str(), b.as_str()]);
+
+    // A saved board can move the same Tasks without changing their shared order.
+    server_write(Write::DesktopDashboardQuery {
+        directory: repo.path().to_owned(),
+        id: "board".into(),
+        expression: "kind:task state:working".into(),
+        revision: None,
+    });
+    let board = server_write(Write::DesktopDashboardMove {
+        directory: repo.path().to_owned(),
+        board: "query:board".into(),
+        member: format!("task:{b}"),
+        destination: format!("task:{c}"),
+        side: None,
+    });
+    let board: loopflow_storage::work::selection::Dashboard =
+        serde_json::from_value(board).unwrap();
+    let order: Vec<_> = board
+        .arrangement
+        .order
+        .iter()
+        .map(|tile| &tile.work.id)
+        .collect();
+    assert_eq!(order, [&b, &c, &a]);
+    assert_eq!(working(), [&c, &a, &b].map(String::as_str));
 }
 
 #[test]
@@ -920,6 +1244,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::TaskDiff { .. }
         | Read::TaskFile { .. }
         | Read::TaskFiles { .. }
+        | Read::TaskFilesWatch { .. }
         | Read::WaveList
         | Read::MachineSelf
         | Read::DesktopPortfolio
@@ -1052,6 +1377,7 @@ fn server_operations_match_their_lf_commands() {
                 },
                 Read::CreationGet {
                     request_id: "absent-creation".into(),
+                    task: None,
                 },
                 Read::GraphRunGet { id: graph },
                 Read::SessionUsage {
@@ -1401,6 +1727,7 @@ fn server_operations_match_their_lf_commands() {
                     request_id: "new-thread-parity".into(),
                     directory: directory.clone(),
                     id: session.clone(),
+                    task: None,
                     agent: None,
                 },
                 // No fixture Session uses Pi, so this selection moves nothing.
@@ -1442,6 +1769,7 @@ fn server_operations_match_their_lf_commands() {
                     board: "query:served".into(),
                     member: format!("task:{task_id}"),
                     destination: format!("task:{task_id}"),
+                    side: None,
                 }) as Box<dyn Fn() -> Write>,
                 Box::new(|| Write::DesktopDashboardPin {
                     directory: directory.clone(),
@@ -2011,14 +2339,35 @@ struct Server(std::process::Child);
 
 impl Server {
     fn start(repo: &Path, home: &Path) -> Self {
-        let server = Self(isolated_lf(repo, home, &["server", "run"]));
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
-        // This test binary is another executable than the server's, and the
-        // server is as ready for it as for its own `lf`.
-        while !loopflow_execution::machine::client::status().unwrap().ready {
-            assert!(std::time::Instant::now() < deadline, "server did not start");
-            std::thread::sleep(Duration::from_millis(20));
-        }
+        use std::io::{ErrorKind, Write};
+        use std::os::unix::net::UnixStream;
+
+        let mut server = Self(isolated_lf(repo, home, &["server", "run"]));
+        let path = loopflow::server::socket_path().unwrap();
+        let mut socket = loop {
+            match UnixStream::connect(&path) {
+                Ok(socket) => break socket,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        ErrorKind::NotFound | ErrorKind::ConnectionRefused
+                    ) =>
+                {
+                    assert!(
+                        server.0.try_wait().unwrap().is_none(),
+                        "server exited before listening on {}",
+                        path.display()
+                    );
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(error) => panic!("connect to {}: {error}", path.display()),
+            }
+        };
+        // The listener binds before the server hashes its executable. Wait for the
+        // answer on this connection, including on a cold debug build.
+        socket.write_all(b"{\"type\":\"status\"}\n").unwrap();
+        let answer: Value = serde_json::from_reader(socket).unwrap();
+        assert_eq!(answer["type"], "status", "{answer}");
         server
     }
 }
@@ -2372,6 +2721,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             id,
             agent,
             request_id,
+            task: _,
         } => {
             let mut spelled = Vec::new();
             if let Some(agent) = agent {
@@ -2434,10 +2784,14 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             directory,
             wave,
             project,
-        } => (
-            path(directory),
-            words(&["wave", "plan", "bind", wave, project, "--json"]),
-        ),
+            replace,
+        } => {
+            let mut args = words(&["wave", "plan", "bind", wave, project, "--json"]);
+            if *replace {
+                args.push("--replace".into());
+            }
+            (path(directory), args)
+        }
         Write::WavePlanConnect {
             directory,
             wave,
@@ -2868,17 +3222,28 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             board,
             member,
             destination,
-        } => (
-            path(directory),
-            words(&[
+            side,
+        } => {
+            let mut args = words(&[
                 "desktop",
                 "dashboard",
                 "move",
                 &format!("{board}/{member}"),
                 "--destination",
                 destination,
-            ]),
-        ),
+            ]);
+            if let Some(side) = side {
+                use loopflow_storage::work::selection::DropSide;
+                args.extend(words(&[
+                    "--side",
+                    match side {
+                        DropSide::Before => "before",
+                        DropSide::After => "after",
+                    },
+                ]));
+            }
+            (path(directory), args)
+        }
         Write::ConfigSet { .. }
         | Write::ConfigPromote { .. }
         | Write::ConfigPreview { .. }
@@ -3080,6 +3445,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     let found = connection
         .request(Operation::Read(Read::CreationGet {
             request_id: "lost-answer".into(),
+            task: None,
         }))
         .unwrap()
         .result;
@@ -3124,6 +3490,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     let continuation = connection
         .request(Operation::Read(Read::CreationGet {
             request_id: "lost-answer".into(),
+            task: None,
         }))
         .unwrap()
         .result;
@@ -3136,6 +3503,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     let interrupted = connection
         .request(Operation::Read(Read::CreationGet {
             request_id: "lost-answer".into(),
+            task: None,
         }))
         .unwrap()
         .result;
@@ -3182,6 +3550,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     let removed = connection
         .request(Operation::Read(Read::CreationGet {
             request_id: "lost-answer".into(),
+            task: None,
         }))
         .unwrap()
         .result;
@@ -3235,6 +3604,7 @@ fn served_session_new_recovers_its_input_after_a_lost_reply_and_restart() {
         directory: repo.path().into(),
         id: id.into(),
         request_id: "lost-thread".into(),
+        task: None,
         agent: None,
     };
     let mut socket = UnixStream::connect(loopflow::server::socket_path().unwrap()).unwrap();

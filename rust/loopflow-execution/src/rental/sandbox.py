@@ -14,6 +14,7 @@ guardian that holds the deadline (`guardian.py`, sent in each create).
 """
 
 import base64
+import datetime
 import json
 import os
 import shlex
@@ -44,14 +45,14 @@ TOOLS = [
     " https://cli.github.com/packages stable main' > /etc/apt/sources.list.d/github-cli.list"
     " && apt-get update -qq && apt-get install -y -qq gh",
     "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -"
-    " && apt-get install -y -qq nodejs && npm install -g @anthropic-ai/claude-code",
+    " && apt-get install -y -qq nodejs && npm install -g @anthropic-ai/claude-code @openai/codex",
     "curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --no-modify-path"
     " && chmod -R a+rwX /usr/local/rustup /usr/local/cargo",
     "curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh",
     "useradd -m -s /bin/bash lf && echo 'lf ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/lf",
     # sshd sessions read the environment from here, not from the image.
     "printf 'RUSTUP_HOME=/usr/local/rustup\\nCARGO_HOME=/usr/local/cargo\\nIS_SANDBOX=1\\n"
-    "PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\\n'"
+    f"PATH={ENV['PATH']}:/root/.local/bin:/home/lf/.local/bin\\n'"
     " > /etc/environment",
 ]
 
@@ -215,6 +216,13 @@ def _modal(op, request):
     if op == "create":
         app = modal.App.lookup(app_name, create_if_missing=True)
         image = modal.Image.from_registry(BASE, add_python="3.12").env(ENV).run_commands(*TOOLS)
+        cores = request["vcpus"] / 2
+        memory_mib = request["memory_gb"] * 1024
+        reserved = request["modal_sizing"] == "reserved"
+        deadline = datetime.datetime.fromisoformat(request["deadline"].replace("Z", "+00:00"))
+        seconds_left = int(deadline.timestamp() - time.time())
+        if seconds_left < 1:
+            raise ValueError("Modal rental deadline passed before sandbox creation")
         sandbox = modal.Sandbox.create(
             "bash",
             "-c",
@@ -222,9 +230,9 @@ def _modal(op, request):
             app=app,
             name=request["name"],
             image=image,
-            cpu=request["vcpus"] / 2,
-            memory=request["memory_gb"] * 1024,
-            timeout=request["lifetime_minutes"] * 60,
+            cpu=(cores if reserved else 0.125, cores),
+            memory=(memory_mib if reserved else 128, memory_mib),
+            timeout=seconds_left,
             unencrypted_ports=[22],
             env={"LF_PUBLIC_KEY": request["public_key"]},
             gpu=request["type"],
@@ -400,7 +408,8 @@ def _aws(op, request):
         return [i for reservation in reply["Reservations"] for i in reservation["Instances"]]
 
     if op == "create":
-        ami = boto3.client("ssm", region_name=region).get_parameter(Name=AWS_AMI)["Parameter"]["Value"]
+        ssm = boto3.client("ssm", region_name=region)
+        ami = ssm.get_parameter(Name=AWS_AMI)["Parameter"]["Value"]
         name = request["name"]
         spot = {}
         if request["spot"]:

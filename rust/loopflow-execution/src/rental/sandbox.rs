@@ -151,6 +151,7 @@ impl Sandboxes {
                     "disk_gb": rental.hardware.disk_gb,
                     "gpu": rental.hardware.gpu,
                     "spot": rental.hardware.spot,
+                    "modal_sizing": rental.hardware.modal_sizing,
                     "type": offer.machine_type,
                     // The most a spot machine may be charged.
                     "usd_per_hour": rental.usd_per_hour.to_decimal(),
@@ -233,6 +234,7 @@ mod tests {
                 disk_gb: 20,
                 gpu: None,
                 spot: false,
+                modal_sizing: None,
             },
             usd_per_hour: Usd::ZERO,
             cap_usd: Usd::ZERO,
@@ -240,7 +242,7 @@ mod tests {
             state: RentalState::Requested,
             created_at: now,
             ended_at: None,
-            cost_usd: None,
+            cost: loopflow_storage::rental::RentalCost::CostUsd(None),
         }
     }
 

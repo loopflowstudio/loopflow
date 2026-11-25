@@ -148,7 +148,7 @@ struct ServerProtocolTests {
         #expect(attached == terminal)
         #expect(issued["expires_in_ms"] == .integer(60000))
         let attach = ServerClientMessage.request(id: "terminal-1", operation: .sessionAttach(
-            session: "session_5e55105e000040008000000000000001"), select: nil, requestID: nil)
+            session: "session_5e55105e000040008000000000000001", task: nil), select: nil, requestID: nil)
         #expect(try encoded(attach) == self.value("attach"))
         // The bridge presents the ticket on a connection of its own.
         #expect(try encoded(.attach(ticket: ticket)) == value("attach_ticket"))
@@ -184,7 +184,12 @@ struct ServerProtocolTests {
             directory: "/repo", headless: false, after: nil, limit: 100, task: "task_00000000000000000000000000000001")), select: nil, requestID: nil)) == value("session_page"))
         #expect(try encoded(.request(id: "continue-1", operation: .sessionContinue(
             session: "session_5e55105e000040008000000000000001", request: "3f2a7c1e-9b4d-4e8a-a1c6-5d0e7f9b2c34",
-            rows: 40, cols: 60), select: nil, requestID: nil)) == value("session_continue"))
+            rows: 40, cols: 60, task: "task_00000000000000000000000000000001", agent: "claude"), select: nil, requestID: nil)) == value("session_continue"))
+        let issue = "task_00000000000000000000000000000001"
+        #expect(try encoded(.request(id: "shell-1", operation: .taskShellStart(
+            issue: issue, shellID: "mobile-\(issue)", rows: 40, cols: 60), select: nil, requestID: nil)) == value("task_shell_start"))
+        #expect(try encoded(.request(id: "shell-2", operation: .taskShellAttach(
+            issue: issue, shellID: "mobile-\(issue)"), select: nil, requestID: nil)) == value("task_shell_attach"))
         #expect(try encoded(.subscribe(id: "tasks-1", operation: .viewSelect(expression: "kind:task state:open"), select: nil, resume: nil)) == value("view_select"))
     }
 
@@ -272,7 +277,7 @@ struct ServerProtocolTests {
                     ProgramStatusReport(state: .blocked, id: nil, kind: .question, progress: nil, app: nil,
                                         title: nil, msg: "Proceed?")]))),
             ("wave_plan_bind", "bind-1", .wavePlanBind(directory: "/repo", wave: "product",
-                                                               project: "5e55105e-0000-4000-8000-000000000042")),
+                                                               project: "5e55105e-0000-4000-8000-000000000042", replace: false)),
             ("wave_plan_connect", "connect-1", .wavePlanConnect(directory: "/repo", wave: "product", all: false,
                                                                         teamKey: "LOO", teamName: nil)),
             ("wave_plan_reteam", "reteam-1", .wavePlanReteam(directory: "/repo", apply: false)),

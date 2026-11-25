@@ -855,6 +855,7 @@ fn installation_configuration_and_app_commands_have_distinct_owners() {
             "credentials",
             "doctor",
             "end",
+            "forward",
             "hub",
             "list",
             "login",

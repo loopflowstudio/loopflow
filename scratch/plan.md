@@ -538,9 +538,21 @@ threads, `spawns` unchanged across two calls a minute apart. Then
    - Merged `store-maintenance` + `plan-git` into one periodic thread and `recovery` + `task-update-wake` into one `recovery-wake` thread; made `TitleReader` lazy with pooled connections; debounced `plan_carriers::after_command` before spawning or opening SQLite; replaced `plan_git::git_until`'s pipe-reader threads with `poll(2)`; scoped `plan_git::exchange_unowned` to `active_plan_repository_paths` (unfinished Task or non-retired Wave) with exponential backoff doubling from 2 min up to 1 h.
    - **What it taught:** `history.db` writes do not touch `loopflow.db-wal`, so raising `CHECK` to 30 s required watching `history.db-wal` on the same kqueue (only while a `Watch::History` follower is active, woken via `EVFILT_USER` on join). Also, `Subscriptions::planning` and `TitleReader` each kept an extra background thread alive while idle, and `server_idle.py` needed a 3.5 s settle window between `file_edits` and `db_writes` so the trailing throttled Git refresh from `file_edits`'s last edit does not spill into `db_writes`.
    - `server_idle.py` (`target/debug/lf --seconds 10`, budgets enforced) passed all three phases with zero violations: `quiet` 0.10% CPU / 18 threads / 0 spawns / 0 opens; `file_edits` 0.60% CPU / 16 threads / 4 spawns / 0 opens; `db_writes` 0.10% CPU / 18 threads / 0 spawns / 0 opens.
+   - Left from Pass 2's shape read: `observe.rs` grew ~850 net lines
+     (`Hold`, `FsWatcher`, `FactWatcher`, `read_once`); a compress pass should
+     check whether `read_once` and the inline stat path for unheld reads can be
+     one path. `harness/drive.rs:19` still builds a `current_thread` runtime per
+     headless provider turn (agent process, not the server; move it onto
+     `runtime::block_on` if it touches that code).
 3. **Disposable custom-home lifetimes.** *(next)* §8 (detached server on macOS + Linux,
    idle/missing-home exit, holder exit on deleted home, bootout of legacy
    hashed jobs, docs in `docs/dev/server.md`, `machines.md`, `.lf/qa/`).
+   Delivers: `LF_HOME=$(mktemp -d)` server and holder gone within a minute of
+   deleting the home, `launchctl list | grep com.loopflow.server.` empty. Teaches
+   whether fixtures relying on `MachineServer` + registered jobs (and
+   `scripts/test_server_registration.py`) survive the detached-process model,
+   and whether the old hashed jobs stay in `launchctl print-disabled` after
+   bootout. Focused tests: the `installation` set under "Acceptance check".
 4. **Job budget and bounded files.** §9 (`RunningGraph::spawn` env budget +
    `nice 5` + host-local `machine.jobs` in `docs/config.md`) and §10 (log rotation,
    delivery/log/backup/lock-file pruning).

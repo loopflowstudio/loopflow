@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1110 Concept Review — The Machine Runtime</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --surface: #f7f8fa;
+    --surface-2: #eef1f5;
+    --border: #d8dee6;
+    --text: #161b22;
+    --muted: #57606a;
+    --accent: #0969da;
+    --accent-bg: #ddf4ff;
+    --yes: #1a7f37;
+    --yes-bg: #dafbe1;
+    --no: #cf222e;
+    --no-bg: #ffebe9;
+    --prop: #8250df;
+    --prop-bg: #fbefff;
+    --warn: #9a6700;
+    --warn-bg: #fff8c5;
+    --code-bg: #f0f3f6;
+    --shadow: 0 1px 2px rgba(27,31,36,0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface-2: #1f2630;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-bg: rgba(56, 139, 253, 0.15);
+      --yes: #3fb950;
+      --yes-bg: rgba(46, 160, 67, 0.18);
+      --no: #f85149;
+      --no-bg: rgba(248, 81, 73, 0.18);
+      --prop: #bc8cff;
+      --prop-bg: rgba(163, 113, 247, 0.18);
+      --warn: #d29922;
+      --warn-bg: rgba(210, 153, 34, 0.18);
+      --code-bg: #21262d;
+      --shadow: 0 1px 3px rgba(0,0,0,0.35);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2rem 1.25rem 4rem;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 1080px; margin: 0 auto; }
+  header { margin-bottom: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 1.25rem; }
+  .eyebrow {
+    font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--muted); display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap;
+  }
+  h1 { margin: 0.35rem 0 0.5rem; font-size: 1.85rem; line-height: 1.2; letter-spacing: -0.02em; }
+  h2 { margin: 2.25rem 0 0.75rem; font-size: 1.25rem; letter-spacing: -0.01em; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+  h3 { margin: 1.25rem 0 0.45rem; font-size: 1rem; }
+  p { margin: 0.5rem 0 0.85rem; }
+  .lead { font-size: 1.02rem; color: var(--muted); max-width: 78ch; }
+  code {
+    font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    background: var(--code-bg); padding: 0.12em 0.35em; border-radius: 4px;
+  }
+  pre {
+    margin: 0.5rem 0;
+    padding: 0.85rem 1rem;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow-x: auto;
+    font: 12.5px/1.48 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  .badge {
+    display: inline-block; font-size: 11.5px; font-weight: 600; padding: 0.14rem 0.52rem;
+    border-radius: 999px; letter-spacing: 0.02em; vertical-align: middle; white-space: nowrap;
+  }
+  .b-yes { background: var(--yes-bg); color: var(--yes); }
+  .b-no { background: var(--no-bg); color: var(--no); }
+  .b-existing { background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
+  .b-proposed { background: var(--prop-bg); color: var(--prop); }
+  .b-warn { background: var(--warn-bg); color: var(--warn); }
+  .b-accent { background: var(--accent-bg); color: var(--accent); }
+
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--no);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin: 1.25rem 0;
+    box-shadow: var(--shadow);
+  }
+  .callout.proposed { border-left-color: var(--prop); }
+  .callout.info { border-left-color: var(--accent); }
+  .callout.warn { border-left-color: var(--warn); }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1rem;
+    margin: 0.9rem 0 1.25rem;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.15rem;
+    box-shadow: var(--shadow);
+  }
+  .card.existing { border-top: 3px solid var(--muted); }
+  .card.proposed { border-top: 3px solid var(--prop); }
+  .card-head {
+    display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
+    margin-bottom: 0.65rem;
+  }
+  .card-title { font-weight: 650; font-size: 0.96rem; }
+
+  table {
+    width: 100%; border-collapse: collapse; margin: 0.85rem 0 1.25rem;
+    font-size: 13.8px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+  }
+  th, td {
+    text-align: left; vertical-align: top; padding: 0.68rem 0.78rem;
+    border-bottom: 1px solid var(--border);
+  }
+  th { background: var(--surface-2); font-weight: 650; font-size: 12.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  tr:last-child td { border-bottom: 0; }
+
+  .metric-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0 1.4rem;
+  }
+  .metric {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem 0.95rem;
+  }
+  .metric .label { font-size: 12px; color: var(--muted); margin-bottom: 0.25rem; }
+  .metric .val { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.02em; }
+  .metric .sub { font-size: 12px; color: var(--muted); margin-top: 0.2rem; }
+  .before-val { color: var(--no); text-decoration: line-through; font-weight: 500; font-size: 0.9rem; margin-right: 0.4rem; }
+  .after-val { color: var(--yes); }
+
+  .trace {
+    display: grid; gap: 0.45rem; font-size: 13.5px;
+  }
+  .step {
+    display: grid; grid-template-columns: 92px 1fr; gap: 0.65rem;
+    padding: 0.45rem 0.6rem; border-radius: 6px; background: var(--bg); border: 1px solid var(--border);
+  }
+  .step .who { font-weight: 650; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; padding-top: 2px; }
+  .step.bad { border-color: var(--no); background: var(--no-bg); }
+  .step.good { border-color: var(--yes); background: var(--yes-bg); }
+
+  .counterexamples { display: grid; gap: 0.75rem; margin: 0.85rem 0; }
+  .ce {
+    background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--warn);
+    border-radius: 8px; padding: 0.8rem 1rem;
+  }
+  .ce strong { display: block; margin-bottom: 0.25rem; }
+
+  .questions { display: grid; gap: 0.9rem; margin-top: 1rem; }
+  .q {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1rem 1.15rem;
+  }
+  .q-num { font-weight: 700; color: var(--accent); margin-right: 0.4rem; }
+  .q ul { margin: 0.55rem 0 0; padding-left: 1.25rem; }
+  .q li { margin: 0.35rem 0; }
+  .choice-tag { font-size: 11.5px; font-weight: 600; color: var(--prop); background: var(--prop-bg); padding: 0.1rem 0.45rem; border-radius: 999px; margin-left: 0.4rem; }
+  footer { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <div class="eyebrow">
+    <span>LOO-1110 Concept Review</span>
+    <span class="badge b-existing">HEAD: 5222c7d (pre-implementation)</span>
+    <span class="badge b-proposed">Plan updated in scratch/plan.md</span>
+  </div>
+  <h1>The Machine Runtime: Do Product Concepts and Code Concepts Line Up?</h1>
+  <p class="lead">
+    <strong>Area taken:</strong> the whole <strong>Machine Runtime</strong> — how a Loopflow Machine hosts itself (<code>lf server</code>, <code>lf holder</code>, <code>~/.lf</code> vs disposable <code>LF_HOME</code>, local store access, live view updates, held terminals, background sync/upkeep, and concurrent Graph builds). The Task asks to stop CPU, SQLite, YAML, git-polling, and load storms; every one of those symptoms comes from the same conceptual split in how the Machine runtime models work, lifetimes, and shared resources.
+  </p>
+</header>
+
+<div class="metric-strip">
+  <div class="metric">
+    <div class="label">Quiet server CPU</div>
+    <div class="val"><span class="before-val">40–100%</span><span class="after-val">&lt; 1%</span></div>
+    <div class="sub">16-core M4 Max, 12 repos</div>
+  </div>
+  <div class="metric">
+    <div class="label">Server threads</div>
+    <div class="val"><span class="before-val">77–180</span><span class="after-val">&lt; 20</span></div>
+    <div class="sub">1 runtime, 1 watcher, 2 loops</div>
+  </div>
+  <div class="metric">
+    <div class="label">Idle forks / sec</div>
+    <div class="val"><span class="before-val">2.8–9.3/s</span><span class="after-val">0</span></div>
+    <div class="sub">Git runs only after real edits</div>
+  </div>
+  <div class="metric">
+    <div class="label">Held terminal under DB lock</div>
+    <div class="val"><span class="before-val">frozen (err 35)</span><span class="after-val">&lt; 200 ms</span></div>
+    <div class="sub">Relay thread never opens SQLite</div>
+  </div>
+  <div class="metric">
+    <div class="label">Leaked temp daemons &amp; holders</div>
+    <div class="val"><span class="before-val">6 + 21</span><span class="after-val">0</span></div>
+    <div class="sub">Delete LF_HOME → all gone</div>
+  </div>
+</div>
+
+<h2>1. Product Concepts vs. Code Concepts</h2>
+<p>
+  Every row pairs what a person understands and expects on their Machine with what the code actually owns today (<span class="badge b-existing">Existing</span>) and what the updated plan moves to (<span class="badge b-proposed">Proposed</span>).
+</p>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:20%">Product concept</th>
+      <th style="width:10%">Lines up?</th>
+      <th style="width:35%">Code today <span class="badge b-existing">Existing</span></th>
+      <th style="width:35%">After LOO-1110 <span class="badge b-proposed">Proposed</span></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Live view vs. one-shot read</strong><br>Open screens update when something changes; closed screens and idle checkouts cost nothing.</td>
+      <td><span class="badge b-no">No</span></td>
+      <td>
+        <strong>Three overlapping pollers nobody asked for:</strong>
+        <code>observe::Cache</code> wakes 3 threads every 250 ms and keeps re-running <code>git</code> for 300 s after a one-shot read;
+        <code>read_stream::Reader</code> wakes every 1 s (<code>CHECK</code>) even when idle and wakes <em>every</em> subscriber at 20 Hz on any WAL write;
+        4 separate FSEvents threads in <code>transcript/watch.rs</code> plus another watcher in <code>workspace.rs</code>.
+      </td>
+      <td>
+        <strong>One rule: held facts refresh on change; unheld facts check on use.</strong>
+        One refresh thread parks when nothing is held; one shared filesystem watcher covers transcript homes + held checkouts; store observer reads <code>revisions()</code> once and wakes only subscribers whose domain moved; <code>Reader</code> sleeps up to 30 s between fallback checks.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>The Machine's store</strong><br>One local database per Machine; reading or writing it is fast and invisible.</td>
+      <td><span class="badge b-no">No</span></td>
+      <td>
+        <strong>Four competing connection models:</strong>
+        <code>open_sqlite</code> opens fresh and parses 402 triggers (~4 ms) every call;
+        <code>open_read_only_store</code> opens twice;
+        <code>journal::process_ledger()</code> caches only when a <code>ProcessContext</code> exists (CLI has one; <code>lf server</code> has none, so it silently reopens every call!);
+        <code>recovery</code>, <code>wake</code>, and each <code>Reader</code> hoard private handles.
+      </td>
+      <td>
+        <strong>One process-wide connection pool in <code>loopflow-storage</code></strong> keyed by <code>(canonical path, dev, ino, mode)</code>.
+        Revalidates only when <code>data_version</code> + <code>(schema_version, schema_migrations)</code> move.
+        <code>prepare_cached</code> with 256-statement cache. Subscriptions borrow read-only connections per step instead of hoarding one per subscriber.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Held terminal typing</strong><br>Keystrokes in Desktop or <code>lf resume</code> go straight to the agent, unaffected by DB locks.</td>
+      <td><span class="badge b-no">No</span></td>
+      <td>
+        The single <code>held-terminals</code> thread calls <code>process_ledger()</code> → <code>open_sqlite()</code> synchronously inside <code>Hosted::pass</code> on every PTY chunk until directory is reported (<strong>96% of samples</strong> on live server!) and calls <code>settle(exit)</code> synchronously in the poll loop.
+      </td>
+      <td>
+        <strong>The relay thread never touches SQLite or transcript files.</strong>
+        Directory confirmation and exit settlement move to the <code>held-status</code> worker channel. Settling terminal IDs answer <code>Waiting</code> on <code>held.sock</code> until committed, keeping exit-code visibility without blocking any other terminal.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Main Machine vs. disposable <code>LF_HOME</code></strong><br><code>~/.lf</code> is your lasting Machine; <code>LF_HOME=/tmp/...</code> is disposable — delete the folder and it's gone.</td>
+      <td><span class="badge b-no">No</span></td>
+      <td>
+        <strong>Docs say disposable; code installs a permanent daemon.</strong>
+        <code>installation/server.rs</code> registers every custom <code>LF_HOME</code> with launchd/systemd as <code>KeepAlive=true</code> (<code>com.loopflow.server.&lt;hash&gt;</code>) and never unregisters it.
+        <code>terminal_holder.rs</code> never notices its home was deleted — leaving 21 zombie holders for days.
+      </td>
+      <td>
+        Only default <code>~/.lf</code> registers with SMAppService / systemd.
+        Custom homes launch a plain detached <code>lf server run</code> that exits when its home is deleted (<code>Ok(false)</code>) or after 10 min idle with no clients, terminals, or active Graphs/agents.
+        Holders exit and close PTYs (SIGHUP to children) when their home is deleted.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Settings &amp; config files</strong><br>Reading settings is free; invalid keys warn once without breaking valid keys.</td>
+      <td><span class="badge b-no">No</span></td>
+      <td>
+        <code>filter_file_preferences</code> builds defaults and deserializes a full <code>Config</code> once <em>per key</em> (O(N²));
+        <code>settings::outside()</code> scans <code>PATH</code> for every harness before building a cache key;
+        <code>observe::derived()</code> caches only inside a <code>READING</code>, so background loops bypass it completely.
+      </td>
+      <td>
+        Cheap structural/scope walk + <strong>one</strong> full <code>Config</code> deserialization + shared invariant check per file (per-key fallback only on error).
+        Cached <code>(PATH, harness)</code> lookup.
+        <code>derived()</code> always uses the process cache, validating unheld file dependencies inline by <code>stat(mtime, size, ino)</code> (~5 µs) so edits are never stale.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Server threads &amp; async work</strong><br>One lightweight resident server per Machine.</td>
+      <td><span class="badge b-no">No</span></td>
+      <td>
+        <strong>No single runtime owner:</strong>
+        <code>reader_runtime()</code> builds a 16-thread Tokio runtime <em>per subscription</em>;
+        107 scattered <code>Runtime::new()</code> calls;
+        server runtime allows 16 workers + 512 blocking threads;
+        separate OS threads for maintenance, plan-git, recovery, wake, and un-debounced <code>after_command</code>.
+      </td>
+      <td>
+        <strong>One bounded runtime per process:</strong> server installs its bounded <code>Handle</code> (4 workers, 12 blocking) for all in-process async work (readers, recovery, commands); bare CLI lazily creates one small runtime.
+        One periodic thread (maintenance + plan-git), one <code>StoreChanges</code> thread (recovery + wake), debounce before spawn.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Active vs. forgotten repositories</strong><br>Repos with live work sync plans in the background; deleted temp demos don't.</td>
+      <td><span class="badge b-no">No</span></td>
+      <td>
+        <code>plan_git::exchange_unowned</code> loops over all 70 <code>repository_plans</code> rows every minute (54 deleted/temp/demo paths on the live Machine), running <code>git fetch</code> on old demo checkouts.
+      </td>
+      <td>
+        Minute exchange covers only existing directories with an unfinished Task or non-retired Wave on this Machine; exponential backoff up to 1 h on failure. Other repos exchange on command as today.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Concurrent Graphs sharing a Machine</strong><br>Running 10+ Graphs keeps the laptop usable instead of driving load to 144.</td>
+      <td><span class="badge b-no">No</span></td>
+      <td>
+        No concurrency budget at step launch. Every agent's <code>cargo</code>/<code>nextest</code>/<code>make</code> claims all 16 cores at priority 0.
+      </td>
+      <td>
+        <code>RunningGraph::spawn</code> exports <code>CARGO_BUILD_JOBS</code>, <code>NEXTEST_TEST_THREADS</code>, <code>MAKEFLAGS=-jN</code>, <code>LF_JOBS</code> = <code>max(2, cores ÷ running steps)</code> and sets <code>nice 5</code> on step children. Respects preset env vars and new <code>machine.jobs</code> setting.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Server status vs. runtime metrics</strong><br>Check readiness across versions, and inspect live server load/opens/forks.</td>
+      <td><span class="badge b-warn">New trap avoided</span></td>
+      <td>
+        <code>wire::Status</code> is an <strong>unversioned pre-hello probe</strong> with <code>deny_unknown_fields</code>, mirrored in Swift and used by <code>lf install</code> across builds.
+      </td>
+      <td>
+        Keep <code>wire::Status</code> pure readiness (zero upgrade breakage). Add versioned <code>server.diagnostics</code> operation (<code>lf server diagnostics --json</code>) returning <code>threads</code>, <code>store_opens</code>, <code>spawns</code>, <code>held_facts</code>.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Bounded local files</strong><br>Months of use don't pile up 60k stray files and 1 GB of logs/backups.</td>
+      <td><span class="badge b-no">No</span></td>
+      <td>
+        <code>logs/lf.log</code> never rotates (197 MB); 24k context deliveries, 27k session locks, 9k terminal/graph logs never pruned; 730 MB DB backups blocked forever by week-old orphan holders.
+      </td>
+      <td>
+        Hourly maintenance rotates <code>lf.log</code> (32 MB × 4), expires old logs (30 d), deliveries (7 d), and backups (7 d after frontier adoption), and unlinks ended lock files under exclusive lock with inode re-check.
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>2. The Biggest Mismatch</h2>
+<div class="callout">
+  <strong>Every layer assumed "someone else isn't watching, so I'll poll and open my own resources."</strong>
+  <p style="margin-bottom:0">
+    <code>observe</code> polled unheld facts for 5 minutes because it didn't distinguish live subscriptions from one-shot reads.
+    <code>read_stream</code> polled every 1 second because <code>observe</code> didn't wake it on change.
+    <code>Hosted::pass</code> and library commands opened SQLite from scratch because the process didn't hold a shared connection pool (and <code>process_ledger()</code> silently fell back to cold opens inside the server).
+    <code>installation/server.rs</code> registered temp homes as permanent launchd jobs because it had no concept of a disposable home.
+    Two earlier patches (#1868, #1979) added caches beside those assumptions and left the server at 80–104% CPU.
+  </p>
+</div>
+
+<div class="callout proposed">
+  <strong>The unifying model <span class="badge b-proposed">Proposed</span></strong>
+  <p style="margin-bottom:0">
+    <strong>Work happens on a change or a request, never on an idle timer.</strong>
+    Each process holds <em>one</em> of each shared resource (one connection pool, one bounded async runtime, one observation cache with one filesystem watcher).
+    The terminal relay thread owns terminal I/O only and never touches SQLite.
+    Only the default Machine (<code>~/.lf</code>) is an OS-registered service; custom <code>LF_HOME</code> servers and holders live only as long as their home and active work do.
+  </p>
+</div>
+
+<h2>3. Concrete Interactions — Before and After</h2>
+
+<h3>Interaction A: Desktop open on a Task, store locked by a heavy write, user types in a held terminal</h3>
+<div class="grid-2">
+  <div class="card existing">
+    <div class="card-head">
+      <span class="card-title">Today</span>
+      <span class="badge b-existing">Existing</span>
+    </div>
+    <div class="trace">
+      <div class="step"><div class="who">User</div><div>Opens a Task once in Desktop, then switches away. Types in a held terminal while 13 Graphs write to SQLite.</div></div>
+      <div class="step bad"><div class="who">observe</div><div>3 threads wake every 250 ms; <code>git diff</code> &amp; <code>git ls-files</code> re-run every 3 s for 5 minutes even though nobody is viewing that Task.</div></div>
+      <div class="step bad"><div class="who">read_stream</div><div>WAL write triggers 50 ms wakeups for 1 s; every subscription runs <code>step()</code> at 20 Hz + 1 Hz idle fallback. Each subscription owns a 16-thread Tokio runtime.</div></div>
+      <div class="step bad"><div class="who">held-terminals</div><div><code>Hosted::pass</code> calls <code>process_ledger()</code> (no <code>ProcessContext</code>) → opens fresh SQLite → parses 402 triggers → blocks on write lock. <strong>Every terminal on the Machine freezes (os error 35).</strong></div></div>
+    </div>
+  </div>
+  <div class="card proposed">
+    <div class="card-head">
+      <span class="card-title">Proposed</span>
+      <span class="badge b-proposed">Proposed</span>
+    </div>
+    <div class="trace">
+      <div class="step"><div class="who">User</div><div>Same workload: Task read once, Desktop open on board, typing in held terminal while 13 Graphs commit 20 writes/s.</div></div>
+      <div class="step good"><div class="who">observe</div><div>Unheld Task diff stops immediately (0 forks). Held checkouts re-run Git only after an FSEvents write (throttled to ≤ 1/3 s). Refresh thread parks when idle.</div></div>
+      <div class="step good"><div class="who">read_stream</div><div>Single store observer reads <code>revisions()</code> once, wakes only subscriptions whose domain moved. All subscriptions share the server's 1 bounded runtime + pooled read-only DB connections.</div></div>
+      <div class="step good"><div class="who">held-terminals</div><div>Relay loop touches zero SQLite and zero transcript files. Keystrokes echo in &lt; 200 ms even under a 5 s write lock. Exit settlement runs on <code>held-status</code> worker while keeping settling IDs as <code>Waiting</code>.</div></div>
+    </div>
+  </div>
+</div>
+
+<h3>Interaction B: Running a demo or test in a private <code>LF_HOME</code>, then deleting the directory</h3>
+<div class="grid-2">
+  <div class="card existing">
+    <div class="card-head">
+      <span class="card-title">Today</span>
+      <span class="badge b-existing">Existing</span>
+    </div>
+    <div class="trace">
+      <div class="step"><div class="who">Setup</div><div><code>LF_HOME=$(mktemp -d) lf task create … --run</code></div></div>
+      <div class="step bad"><div class="who">install/server</div><div>Writes <code>server.plist</code> with <code>KeepAlive=true</code> and registers <code>com.loopflow.server.&lt;hash&gt;</code> in launchd.</div></div>
+      <div class="step"><div class="who">Teardown</div><div><code>rm -rf "$LF_HOME"</code></div></div>
+      <div class="step bad"><div class="who">Aftermath</div><div>launchd respawns <code>lf server run</code> forever; <code>lf holder run</code> lingers for days holding orphan child processes; user must manually <code>launchctl bootout</code> and <code>kill</code>.</div></div>
+    </div>
+  </div>
+  <div class="card proposed">
+    <div class="card-head">
+      <span class="card-title">Proposed</span>
+      <span class="badge b-proposed">Proposed</span>
+    </div>
+    <div class="trace">
+      <div class="step"><div class="who">Setup</div><div><code>LF_HOME=$(mktemp -d) lf task create … --run</code></div></div>
+      <div class="step good"><div class="who">install/server</div><div>Starts a plain detached <code>lf server run</code>. Zero launchd/systemd registration. (Any old hashed job is booted out.)</div></div>
+      <div class="step"><div class="who">Teardown</div><div><code>rm -rf "$LF_HOME"</code></div></div>
+      <div class="step good"><div class="who">Aftermath</div><div>Server sees <code>try_exists() == Ok(false)</code> and exits. Holder sees its home gone, closes PTYs (children get SIGHUP), and exits. Within seconds: 0 processes, 0 launchd jobs.</div></div>
+    </div>
+  </div>
+</div>
+
+<h2>4. Counterexamples Caught Before Implementation</h2>
+<p>Testing the kickoff plan against failure, recovery, and cross-version upgrade paths turned up <strong>seven concrete design flaws</strong>. All seven are now resolved in <code>scratch/plan.md</code> before any code is written:</p>
+
+<div class="counterexamples">
+  <div class="ce">
+    <strong>1. Always-on <code>observe::derived()</code> + no unheld background refresh = permanently stale config</strong>
+    <code>computed.dependencies.changed()</code> only checks cached entry revisions — which stop updating when unheld facts stop polling. A background loop or CLI test calling <code>load_config()</code>, editing <code>config.yaml</code>, and calling <code>load_config()</code> again would read stale config forever.
+    <br><em>Fix in plan:</em> Validate unheld <code>File</code>/<code>Bytes</code>/<code>Directory</code>/<code>Metadata</code> dependencies inline via <code>stat(mtime, size, ino)</code> (~5 µs) before returning a cached derived value.
+  </div>
+  <div class="ce">
+    <strong>2. Hidden 1-second idle wake loop in <code>read_stream.rs</code></strong>
+    Even with <code>observe.rs</code>'s 250 ms loops gone and <code>StoreChanges</code> filtered, <code>Reader::step()</code> schedules <code>now + CHECK</code> (1 s) and <code>read_stream::observe</code> waits <code>CHECK</code> (1 s) forever.
+    <br><em>Fix in plan:</em> <code>observe</code> pushes wakeups directly to followers whose held facts bumped, and the fallback reconcile wait rises from 1 s to 30 s so idle subscriptions truly sleep.
+  </div>
+  <div class="ce">
+    <strong>3. Three separate <code>notify</code> FSEvents watcher layers</strong>
+    Shrinking <code>transcript/watch.rs</code> (4 → 1) while keeping <code>TaskFilesWatch</code> and adding a third watcher in <code>observe.rs</code> still duplicates FSEvents threads.
+    <br><em>Fix in plan:</em> One shared filesystem watcher owned by <code>observe</code> covering the 4 transcript roots plus active held checkouts.
+  </div>
+  <div class="ce">
+    <strong>4. Adding metrics directly to <code>wire::Status</code> breaks cross-build upgrades</strong>
+    <code>ClientMessage::Status</code> is an unversioned pre-hello probe, and <code>wire::Status</code> uses <code>#[serde(deny_unknown_fields)]</code>. Adding <code>threads</code>/<code>store_opens</code>/<code>spawns</code>/<code>held_facts</code> directly to <code>wire::Status</code> breaks every older binary's <code>lf server status</code> and <code>lf install</code> check!
+    <br><em>Fix in plan:</em> Keep <code>wire::Status</code> untouched; expose runtime metrics via a versioned post-hello <code>server.diagnostics</code> operation (<code>lf server diagnostics --json</code>).
+  </div>
+  <div class="ce">
+    <strong>5. Connection pooling traps: data-only migrations, per-caller <code>token_key</code>, and subscription hoarding</strong>
+    <code>PRAGMA schema_version</code> does not change on data-only migrations; <code>SqliteStore</code> carries per-caller <code>token_key</code>; and <code>Reader</code> currently holds one open read-only connection per subscription forever.
+    <br><em>Fix in plan:</em> Revalidate when <code>PRAGMA data_version</code> moves and <code>(schema_version, schema_migrations)</code> differ; pool <code>(Connection, HistoryFile)</code> and attach caller's <code>token_key</code> per checkout; have <code>Reader</code> borrow read-only connections per <code>step()</code>.
+  </div>
+  <div class="ce">
+    <strong>6. Moving <code>settle(exit)</code> off <code>held-terminals</code> races exit-code reads</strong>
+    If a terminal leaves <code>terminals</code> before the <code>held-status</code> worker commits its exit row, an attaching view receives <code>Answered::Ended</code> and misses the exit code.
+    <br><em>Fix in plan:</em> Track in-flight exits in a <code>settling</code> set on the relay loop that answers <code>Answered::Waiting</code> until the worker sends <code>Command::Settled</code>.
+  </div>
+  <div class="ce">
+    <strong>7. Shared <code>current_thread</code> runtime panics under concurrent <code>block_on</code>; macOS lacks <code>pidfd_open</code></strong>
+    Two threads cannot concurrently <code>block_on</code> a shared <code>current_thread</code> Tokio runtime, and <code>server/linux.rs::retire_server</code> uses Linux-only <code>SO_PEERCRED</code> + <code>SYS_pidfd_open</code>.
+    <br><em>Fix in plan:</em> Server installs its own bounded multi-thread <code>Handle</code> for all in-process async work (CLI uses one lazy 2-worker runtime); macOS custom-home replacement uses <code>LOCAL_PEERPID</code> + <code>OsProcess</code> verification.
+  </div>
+</div>
+
+<h2>5. Open Questions (Choices Made for Review)</h2>
+<p>None of these block implementation or are irreversible once shipped — the plan takes the bold, simpler option for each and flags it here. Reply with e.g. <code>1a</code> or <code>2b</code> to change course.</p>
+
+<div class="questions">
+  <div class="q">
+    <div><span class="q-num">1.</span><strong>Should a custom <code>LF_HOME</code> ever stay registered to come back after a reboot?</strong><span class="choice-tag">Chosen: 1a</span></div>
+    <ul>
+      <li><strong>1a (chosen):</strong> Never register custom homes with launchd/systemd. Delete the folder (or leave it idle for 10 min with no work) and its server and holders exit automatically. Only <code>~/.lf</code> restarts on login.</li>
+      <li><strong>1b:</strong> Keep OS registration for custom homes unless a flag or temp-path rule marks them temporary.</li>
+    </ul>
+  </div>
+
+  <div class="q">
+    <div><span class="q-num">2.</span><strong>When a custom <code>LF_HOME</code> directory is deleted while its agents are still running, should its holder end those agents?</strong><span class="choice-tag">Chosen: 2a</span></div>
+    <ul>
+      <li><strong>2a (chosen):</strong> Yes — once the home directory itself is gone, no server can ever adopt those terminals again, so the holder closes its PTYs (sending SIGHUP to its children) and exits. Live homes are unchanged: holders still outlive server restarts and upgrades.</li>
+      <li><strong>2b:</strong> Never end children from a holder; require manual cleanup or fixture teardown for deleted homes.</li>
+    </ul>
+  </div>
+
+  <div class="q">
+    <div><span class="q-num">3.</span><strong>How should concurrent Graphs share CPU cores during local builds and tests?</strong><span class="choice-tag">Chosen: 3a</span></div>
+    <ul>
+      <li><strong>3a (chosen):</strong> Soft budget in the environment (<code>cores ÷ running steps</code>, floor 2, at <code>nice 5</code>, overridable via env or <code>machine.jobs</code>). Never blocks or stalls an agent mid-turn, and keeps Desktop/typing responsive.</li>
+      <li><strong>3b:</strong> Hard build-slot queue in <code>lf server</code> that makes extra builds wait until a slot frees up (requires build commands to check in with the server).</li>
+    </ul>
+  </div>
+
+  <div class="q">
+    <div><span class="q-num">4.</span><strong>Where should live server runtime counters (threads, store opens, spawns, held facts) live?</strong><span class="choice-tag">Chosen: 4a</span></div>
+    <ul>
+      <li><strong>4a (chosen):</strong> Separate <code>lf server diagnostics --json</code> (backed by a versioned <code>server.diagnostics</code> operation), keeping <code>lf server status</code> a pure readiness probe that never breaks older binaries during upgrades.</li>
+      <li><strong>4b:</strong> Put them directly into <code>lf server status --json</code> by having the CLI make a second versioned request when the server is ready (adds a welcomed connection per status check).</li>
+    </ul>
+  </div>
+
+  <div class="q">
+    <div><span class="q-num">5.</span><strong>Should repositories with no Waves and no unfinished Tasks still sync Git plans every minute?</strong><span class="choice-tag">Chosen: 5a</span></div>
+    <ul>
+      <li><strong>5a (chosen):</strong> No — only repositories with an unfinished Task or an active Wave on this Machine sync on the minute timer. A repo with neither still syncs automatically the next time you run a command in it.</li>
+      <li><strong>5b:</strong> Keep syncing every existing repository on disk every minute, and prune deleted/temp rows instead.</li>
+    </ul>
+  </div>
+</div>
+
+<footer>
+  Generated by <code>lf concept-review</code> before implementation · Record matches <code>scratch/plan.md</code> at HEAD <code>5222c7d</code> · No code modified.
+</footer>
+
+</main>
+</body>
+</html>

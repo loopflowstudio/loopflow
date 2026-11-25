@@ -2378,6 +2378,15 @@ elif "<lf:skill:kickoff>" in turn:
             assert_eq!(stop.cursor.index, 1);
             assert!(checkout.join("scratch/explore.html").is_file());
             assert_eq!(received_contexts(home).len(), 1);
+            let status = run_lf(checkout, home, &["task", "status", "INF-123"], Some(&path));
+            assert!(
+                String::from_utf8_lossy(&status.stdout).contains(
+                    "latest Graph: Graph feature stopped at breakpoint after-explore; \
+                     `lf task run INF-123` continues it"
+                ),
+                "{}",
+                String::from_utf8_lossy(&status.stdout)
+            );
             match choice {
                 LayoutChoice::Reply => check(&[
                     "task",

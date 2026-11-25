@@ -1,0 +1,72 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LOO-1096 QA · breakpoints on real providers</title>
+<style>
+body{font:15px/1.5 -apple-system,sans-serif;max-width:56em;margin:2em auto;padding:0 1em;color:#222}
+pre{background:#f4f4f2;padding:.8em;overflow-x:auto;font-size:12.5px;white-space:pre-wrap}
+h2{margin-top:2em;border-top:1px solid #ddd;padding-top:1em}
+.ok{color:#176b2c;font-weight:600}.bad{color:#a12;font-weight:600}.fix{color:#7a4b00;font-weight:600}
+img{max-width:100%;border:1px solid #ccc}
+td,th{padding:.3em .6em;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
+</style></head><body>
+<h1>Breakpoints on real providers</h1>
+<p>Branch <code>lf</code> at f99ad5ace plus the fixes below. Private <code>LF_HOME</code> under <code>/tmp/lf-qa-bp</code>, a disposable recipe-card repository with a bare origin, real Claude for the primary (default model) and for explore (<code>claude:sonnet</code>). Run on 2026-11-25.</p>
+
+<h2>1 · A new feature Task runs explore on its own model</h2>
+<p>Did: <code>lf task create 'Add a dark mode to the recipe card' --run --graph feature --json</code>, with <code>skills.explore.agent: codex</code>.</p>
+<p>Saw: Codex was out of quota until Nov 30. Status said <q>explore is waiting for codex capacity until Nov 25 07:31 … It goes on by itself</q>. The retry kept Codex after I changed the setting to <code>claude:sonnet</code>, so I interrupted and ran again. Explore then ran headless as <code>claude -p … --model sonnet</code> while the primary ran in a held terminal on the default model. <span class="ok">Works.</span></p>
+
+<h2>2 · The primary quits during explore</h2>
+<p>Did: attached with <code>lf resume --task 2d0e18</code> and pressed Enter on Claude's trust dialog, which selects its exit choice.</p>
+<p>Saw: <code>claude exited with 1.</code> The server restarted the primary (<q>Conversation: running (started again 07:28, attempt 1)</q>). <span class="ok">Works.</span></p>
+
+<h2>3 · Parking at after-explore</h2>
+<p>Saw: about two minutes later, <q>Graph feature: At breakpoint after-explore.</q> On the next line, status said:</p>
+<pre>latest Graph: Graph feature finished; nothing further is launched · started by QA Person</pre>
+<p><span class="fix">Fixed.</span> That line describes the run that parked, which ended its carrier. It now reads:</p>
+<pre>latest Graph: Graph feature stopped at breakpoint after-explore; `lf task run 2d0e18` continues it · started by QA Person</pre>
+<p>The artifact explore left, <code>scratch/explore.html</code>:</p>
+<img src="qa/explore.png" alt="explore.html: three dark-mode visions with live demos and a recommendation">
+
+<h2>4 · The handoff reaches the primary</h2>
+<p>On its first turn the restarted primary (task-session) chose:</p>
+<pre>lf session rename … 'recipe dark mode' --suggest; lf task wait 2d0e18 --until submitted --timeout 540</pre>
+<p>Its description was <q>Rename session and wait for explore breakpoint</q>. <span class="bad">Broken:</span> <code>--until submitted</code> returned only for an open PR or a finished Task, so the primary sat inside the tool call while the Task waited at the breakpoint. The handoff could not land until the 9-minute timeout.</p>
+<p><span class="fix">Fixed.</span> <code>submitted</code> now also returns when the Task waits at a breakpoint (<code>ops/task.rs</code>). I updated the <code>--until</code> help and the task-session skill to match, and added a unit case. Live check on a command Graph (<code>- cmd: help task</code>, <code>- break: check</code>, <code>- cmd: help</code>): a wait started before <code>lf task run</code> returned exit 0 with <q>At breakpoint check.</q> Right after a continue, <code>task_graphs.breakpoint</code> was already NULL, so a new wait does not return early.</p>
+<p>The live primary was still running the old binary's wait, so I pressed Esc. Claude fires no Stop hook on Esc, and the server's idle wake needs one, so nothing came for 87 s. That gap existed before this change. When I typed <q>where does this stand?</q>, the handoff was delivered with the turn, and the primary presented it:</p>
+<pre>Explore run 440a0a35 finished, and the Task is waiting for you at the after-explore breakpoint. Nothing in index.html has changed …
+ A. Follows your device | B. Adds a switch | C. Cook mode   (what you get · cost and risk)
+ 1. Which vision?  a) Follow the device (recommended)  b) … plus a switch  c) Cook mode
+ 2. Which dark colours?  a) browser built-in (recommended)  b) warm kitchen palette
+ 3. Add the mobile viewport tag?  a) Yes  b) No (recommended)
+Recommendation: 1a, 2a, 3b …
+Reply with your picks, like "1a 2a 3b", or just "continue" to accept the recommendation.</pre>
+
+<h2>5 · Choosing the other layout</h2>
+<p>Typed: <q>1b 2b 3b, I want the switch with a warm kitchen palette</q>. The primary appended the decision to <code>scratch/design.md</code> and ran:</p>
+<pre>lf task run 2d0e18 --at-arrival f49ee81a-… --reason '"1b 2b 3b, I want the switch with a warm kitchen palette" — 1b: follow device plus Auto/Light/Dark switch; 2b: warm kitchen palette in dark only; 3b: …'</pre>
+<p>The kickoff worker received that steer with the words verbatim and committed <q>lf kickoff: Plan dark mode with an Auto / Light / Dark switch and warm palette</q>. <span class="ok">Works.</span> I interrupted at concept-review rather than run a full build.</p>
+
+<h2>6 · Auto through a parked breakpoint</h2>
+<p><code>lf task auto on</code> on a Task parked at <code>check</code>: the run continued to the end and the Task went to <q>done · auto: on</q>. <span class="ok">Works.</span></p>
+
+<h2>7 · Notes that were wrong</h2>
+<p><span class="fix">Fixed.</span> <code>.lf/skills/qa.md</code> told QA runs to add <code>.lf/graphs/qa.yaml</code> ending in <code>- interactive: demo</code>. A Graph named <code>qa</code> also replaces the <code>qa</code> step inside <code>build</code>: <code>lf graph show feature</code> listed <code>cmd: help task / break: check / cmd: help</code> there. The note now uses <code>qa-start.yaml</code> with <code>- break</code>. <code>.lf/qa/antigravity.md</code> no longer says <code>interactive:</code>.</p>
+
+<h2>Checks</h2>
+<table>
+<tr><td><code>cargo test -p loopflow-execution --lib ops::task::tests::task_wait_condition_releases_terminal_tasks</code></td><td class="ok">passed</td></tr>
+<tr><td><code>cargo test -p loopflow --lib breakpoint_feature_kickoff_receives_the_chosen_layout</code> (now also asserts the status line)</td><td class="ok">passed (85 s)</td></tr>
+<tr><td>Clippy, Swift, full suites</td><td>gate / CI</td></tr>
+</table>
+
+<h2>Where it stands</h2>
+<p><b>Works now:</b> a worker on another model, a primary that quit and was restarted, parking, status, a handoff with artifacts and numbered choices, a reply carried through <code>--at-arrival</code>/<code>--reason</code> to the next worker, waits that return at a breakpoint, and auto through a parked breakpoint.</p>
+<p><b>Not reached:</b> Desktop (Now ordering, the Continue button, the sidebar) and iOS. Those need the Dev bundle and a display, so they stay with gate and demo. Codex as a worker (no quota until Nov 30). A primary that was fully quit (<code>/exit</code>) rather than crashed, waiting for a breakpoint to start it in a held terminal.</p>
+<p><b>Still wrong, worst first:</b></p>
+<ol>
+<li>Esc during a tool call leaves Claude idle without a Stop hook, so a parked handoff waits for the next typed prompt instead of waking the conversation. This predates the change and affects every idle wake.</li>
+<li>A provider limit retry keeps the agent captured at step start. Changing the setting has no effect until an interrupt and a fresh run.</li>
+<li>A bare step name in a builtin Graph (<code>build</code>'s <code>qa</code>) resolves to any repository Graph of that name.</li>
+<li>Status names a running step by UUID (<q>Step d148293b-… is running explore</q>), and the suggested action at a breakpoint is generic (<q>run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first</q>).</li>
+</ol>
+</body></html>

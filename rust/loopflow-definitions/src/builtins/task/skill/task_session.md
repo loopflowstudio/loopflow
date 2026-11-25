@@ -56,7 +56,8 @@ child stands and what it needs. Direction for a child goes to the child, with
 `lf steer <child> '<direction>'`.
 
 **Wait, don't poll.** Within a turn, `lf task wait <issue> --until submitted`
-(or `terminal`, with `--timeout`) waits for a change.
+(or `terminal`, with `--timeout`) waits for a change; `submitted` also returns
+at a breakpoint, so read its handoff and present it.
 
 This conversation keeps the instructions it launched with; start a new one
 after an install.

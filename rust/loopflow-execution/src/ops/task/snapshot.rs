@@ -79,13 +79,17 @@ pub(super) async fn snapshot_here(
         crate::store::task_work::task_work(&store.sqlite, &task.id).map_err(task_error)?;
     let auto = store.sqlite.task_auto(&task.id).map_err(task_error)?;
     if execution.state == crate::ops::task_execution::TaskExecutionState::Idle {
-        if let Some(wait) = work_set
-            .graph
-            .as_ref()
-            .and_then(|graph| graph.waiting_to_land(auto.as_ref(), &task.identifier))
-        {
-            execution.state = crate::ops::task_execution::TaskExecutionState::Waiting;
-            execution.reason = wait;
+        if let Some(graph) = work_set.graph.as_ref() {
+            // A run that parked ended its carrier; the Graph itself goes on.
+            if let crate::task_graph::TaskGraphPosition::Breakpoint { step, .. } = &graph.position {
+                execution.reason = format!(
+                    "Graph {} stopped at breakpoint {step}; `lf task run {}` continues it",
+                    graph.name, task.identifier
+                );
+            } else if let Some(wait) = graph.waiting_to_land(auto.as_ref(), &task.identifier) {
+                execution.state = crate::ops::task_execution::TaskExecutionState::Waiting;
+                execution.reason = wait;
+            }
         }
     }
     let status = store.task_state(&task.id).await.map_err(task_error)?;

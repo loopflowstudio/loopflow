@@ -5,3 +5,5 @@
 - Use `step: research` inside the research Graph. A bare `research` resolves to the Graph of the same name.
 - When **Sort by status** is off, should a breakpoint temporarily appear above a Task someone dragged to the top? #2025 made the default Working order stable. For the Desktop pass, assume priority in Now and status-sorted work while keeping the saved drag order intact. The default sidebar presentation is still open.
 - Convert a released capture only when a run successfully claims its position. SQLite fixes the Graph at take-up, so the claim replaces that one row in the same transaction and retains its carrier and recovery counts. A Machine move carries the source coordinates until then.
+- QA, LOO-1096: builtin `build` names `qa` bare, so a repository Graph named `qa` replaces that step (research already uses `step: research`). Should builtin Graphs spell skills as `step:`? Left as is.
+- QA, LOO-1096: Esc during a Claude tool call fires no Stop hook, so a parked handoff waits for the next typed prompt rather than waking the conversation. This predates the change and is left as is.

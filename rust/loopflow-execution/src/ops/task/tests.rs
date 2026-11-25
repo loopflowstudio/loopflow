@@ -44,6 +44,28 @@ fn task_wait_condition_releases_terminal_tasks() {
     };
     assert!(!read(TaskWaitUntil::Terminal).1);
     assert!(!read(TaskWaitUntil::Open).1);
+    // A parked Task needs someone, so a submitted wait returns there.
+    store
+        .sqlite
+        .take_up_task_graph(&fixture.task.id, "{}")
+        .unwrap();
+    let park = |breakpoint: Option<&str>| {
+        store
+            .sqlite
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE task_graphs SET breakpoint=?2 WHERE task_id=?1",
+                rusqlite::params![fixture.task.id.as_str(), breakpoint],
+            )
+            .unwrap();
+    };
+    park(Some(r#"{"id":"arrival"}"#));
+    assert!(read(TaskWaitUntil::Open).1);
+    assert!(!read(TaskWaitUntil::Terminal).1);
+    park(None);
+    assert!(!read(TaskWaitUntil::Open).1);
     let mut pr = runtime
         .block_on(store.active_task_pr(&fixture.task.id))
         .unwrap()

@@ -84,7 +84,7 @@ use time::format_description::well_known::Rfc3339;
 )]
 #[serde(rename_all = "snake_case")]
 pub enum TaskWaitUntil {
-    /// Its PR is open, or it finished first.
+    /// Its PR is open, it waits at a breakpoint, or it finished first.
     #[serde(rename = "submitted")]
     Open,
     /// It is done or abandoned.
@@ -3903,6 +3903,11 @@ async fn task_wait_condition(
     let reached = match until {
         TaskWaitUntil::Open => {
             finished
+                || store
+                    .sqlite
+                    .task_graph_row(&task.id)
+                    .map_err(task_error)?
+                    .is_some_and(|row| row.breakpoint.is_some())
                 || store
                     .active_task_pr(&task.id)
                     .await

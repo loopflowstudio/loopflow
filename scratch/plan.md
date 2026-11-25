@@ -61,6 +61,10 @@ Replaced the remaining interactive-skill display paths with one breakpoint proje
 
 Realign after Pass 4: the removed types are gone from Rust and Swift. `ConcreteSkill.interactive` and `interactive_name` remain only for unconverted released captures (compilation always writes `false`), as does the `occurrence.interactive` branch in [instructions.rs](../rust/loopflow-execution/src/graph/instructions.rs). LOO-1100 removes them with the released readers. Twenty stale "interactive step" doc comments in storage, execution, auto, run recovery and the server/harness READMEs now say breakpoint.
 
+## QA · November 25, real providers
+
+The feature walkthrough ran on real Claude: explore on `claude:sonnet`, the primary on the default model. The primary was crashed during explore and restarted, the Task parked at `after-explore`, and the handoff was presented with the artifact and numbered choices. The reply “1b 2b 3b, I want the switch with a warm kitchen palette” reached kickoff through `--at-arrival`/`--reason`. Two fixes came out of it: `lf task wait --until submitted` now returns at a breakpoint (the primary had blocked in it for the whole review), and status says a parked run “stopped at breakpoint” instead of “finished”. Details and what remains wrong are in [qa.html](qa.html).
+
 ## Remaining · gate and demo (no implement pass left)
 
 **Gate and demo.** Gate owns all-target Clippy, the full Swift package check, `scripts/test_desktop.sh --filter DTOFixtureTests/breakpointOffersContinuationForThePresentedArrival`, iOS build/simulator checks, and full Work/Now projection checks. Before shipping, run the feature walkthrough in a disposable repository with different agents for explore and the primary. Quit during explore, reopen from Now or with `lf resume --task <ID>`, open the artifact and choose the other layout. Record what appeared on reopen and what planning received, separately from the stand-in results. The multi-day Desktop usage goals in the earlier Task snapshot require real sessions.

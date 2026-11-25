@@ -152,3 +152,27 @@ configure different agents for `explore` and the Task conversation, quit the
 conversation during `explore`, reopen from **Now** or `lf resume --task <ID>`,
 open `scratch/explore.html`, and reply with the non-recommended layout so
 `kickoff` receives both the recommendation and the chosen direction.
+
+# A breakpoint review on real providers
+
+Keep the real `HOME` so `claude` and `codex` keep their logins; isolate only
+`LF_HOME`, put the branch `lf` first on `PATH` and set `LF_BIN` to it. Give
+the workers another model than the primary in `.lf/config.yaml`
+(`agent: claude` with `skills: {explore: {agent: claude:sonnet}}`). A provider
+out of quota keeps its captured agent across retries: change the setting with
+`lf set skills.explore.agent …`, then `lf task interrupt` and `lf task run`.
+`lf task create '<words>' --run --graph feature --json` runs explore and parks
+at `after-explore` in about two minutes.
+
+Attach with `lf resume --task <id>` under a PTY driver. The `--add-dir` trust
+dialog's cursor starts on the exit choice: Enter alone ends Claude with exit 1
+(the recovery pass restarts it); send ↓ (`ESC [ B`), then Enter. A driver
+that answers no kitty keyboard query leaves `65535u` in the prompt; Ctrl+U
+clears it. Esc during a tool call ends the turn without a Stop hook, so the
+server does not wake that conversation with a parked handoff; the next typed
+prompt delivers it. Read what the primary ran from its transcript,
+`~/.claude/projects/-private-tmp-<…>-repo-<task dir>/<provider_thread>.jsonl`,
+and what the next worker received from `<checkout>/.lf/prompts/*-steer.md`.
+Interrupt and `lf task hold` before the Graph reaches `build`: its `qa` step
+resolves to any repository Graph named `qa`. Stop each primary `claude` (a
+child of `lf holder run`) by PID, then the holder, then the server.

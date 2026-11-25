@@ -11,8 +11,13 @@ the very next concept-review iterating `build`.
 
 Two new Graphs appear wherever Graphs are listed (`lf list graph`, Desktop's
 Start menu and New Task sheet): `ui`, which puts the running UI in front of a
-person every pass, and `fix`, which takes a bounded bug from brief to merged
-with no planning or review steps.
+person every pass (`1 stop`), and `fix`, which takes a bounded bug from brief
+to merged with no planning or review steps (`merges without asking`).
+
+Every builtin skill in the loop has one clean owner:
+- `concept-review` is read-only everywhere (writes `scratch/concept-review.html`).
+- `realign` is the sole owner of reconciling review findings into `scratch/plan.md`.
+- `wave-session` is the sole owner of curating Wave `MEMORY.md` (and `wave-operate` stays a read/judge/act Task operator).
 
 ## Demo
 
@@ -30,15 +35,13 @@ $ lf list graph        # among the rest
   build   loop(loop(cmd: sync → implement) → concept-review → realign) → compress → qa → pr-publish
   fix     loop(cmd: sync → implement) → qa → gate → cmd: land --wait-and-fix
   plan    kickoff → concept-review → realign → write-docs
-  ui      kickoff → loop(implement → cmd: sync → qa → demo (interactive)) → compress → pr-publish → deliver
+  ui      kickoff → loop(cmd: sync → implement → qa → demo (interactive)) → compress → deliver
 ```
 
-This output is real: the four YAML files below were written to a temp
-repository's `.lf/graphs/` and read with the installed `lf`. All four compile,
-and `code`, `pursue`, `feature` and `redesign` compose over them with no edit
-of their own (`code` becomes kickoff, concept-review, realign, write-docs,
-sync, implement, concept-review, realign, compress, qa, pr-publish,
-ship-review, reflect, gate, land, verify).
+`code`, `pursue`, `feature` and `redesign` compose over `plan` and `build`
+with no edit of their own (`code` compiles to kickoff, concept-review,
+realign, write-docs, sync, implement, concept-review, realign, compress, qa,
+pr-publish, ship-review, reflect, gate, land, verify).
 
 ## The Graphs
 
@@ -77,18 +80,17 @@ description: Build a Desktop, mobile or web UI change you try as it takes shape,
 steps:
 - kickoff
 - loop:
-    - implement
     - cmd: sync
+    - implement
     - qa
-    - interactive: demo     # you use it; iterate goes back to implement with your words
+    - interactive: demo     # you use it; iterate goes back to sync → implement with your words
 - compress
-- pr-publish
 - graph: deliver
 ```
 
 ```yaml
 # fix.yaml
-description: Fix a bounded bug or make a small tweak, and land it without stopping.
+description: Fix a bounded bug or small tweak and land it.
 steps:
 - loop:
     - cmd: sync
@@ -114,93 +116,117 @@ the comments in docs that summarize `plan` and `build` move.
 - No autonomous loop may return across an interactive step
   (`validate_interactive_steps`, `graph/mod.rs:609`). `ui`'s loop is decided by
   the interactive step itself, like `code`'s `ship-review` loop, so it passes.
-- The decision prompt reads "Decision pass N. Iterating repeats K steps, back
-  to <first step>" (`rust/loopflow/src/lf/commands/graph.rs:1263`). In `build`
-  the first step is now `sync`; the docs example in `docs/orchestration.md`
-  follows whatever the built `lf` prints.
+- The decision prompt reads `"Decision pass N. Iterating repeats K steps, back to <first step>"`
+  (`rust/loopflow/src/lf/commands/graph.rs:1263`). In `build` the first step is
+  now `sync`. `GraphOutput::Decision` (`advance` / `iterate` / `blocked`) is
+  attached only when `skill.returns.is_some()` (`graph/output.rs:36`).
+- Desktop's Start menu (`swift/LoopflowMac/Views/BacklogView.swift:128-145`)
+  inspects ops before the first stop and already labels `fix` as
+  **`merges without asking`** under `Run without stopping`, and `ui` as
+  **`1 stop`** under stopping workflows. `lf task auto off` still stops `fix`
+  before `cmd: land --wait-and-fix` (`stopped_landing`, `graph.rs:907`).
 
-## Who writes `scratch/plan.md`
+## Ownership map
+
+### Who writes `scratch/plan.md`
 
 | Step | What it does to the plan |
 | --- | --- |
-| kickoff | writes it |
-| implement | collapses each finished pass to one line with its commit and the finding that changes the next pass; revises when a counterexample breaks the plan (unchanged) |
-| concept-review | never writes it, anywhere |
-| realign | the only step that turns review findings into plan changes, and the only one that regroups remaining passes |
-| compress, qa, ship-review | read it |
+| `kickoff` | writes it |
+| `implement` | collapses each finished pass to one line with its commit and any finding that changes the next pass; records a contradiction when a counterexample breaks the plan |
+| `concept-review` | never writes it, anywhere |
+| `realign` | the only step that turns review findings into plan changes, fixes small mismatches inline, defers separate outcomes under `## Deferred findings`, and regroups remaining passes |
+| `compress`, `qa`, `ship-review` | read it |
 
-"Single owner" in the brief is read as the last two rows: review findings
-reach the plan through `realign` and nowhere else. `implement` still marks its
-own progress, because `ui`, `fix` and `optimize` have no `realign` after it.
+### Who curates Wave `MEMORY.md`
+
+| Skill | Ownership |
+| --- | --- |
+| `wave-session` | sole owner of `.lf/wave/<wave>/MEMORY.md` (direction, promoting child-Wave lessons, replacing stale guidance, retiring largest stale sections when `lf context` exceeds its limit). `build.rs:24` composes `wave-session` from `wave_session.md` + `wave_operate.md`, so placing curation in `wave_session.md` keeps it in one section with no duplicate `.lf/wave/` rule. |
+| `wave-operate` | unchanged: reads, judges, and moves existing Tasks; never edits Wave files. |
+| `realign` | drops `## Wave memory` and its token-limit paragraph; leaves one-line pointer to `lf help wave-session` when a Graph step has write access to Wave memory. |
 
 ## The skills
 
 All under `rust/loopflow-definitions/src/builtins/`. Each must still read
-correctly where it runs outside these Graphs; the sibling uses are listed.
+correctly in every Graph position it holds (and standalone).
 
 **`task/skill/concept-review.md`** — read-only everywhere.
-- Delete the section "In a Graph, with nobody there" (lines 72–105) and the
-  three-outcome report. What survives from it moves into the main body in a few
-  lines, because it is review guidance and not plan-writing: question the
-  premise, since the plan came from the same pipeline; before anything is
-  built, review the whole thing the plan builds and whether its first slice is
-  the right one; after it is built, review against the base as a first-time
-  reader; a product choice is shown on the page as a recommendation with what
-  was passed over.
-- Line 39 "What this work should do differently goes in the plan, when the
-  review is updating one" becomes: every finding goes on the page, marked as
+- Delete the section `## In a Graph, with nobody there` (lines 72–105) and the
+  three-outcome report. Move the surviving review guidance (not plan-writing)
+  into the main body in a few lines: question the premise, since the plan came
+  from the same pipeline; before anything is built, review the whole thing the
+  plan builds and whether its first slice is the right one; after it is built,
+  review against the base as a first-time reader; show a product choice on the
+  page as a recommendation with what was passed over.
+- Line 39 ("What this work should do differently goes in the plan, when the
+  review is updating one") becomes: every finding goes on the page, marked as
   this work or as a separate outcome.
-- Add the closing rule: the page is the only file it writes; it does not edit
-  `scratch/plan.md`, code or docs, and it does not decide a loop.
+- Add the closing rule: `scratch/concept-review.html` is the only file it
+  writes; it does not edit `scratch/plan.md`, code or docs, and it does not
+  decide a loop.
 - Frontmatter `produces:` drops "in a Graph, also a plan the next step can
   build from".
 - This repository's `.lf/skills/concept-review.md` (`extends: builtin`,
   "Rewrite the whole page") stays valid as is.
 
 **`task/skill/realign.md`** — owns the plan after a review. Runs in three
-places and the text must fit each: `build` (outer-loop decider), `plan` (after
-the premise review, nothing built, not a decider), `refresh` (after `cmd:
-sync` in `queue` and `optimize`, no fresh review).
+places: `build` (outer-loop decider), `plan` (after premise review, nothing
+built, not a decider), `refresh` (after `cmd: sync` in `queue` and `optimize`,
+no fresh review).
 - New section for a review page: when `scratch/concept-review.html` has
-  findings the plan has not answered, give each one a place.
+  findings the plan has not answered, give each one a place:
   - A small, clear mismatch: fix it here, in plan, code, tests or docs.
   - Conceptual rework in the area this work touches, or promised behavior that
     is missing: write it into the plan as the next pass.
-  - A separate outcome: list it in the plan under a heading `ship-review`
-    reads, with what it would take. Don't build it.
-  - Record in the plan what happened to each finding, so a later `realign`
-    (the one in `refresh`) does not act on the same page twice.
-- When it decides a loop: iterate only when the plan now holds a pass of
-  rework or missing promised behavior, naming that pass in the summary;
-  advance when what was found is fixed here or deferred. A product choice that
-  can't be undone once shipped is `blocked` with the question. Outside a loop
-  it reports and finishes.
-- "After a slice" opening widens to "after a slice, a review, or upstream
+  - A separate outcome: list it in the plan under `## Deferred findings` (which
+    `ship-review` reads), with what it would take. Don't build it.
+  - Record in the plan what happened to each finding by substance (not bare
+    numbers), so a later `realign` (e.g. in `refresh`) does not act on the same
+    page twice. When a fresh `scratch/concept-review.html` arrives (e.g. after
+    `ship-review` iterates back to `build`), replace earlier settled review
+    notes while keeping `## Deferred findings` intact.
+- Loop decision vs. non-loop honesty:
+  - When deciding a loop (`build`): `iterate` only when the plan now holds a
+    pass of rework or missing promised behavior, naming that pass in the
+    summary; `advance` when what was found is fixed here or deferred; `blocked`
+    with the question on a product choice that can't be undone once shipped.
+  - Outside a loop (`plan`, `refresh`): no `blocked` verdict exists — record
+    any open irreversible choice in `scratch/questions.md` and `scratch/plan.md`,
+    report what changed, and finish.
+- Widen opening ("After a slice") to "After a slice, a review, or upstream
   changes"; before anything is built, the review is what was learned.
-- "Regroup what remains into end-to-end passes" stays: it writes the pass list
-  `implement` now counts down.
+- Keep "Regroup what remains into end-to-end passes": it writes the pass list
+  `implement` counts down.
 - Delete `## Wave memory` (lines 47–54) and the Wave paragraph of "Keeping
   notes readable" (lines 64–67); leave one line: when the Wave's memory is
-  this step's to write, curate it as `lf help wave-operate` describes.
+  this step's to write, curate it as `lf help wave-session` describes.
   Frontmatter `produces:` drops "Wave memory".
 
-**`wave/skill/wave_operate.md`** — gains `## Wave memory`, the moved text:
-read the Wave's `MEMORY.md` and its immediate children's, promote lessons
-that apply across the parent, replace stale guidance, curate the selected Wave
-and not its ancestors; `.lf/wave/` is read-only unless the running Graph's
-step maintains it, otherwise proposals go in `scratch/`; `lf context` over
-its limit means retiring the largest stale sections, never raising the limit.
-Line 10 ("its plan, new Tasks and backlog are not this skill's to change")
-keeps its meaning: memory curation is conditional on write access.
+**`wave/skill/wave_session.md`** — absorbs the moved Wave memory curation rules
+directly into `## Develop direction` (lines 29–49), with no duplication of the
+`.lf/wave/` read-only rule:
+- Read the Wave's `MEMORY.md` and its immediate children's; promote lessons that
+  apply across the parent, replace stale guidance, remove duplication, and
+  curate the selected Wave (not its ancestors).
+- Every Wave run pays for `MEMORY.md`: run `lf context`, and when it is over
+  its limit retire the largest stale sections until it fits (committing notes
+  before removing them), never raising the limit to hide overflow.
+- `wave/skill/wave_operate.md`: unchanged.
 
-**`task/skill/implement.md`** — decides the inner loop; language-neutral;
-no longer than it is now (110 lines) with the new section in it.
-- New short section, conditional on being the deciding step: iterate while the
-  plan lists a pass not yet built, and name that pass in the summary; advance
-  once the planned passes are built. With no `scratch/plan.md` the brief is
-  the plan and its outcome is one pass. When a counterexample breaks the plan,
-  don't iterate onto it: advance (or `blocked` when no later step can replan)
-  and say what broke.
+**`task/skill/implement.md`** — decides the inner loop; language-neutral; no
+longer than it is now (110 lines) with the new section in it.
+- New short section, conditional on being the deciding step:
+  - With `scratch/plan.md`: iterate while the plan lists a pass not yet built,
+    and name that pass in the summary; advance once the planned passes are
+    built. When a counterexample breaks the plan, note what broke in
+    `scratch/plan.md` and return `advance` so review/realign can replan rather
+    than iterating onto a broken plan.
+  - With no `scratch/plan.md` (the brief is the plan, e.g. `fix`): build the
+    outcome in one pass and `advance` (iterating only if a concrete remaining
+    piece stays within the brief); if the brief is contradicted or outgrows a
+    bounded change, return `blocked` with what broke so the Graph stops before
+    shipping.
 - Pass closeout and context headroom, from a comment on the Task (Jack Heart,
   2026-11-25), word for word:
   > Keep #2037 substantial-pass sizing, and add: do not start another planned
@@ -213,51 +239,56 @@ no longer than it is now (110 lines) with the new section in it.
   Both go in the deciding section. The first also bounds "Keep building while
   the next item is the same kind of work" in "Choose the slice": with context
   already heavy, close the pass out and return `iterate` so the next pass
-  starts in a fresh conversation (each `iterate` launches the loop's skills
-  afresh). The second replaces the looser "Mark the plan's remaining work in
-  place: what this slice built, what it taught, what is next" when iterating:
-  one line per finished pass with its commit, plus only the finding that
-  changes the next pass. This is the job `realign` did between passes.
+  starts in a fresh conversation. The second replaces the looser "Mark the
+  plan's remaining work in place: what this slice built, what it taught, what
+  is next" when iterating: one line per finished pass with its commit, plus
+  only the finding that changes the next pass.
 - "If the codebase uses `@dataclass`, use `@dataclass`" becomes "use the
   constructs the codebase already uses for the job".
-- Trim what `LOOPFLOW.md` already says on every launch, keeping the part
-  specific to a slice: "A new type means a new real-world concept" (Build
-  around the real thing); "Stay in scope… `scratch/questions.md`" (Finish the
-  plan; don't grow it); the generic half of "Write the tests"; the closing
-  paragraph on staying in this checkout and starting no second Task (Tasks
-  section). "Finish the slice by deleting" keeps its test-deletion rule.
-- Runs unchanged as a non-decider in `ui`, `optimize` and this repository's
-  `.lf/graphs/*`; `.lf/skills/implement.md` extends it and needs no edit.
+- Trim what `LOOPFLOW.md` already says on every launch, keeping the parts
+  specific to a slice: "A new type means a new real-world concept"; "Stay in
+  scope… `scratch/questions.md`"; the generic half of "Write the tests"; the
+  closing paragraph on staying in this checkout and starting no second Task.
+  "Finish the slice by deleting" keeps its test-deletion rule.
+- Runs unchanged as a non-decider in `ui`, `optimize` and `.lf/graphs/*`;
+  `.lf/skills/implement.md` extends it and needs no edit.
+
+**`task/skill/demo.md`** — align `## Headless` with `ui.yaml` (where `demo` is
+now a loop decider under `auto on` / `lf -b`):
+- Keep "With nobody there, nobody can feel it... Don't act out a person's
+  reactions or invent feedback."
+- Add two lines for when standing in as a loop decider: inspect what `qa`
+  produced (`scratch/qa.html`, screenshots, transcripts); return `iterate` only
+  when promised UI behavior or visual quality is visibly broken, otherwise note
+  that no person tried it and `advance`.
 
 **`task/skill/verify.md`** — identical-tree fast path, placed before "Check
 headless first":
-- When the tree qa and gate checked is the tree that merged (`git diff
-  <final PR head> <merge SHA>` prints nothing), post-merge CI for that merge
-  SHA is green, and no claim depends on something that only exists after
-  merge (a release install, a deployment, production state), the claims were
-  already checked on these exact files: verify from the qa and gate records
-  and the CI run, cite them, and don't rebuild main.
-- Any of the three missing means the full check, as today.
-- Brief says `git diff <qa-head> origin/main`. The plan compares against the
-  merge SHA: `origin/main` keeps moving, and a squash onto a newer base then
-  shows other people's changes, which correctly sends it down the full path.
-  When nothing has landed since, the two are the same commit.
+- When every shipped file on `main` is byte-for-byte identical to the tree `qa`
+  exercised (`git diff <qa head> <merge SHA> -- . ':!scratch'` prints nothing;
+  `scratch/` is excluded because `lf land` clears added scratch files before
+  merging), post-merge CI for `<merge SHA>` is green, and no claim depends on
+  something that only exists after merge (a release install, a deployment,
+  production state), the claims were already checked on these exact files:
+  verify from the `qa` and `gate` records and the CI run, cite them, and don't
+  rebuild `main`.
+- Any of the three missing (or any diff outside `scratch/`, including code
+  edits by `gate`/`land` or synced upstream commits) means the full check, as
+  today.
 
-**Generic wording**
+**Generic wording & `ship-review`**
 - `kickoff.md:26`: "Linear's API has no conditional assignment…" becomes "the
   tracker's API has no conditional assignment…".
 - `advance.md:22`: "No Task, Wave or Linear setup" becomes "No Task, Wave or
-  tracker setup". Its `description:` ("the current Loopflow work") stays: it
-  names the tool the skill drives, as `prompt.md` does.
+  tracker setup". Its `description:` ("the current Loopflow work") stays.
 - `write-docs.md` step 4: `lf open --file <path>` (repeat `--file`), which
-  shows the files in an attached Files view and never launches anything; with
-  none attached, report the paths. Checked in
-  `rust/loopflow/src/lf/commands/open/files.rs`: host `auto` is accepted and
-  prints "No Desktop Files view attached; nothing opened." instead of failing.
-  Frontmatter `produces:` ends "with their paths shared", no "Desktop".
-- `ship-review.md` gather list: the deferred findings now come from the plan's
-  heading that `realign` writes, with `scratch/concept-review.html` as the page
-  behind them. One line changes.
+  shows files in an attached Files view and never launches anything; with none
+  attached, report the paths (`open/files.rs:18` accepts host `auto` and prints
+  "No Desktop Files view attached; nothing opened."). Frontmatter `produces:`
+  ends "with their paths shared", no "Desktop".
+- `ship-review.md` gather list: deferred findings come from `## Deferred
+  findings` in `scratch/plan.md` (written by `realign`), with
+  `scratch/concept-review.html` as the page behind them. One line changes.
 
 ## Everything else that names the old order
 
@@ -273,104 +304,134 @@ Tests (expected values change; no production Rust changes):
   interactive step and `ui` to the list with one.
 - `rust/loopflow-execution/src/task_graph.rs:759` (concept-review placed in
   `plan` then `build`) holds unchanged.
-- `tests/goldens/builtin_implement.md`, `builtin_realign.md`: regenerate with
+- `tests/goldens/builtin_implement.md`, `builtin_realign.md` (and any golden
+  covering `wave_session` or `demo` if present): regenerate with
   `uv run python tests/goldens/update_goldens.py`.
-- DTO fixtures under `tests/fixtures/dto/` and the Swift tests name no step
-  order from these Graphs (grep for `concept-review|write-docs` finds none).
+- DTO fixtures under `tests/fixtures/dto/` and Swift tests name no step order
+  from these Graphs.
 
 Docs:
-- `docs/orchestration.md`: the `build` listing and its prose (126–155: who
-  decides each loop, `realign` after review), the `feature` listing's
-  comments (220–223), and a short entry each for `ui` and `fix`. `fix` says
-  plainly that it has no step for a person and merges when checks pass.
-- `docs/index.md:122`: `implement → sync → realign`.
-- `docs/surfaces.md:285`: the Start menu sample gains `ui` (1 stop) and `fix`
-  (never stops).
-- `docs/work.md:549` and `swift/README.md:407`: read and keep if still true.
+- `docs/orchestration.md`: update the `build` listing and prose (126–165:
+  `implement` decides inner loop, `realign` decides outer loop, `Decision pass`
+  example says `back to sync`), update `feature` listing comments (220–223),
+  and add `ui` and `fix` to the Built-in Graphs table (244–253) with a short
+  note that `fix` has no interactive step and merges when checks pass.
+- `docs/index.md:122`: `sync → implement` (or `implement → concept-review → realign`).
+- `docs/surfaces.md:285`: update Start menu sample with `ui` (`1 stop`) under
+  stopping workflows and `fix` (`merges without asking`) under `Run without
+  stopping`.
+- `docs/work.md:549`: replace "`realign` keeps plan, code, and memory in sync"
+  with `wave-session` curating Wave memory.
+- `swift/README.md:407`: read and keep (still true: `concept-review` still runs
+  in both `plan` and `build`).
 
 ## Choices made for review
 
-1. **`implement` advances, not iterates, on a broken plan.** `realign` is
-   where replanning happens in `build`, and a fresh review sits between them.
-   Passed over: letting `implement` rewrite the pass list and iterate, which
-   is how the 9–17 thin passes of LOO-1082 arose.
-2. **`realign` records each finding's fate in the plan.** Without it the
-   `realign` inside `queue`'s `refresh` rereads a stale page and reopens
-   settled findings. Passed over: stamping the page with a commit and having
-   `realign` compare; that puts a protocol in two skills.
-3. **`verify` compares against the merge SHA** (above).
-4. **`ui` keeps `pr-publish` before `deliver`** as the brief has it, though
-   `gate` inside `deliver` publishes too. It costs one cheap step and leaves a
-   PR up when `deliver` is skipped with `--from`.
-5. **`demo.md` is not edited.** Headless, it says the demo didn't happen and
-   finishes, which as `ui`'s decider is `advance`: a `ui` Task with auto on
-   lands without anyone having used it. That is what auto means everywhere
-   else; noted in `scratch/questions.md`.
+1. **Wave memory curation moves to `wave_session.md`, not `wave_operate.md`.**
+   `build.rs` composes `wave-session` by appending `wave_operate.md` to
+   `wave_session.md`; `wave_session.md` already owns writing and publishing
+   `MEMORY.md` while `wave_operate.md:10` says Wave files are not its to
+   change. Passed over: putting `## Wave memory` in `wave_operate.md` as the
+   brief drafted, which creates a self-contradiction in `wave-operate` and
+   duplicate `MEMORY.md` rules inside `wave-session`.
+2. **`ui.yaml` drops `pr-publish` before `deliver` and puts `cmd: sync` before
+   `implement`.** `deliver`'s `gate` already publishes after `reflect` (avoiding
+   an extra LLM step and a cancelled CI run), and syncing before `implement`
+   matches `build`, `fix`, and `deep-clean` while avoiding mid-loop conflicts
+   after a long human demo pause. Passed over: keeping `pr-publish` and
+   `implement → cmd: sync` as drafted.
+3. **`demo.md` headless mode inspects `scratch/qa.html` when standing in as a
+   loop decider.** Makes `lf task auto on` / Auto-Ship on `ui` deterministic
+   and consistent with `ship-review` and `stand_in_message`. Passed over:
+   leaving `demo.md` unedited (which clashes with `stand_in_message`) or
+   blocking Auto-Ship on `ui`.
+4. **`implement` broken-plan rule keys off `scratch/plan.md` presence.**
+   `implement` cannot see what steps follow its loop in the Graph. With
+   `scratch/plan.md` (`build`), it notes what broke and advances to
+   review/realign; without `scratch/plan.md` (`fix`), it returns `blocked` so
+   broken work never proceeds to `qa → gate → land`. Passed over: letting
+   `implement` rewrite the pass list and iterate, or asking it to guess Graph
+   topology.
+5. **`verify` compares `git diff <qa head> <merge SHA> -- . ':!scratch'`.**
+   Comparing `<qa head>` (not `<final PR head>`) catches post-`qa` edits by
+   `gate`/`sync`/`land`; comparing `<merge SHA>` (not moving `origin/main`)
+   avoids false diffs from later PRs; excluding `scratch/` keeps `lf scratch
+   clear` on `land` from breaking the fast path on every PR.
+6. **`fix` merges with no interactive step.** Matches the brief; Desktop's
+   Start menu already warns `merges without asking`, and `lf task auto off`
+   still stops before `land`. Passed over: adding `interactive: verify` at the
+   end.
 
 ## Known costs of the new order
 
-- `concept-review` sees the change before `compress` and `qa`, so it never
-  reads qa's findings. A product-level problem qa finds goes to
-  `scratch/qa.html`, which `ship-review` already gathers; in `pursue`, which
-  has no `ship-review`, it reaches the person only through the PR.
-- `sync` now runs before each `implement`, so the last pass is not synced
-  before `compress` and `qa`. `gate` and `land --wait-and-fix` sync later.
-- `fix` has no interactive step, so `lf task run` on it may merge with nobody
-  watching. Its description and docs say so.
+- `concept-review` runs before `compress` and `qa`, so it never reads qa's
+  findings. Product-level problems qa finds go to `scratch/qa.html`, which
+  `ship-review` gathers; in `pursue` (no `ship-review`) they reach a person
+  through the PR.
+- `sync` runs before each `implement` (in `build`, `ui`, `fix`), so the final
+  pass is not synced before `compress` and `qa`. `gate` and
+  `land --wait-and-fix` sync later.
+- In `ui`, `compress` runs after `interactive: demo`, so a refactor in
+  `compress` is checked by `gate` + CI (including headless view tests) rather
+  than re-demoed by a person.
+- `fix` has no interactive step, so `lf task run` merges as soon as checks
+  pass unless `lf task auto off` is set.
 
 ## Left out
 
-- `loop-or-next`, `demo`, `qa`, `compress`, `gate`, `reflect` text.
-- This repository's `.lf/graphs/*` (they use `loop-or-next` and their own
-  order) and `.lf/skills/*`.
-- Choosing `ui` or `fix` automatically from a Task's content; a person or a
-  Wave default picks the Graph.
-- `.lf/wave/intelligence/MEMORY.md` still says `realign` owns memory curation
-  (2026-09-28). It is read-only here; the correction is proposed in
-  `scratch/questions.md`.
+- `loop-or-next`, `qa`, `compress`, `gate`, `reflect`, `wave_operate` text.
+- This repository's `.lf/graphs/*` and `.lf/skills/*`.
+- Choosing `ui` or `fix` automatically from a Task's content; a person or Wave
+  default picks the Graph.
+- `.lf/wave/intelligence/MEMORY.md` (read-only here; its 2026-09-28 note that
+  `realign` owns memory curation waits for a Wave session update).
 
 ## What goes
 
-- `concept-review.md`: the headless plan-writing mode and its outcome report.
-- `realign.md`: `## Wave memory` and the Wave-memory limit paragraph (moved,
-  not copied).
-- `implement.md`: the `@dataclass` example and the rules `LOOPFLOW.md` repeats.
+- `concept-review.md`: the headless plan-writing mode and three-outcome report.
+- `realign.md`: `## Wave memory` and the Wave-memory limit paragraph (moved to
+  `wave_session.md`, not copied).
+- `implement.md`: the `@dataclass` example and rules `LOOPFLOW.md` repeats.
 - The old expected step lists in the three Rust tests above.
 
 Must survive: `concept-review` with a person (the page stands in for code
 review; nothing else changes unless asked); `realign` in `refresh`; `implement`
-as an ordinary step; `verify`'s three outcomes.
+as an ordinary step; `demo` interactive; `verify`'s three outcomes.
 
 ## Acceptance check at gate
 
 ```bash
 cargo build -p loopflow
-target/debug/lf graph show build    # the seven lines under Demo
-target/debug/lf graph show code     # the sixteen steps listed under Demo
-target/debug/lf list graph | grep -E '^  (ui|fix) '
+# Run from an empty temp repo with LF_* unset so repo .lf/ doesn't shadow builtins:
+env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') sh -c '
+  tmp=$(mktemp -d) && git -C "$tmp" init -q &&
+  (cd "$tmp" && "$PWD/target/debug/lf" graph show build &&
+   "$PWD/target/debug/lf" graph show code &&
+   "$PWD/target/debug/lf" list graph | grep -E "^  (ui|fix) ")
+'
 grep -rnE "Linear|Loopflow Desktop|--host desktop" \
   rust/loopflow-definitions/src/builtins/task/skill/{kickoff,advance,write-docs}.md   # no output
 uv run python scripts/test.py --reuse-passing \
   --rust-filter 'test(graph::) | binary(golden_prompt) | test(documented_commands::) | test(builtins::)'
 ```
 
-Run `lf` from an empty temp repository with `LF_*` unset, so this checkout's
-`.lf/graphs/` and `.lf/skills/` do not stand in for the builtins.
-
 ## Passes
 
-One pass; it is prose, four YAML files and test expectations.
+One pass; it is prose, four YAML files, docs, and test expectations.
 
-1. The four Graph files, then the three Rust tests. This is the part that
-   could prove the plan wrong, and the probe above already ran it.
-2. The skills: `concept-review`, `realign` with `wave_operate`, `implement`,
-   `verify`, the three wording fixes, the `ship-review` line. Regenerate
-   goldens.
-3. Docs.
-4. Read each changed skill once in every Graph position it holds (listed per
-   skill above) before calling it done.
+1. The four Graph YAML files (`build.yaml`, `plan.yaml`, `ui.yaml`, `fix.yaml`)
+   and the three Rust test updates (`compiled.rs`, `graph/mod.rs`,
+   `commands/graph.rs`).
+2. The skills: `concept-review.md`, `realign.md`, `wave_session.md`,
+   `implement.md`, `demo.md`, `verify.md`, `kickoff.md`, `advance.md`,
+   `write-docs.md`, `ship-review.md`. Regenerate prompt goldens.
+3. Docs: `docs/orchestration.md`, `docs/index.md`, `docs/surfaces.md`,
+   `docs/work.md`.
+4. Read each changed skill once in every Graph position it holds and run the
+   acceptance check.
 
 Done when `lf list graph` shows `ui` and `fix` beside the reordered `build`
-and `plan`; `lf graph show code` runs review and realign before compress and
-qa; a headless `concept-review` leaves `scratch/plan.md` untouched; and the
-gate command above passes.
+and `plan`; `lf graph show code` runs `concept-review` and `realign` before
+`compress` and `qa`; a headless `concept-review` leaves `scratch/plan.md`
+untouched; `wave-session` is the single owner of Wave memory curation; `verify`
+has the `scratch`-excluded identical-tree fast path; and the gate check passes.

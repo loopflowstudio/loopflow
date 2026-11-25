@@ -1,11 +1,15 @@
-at: fcf7334f604c631aac5c2138dbde93ec6e6519ca
+at: f9e6cbd697aa50d429550f559ea5f4ff4121ab32
 first:
   - path: docs/work.md
     why: Pause and resume from the saved step
   - path: docs/surfaces.md
     why: How Working looks across surfaces
+  - path: swift/README.md
+    why: The workflow track as the Mac shows it
   - path: rust/loopflow-execution/src/task_graph.rs
-    why: Read the saved cursor for display and resume
+    why: Word the chip and read the saved cursor
+  - path: rust/loopflow-execution/src/store/task_work.rs
+    why: One resume-on-unpause read for release and the board
   - path: rust/loopflow-execution/src/engine/task.rs
     why: Return a run receipt or leave the stop waiting
   - path: rust/loopflow-storage/src/execution.rs
@@ -53,9 +57,9 @@ first:
   - path: swift/Loopflow/Design/TaskActions.swift
     why: Combine Graph position with lifecycle and run refusals
   - path: swift/Loopflow/Services/PendingChanges.swift
-    why: Send smart or plain unpause and preview the change
+    why: Preview Auto, Run, Interrupt and pause until read
   - path: swift/Loopflow/Design/TaskWorkflowControls.swift
-    why: Show pending writes and the resumable step override
+    why: The C1 track: transport, steps, chip, Auto, ✓
   - path: swift/LoopflowMac/Views/TaskWorkView.swift
     why: Unpause from every Mac menu before opening the workspace
   - path: swift/LoopflowiOS/TaskWorkspaceView.swift
@@ -67,7 +71,7 @@ first:
   - path: swift/LoopflowTests/TaskConceptTests.swift
     why: Unpause an unopened row and restore a refused change
   - path: swift/LoopflowTests/TaskActionsTests.swift
-    why: Click both unpause choices and check post-merge verify
+    why: Chip placement, step jumps and smart unpause
   - path: swift/LoopflowiOSTests/TaskActionsTests.swift
     why: Tap Unpause at implement and ship-review on iPhone
   - path: swift/LoopflowiOSTests/TaskFeedTests.swift

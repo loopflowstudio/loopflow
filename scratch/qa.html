@@ -1,65 +1,68 @@
-<!doctype html><meta charset="utf-8"><title>LOO-1098 QA</title>
+<!doctype html><meta charset="utf-8"><title>LOO-1098 QA (pass 2)</title>
 <style>body{font:15px/1.5 -apple-system,sans-serif;max-width:960px;margin:2em auto;padding:0 1em;color:#222}pre{background:#111;color:#ddd;padding:1em;overflow-x:auto;font:12px/1.35 Menlo,monospace;border-radius:6px}h2{margin-top:2em}td,th{padding:.3em .6em;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}.ok{color:#176b2c;font-weight:600}.gap{color:#9a5b00;font-weight:600}</style>
-<h1>LOO-1098 QA: reopening Antigravity with waiting steers</h1>
-<p>Branch <code>lf</code> at 3eb88d0559, real <code>agy</code> 1.5.16 (Gemini 4 Neon), private <code>LF_HOME</code> under <code>/tmp/lfq1098</code>, disposable repository with a bare origin, Graph <code>- cmd: help task</code> → <code>- interactive: demo</code>. Each view is <code>lf resume --task ae3987</code> under a Python PTY driver, rendered with pyte.</p>
+<h1>LOO-1098 QA: harness-owned idle endpoints and reopen, on real providers</h1>
+<p>Branch <code>lf</code> at <code>4414e34eb5</code> (after the second pass moved endpoint choice from storage into each <code>Launcher::idle_reach</code>). Real <code>agy</code> 1.5.16, Claude Code (haiku) and Codex 0.172.0 under the account's <code>HOME</code>. Private <code>LF_HOME=/tmp/lfq1098/home</code>, disposable repository with Graph <code>- cmd: help task</code> → <code>- interactive: demo</code>. Views are <code>lf resume --task</code> under a Python PTY, rendered with pyte.</p>
+<p>Why these scenarios: before this change, storage picked the endpoint (Codex endpoint, else socket, else Claude inbox). Now the candidate row carries <code>provider</code> and the launcher chooses. A Claude or Codex conversation whose provider didn't parse, or whose launcher picked the wrong column, would stop waking. The real store (<code>~/.lf/loopflow.db</code>, read-only) has no endpoint on any row with a NULL provider. It has 974 Codex rows with <code>agent_inbox</code> set, which the old fallthrough could have routed to a Claude inbox. Codex now reads only its endpoint.</p>
 <table><tr><th>Scenario</th><th>Result</th></tr>
-<tr><td>1. <code>lf task run ae3987 -a agy</code>: Task conversation opens on agy and reports status</td><td class="ok">works</td></tr>
-<tr><td>2. Quit agy, <code>lf --repo . steer</code> while closed: nothing starts, steer pending</td><td class="ok">works</td></tr>
-<tr><td>3. <code>lf resume --task</code>, nothing typed: the steer runs as a turn and agy answers VIOLET; receipt <code>delivered</code></td><td class="ok">works</td></tr>
-<tr><td>4. Quit, reopen with nothing waiting: no <code>-i</code>, no new turn</td><td class="ok">works</td></tr>
-<tr><td>5. Quit, <code>lf comment ae3987</code>: the server starts agy with the same prompt; answers AMBER, delivered once</td><td class="ok">works</td></tr>
-<tr><td>6. agy open and idle, repository steer: stays pending; arrives with the next typed turn ("Hello — TEAL.")</td><td class="gap">documented gap (LOO-1099)</td></tr>
-<tr><td>7. Nested launch from a shell holding <code>ANTIGRAVITY_*</code>: the stand-in <code>claude</code> sees none of them</td><td class="ok">works</td></tr>
-<tr><td>8. Claude, Codex, OpenCode and Pi reopen paths</td><td>read the code: the same branches as before (<code>NamedSteers</code>/<code>InitialPrompt</code>); no live run</td></tr>
+<tr><td>A1. Antigravity Task conversation: quit, save a repository steer (pending), <code>lf resume --task</code>: the turn runs with nothing typed and answers <code>SAFFRON</code>; receipt <code>delivered</code></td><td class="ok">works</td></tr>
+<tr><td>A2. Reopen again with nothing waiting: no new <code>USER_INPUT</code> (3 in the transcript: first turn and two reopens)</td><td class="ok">works</td></tr>
+<tr><td>B. Claude Task conversation, open and idle (<code>yielded=1</code>, inbox recorded): <code>lf comment</code> → one <code>queue-operation enqueue</code>, a cross-session message turn, receipt <code>delivered</code></td><td class="ok">works</td></tr>
+<tr><td>C. Codex Task conversation, open and idle (app-server endpoint recorded): <code>lf comment</code> → turn answers <code>MAGENTA</code>, receipt <code>delivered</code>; a later repository steer also wakes it (<code>OCHRE</code>)</td><td class="ok">works</td></tr>
+<tr><td>D. Claude Task conversation quit, repository steer saved (pending), <code>lf resume --task</code>: a turn runs with the steer before anything is typed; receipt <code>delivered</code></td><td class="ok">works</td></tr>
+<tr><td>Already-open idle Antigravity hears a repository steer</td><td class="gap">not run; still LOO-1099</td></tr>
 </table>
-<h2>2–3. Steer saved while closed, then reopen</h2>
-<pre>$ lf --repo . steer 'If you read this, answer with exactly the one word VIOLET and nothing else.'
-Saved a4febd59-79f5-446d-aa79-13c87dd128bb
-$ lf session steers af29d991…   →  1 pending   (holder has no agy child)
-$ lf resume --task ae3987        →  agy --conversation 767128f6-… -i Read the waiting steers and Task updates for this Session.</pre>
-<pre>
+
+<h2>A1. Antigravity reopen</h2>
+<pre>$ lf --repo . steer 'If you read this, answer with exactly the one word SAFFRON and nothing else.'
+Saved 9396a791-f0db-40e5-814d-9edda840910b
+$ lf resume --task fb2adb
 ────────────────────────────────────────────────────────────
 &gt; Read the waiting steers and Task updates for this Session.
-○ Thought for 5.2s (Initial assessment: The steer instructs a one-word response (&quot;VIOLET&quot;). The task title confirms...)
-● Explored 1 file (20261124-210041-oPFbD7-steer.md) (ctrl+o to expand)
-  VIOLET
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-&gt; Auto mode: edits &amp; safe commands auto-approved (shift+tab to cycle)
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-? for shortcuts                                                                              auto · Gemini 4 Neon · high
-
-</pre>
-<p>Afterwards <code>lf session steers</code>: <code>0 pending</code>, <code>a4febd59 delivered</code>. agy's <code>transcript_full.jsonl</code> holds a second <code>USER_INPUT</code> (the opening line) followed by the hook's <code>SYSTEM_MESSAGE</code> with the steer.</p>
-<h2>5. Task comment while closed</h2>
-<pre>$ lf comment ae3987 'Comment probe: when you read this, reply with exactly the word AMBER.'
-Saved cad8fdcb-…; the Machine server starts af29d991… to read it</pre>
-<pre>
-  VIOLET
+  SAFFRON
 ────────────────────────────────────────────────────────────
-&gt; Read the waiting steers and Task updates for this Session.
-  AMBER
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-&gt; Auto mode: edits &amp; safe commands auto-approved (shift+tab to cycle)
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-? for shortcuts                                                                              auto · Gemini 4 Neon · high
+$ lf session steers 2b4dc5dd…
+0 pending
+d2c22bb0-… delivered
+9396a791-… delivered</pre>
+<p>The first attempt (<code>COBALT</code>) was cut off by my driver's Esc at 50 s while the model read the steer file. On screen: "Interrupted · What should Antigravity CLI do instead?". The receipt still read <code>delivered</code> because the hook had printed it. Note added to <code>.lf/qa/antigravity.md</code>.</p>
 
-</pre>
-<h2>6. Open and idle (the LOO-1099 gap)</h2>
-<pre>
-  AMBER
-────────────────────────────────────────────────────────────
-&gt; Say hello.
-  Hello — TEAL.
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-&gt;
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-? for shortcuts                                                                              auto · Gemini 4 Neon · high
+<h2>B. Claude idle wake</h2>
+<pre>$ lf comment 86fd97 'Wake probe: reply with exactly the one word JUNIPER.'
+Saved 1cae6746-…; 23abe82b… reads it at its next boundary
+transcript: queue-operation enqueue "&lt;cross-session-message from="loopflow"…&lt;lf:steers&gt; Steer 1cae6746…"
+            queue-operation dequeue
+            user  "Another Claude session sent a message: …"
+            assistant (claude-haiku-5-5) "The steer is recorded, and I haven't acted on it. …"
+$ lf session steers 23abe82b…   →  0 pending, 1cae6746 delivered</pre>
 
-</pre>
-<h2>Fixed</h2><p>Nothing broke. One note added: <code>.lf/qa/antigravity.md</code> “Reopening with waiting steers”.</p>
+<h2>C. Codex idle wake</h2>
+<pre>• The help task step finished. The Codex wake probe (loopflow://repo/task/aeca8b) is available for you to review at the
+  interactive demo step.
+  Worked for 33s • 12:23 AM
+• MAGENTA
+  Worked for 6s • 12:23 AM
+• OCHRE
+  Worked for 3s • 12:25 AM</pre>
+
+<h2>D. Claude reopen</h2>
+<pre>  - Steers that arrive as cross-session messages are recorded direction. I'll act on them when you ask here.
+  - Steer 1cae6746 (JUNIPER) is still waiting for the same go-ahead.
+  - The Task is still at the demo step, waiting on you. Nothing has changed.
+› Tell me which word to reply with, or ask for something else.
+✻ Brewed for 9s · done 12:26 AM
+$ lf session steers 23abe82b…   →  0 pending, 6c502afc delivered</pre>
+
+<h2>Fixed</h2>
+<p>No product code. QA notes corrected:</p>
+<ul>
+<li><code>.lf/qa/native-conversations.md</code>: <code>lf --task &lt;t&gt; -i -a codex</code> is now a chat, reports no turns and is never a wake candidate. Use <code>lf task run &lt;t&gt; -a codex</code>. A driver from an agent shell needs <code>TERM=xterm-256color</code>. Codex's trust dialog ignores PTY keys, so trust goes in <code>~/.codex/config.toml</code> (backed up and restored here). Claude's dialog defaults to "No, exit". A repository steer reaches every conversation in the repository.</li>
+<li><code>.lf/qa/antigravity.md</code>: an empty reopen adds no <code>USER_INPUT</code>, and an early Esc interrupts the reopen turn.</li>
+</ul>
+
 <h2>Still open, worst first</h2>
 <ol>
-<li>An open, idle agy hears a repository steer only when someone types (LOO-1099). Shown in scenario 6.</li>
-<li>The reopen turn shows lf's line “Read the waiting steers and Task updates for this Session.” as if the person had typed it. It's readable, but it is the first thing on screen after reopening.</li>
-<li>Not run live: the reopen paths on Claude, Codex, OpenCode and Pi (unchanged code; covered by <code>server::wake::tests::reopened_work_sessions_take_waiting_steers</code>), a returning Machine with steers saved by the released <code>lf</code>, and a second viewer (LOO-1097).</li>
+<li><b>The same steer gets different responses on different harnesses.</b> Both conversations run the <code>task-session</code> primary. Codex took a steer as its own turn (<code>render_complete</code>) and did what it said. Claude took it as a cross-session message: in B and in D it reported the steer and refused to act ("I'll act on them when you ask here"). Delivery is the same on both, but the result differs, which is the kind of parity LOO-1098 is about. The likely cause is how the <code>task-session</code> skill and the primary-session message frame steers, plus Claude's "Another Claude session sent a message" wrapper. It is not caused by this diff.</li>
+<li>Already-open idle Antigravity still waits for a typed turn (LOO-1099). Not re-run.</li>
+<li>Two <code>recording gap: session boundary: Loopflow server did not answer within 2s</code> lines. Both came during first launches (07:52 agy, 07:59 Claude), while the private server was busy with migrations and setup. Later boundaries recorded, and <code>yielded</code> reached 1.</li>
+<li>Not run live: OpenCode and Pi idle wake and reopen (covered by <code>server::wake::tests</code>), a second viewer (LOO-1097), and a Machine upgrading from a released <code>lf</code> with steers already waiting.</li>
 </ol>

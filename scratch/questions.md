@@ -19,3 +19,11 @@ used `ANTIGRAVITY_*` values inherited from conversation
 `lf task run LOO-1098`). Both messages went to throwaway probe conversations
 in `/tmp/agyprobe`, but they were sent through 49362's server and attributed
 to `c3742012`. That conversation may show those two sends.
+
+# QA pass 2 (2026-11-25)
+
+- Same steer, different outcome: on the `task-session` primary, Codex (steer as
+  its own turn) answered the steer; Claude (cross-session message) reported it
+  and waited "when you ask here", on both idle wake and reopen. Delivery is the
+  same; behavior differs. Likely skill/primary-session framing, outside this
+  diff. See scratch/qa.html.

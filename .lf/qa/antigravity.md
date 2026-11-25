@@ -113,7 +113,9 @@ conversation: `lf --repo . steer '<ask for one word>'`. Nothing starts and
 starts `agy --conversation <id> … -i Read the waiting steers and Task updates
 for this Session.`; the screen shows that line as a turn and the one-word
 answer before anything is typed, and the steer reads `delivered`. A second
-reopen with nothing waiting has no `-i`. `lf comment <task>` names the Task,
+reopen with nothing waiting has no `-i` and adds no `USER_INPUT` row. Wait
+for the answer line before Esc: an Esc while the model still reads the steer
+file interrupts the turn, and the steer still reads `delivered`. `lf comment <task>` names the Task,
 so the server starts the closed conversation itself with the same line.
 While agy is open and idle, a repository steer stays pending until the next
 typed turn (LOO-1099).

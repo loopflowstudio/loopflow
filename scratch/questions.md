@@ -43,13 +43,20 @@
   flag also covers SIGHUP and SIGTERM. Rewriting all those exits to 130
   would report an external kill as a quit.
 
-- Open (QA, 2026-11-24): a retired standalone chat now leaves `lf session
-  list --all` and every other `completed_at IS NULL` read, the same as a
-  quit. Its `closed HH:MM (15 minutes without a viewer)` line is reachable
-  only through `lf resume <id>` / `session resume --prepare`. Pass 1 listed
-  it (as `died … (exit 137)`). Should closed-tab chats stay listed, or is
-  vanishing like a quit the intended reading?
-- Open (QA): retirement SIGKILLs the PTY group, so a retired Skill's launcher
-  never runs its checkpoint; `NOTE.txt` stayed uncommitted after retirement
-  and after a reopen and clean quit. The old direct path lost it on tab close
-  too.
+- Chosen headless (Pass 2 post-build concept review, built on `HEAD`,
+  `scratch/concept-review.html` Q3 & Q6):
+  - **Retired standalone chats leave `lf session list` (`3a`).** Setting
+    `completed_at` on idle retirement matches `/exit` and pre-LOO-1097 tab
+    close (`SIGHUP`) and keeps ~275 closed-tab chats/month (37 of 58 in 4-day
+    telemetry) from flooding `lf session list` with no dismiss action; scoped
+    Task/Wave/repo conversations keep `completed_at = NULL` and stay listed,
+    while retired standalone chats stay readable via `lf session card <id>`,
+    `lf resume <id> --prepare`, `lf history search`, and the restored screen
+    on `lf resume <id>`. Update `docs/sessions.md` lines 70–72 at gate to
+    match. Passed over: keeping retired standalone chats in `lf session list`
+    indefinitely (`3b`).
+  - **Retired Skills leave uncommitted edits in the worktree (`6a`).** Clean
+    exits (even after detach) still run the checkpoint commit; 15-minute idle
+    retirement closes the PTY group without silently committing abandoned
+    edits, matching pre-LOO-1097 tab close. Passed over: auto-committing
+    pending edits on idle timeout (`6b`).

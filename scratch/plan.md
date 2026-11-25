@@ -56,11 +56,19 @@ in the the holder the same way as other clients"
 
 ## Remaining at gate
 
-Open an actual agy conversation in Rex, type a draft, then join from Desktop.
-Submit the draft from the second view, close the views, and resume the
-conversation. Check both panes' native input and their reconnect after a
-Machine server restart. Gate checks the documentation examples with
-`documented_commands::`. CI owns the wider harness matrix.
+- Update `docs/sessions.md` lines 70–72 so it matches `HEAD`: scoped Task,
+  Wave, and repository conversations stay in `lf session list` showing
+  `closed HH:MM (Task completed)` / `closed HH:MM (Task abandoned)` and
+  `quit HH:MM`, whereas standalone chats complete (`completed_at` set) on
+  both `/exit` and 15-minute idle retirement and leave `lf session list`
+  (inspectable via `lf session card <id>` / `lf resume <id> --prepare`,
+  findable via `lf history search`, with the close notice on the saved screen
+  when reopened).
+- Open an actual agy conversation in Rex, type a draft, then join from Desktop.
+  Submit the draft from the second view, close the views, and resume the
+  conversation. Check both panes' native input and their reconnect after a
+  Machine server restart. Gate checks the documentation examples with
+  `documented_commands::`. CI owns the wider harness matrix.
 
 ## Before the change (reference)
 

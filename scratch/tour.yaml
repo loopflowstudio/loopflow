@@ -1,4 +1,4 @@
-at: 8d7e02d2686889ed064eb4537d3edfd6ed59eeb7
+at: a29d7b6d3cdf80ae9075be488707e4855f456f01
 first:
   - path: docs/work.md
     why: Pause and resume from the saved step
@@ -7,9 +7,9 @@ first:
   - path: swift/README.md
     why: The workflow track as the Mac shows it
   - path: rust/loopflow-execution/src/task_graph.rs
-    why: Word the chip, pausing action and saved cursor
+    why: WorkflowControl, stop_at, UnpauseEffect and TaskGraph::read
   - path: rust/loopflow-execution/src/store/task_work.rs
-    why: One resume-on-unpause read for release and the board
+    why: Read saved Graphs with landing semantics
   - path: rust/loopflow-execution/src/engine/task.rs
     why: Return a run receipt or leave the stop waiting
   - path: rust/loopflow-storage/src/execution.rs
@@ -17,13 +17,15 @@ first:
   - path: rust/loopflow-storage/src/migrations/task_pauses.sql
     why: One hold and its stopping sessions per Task
   - path: rust/loopflow-storage/src/sqlite/task_pause.rs
-    why: Commit the hold and Graph stop together
+    why: Commit holds and settle dead stop cursors
+  - path: rust/loopflow-storage/src/sqlite/task_work.rs
+    why: Keep end arrivals paused without auto-completing
   - path: rust/loopflow-execution/src/ops/task/pause.rs
-    why: Release the hold under run admission
+    why: Release holds and settle stop cursors under admission
   - path: rust/loopflow-execution/src/ops/task.rs
-    why: Keep admission until the run claims its cursor
+    why: Hold admission and park at interactive or landing stops
   - path: rust/loopflow/src/lf/commands/graph.rs
-    why: Carry runs and advance draining commands on exit 0
+    why: Honor natural stops and advance draining commands
   - path: rust/loopflow-execution/src/harness/agent_process.rs
     why: Capture worker sessions under their attachment locks
   - path: rust/loopflow-execution/src/os_process.rs
@@ -31,7 +33,7 @@ first:
   - path: rust/loopflow-execution/src/ops/human_session/moves.rs
     why: Carry a hold across Machines once
   - path: rust/loopflow-execution/src/ops/task_execution.rs
-    why: Distinguish an interrupted step from a failed run
+    why: Distinguish finished drained steps, stops and failures
   - path: rust/loopflow-execution/src/ops/task/run_recovery.rs
     why: Recheck pause before counting and restarting a carrier
   - path: rust/loopflow-storage/src/sqlite/task_details.rs
@@ -67,7 +69,7 @@ first:
   - path: swift/LoopflowiOS/TaskWorkspaceView.swift
     why: Patch Task rows, track .task reads and toolbar actions
   - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
-    why: Resume workers and keep parked Graphs waiting
+    why: Resume workers, drain commands and honor natural stops
   - path: rust/loopflow/tests/machine_commands.rs
     why: Honor the owning Machine’s cursor after a stale click
   - path: swift/LoopflowTests/TaskConceptTests.swift

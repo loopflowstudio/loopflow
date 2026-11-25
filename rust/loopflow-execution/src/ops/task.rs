@@ -1206,25 +1206,23 @@ async fn try_start_task_run(
         }
         return Ok(Some(TaskRunStart::Ended));
     };
-    // Starting at an interactive step without running past it puts the Task there.
+    // Starting at a step this run stops before (interactive without running
+    // through, or landing with auto off) waits there without spawning a Graph.
     let interactive = graph.interactive_at(&start.place);
-    if let Some(step) = interactive.filter(|_| !through) {
+    let stop = interactive
+        .filter(|_| !through)
+        .map(str::to_owned)
+        .or_else(|| {
+            (auto_state == Some(loopflow_storage::sqlite::AutoState::Off))
+                .then(|| graph.landing_at(&start.place, merges))
+                .flatten()
+        });
+    if let Some(step) = stop {
         store
             .sqlite
-            .set_task_graph_step(&task.id, step)
+            .set_task_graph_step(&task.id, &step)
             .map_err(task_error)?;
-        return Ok(Some(TaskRunStart::Waiting(step.to_owned())));
-    }
-    // Starting at a landing step with auto off waits there instead of spawning
-    // a Graph process just to hit stopped_landing().
-    if auto_state == Some(loopflow_storage::sqlite::AutoState::Off) {
-        if let Some(step) = graph.landing_at(&start.place, merges) {
-            store
-                .sqlite
-                .set_task_graph_step(&task.id, &step)
-                .map_err(task_error)?;
-            return Ok(Some(TaskRunStart::Waiting(step)));
-        }
+        return Ok(Some(TaskRunStart::Waiting(step)));
     }
     let label = if start.place == crate::task_graph::Place::default() {
         format!("{} from start", graph.name)

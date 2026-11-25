@@ -235,23 +235,24 @@ pub(super) fn release(
         }
         let row =
             crate::store::task_work::task_graph_row(&store.sqlite, &task.id).map_err(task_error)?;
-        let settle_step = row.as_ref().and_then(|row| {
-            let (cursor, _) = row.run.as_ref()?;
-            let place = row.graph.place_of(cursor)?;
-            row.graph.stop_at(&place, row.auto, merges)
-        });
-        let start = resume
-            && row.as_ref().is_none_or(|row| {
-                row.graph.resumes_on_unpause(
+        let effect = row
+            .as_ref()
+            .map_or(crate::task_graph::UnpauseEffect::Resume, |row| {
+                row.graph.unpause_effect(
                     &row.step,
                     row.run.as_ref().map(|(cursor, _)| cursor),
                     row.auto,
                     merges,
                 )
             });
+        let settle_step = match &effect {
+            crate::task_graph::UnpauseEffect::Park(step) => step.as_deref(),
+            crate::task_graph::UnpauseEffect::Resume => None,
+        };
+        let start = resume && effect == crate::task_graph::UnpauseEffect::Resume;
         store
             .sqlite
-            .release_task_pause(&task.id, settle_step.as_deref())
+            .release_task_pause(&task.id, settle_step)
             .map_err(refused)?;
         Ok(start.then_some((task.id, admission)))
     })

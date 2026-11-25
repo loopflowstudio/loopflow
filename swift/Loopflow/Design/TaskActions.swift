@@ -6,8 +6,8 @@ public struct TaskActions: Equatable {
 
     public let control: WorkflowControl?
     public let pause: Pause?
-    public let pauseRefusal: String?
     public let runRefusal: String?
+    public let primaryRefusal: String?
     public let auto: Auto?
     public let completeReady: Bool
     public let steps: [String]
@@ -38,7 +38,6 @@ public struct TaskActions: Equatable {
         let on = autoPending ?? execution.map { $0.auto?.state == .on } ?? row.selectionStates.contains(.auto)
         auto = on ? .on : row.isCompleted ? nil : .off
         runRefusal = row.runControl.unavailable
-        pauseRefusal = row.runControl.pausing ? runRefusal : nil
         completeReady = row.lifecycle == .done || row.pr?.phase == .merged || graph?.control.action == .done
 
         if row.isCompleted {
@@ -56,6 +55,7 @@ public struct TaskActions: Equatable {
         } else {
             control = outline?.start ?? WorkflowControl(action: .run, label: "Run")
         }
+        primaryRefusal = (control?.action == .run || row.runControl.pausing) ? runRefusal : nil
         pause = held ? .unpause : row.lifecycle.isWorking ? .pause : nil
 
         if let graph {
@@ -76,8 +76,4 @@ public struct TaskActions: Equatable {
     }
 
     public var autoRefusal: String? { auto == .on ? nil : runRefusal }
-
-    public var primaryRefusal: String? {
-        control?.action == .run ? runRefusal : pauseRefusal
-    }
 }

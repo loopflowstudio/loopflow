@@ -25,6 +25,14 @@ pub struct CapturedGraph {
     pub steps: Vec<ConcreteStep>,
 }
 
+/// What lifting a pause hold does at the Task's saved position.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum UnpauseEffect {
+    Resume,
+    /// Stay parked; settle a dead run cursor to `At { step }` when `Some`.
+    Park(Option<String>),
+}
+
 /// A place in the captured steps: the top level, or inside XOR paths.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Place {
@@ -303,6 +311,35 @@ impl CapturedGraph {
         place.is_some_and(|place| !self.needs_review(&place, stop_at_landing, &mut merges))
     }
 
+    /// What lifting a pause hold does at `(step, cursor)` under `auto`:
+    /// `Resume` restarts the run; `Park(step)` leaves it parked, settling a
+    /// dead run cursor to `At { step }` when `Some`.
+    pub(crate) fn unpause_effect(
+        &self,
+        step: &str,
+        cursor: Option<&ExecutionCursor>,
+        auto: Option<AutoState>,
+        merges: impl FnMut(&[String]) -> bool,
+    ) -> UnpauseEffect {
+        match cursor {
+            Some(cursor) => match self.place_of(cursor) {
+                Some(place) => match self.stop_at(&place, auto, merges) {
+                    Some(step) => UnpauseEffect::Park(Some(step)),
+                    None => UnpauseEffect::Resume,
+                },
+                None => UnpauseEffect::Park(None),
+            },
+            None if step == START => UnpauseEffect::Resume,
+            None if step != END
+                && auto != Some(AutoState::Off)
+                && self.interactive_step(step).is_none() =>
+            {
+                UnpauseEffect::Resume
+            }
+            None => UnpauseEffect::Park(None),
+        }
+    }
+
     /// A run restarts at its saved cursor unless `auto` now parks at that step.
     /// A Task already waiting for a person stays there.
     pub(crate) fn resumes_on_unpause(
@@ -312,15 +349,10 @@ impl CapturedGraph {
         auto: Option<AutoState>,
         merges: impl FnMut(&[String]) -> bool,
     ) -> bool {
-        match cursor {
-            Some(cursor) => self
-                .place_of(cursor)
-                .is_some_and(|place| self.stop_at(&place, auto, merges).is_none()),
-            None if step == START => true,
-            None => {
-                step != END && auto != Some(AutoState::Off) && self.interactive_step(step).is_none()
-            }
-        }
+        matches!(
+            self.unpause_effect(step, cursor, auto, merges),
+            UnpauseEffect::Resume
+        )
     }
 
     /// The place `cursor` stands at, if the graph has it.

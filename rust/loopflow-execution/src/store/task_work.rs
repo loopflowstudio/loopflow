@@ -14,11 +14,16 @@ pub(crate) fn carrier_may_run(carrier: &TaskCarrier) -> bool {
         != crate::store::ProcessIdentityEvidence::Dead
 }
 
-pub fn task_graph(store: &SqliteStore, task: &TaskId) -> StoreResult<Option<TaskGraph>> {
-    store
-        .task_graph_row(task)?
-        .map(|row| decode_row(row).map(|row| read_task_graph(row, |_| false)))
+fn read_saved_graph(
+    row: Option<SavedTaskGraphRow>,
+    merges: fn(&[String]) -> bool,
+) -> StoreResult<Option<TaskGraph>> {
+    row.map(|row| decode_row(row).map(|row| read_task_graph(row, merges)))
         .transpose()
+}
+
+pub fn task_graph(store: &SqliteStore, task: &TaskId) -> StoreResult<Option<TaskGraph>> {
+    read_saved_graph(store.task_graph_row(task)?, |_| false)
 }
 
 pub fn task_work(
@@ -30,10 +35,7 @@ pub fn task_work(
     Ok(TaskWork {
         sessions: records.sessions,
         graph_processes: records.graph_processes,
-        graph: records
-            .graph
-            .map(|row| decode_row(row).map(|row| read_task_graph(row, merges)))
-            .transpose()?,
+        graph: read_saved_graph(records.graph, merges)?,
     })
 }
 
@@ -47,10 +49,7 @@ pub fn task_overview(
         TaskOverview {
             sessions: records.sessions,
             graph_processes: records.graph_processes,
-            graph: records
-                .graph
-                .map(|row| decode_row(row).map(|row| read_task_graph(row, merges)))
-                .transpose()?,
+            graph: read_saved_graph(records.graph, merges)?,
         },
         details,
     ))

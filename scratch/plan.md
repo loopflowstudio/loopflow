@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Status: built (`78bde1d766`), compressed (`c6eab6e222`), QA'd (`73abaa380c`), reviewed (`scratch/concept-review.html`), post-build review findings applied (`02b9cf8f62`), ship-review revisions applied (`4cb640f3f6`: `fix` renamed to `quick`; builtin `ui` removed), generic design-wording pass applied, and QA'd again after the revisions (`scratch/qa.html`: `realign` deciding `build`'s outer loop on haiku; not-found errors now end their line). Remaining: gate.
+Status: built (`78bde1d766`), compressed (`c6eab6e222`), QA'd (`73abaa380c`), reviewed (`scratch/concept-review.html`), post-build review findings applied (`02b9cf8f62`), ship-review revisions applied (`4cb640f3f6`: `fix` renamed to `quick`; builtin `ui` removed), generic design-wording pass applied (`b1d9ac2819`), QA'd again (`684bbae383`), and named skill inheritance (`extends: <name>` / `extends: lf:<name>`) built. Remaining: gate.
 
 
 A Task on `code`, `feature`, `pursue` or `redesign` runs `compress` and `qa`
@@ -392,6 +392,10 @@ One pass; it is prose, three YAML files, docs, and test expectations.
   > Additional wording edit in builtin `concept-review.md` (and update its golden): remove "the product" / "product" wording (currently ~10 occurrences) so `concept-review` fits libraries, engines, compilers, protocols, and research pipelines as well as user-facing apps.
   >
   > Replace with generic framing: e.g. "the system" / "the domain" / "the concepts people work with" / "a design choice" instead of "the product", "product concepts", "product choice", and "what the product should be". Align the matching "product choice/decision" phrases in `realign.md`, `kickoff.md`, and `write-docs.md` to "design choice/decision" too.
+- Named skill inheritance (`extends: <name>` and `extends: lf:<name>`):
+  - `SkillCatalog::read_source` / `load_source` resolve `extends: lf:<name>` (explicit raw builtin), `extends: <name>` (catalog skill, falling through to the builtin of the same name when a file extends itself), and temporary `extends: builtin` compatibility alias (removed in LOO-1107). Frontmatter merges parent-under-child with `extends` stripped; missing targets and cycles (`a -> a`, `a -> b -> a`) return `LoadError::InvalidSkill`.
+  - `lf skill customize <name>` now writes `extends: lf:<name>`; this repo's existing `.lf/skills/*.md` remain on `extends: builtin` for released `lf` 0.16.0 compatibility until LOO-1107.
+  - `skills::listing::Entry` carries `extends: Option<String>` and `source_label()` prints `extends <target>` in `lf list skill`; regenerated `tests/fixtures/dto/server_schema.json`, updated `skill_entries.json` and `ServerProtocolTests.swift`, and updated `docs/orchestration.md`, `docs/index.md`, and `reflect.md`.
 
 ## Post-build review findings
 
@@ -402,6 +406,7 @@ Recorded by post-build `concept-review` against base `23ce1a69f9` (`scratch/conc
 
 ## Deferred findings
 
+- **Drop temporary `extends: builtin` alias and migrate `.lf/skills/*.md` (LOO-1107):** filed as `LOO-1107` (`task_ef922f96c6bd42a98d0ffc556c93e554`) to run once LOO-1104 ships past `lf` 0.16.0.
 - **Update `.lf/wave/intelligence/MEMORY.md`:** read-only in a Task checkout; replace the 2026-09-28 entry ("`realign` now owns memory curation") with "`wave-session` owns memory curation" in an intelligence Wave session once LOO-1104 lands.
 - **Step-commit `-a` propagation (`scratch/qa.html` #1):** with `-a claude:haiku` and no `default_agent`, `lf commit --step` falls back to `lf <skill>: checkpoint`. Outside LOO-1104's scope; `.lf/qa/skills.md` documents the current behavior.
 - **Repo-local UI workflows, `.lf/graphs/pursue-auto.yaml` & automatic Graph selection:** separate outcomes outside this Task.

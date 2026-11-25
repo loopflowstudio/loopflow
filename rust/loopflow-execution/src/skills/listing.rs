@@ -18,12 +18,35 @@ pub struct Entry {
     /// there is no such builtin or the entry is the builtin.
     #[serde(deserialize_with = "Option::deserialize")]
     pub builtin: Option<BuiltinRelation>,
+    /// Skill named by `extends:` in frontmatter (`lf:<name>`, `<name>`, or
+    /// `builtin`), when the skill extends another.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub extends: Option<String>,
+}
+
+impl Entry {
+    pub fn source_label(&self) -> String {
+        let mut notes = Vec::new();
+        if let Some(target) = &self.extends {
+            notes.push(format!("extends {target}"));
+        }
+        if let Some(relation) = self.builtin {
+            if relation != BuiltinRelation::Extends {
+                notes.push(relation.describe().to_string());
+            }
+        }
+        if notes.is_empty() {
+            self.source.clone()
+        } else {
+            format!("{}, {}", self.source, notes.join(", "))
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BuiltinRelation {
-    /// `extends: builtin`: the builtin's text with the file's appended.
+    /// Extends the builtin of the same name (`extends: lf:<name>`, `extends: <name>`, or `extends: builtin`).
     Extends,
     /// A whole skill in the builtin's place, drifting as the builtin changes.
     Replaces,
@@ -108,6 +131,7 @@ fn graph_entry(repo: &Path, name: String) -> Result<Entry> {
         kind: kind.as_str().to_string(),
         description,
         builtin: None,
+        extends: None,
     })
 }
 
@@ -127,6 +151,7 @@ pub fn discover(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
                     summary
                 },
                 builtin: None,
+                extends: None,
             });
         }
         if !path.is_empty() {
@@ -144,7 +169,7 @@ pub fn discover(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
             {
                 continue;
             }
-            let description = match source.read() {
+            let description = match catalog.read_source(source) {
                 Ok(content) => {
                     loopflow_definitions::text::skill_description(&content).unwrap_or_default()
                 }
@@ -157,6 +182,7 @@ pub fn discover(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
                 description,
                 invocation: format!("lf skill -- {name}"),
                 builtin: source.builtin_relation(),
+                extends: source.extends_target(),
             });
         }
         if !path.is_empty() {
@@ -176,7 +202,7 @@ pub fn discover(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
 
 #[cfg(test)]
 mod tests {
-    use super::Entry;
+    use super::{BuiltinRelation, Entry};
 
     #[test]
     fn entries_match_the_shared_fixture_without_defaults() {
@@ -187,6 +213,28 @@ mod tests {
         let entries: Vec<Entry> = serde_json::from_value(message["result"].clone()).unwrap();
         assert_eq!(serde_json::to_value(&entries).unwrap(), message["result"]);
         assert_eq!(entries[0].invocation, "lf debug [message]");
+        assert_eq!(entries[1].source_label(), ".lf/skills/qa.md, extends lf:qa");
+        assert_eq!(
+            entries[2].source_label(),
+            ".lf/skills/card-implement.md, extends implement"
+        );
         assert!(serde_json::from_str::<Entry>(r#"{"name":"debug","kind":"skill"}"#).is_err());
+    }
+
+    #[test]
+    fn source_label_reports_named_extends_and_builtin_replacement() {
+        let entry = Entry {
+            name: "qa".into(),
+            kind: "skill".into(),
+            source: ".lf/skills/qa.md".into(),
+            description: "Custom QA".into(),
+            invocation: "lf qa".into(),
+            builtin: Some(BuiltinRelation::Replaces),
+            extends: Some("implement".into()),
+        };
+        assert_eq!(
+            entry.source_label(),
+            ".lf/skills/qa.md, extends implement, replaces builtin"
+        );
     }
 }

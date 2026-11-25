@@ -15,12 +15,12 @@ verifies, `gate` reviews and publishes. Chain Skills in a Graph rather than
 cramming everything into one prompt; steps pass work through Git commits and
 notes in `scratch/`.
 
-### Extend or replace a builtin
+### Extend or replace a Skill
 
 ```bash
-lf skill customize pr-message    # creates .lf/skills/pr-message.md extending the builtin
+lf skill customize pr-message    # creates .lf/skills/pr-message.md extending lf:pr-message
 lf skill customize gate --full   # copies the full builtin text to replace it
-lf list skill                    # shows which Skills extend vs. replace builtins
+lf list skill                    # shows which Skills extend or replace others
 ```
 
 Extending a builtin lets you add repo-specific instructions while still
@@ -29,15 +29,33 @@ receiving upstream improvements to the builtin:
 ```markdown
 <!-- .lf/skills/gate.md -->
 ---
-extends: builtin
+extends: lf:gate
 ---
 ## In this repository
 
 Run `make e2e` before publishing.
 ```
 
-A Skill without `extends: builtin` replaces the builtin of the same name for
-everyone on your team.
+You can also extend another Skill by name to build specialized variants on top
+of your repository's version (or the builtin when no repository file overrides
+it):
+
+```markdown
+<!-- .lf/skills/card-implement.md -->
+---
+extends: implement
+agent: claude:opus
+---
+## Card rules
+
+Verify every state transition against the spec before committing.
+```
+
+Frontmatter merges parent under child (child keys win), and the child's body
+appends after the parent's. Use `extends: lf:<name>` to inherit Loopflow's raw
+builtin directly and skip any repository overlay; using `extends: <name>` in a
+file of the same name also falls through to the builtin. A Skill without
+`extends:` replaces the builtin of the same name for everyone on your team.
 
 ### Automatic commits per step
 

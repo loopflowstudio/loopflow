@@ -310,20 +310,14 @@ Tests (expected values change; no production Rust changes):
 - DTO fixtures under `tests/fixtures/dto/` and Swift tests name no step order
   from these Graphs.
 
-Docs:
-- `docs/orchestration.md`: update the `build` listing and prose (126–165:
-  `implement` decides inner loop, `realign` decides outer loop, `Decision pass`
-  example says `back to sync`), update `feature` listing comments (220–223),
-  and add `ui` and `fix` to the Built-in Graphs table (244–253) with a short
-  note that `fix` has no interactive step and merges when checks pass.
-- `docs/index.md:122`: `sync → implement` (or `implement → concept-review → realign`).
-- `docs/surfaces.md:285`: update Start menu sample with `ui` (`1 stop`) under
-  stopping workflows and `fix` (`merges without asking`) under `Run without
-  stopping`.
-- `docs/work.md:549`: replace "`realign` keeps plan, code, and memory in sync"
-  with `wave-session` curating Wave memory.
-- `swift/README.md:407`: read and keep (still true: `concept-review` still runs
-  in both `plan` and `build`).
+Docs (written in `write-docs`; read before implementation and keep in sync with `ui.yaml` description):
+- `docs/orchestration.md`: updated the `build` listing and prose (`implement` decides inner loop, `realign` decides outer loop, `Decision pass` example says `back to sync`), updated `feature` listing comments, and added `ui` and `fix` to the Built-in Graphs table with examples and notes.
+- `docs/index.md` and `README.md`: replaced stale `auto` in the Built-in Graphs list with `ui`, `fix`; updated `docs/index.md` loop example to `sync → implement` inside `concept-review → realign`.
+- `docs/surfaces.md`: updated Start menu sample with `ui` (`1 stop`) under stopping workflows and `fix` (`merges without asking`) under `Run without stopping`, with a note on `merges without asking` and `lf task auto off`.
+- `docs/work.md`: replaced "`realign` keeps plan, code, and memory in sync" with `wave-session` curating Wave `MEMORY.md`.
+- `swift/README.md:407`: read and kept (still true: `concept-review` runs in both `plan` and `build`).
+
+Note from writing `docs/surfaces.md`: Desktop's Start menu (`BacklogView.swift:148`) displays the first sentence of `description:` on one line. `ui.yaml`'s single 86-char sentence (`Build a Desktop, mobile or web UI change you try as it takes shape, then deliver it.`) is longer than the 4–6 word first sentences of `feature`/`code`/`redesign`/`research` and truncates in the menu; splitting it into two sentences (e.g. `Build and try a UI change, then deliver it. You try the running Desktop, mobile or web UI each pass.`) keeps the menu row untruncated if desired.
 
 ## Choices made for review
 
@@ -425,8 +419,8 @@ One pass; it is prose, four YAML files, docs, and test expectations.
 2. The skills: `concept-review.md`, `realign.md`, `wave_session.md`,
    `implement.md`, `demo.md`, `verify.md`, `kickoff.md`, `advance.md`,
    `write-docs.md`, `ship-review.md`. Regenerate prompt goldens.
-3. Docs: `docs/orchestration.md`, `docs/index.md`, `docs/surfaces.md`,
-   `docs/work.md`.
+3. Docs: `docs/orchestration.md`, `docs/index.md`, `README.md`, `docs/surfaces.md`,
+   `docs/work.md` (drafted in `write-docs`; verify against final `ui.yaml` / `fix.yaml` descriptions).
 4. Read each changed skill once in every Graph position it holds and run the
    acceptance check.
 

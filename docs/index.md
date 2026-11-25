@@ -78,7 +78,7 @@ lf task run <ID> ship-api       # run a Task through it, pausing at design
 lf -b task run <ID> ship-api    # run every step headless to a merged PR
 ```
 
-Built-in Graphs (`feature`, `code`, `auto`, `research`, `optimize`) work out of
+Built-in Graphs (`feature`, `code`, `ui`, `fix`, `research`, `optimize`) work out of
 the box and are templates you can customize (`lf graph customize feature`).
 Extend built-in Skills with `extends: builtin` instead of forking them.
 
@@ -119,7 +119,7 @@ lf resume                                  # return to this checkout's conversat
   steps move to the next agent in your `agents` list, or wait and try again.
 - **Workflows are files in your repository.** Skills are Markdown and Graphs
   are YAML under `.lf/`, reviewed like code. A Graph can loop
-  (`implement → sync → realign`), branch (`xor`), write the docs before the
+  (`sync → implement` inside `concept-review → realign`), branch (`xor`), write the docs before the
   code (`write-docs`), keep QA playbooks (`.lf/qa/`), and stop for you with
   one summary page (`ship-review`).
 - **Your team keeps its tools.** Teammates review PRs on GitHub and comment in

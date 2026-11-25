@@ -282,24 +282,27 @@ the repository's. ▾ lists the others, each with its description and how many
 times it stops for you:
 
 ```text
-✓ feature                 Explore, build, deliver and verify      3 stops
-  code                    Build, deliver and verify               2 stops
-  redesign                Rethink a started Task                  1 stop
-  research                Investigate and report, with no PR      1 stop
+✓ feature                 Explore, build, deliver and verify                         3 stops
+  code                    Build, deliver and verify                                  2 stops
+  redesign                Rethink a started Task                                     1 stop
+  research                Investigate and report, with no PR                         1 stop
+  ui                      Build a Desktop, mobile or web UI change you try as it…    1 stop
   More ›
   Run without stopping
-  deep-clean              Delete what an area no longer needs     never stops
-  incident                Restore first, then fix the cause       never stops
-  optimize                Move one number                         never stops
-  queue                   Compress, integrate upstream changes    never stops
-  task-design             Draft the Task design                   never stops
+  deep-clean              Delete what an area no longer needs                        never stops
+  fix                     Fix a bounded bug or small tweak and land it               merges without asking
+  incident                Restore first, then fix the cause                          never stops
+  optimize                Move one number                                            never stops
+  queue                   Compress, integrate upstream changes                       never stops
+  task-design             Draft the Task design                                      never stops
 ```
 
 Several Tasks whose workflows differ show the split,
 `Start 3: feature 2, code 1`, and the menu opens with "Each Task's own
 workflow"; clicking Start runs each on its own. Pick a workflow below it to run
 all of them on that one. Workflows under "Run without stopping" never wait for
-you. **More ›** holds the pieces other
+you; one that lands the PR before any stop, like `fix`, reads **merges without
+asking** (`lf task auto off` still holds before `land`). **More ›** holds the pieces other
 Graphs include, such as `build` and `deliver`, and Graphs with no
 `description:` ([describe a Graph](orchestration.md#describe-a-graph)). A
 Graph that runs for a Wave is not offered for a Task. The

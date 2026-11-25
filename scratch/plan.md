@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Status: built (`78bde1d766`), compressed (`c6eab6e222`), QA'd (`73abaa380c`), reviewed (`scratch/concept-review.html`), post-build review findings applied (`02b9cf8f62`), ship-review revisions applied (`4cb640f3f6`: `fix` renamed to `quick`; builtin `ui` removed), generic design-wording pass applied (`b1d9ac2819`), QA'd again (`684bbae383`), concept-reviewed again (`5ec9a261ef`, against `684bbae383`: 7 of 7 pairings line up, no mismatches), and named skill inheritance (`extends: <name>` / `extends: lf:<name>`) built (`b51d7711a8`) and QA'd on the branch `lf` (`scratch/qa.html`: listing, composed launch text, merged `agent:`, `customize`, cycles and missing targets in launches and Graphs). Remaining: gate.
+Status: built (`78bde1d766`), compressed (`c6eab6e222`), QA'd (`73abaa380c`), reviewed (`scratch/concept-review.html`), post-build review findings applied (`02b9cf8f62`), ship-review revisions applied (`4cb640f3f6`: `fix` renamed to `quick`; builtin `ui` removed), generic design-wording pass applied (`b1d9ac2819`), QA'd again (`684bbae383`), concept-reviewed again (`5ec9a261ef`), named skill inheritance (`extends: <name>` / `extends: lf:<name>`) built (`b51d7711a8`), compressed (`be73184b3b`), QA'd (`00c7f89698`), and post-build concept-reviewed (`scratch/concept-review.html`). Remaining: one focused pass fixing 3 mismatches in named skill inheritance (`catalog.rs` and `listing.rs`), then gate.
 
 
 A Task on `code`, `feature`, `pursue` or `redesign` runs `compress` and `qa`
@@ -322,6 +322,12 @@ Docs:
    ship-review revision; Desktop's Start menu already warns `merges without
    asking`, and `lf task auto off` still stops before `land`. Passed over:
    adding `interactive: verify` at the end.
+5. **Same-name and legacy builtin extensions normalize to `lf:<canonical>` in `Entry.extends` (made for review).**
+   When `.lf/skills/implement.md` writes `extends: implement` (or temporary
+   `extends: builtin`), `lf list skill` reports `extends lf:implement` so it is
+   obvious where the inherited text comes from rather than printing a
+   circular-looking `extends implement`. Passed over: echoing the raw string
+   verbatim in `Entry.extends`.
 
 ## Known costs of the new order
 
@@ -393,17 +399,38 @@ One pass; it is prose, three YAML files, docs, and test expectations.
   > Additional wording edit in builtin `concept-review.md` (and update its golden): remove "the product" / "product" wording (currently ~10 occurrences) so `concept-review` fits libraries, engines, compilers, protocols, and research pipelines as well as user-facing apps.
   >
   > Replace with generic framing: e.g. "the system" / "the domain" / "the concepts people work with" / "a design choice" instead of "the product", "product concepts", "product choice", and "what the product should be". Align the matching "product choice/decision" phrases in `realign.md`, `kickoff.md`, and `write-docs.md` to "design choice/decision" too.
-- Named skill inheritance (`extends: <name>` and `extends: lf:<name>`):
-  - `SkillCatalog::read_source` / `load_source` resolve `extends: lf:<name>` (explicit raw builtin), `extends: <name>` (catalog skill, falling through to the builtin of the same name when a file extends itself), and temporary `extends: builtin` compatibility alias (removed in LOO-1107). Frontmatter merges parent-under-child with `extends` stripped; missing targets and cycles (`a -> a`, `a -> b -> a`) return `LoadError::InvalidSkill`.
+- Named skill inheritance (`extends: <name>` and `extends: lf:<name>`) (`b51d7711a8`, compressed `be73184b3b`, QA'd `00c7f89698`):
+  - `SkillCatalog::read_source` / `load_source` resolve `extends: lf:<name>` (explicit raw builtin), `extends: <name>` (catalog skill, falling through to the builtin of the same name when a file extends itself), and temporary `extends: builtin` compatibility alias (removed in LOO-1107).
   - `lf skill customize <name>` now writes `extends: lf:<name>`; this repo's existing `.lf/skills/*.md` remain on `extends: builtin` for released `lf` 0.16.0 compatibility until LOO-1107.
   - `skills::listing::Entry` carries `extends: Option<String>` and `source_label()` prints `extends <target>` in `lf list skill`; regenerated `tests/fixtures/dto/server_schema.json`, updated `skill_entries.json` and `ServerProtocolTests.swift`, and updated `docs/orchestration.md`, `docs/index.md`, and `reflect.md`.
+- **Next pass — fix 3 conceptual mismatches in named skill inheritance (`rust/loopflow-execution/src/skills/catalog.rs` and `listing.rs`):**
+  1. **Keep native provider frontmatter out of Loopflow child settings (`SkillDialect` boundary):**
+     - `resolve_parent` returns the parent's `SkillDialect` alongside its resolved content (e.g. `(String, SkillDialect)`).
+     - In `merge_extension`, when `parent_dialect != SkillDialect::Loopflow`, inherit only the parent's body and its `description` (if it has a string `description:` and the child does not declare one). Never merge native frontmatter keys (`agent: Explore`, `context: fork`, `default_agent`, `allowed-tools`, etc.) into a Loopflow child's frontmatter.
+     - Test: a Loopflow skill extending a `.claude/skills/audit/SKILL.md` with `agent: Explore`, `context: fork`, and `description: Audit diff` loads cleanly, inherits the description and body, and has `skill.agent == None` and no `context` validation error.
+  2. **Merge Loopflow frontmatter by setting semantics instead of shallow raw YAML:**
+     - Normalize both parent and child mappings through `crate::config::normalize_context` before merging.
+     - Recursively merge nested mappings (`context`, `context.budgets`, `claude`, `codex`) parent-under-child; child non-mapping values (scalars and sequences) replace parent values.
+     - Agent-choice override: if the child declares `agent`, remove inherited `default_agent`; if the child declares `default_agent`, remove inherited `agent` (so a child's `default_agent:` is never silently overridden by a parent's pinned `agent:`).
+     - Strip `extends` from the merged mapping.
+     - Tests covering all three counterexamples:
+       - Parent `context: { docs: [a.md] }` + child `docs: [b.md]` → child's `b.md` wins.
+       - Parent `context: { docs: [a.md] }` + child `context: { diff_files: false }` → merged skill keeps `docs: [a.md]` AND `diff_files: false`.
+       - Parent `agent: codex` + child `default_agent: claude:opus` → merged skill has `agent == None` and `settings["default_agent"] == "claude:opus"`.
+  3. **Honest listing relations and non-builtin self-extension error:**
+     - Move `relations(&self, source: &SkillSource)` onto `SkillCatalog` (which `listing::discover` already holds).
+     - Normalize same-name builtin fallthrough (`implement.md` with `extends: implement`) and temporary `extends: builtin` to report `extends: Some("lf:<canonical>")` so `lf list skill` shows `extends lf:implement` instead of circular-looking `extends implement`.
+     - Walk the inheritance chain (cycle-safely) in `catalog.relations(source)` to decide `BuiltinRelation::Extends` vs `Replaces`: if `.lf/skills/qa.md` extends `base-qa` which extends `lf:qa`, report `BuiltinRelation::Extends` (not `Replaces`) so `source_label()` prints `(.lf/skills/qa.md, extends base-qa)` without a false `replaces builtin`.
+     - In `resolve_parent`, when `parent.name == source.name` and no builtin exists for `source.name` (e.g. `selfie.md` with `extends: selfie`), return `LoadError::InvalidSkill` saying `no builtin skill is named "selfie"` instead of `skill inheritance cycle: selfie -> selfie`.
+     - Update `catalog::tests` (`a_listing_tells_extensions_from_replacements_and_copies`, `skill_inheritance_rejects_missing_targets_and_cycles`) to verify all three.
 
 ## Post-build review findings
 
-Recorded by post-build `concept-review` against base `23ce1a69f9` (`scratch/concept-review.html`), both resolved before `pr-publish`:
-
-1. **Resolved — `realign.md` reversible-choice handoff:** added a bullet under `## After a review` so headless `realign` adopts a recommended reversible design choice into the plan marked as made for review (with what was passed over and why, never as settled), and regenerated `tests/goldens/builtin_realign.md`.
-2. **Resolved — `verify.md` `<qa head>` pointer:** clarified that `<qa head>` is the branch's `lf qa:` commit.
+- **Earlier pass against base `23ce1a69f9` (`02b9cf8f62`, resolved):** `realign.md` reversible-choice handoff and `verify.md` `<qa head>` pointer.
+- **Current pass against base `23ce1a69f9` (`scratch/concept-review.html` at `00c7f89698`, open — queued as next pass above):**
+  1. Native Claude/Codex parent frontmatter (`context: fork`, `agent: Explore`) leaks into Loopflow child settings in `merge_extension`.
+  2. Shallow/unnormalized YAML merge in `merge_extension` lets parent `context.docs` beat child `docs:`, wipes parent `context.*` siblings on nested `context:` overrides, and lets parent `agent:` override child `default_agent:`.
+  3. `SkillSource::relations()` reports raw circular `extends implement` on same-name overlays, falsely marks transitive builtin extensions (`qa -> base-qa -> lf:qa`) as `replaces builtin`, and non-builtin self-extension (`selfie -> selfie`) reports a cycle instead of a missing builtin.
 
 ## Deferred findings
 

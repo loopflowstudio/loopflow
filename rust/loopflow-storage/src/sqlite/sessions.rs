@@ -749,7 +749,7 @@ pub(super) fn admit_task_primary_in(
             choose_task_primary_in(conn, task, session.id.as_str())?;
         }
     }
-    ensure_primary_session_in(conn, &scope, session.clone(), caller_process)
+    ensure_primary_session_in(conn, &scope, session.clone(), caller_process, None)
 }
 
 fn ensure_primary_session_in(
@@ -757,11 +757,18 @@ fn ensure_primary_session_in(
     scope: &PrimaryScope,
     session: LfSession,
     caller_process: Option<&loopflow_model::id::LfProcessId>,
+    person_start_at: Option<i64>,
 ) -> StoreResult<LfSession> {
     if let Some(current) = primary_session_in(conn, scope)? {
         return Ok(current);
     }
     let session = reserve_session_in(conn, session, caller_process)?;
+    if let Some(at) = person_start_at {
+        conn.execute(
+            "UPDATE agent_sessions SET last_started_at=?2 WHERE id=?1",
+            params![&session.id, at],
+        )?;
+    }
     let marked = match scope {
         PrimaryScope::Repository(_) => conn.execute(
             "UPDATE agent_sessions SET primary_scope='repository' WHERE id=?1",
@@ -1730,6 +1737,7 @@ impl SqliteStore {
         scope: &PrimaryScope,
         session: LfSession,
         caller_process: Option<&loopflow_model::id::LfProcessId>,
+        person_start_at: Option<i64>,
     ) -> StoreResult<LfSession> {
         // Nearly every call finds the primary it asks for; that takes no write lock.
         if let Some(current) = self.primary_session(scope)? {
@@ -1737,7 +1745,8 @@ impl SqliteStore {
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let session = ensure_primary_session_in(&tx, scope, session, caller_process)?;
+        let session =
+            ensure_primary_session_in(&tx, scope, session, caller_process, person_start_at)?;
         tx.commit()?;
         Ok(session)
     }

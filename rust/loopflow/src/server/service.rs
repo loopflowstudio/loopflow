@@ -876,9 +876,9 @@ pub(super) async fn session<C: Carrier>(
                     }
                     Ok(None) => {}
                 }
-                let held = terminals
-                    .as_ref()
-                    .and_then(|terminals| terminals.session_terminal(&session));
+                let held = terminals.as_ref().and_then(|terminals| {
+                    terminals.session_terminal_for(&session, terminal_id.as_ref())
+                });
                 // A terminal whose holder has not answered this server yet.
                 let pending = terminals.as_ref().and_then(|terminals| {
                     terminals.pending_terminal(&session, terminal_id.as_ref())

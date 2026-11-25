@@ -400,10 +400,23 @@ impl Registry {
 
     /// The running terminal started for `session`.
     pub fn session_terminal(&self, session: &LfSessionId) -> Option<TerminalId> {
-        self.live
-            .lock()
-            .expect("registry lock poisoned")
-            .iter()
+        self.session_terminal_for(session, None)
+    }
+
+    /// The running terminal started for `session`: `wanted` when it is still
+    /// running for `session`, else any running terminal for `session`.
+    pub fn session_terminal_for(
+        &self,
+        session: &LfSessionId,
+        wanted: Option<&TerminalId>,
+    ) -> Option<TerminalId> {
+        let live = self.live.lock().expect("registry lock poisoned");
+        if let Some(wanted) = wanted {
+            if live.get(wanted).and_then(Option::as_ref) == Some(session) {
+                return Some(wanted.clone());
+            }
+        }
+        live.iter()
             .find(|(_, held)| held.as_ref() == Some(session))
             .map(|(terminal, _)| terminal.clone())
     }

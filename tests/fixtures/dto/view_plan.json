@@ -148,7 +148,8 @@
       "unavailable": [
         "No primary Session is recorded",
         "Recorded execution location is unavailable"
-      ]
+      ],
+      "open_children": 0
     }
   ],
   "name": null,

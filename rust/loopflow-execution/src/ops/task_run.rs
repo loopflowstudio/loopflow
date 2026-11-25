@@ -20,7 +20,7 @@ pub struct TaskRunEvidence<'a> {
 pub fn task_run_control(evidence: &TaskRunEvidence) -> TaskRunControl {
     let terminal = match evidence.status {
         Some(WorkStatus::Done) => Some("Task is complete"),
-        Some(WorkStatus::Abandoned) => Some("Task is abandoned; recover it before running a Graph"),
+        Some(WorkStatus::Abandoned) => Some("Task is abandoned; reopen it before running a Graph"),
         _ => evidence.plan_terminal_reason,
     };
     TaskRunControl {

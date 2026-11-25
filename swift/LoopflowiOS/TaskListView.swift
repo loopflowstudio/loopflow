@@ -71,13 +71,22 @@ final class TaskFeed {
         }
     }
 
-    /// The row leaves the list in the swipe; a refusal brings it back and the Notice
-    /// says why, its Show running `show` to open the Task.
-    func complete(_ task: WorkViewPlan.Content, show: @escaping @MainActor () -> Void) {
+    /// The parent a swipe is asking about: what happens to its open children.
+    var completing: WorkViewPlan.Content?
+
+    /// The row leaves the list at once; a refusal brings it back and the Notice
+    /// says why, its Show running `show` to open the Task. A swipe on a parent
+    /// sends no `children`: the row stays and `completing` asks what happens to them.
+    func complete(_ task: WorkViewPlan.Content, children: TaskChildPolicy? = nil, show: @escaping @MainActor () -> Void) {
+        completing = nil
+        if children == nil, (task.openChildren ?? 0) > 0 {
+            completing = task
+            return
+        }
         guard let directory = directory(of: task) else { return }
         let issue = task.identifier ?? task.work.id
         pendingChanges.make(.complete(task: issue), subject: issue, verb: "completed",
-                            write: .taskComplete(directory: directory, issue: issue), notices: notices,
+                            write: .taskComplete(directory: directory, issue: issue, children: children), notices: notices,
                             show: Notice.Action("Show", perform: show)) { [weak self] in
             try? await self?.observation?.refresh()
         }
@@ -366,6 +375,21 @@ struct TaskListView: View {
                         .accessibilityLabel("Machine")
                 }
             }
+        }
+        .confirmationDialog(
+            feed.completing.map { TaskChildPolicy.question(issue: $0.identifier ?? $0.work.id, openChildren: $0.openChildren ?? 0) }
+                ?? "Complete Task?",
+            isPresented: Binding(get: { feed.completing != nil }, set: { if !$0 { feed.completing = nil } }),
+            titleVisibility: .visible,
+            presenting: feed.completing
+        ) { task in
+            Button("Move Children Up") { feed.complete(task, children: .rehome) { selectedTask = MobileTask(task) } }
+            Button("Abandon Children", role: .destructive) {
+                feed.complete(task, children: .abandon) { selectedTask = MobileTask(task) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Move children up to keep them open, or abandon open children (merged ones are marked done).")
         }
         .alert("Visual timing unavailable", isPresented: Binding(get: { captureError != nil }, set: { if !$0 { captureError = nil } })) {
             Button("OK") { captureError = nil }

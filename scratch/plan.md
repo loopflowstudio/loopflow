@@ -568,6 +568,20 @@ threads, `spawns` unchanged across two calls a minute apart. Then
 Each pass deletes what it replaces and leaves the benchmark passing its
 then-current budgets.
 
+## Remaining
+
+No implementation pass remains; every section §1–§11 is built.
+
+- **Gate:** release build `server_idle.py target/release/lf --seconds 60`;
+  after merge, `sample <server pid> 3` and `lf server diagnostics --json` on the
+  live Machine with Desktop open and Graphs running; base-commit numbers beside
+  the branch's in the PR body.
+- **Compress candidates** (shape reads, not required for acceptance):
+  `observe.rs` `read_once` vs the inline stat path for unheld reads (one path?);
+  `harness/drive.rs:19` per-turn `current_thread` runtime → `runtime::block_on`.
+- If the PR is too large to review, it splits as stacked Tasks: lifetimes
+  (Pass 3) and job budget + file bounds (Pass 4).
+
 ## Checks
 
 - `scratch/concept-review.html` — pre-implementation concept review written and reconciled into this plan.
@@ -575,6 +589,7 @@ then-current budgets.
   - Baseline (before Pass 1 pool/settings/relay): `quiet` 0.60% CPU / 69 th / 36 spawns / 0 opens; `file_edits` 1.00% CPU / 69 th / 36 spawns / 0 opens; `db_writes` 0.60% CPU / 69 th / 48 spawns / 1 open.
   - After Pass 1: `quiet` 0.50% CPU / 69 th / 36 spawns / 0 opens; `file_edits` 1.00% CPU / 69 th / 36 spawns / 0 opens; `db_writes` 0.60% CPU / 69 th / 37 spawns / 0 opens.
   - After Pass 2 (budgets enforced, exit 0): `quiet` 0.10% CPU / 18 th / 0 spawns / 0 opens; `file_edits` 0.60% CPU / 16 th / 4 spawns / 0 opens; `db_writes` 0.10% CPU / 18 th / 0 spawns / 0 opens.
+  - After Pass 4 (realign, budgets enforced, exit 0): `quiet` 0.10% CPU / 18 th / 0 spawns / 0 opens; `file_edits` 0.80% CPU / 16 th / 4 spawns / 0 opens; `db_writes` 0.10% CPU / 18 th / 0 spawns / 0 opens.
   - Release 60 s acceptance run (`target/release/lf --seconds 60`) runs at gate.
 - Focused tests passed in Pass 1: `server::schema::tests::` (8), `server::wire::tests::` (2), `machine::wire::tests::` (2), Swift `ServerProtocolTests` (25), `loopflow-storage::pool::tests::` (4), `store::opening::` (12), `read_stream::tests::` (11), `loopflow-harness::transcript::tests::misses_under_watched_root_cache_until_invalidated` (1), `config::settings::tests::` (24), `observe::tests::` (17), `transport::registry::tests::` (16), `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`.
 - Focused tests passed in Pass 2: `loopflow-storage::changes::tests::` (3), `loopflow-storage::query_plans::tests::` (17), `loopflow-execution::runtime::tests::` (2), `observe::tests::` (19, including `unheld_git_fact_is_not_rerun_after_its_interval` and `held_git_fact_reruns_after_checkout_write_and_not_before`), `transcript::watch::tests::` (3), `read_stream::tests::` (13, including `idle_subscription_performs_zero_steps_over_five_seconds` and `history_write_does_not_wake_state_subscription`), `ops::plan_git::tests::` (10, including active-work scoping and exponential backoff), `ops::task::workspace::tests::` (1), `transport::output::tests::` (10), `loopflow::server::subscriptions::tests::` (12), `server::maintenance::tests::` (1), `server::recovery::tests::` (10), `server::wake::tests::` (12), `server::service::tests::` (`identical_consumers_share_setup`, `queued_subscription_cancellation_skips_construction`), `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`.

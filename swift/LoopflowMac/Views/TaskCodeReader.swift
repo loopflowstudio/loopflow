@@ -157,7 +157,7 @@ struct TaskCodeReader: View {
     }
 
     @ViewBuilder private func source(_ line: CodeLine, number: Int) -> some View {
-        let label = Text(painted(line, number: number)).textSelection(.enabled)
+        let label = CodeLineText(line: line, marks: marks(number, in: line)).equatable()
         if store != nil {
             label
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { rows.frames[number] = $0 }
@@ -231,19 +231,54 @@ struct TaskCodeReader: View {
         return FileJumps.Target(path: path, line: number, word: source.substring(with: range), range: range)
     }
 
-    func painted(_ line: CodeLine, number: Int) -> AttributedString {
+    /// What a row shows besides its syntax colors, as values: a change elsewhere repaints no other line.
+    func marks(_ number: Int, in line: CodeLine) -> CodeLineText.Marks {
+        var marks = CodeLineText.Marks()
+        if let target = store?.jumps.target, target.path == path, target.line == number { marks.underline = target.range }
+        marks.selected = selected(number) || location?.lines?.contains(number) == true
+        if let hit = location?.hit, hit.line == number, hit.revision == revision { marks.hit = hit.range(in: line.text) }
+        if let match = store?.find?.current, match.cell == .line(number) { marks.find = match.range }
+        return marks
+    }
+}
+
+/// One source line. Equatable on its text and marks, so the rows SwiftUI keeps
+/// built skip repainting when the reader redraws for another line.
+struct CodeLineText: View, Equatable {
+    struct Marks: Equatable {
+        var underline: NSRange?
+        var selected = false
+        var hit: NSRange?
+        var find: NSRange?
+    }
+
+    let line: CodeLine
+    let marks: Marks
+    @Environment(\.palette) private var palette
+    @Environment(\.theme) private var theme
+
+    nonisolated static func == (a: Self, b: Self) -> Bool {
+        a.marks == b.marks && a.line.text == b.line.text && a.line.highlights == b.line.highlights
+    }
+
+    var body: some View {
+        Text(painted).textSelection(.enabled)
+    }
+
+    private var painted: AttributedString {
         var value = AttributedString(line.text)
         value.paint(line.highlights, inks: .of(theme))
-        if let target = store?.jumps.target, target.path == path, target.line == number,
-           let range = Range(target.range, in: value) {
+        if let underline = marks.underline, let range = Range(underline, in: value) {
             value[range].underlineStyle = Text.LineStyle(pattern: .solid, color: palette.actionInk)
         }
-        if selected(number) || location?.lines?.contains(number) == true { value.backgroundColor = palette.keyboardFocus.opacity(0.3) }
-        if let hit = location?.hit, hit.line == number, hit.revision == revision,
-           let range = hit.range(in: line.text), let attributed = Range(range, in: value) {
-            value[attributed].backgroundColor = palette.keyboardFocus.opacity(0.3)
+        if marks.selected { value.backgroundColor = palette.keyboardFocus.opacity(0.3) }
+        if let hit = marks.hit, let range = Range(hit, in: value) {
+            value[range].backgroundColor = palette.keyboardFocus.opacity(0.3)
         }
-        return store?.find?.highlight(value, in: .line(number), color: palette.keyboardFocus.opacity(0.45)) ?? value
+        if let find = marks.find, let range = Range(find, in: value) {
+            value[range].backgroundColor = palette.keyboardFocus.opacity(0.45)
+        }
+        return value
     }
 }
 

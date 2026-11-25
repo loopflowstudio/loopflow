@@ -357,9 +357,7 @@ struct TaskFilesTests {
         let target = try #require(store.jumps.target)
         #expect(target.word == "read" && target.range == NSRange(location: 12, length: 4))
         let line = try #require(CodeLine.read(text, grammar: nil).first)
-        let painted = reader.painted(line, number: 1)
-        let marked = painted.runs.filter { $0.underlineStyle != nil }.map { NSRange($0.range, in: painted) }
-        #expect(marked == [target.range])
+        #expect(reader.marks(1, in: line).underline == target.range)
         #expect(reader.target(in: text, number: 1, at: CGPoint(x: 1000, y: 0)) == nil)
 
         let responder = NSTextView()

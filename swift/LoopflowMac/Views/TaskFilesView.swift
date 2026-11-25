@@ -126,9 +126,7 @@ struct TaskFilesView: View {
                     HStack(spacing: Spacing.xxs) {
                         folders(path)
                         filename(path)
-                        if let symbol = store.selectedDocument?.outline?.enclosing(store.jumps.readingLine) {
-                            Text("› " + symbol.name).font(Typography.meta)
-                        }
+                        ReadingSymbol(store: store)
                     }.fixedSize()
                     filename(path)
                 }
@@ -497,6 +495,17 @@ struct TaskFilesView: View {
     private func reportVisible(_ path: String) {
         guard page == .files, store.selection == path else { return }
         Perf.stateObserved(.openFile, id: path, owner: store.performanceOwner)
+    }
+}
+
+/// The symbol around the reading line. Scrolling changes that line, so only this label redraws.
+private struct ReadingSymbol: View {
+    let store: TaskFilesStore
+
+    var body: some View {
+        if let symbol = store.selectedDocument?.outline?.enclosing(store.jumps.readingLine) {
+            Text("› " + symbol.name).font(Typography.meta)
+        }
     }
 }
 

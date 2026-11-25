@@ -664,7 +664,7 @@ fn session_ending(
         };
     }
     let facts = crate::ops::recovery::DownConversation {
-        here: conversation && session.in_task_checkout,
+        here: conversation && session.task_checked_out_here,
         exit_code: end.and_then(|end| end.exit_code),
         starts_since_turn: attempts,
         last_started_at: session.last_started_at,

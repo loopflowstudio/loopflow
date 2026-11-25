@@ -232,7 +232,7 @@ fn summary_fixture() -> crate::session::SessionSummary {
         unviewed: false,
         held: false,
         task_terminal: false,
-        in_task_checkout: false,
+        task_checked_out_here: false,
         launching: false,
         captured: Some(1),
         id: "metadata".into(),
@@ -302,7 +302,7 @@ fn a_task_conversation_says_how_it_ended_and_what_happens_next() {
     };
     let mut summary = summary_fixture();
     summary.primary_scope = Some("task".into());
-    summary.in_task_checkout = true;
+    summary.task_checked_out_here = true;
     summary.agent_process_evidence = crate::store::ProcessIdentityEvidence::Dead;
     summary.agent_end = died(1_000);
 
@@ -388,13 +388,13 @@ fn a_task_conversation_says_how_it_ended_and_what_happens_next() {
         unclaimed.outlook.unwrap().reason.as_deref(),
         Some("its Task is not claimed on this Machine")
     );
-    summary.in_task_checkout = false;
+    summary.task_checked_out_here = false;
     let elsewhere = outlook(&summary).unwrap();
     assert_eq!(
         (elsewhere.kind, elsewhere.reason.as_deref()),
         (WaitingForYou, Some("its Task is not checked out here"))
     );
-    summary.in_task_checkout = true;
+    summary.task_checked_out_here = true;
 
     summary.starts_since_turn = loopflow_storage::sqlite::session_recovery::CONVERSATION_STARTS;
     let row = surfaced(&summary);
@@ -657,8 +657,21 @@ fn the_pass_starts_what_the_outlook_says_the_server_starts() {
     set("completed_at=NULL,cwd='/elsewhere'");
     assert_eq!(
         read(),
+        (Some((ComingBack, true)), true),
+        "checked out here even when conversation runs in another directory"
+    );
+    execute(
+        "DELETE FROM task_checkouts WHERE task_id=?1",
+        params![task.as_str()],
+    );
+    assert_eq!(
+        read(),
         (Some((WaitingForYou, false)), false),
         "not checked out here"
+    );
+    execute(
+        "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+        params![task.as_str(), checkout],
     );
     execute(
         "UPDATE agent_sessions SET cwd=?2 WHERE id=?1",

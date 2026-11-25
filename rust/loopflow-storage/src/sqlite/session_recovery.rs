@@ -1,5 +1,5 @@
-//! Task conversations in their checkouts here, for the server's recovery
-//! pass to start again, and the counters it keeps on them.
+//! Primary conversations of open Tasks checked out here, for the server's
+//! recovery pass to start again, and the counters it keeps on them.
 
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::{AgentProcessId, LfSessionId};
@@ -12,8 +12,9 @@ use crate::StoreResult;
 /// continues.
 pub const CONVERSATION_STARTS: u32 = 5;
 
-/// An open Task's conversation in the Task's checkout on this Machine, with
-/// what decides whether the server starts it.
+/// The primary conversation of an open Task checked out on this Machine, with
+/// what decides whether the server starts it. Recovery launches it in the
+/// Session's own directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskConversation {
     pub session: LfSessionId,
@@ -34,22 +35,22 @@ pub struct TaskConversation {
     pub last_started_at: Option<i64>,
 }
 
-/// SQL: Session row `s` is the conversation of open Task `t`, running in its
-/// checkout `c` on this Machine. The recovery pass lists these rows and a
-/// Session's summary asks it of one, so both read one definition.
-pub(super) fn task_conversation_here_sql(s: &str, t: &str, c: &str) -> String {
+/// SQL: Session row `s` is the primary conversation of open Task `t` on this
+/// Machine (paired with `task_checkouts` by its callers). The recovery pass
+/// lists these rows and a Session's summary asks it of one, so both read one
+/// definition.
+pub(super) fn task_conversation_here_sql(s: &str, t: &str) -> String {
     format!(
         "({open} AND EXISTS(SELECT 1 FROM task_primary_sessions tp WHERE tp.session_id={s}.id AND tp.task_id={t}.id)
           AND {s}.completed_at IS NULL AND {s}.interactive=1
-          AND {s}.moved_to_machine_id IS NULL
-          AND rtrim({s}.cwd,'/')=rtrim({c}.worktree,'/'))",
+          AND {s}.moved_to_machine_id IS NULL)",
         open = super::durable::task_open_sql(t),
     )
 }
 
 impl SqliteStore {
-    /// Every open Task's primary conversation in this Machine's checkout of
-    /// the Task, most recently active Task first. Whether the server starts
+    /// Every open Task's primary conversation for Tasks checked out on this
+    /// Machine, most recently active Task first. Whether the server starts
     /// one is the caller's rule, not this read's.
     pub fn task_conversations_here(&self) -> StoreResult<Vec<TaskConversation>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -62,7 +63,7 @@ impl SqliteStore {
              JOIN agent_sessions s ON s.id=tp.session_id
              WHERE {here}
              ORDER BY t.updated_at DESC,t.id",
-            here = task_conversation_here_sql("s", "t", "c"),
+            here = task_conversation_here_sql("s", "t"),
         ))?;
         let rows = statement.query_map([], |row| {
             Ok(TaskConversation {
@@ -135,5 +136,87 @@ impl SqliteStore {
             params![session.as_str(), failure],
         )?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::params;
+
+    use crate::query_plans::{growing_scans, statements};
+
+    #[test]
+    fn task_conversations_here_follows_task_checkout_not_session_cwd() {
+        let (_home, store, task) = crate::test_fixture::store_with_task();
+        let wave_id = store.task(&task).unwrap().unwrap().wave_id;
+        let session = store
+            .test_session(
+                "session_split_checkout",
+                &crate::session_record::new_artifact_key(),
+            )
+            .id;
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT OR REPLACE INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo.task')",
+                [task.as_str()],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET task_id=?2,wave_id=?3,interactive=1,cwd='/repo.research'
+                 WHERE id=?1",
+                params![
+                    session.as_str(),
+                    task.as_str(),
+                    wave_id.as_ref().map(|w| w.as_str())
+                ],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+                params![task.as_str(), session.as_str()],
+            )
+            .unwrap();
+        }
+
+        let summary_predicate = format!(
+            "SELECT EXISTS(SELECT 1 FROM task_checkouts pc WHERE pc.task_id=t.id AND {here})
+             FROM agent_sessions a LEFT JOIN tasks t ON t.id=a.task_id WHERE a.id=?1",
+            here = super::task_conversation_here_sql("a", "t"),
+        );
+        let summary_checked_out_here = || -> bool {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(&summary_predicate, [session.as_str()], |row| row.get(0))
+                .unwrap()
+        };
+
+        let listed = store.task_conversations_here().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].session, session);
+        assert_eq!(listed[0].task, task);
+        assert!(summary_checked_out_here());
+
+        // Single-Session summary predicate plans by index on growing tables.
+        let traced = statements(&store, || {
+            assert!(summary_checked_out_here());
+        });
+        let scans = growing_scans(&store, &traced);
+        assert!(scans.is_empty(), "{}", scans.join("\n"));
+
+        // Removing the local checkout row excludes the Task on both paths.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "DELETE FROM task_checkouts WHERE task_id=?1",
+                [task.as_str()],
+            )
+            .unwrap();
+        assert!(store.task_conversations_here().unwrap().is_empty());
+        assert!(!summary_checked_out_here());
     }
 }

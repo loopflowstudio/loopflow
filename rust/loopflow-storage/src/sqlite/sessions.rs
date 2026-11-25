@@ -500,7 +500,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         ORDER BY {order}",
         scope = primary_scope_sql("a"),
         task_state = super::durable::task_state_sql("t"),
-        here = super::session_recovery::task_conversation_here_sql("a", "t", "pc"))
+        here = super::session_recovery::task_conversation_here_sql("a", "t"))
 }
 
 fn read_summary(
@@ -597,7 +597,7 @@ fn read_summary(
                 .filter(|_| live),
             agent_process_id,
             task_terminal: row.get(26)?,
-            in_task_checkout: row.get(45)?,
+            task_checked_out_here: row.get(45)?,
             launching: row.get(46)?,
             captured: row.get(15)?,
             id: row.get(0)?,

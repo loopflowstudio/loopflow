@@ -120,7 +120,8 @@ struct DashboardWorkspaceTests {
         }
         let model = WorkModel(query: query, repoPath: "/repo")
         model.applySelectionPlans([try JSONDecoder().decode(WorkViewPlan.self, from: Data(plan.utf8))], reason: "")
-        await model.reorderWorkingTask("task_b", to: "task_a").value
+        let source = WorkWorkspaceKey(repository: "repo_11111111111111111111111111111111", kind: .task, id: "task_b")
+        await model.reorderWorkingTask(source, to: "task_a", side: nil).value
         #expect(model.workingTaskIDs == ids)
         #expect(model.navigation.notices.current?.text == reason)
     }

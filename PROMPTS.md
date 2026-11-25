@@ -159,9 +159,8 @@ implementation?" is a goal; a numbered checklist belongs in a Graph. Loopflow
 concepts (`.lf/wave/`, `scratch/`, Graphs) are fine in goals; product details
 ("44pt tap targets") are not.
 
-Projects are measured bets inside one Wave. Start from who benefits and what
-changes for them. A KR is an end state that would show the bet holds, not a
-task list.
+A Wave’s Project groups its Tasks and has its own status. Start from
+who benefits and what changes for them.
 
 ## Opening lines
 

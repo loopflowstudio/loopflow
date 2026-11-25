@@ -43,22 +43,22 @@ enum MockWaveFixture {
     static let waves = portfolio.map(\.wave)
 
     static let plans = Dictionary(uniqueKeysWithValues: portfolio.map { wave, objective in
-        let projects: WorkEvidence<ProjectPlanningSnapshot> = wave.name == "infrastructure"
-            ? infrastructureProjects : .available(items: [], truncated: false)
-        return (wave.id, WavePlan(objective: objective, projects: projects))
+        let project: WorkReading<ProjectPlanningSnapshot?> = wave.name == "infrastructure"
+            ? infrastructureProject : .available(nil)
+        return (wave.id, WavePlan(objective: objective, project: project))
     })
 
-    private static let infrastructureProjects: WorkEvidence<ProjectPlanningSnapshot> = {
+    private static let infrastructureProject: WorkReading<ProjectPlanningSnapshot?> = {
         let json = #"""
             {
               "id": "project-1", "tracker_id": null, "sync": {"actions": []},
-              "slug": "release-feedback", "name": "current", "status": "started", "current": true,
-              "metric_targets": [], "krs": [{"text": "Every failed run has an owner", "holds": false}]
+              "slug": "release-feedback", "name": "Release feedback", "status": "started", "url": null,
+              "unbound": "not in Linear yet; `lf wave create release-feedback` makes it"
             }
             """#
         do {
             let project = try JSONDecoder().decode(ProjectPlanningSnapshot.self, from: Data(json.utf8))
-            return .available(items: [project], truncated: false)
+            return .available(project)
         } catch {
             return .unavailable(reason: error.localizedDescription)
         }

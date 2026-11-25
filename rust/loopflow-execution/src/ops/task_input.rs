@@ -2,7 +2,6 @@
 use crate::harness::Driver;
 use crate::store::SharedStore;
 use anyhow::{anyhow, Result};
-use loopflow_model::durable::WorkRef;
 use loopflow_storage::child::ChildRef;
 use loopflow_storage::work::project::Project;
 use loopflow_storage::work::task::Task;
@@ -19,9 +18,7 @@ pub struct TaskSeed {
 
 /// Read a Task snapshot without refreshing providers or advancing a control cursor.
 pub async fn read_seed(store: &SharedStore, task: &Task, wave: Option<&str>) -> Result<TaskSeed> {
-    let interrupt = store
-        .latest_interrupt_id(&WorkRef::Task(task.id.clone()))
-        .await?;
+    let interrupt = store.latest_interrupt_id(&task.id).await?;
     let pr = store.active_task_pr(&task.id).await?;
     let project = match &task.project_id {
         Some(id) => Some(
@@ -115,13 +112,7 @@ impl TaskInput {
             handle_attachment(store, task, harness, line).await?;
         }
         if Instant::now() >= *next_interrupt {
-            crate::ops::child::observe_interrupt(
-                store,
-                &WorkRef::Task(task.id.clone()),
-                harness,
-                interrupt,
-            )
-            .await;
+            crate::ops::child::observe_interrupt(store, &task.id, harness, interrupt).await;
             *next_interrupt = Instant::now() + Duration::from_secs(5);
         }
         Ok(())

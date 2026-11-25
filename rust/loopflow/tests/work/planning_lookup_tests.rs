@@ -33,38 +33,20 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
     .unwrap();
     let scope = repo.path().canonicalize().unwrap();
     runtime
-        .block_on(store.seed_issue(
-            &scope.to_string_lossy(),
-            "linear",
-            record.clone(),
-            None,
-            None,
-        ))
+        .block_on(store.seed_issue(&scope.to_string_lossy(), "linear", record.clone(), None))
         .unwrap();
     let mut stale = record.clone();
     stale.item.id = "issue-2".into();
     stale.item.identifier = "FIX-2".into();
     stale.observed_at -= 7 * 86400 + 1;
     runtime
-        .block_on(store.seed_issue(
-            &scope.to_string_lossy(),
-            "linear",
-            stale.clone(),
-            None,
-            None,
-        ))
+        .block_on(store.seed_issue(&scope.to_string_lossy(), "linear", stale.clone(), None))
         .unwrap();
     let mut invalid = record.clone();
     invalid.item.id = "issue-3".into();
     invalid.item.identifier = "FIX-3".into();
     runtime
-        .block_on(store.seed_issue(
-            &scope.to_string_lossy(),
-            "linear",
-            invalid.clone(),
-            None,
-            None,
-        ))
+        .block_on(store.seed_issue(&scope.to_string_lossy(), "linear", invalid.clone(), None))
         .unwrap();
     runtime
         .block_on(
@@ -81,13 +63,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
     removed.item.id = "issue-4".into();
     removed.item.identifier = "FIX-4".into();
     runtime
-        .block_on(store.seed_issue(
-            &scope.to_string_lossy(),
-            "linear",
-            removed.clone(),
-            None,
-            None,
-        ))
+        .block_on(store.seed_issue(&scope.to_string_lossy(), "linear", removed.clone(), None))
         .unwrap();
     runtime
         .block_on(store.record_tracker_event("issue-4", None, true))
@@ -161,10 +137,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
         assert_eq!(text.contains("\nPlanning: "), error, "{text}");
     }
     assert_eq!(runtime.block_on(store.list_tasks(None)).unwrap().len(), 3);
-    assert!(runtime
-        .block_on(store.list_projects(None))
-        .unwrap()
-        .is_empty());
+    assert!(runtime.block_on(store.list_projects()).unwrap().is_empty());
     assert_eq!(
         loopflow_execution::git::worktrees::list_worktrees(repo.path())
             .unwrap()

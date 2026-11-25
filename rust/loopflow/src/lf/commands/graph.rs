@@ -635,7 +635,6 @@ fn execute(
             task_run: task_run.cloned(),
             interrupt,
         };
-        // A project rotation moving this checkout's Task excludes new work in it.
         let admission = loopflow_execution::store::admission::lock_task_checkouts(
             &running.store.sqlite,
             &[running.cwd],
@@ -1603,7 +1602,6 @@ mod tests {
                 sources: Vec::new(),
             });
             let steps = [skill.clone(), skill];
-            let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
             let running = super::RunningGraph {
                 store: fixture.store.clone(),
                 process: loopflow_model::id::LfProcessId::new(),
@@ -1628,7 +1626,7 @@ mod tests {
                     while !started.exists() {
                         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                     }
-                    fixture.store.append_interrupt(&work).await.unwrap();
+                    fixture.store.append_interrupt(&task.id).await.unwrap();
                 };
                 let runner = GraphRunner::new(&running);
                 let (outcome, ()) = tokio::join!(runner.run(&steps, 0), interrupt);
@@ -1652,7 +1650,6 @@ mod tests {
 
         with_planning_task(|runtime, fixture, repo, task, _| {
             let _env = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
-            let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
             let cli = Cli::try_parse_from(["lf", "--batch"]).unwrap();
             let op = |name: &str| {
                 ConcreteStep::Command(ConcreteCommand {
@@ -1703,7 +1700,7 @@ mod tests {
                     while !started.exists() {
                         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                     }
-                    fixture.store.append_interrupt(&work).await.unwrap();
+                    fixture.store.append_interrupt(&task.id).await.unwrap();
                     fs::write(&release, "").unwrap();
                 };
                 let runner = GraphRunner::new(&running);
@@ -1754,7 +1751,7 @@ mod tests {
                     while !started.exists() {
                         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                     }
-                    fixture.store.append_interrupt(&work).await.unwrap();
+                    fixture.store.append_interrupt(&task.id).await.unwrap();
                     fs::write(&release, "").unwrap();
                 };
                 let runner = GraphRunner::new(&running);

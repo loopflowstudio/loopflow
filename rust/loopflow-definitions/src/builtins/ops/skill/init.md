@@ -78,7 +78,7 @@ A connection counts only after the provider flow completes.
 `lf wave status <wave> --json`. If Linear is connected and the Wave isn't
 bound, offer `lf wave plan connect <wave>`. The first Wave picks the
 repository's Linear Team, and that choice needs a person. Never create another
-Team, Initiative or Project.
+Team or Project.
 
 **New Wave.** Ask for one outcome and a short name, then
 `lf wave create <name> --objective "<outcome>"`. It commits

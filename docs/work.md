@@ -18,7 +18,7 @@ lf capture-tasks                             # talk through an idea; the agent f
 Each Task gets its own sibling worktree (`../<repo>.<task>`), its own branch,
 and at most one open pull request. Every agent working on a Task starts from
 the same shared context: the Task's title, notes, thread, checkout, `scratch/`,
-and (when in a Wave) the Wave's goal, memory, and KRs.
+and (when in a Wave) the Wave's goal and memory.
 
 A new Task branches from `origin/<default>` as of the
 last background fetch (its first `lf sync` catches up). Loopflow keeps one
@@ -462,23 +462,21 @@ tracker:
 | Start work on the Task | Issue moves to In Progress |
 | Open, land, or abandon its PR | One linked PR on the issue, updated as its state changes |
 
-In Linear, a Wave maps to an Initiative and its current Project maps to a
-Linear Project. In Asana, it maps to a team project.
-
-Cloning a repository with existing `.lf/wave/` files onto a new Machine (or
-rental) registers those Waves read-only without editing `.lf/wave/` or
-committing to `main`. When a Wave's Linear Initiative has one In Progress
-Project, Loopflow binds it automatically. If the Initiative has none or
-several, or Linear is unreachable, the Wave stays unbound and lists its
-available Projects so you can pick one explicitly:
+In Linear, a Wave is one Linear Project and its Tasks are that Project's
+issues. In Asana, it is a team project.
 
 ```bash
-lf wave plan bind coverage <project-uuid>            # bind an unbound Wave to a Linear Project
-lf wave plan bind coverage <project-uuid> --replace  # switch a misselected Wave without losing prior work or history
+lf wave plan connect billing                       # make billing's Project in Linear
+lf wave plan connect billing 'Refunds'             # or link the Linear Project named Refunds
+lf wave plan connect billing https://linear.app/acme/project/refunds-1a2b3c4d5e6f
 ```
 
-Re-running `lf wave plan connect` on an already-bound Team and Initiative is a
-no-op that leaves `.lf/config.yaml`, `.lf/wave/`, and `main` untouched.
+You can connect a new Wave directly to an existing Linear Project. A Linear
+Project no Wave links stays out of Loopflow.
+
+Loopflow registers Waves from an existing checkout's `.lf/wave/` files
+without editing those files. When renting a Machine for a Linear Task,
+Loopflow connects the Task's Wave to its linked Project on the rental.
 
 ### Offline queue and conflict resolution
 
@@ -518,14 +516,17 @@ Answer a lost line: lf repo tracker answer <id> --keep-theirs, or --use-mine.
   lf task create            DeliverTaskCreation                  1         0         30
   ```
 
-A Wave not yet linked to a Linear Initiative keeps its Tasks local until you
-run `lf wave plan connect <wave>`.
+In a connected repository a new Wave's Project goes to Linear with it. If that
+send fails, `lf wave status` shows `Project … (local)` and its Tasks wait in the
+queue until `lf wave create <wave>` makes it. Linking another Linear Project
+replaces the one Loopflow made while none of the Wave's Tasks is in Linear yet.
+A Task in no Wave goes to Linear right away, as a team issue.
 
 ## Waves
 
 A Wave groups related Tasks under a lasting objective (`GOAL.md`), curated team
-memory (`MEMORY.md`), KRs, and shared defaults. Every Task in the Wave starts
-with that context.
+memory (`MEMORY.md`), its Project, and shared defaults. Every Task in the Wave
+starts with that context.
 
 ### Goal and memory
 
@@ -583,7 +584,7 @@ See [Configuration](config.md) for the complete precedence rules.
 ```bash
 lf --wave billing wave-operate "invoices first"   # one finite pass over its Tasks
 lf resume --wave billing                          # open the Wave's ongoing conversation
-lf wave status billing                            # plan, Tasks, KRs, and runtime state
+lf wave status billing                            # the Wave's Project, Tasks and runtime state
 ```
 
 `wave-operate` reviews every started Task you own (leaving running Graphs alone
@@ -598,22 +599,41 @@ you to pick, and leaves teammates' Tasks untouched. Run it on a schedule with yo
 On macOS, scheduled commands that need Keychain credentials belong in a
 LaunchAgent under `~/Library/LaunchAgents` rather than cron.
 
-### Plan it: KRs and targets
+### Projects
 
-A Wave's current Project holds its Tasks, KRs, and
-targets:
-
-```bash
-lf wave plan billing --json
-lf wave update-project --wave billing --file project.json
+```text
+$ lf wave create billing ; lf wave create billing/refunds
+$ lf task create --wave billing/refunds --title "Refund a mischarged invoice"
+Refund a mischarged invoice · LOO-14
+$ lf wave status billing/refunds
+…
+  Refund a mischarged invoice   LOO-14   unstarted
 ```
 
-```json
-{"metric_targets":[],"krs":[{"text":"A customer's invoice matches metered usage to the cent.","holds":false}]}
-```
+A Wave is one Project, made with the Wave: `lf wave create billing/refunds`
+makes the Project `refunds`, and in a repository with Linear or Asana makes it
+there too before it returns. Can't reach the tracker? The command fails and
+says to run it again, which makes it. A Wave that arrived without one (from
+an upgrade) gets its tracker Project from that command or the first Task sent
+into it; `lf wave sync` and Desktop's refresh never make one. Until then `lf
+wave status` and Desktop say the Project is not in the tracker yet and name
+the command that makes it. Tasks reordered meanwhile keep that order in the
+tracker. A Task
+in a Wave is in its Project, and lists under that Wave only. A Task in no
+Wave is in no Project.
 
-Updating a Project replaces its KRs and targets in place; started Tasks keep
-their worktrees and PRs.
+The Project has a name, a summary and a status, and `lf wave status` and
+`lf wave plan billing --json` show it. It starts and ends in the tracker:
+rename it or mark it completed in Linear, and `lf wave sync` shows the same
+here. An ended Project is still the Wave's, and new Tasks still join it.
+
+In Linear, an issue in a linked Project appears under that Project's Wave on
+other Machines. A Task with no Wave goes to Linear as a Team issue with no
+Project. Other Machines syncing the Team import it as a Task with no Wave.
+Issues in unlinked Linear Projects stay out of Loopflow.
+
+`lf task move` puts a Task in the new Wave's Project. A started Task keeps its
+worktree and PR wherever it is.
 
 ### Nested Waves
 
@@ -625,7 +645,7 @@ Wave selected.
 ### Rename or remove a Wave
 
 ```bash
-lf wave rename billing payments          # moves files on main; keeps Tasks, ID, and planning
+lf wave rename billing payments          # moves files on main; keeps Tasks and ID; renames its Project, in Linear too
 lf wave remove payments --preview        # preview what happens to Tasks and Sessions
 lf wave remove payments                  # moves open Tasks to the parent Wave or repository
 lf wave remove payments --delete-backlog # delete unstarted Tasks instead; started ones always move
@@ -633,6 +653,7 @@ lf wave remove payments --delete-backlog # delete unstarted Tasks instead; start
 
 Removal retires the Wave and its children, folds a child's `MEMORY.md` into its
 parent, and keeps completed history readable via `lf wave show payments`.
+You can then connect another Wave to the same Linear Project.
 
 ### Talk to it from Discord
 
@@ -703,12 +724,14 @@ if setup fails, `lf resume --task <ID>` retries it). See
 [Recover a submitted creation](server.md#recover-a-submitted-creation).
 
 **Tracker sync notes.** `lf task sync LOO-12` exchanges one Task now;
-`lf wave sync` refreshes from the tracker first. Without a tracker,
-`lf task sync` pushes and fetches the repository's plan and exchanges with the
-hub, then prints what each still has unsent. If Linear updates an issue or
+`lf wave sync billing` reads tracker changes, then gives billing’s Project
+priority among pending saves. A save that stays queued shows in status with
+its last error when available. A linked Linear Wave also reads its Project and issues. Without a
+tracker, both commands exchange the repository’s plan through Git and its
+configured hub. `lf task sync` also shows what each still has unsent. If Linear updates an issue or
 Project without bumping `updatedAt`, Loopflow adopts the fresh reading and
-keeps your local edits queued. Moving a Project to another Initiative in Linear
-is held until moved back, because the Initiative determines which Wave owns it.
+keeps your local edits queued. An issue moved into another Wave's Linear
+Project moves to that Wave.
 
 Every flag: [`lf task`](lf-reference.md#lf-task), [`lf wave`](lf-reference.md#lf-wave).
 

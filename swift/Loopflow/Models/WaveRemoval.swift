@@ -13,20 +13,18 @@ public struct WaveRemoval: Decodable, Sendable, Hashable {
     public let moved: [Task]
     public let deleted: [Task]
     public let completedTasks: Int
-    public let projects: Int
     public let sessions: Int
-    public let initiatives: [InitiativeArchive]
     public let hasFiles: Bool
     /// Edits under `.lf/wave/<name>` nobody committed; removal deletes them.
     public let uncommitted: [String]
     public let files: AuthoredFiles?
     public let summary: [String]
 
-    /// Whether `summary` ends with lines a person still has to act on: an
-    /// Initiative Linear kept live or files left uncommitted.
+    /// Whether `summary` ends with lines a person still has to act on: files
+    /// left uncommitted.
     public var hasLeftovers: Bool {
         if case .uncommitted = files { return true }
-        return initiatives.contains { $0.error != nil }
+        return false
     }
 
     public struct Task: Decodable, Sendable, Hashable {
@@ -34,21 +32,6 @@ public struct WaveRemoval: Decodable, Sendable, Hashable {
         public let identifier: String
         public let title: String
         public let started: Bool
-    }
-
-    public struct InitiativeArchive: Decodable, Sendable, Hashable {
-        public let wave: String
-        public let initiative: String
-        public let error: String?
-
-        public init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            wave = try container.decode(String.self, forKey: .wave)
-            initiative = try container.decode(String.self, forKey: .initiative)
-            error = try container.decode(String?.self, forKey: .error)
-        }
-
-        enum CodingKeys: String, CodingKey { case wave, initiative, error }
     }
 
     /// What happened to `.lf/wave/<name>/` on the main checkout.
@@ -73,8 +56,8 @@ public struct WaveRemoval: Decodable, Sendable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, preview, destination, waves, moved, deleted, projects, sessions
-        case initiatives, uncommitted, files, summary
+        case id, name, preview, destination, waves, moved, deleted, sessions
+        case uncommitted, files, summary
         case alreadyRemoved = "already_removed"
         case completedTasks = "completed_tasks"
         case hasFiles = "has_files"
@@ -91,9 +74,7 @@ public struct WaveRemoval: Decodable, Sendable, Hashable {
         moved = try container.decode([Task].self, forKey: .moved)
         deleted = try container.decode([Task].self, forKey: .deleted)
         completedTasks = try container.decode(Int.self, forKey: .completedTasks)
-        projects = try container.decode(Int.self, forKey: .projects)
         sessions = try container.decode(Int.self, forKey: .sessions)
-        initiatives = try container.decode([InitiativeArchive].self, forKey: .initiatives)
         hasFiles = try container.decode(Bool.self, forKey: .hasFiles)
         uncommitted = try container.decode([String].self, forKey: .uncommitted)
         files = try container.decode(AuthoredFiles?.self, forKey: .files)

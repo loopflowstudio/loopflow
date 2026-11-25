@@ -30,7 +30,6 @@ mod subscription_events;
 mod task_started;
 
 mod machine_records;
-mod metrics;
 pub mod plan_carriers;
 pub mod planning_order;
 pub mod planning_scope_checks;
@@ -40,8 +39,8 @@ mod pr_landings;
 mod processes;
 pub use processes::{PreviousAgentDisposition, SessionTransfer};
 mod program_status;
-pub mod project_content;
-pub mod project_selection;
+#[cfg(test)]
+mod project_content_tests;
 pub mod provider_transitions;
 mod rentals;
 pub mod repositories;
@@ -75,7 +74,6 @@ mod wave_lifecycle;
 
 pub use children::ClosedTaskPage;
 pub use graph_inventory::{entry_of, AgentLimitRecovery, GraphExecutionFacts, UnrunGraph};
-pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::{Revisions, StoreRevisions};
 pub use session_events::{AnsweredTurn, CurrentConversation, TurnSpan};
 pub use task_details::{GraphDetail, GraphDetailInput, GraphDetailReader, TaskDetailFacts};
@@ -758,6 +756,10 @@ impl SqliteStore {
             &crate::work::edit::WorkEdit::for_target(wave.id().as_str(), &edits),
             crate::sqlite::planning_write::WriteOrigin::Local,
         )?;
+        if !saved && wave.retired_at().is_none() {
+            // A Wave is made with its one Project.
+            children::wave_project_in(&tx, wave.id())?;
+        }
         if !saved {
             tx.execute("UPDATE waves SET created_at=?2,retired_at=?3,superseded_by_wave_id=?4,retirement_reason=?5 WHERE id=?1",params![wave.id(),created_at,wave.retired_at().map(|at|at.unix_timestamp()),wave.superseded_by_wave_id(),wave.retirement_reason()])?;
         }
@@ -1300,6 +1302,19 @@ impl SqliteStore {
                     ],
                 ),
             )?;
+            // A Wave's Project is named for it; a linked one's new name goes to the tracker.
+            if let Some(project) = children::held_wave_project_in(&tx, &update.wave_id)? {
+                planning_write::local(
+                    &tx,
+                    &crate::work::edit::WorkEdit::for_target(
+                        project.as_str(),
+                        &[
+                            crate::work::edit::WorkValue::ProjectSlug(Some(name.into())),
+                            crate::work::edit::WorkValue::ProjectName(Some(name.into())),
+                        ],
+                    ),
+                )?;
+            }
         }
         tx.commit()?;
         Ok(())

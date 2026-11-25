@@ -933,7 +933,6 @@ struct WorkNavigationTests {
         snapshot["tasks"] = truncated
             ? ["state": "ok", "items": [], "truncated": true]
             : ["state": "unavailable", "reason": "planning offline"]
-        waves[0]["unavailable_tasks"] = []
         snapshot["waves"] = waves
         await source.replaceRoadmap(String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self))
         await model.refresh()
@@ -1079,26 +1078,6 @@ struct WorkNavigationTests {
         #expect(throws: Never.self) { try view.inspect().find(viewWithAccessibilityIdentifier: "task-available-human") }
     }
 
-    @Test("Work outside the plan is one condition Notice while its Wave is open")
-    func outsidePlanIsAConditionNotice() async throws {
-        let model = try model()
-        await model.refresh()
-        let wave = try #require(model.projection.waves.first)
-        let task = try #require(wave.roadmap.unavailableTasks.first)
-        let text = "\(task.taskIdentifier): \(task.reason)"
-        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
-        #expect(throws: (any Error).self) { try navigator.inspect().find(text: text) }
-        model.select(wave.id.work)
-        // One condition Notice names the Task while the Wave is open; its action copies the recovery.
-        let notice = try #require(model.navigation.notices.current)
-        #expect(notice.text == "\(task.taskIdentifier) is outside the current plan")
-        #expect(notice.kind == .condition)
-        #expect(notice.action?.title == "Copy recovery")
-        #expect(notice.action?.help == text)
-        model.select(nil)
-        #expect(model.navigation.notices.current == nil)
-    }
-
     @Test("Slow planning does not gate Session reading or navigation")
     func sessionsArriveBeforePlanning() async throws {
         let snapshot = try roadmapJSON()
@@ -1124,7 +1103,7 @@ struct WorkNavigationTests {
     }
 
     @Test("Bound Sessions retain ancestry and panes across planning loss and return",
-          arguments: ["absent-task", "no-current-project", "no-waves"])
+          arguments: ["absent-task", "no-project", "no-waves"])
     func boundSessionRetainsAncestry(planning: String) async throws {
         let work = WorkReference.task(id: "issue-review")
         let records = try [session("first", work: work, waveId: "wave-1"),
@@ -1133,9 +1112,8 @@ struct WorkNavigationTests {
         var snapshot = try #require(JSONSerialization.jsonObject(with: Data(original.utf8)) as? [String: Any])
         var waves = try #require(snapshot["waves"] as? [[String: Any]])
         snapshot["tasks"] = ["state": "ok", "items": [], "truncated": false]
-        waves[0]["unavailable_tasks"] = []
-        if planning == "no-current-project" {
-            waves[0]["projects"] = ["state": "ok", "items": [], "truncated": false]
+        if planning == "no-project" {
+            waves[0]["project"] = ["state": "ok", "value": NSNull()]
         }
         snapshot["waves"] = planning == "no-waves" ? [] : waves
         let missing = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)

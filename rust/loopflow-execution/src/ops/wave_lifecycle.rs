@@ -8,7 +8,7 @@ pub mod recovery;
 
 use std::path::{Path, PathBuf};
 
-use crate::work::wave::lifecycle::{Identity, Operation, ProviderChange};
+use crate::work::wave::lifecycle::{Identity, Operation};
 
 use serde::{Deserialize, Serialize};
 
@@ -16,7 +16,7 @@ use crate::ops::{OpsError, OpsResult};
 use crate::store::Store;
 use crate::work::wave::Wave;
 use loopflow_model::id::WaveId;
-use loopflow_storage::work::project::Project;
+use loopflow_storage::sqlite::tracker_actions::ActionOwner;
 
 fn lifecycle_error(message: impl ToString) -> OpsError {
     OpsError::Message(message.to_string())
@@ -39,24 +39,43 @@ pub struct WaveAdded {
     pub id: WaveId,
     pub name: String,
     pub created: bool,
-    #[serde(deserialize_with = "Option::deserialize")]
-    pub project: Option<Project>,
     pub main_checkout: PathBuf,
     pub files: AuthoredFiles,
     pub summary: Vec<String>,
 }
 
-/// Register a Wave, seed its authored files on the main checkout, ensure its
-/// first Project and commit the files. Re-adding a Wave whose files name it
-/// writes nothing to the checkout.
+/// Register a Wave, seed its authored files on the main checkout and commit
+/// them, then make its Project in the repository's tracker. Re-adding a live
+/// Wave changes nothing but a Project the tracker does not hold yet.
 pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<WaveAdded> {
-    let main = crate::repository::discover(repo)
-        .map_err(lifecycle_error)?
-        .as_path()
-        .to_path_buf();
-    let _lifecycle = recovery::lock(&main)?;
-    let locator = crate::work::wave::discover(&main, name).map_err(lifecycle_error)?;
     let store = super::planning_sync::planning_store().await?;
+    let main = crate::repository::discover(repo).map_err(lifecycle_error)?;
+    let added = {
+        let _lifecycle = recovery::lock_async(main.as_path()).await?;
+        add_local(&store, main.as_path(), name, objective).await?
+    };
+    sync_wave_project(&store, &main.to_string(), &added.id).await?;
+    super::tracker::create_wave_project(&store, &added.main_checkout, &added.id)
+        .await
+        .map_err(|error| {
+            let retry = super::tracker::make_project_command(&added.name);
+            lifecycle_error(format!(
+                "wave/{} has no tracker Project yet: {}. Run `{retry}` to make it.",
+                added.name,
+                error.to_string().trim_end_matches('.'),
+            ))
+        })?;
+    Ok(added)
+}
+
+/// Register and commit under the caller's main-checkout lifecycle lock.
+pub(crate) async fn add_local(
+    store: &Store,
+    main: &Path,
+    name: &str,
+    objective: Option<&str>,
+) -> OpsResult<WaveAdded> {
+    let locator = crate::work::wave::discover(main, name).map_err(lifecycle_error)?;
     let mut existing = crate::work::wave::bootstrap::find_or_register(
         &store.sqlite,
         &main.to_string_lossy(),
@@ -64,77 +83,50 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
     )
     .map_err(lifecycle_error)?;
     if existing.is_none() {
-        super::plan_carriers::look_first(&store, &main).await;
-        existing = store
-            .sqlite
-            .get_wave_at(&locator)
-            .map_err(lifecycle_error)?;
+        super::plan_carriers::look_first(store, main).await;
+        existing = store.get_wave_at(&locator).await.map_err(lifecycle_error)?;
     }
-    // A Wave whose authored files already name it is adopted without writing
-    // to the checkout; any other Wave gets its files seeded below.
-    let adopted = existing
+    if let Some(wave) = existing
         .as_ref()
-        .filter(|_| crate::work::wave::bootstrap::names_its_wave(&main, locator.slug()));
-    if let Some(wave) = adopted {
-        let mut summary = Vec::new();
-        if let Err(error) = super::linear::acquire_wave_inventory(&store, wave).await {
-            summary.push(error.to_string());
-        }
-        // A Linear Initiative chooses its own Project; any other Wave gets a first one.
-        let project = if super::linear::authored_initiative(wave).is_none() {
-            Some(ensure_first_project(&store, wave).await?)
-        } else {
-            let selected = store
-                .sqlite
-                .selected_project(wave.id())
-                .map_err(lifecycle_error)?;
-            if selected.is_none() {
-                summary.push(super::project::unconfigured(&store, wave)?);
-            }
-            selected
-        };
+        .filter(|_| crate::work::wave::bootstrap::names_its_wave(main, locator.slug()))
+    {
         return Ok(WaveAdded {
             id: wave.id().clone(),
             name: wave.slug().to_owned(),
             created: false,
-            project,
-            main_checkout: main,
+            main_checkout: main.to_path_buf(),
             files: AuthoredFiles::Unchanged,
-            summary,
+            summary: Vec::new(),
         });
     }
     let created = existing.is_none();
-    let wave = crate::work::wave::ensure_wave_row(&store, &main, locator.slug())
+    let wave = crate::work::wave::ensure_wave_row(store, main, locator.slug())
         .await
         .map_err(lifecycle_error)?;
     if created {
         if let Some(objective) = objective.map(str::trim).filter(|text| !text.is_empty()) {
-            write_objective(&main, wave.slug(), objective)?;
+            write_objective(main, wave.slug(), objective)?;
         }
     }
-    let project = ensure_first_project(&store, &wave).await?;
     let files = commit_authored(
-        &main,
+        main,
         &[authored_path(wave.slug())],
         &format!("lf wave add: {}", wave.slug()),
     );
-    super::planning_sync::sync_after_save(
-        &store,
-        &main.to_string_lossy(),
-        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Wave(wave.id().clone()),
-    )
-    .await;
-    let mut added = WaveAdded {
+    Ok(WaveAdded {
         id: wave.id().clone(),
         name: wave.slug().to_string(),
         created,
-        project: Some(project),
-        main_checkout: main,
+        main_checkout: main.to_path_buf(),
+        summary: uncommitted_summary(wave.slug(), &files),
         files,
-        summary: Vec::new(),
-    };
-    added.summary = uncommitted_summary(&added.name, &added.files);
-    Ok(added)
+    })
+}
+
+async fn sync_wave_project(store: &Store, repo: &str, wave: &WaveId) -> OpsResult<()> {
+    let project = store.sqlite.wave_project(wave).map_err(lifecycle_error)?;
+    super::planning_sync::sync_after_save(store, repo, Some(&ActionOwner::Project(project))).await;
+    Ok(())
 }
 
 /// Report authored files the main checkout could not commit.
@@ -166,31 +158,6 @@ pub fn render_added(added: &WaveAdded) -> String {
         .chain(added.summary.iter().cloned())
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-async fn ensure_first_project(store: &Store, wave: &crate::work::wave::Wave) -> OpsResult<Project> {
-    if let (Some(process), Some(start)) = (
-        crate::journal::current_lf_process_id(),
-        crate::journal::current_execution_start(),
-    ) {
-        store
-            .sqlite
-            .record_project_activation(wave.id(), &process, &start)
-            .map_err(lifecycle_error)?;
-        crate::journal::mark_run_owner(
-            loopflow_storage::graph_process::RunOwner::ProjectActivation,
-        );
-    }
-    let _acquisition = super::planning_sync::lock_wave_planning(wave).await?;
-    let id = store
-        .sqlite
-        .ensure_project(wave.id(), wave.slug())
-        .map_err(lifecycle_error)?;
-    store
-        .sqlite
-        .project(&id)
-        .map_err(lifecycle_error)?
-        .ok_or_else(|| lifecycle_error("selected Project is missing"))
 }
 
 /// Register the authored Wave directories of `repo`'s main checkout that the
@@ -298,14 +265,6 @@ pub struct RemovalTask {
     pub started: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct InitiativeArchive {
-    pub wave: String,
-    pub initiative: String,
-    /// Why Linear still has it live; `None` once archived.
-    pub error: Option<String>,
-}
-
 /// The preview Desktop and the CLI render before removal, and the receipt after.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WaveRemoval {
@@ -320,9 +279,7 @@ pub struct WaveRemoval {
     pub moved: Vec<RemovalTask>,
     pub deleted: Vec<RemovalTask>,
     pub completed_tasks: usize,
-    pub projects: usize,
     pub sessions: usize,
-    pub initiatives: Vec<InitiativeArchive>,
     pub has_files: bool,
     /// Files under `.lf/wave/<name>` with edits nobody committed on the main
     /// checkout; removal deletes them with the directory, and Git keeps no copy.
@@ -416,13 +373,7 @@ pub fn remove(
     let mut moved = Vec::new();
     let mut deleted = Vec::new();
     let mut completed_tasks = 0;
-    let mut projects = 0;
     for id in &ids {
-        projects += store
-            .sqlite
-            .list_projects(Some(id))
-            .map_err(lifecycle_error)?
-            .len();
         for task in store.sqlite.list_tasks(Some(id)).map_err(lifecycle_error)? {
             let state = store.sqlite.task_state(&task.id).map_err(lifecycle_error)?;
             if state.is_terminal() {
@@ -459,29 +410,6 @@ pub fn remove(
     );
     let directory = main.join(authored_path(wave.slug()));
     let has_files = owns_address && directory.exists();
-    let initiatives = if let Some(operation) = saved {
-        operation
-            .providers
-            .iter()
-            .map(|provider| InitiativeArchive {
-                wave: provider.wave.clone(),
-                initiative: provider.initiative.clone(),
-                error: None,
-            })
-            .collect()
-    } else {
-        slugs
-            .iter()
-            .filter(|_| owns_address)
-            .filter_map(|slug| {
-                super::linear::read_initiative(&main, slug).map(|initiative| InitiativeArchive {
-                    wave: slug.clone(),
-                    initiative,
-                    error: None,
-                })
-            })
-            .collect()
-    };
     let mut receipt = WaveRemoval {
         id: wave.id().clone(),
         name: saved.map_or_else(
@@ -495,9 +423,7 @@ pub fn remove(
         moved,
         deleted,
         completed_tasks,
-        projects,
         sessions,
-        initiatives,
         has_files,
         uncommitted: if has_files {
             uncommitted_edits(&main, &authored_path(wave.slug()))
@@ -540,16 +466,6 @@ pub fn remove(
             waves: subtree.iter().map(Identity::from).collect(),
             destination: parent_id,
             delete_backlog,
-            providers: receipt
-                .initiatives
-                .iter()
-                .map(|archive| ProviderChange {
-                    wave: archive.wave.clone(),
-                    initiative: archive.initiative.clone(),
-                    title: None,
-                    done: false,
-                })
-                .collect(),
             changes,
             planning_done: false,
             applied: false,
@@ -578,39 +494,14 @@ pub fn remove(
             .retire_waves(&ids, "removed")
             .map_err(lifecycle_error)?;
         runtime.block_on(super::planning_sync::sync_after_save(
-            &store,
-            &repo_key,
-            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Wave(ids[0].clone()),
+            &store, &repo_key, None,
         ));
     }
 
     operation.planning_done = true;
     recovery::save(&operation, &store)?;
 
-    for (index, archive) in receipt.initiatives.iter_mut().enumerate() {
-        if operation.providers[index].done {
-            continue;
-        }
-        match runtime.block_on(super::linear::archive_initiative(
-            &main,
-            &archive.initiative,
-        )) {
-            Ok(()) => {
-                operation.providers[index].done = true;
-                recovery::save(&operation, &store)?;
-            }
-            Err(error) => archive.error = Some(error.to_string()),
-        }
-    }
-    receipt.files = Some(
-        if operation.providers.iter().any(|provider| !provider.done) {
-            AuthoredFiles::Uncommitted {
-                reason: "kept until the Linear Initiative is archived".into(),
-            }
-        } else {
-            recovery::finish_files(&mut operation, &store, &main)
-        },
-    );
+    receipt.files = Some(recovery::finish_files(&mut operation, &store, &main));
     receipt.summary = removal_summary(&receipt);
     Ok(receipt)
 }
@@ -790,7 +681,9 @@ fn removal_summary(removal: &WaveRemoval) -> Vec<String> {
     let name = &removal.name;
     if removal.already_removed {
         let mut lines = vec![format!("{name} was already removed.")];
-        lines.extend(leftovers(removal));
+        if let Some(files) = &removal.files {
+            lines.extend(uncommitted_summary(name, files));
+        }
         return lines;
     }
     let mut lines = Vec::new();
@@ -848,26 +741,15 @@ fn removal_summary(removal: &WaveRemoval) -> Vec<String> {
                 .join(", ")
         ));
     }
-    let mut kept = Vec::new();
     if removal.completed_tasks > 0 {
-        kept.push(count(
-            removal.completed_tasks,
-            "completed Task",
-            "completed Tasks",
-        ));
-    }
-    if removal.projects > 0 {
-        kept.push(count(removal.projects, "Project", "Projects"));
-    }
-    if !kept.is_empty() {
-        let verb = if removal.completed_tasks + removal.projects == 1 {
+        let verb = if removal.completed_tasks == 1 {
             "stays"
         } else {
             "stay"
         };
         lines.push(format!(
             "{} {verb} readable in history.",
-            kept.join(" and ")
+            count(removal.completed_tasks, "completed Task", "completed Tasks")
         ));
     }
     if removal.sessions > 0 {
@@ -899,15 +781,9 @@ fn removal_summary(removal: &WaveRemoval) -> Vec<String> {
             ));
         }
     }
-    if removal.preview {
-        for archive in &removal.initiatives {
-            lines.push(format!(
-                "Linear Initiative {} for {} will be archived.",
-                archive.initiative, archive.wave
-            ));
-        }
+    if let Some(files) = &removal.files {
+        lines.extend(uncommitted_summary(&removal.name, files));
     }
-    lines.extend(leftovers(removal));
     lines
 }
 
@@ -919,22 +795,6 @@ pub fn render_removed(removal: &WaveRemoval) -> String {
         .chain(removal.summary.iter().cloned())
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-fn leftovers(removal: &WaveRemoval) -> Vec<String> {
-    let mut lines = Vec::new();
-    for archive in &removal.initiatives {
-        if let Some(error) = &archive.error {
-            lines.push(format!(
-                "Linear Initiative {} is still live: {error}. Run `lf wave remove {}` again to retry.",
-                archive.initiative, removal.name
-            ));
-        }
-    }
-    if let Some(files) = &removal.files {
-        lines.extend(uncommitted_summary(&removal.name, files));
-    }
-    lines
 }
 
 // ── Rename ─────────────────────────────────────────────────────────────
@@ -949,27 +809,16 @@ pub struct WaveRenamed {
     pub to: String,
     pub renamed: bool,
     pub files: AuthoredFiles,
-    /// The connected Initiative's new title, or why Linear kept the old one.
-    pub initiative: Option<InitiativeRename>,
     pub summary: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct InitiativeRename {
-    pub initiative: String,
-    pub title: String,
-    pub error: Option<String>,
-}
-
-/// Give a Wave a new address (and optionally another repository). Identity,
-/// Projects, Tasks and Sessions are untouched; `.lf/wave/<name>` moves on main
-/// with path references in other Waves' documents.
+/// Give a Wave a new address and rename its Project. The authored directory
+/// moves on main with path references in other Waves' documents.
 pub async fn rename(
     repo: &Path,
     wave: &str,
     new_name: Option<&str>,
     target_repo: Option<&Path>,
-    title: Option<&str>,
 ) -> OpsResult<WaveRenamed> {
     let store = super::planning_sync::planning_store().await?;
     let main = crate::repository::discover(repo)
@@ -982,7 +831,7 @@ pub async fn rename(
                 .ok_or_else(|| lifecycle_error(format!("invalid Wave name {name:?}")))
         })
         .transpose()?;
-    let _lifecycle = recovery::lock(&main)?;
+    let _lifecycle = recovery::lock_async(&main).await?;
     let repo_key = main.to_string_lossy().to_string();
     let target_checkout = crate::repository::discover(target_repo.unwrap_or(&main))
         .map_err(lifecycle_error)?
@@ -1069,16 +918,6 @@ pub async fn rename(
         } else {
             Vec::new()
         };
-        let providers = super::linear::read_initiative(Path::new(&source_repo), &from)
-            .filter(|_| moves || title.is_some())
-            .map(|initiative| ProviderChange {
-                wave: from.clone(),
-                initiative,
-                title: Some(title.map_or_else(|| super::linear::title_case(&to), str::to_string)),
-                done: false,
-            })
-            .into_iter()
-            .collect();
         let operation = Operation {
             id: uuid::Uuid::new_v4().to_string(),
             repo: repo_key.clone(),
@@ -1090,7 +929,6 @@ pub async fn rename(
             waves: subtree.iter().map(Identity::from).collect(),
             destination: None,
             delete_backlog: false,
-            providers,
             changes,
             planning_done: false,
             applied: false,
@@ -1125,48 +963,15 @@ pub async fn rename(
         }
         operation.planning_done = true;
         recovery::save(&operation, &store)?;
-        super::planning_sync::sync_after_save(
-            &store,
-            &operation.target_repo,
-            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Wave(
-                operation.waves[0].id.clone(),
-            ),
-        )
-        .await;
+        sync_wave_project(&store, &operation.target_repo, current.id()).await?;
     }
     let files = recovery::finish_files(&mut operation, &store, &main);
-    let initiative = if let Some(provider) = operation.providers.first() {
-        let mut result = InitiativeRename {
-            initiative: provider.initiative.clone(),
-            title: provider.title.clone().expect("rename retains its title"),
-            error: None,
-        };
-        if !provider.done {
-            match super::linear::rename_initiative(
-                Path::new(&operation.target_repo),
-                &result.initiative,
-                &result.title,
-            )
-            .await
-            {
-                Ok(()) => {
-                    operation.providers[0].done = true;
-                    recovery::save(&operation, &store)?;
-                }
-                Err(error) => result.error = Some(error.to_string()),
-            }
-        }
-        Some(result)
-    } else {
-        None
-    };
     let mut renamed = WaveRenamed {
         id: operation.waves[0].id.clone(),
         from: operation.from,
         to: operation.to,
         renamed: renamed_now,
         files,
-        initiative,
         summary: Vec::new(),
     };
     renamed.summary = rename_summary(&renamed);
@@ -1175,18 +980,7 @@ pub async fn rename(
 
 /// What the rename left for a person or agent to finish.
 fn rename_summary(renamed: &WaveRenamed) -> Vec<String> {
-    let mut lines = uncommitted_summary(&renamed.to, &renamed.files);
-    if let Some(InitiativeRename {
-        initiative,
-        error: Some(error),
-        ..
-    }) = &renamed.initiative
-    {
-        lines.push(format!(
-            "Linear Initiative {initiative} kept its title: {error}. Repeat the original `lf wave rename` command to retry."
-        ));
-    }
-    lines
+    uncommitted_summary(&renamed.to, &renamed.files)
 }
 
 pub fn render_renamed(renamed: &WaveRenamed) -> String {

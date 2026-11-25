@@ -114,37 +114,21 @@
     "generated_at": "2026-10-11T22:28:09.267041Z",
     "waves": [
       {
-        "metric_portfolio": {
-          "contract_issues": [],
-          "metrics": []
-        },
-        "project_readiness": {
-          "activation": null,
-          "observed_at": 1791757688,
-          "pending_successor": null,
-          "project_id": "proj_afa19d1ddecc466d956f0bc47eccaad9",
-          "state": "ready"
-        },
-        "projects": {
-          "items": [
-            {
-              "current": true,
-              "id": "proj_afa19d1ddecc466d956f0bc47eccaad9",
-              "krs": [],
-              "tracker_id": "project-7b839056-f5c3-44c7-b729-ff62bf8c43ba",
-              "metric_targets": [],
-              "name": "Task PR tests",
-              "slug": "task-pr-tests",
-              "status": "started",
-              "sync": {
-                "actions": []
-              }
-            }
-          ],
+        "project": {
           "state": "ok",
-          "truncated": false
+          "value": {
+            "id": "proj_afa19d1ddecc466d956f0bc47eccaad9",
+            "tracker_id": "project-7b839056-f5c3-44c7-b729-ff62bf8c43ba",
+            "url": "https://linear.app/loopflow/project/task-pr-tests-7b839056f5c3",
+            "unbound": null,
+            "name": "Task PR tests",
+            "slug": "task-pr-tests",
+            "status": "started",
+            "sync": {
+              "actions": []
+            }
+          }
         },
-        "unavailable_tasks": [],
         "wave": {
           "active_tasks": 1,
           "created_at": "2026-10-11T22:28:08Z",

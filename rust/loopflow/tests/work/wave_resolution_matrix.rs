@@ -5,7 +5,6 @@
 //! environment classify the same way. A completeness guard walks the clap tree
 //! and fails CI when a new `--wave`-bearing command is not registered.
 
-use crate::test_linear_input::{InventoryFixture, SeedLinearSqlite};
 use std::collections::HashSet;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -122,13 +121,6 @@ const COMMANDS: &[Cmd] = &[
         global_default: true,
     },
     Cmd {
-        id: "wave edit-project",
-        path: &["wave", "edit-project"],
-        base_args: &["wave", "edit-project", "--summary", "Fixture"],
-        wave_form: WaveForm::Positional,
-        global_default: false,
-    },
-    Cmd {
         id: "wave graph show",
         path: &["wave", "graph", "show"],
         base_args: &["wave", "graph", "show", "--json"],
@@ -147,13 +139,6 @@ const COMMANDS: &[Cmd] = &[
         id: "task create",
         path: &["task", "create"],
         base_args: &["task", "create", "--title", "Fixture task"],
-        wave_form: WaveForm::Flag,
-        global_default: false,
-    },
-    Cmd {
-        id: "wave update-project",
-        path: &["wave", "update-project"],
-        base_args: &["wave", "update-project", "--file", "plan.json"],
         wave_form: WaveForm::Flag,
         global_default: false,
     },
@@ -296,7 +281,7 @@ fn open_test_store(path: &Path) -> SqliteStore {
     loopflow_execution::store::open_sqlite(path).expect("open store")
 }
 
-/// Seed a machine home with one registered wave ("product"), a PM snapshot,
+/// Seed a machine home with one registered Wave ("product"),
 /// a wave directory with MEMORY.md, and a git repo on a clean `main` branch.
 fn seed(home: &Path, repo: &Path) -> Wave {
     std::fs::create_dir_all(home).expect("home");
@@ -334,23 +319,12 @@ fn seed(home: &Path, repo: &Path) -> Wave {
         repo.display().to_string(),
     );
     loopflow_execution::work::wave::bootstrap::upsert_wave(&store, &wave).expect("register wave");
-    store
-        .seed_inventory(&InventoryFixture {
-            wave_id: wave.id().clone(),
-            initiative: "initiative-1".to_string(),
-            synced_at: chrono::Utc::now().timestamp(),
-            snapshot: crate::test_linear_input::Inventory {
-                projects: vec![],
-                items: vec![],
-            },
-        })
-        .expect("seed pm snapshot");
 
     // Commit everything so the repo is clean.
     git(&["add", "."]);
     std::fs::write(
         repo.join("plan.json"),
-        serde_json::to_vec(&serde_json::json!({"metric_targets":[], "krs":[]})).unwrap(),
+        serde_json::to_vec(&serde_json::json!({})).unwrap(),
     )
     .unwrap();
     git(&["add", "plan.json"]);

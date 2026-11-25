@@ -12,31 +12,7 @@ use crate::ops::linear::{LinearRefresh, LINEAR_TEST_CONTEXT};
 use loopflow_storage::work::task::Task;
 
 pub async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wave) {
-    let (repo, wave) = fixture.planning_repo().await;
-    let project = serde_json::from_value(json!({
-        "id": "project-1", "slug": "Project", "name": "Project", "summary": "",
-        "metric_targets": [], "workflow": "feature", "status": "started", "krs": [],
-        "initiative_ids": ["initiative-1"], "team_ids": ["team-1"]
-    }))
-    .unwrap();
-    loopflow_storage::sqlite::linear_events::accept_linear_project_in(
-        &fixture.store.sqlite,
-        wave.id(),
-        "initiative-1",
-        &project,
-        now(),
-        loopflow_storage::planning_sync::TrackerKind::Linear,
-    )
-    .unwrap();
-    loopflow_storage::sqlite::project_selection::write_project_binding(
-        &fixture.store.sqlite,
-        wave.id(),
-        None,
-        "project-1",
-        &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
-    )
-    .unwrap();
-    (repo, wave)
+    fixture.planning_repo().await
 }
 
 pub async fn serve(
@@ -60,14 +36,9 @@ pub struct PlanningState {
     /// Added to every answer: a provider taking its time.
     pub response_delay: Option<std::time::Duration>,
     pub rate_limit_query: Option<&'static str>,
-    pub wave_summary: String,
-    pub reject_wave_update: bool,
-    pub wave_updates: usize,
     pub export_mode: bool,
     pub creation_writes: usize,
-    pub attachment_writes: usize,
     pub lose_creation_reply: bool,
-    pub lose_attachment_reply: bool,
     pub hide_exports: bool,
     pub slow_export_id: Option<String>,
     pub deletion_writes: usize,
@@ -97,12 +68,9 @@ pub struct PlanningState {
     pub team_filter: Option<serde_json::Value>,
     pub history_unavailable: bool,
     pub completion_writes: usize,
-    pub current_project_id: Option<String>,
-    pub initial_project_id: Option<String>,
     pub completion_state: Option<String>,
     pub comments: Vec<serde_json::Value>,
     pub attachments: Vec<String>,
-    pub move_on_attachment_read: bool,
 }
 
 /// Every issue edit enters its Linear history with the state it left behind.
@@ -119,8 +87,8 @@ pub fn mark_issue_updated(issue: &mut serde_json::Value) {
     }
 }
 
-pub fn planning_project(id: &str, current: &str) -> serde_json::Value {
-    let completed = id == "prior-project" || (id == "project-1" && current == "project-2");
+pub(crate) fn planning_project(id: &str) -> serde_json::Value {
+    let completed = id == "prior-project";
     let name = match id {
         "project-1" => "Project",
         "prior-project" => "Previous project",
@@ -129,8 +97,7 @@ pub fn planning_project(id: &str, current: &str) -> serde_json::Value {
     json!({"id":id, "name":name, "description":"", "content":"workflow: feature",
         "status":{"type":if completed { "completed" } else { "started" }},
         "updatedAt":if completed { "2026-09-30T12:00:01Z" } else { "2026-09-30T12:00:00Z" },
-        "archivedAt":null,
-        "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}})
+        "archivedAt":null, "teams":{"nodes":[{"id":"team-1"}]}})
 }
 
 pub async fn planning_graphql(
@@ -209,23 +176,14 @@ pub async fn planning_response(
         || (state.field_reads_blocked
             && (query.contains("IssueOwnership")
                 || query.contains("ProjectOwnership")
-                || query.contains("ListInitiativeProjects")
                 || query.contains("ListProjectIssues")))
     {
         return axum::Json(json!({"errors":[{"message":"planning offline"}]}));
     }
-    let initial_project_id = state
-        .initial_project_id
-        .clone()
-        .unwrap_or_else(|| "project-1".into());
-    let project_id = state
-        .current_project_id
-        .clone()
-        .unwrap_or_else(|| initial_project_id.clone());
     let project = state
         .project_fields
         .clone()
-        .unwrap_or_else(|| planning_project(&project_id, &project_id));
+        .unwrap_or_else(|| planning_project("project-1"));
     if query.contains("query TeamChanges") {
         state.team_filter = Some(vars["issues"].clone());
     }
@@ -237,9 +195,7 @@ pub async fn planning_response(
                 .iter()
                 .find(|p| p["id"] == issue["project"]["id"])
                 .cloned()
-                .unwrap_or_else(|| {
-                    planning_project(issue["project"]["id"].as_str().unwrap(), &project_id)
-                });
+                .unwrap_or_else(|| planning_project(issue["project"]["id"].as_str().unwrap()));
         }
         issue
     };
@@ -284,32 +240,11 @@ pub async fn planning_response(
     } else if query.contains("query ListTeams") {
         json!({"teams":{"nodes":[{"id":"team-1","name":"Fixture","key":"FIX",
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
-    } else if query.contains("mutation UpdateInitiative") {
-        state.wave_updates += 1;
-        if state.reject_wave_update {
-            return axum::Json(json!({"errors":[{"message":"summary update refused"}]}));
-        }
-        if let Some(summary) = vars["input"]["description"].as_str() {
-            state.wave_summary = summary.into();
-        }
-        json!({"initiativeUpdate":{"success":true,"initiative":{"id":vars["id"]}}})
-    } else if query.contains("query ListInitiatives") {
-        json!({"initiatives":page(vec![json!({"id":"initiative-1", "name":"Product", "description":state.wave_summary})])})
-    } else if query.contains("query ListInitiativeProjects") {
+    } else if query.contains("query ListProjectIssues") {
         if !state.issues.is_empty() && state.fail_snapshot {
             state.fail_snapshot = false;
             return axum::Json(json!({"errors":[{"message":"snapshot unavailable"}]}));
         }
-        let mut projects = if state.export_mode {
-            vec![]
-        } else if project_id == "prior-project" {
-            vec![project, planning_project(&initial_project_id, &project_id)]
-        } else {
-            vec![project]
-        };
-        projects.extend(state.extra_projects.clone());
-        json!({"initiative":{"projects":page(projects)}})
-    } else if query.contains("query ListProjectIssues") {
         if !state.export_mode
             && state
                 .extra_projects
@@ -340,9 +275,18 @@ pub async fn planning_response(
                     .collect()
             }
         } else {
-            vec![planning_project(vars["id"].as_str().unwrap(), &project_id)]
+            vec![planning_project(vars["id"].as_str().unwrap())]
         };
         json!({"projects":page(projects)})
+    } else if query.contains("query NamedProject") {
+        let name = vars["name"].as_str().unwrap_or_default().to_lowercase();
+        let named: Vec<_> = state
+            .extra_projects
+            .iter()
+            .filter(|p| p["name"].as_str().unwrap_or_default().to_lowercase() == name)
+            .cloned()
+            .collect();
+        json!({"projects":page(named)})
     } else if query.contains("query ProjectOwnership") {
         let owned = state
             .extra_projects
@@ -350,7 +294,7 @@ pub async fn planning_response(
             .find(|p| p["id"] == vars["id"])
             .cloned()
             .or_else(|| state.project_fields.clone())
-            .unwrap_or_else(|| planning_project(vars["id"].as_str().unwrap(), &project_id));
+            .unwrap_or_else(|| planning_project(vars["id"].as_str().unwrap()));
         json!({"project": owned})
     } else if query.contains("query ProjectStatuses") {
         json!({"projectStatuses":page(["planned","started","completed","paused","canceled"].iter()
@@ -378,12 +322,11 @@ pub async fn planning_response(
         }
         state.creation_writes += 1;
         if is_project {
-            let mut project = planning_project(input["id"].as_str().unwrap(), "project-1");
+            let mut project = planning_project(input["id"].as_str().unwrap());
             project["name"] = input["name"].clone();
             project["description"] = input["description"].clone();
             project["content"] = input["content"].clone();
             project["status"] = json!({"type":input["statusId"]});
-            project["initiatives"] = json!({"nodes":[]});
             mark_issue_updated(&mut project);
             state.extra_projects.push(project);
         } else {
@@ -411,7 +354,7 @@ pub async fn planning_response(
                     .iter()
                     .find(|p| p["id"] == id)
                     .cloned()
-                    .unwrap_or_else(|| planning_project(&id, "project-1"));
+                    .unwrap_or_else(|| planning_project(&id));
             }
             issue
         };
@@ -432,20 +375,6 @@ pub async fn planning_response(
         } else {
             json!({"data":{"issueCreate":{"success":true,"issue":created}}})
         });
-    } else if query.contains("mutation DeliverProjectAttachment") {
-        state.attachment_writes += 1;
-        let project = state
-            .extra_projects
-            .iter_mut()
-            .find(|p| p["id"] == vars["input"]["projectId"])
-            .unwrap();
-        project["initiatives"] = json!({"nodes":[{"id":vars["input"]["initiativeId"]}]});
-        mark_issue_updated(project);
-        let attached = project.clone();
-        if std::mem::take(&mut state.lose_attachment_reply) {
-            return axum::Json(json!({"errors":[{"message":"attachment reply lost"}]}));
-        }
-        json!({"initiativeToProjectCreate":{"success":true,"initiativeToProject":{"project":attached}}})
     } else if query.contains("mutation DeliverTaskField")
         || query.contains("mutation DeliverProjectField")
     {
@@ -498,9 +427,7 @@ pub async fn planning_response(
                 .iter()
                 .find(|p| p["id"] == confirmed["project"]["id"])
                 .cloned()
-                .unwrap_or_else(|| {
-                    planning_project(confirmed["project"]["id"].as_str().unwrap(), &project_id)
-                });
+                .unwrap_or_else(|| planning_project(confirmed["project"]["id"].as_str().unwrap()));
         }
         let lost = state.field_reply_lost;
         if lost {
@@ -622,12 +549,6 @@ pub async fn planning_response(
         confirmed["project"] = project;
         json!({"issueUpdate":{"success":true,"issue":confirmed}})
     } else if query.contains("query IssueAttachments") {
-        if state.move_on_attachment_read {
-            state.move_on_attachment_read = false;
-            state.current_project_id = Some(initial_project_id.clone());
-            state.issues[0]["project"]["id"] = json!(initial_project_id);
-            mark_issue_updated(&mut state.issues[0]);
-        }
         json!({"issue":{"attachments":page(state.attachments.iter().map(|url| json!({"id":format!("att-{url}"),"url":url})).collect::<Vec<_>>())}})
     } else if query.contains("query IssueEvent") {
         let mut issue = state
@@ -714,11 +635,6 @@ pub fn seed_provider_task(
 ) -> crate::ops::OpsResult<loopflow_storage::planning::TrackerItem> {
     runtime.block_on(async {
         let mut state = state.lock().await;
-        let project = state
-            .initial_project_id
-            .as_deref()
-            .unwrap_or("project-1")
-            .to_string();
         let index = state.issues.len() + 1;
         let id = format!("issue-{index}");
         state.issues.push(json!({
@@ -726,7 +642,7 @@ pub fn seed_provider_task(
             "title":title,"description":description,"completedAt":null,"dueDate":null,
             "parent":null,"prioritySortOrder":0.0,"sortOrder":index as f64,"assignee":null,"trashed":null,
             "updatedAt":"2026-09-29T12:00:00.123Z","state":{"type":"unstarted"},
-            "team":{"id":"team-1"},"project":{"id":project,"name":"Project"}
+            "team":{"id":"team-1"},"project":{"id":"project-1","name":"Project"}
         }));
         drop(state);
         crate::ops::linear::refresh_wave(repo, "product").await?;

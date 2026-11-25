@@ -65,8 +65,7 @@ impl RunningParent {
 const RUNNING_OWNERS: &str = "SELECT pid,1 FROM (
     SELECT agent_pid pid FROM agent_sessions UNION SELECT attached_pid FROM agent_sessions
     UNION SELECT pid FROM graph_processes UNION SELECT pid FROM graph_process_steps
-    UNION SELECT run_pid FROM task_graphs
-    UNION SELECT project_activation_pid FROM waves UNION SELECT repair_pid FROM ci_incidents
+    UNION SELECT run_pid FROM task_graphs UNION SELECT repair_pid FROM ci_incidents
 ) WHERE pid IS NOT NULL";
 /// Rows a released lf or a fixture wrote, finished ones included.
 const PROCESS_ROWS: &str = "SELECT pid,completed_at IS NULL FROM processes WHERE pid IS NOT NULL";
@@ -475,7 +474,7 @@ pub fn retained_task_input_in<T: serde::de::DeserializeOwned>(
 ) -> T {
     let (item, project, observed_at): (String, Option<String>, i64) = conn
         .query_row(
-            "SELECT json_object('id',i.id,'identifier',i.identifier,'project_id',i.project_id,'revision',i.revision,'branch_name',i.branch_name,'url',i.url,'name',i.name,'description',i.description,'rank',i.rank,'completed',json(CASE i.completed WHEN 1 THEN 'true' ELSE 'false' END),'completed_at',i.completed_at,'due_date',i.due_date,'state',i.state,'team_id',i.team_id,'assignee',i.assignee,'parent_id',i.parent_id,'parent_observed',json(CASE i.parent_id_observed WHEN 1 THEN 'true' ELSE 'false' END)),CASE WHEN p.id IS NOT NULL THEN json_object('id',p.id,'revision',p.revision,'slug',p.slug,'name',p.name,'summary',p.summary,'status',p.status,'krs',json(p.krs),'metric_targets',json(p.metric_targets),'initiative_ids',json(p.initiative_ids),'team_ids',json(p.team_ids)) END,i.observed_at FROM tracker_items i LEFT JOIN tracker_projects p
+            "SELECT json_object('id',i.id,'identifier',i.identifier,'project_id',i.project_id,'revision',i.revision,'branch_name',i.branch_name,'url',i.url,'name',i.name,'description',i.description,'rank',i.rank,'completed',json(CASE i.completed WHEN 1 THEN 'true' ELSE 'false' END),'completed_at',i.completed_at,'due_date',i.due_date,'state',i.state,'team_id',i.team_id,'assignee',i.assignee,'parent_id',i.parent_id,'parent_observed',json(CASE i.parent_id_observed WHEN 1 THEN 'true' ELSE 'false' END)),CASE WHEN p.id IS NOT NULL THEN json_object('id',p.id,'revision',p.revision,'slug',p.slug,'name',p.name,'summary',p.summary,'status',p.status,'team_ids',json(p.team_ids)) END,i.observed_at FROM tracker_items i LEFT JOIN tracker_projects p
          ON p.repo=i.repo AND p.tracker=i.tracker AND p.id=i.project_id
          WHERE i.repo=?1 AND i.tracker='linear' AND (i.id=?2 OR i.identifier=?2)",
             rusqlite::params![repo, selector],

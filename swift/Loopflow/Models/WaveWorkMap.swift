@@ -2,13 +2,12 @@ import Foundation
 
 public struct WaveWorkMap: Sendable, Hashable {
     public let objective: String
-    public let projects: WorkEvidence<ProjectPlanningSnapshot>
-    public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
+    public let project: WorkReading<ProjectPlanningSnapshot?>
     public let tasks: WorkEvidence<RoadmapTask>
 
-    public init(objective: String, projects: WorkEvidence<ProjectPlanningSnapshot>, tasks: WorkEvidence<RoadmapTask>) {
+    public init(objective: String, project: WorkReading<ProjectPlanningSnapshot?>, tasks: WorkEvidence<RoadmapTask>) {
         self.objective = objective
-        self.projects = projects
+        self.project = project
         self.tasks = tasks
     }
 }
@@ -19,47 +18,37 @@ public enum ProjectStatus: String, Decodable, Sendable, Hashable {
 
 public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
     public let sync: TrackerSync
-    public let current: Bool
     public let id: String
     public let trackerId: String?
     public let slug: String
     public let name: String
     public let status: ProjectStatus
-    public let metricTargets: [MetricTarget]
-    public let krs: [PlanningKeyResult]
+    /// Where the tracker shows this Project, once a read has seen it.
+    public let url: URL?
+    /// Set while the repository's tracker does not hold this Project yet: what
+    /// that means and the command that makes it, as the CLI prints it.
+    public let unbound: String?
+
+    public func matches(reference: String) -> Bool {
+        id == reference || slug == reference || trackerId == reference
+    }
 
     enum CodingKeys: String, CodingKey {
-        case id, slug, name, status, krs, current, sync
+        case id, slug, name, status, sync, url, unbound
         case trackerId = "tracker_id"
-        case metricTargets = "metric_targets"
     }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         sync = try values.decode(TrackerSync.self, forKey: .sync)
-        current = try values.decode(Bool.self, forKey: .current)
         id = try values.decode(String.self, forKey: .id)
         trackerId = try values.decode(String?.self, forKey: .trackerId)
         slug = try values.decode(String.self, forKey: .slug)
         name = try values.decode(String.self, forKey: .name)
         status = try values.decode(ProjectStatus.self, forKey: .status)
-        metricTargets = try values.decode([MetricTarget].self, forKey: .metricTargets)
-        krs = try values.decode([PlanningKeyResult].self, forKey: .krs)
+        url = try values.decode(URL?.self, forKey: .url)
+        unbound = try values.decode(String?.self, forKey: .unbound)
     }
-}
-
-extension WorkEvidence where Item == ProjectPlanningSnapshot {
-    public var currentProject: ProjectPlanningSnapshot? {
-        let current = items.filter { $0.current }
-        return current.count == 1 ? current[0] : nil
-    }
-}
-
-public struct PlanningKeyResult: Decodable, Sendable, Identifiable, Hashable {
-    public var id: String { text }
-
-    public let text: String
-    public let holds: Bool
 }
 
 public struct TrackerState: Decodable, Sendable, Hashable {
@@ -547,5 +536,48 @@ public enum WorkEvidence<Item: Decodable & Sendable & Hashable>: Decodable, Send
     public func filter(_ isIncluded: (Item) -> Bool) -> WorkEvidence<Item> {
         guard case let .available(items, truncated) = self else { return self }
         return .available(items: items.filter(isIncluded), truncated: truncated)
+    }
+}
+
+/// One value from `lf wave status`, or the reason there is none. Mirrors Rust
+/// `Reading<T>` (`lf/commands/waves.rs`), the single-value `WorkEvidence`.
+public enum WorkReading<Value: Decodable & Sendable & Hashable>: Decodable, Sendable, Hashable {
+    case available(Value)
+    case unavailable(reason: String)
+
+    enum CodingKeys: String, CodingKey {
+        case state, value, reason
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let state = try container.decode(String.self, forKey: .state)
+        switch state {
+        case "ok":
+            self = .available(try container.decode(Value.self, forKey: .value))
+        case "unavailable":
+            self = .unavailable(reason: try container.decode(String.self, forKey: .reason))
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .state,
+                in: container,
+                debugDescription: "unknown reading state '\(state)'"
+            )
+        }
+    }
+
+    public var unavailableReason: String? {
+        if case let .unavailable(reason) = self { return reason }
+        return nil
+    }
+}
+
+extension WorkReading where Value == ProjectPlanningSnapshot? {
+    /// The Wave's Project when it was read and the Wave has one. Callers that
+    /// render must check `unavailableReason` too, or a failed read looks like
+    /// a Wave without a Project.
+    public var present: ProjectPlanningSnapshot? {
+        if case let .available(project) = self { return project }
+        return nil
     }
 }

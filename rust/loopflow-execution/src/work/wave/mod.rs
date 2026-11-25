@@ -3,7 +3,6 @@
 pub mod bootstrap;
 pub mod config;
 pub mod context;
-pub mod metrics;
 pub mod relocate;
 pub mod setup;
 

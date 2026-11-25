@@ -1694,9 +1694,6 @@ struct SessionsContentView: View {
                 EmptyView()
             }
         }
-        .sheet(item: $model.historyWave) { wave in
-            ProjectHistoryView(wave: wave.name, repo: wave.repo, sourceReference: model.historyReference)
-        }
         .modifier(TaskAbandonConfirmation(model: model))
         .modifier(TaskCompleteConfirmation(model: model))
         .sheet(isPresented: Binding(

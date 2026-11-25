@@ -1,6 +1,6 @@
 //! Asana's half of the tracker queue. A Task is an Asana task addressed by its
 //! Loopflow uuid (`external:<uuid>`); a Wave Project is mirrored once, when it
-//! is created. Project edits, order and Initiative links have no Asana form
+//! is created. Project edits and order have no Asana form
 //! and retire with a reason.
 
 use std::path::Path;
@@ -21,6 +21,7 @@ use loopflow_storage::planning::rules::Observed;
 use loopflow_storage::planning::TrackerProject;
 use loopflow_storage::sqlite::tracker_actions::{ActionKind, ActionOwner, TaskLink, TrackerAction};
 use loopflow_storage::work::edit::WorkValue;
+use loopflow_storage::work::project::Project;
 
 const PROJECT_EDITS: &str =
     "Asana mirrors a Project when it is created; later Project edits stay local";
@@ -35,9 +36,6 @@ impl AsanaClient {
         let sent = match (&action.owner, action.kind) {
             (ActionOwner::Task(task), ActionKind::Create) => {
                 self.create_task(store, repo, task, action).await
-            }
-            (ActionOwner::Project(project), ActionKind::Create) => {
-                self.create_project(store, repo, project, action).await
             }
             (ActionOwner::Task(task), ActionKind::Field) => {
                 self.task_field(store, repo, task, action).await
@@ -84,10 +82,6 @@ impl AsanaClient {
                 Ok(external) => self.look_task(store, repo, &external).await,
                 Err(error) => Err(error),
             },
-            (ActionOwner::Project(project), ActionKind::Create) => {
-                self.look_created_project(store, repo, project, action)
-                    .await
-            }
             _ => Err(message(PROJECT_EDITS)),
         };
         observed.map_err(|error| error.to_string())
@@ -136,42 +130,58 @@ impl AsanaClient {
         self.accepted(store, repo, &id, created).await
     }
 
-    async fn create_project(
+    /// Mirror `project` as a team project and bind it. Asana takes no caller
+    /// id, so a create whose reply was lost shows only as a team project whose
+    /// footer names the Project: one found is bound instead of made again.
+    pub(crate) async fn create_project(
         &self,
         store: &Store,
         repo: &Path,
-        project: &ProjectId,
-        action: &TrackerAction,
-    ) -> OpsResult<Sent> {
-        let id = creation_id(project.as_str())?;
-        let mirrored = mirrored_project(&id, &repository_scope(repo)?, None, action)?;
-        let footer = format!("{IDENTITY_LABEL} {id}");
-        let summary = mirrored.summary.trim();
-        let notes = if summary.is_empty() {
-            footer
-        } else {
-            format!("{summary}\n\n{footer}")
-        };
-        let created: super::Project = match self
-            .send(
-                Method::POST,
-                &format!("/teams/{}/projects", self.team),
-                Some(json!({"name": mirrored.name, "html_notes": rich_text::to_html(&notes)})),
-            )
-            .await
-        {
-            Ok(created) => created,
-            Err(error) => return Ok(Sent::failed(TrackerError::from(error))),
+        project: &Project,
+    ) -> OpsResult<()> {
+        let id = creation_id(project.id.as_str())?;
+        let revision = match self.project_revision(&id).await.map_err(message)? {
+            Some(revision) => revision,
+            None => {
+                let footer = format!("{IDENTITY_LABEL} {id}");
+                let summary = project.summary.trim();
+                let notes = if summary.is_empty() {
+                    footer
+                } else {
+                    format!("{summary}\n\n{footer}")
+                };
+                let created: super::Project = self
+                    .send(
+                        Method::POST,
+                        &format!("/teams/{}/projects", self.team),
+                        Some(
+                            json!({"name": project.name, "html_notes": rich_text::to_html(&notes)}),
+                        ),
+                    )
+                    .await
+                    .map_err(|error| message(TrackerError::from(error)))?;
+                created.modified_at
+            }
         };
         let mirrored = TrackerProject {
-            revision: created.modified_at,
-            ..mirrored
+            id,
+            revision,
+            slug: loopflow_storage::planning::project_slug(&project.name),
+            name: project.name.clone(),
+            summary: project.summary.clone(),
+            description: Some(project.description.clone()),
+            status: project.status,
+            url: None,
+            team_ids: vec![repository_scope(repo)?],
         };
-        accept_mirror(store, project, &mirrored).await?;
-        Ok(Sent::Acknowledged {
-            revision: mirrored.revision,
-            remote_id: Some(id),
-        })
+        loopflow_storage::sqlite::linear_events::accept_linear_project_in(
+            &store.sqlite,
+            &project.wave_id,
+            &mirrored,
+            now(),
+            loopflow_storage::planning_sync::TrackerKind::Asana,
+        )
+        .map_err(message)
     }
 
     async fn task_field(
@@ -324,7 +334,7 @@ impl AsanaClient {
             return Ok(None);
         };
         ingest_task(store, repo, &item, None, now()).await?;
-        Ok(Some(observed_task(store, &item).await))
+        Ok(Some(observed_task(store, &item).await?))
     }
 
     async fn look_comments(
@@ -351,26 +361,6 @@ impl AsanaClient {
             ..Observed::default()
         }))
     }
-
-    async fn look_created_project(
-        &self,
-        store: &Store,
-        repo: &Path,
-        project: &ProjectId,
-        action: &TrackerAction,
-    ) -> OpsResult<Option<Observed>> {
-        let id = creation_id(project.as_str())?;
-        let Some(revision) = self.project_revision(&id).await.map_err(message)? else {
-            return Ok(None);
-        };
-        let mirrored = mirrored_project(&id, &repository_scope(repo)?, revision, action)?;
-        accept_mirror(store, project, &mirrored).await?;
-        Ok(Some(Observed {
-            remote_id: Some(id),
-            revision: mirrored.revision,
-            ..Observed::default()
-        }))
-    }
 }
 
 /// The Asana task field a Task value sets; Project membership is separate.
@@ -386,65 +376,4 @@ fn fields(data: &mut Value, value: &WorkValue) {
         WorkValue::TaskDueDate(due) => data["due_on"] = json!(due),
         _ => {}
     }
-}
-
-/// A created Project as the Asana mirror holds it. Asana shows its name and
-/// summary; status, KRs and targets stay the creation values Loopflow owns.
-fn mirrored_project(
-    id: &str,
-    team: &str,
-    revision: Option<String>,
-    action: &TrackerAction,
-) -> OpsResult<TrackerProject> {
-    let mut project = TrackerProject {
-        id: id.to_owned(),
-        revision,
-        slug: String::new(),
-        name: String::new(),
-        summary: String::new(),
-        description: None,
-        metric_targets: Vec::new(),
-        status: loopflow_storage::work::project::ProjectStatus::Backlog,
-        krs: Vec::new(),
-        initiative_ids: vec![team.to_owned()],
-        team_ids: vec![team.to_owned()],
-    };
-    for value in values(action)? {
-        match value {
-            WorkValue::ProjectName(Some(name)) => {
-                project.slug = loopflow_storage::planning::project_slug(&name);
-                project.name = name;
-            }
-            WorkValue::ProjectSummary(summary) => project.summary = summary,
-            WorkValue::ProjectDescription(description) => project.description = description,
-            WorkValue::ProjectStatus(status) => project.status = status,
-            WorkValue::Krs(krs) => project.krs = krs,
-            WorkValue::MetricTargets(targets) => project.metric_targets = targets,
-            _ => {}
-        }
-    }
-    Ok(project)
-}
-
-/// Asana has no Initiative: a Wave's Projects belong to the repository's team.
-async fn accept_mirror(
-    store: &Store,
-    project: &ProjectId,
-    mirrored: &TrackerProject,
-) -> OpsResult<()> {
-    let wave = store
-        .get_project(project)
-        .await
-        .map_err(message)?
-        .ok_or_else(|| message("Project is missing"))?
-        .wave_id;
-    loopflow_storage::sqlite::linear_events::accept_linear_project_in(
-        &store.sqlite,
-        &wave,
-        &mirrored.initiative_ids[0],
-        mirrored,
-        now(),
-        loopflow_storage::planning_sync::TrackerKind::Asana,
-    )
-    .map_err(message)
 }

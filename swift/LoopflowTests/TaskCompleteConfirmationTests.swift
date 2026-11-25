@@ -5,19 +5,28 @@ import Testing
 @testable import LoopflowMac
 
 @MainActor @Suite struct TaskCompleteConfirmationTests {
-    @Test func theDialogNamesWhereChildrenMoveAndWhatAbandoningDoes() throws {
+    @Test func theSheetNamesWhereChildrenMoveAndWhatSettlingDoes() throws {
         let parent = try roadmapTask(condition: "clear", reason: "Merged · 2 children open")
         let id = parent.task.identifier
         #expect(TaskChildPolicy.question(issue: id, openChildren: 1) == "Complete \(id)? 1 child is open")
         #expect(TaskChildPolicy.question(issue: id, openChildren: 3) == "Complete \(id)? 3 children are open")
-        #expect(TaskCompleteConfirmation.moveLabel(to: parent) == "Complete & Move Children to \(id)")
-        #expect(TaskCompleteConfirmation.moveLabel(to: nil) == "Complete & Move Children to Top Level")
+        #expect(TaskCompleteConfirmation.moveTitle(to: parent) == "Move children to \(id)")
+        #expect(TaskCompleteConfirmation.moveTitle(to: nil) == "Move children to top level")
+        #expect(TaskCompleteConfirmation.moveDetail(to: parent).contains("under \(id)"))
+        #expect(TaskCompleteConfirmation.moveDetail(to: nil).contains("at the top level"))
 
         let unmerged = try roadmapTask(condition: "clear", reason: "Open")
-        let message = TaskCompleteConfirmation.message(descendants: [unmerged], destination: nil)
-        #expect(message.contains("Move keeps its children open at the top level."))
-        #expect(message.contains("Abandoning closes PRs and deletes branches for \(unmerged.task.identifier)"))
-        #expect(!message.contains("cannot be reopened"))
+        #expect(TaskCompleteConfirmation.defaultPolicy(descendants: [unmerged]) == .rehome)
+        let detail = TaskCompleteConfirmation.settleDetail(descendants: [unmerged])
+        #expect(detail.contains("Closes PRs and deletes branches for \(unmerged.task.identifier)"))
+        #expect(!detail.contains("cannot be reopened"))
+
+        #expect(TaskCompleteConfirmation.confirmLabel(policy: .rehome, allMerged: false) == "Complete & Move")
+        #expect(TaskCompleteConfirmation.confirmRole(policy: .rehome, allMerged: false) == .success)
+        #expect(TaskCompleteConfirmation.confirmLabel(policy: .abandon, allMerged: false) == "Complete & Abandon")
+        #expect(TaskCompleteConfirmation.confirmRole(policy: .abandon, allMerged: false) == .destructive)
+        #expect(TaskCompleteConfirmation.confirmLabel(policy: .abandon, allMerged: true) == "Complete & Finish")
+        #expect(TaskCompleteConfirmation.confirmRole(policy: .abandon, allMerged: true) == .success)
     }
 }
 #endif

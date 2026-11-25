@@ -170,7 +170,10 @@ without writing; `--children rehome` finishes the parent and `lf wave show`
 lists both children top-level. Abandon a started child, `lf task reopen` it,
 confirm `lf task status` recommends `run` (not "PR closed without merge") and
 `lf task run` starts fresh from main. In Desktop, right-click the parent →
-`Complete Task…` → the two-choice dialog, and reopen an abandoned Task → **Run**
+`Complete Task…` → a Loopflow sheet listing the open descendant tree with a
+radio choice (Move children up vs. Abandon/Finish children), neutral Cancel,
+and a green `.success` confirm button (switching to quiet `.destructive`
+outline when Abandon is chosen), and reopen an abandoned Task → **Run**
 is immediately clickable.
 
 ## Placement discovery

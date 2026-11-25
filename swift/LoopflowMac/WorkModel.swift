@@ -2830,18 +2830,20 @@ final class WorkModel {
     }
 
     func openDescendants(of task: RoadmapTask) -> [RoadmapTask] {
+        openDescendantTree(of: task).map(\.task)
+    }
+
+    func openDescendantTree(of task: RoadmapTask) -> [(task: RoadmapTask, depth: Int)] {
         let children = taskIndex.openChildren
-        var descendants: [RoadmapTask] = []
+        var descendants: [(task: RoadmapTask, depth: Int)] = []
         var seen: Set<String> = [task.task.id]
-        var parents = [task.task.id]
-        var index = 0
-        while index < parents.count {
-            for child in children[parents[index]] ?? [] where seen.insert(child.task.id).inserted {
-                descendants.append(child)
-                parents.append(child.task.id)
+        func visit(_ parentId: String, depth: Int) {
+            for child in children[parentId] ?? [] where seen.insert(child.task.id).inserted {
+                descendants.append((child, depth))
+                visit(child.task.id, depth: depth + 1)
             }
-            index += 1
         }
+        visit(task.task.id, depth: 0)
         return descendants
     }
 

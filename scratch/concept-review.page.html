@@ -23,8 +23,8 @@
       <td>Loopback carrier (<code>server/loopback.rs</code>, local-only <code>page.url</code>, shared <code>Messages&lt;S&gt;</code>), <code>lf page build</code> compiler (<code>lf/commands/page/{build,components,diff,operations,html}.rs</code>), <code>lf page open</code>, shared runtime &amp; theme (<code>builtins/page/</code>, <code>.lf/theme.css</code>), Desktop bridge (<code>TaskHTMLBridge</code>, <code>ReviewComment.Anchor</code>, <code>ServerLink.sendRawOperation</code>, read-only <code>ReviewRenderedView</code>), five updated skills, user docs, and Chrome QA fixes.</td>
     </tr>
     <tr>
-      <td><strong>Proposed for Pass 5 (written into <code>scratch/plan.md</code>)</strong></td>
-      <td>Four conceptual/lifecycle leaks found by walking real failure and recovery paths: (1) <code>lf page open</code> treating interactive plain-terminal sessions as headless, (2) <code>data-label</code> serving two conflicting roles and breaking <code>scratch/ship-review.html</code>, (3) <code>runtime.js</code> hardcoding protocol <code>revision: 10</code> and silently hiding handshake/disconnect failures, and (4) the browser <strong>Clear</strong> button marking unreported <code>data-lf</code> receipts as already reported.</td>
+      <td><strong>Fixed in Pass 5</strong></td>
+      <td>Resolved all four conceptual/lifecycle leaks found at <code>c04a60309d</code>: (1) <code>lf page open</code> now reads <code>session.interactive</code> from SQLite so interactive plain-terminal sessions open the browser while headless workers stay quiet, (2) <code>base.css</code> guards <code>[data-label]::before</code> with <code>:not(:has(&gt; p, &gt; label, &gt; h3, &gt; h4, &gt; legend))</code> and gives direct prompt children <code>flex-basis: 100%</code>, (3) <code>lf page build</code> stamps <code>wire::REVISION</code>/<code>wire::MIN_REVISION</code> and <code>runtime.js</code> surfaces handshake errors and any loopback close with a truthful disconnect banner, and (4) <strong>Clear</strong> calls <code>clearDrafts({ markReported: false })</code> so unreported <code>data-lf</code> receipts still ride along on the next reply.</td>
     </tr>
     <tr>
       <td><strong>Outside this work</strong></td>
@@ -102,9 +102,9 @@
 
 <p>Walking the interaction: a person starts an interactive <code>lf explore</code> in Ghostty or iTerm2. The agent compiles <code>scratch/explore.page.html</code> and runs <code>lf page open scratch/explore.html</code>. Because <code>viewed_placement()</code> only recognizes multiplexer IDs (<code>desktop:</code>, <code>rex:</code>, <code>cmux:</code>, <code>herdr:</code>, <code>tmux:</code>), it returns <code>None</code> and <code>route_for</code> prints a URL without opening the browser — even though SQLite already knows <code>session.interactive == true</code>.</p>
 
-<lf-diff path="rust/loopflow/src/lf/commands/page.rs" lines="70-105">
-  <lf-note line="73">Only checks multiplexer viewed_placement(), ignoring session.interactive in SQLite.</lf-note>
-  <lf-note line="100">Plain-terminal interactive sessions hit None here and silently fall into PrintQuiet.</lf-note>
+<lf-diff path="rust/loopflow/src/lf/commands/page.rs" lines="70-135">
+  <lf-note line="75">Reads session.interactive from SQLite via shared load_session().</lf-note>
+  <lf-note line="123">Plain-terminal interactive sessions now route to OpenRoute::Browser while session.interactive == false stays PrintQuiet.</lf-note>
 </lf-diff>
 
 <lf-component name="before-after">
@@ -120,12 +120,13 @@
 
 <p>On this branch's own compiled <code>scratch/ship-review.html</code>, Question 1 has both a short <code>data-label</code> (for the steer line) and a fuller <code>&lt;p&gt;</code> question. Because <code>base.css</code> unconditionally renders <code>::before { content: attr(data-label) }</code>, the page prints <code>1.</code> twice, lays out <code>&lt;p&gt;</code> inside a flex row without <code>flex-basis: 100%</code>, and makes the <code>::before</code> text unselectable for highlight-to-comment.</p>
 
-<lf-diff path="rust/loopflow-definitions/src/builtins/page/base.css" lines="262-284">
-  <lf-note line="271">Always draws data-label via ::before, even when the author wrote a selectable &lt;p&gt; prompt inside the control.</lf-note>
+<lf-diff path="rust/loopflow-definitions/src/builtins/page/base.css" lines="262-289">
+  <lf-note line="272">Only draws ::before when the control has no direct selectable prompt child.</lf-note>
+  <lf-note line="282">Gives direct prompt children full row width inside flex choice/multiselect containers.</lf-note>
 </lf-diff>
 
-<lf-diff path="scratch/ship-review.page.html" lines="139-144">
-  <lf-note line="139">data-label is the concise reply key; the &lt;p&gt; on line 140 is the visible question — currently both render stacked.</lf-note>
+<lf-diff path="scratch/ship-review.page.html" lines="140-145">
+  <lf-note line="140">data-label stays the concise reply key while the selectable &lt;p&gt; on line 141 is the sole visible question.</lf-note>
 </lf-diff>
 
 <lf-component name="before-after">
@@ -141,10 +142,10 @@
 
 <p>Walking failure and recovery: when <code>wire::REVISION</code> bumps from 10 to 11 (or a person reloads a stale loopback tab after <code>lf server</code> restarts or stops), the WebSocket closes before <code>welcome</code>. Today <code>runtime.js</code> hardcodes <code>10</code>, drops un-ID'd <code>error</code> frames, and hides the banner unless <code>welcomed</code> was already true — so the page silently falls back to clipboard copy with no explanation.</p>
 
-<lf-diff path="rust/loopflow-definitions/src/builtins/page/runtime.js" lines="222-274">
-  <lf-note line="227">Hardcoded magic revision instead of wire::REVISION / wire::MIN_REVISION stamped by lf page build.</lf-note>
-  <lf-note line="254">Un-ID'd server error on hello (such as incompatible revision) is silently ignored.</lf-note>
-  <lf-note line="267">If handshake fails before welcome, no banner appears; if server stopped, banner inaccurately says "restarted".</lf-note>
+<lf-diff path="rust/loopflow-definitions/src/builtins/page/runtime.js" lines="239-294">
+  <lf-note line="245">Reads wire::REVISION / wire::MIN_REVISION stamped by lf page build into #lf-page.</lf-note>
+  <lf-note line="271">Captures un-ID'd handshake error frames and shows the server message immediately.</lf-note>
+  <lf-note line="292">Shows handshake error or truthful disconnect banner on any loopback close, even before welcome.</lf-note>
 </lf-diff>
 
 <lf-component name="before-after">
@@ -160,8 +161,8 @@
 
 <p>Walking recovery: a reviewer clicks <strong>File Task now</strong> (<code>Filed LOO-1200</code>), adds a note, hits <strong>Clear</strong> to rewrite the note, and then presses <code>⌘↩</code>. Because <strong>Clear</strong> shares <code>clearDrafts()</code> with <code>submitReply()</code>, it flips <code>reported: true</code> on the receipt even though nothing was sent — so <code>[already ran: task.create → LOO-1200]</code> disappears from the steer.</p>
 
-<lf-diff path="rust/loopflow-definitions/src/builtins/page/runtime.js" lines="779-785">
-  <lf-note line="781">Marks every receipt reported even when invoked from the strip's Clear button rather than a successful send.</lf-note>
+<lf-diff path="rust/loopflow-definitions/src/builtins/page/runtime.js" lines="801-810">
+  <lf-note line="803">Marks receipts reported only when markReported is true (actual send), leaving Clear drafts separate.</lf-note>
 </lf-diff>
 
 <lf-component name="before-after">

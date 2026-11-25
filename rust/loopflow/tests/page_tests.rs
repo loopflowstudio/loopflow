@@ -7,7 +7,8 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use loopflow::server::wire::{
-    ClientIdentity, ClientMessage, Hello, Operation, ServerMessage, ServerOperation, REVISION,
+    ClientIdentity, ClientMessage, Hello, Operation, ServerMessage, ServerOperation, MIN_REVISION,
+    REVISION,
 };
 use loopflow_test_support::{MachineServer, TestRepo};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -486,9 +487,19 @@ fn page_build_expands_diffs_components_data_lf_and_rejects_broken_references() {
     assert_eq!(stamp["work"]["issue"], issue);
     assert_eq!(stamp["path"], "scratch/ship-review.html");
     assert_eq!(stamp["build_id"].as_str().unwrap().len(), 16);
+    assert_eq!(stamp["protocol"]["revision"], REVISION);
+    assert_eq!(stamp["protocol"]["min_revision"], MIN_REVISION);
     assert!(
         html.contains("window.__lfDesktopApplyState"),
         "missing runtime JS"
+    );
+    assert!(
+        html.contains(":not(:has(> p, > label, > h3, > h4, > legend))::before"),
+        "missing guarded data-label pseudo-element selector"
+    );
+    assert!(
+        !html.contains("revision: 10"),
+        "runtime must read protocol revision from stamp rather than hardcoding 10"
     );
 
     // Negative build checks: each fails non-zero naming element and line.
@@ -537,4 +548,137 @@ fn page_build_expands_diffs_components_data_lf_and_rejects_broken_references() {
             "{name}: expected {expected_elem} and {expected_line}, got: {err}"
         );
     }
+}
+
+fn seed_session(
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+    id: &str,
+    interactive: bool,
+) -> String {
+    let store = loopflow_execution::store::open_sqlite(&home.join("loopflow.db")).unwrap();
+    loopflow_execution::store::sessions::create_session(
+        &store,
+        loopflow_execution::session::LfSession {
+            captured: None,
+            id: id.into(),
+            artifact_key: None,
+            caller_artifact_key: None,
+            input_published: false,
+            cwd: cwd.into(),
+            skill: None,
+            provider: Some("claude".into()),
+            model: None,
+            node: None,
+            iterations: None,
+            task_id: None,
+            wave_id: None,
+            graph_lf_process_id: None,
+            work_source: None,
+            bound_at: None,
+            interactive,
+            repo: None,
+            title: id.into(),
+            title_source: loopflow_execution::session::TitleSource::Generated,
+            request: None,
+            completed_at: None,
+            created_at: 1,
+        },
+        None,
+    )
+    .unwrap();
+    serde_json::to_string(&loopflow_storage::process::AgentCaller {
+        session_id: id.into(),
+        agent_process_id: None,
+        origin_lf_process_id: loopflow_model::id::LfProcessId::new(),
+        trace_id: None,
+    })
+    .unwrap()
+}
+
+#[test]
+fn page_open_routes_interactive_plain_terminal_to_browser_and_headless_worker_quietly() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir_in("/tmp").unwrap();
+    let _server = MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path());
+
+    let scratch = repo.path().join("scratch");
+    fs::create_dir_all(&scratch).unwrap();
+    fs::write(
+        scratch.join("explore.html"),
+        "<!doctype html><h1>Explore</h1>",
+    )
+    .unwrap();
+
+    let fake_bin = home.path().join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let opener_marker = home.path().join("browser-opened");
+    for opener in ["open", "xdg-open"] {
+        let script = fake_bin.join(opener);
+        fs::write(
+            &script,
+            format!("#!/bin/sh\necho \"$@\" > {}\n", opener_marker.display()),
+        )
+        .unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let test_path = format!("{}:/usr/bin:/bin", fake_bin.display());
+
+    // Headless worker session (`interactive == false`) prints URL quietly even if LF_DESKTOP is set.
+    let headless_caller = seed_session(home.path(), repo.path(), "session_headless_worker", false);
+    let headless = lf_cmd(repo.path(), home.path())
+        .env("LF_AGENT_CALLER", headless_caller)
+        .env("LF_DESKTOP", "1")
+        .env("PATH", &test_path)
+        .args(["page", "open", "scratch/explore.html"])
+        .output()
+        .unwrap();
+    assert!(
+        headless.status.success(),
+        "headless worker lf page open failed: {}",
+        String::from_utf8_lossy(&headless.stderr)
+    );
+    let expected_url = String::from_utf8(headless.stdout)
+        .unwrap()
+        .trim()
+        .to_owned();
+    assert!(
+        expected_url.starts_with("http://127.0.0.1:"),
+        "expected loopback URL, got: {expected_url}"
+    );
+    assert!(
+        !opener_marker.exists(),
+        "headless worker must not invoke OS browser opener"
+    );
+
+    // Interactive plain-terminal session (`interactive == true`, no multiplexer viewed_placement)
+    // opens the loopback URL in the browser and prints it.
+    let interactive_caller = seed_session(
+        home.path(),
+        repo.path(),
+        "session_interactive_plain_tty",
+        true,
+    );
+    let interactive = lf_cmd(repo.path(), home.path())
+        .env("LF_AGENT_CALLER", interactive_caller)
+        .env("PATH", &test_path)
+        .args(["page", "open", "scratch/explore.html"])
+        .output()
+        .unwrap();
+    assert!(
+        interactive.status.success(),
+        "interactive plain-terminal lf page open failed: {}",
+        String::from_utf8_lossy(&interactive.stderr)
+    );
+    let interactive_url = String::from_utf8(interactive.stdout)
+        .unwrap()
+        .trim()
+        .to_owned();
+    assert_eq!(interactive_url, expected_url);
+    assert_eq!(
+        fs::read_to_string(&opener_marker)
+            .expect("interactive plain-terminal session should invoke OS browser opener")
+            .trim(),
+        expected_url
+    );
 }

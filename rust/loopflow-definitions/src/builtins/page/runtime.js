@@ -14,6 +14,10 @@
   const buildId = String(stamp.build_id || "0");
   const work = stamp.work || { kind: "repository" };
   const directory = String(stamp.directory || "");
+  const protocol =
+    stamp.protocol && typeof stamp.protocol === "object" ? stamp.protocol : null;
+  const protocolRevision = Number(protocol && protocol.revision);
+  const protocolMinRevision = Number(protocol && protocol.min_revision);
   const storageKey = "lf-page:" + pagePath + ":" + buildId;
 
   const desktopHandler =
@@ -25,7 +29,7 @@
   let socket = null;
   let nextReqId = 1;
   const pending = new Map();
-  let serverRestarted = false;
+  let serverDisconnected = false;
 
   // Draft & receipt state.
   // Notes, choices, multiselects, questions, and offline actions enter the reply queue.
@@ -193,7 +197,7 @@
   // Desktop calls this with `null` after `ReviewComments.insert(into:)` sends the page's items.
   window.__lfDesktopApplyState = function (loaded) {
     if (loaded) applyState(loaded);
-    else clearDrafts();
+    else clearDrafts({ markReported: true });
   };
 
   // --- Loopback WebSocket carrier ---
@@ -209,23 +213,37 @@
     return wsProto + "//" + window.location.host + "/" + token + "/machine";
   }
 
+  function disconnectedMessage(reason) {
+    return reason || "Loopflow server disconnected — run lf page open " + pagePath;
+  }
+
   function connectLoopback() {
     if (desktopHandler) return;
     const url = loopbackWsUrl();
     if (!url) return;
+    if (!Number.isInteger(protocolRevision) || !Number.isInteger(protocolMinRevision)) {
+      serverDisconnected = true;
+      showBanner("Review page is missing server protocol version — rebuild with lf page build");
+      renderStrip();
+      return;
+    }
     let ws;
     try {
       ws = new WebSocket(url);
     } catch (_) {
+      serverDisconnected = true;
+      showBanner(disconnectedMessage(""));
+      renderStrip();
       return;
     }
-    let welcomed = false;
+    let handshakeError = "";
+    let closingForUnload = false;
     ws.addEventListener("open", () => {
       ws.send(
         JSON.stringify({
           type: "hello",
-          revision: 10,
-          min_revision: 10,
+          revision: protocolRevision,
+          min_revision: protocolMinRevision,
           client: {
             kind: "page",
             platform: "browser",
@@ -243,12 +261,16 @@
         return;
       }
       if (msg.type === "welcome") {
-        welcomed = true;
         socket = ws;
         hostMode = "loopback";
-        serverRestarted = false;
+        serverDisconnected = false;
         hideBanner();
         renderStrip();
+        return;
+      }
+      if (msg.type === "error" && !msg.id) {
+        handshakeError = msg.message || msg.code || "Loopflow server rejected connection";
+        showBanner(handshakeError);
         return;
       }
       if ((msg.type === "response" || msg.type === "error") && msg.id && pending.has(msg.id)) {
@@ -264,14 +286,14 @@
         entry.reject(new Error("Connection closed"));
       }
       pending.clear();
-      if (welcomed) {
-        hostMode = "clipboard";
-        serverRestarted = true;
-        showBanner("lf server restarted; run lf page open " + pagePath);
-        renderStrip();
-      }
+      if (closingForUnload) return;
+      hostMode = "clipboard";
+      serverDisconnected = true;
+      showBanner(disconnectedMessage(handshakeError));
+      renderStrip();
     });
     window.addEventListener("pagehide", () => {
+      closingForUnload = true;
       try {
         ws.close();
       } catch (_) {}
@@ -776,9 +798,12 @@
     });
   }
 
-  // After a reply is sent: drafts go, receipts stay drawn and stop riding on replies.
-  function clearDrafts() {
-    const receipts = state.receipts.map((r) => Object.assign({}, r, { reported: true }));
+  // Drop unsent drafts while keeping rendered receipts; mark receipts reported only after a reply is sent.
+  function clearDrafts(options) {
+    const markReported = Boolean(options && options.markReported);
+    const receipts = markReported
+      ? state.receipts.map((r) => Object.assign({}, r, { reported: true }))
+      : state.receipts.slice();
     state = emptyState();
     state.receipts = receipts;
     refresh(true);
@@ -802,7 +827,7 @@
             "Steer saved.";
           stripStatusText = sentence;
           stripStatusKind = "ok";
-          clearDrafts();
+          clearDrafts({ markReported: true });
         },
         (err) => {
           stripStatusText = String(err && err.message ? err.message : err);
@@ -815,8 +840,8 @@
 
     copyText(message).then(
       () => {
-        stripStatusText = serverRestarted
-          ? "Copied reply (server restarted)"
+        stripStatusText = serverDisconnected
+          ? "Copied reply (server disconnected)"
           : "Copied reply";
         stripStatusKind = "ok";
         renderStrip();
@@ -873,7 +898,7 @@
       clearBtn.addEventListener("click", () => {
         stripStatusText = "";
         stripStatusKind = "";
-        clearDrafts();
+        clearDrafts({ markReported: false });
       });
 
       const sendBtn = document.createElement("button");

@@ -68,19 +68,39 @@ enum OpenRoute {
 }
 
 fn decide_open_route(host: PageHost) -> OpenRoute {
-    let has_agent_caller = loopflow_execution::journal::agent_caller().is_some();
+    let caller = loopflow_execution::journal::agent_caller();
     let in_desktop_env = std::env::var_os("LF_DESKTOP").is_some_and(|value| !value.is_empty());
-    let placement = has_agent_caller
-        .then(viewed_placement)
-        .flatten()
+    let session_interactive = caller
+        .as_ref()
+        .and_then(|c| load_session(&c.session_id))
+        .map(|session| session.interactive);
+    let placement = caller
+        .as_ref()
+        .and_then(|_| viewed_placement())
         .map(|(host, _)| host);
-    route_for(host, has_agent_caller, in_desktop_env, placement)
+    route_for(
+        host,
+        caller.is_some(),
+        in_desktop_env,
+        session_interactive,
+        placement,
+    )
+}
+
+pub(super) fn load_session(
+    session_id: &loopflow_model::id::LfSessionId,
+) -> Option<loopflow_execution::session::LfSession> {
+    let store = loopflow_execution::store::read_existing_registry()
+        .ok()
+        .flatten()?;
+    store.sqlite.session(session_id).ok().flatten()
 }
 
 fn route_for(
     host: PageHost,
     has_agent_caller: bool,
     in_desktop_env: bool,
+    session_interactive: Option<bool>,
     viewed_host: Option<OpenHost>,
 ) -> OpenRoute {
     match host {
@@ -94,10 +114,20 @@ fn route_for(
                     OpenRoute::Browser
                 }
             } else {
-                match viewed_host {
-                    Some(OpenHost::Desktop) => OpenRoute::Desktop,
-                    Some(_) => OpenRoute::Browser,
-                    None => OpenRoute::PrintQuiet,
+                match session_interactive {
+                    Some(false) => OpenRoute::PrintQuiet,
+                    Some(true) => {
+                        if matches!(viewed_host, Some(OpenHost::Desktop)) || in_desktop_env {
+                            OpenRoute::Desktop
+                        } else {
+                            OpenRoute::Browser
+                        }
+                    }
+                    None => match viewed_host {
+                        Some(OpenHost::Desktop) => OpenRoute::Desktop,
+                        Some(_) => OpenRoute::Browser,
+                        None => OpenRoute::PrintQuiet,
+                    },
                 }
             }
         }
@@ -176,36 +206,74 @@ mod tests {
     fn open_routing_respects_direct_interactive_and_headless_callers() {
         // Direct CLI outside Desktop opens the browser.
         assert_eq!(
-            route_for(PageHost::Auto, false, false, None),
+            route_for(PageHost::Auto, false, false, None, None),
             OpenRoute::Browser
         );
         // Direct CLI inside Desktop opens Desktop Files.
         assert_eq!(
-            route_for(PageHost::Auto, false, true, None),
+            route_for(PageHost::Auto, false, true, None, None),
             OpenRoute::Desktop
         );
-        // Interactive agent viewed in Desktop opens Desktop Files.
+        // Interactive agent viewed in Desktop (or with LF_DESKTOP) opens Desktop Files.
         assert_eq!(
-            route_for(PageHost::Auto, true, false, Some(OpenHost::Desktop)),
+            route_for(
+                PageHost::Auto,
+                true,
+                false,
+                Some(true),
+                Some(OpenHost::Desktop)
+            ),
             OpenRoute::Desktop
         );
-        // Interactive agent viewed in Rex opens the browser.
         assert_eq!(
-            route_for(PageHost::Auto, true, false, Some(OpenHost::Rex)),
+            route_for(PageHost::Auto, true, true, Some(true), None),
+            OpenRoute::Desktop
+        );
+        // Interactive agent in Rex or a plain terminal (Ghostty/iTerm) opens the browser.
+        assert_eq!(
+            route_for(PageHost::Auto, true, false, Some(true), Some(OpenHost::Rex)),
             OpenRoute::Browser
         );
-        // Headless agent (no viewer) prints the URL without popping a browser window.
         assert_eq!(
-            route_for(PageHost::Auto, true, false, None),
+            route_for(PageHost::Auto, true, false, Some(true), None),
+            OpenRoute::Browser
+        );
+        // Headless agent (`session.interactive == false`) always prints quietly,
+        // even if LF_DESKTOP or a multiplexer placement happens to be present.
+        assert_eq!(
+            route_for(PageHost::Auto, true, false, Some(false), None),
+            OpenRoute::PrintQuiet
+        );
+        assert_eq!(
+            route_for(
+                PageHost::Auto,
+                true,
+                true,
+                Some(false),
+                Some(OpenHost::Desktop)
+            ),
+            OpenRoute::PrintQuiet
+        );
+        // Missing session row falls back to viewed_placement(), staying quiet when absent.
+        assert_eq!(
+            route_for(PageHost::Auto, true, false, None, Some(OpenHost::Desktop)),
+            OpenRoute::Desktop
+        );
+        assert_eq!(
+            route_for(PageHost::Auto, true, false, None, Some(OpenHost::Rex)),
+            OpenRoute::Browser
+        );
+        assert_eq!(
+            route_for(PageHost::Auto, true, false, None, None),
             OpenRoute::PrintQuiet
         );
         // Explicit overrides win without falling back.
         assert_eq!(
-            route_for(PageHost::Desktop, true, false, None),
+            route_for(PageHost::Desktop, true, false, Some(false), None),
             OpenRoute::Desktop
         );
         assert_eq!(
-            route_for(PageHost::Browser, false, true, None),
+            route_for(PageHost::Browser, false, true, None, None),
             OpenRoute::Browser
         );
     }

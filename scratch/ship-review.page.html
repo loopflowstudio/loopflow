@@ -2,7 +2,7 @@
 
 <div class="lf-meta">
   <span>Task <code>LOO-1109</code></span>
-  <span>Passes 1–4 complete</span>
+  <span>Passes 1–5 complete</span>
   <span>Built with <code>lf page build</code></span>
 </div>
 
@@ -58,9 +58,10 @@
 
 <p><code>lf page open</code> routes by caller context so headless Graph steps never pop browser windows while interactive Rex and Desktop sessions land where you already work:</p>
 
-<lf-diff path="rust/loopflow/src/lf/commands/page.rs" lines="70-105">
-  <lf-note line="98">Interactive agent viewed in Desktop opens Desktop Files; viewed in Rex/tmux/terminal opens the loopback URL in the browser.</lf-note>
-  <lf-note line="100">Headless agent (agent_caller present, no viewer) prints the URL quietly and never invokes the OS browser opener.</lf-note>
+<lf-diff path="rust/loopflow/src/lf/commands/page.rs" lines="70-135">
+  <lf-note line="75">Reads session.interactive from SQLite so interactive plain-terminal sessions (Ghostty/iTerm/Terminal) open the browser instead of falling into PrintQuiet.</lf-note>
+  <lf-note line="118">Headless agents (session.interactive == false) always print the URL quietly and never invoke the OS browser opener.</lf-note>
+  <lf-note line="123">Interactive agents outside Desktop (Rex, tmux, or plain terminal) open the loopback URL in the browser.</lf-note>
 </lf-diff>
 
 <p>In Loopflow Desktop, <code>TaskFileReadingView</code> attaches <code>TaskHTMLBridge</code> (a reply-capable <code>WKScriptMessageHandlerWithReply</code> named <code>loopflow</code>), while side-by-side HTML diffs in <code>ReviewRenderedView</code> leave it unset so historical commits stay read-only:</p>
@@ -96,7 +97,7 @@
     <tr>
       <td>Page compiler</td>
       <td><code data-path="rust/loopflow/src/lf/commands/page/build.rs">lf/commands/page/</code></td>
-      <td>Compiles <code>*.page.html</code> → <code>*.html</code> across focused submodules (<code>build</code>, <code>components</code>, <code>diff</code>, <code>operations</code>, <code>html</code>): expands <code>&lt;lf-component&gt;</code>, <code>&lt;lf-diff&gt;</code> (via <code>checkout_file_diff</code> once per path), <code>&lt;lf-file&gt;</code>, partial→strict <code>data-lf</code> validated against <code>Operation</code>; checks missing paths, unknown Git SHAs, forbidden tags; stamps <code>PageStamp</code> (<code>work</code>, <code>directory</code>, <code>base</code>, <code>head</code>, <code>path</code>, <code>build_id</code>)</td>
+      <td>Compiles <code>*.page.html</code> → <code>*.html</code> across focused submodules (<code>build</code>, <code>components</code>, <code>diff</code>, <code>operations</code>, <code>html</code>): expands <code>&lt;lf-component&gt;</code>, <code>&lt;lf-diff&gt;</code> (via <code>checkout_file_diff</code> once per path), <code>&lt;lf-file&gt;</code>, partial→strict <code>data-lf</code> validated against <code>Operation</code>; checks missing paths, unknown Git SHAs, forbidden tags; stamps <code>PageStamp</code> (<code>work</code>, <code>directory</code>, <code>base</code>, <code>head</code>, <code>path</code>, <code>build_id</code>, <code>protocol</code>)</td>
     </tr>
     <tr>
       <td>Page kit assets &amp; overrides</td>
@@ -120,7 +121,7 @@
 
 <ul>
   <li><strong>Any Machine <code>Operation</code> is allowed over the loopback WebSocket</strong> (no allowlist), guarded by the 32-byte in-memory token, exact <code>Host</code> check, and same-origin <code>Origin</code> check. <code>page.url</code> and <code>mobile.*</code> remain local-Unix-socket-only, and no <code>/ticket</code> route is exposed on loopback.</li>
-  <li><strong>The loopback token is never written to disk.</strong> Restarting <code>lf server</code> rotates port and token; open browser tabs detect the close, show <code>lf server restarted; run lf page open &lt;path&gt;</code>, and fall back to clipboard copy.</li>
+  <li><strong>The loopback token is never written to disk.</strong> Stopping or restarting <code>lf server</code> closes the socket or rotates port and token; open browser tabs detect any disconnect or handshake mismatch, show <code>Loopflow server disconnected — run lf page open &lt;path&gt;</code> (or the server error), and fall back to clipboard copy.</li>
   <li><strong>Task pages always steer via <code>task.steer</code>, never the building worker's <code>session.steer</code>.</strong> Headless Graph workers exit after building the page, and <code>session.steer</code> silently queues onto finished Sessions; <code>task.steer</code> reaches the Task's active work or primary interactive Session and returns <code>delivery.sentence</code>.</li>
   <li><strong>Desktop never touches <code>localStorage</code> for review pages.</strong> <code>ReviewComments</code> owns draft state keyed by <code>(path, build_id)</code>, preventing <code>SecurityError</code> on peer-Machine <code>about:blank</code> pages and preventing resurrection after sending from another file.</li>
   <li><strong><code>*.page.html</code> sources are excluded from <code>is_scratch_page</code></strong> in both Rust (<code>ops/task/find.rs</code>) and Swift (<code>TaskFilesStore.swift</code>), and <code>lf page open</code> refuses raw <code>.page.html</code> files with the exact <code>lf page build</code> command.</li>

@@ -267,15 +267,21 @@ th {
   margin-top: 8px;
 }
 
-/* A control's `data-label` is its question; a decision card shows its title instead. */
-[data-choice][data-label]::before,
-[data-multiselect][data-label]::before,
-[data-question][data-label]::before {
+/* Draw `data-label` as a heading only when the control has no selectable prompt child;
+   a decision card shows its title instead. */
+[data-choice][data-label]:not(:has(> p, > label, > h3, > h4, > legend))::before,
+[data-multiselect][data-label]:not(:has(> p, > label, > h3, > h4, > legend))::before,
+[data-question][data-label]:not(:has(> p, > label, > h3, > h4, > legend))::before {
   content: attr(data-label);
   display: block;
   flex-basis: 100%;
   margin: 10px 0 2px;
   font-weight: 600;
+}
+
+:is([data-choice], [data-multiselect]) > :is(p, label, h3, h4, legend) {
+  flex-basis: 100%;
+  margin: 10px 0 2px;
 }
 
 .lf-decision [data-choice]::before {

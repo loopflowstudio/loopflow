@@ -99,9 +99,10 @@ On the page:
   clipboard copy.
 
 Drafts are keyed by file path and build hash: reloading the page keeps them,
-and rebuilding the page starts clean. If `lf server` restarts while a page is
-open in a browser, the page shows a banner (`lf server restarted; run lf page
-open <path>`) and `⌘↩` falls back to copying. Browser loopback serves checkouts
+and rebuilding the page starts clean. If `lf server` stops or restarts while a
+page is open in a browser (or a stale URL fails to reconnect), the page shows a
+banner (`Loopflow server disconnected — run lf page open <path>`) and `⌘↩`
+falls back to copying. Browser loopback serves checkouts
 on this Machine; for peer-owned Tasks, open the page in Desktop. Hand-written
 `scratch/*.html` files without the page kit keep opening as plain pages with no
 strip. Passing a raw `*.page.html` source to `lf page open` exits with the

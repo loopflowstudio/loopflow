@@ -96,10 +96,10 @@ the local Unix socket for a capability URL
 
 - `lf server status` never prints the token, and the token is never written to
   disk.
-- Restarting `lf server` (including during `lf install`) rotates the port and
-  token. Any open browser tab shows a banner
-  (`lf server restarted; run lf page open <path>`) and falls back to copying
-  replies to the clipboard until reopened.
+- Restarting or stopping `lf server` (including during `lf install`) rotates
+  the port and token or closes the socket. Any open browser tab shows a banner
+  (`Loopflow server disconnected — run lf page open <path>`) and falls back to
+  copying replies to the clipboard until reopened.
 - Loopback serving covers checkouts on this Machine. For a Task owned by
   another Machine, open the page in Loopflow Desktop.
 

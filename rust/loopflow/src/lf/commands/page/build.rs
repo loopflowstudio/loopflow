@@ -77,6 +77,10 @@ pub(super) fn build(cli: &Cli, source: &Path, base_override: Option<&str>) -> Re
         head,
         path: rel_output.to_string_lossy().replace('\\', "/"),
         build_id: short_sha256(&body_html),
+        protocol: ProtocolStamp {
+            revision: crate::server::wire::REVISION,
+            min_revision: crate::server::wire::MIN_REVISION,
+        },
     };
     let stamp_json = serde_json::to_string(&stamp)?.replace("</", "<\\/");
 
@@ -122,6 +126,13 @@ struct PageStamp {
     head: String,
     path: String,
     build_id: String,
+    protocol: ProtocolStamp,
+}
+
+#[derive(Debug, Serialize)]
+struct ProtocolStamp {
+    revision: u32,
+    min_revision: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -246,13 +257,8 @@ fn readable_task_identifier(raw: &str) -> Option<String> {
 }
 
 fn is_standalone_interactive_session(session_id: &loopflow_model::id::LfSessionId) -> bool {
-    let Ok(Some(store)) = loopflow_execution::store::read_existing_registry() else {
-        return false;
-    };
-    let Ok(Some(session)) = store.sqlite.session(session_id) else {
-        return false;
-    };
-    session.interactive && session.graph_lf_process_id.is_none()
+    super::load_session(session_id)
+        .is_some_and(|session| session.interactive && session.graph_lf_process_id.is_none())
 }
 
 fn short_sha256(text: &str) -> String {

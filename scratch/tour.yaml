@@ -1,0 +1,30 @@
+at: f2d99daf0922b39ee1025d3c2772f2ca2722f22b
+first:
+  - path: rust/loopflow-definitions/src/builtins/task/graph/code.yaml
+    why: builtin Graphs end at deliver with no verify loop
+  - path: rust/loopflow-definitions/src/builtins/task/graph/feature.yaml
+  - path: rust/loopflow-definitions/src/builtins/task/skill/verify.md
+    why: deleted builtin and repository verify skills
+  - path: .lf/skills/verify.md
+  - path: docs/orchestration.md
+    why: updated Graph docs, stop counts, and merges warning copy
+  - path: docs/surfaces.md
+  - path: docs/getting-started.md
+  - path: rust/loopflow-execution/src/task_graph.rs
+    why: CapturedGraph::reaches_landing predicate and unit tests
+  - path: rust/loopflow-execution/src/ops/task.rs
+    why: replaces reaches_end with reaches_landing on Run and Live
+  - path: rust/loopflow/src/lf/commands/graph.rs
+    why: forwards Live merges flag instead of hardcoding true
+  - path: rust/loopflow-execution/src/engine/task.rs
+  - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
+    why: integration tests for merges warning and renamed stand-in steps
+hide:
+  - path: tests/fixtures/dto/server_schema.json
+    why: regenerated schema doc-comment update
+  - path: rust/loopflow-execution/src/skills/catalog.rs
+    why: test swaps retired verify name for measure
+  - path: rust/loopflow-execution/src/ops/task_execution.rs
+    why: test swaps retired verify step label for gate
+  - path: swift/LoopflowTests/AppBootstrapResourceTests.swift
+    why: font glyph test swaps sample word verify for deliver

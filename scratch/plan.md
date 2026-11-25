@@ -222,6 +222,31 @@ prose, release notes, `design/prototypes/`, `scripts/evals/instruction_levels.*`
 - Editing `manabot`, `fantasia`, `etude`, `etude-sdk`.
 - A post-merge check anywhere else.
 
+## Status
+
+Implementation pass complete. All code, skill/Graph deletions, tests, Swift
+updates, `.lf/qa/auto.md`, and regenerated `tests/fixtures/dto/server_schema.json`
+are committed.
+
+Verified locally:
+- `cargo test -p loopflow-definitions --lib builtins::` (12 passed)
+- `cargo test -p loopflow-execution --lib task_graph::` (7 passed, including `reaches_landing` matrix)
+- `cargo test -p loopflow-execution --lib graph::compiled::` (10 passed)
+- `cargo test -p loopflow-execution --lib skills::catalog::` (16 passed)
+- `cargo test -p loopflow-execution --lib ops::task_execution::` (3 passed)
+- `cargo test -p loopflow-execution --lib engine::task::` (1 passed)
+- `cargo test -p loopflow-execution --lib ops::task::explain::tests::` (6 passed)
+- `cargo test -p loopflow --lib server::schema::tests::` (8 passed)
+- `cargo test -p loopflow --lib task_graph_launch_tests::` (4 focused tests: `auto_on_a_running_task_reports_its_run_and_starts_nothing`, `merges_warning_follows_reachable_landing_steps`, `an_auto_run_meets_a_hand_merged_pr_at_its_landing_step`, `an_auto_run_blocked_at_verification_waits_there_without_building_again`)
+- `cargo test -p loopflow --test integration documented_commands::` (4 passed)
+- `cargo test -p loopflow --test golden_prompt` (1 passed)
+- `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` (clean)
+- Demo checks against `target/debug/lf`: `lf graph list`, `lf graph list --json`, `lf verify` (`skill or graph not found: verify`), `lf list skill` (no `verify`), `git grep -nw verify -- rust/loopflow-definitions/src/builtins/task` (only the verb in `ci-fix.md` and `task_operate.md`).
+
+Remaining for gate/CI:
+- Swift view tests (`WorkflowLineTests`, `BacklogViewTests`, `AppBootstrapResourceTests`) and DTO fixture tests (`ServerProtocolTests`).
+- Note on `return_target`: `ConcreteSkill.returns` is a relative back-offset, not an absolute index; `reaches_landing` uses `crate::graph::return_target(body, index)` so loop back-edges resolve accurately in `body`.
+
 ## One pass
 
 1. Delete both `verify.md` files, update `code.yaml`, `feature.yaml`, and

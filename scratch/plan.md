@@ -233,4 +233,15 @@ the bound conversation. Check both readings with two Sessions in one checkout.
   With 1,000 unfinished conversations, checkout selection used
   `session_inventory` (0.41 ms median for resume, 0.44 ms for adoption).
 
-Desktop build and `SessionControlsTests` run at gate/CI.
+## Status
+
+All surfaces above are implemented (commit e1a15bfcf3); docs match (9caf7d133c).
+Nothing remains to build. Checks:
+
+- `cargo test -p loopflow-execution --lib ops::task::adoption::` after merging
+  41023c8e55: 11 passed (realign, 2026-11-25).
+- Native resume and provider-switch fixtures in
+  `rust/loopflow/tests/session_launch_contract.rs`,
+  `session_lifecycle_tests.rs`: run at gate/CI.
+- Desktop build and `SessionControlsTests`: gate/CI.
+- Open review choices stay in `scratch/questions.md`.

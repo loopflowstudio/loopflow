@@ -144,7 +144,7 @@ final class TaskFeedTests: XCTestCase {
     func testASwipedParentStaysUntilAskedWhatHappensToItsChildren() async throws {
         let machineID = "HOME_\(UUID().uuidString.lowercased())"
         let server = try HeldServer(machineID: machineID, openChildren: [1: 3])
-        let feed = feed(server, machineID: machineID)
+        let feed = TaskFeed(client: client(server, machineID: machineID), notices: NoticeCenter())
         defer { feed.forget() }
         await feed.start()
         try await until { identifiers(feed) == ["LOO-1", "LOO-2", "LOO-3"] }
@@ -168,7 +168,7 @@ final class TaskFeedTests: XCTestCase {
     func testASwipedLeafSendsNoChildren() async throws {
         let machineID = "HOME_\(UUID().uuidString.lowercased())"
         let server = try HeldServer(machineID: machineID, openChildren: [1: 3])
-        let feed = feed(server, machineID: machineID)
+        let feed = TaskFeed(client: client(server, machineID: machineID), notices: NoticeCenter())
         defer { feed.forget() }
         await feed.start()
         try await until { identifiers(feed).count == 3 }

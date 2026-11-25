@@ -57,10 +57,9 @@ async fn resolve(issue: &str, route: TaskRoute) -> OpsResult<(SharedStore, Task,
     let cleanup = cleanup_lock(&task.id)?;
     let route = route(&store.sqlite, &task.id).map_err(task_error)?;
     if route.machine_id != store.local_machine().await.map_err(task_error)?.id {
-        return Err(task_error(format!(
-            "Task {issue} runs on Machine {}",
-            route.machine_id
-        )));
+        return Err(
+            Error::conflict(format!("Task {issue} runs on Machine {}", route.machine_id)).into(),
+        );
     }
     Ok((store, task, cleanup))
 }
@@ -174,9 +173,9 @@ pub(crate) fn before_unassign(store: &SqliteStore, task: &Task) -> OpsResult<()>
         .is_some()
     {
         let lock = cleanup_lock_file(&task.id)?;
-        lock.try_lock_exclusive().map_err(|err| {
+        lock.try_lock_exclusive().map_err(|err| -> OpsError {
             if err.kind() == std::io::ErrorKind::WouldBlock {
-                task_error(format!("{} is still stopping", task.identifier))
+                Error::conflict(format!("{} is still stopping", task.identifier)).into()
             } else {
                 err.into()
             }

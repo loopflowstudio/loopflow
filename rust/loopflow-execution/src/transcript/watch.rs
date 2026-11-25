@@ -34,7 +34,10 @@ pub fn watch(cache: &Arc<Cache>) -> Vec<notify::RecommendedWatcher> {
         .filter(|(root, _)| root.is_dir())
         .filter_map(
             |(root, store)| match watch_root(&root, store, Arc::downgrade(cache)) {
-                Ok(watcher) => Some(watcher),
+                Ok(watcher) => {
+                    loopflow_harness::transcript::register_watched_root(root);
+                    Some(watcher)
+                }
                 Err(error) => {
                     tracing::warn!(root = %root.display(), %error, "Could not watch transcripts");
                     None
@@ -64,11 +67,19 @@ fn hint(cache: &Cache, event: notify::Result<notify::Event>, store: Option<&Path
     let event = match event {
         Ok(event) if event.kind.is_access() => return,
         Ok(event) if !event.need_rescan() => event,
-        Ok(_) | Err(_) => return cache.hint_transcript(None, true),
+        Ok(_) | Err(_) => {
+            loopflow_harness::transcript::invalidate_misses(None);
+            return cache.hint_transcript(None, true);
+        }
     };
     // A new OpenCode conversation is a row, not a file; raw discovery finds
     // it at its own interval.
     let created = event.kind.is_create() && store.is_none();
+    if created {
+        for path in &event.paths {
+            loopflow_harness::transcript::invalidate_misses(Some(path));
+        }
+    }
     for path in transcripts(&event.paths, store) {
         cache.hint_transcript(Some(&path), created);
     }

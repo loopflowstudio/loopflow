@@ -6,8 +6,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, Weak};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, SystemTime};
 
 static SPAWNS: AtomicU64 = AtomicU64::new(0);
@@ -24,10 +24,7 @@ pub fn spawns() -> u64 {
 
 /// Number of observation facts currently held by active subscriptions.
 pub fn current_held_facts() -> u64 {
-    let Some(cache) = SHARED.lock().expect("observation cache").upgrade() else {
-        return 0;
-    };
-    cache.held_facts()
+    PROCESS_CACHE.held_facts()
 }
 
 use crate::ops::task::TaskFileInventory;
@@ -114,7 +111,70 @@ enum Source {
     Github,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StatStamp {
+    Present {
+        mtime: Option<SystemTime>,
+        ctime: (i64, i64),
+        size: u64,
+        dev: u64,
+        ino: u64,
+        symlink_mtime: Option<SystemTime>,
+        symlink_ino: u64,
+    },
+    Missing(io::ErrorKind),
+}
+
+fn stat_metadata(meta: &std::fs::Metadata) -> (Option<SystemTime>, (i64, i64), u64, u64, u64) {
+    #[cfg(unix)]
+    let (ctime, dev, ino) = {
+        use std::os::unix::fs::MetadataExt;
+        ((meta.ctime(), meta.ctime_nsec()), meta.dev(), meta.ino())
+    };
+    #[cfg(not(unix))]
+    let (ctime, dev, ino) = ((0, 0), 0, 0);
+    (meta.modified().ok(), ctime, meta.len(), dev, ino)
+}
+
+fn stat_stamp(path: &Path, include_symlink: bool) -> StatStamp {
+    match std::fs::metadata(path) {
+        Ok(meta) => {
+            let (mtime, ctime, size, dev, ino) = stat_metadata(&meta);
+            let (symlink_mtime, symlink_ino) = if include_symlink {
+                std::fs::symlink_metadata(path)
+                    .map(|s| {
+                        let (sm, _, _, _, si) = stat_metadata(&s);
+                        (sm, si)
+                    })
+                    .unwrap_or((None, 0))
+            } else {
+                (None, 0)
+            };
+            StatStamp::Present {
+                mtime,
+                ctime,
+                size,
+                dev,
+                ino,
+                symlink_mtime,
+                symlink_ino,
+            }
+        }
+        Err(err) => StatStamp::Missing(err.kind()),
+    }
+}
+
 impl Fact {
+    fn stat_stamp(&self) -> Option<StatStamp> {
+        match self {
+            Self::File(path) | Self::Bytes(path, _) | Self::Directory(path) => {
+                Some(stat_stamp(path, false))
+            }
+            Self::Metadata(path) => Some(stat_stamp(path, true)),
+            _ => None,
+        }
+    }
+
     fn source(&self) -> Source {
         match self {
             Self::Git(..) | Self::CheckoutFiles(..) => Source::Git,
@@ -194,18 +254,20 @@ const TURN_HINTED: Duration = Duration::from_secs(1);
 #[derive(Debug)]
 struct Entry {
     answer: Option<Answer>,
+    stat: Option<StatStamp>,
     revision: u64,
     checked: SystemTime,
     used: SystemTime,
 }
 
 impl Entry {
-    fn update(&mut self, answer: Answer) -> bool {
+    fn update(&mut self, answer: Answer, stat: Option<StatStamp>) -> bool {
         let changed = self.answer.as_ref() != Some(&answer);
         if changed {
             self.answer = Some(answer);
             self.revision += 1;
         }
+        self.stat = stat;
         self.checked = SystemTime::now();
         changed
     }
@@ -267,6 +329,32 @@ impl Dependencies {
             .any(|(entry, revision)| entry.lock().expect("observed fact").revision != *revision)
             || observed.derived.values().any(Dependencies::changed)
     }
+
+    /// Check whether any observed fact moved, validating stat-guarded file,
+    /// bytes, directory, and metadata dependencies inline (~3–5 µs) so unheld
+    /// derived values notice external writes immediately.
+    fn changed_or_stat_stale(&self) -> bool {
+        let observed = self.0.lock().expect("observed dependencies");
+        for (fact, (entry, revision)) in &observed.facts {
+            let mut guard = entry.lock().expect("observed fact");
+            if guard.revision != *revision {
+                return true;
+            }
+            if let Some(current_stat) = fact.stat_stamp() {
+                if guard.stat.as_ref() != Some(&current_stat) {
+                    let answer = fact.observe();
+                    let changed = guard.update(answer, Some(current_stat));
+                    if changed || guard.revision != *revision {
+                        return true;
+                    }
+                }
+            }
+        }
+        observed
+            .derived
+            .values()
+            .any(Dependencies::changed_or_stat_stale)
+    }
 }
 
 /// One derived value, locked while it is computed so concurrent readings
@@ -288,24 +376,21 @@ pub struct Cache {
     computations: Mutex<Vec<Derived>>,
 }
 
-static SHARED: LazyLock<Mutex<Weak<Cache>>> = LazyLock::new(Mutex::default);
+static PROCESS_CACHE: LazyLock<Arc<Cache>> = LazyLock::new(|| Arc::new(Cache::default()));
+static REFRESH_STARTED: AtomicBool = AtomicBool::new(false);
 
 impl Cache {
     pub fn shared() -> Arc<Self> {
-        let mut shared = SHARED.lock().expect("observation cache");
-        if let Some(cache) = shared.upgrade() {
-            return cache;
-        }
-        let cache = Arc::new(Self::default());
-        *shared = Arc::downgrade(&cache);
-        // Slow GitHub requests cannot postpone local files or process exits.
-        for source in [Source::Local, Source::Git, Source::Github] {
-            let weak = Arc::downgrade(&cache);
-            std::thread::spawn(move || loop {
-                std::thread::sleep(Duration::from_millis(250));
-                let Some(cache) = weak.upgrade() else { break };
-                cache.refresh(source);
-            });
+        let cache = PROCESS_CACHE.clone();
+        if !REFRESH_STARTED.swap(true, Ordering::AcqRel) {
+            // Slow GitHub requests cannot postpone local files or process exits.
+            for source in [Source::Local, Source::Git, Source::Github] {
+                let cache = cache.clone();
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(Duration::from_millis(250));
+                    cache.refresh(source);
+                });
+            }
         }
         cache
     }
@@ -347,18 +432,26 @@ impl Cache {
                 .collect::<Vec<_>>()
         };
         for (fact, entry) in entries {
-            let Some(checked) = entry.try_lock().ok().and_then(|entry| {
+            let Some((checked, prior_stat)) = entry.try_lock().ok().and_then(|entry| {
                 (entry.answer.is_some()
                     && entry.checked.elapsed().unwrap_or_default() >= fact.interval())
-                .then_some(entry.checked)
+                .then(|| (entry.checked, entry.stat.clone()))
             }) else {
                 continue;
             };
+            let current_stat = fact.stat_stamp();
+            if current_stat.is_some() && current_stat == prior_stat {
+                let mut entry = entry.lock().expect("observed fact");
+                if entry.checked == checked {
+                    entry.checked = SystemTime::now();
+                }
+                continue;
+            }
             let answer = fact.observe();
             let mut entry = entry.lock().expect("observed fact");
             // A write can publish a newer observation while this poll is in flight.
             if entry.checked == checked {
-                entry.update(answer);
+                entry.update(answer, current_stat);
             }
         }
     }
@@ -406,6 +499,7 @@ impl Cache {
                 Fact::RawConversations,
                 Arc::new(Mutex::new(Entry {
                     answer: Some(Answer::Raw(raw)),
+                    stat: None,
                     revision: 0,
                     checked: SystemTime::now(),
                     used: SystemTime::now(),
@@ -436,6 +530,7 @@ impl Cache {
             .or_insert_with(|| {
                 Arc::new(Mutex::new(Entry {
                     answer: None,
+                    stat: None,
                     revision: 0,
                     checked: SystemTime::now(),
                     used: SystemTime::now(),
@@ -447,11 +542,13 @@ impl Cache {
             || (matches!(fact, Fact::CheckoutFiles(_))
                 && observed.checked.elapsed().unwrap_or_default() >= fact.interval())
         {
+            let stat = fact.stat_stamp();
             let answer = fact.observe();
             if observed.answer.as_ref() != Some(&answer) {
                 observed.answer = Some(answer);
                 observed.revision += 1;
             }
+            observed.stat = stat;
             observed.checked = SystemTime::now();
         }
         observed.used = SystemTime::now();
@@ -543,8 +640,7 @@ fn scope<T>(reading: Option<Reading>, read: impl FnOnce() -> T) -> T {
 
 /// Publish a file change to existing served reads before returning to the writer.
 pub(crate) fn invalidate_path(path: &Path) {
-    let cache = SHARED.lock().expect("observation cache").upgrade();
-    let Some(cache) = cache else { return };
+    let cache = &*PROCESS_CACHE;
     let path = absolute(path);
     let facts = [
         Some(Fact::File(path.clone())),
@@ -561,8 +657,9 @@ pub(crate) fn invalidate_path(path: &Path) {
             .get(&fact)
             .cloned();
         if let Some(entry) = entry {
+            let stat = fact.stat_stamp();
             let mut entry = entry.lock().expect("observed fact");
-            changed |= entry.update(fact.observe());
+            changed |= entry.update(fact.observe(), stat);
         }
     }
     if changed {
@@ -583,6 +680,7 @@ pub(crate) fn preview_files<T>(files: &BTreeMap<PathBuf, String>, read: impl FnO
             Fact::File(absolute(path)),
             Arc::new(Mutex::new(Entry {
                 answer: Some(Answer::File(Ok(text.clone()))),
+                stat: None,
                 revision: 0,
                 used: SystemTime::now(),
                 checked: SystemTime::now(),
@@ -608,8 +706,10 @@ pub fn inherit<T>(read: impl FnOnce() -> T) -> impl FnOnce() -> T {
     loopflow_storage::instrumentation::inherit(move || scope(reading, read))
 }
 
-/// `compute`'s result, shared by served readings until a fact it observed
-/// changes. With no reading active it is computed inline and nothing is kept.
+/// `compute`'s result, shared across the process until a fact it observed
+/// changes. Works both inside a served `READING` and in background loops or
+/// bare commands (validating file/directory/metadata dependencies inline via
+/// `stat` so external edits are seen immediately).
 ///
 /// `compute` reads observed facts and `key`, nothing else: an input from the
 /// environment, a thread-local or the store that is missing from `key` leaves
@@ -619,11 +719,12 @@ pub fn inherit<T>(read: impl FnOnce() -> T) -> impl FnOnce() -> T {
 ///
 /// When two computations of different types share one `key`.
 pub fn derived<T: Send + Sync + 'static>(key: Derived, compute: impl FnOnce() -> T) -> Arc<T> {
-    let Some(reading) = READING.with(|reading| reading.borrow().clone()) else {
-        return Arc::new(compute());
+    let reading = READING.with(|reading| reading.borrow().clone());
+    let cache = match &reading {
+        Some(reading) => reading.cache.clone(),
+        None => PROCESS_CACHE.clone(),
     };
-    let slot = reading
-        .cache
+    let slot = cache
         .derived
         .lock()
         .expect("derived values")
@@ -635,20 +736,27 @@ pub fn derived<T: Send + Sync + 'static>(key: Derived, compute: impl FnOnce() ->
         slot.clear_poison();
         poisoned.into_inner()
     });
-    if computed
-        .as_ref()
-        .is_none_or(|computed| computed.dependencies.changed())
-    {
+    let stale = match computed.as_ref() {
+        None => true,
+        Some(computed) => {
+            if reading.is_some() {
+                computed.dependencies.changed()
+            } else {
+                computed.dependencies.changed_or_stat_stale()
+            }
+        }
+    };
+    if stale {
         let dependencies = Dependencies::default();
         let value = scope(
             Some(Reading {
-                cache: reading.cache.clone(),
+                cache: cache.clone(),
                 dependencies: dependencies.clone(),
             }),
             compute,
         );
         #[cfg(test)]
-        reading.cache.computations.lock().unwrap().push(key.clone());
+        cache.computations.lock().unwrap().push(key.clone());
         *computed = Some(Computed {
             value: Arc::new(value),
             dependencies,
@@ -659,14 +767,16 @@ pub fn derived<T: Send + Sync + 'static>(key: Derived, compute: impl FnOnce() ->
     computed.used = SystemTime::now();
     // Keep the first dependencies so a value computed again during the
     // reading stays visible as a change.
-    reading
-        .dependencies
-        .0
-        .lock()
-        .expect("observed dependencies")
-        .derived
-        .entry(key)
-        .or_insert_with(|| computed.dependencies.clone());
+    if let Some(reading) = reading {
+        reading
+            .dependencies
+            .0
+            .lock()
+            .expect("observed dependencies")
+            .derived
+            .entry(key)
+            .or_insert_with(|| computed.dependencies.clone());
+    }
     computed
         .value
         .clone()
@@ -1342,5 +1452,52 @@ mod tests {
         assert!(after.1.members.is_empty());
         assert!(after.1.unavailable.is_empty(), "proven death is known");
         assert_eq!(store.revisions().unwrap(), revision);
+    }
+
+    #[test]
+    fn unheld_derived_caches_without_reading_and_sees_external_edit_immediately() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _guard = crate::config::environment::EnvVarGuard::set(
+            "LF_HOME",
+            home.path().to_str().unwrap(),
+        );
+        let config_path = home.path().join("config.yaml");
+        std::fs::write(&config_path, "agent: claude\n").unwrap();
+
+        let outside = crate::config::settings::outside().unwrap();
+        let key = Derived::GlobalSettings { outside };
+        let before_count = super::PROCESS_CACHE.computations(|k| k == &key);
+
+        let first = derived(key.clone(), || {
+            read_to_string(&config_path).unwrap_or_default()
+        });
+        assert_eq!(first.as_str(), "agent: claude\n");
+        assert_eq!(
+            super::PROCESS_CACHE.computations(|k| k == &key),
+            before_count + 1
+        );
+
+        // Second call without a READING reuses the cached Arc without recomputing.
+        let second = derived(key.clone(), || {
+            read_to_string(&config_path).unwrap_or_default()
+        });
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(
+            super::PROCESS_CACHE.computations(|k| k == &key),
+            before_count + 1
+        );
+
+        // An external write 1 ms later is detected immediately via inline stat.
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        std::fs::write(&config_path, "agent: codex\n").unwrap();
+        let third = derived(key.clone(), || {
+            read_to_string(&config_path).unwrap_or_default()
+        });
+        assert_eq!(third.as_str(), "agent: codex\n");
+        assert_eq!(
+            super::PROCESS_CACHE.computations(|k| k == &key),
+            before_count + 2
+        );
     }
 }

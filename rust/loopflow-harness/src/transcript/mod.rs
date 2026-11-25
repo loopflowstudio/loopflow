@@ -140,8 +140,59 @@ impl Source {
 }
 
 /// Where each conversation's transcript was found; a transcript never moves,
-/// though its provider may delete it.
-static FOUND: LazyLock<Mutex<HashMap<(String, PathBuf), PathBuf>>> = LazyLock::new(Mutex::default);
+/// though its provider may delete it. `None` records a miss under a watched
+/// transcript root until the watcher reports a create under that home.
+static FOUND: LazyLock<Mutex<HashMap<(String, PathBuf), Option<PathBuf>>>> =
+    LazyLock::new(Mutex::default);
+static WATCHED_ROOTS: LazyLock<Mutex<Vec<PathBuf>>> = LazyLock::new(Mutex::default);
+
+/// Register a transcript root that has a live filesystem watcher so misses
+/// under it can be cached until a file is created there.
+pub fn register_watched_root(root: PathBuf) {
+    let mut roots = WATCHED_ROOTS.lock().expect("watched transcript roots");
+    if !roots.contains(&root) {
+        roots.push(root.clone());
+    }
+    if let Ok(canonical) = root.canonicalize() {
+        if !roots.contains(&canonical) {
+            roots.push(canonical);
+        }
+    }
+}
+
+/// Clear cached transcript misses under `path` (or all misses when `None`, e.g.
+/// on watcher rescan/overflow).
+pub fn invalidate_misses(path: Option<&Path>) {
+    let mut found = FOUND.lock().expect("transcript locations");
+    match path {
+        None => found.retain(|_, v| v.is_some()),
+        Some(changed) => found.retain(|(_, home), v| {
+            if v.is_some() {
+                return true;
+            }
+            let home_canonical = home.canonicalize().ok();
+            let matches_home = changed.starts_with(home)
+                || home_canonical
+                    .as_deref()
+                    .is_some_and(|canon| changed.starts_with(canon));
+            !matches_home
+        }),
+    }
+}
+
+fn is_root_watched(root: &Path) -> bool {
+    let roots = WATCHED_ROOTS.lock().expect("watched transcript roots");
+    if roots.is_empty() {
+        return false;
+    }
+    let canonical = root.canonicalize().ok();
+    roots.iter().any(|watched| {
+        root.starts_with(watched)
+            || canonical
+                .as_deref()
+                .is_some_and(|canon| canon.starts_with(watched))
+    })
+}
 
 /// Conversation `id`'s transcript in `home`, which ran in `cwd`. Claude's is
 /// tried where its directory puts it before the home is walked.
@@ -152,19 +203,32 @@ pub fn find(harness: HarnessKind, home: &Path, id: &str, cwd: &Path) -> Option<P
         .expect("transcript locations")
         .get(&key)
         .cloned();
-    if let Some(path) = known.filter(|path| path.is_file()) {
-        return Some(path);
+    match known {
+        Some(Some(path)) if path.is_file() => return Some(path),
+        Some(None) => return None,
+        _ => {}
     }
     let direct = harness
         .harness()
         .direct_transcript(home, cwd, id)
         .filter(|path| path.is_file());
-    let path = direct.or_else(|| transcript(harness, home, id))?;
-    FOUND
-        .lock()
-        .expect("transcript locations")
-        .insert(key, path.clone());
-    Some(path)
+    let found = direct.or_else(|| transcript(harness, home, id));
+    match found {
+        Some(path) => {
+            FOUND
+                .lock()
+                .expect("transcript locations")
+                .insert(key, Some(path.clone()));
+            Some(path)
+        }
+        None => {
+            let (root, _) = transcript_root(harness, home);
+            if is_root_watched(&root) {
+                FOUND.lock().expect("transcript locations").insert(key, None);
+            }
+            None
+        }
+    }
 }
 
 /// Every turn of a transcript, oldest first.
@@ -780,5 +844,28 @@ mod tests {
         assert_eq!(set.after(0), Some(90 * 86_400));
         assert!(set.describe().contains("settings.json"));
         assert_eq!(ExpiryPolicy::read(HarnessKind::Codex, None).after(0), None);
+    }
+
+    #[test]
+    fn misses_under_watched_root_cache_until_invalidated() {
+        let home = tempfile::tempdir().unwrap();
+        let day = home.path().join("sessions/2026/10/02");
+        fs::create_dir_all(&day).unwrap();
+        register_watched_root(home.path().join("sessions"));
+
+        let id = "11111111-2222-3333-4444-555555555555";
+        assert!(find(HarnessKind::Codex, home.path(), id, Path::new("/work")).is_none());
+
+        // Creating the file without invalidation stays cached as a miss.
+        let transcript_path = day.join(format!("rollout-2026-10-02T10-00-00-{id}.jsonl"));
+        fs::write(&transcript_path, "{}\n").unwrap();
+        assert!(find(HarnessKind::Codex, home.path(), id, Path::new("/work")).is_none());
+
+        // Watcher reporting a create under that home clears the miss so it is found.
+        invalidate_misses(Some(&transcript_path));
+        assert_eq!(
+            find(HarnessKind::Codex, home.path(), id, Path::new("/work")),
+            Some(transcript_path)
+        );
     }
 }

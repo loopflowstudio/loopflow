@@ -166,8 +166,28 @@ pub fn default_agent() -> Option<&'static str> {
     #[cfg(test)]
     let is_installed = |agent: HarnessKind| agent == HarnessKind::Codex;
     #[cfg(not(test))]
-    let is_installed = |kind: HarnessKind| crate::harness::launcher(kind).installed();
+    let is_installed = |kind: HarnessKind| cached_harness_installed(kind);
     installed_agent(is_installed)
+}
+
+#[cfg(not(test))]
+fn cached_harness_installed(kind: HarnessKind) -> bool {
+    use std::collections::HashMap;
+    use std::ffi::OsString;
+    use std::sync::{LazyLock, Mutex};
+
+    static CACHE: LazyLock<Mutex<HashMap<(Option<OsString>, HarnessKind), bool>>> =
+        LazyLock::new(Mutex::default);
+    let key = (std::env::var_os("PATH"), kind);
+    if let Some(&installed) = CACHE.lock().expect("harness PATH cache").get(&key) {
+        return installed;
+    }
+    let installed = crate::harness::launcher(kind).installed();
+    CACHE
+        .lock()
+        .expect("harness PATH cache")
+        .insert(key, installed);
+    installed
 }
 
 fn installed_agent(is_installed: impl Fn(HarnessKind) -> bool) -> Option<&'static str> {

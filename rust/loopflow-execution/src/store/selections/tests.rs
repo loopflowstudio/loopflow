@@ -387,6 +387,11 @@ fn sidebar_step_follows_the_captured_cursor_and_disappears_without_a_graph() {
 #[test]
 fn repository_and_wave_tiles_open_only_the_unfinished_primary() {
     let (_dir, store, repo) = fixture();
+    // A tile's resume argv names an `lf`; pin it rather than find the Machine's install.
+    let _lock = crate::journal::test_env_lock();
+    let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+    std::env::set_var("LF_HOME", _dir.path());
+    std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
     let session = store.test_session("conversation", &crate::session_record::new_artifact_key());
     let db = || store.conn.lock().unwrap();
     db().execute(

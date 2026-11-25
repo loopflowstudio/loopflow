@@ -564,10 +564,10 @@ step processes, with no separate record or process.
 
 Every Graph started for a Task, by naming it or in its checkout, is equally that
 Task's work; none is selected or privileged. Taskless and Task execution share the
-Graph runner. `lf graph` runs an `interactive:` step in place, with the person at a
-terminal, else headless. Each `task run` starts a fresh Graph as a child Graph process
+Graph runner. `lf graph` runs workers headless and prompts at `- break` when a
+terminal is attached. Each `task run` starts a fresh Graph as a child Graph process
 (hidden `lf --task ISSUE graph run`), and a fresh one again when that Graph process
-fails; it stops before the next interactive step (`GraphOutcome::Staged`). Finishing
+fails; it parks at the next breakpoint (`GraphOutcome::StoppedAt`). Finishing
 retains history and chooses no successor; Graph completion alone does not
 complete Task Work.
 
@@ -577,7 +577,8 @@ A Task takes up [one graph](../orchestration.md#where-a-person-takes-part) and s
 at a step of it. On its first `lf task run`, a Task takes up the graph named on
 `lf task run ISSUE GRAPH`, else its Wave's default, repository `graph:`, then
 builtin `code`. `task_graphs` holds one row per Task: the graph as it was then,
-never edited, and `step`: `start`, `end`, or the interactive step it waits at.
+never edited, `step` (`start`, `end`, a breakpoint, or a landing wait), and
+`breakpoint` (the parked arrival ID and saved cursor).
 A later edit to the YAML applies to Tasks that take it up afterwards; taking one
 up again replaces the row and starts over at `start`.
 
@@ -588,11 +589,12 @@ it still runs is read from the Process, never stored. `lf task run` writes
 cursor of the next one (loop counts, iterate direction, pending verdict and route
 included), so a failed attempt and the next `lf task run` start at the step that
 failed and the steps before it never rerun. The child Graph process writes where
-it left the Task: before the interactive step it stopped at, or `end`. With no
-run, `lf task run` continues after the step the Task waits at; `--from STEP` (a
-step id, skill or composed graph name) starts anywhere, and starting from an
-interactive step only puts the Task there. `-b task run` runs
-straight through headless, and `lf task auto on` turns auto on and runs it. Other Graphs in
+it left the Task: parked at a breakpoint (with a review steer queued for the
+Task's primary conversation), waiting before landing, or at `end`. With no
+run, `lf task run` continues past the breakpoint (accepting the worker's proposal,
+or carrying `--at-arrival`, `--decision`, and `--reason`); `--from STEP` (a
+step id, skill, breakpoint, or composed graph name) starts anywhere. `-b task run`
+continues through breakpoints for that run, and `lf task auto on` turns auto on and runs it. Other Graphs in
 the checkout never move the Task. Graph processes and Task events keep the
 history; there is no move log.
 
@@ -603,7 +605,7 @@ attempts settlement. Failed settlement retains end and its reason; retry only
 `task complete`, never the successful run. PR delivery requires verified merge; PR-less completion retains useful artifacts.
 Accepted Linear completion or reopening updates status without moving the graph
 or terminating Processes. Reopening supersedes old requests. Ordinary reads do
-not execute completion. Task state is derived: `active` at an interactive step
+not execute completion. Task state is derived: `active` when parked at a breakpoint
 with nothing running, `moving` while a run carries it, whatever its auto
 setting; abandonment is its own mark.
 An unfinished Graph or step in the Task's work also makes it `moving`,
@@ -693,8 +695,8 @@ process and effect receipts, then launch fresh work. Observation does not replay
 work or consume a surviving child's result.
 
 `task run` takes up the Task's captured graph and starts a fresh Graph process
-from its saved position. It returns after registration; `-b` waits and runs
-interactive steps headless. Ordinary runs stop at the next interactive step for
+from its saved position. It returns after registration; `-b` waits and passes
+breakpoints on the worker's proposed path. Ordinary runs park at the next breakpoint for
 the Task conversation. A direct `lf --task ISSUE graph GRAPH` uses the same runner
 but does not move the Task's position. `--reason` publishes direction first.
 Inspect live and unfinished processes before launching more work.
@@ -703,7 +705,7 @@ Task status and `plan list` separate the Task's graph position from `execution`,
 which describes its latest Graph as `idle`, `starting`, `running`, `stalled`,
 `blocked` or `unknown`. `run_control` describes the available action; recorded
 history alone is not permission to start a competing Graph. See
-[interactive steps and Task states](../orchestration.md#where-a-person-takes-part).
+[breakpoints and Task states](../orchestration.md#where-a-person-takes-part).
 
 Automatic provider retries within one Process retain earlier failure and usage and
 select only an authorized successor. An uncertain mechanical effect requires

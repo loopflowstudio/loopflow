@@ -434,7 +434,7 @@ move ends.
 
 Auto travels with the move, as the Graph position does: it is one setting
 on the Task (on or off, who, when), carried whether or not the Task has run. The continued run is a plain
-`lf task run`; with auto on it stands in at interactive steps on mini, as
+`lf task run`; with auto on it continues through breakpoints on mini, as
 it would have on the laptop. `lf task auto off MTG-321` turns it off on either
 Machine. A Machine ships only Tasks it owns: once a Task has
 left, its old checkout starts nothing.

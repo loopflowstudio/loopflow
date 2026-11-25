@@ -219,8 +219,8 @@ struct DTOFixtureTests {
     @Test func taskRunExplanationsPreserveActionsAndMissingEvidence() throws {
         let data = try loadFixtureData("task_run_explanations.json")
         let reports = try JSONDecoder().decode([TaskRunExplanation].self, from: data)
-        #expect(reports[0].action == .run(graph: "feature", takeUp: true, from: "start", stopsAt: "explore"))
-        #expect(reports[1].action == .wait(graph: "feature", takeUp: false, step: "demo"))
+        #expect(reports[0].action == .run(graph: "feature", takeUp: true, from: "start", stopsAt: "after-explore"))
+        #expect(reports[1].action == .run(graph: "feature", takeUp: false, from: "demo", stopsAt: "after-demo"))
         #expect(reports[2].action == .end(graph: "proof", takeUp: false))
         #expect(reports[3].action == nil)
         #expect(try JSONDecoder().decode([TaskRunExplanation].self, from: JSONEncoder().encode(reports)) == reports)

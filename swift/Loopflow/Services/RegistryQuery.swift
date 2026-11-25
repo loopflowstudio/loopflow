@@ -1051,9 +1051,8 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(Launched.self, from: await write(.skillRun(directory: checkout, name: name, message: nil, agent: nil))).log
     }
 
-    /// Run the Task's graph until its next interactive step; returns once it
-    /// runs. `graph` takes up another graph; `from` starts at that step instead,
-    /// and an interactive `from` only puts the Task there.
+    /// Run the Task's graph until its next breakpoint; returns once it
+    /// runs. `graph` takes up another graph; `from` starts at that step instead.
     public func runTask(issue: String, graph: String?, from: String? = nil, cwd: String?) async throws {
         _ = try await write(.taskRun(directory: cwd ?? "/", issue: issue, graph: graph, from: from, agent: nil, approve: false, atArrival: nil, decision: nil, reason: nil))
     }

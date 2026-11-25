@@ -2345,17 +2345,7 @@ async fn snapshot_task_detail(
             .map(|(step, raw)| {
                 let arrival: loopflow_execution::store::task_work::BreakpointArrival =
                     serde_json::from_str(raw)?;
-                let blocked =
-                    arrival
-                        .cursor
-                        .leaf()
-                        .progress
-                        .verdict
-                        .as_ref()
-                        .is_some_and(|verdict| {
-                            verdict.decision
-                                == loopflow_execution::graph::transitions::GraphDecision::Blocked
-                        });
+                let blocked = arrival.blocked_reason().is_some();
                 let sentence = loopflow_execution::task_graph::breakpoint_sentence(step, &arrival);
                 Ok::<_, serde_json::Error>((blocked, sentence))
             })

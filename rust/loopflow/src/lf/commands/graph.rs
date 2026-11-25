@@ -622,7 +622,8 @@ fn execute(
         drop(admission);
         let outcome = drive(&running, start).await?;
         if let (Some(carrier), Some(task)) = (task_run, &running.task) {
-            let step = match (&outcome, running.current()) {
+            let current = running.current();
+            let step = match (&outcome, current) {
                 (GraphOutcome::Completed, _) => Some(loopflow_execution::task_graph::END),
                 (GraphOutcome::StoppedAt(step), _) => Some(step.as_str()),
                 (GraphOutcome::Blocked(_), Some(ConcreteStep::Breakpoint(stop))) => {
@@ -631,7 +632,7 @@ fn execute(
                 _ => None,
             };
             if let Some(step) = step {
-                let review = if matches!(running.current(), Some(ConcreteStep::Breakpoint(_))) {
+                let review = if matches!(current, Some(ConcreteStep::Breakpoint(_))) {
                     let cursor = running
                         .position
                         .lock()
@@ -1361,19 +1362,12 @@ impl SkillExecutor for &RunningGraph<'_> {
         if self.launcher.batch {
             return Ok(true);
         }
-        let task = self.task.as_ref().filter(|_| self.task_run.is_some());
-        if let Some(task) = task {
-            if self
+        if let Some(task) = self.task.as_ref().filter(|_| self.task_run.is_some()) {
+            return Ok(self
                 .store
                 .sqlite
                 .task_auto(task)?
-                .is_some_and(|mark| mark.state == AutoState::On)
-            {
-                return Ok(true);
-            }
-        }
-        if task.is_some() {
-            return Ok(false);
+                .is_some_and(|mark| mark.state == AutoState::On));
         }
         eprintln!("{}", self.breakpoint_review(&stop.name, cursor)?);
         if !std::io::stdin().is_terminal() {

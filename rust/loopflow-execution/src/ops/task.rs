@@ -975,6 +975,10 @@ pub fn select_task_run(
         return Err(task_error(execution.reason));
     }
     let step = row.as_ref().map_or(START, |row| row.step.as_str());
+    let reason = options
+        .reason
+        .as_deref()
+        .filter(|text| !text.trim().is_empty());
     let mut start = match (from, row.as_ref().and_then(|row| row.run.as_ref()), parked) {
         (Some(name), _, _) => Some(
             graph
@@ -1008,8 +1012,8 @@ pub fn select_task_run(
                 let verdict = cursor.leaf_mut().progress.verdict.as_mut()
                     .ok_or_else(|| task_error("this breakpoint has no loop decision"))?;
                 verdict.decision = decision;
-                if let Some(reason) = options.reason.as_ref().filter(|text| !text.trim().is_empty()) {
-                    verdict.summary.clone_from(reason);
+                if let Some(reason) = reason {
+                    verdict.summary = reason.to_owned();
                 }
             }
             cursor.finish(&graph.steps).map_err(task_error)?;
@@ -1032,10 +1036,8 @@ pub fn select_task_run(
             Some(place.into())
         }
     };
-    if let (Some(_), Some(start), Some(reason)) = (parked, &mut start, &options.reason) {
-        if !reason.trim().is_empty() {
-            start.cursor.leaf_mut().progress.direction = Some(reason.clone());
-        }
+    if let (Some(_), Some(start), Some(reason)) = (parked, &mut start, reason) {
+        start.cursor.leaf_mut().progress.direction = Some(reason.to_owned());
     }
     Ok(TaskRunSelection {
         previous: row,
@@ -1164,6 +1166,14 @@ async fn try_start_task_run(
         }
     };
     let arrival = row.breakpoint.as_ref().map(|stop| &stop.id);
+    let lost_claim = || -> OpsResult<Option<TaskRunStart>> {
+        if arrival.is_some() && (!auto_on || options.at_arrival.is_some()) {
+            return Err(task_error(format!(
+                "Task {issue} already continued from this breakpoint"
+            )));
+        }
+        Ok(None)
+    };
     let Some(start) = start else {
         let ended = match &row.run {
             Some((_, carrier)) => {
@@ -1174,15 +1184,10 @@ async fn try_start_task_run(
             None => store.sqlite.end_task_graph(&task.id, arrival),
         }
         .map_err(task_error)?;
-        if ended {
-            settle_pending_completion(store, task).await?;
-        } else if arrival.is_some() && (!auto_on || options.at_arrival.is_some()) {
-            return Err(task_error(format!(
-                "Task {issue} already continued from this breakpoint"
-            )));
-        } else {
-            return Ok(None);
+        if !ended {
+            return lost_claim();
         }
+        settle_pending_completion(store, task).await?;
         return Ok(Some(TaskRunStart::Ended));
     };
     let label = if start.place == crate::task_graph::Place::default() {
@@ -1200,12 +1205,7 @@ async fn try_start_task_run(
     )
     .map_err(task_error)?
     {
-        if arrival.is_some() && (!auto_on || options.at_arrival.is_some()) {
-            return Err(task_error(format!(
-                "Task {issue} already continued from this breakpoint"
-            )));
-        }
-        return Ok(None);
+        return lost_claim();
     }
     Ok(Some(TaskRunStart::Run {
         step: label,

@@ -115,7 +115,7 @@ Task Graph run and its previews (`task_graph_launch_tests` in the library,
 
 | Test | Wiring it proves |
 |---|---|
-| `a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named` | `task run` captures the Wave's Graph and stops the Task at its interactive step; a later bare run keeps the Graph a Task named |
+| `a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named` | `task run` captures the Wave's Graph and parks the Task at its breakpoint; a later bare run keeps the Graph a Task named |
 | `auto_on_runs_workers_through_their_breakpoints` | `-b --task … task auto on --reason` runs the workers through each breakpoint, reaches `end` and completes the Task |
 | `task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state` | `task run --explain` flags reach the preview; named, checkout and `--task` selections agree, conflicting ones refuse; the store's bytes don't change; launch refuses with the preview's reason |
 | `task_run_explain_reads_unstarted_work_without_preparing_it` | `LF_AS` reaches context resolution; previewing an unstarted Task leaves it without a checkout |

@@ -84,20 +84,18 @@ public struct ContextExplanation: Codable, Equatable, Sendable {
     }
 }
 
-/// What `lf task run` would do: run `graph` from `from` until the interactive
-/// step `stopsAt` (or to the end), put the Task at the interactive step `step`
-/// running nothing, or reach `end` when nothing remains.
+/// What `lf task run` would do: run `graph` from `from` until the breakpoint
+/// `stopsAt` (or to the end), or reach `end` when nothing remains.
 public enum TaskRunAction: Codable, Equatable, Sendable {
     case run(graph: String, takeUp: Bool, from: String, stopsAt: String?)
-    case wait(graph: String, takeUp: Bool, step: String)
     case end(graph: String, takeUp: Bool)
 
     private enum CodingKeys: String, CodingKey {
-        case kind, graph, from, step
+        case kind, graph, from
         case takeUp = "take_up"
         case stopsAt = "stops_at"
     }
-    private enum Kind: String, Codable { case run, wait, end }
+    private enum Kind: String, Codable { case run, end }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -108,8 +106,6 @@ public enum TaskRunAction: Codable, Equatable, Sendable {
             self = .run(graph: graph, takeUp: takeUp,
                         from: try values.decode(String.self, forKey: .from),
                         stopsAt: try values.decode(String?.self, forKey: .stopsAt))
-        case .wait:
-            self = .wait(graph: graph, takeUp: takeUp, step: try values.decode(String.self, forKey: .step))
         case .end:
             self = .end(graph: graph, takeUp: takeUp)
         }
@@ -124,11 +120,6 @@ public enum TaskRunAction: Codable, Equatable, Sendable {
             try values.encode(takeUp, forKey: .takeUp)
             try values.encode(from, forKey: .from)
             try values.encode(stopsAt, forKey: .stopsAt)
-        case .wait(let graph, let takeUp, let step):
-            try values.encode(Kind.wait, forKey: .kind)
-            try values.encode(graph, forKey: .graph)
-            try values.encode(takeUp, forKey: .takeUp)
-            try values.encode(step, forKey: .step)
         case .end(let graph, let takeUp):
             try values.encode(Kind.end, forKey: .kind)
             try values.encode(graph, forKey: .graph)

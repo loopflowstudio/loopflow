@@ -202,13 +202,10 @@ impl CapturedGraph {
     pub fn next_breakpoint(&self, place: &Place) -> Option<&str> {
         fn scan(body: &[ConcreteStep], from: usize) -> Option<&str> {
             body[from..].iter().find_map(|step| match step {
-                ConcreteStep::Breakpoint(stop) => Some(stop.name.as_str()),
                 ConcreteStep::Xor(branch) => {
                     branch.paths.values().find_map(|path| scan(&path.steps, 0))
                 }
-                // A live released carrier still stops before its interactive worker.
-                ConcreteStep::Skill(skill) => skill.interactive_step(),
-                ConcreteStep::Command(_) => None,
+                step => stop_name(step),
             })
         }
         let mut path = place.path.clone();
@@ -294,18 +291,22 @@ fn interactive_steps(steps: &[ConcreteStep]) -> Vec<(Place, &ConcreteSkill)> {
     out
 }
 
+/// Breakpoint name for `step`, or the unconverted released interactive stop name (LOO-1100).
+fn stop_name(step: &ConcreteStep) -> Option<&str> {
+    match step {
+        ConcreteStep::Breakpoint(stop) => Some(stop.name.as_str()),
+        ConcreteStep::Skill(skill) => skill.interactive_step(),
+        _ => None,
+    }
+}
+
 /// Every breakpoint name in order (including composed Graphs and XOR paths),
 /// each once. Unconverted released captures still project their interactive
 /// skills as stops until claimed (LOO-1100).
 fn breakpoints(steps: &[ConcreteStep]) -> Vec<String> {
     let mut out = Vec::new();
     walk(steps, &[], &mut |_, step| {
-        let name = match step {
-            ConcreteStep::Breakpoint(stop) => Some(stop.name.as_str()),
-            ConcreteStep::Skill(skill) => skill.interactive_step(),
-            _ => None,
-        };
-        if let Some(name) = name.filter(|name| !out.iter().any(|seen| seen == name)) {
+        if let Some(name) = stop_name(step).filter(|name| !out.iter().any(|seen| seen == name)) {
             out.push(name.to_owned());
         }
     });
@@ -317,13 +318,10 @@ pub fn breakpoint_sentence(
     step: &str,
     stop: &crate::store::task_work::BreakpointArrival,
 ) -> String {
-    let mut sentence = format!("At breakpoint {step}.");
-    if let Some(verdict) = &stop.cursor.leaf().progress.verdict {
-        if verdict.decision == crate::graph::transitions::GraphDecision::Blocked {
-            sentence.push_str(&format!(" Blocked: {}", verdict.summary));
-        }
+    match stop.blocked_reason() {
+        Some(reason) => format!("At breakpoint {step}. Blocked: {reason}"),
+        None => format!("At breakpoint {step}."),
     }
-    sentence
 }
 
 /// The top-level steps as a person reads them, consecutive repeats collapsed,
@@ -343,8 +341,7 @@ fn workflow(steps: &[ConcreteStep]) -> (Vec<WorkflowStep>, Vec<u32>) {
         let name = sources.get(1).cloned().unwrap_or_else(|| step_name(step));
         let mut breakpoint = false;
         walk(std::slice::from_ref(step), &[], &mut |_, node| {
-            breakpoint |= matches!(node, ConcreteStep::Breakpoint(_))
-                || matches!(node, ConcreteStep::Skill(skill) if skill.interactive);
+            breakpoint |= stop_name(node).is_some();
         });
         match line.last_mut() {
             Some(last) if last.name == name => last.breakpoint |= breakpoint,
@@ -578,8 +575,8 @@ impl TaskGraph {
             return None;
         };
         let ends = step == START || step == END;
-        let stop = self.breakpoints.iter().any(|name| name == step);
-        (!ends && !stop).then(|| crate::ops::task::auto::landing_wait(step, off, issue))
+        (!ends && self.waiting_step().is_none())
+            .then(|| crate::ops::task::auto::landing_wait(step, off, issue))
     }
 }
 

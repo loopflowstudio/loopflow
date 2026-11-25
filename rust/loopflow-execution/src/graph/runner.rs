@@ -712,14 +712,11 @@ mod tests {
     #[tokio::test]
     async fn a_step_that_stops_leaves_everything_before_it_done() {
         let repo = fixture_repo().unwrap();
-        let mut design = skill("design");
-        design.interactive = true;
         let items = vec![
             step("plan", None),
-            ConcreteStep::Skill(design),
+            step("design", None),
             step("build", None),
         ];
-        // `lf graph`: the interactive step runs like any other.
         let executor = RecordingExecutor::new(repo.path().to_owned());
         let outcome = GraphRunner::new(executor.clone())
             .run(&items, 0)
@@ -727,7 +724,7 @@ mod tests {
             .unwrap();
         assert_eq!(outcome, GraphOutcome::Completed);
         assert_eq!(executor.calls(), ["plan", "design", "build"]);
-        // A Task run whose step stops there: the cursor stays on it.
+        // A step that stops the run (e.g. landing with auto off) leaves the cursor on it.
         let executor = RecordingExecutor::new(repo.path().to_owned())
             .with_outcomes("design", vec![SkillOutcome::StopsAt("design".into())]);
         let mut cursor = ExecutionCursor::default();

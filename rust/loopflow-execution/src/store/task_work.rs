@@ -257,6 +257,15 @@ pub struct BreakpointArrival {
     pub cursor: ExecutionCursor,
 }
 
+impl BreakpointArrival {
+    /// The blocker's summary when the worker's pending verdict at this breakpoint is `blocked`.
+    pub fn blocked_reason(&self) -> Option<&str> {
+        let verdict = self.cursor.leaf().progress.verdict.as_ref()?;
+        (verdict.decision == crate::graph::transitions::GraphDecision::Blocked)
+            .then_some(verdict.summary.as_str())
+    }
+}
+
 /// A Task's Graph as another Machine takes it up: the graph it took up, the
 /// step it stands at and the cursor its run sets out from again, if it is on
 /// one. The run's Process stays behind.

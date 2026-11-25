@@ -12,7 +12,7 @@ public struct WorkflowLine: View {
     /// Where the Task stands, or where you take part; nil in an unstarted
     /// Task's bar, whose pane says it.
     public let sentence: String?
-    /// The Task's auto setting is on: its run takes the interactive steps.
+    /// The Task's auto setting is on: its run continues through breakpoints.
     let auto: Bool
     let sentenceOnly: Bool
     @Environment(\.palette) private var palette

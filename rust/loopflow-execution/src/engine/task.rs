@@ -38,8 +38,6 @@ pub enum TaskRun {
         /// terminal (`-b`, `-i`) keeps it.
         log: Option<PathBuf>,
     },
-    /// Nothing runs: the Task now waits at this breakpoint.
-    Waiting { issue: String, step: String },
     /// Nothing remained: the Task is at `end`.
     Ended { issue: String },
 }
@@ -64,7 +62,6 @@ impl TaskRun {
                 log.display()
             )),
             Self::Running { log: None, .. } => None,
-            Self::Waiting { issue, step } => Some(format!("Task {issue} waits at {step}")),
             Self::Ended { issue } => Some(format!("Task {issue} reached the end of its graph")),
         }
     }
@@ -116,7 +113,7 @@ pub fn auto_on(directory: &Path, issue: &str, environment: &[(String, String)]) 
 }
 
 /// `task.auto.off`: turn the Task's auto setting off, as `lf task auto off
-/// <issue>` does. Nothing is killed: the run waits at its next interactive or
+/// <issue>` does. Nothing is killed: the run waits at its next breakpoint or
 /// merging step until `task.auto.on` turns auto on again.
 pub fn auto_off(issue: &str, reason: Option<&str>) -> Result<AutoOff> {
     let was_on = crate::ops::task::auto::off(issue, reason)
@@ -410,14 +407,16 @@ mod tests {
         assert_eq!(off.render(), "LOO-1: auto off");
         // A missing field is an error, never a default.
         assert!(serde_json::from_str::<TaskRun>(r#"{"state":"running","issue":"LOO-1"}"#).is_err());
-        let waiting = TaskRun::Waiting {
+        let ended = TaskRun::Ended {
             issue: "LOO-1".into(),
-            step: "demo".into(),
         };
         assert_eq!(
-            serde_json::to_value(&waiting).unwrap(),
-            serde_json::json!({"state": "waiting", "issue": "LOO-1", "step": "demo"})
+            serde_json::to_value(&ended).unwrap(),
+            serde_json::json!({"state": "ended", "issue": "LOO-1"})
         );
-        assert_eq!(waiting.render().unwrap(), "Task LOO-1 waits at demo");
+        assert_eq!(
+            ended.render().unwrap(),
+            "Task LOO-1 reached the end of its graph"
+        );
     }
 }

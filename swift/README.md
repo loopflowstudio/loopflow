@@ -409,9 +409,9 @@ part it is running in. The sentence is the one `lf task status` prints. In a
 narrow window the steps go and the sentence stays.
 
 When the Task can move, one button says how: **Start** before it has run,
-**Run** once its Graph has stopped. **Auto-Ship** turns the Task's auto setting
-on and runs it, as `lf task auto on` does: its run stands in at each
-interactive step and lands the PR. Turning it on raises the Notice "LOO-5
+**Continue** at a breakpoint, and **Run** once its Graph has stopped. **Auto-Ship** turns the Task's auto setting
+on and runs it, as `lf task auto on` does: its run continues through each
+breakpoint and lands the PR. Turning it on raises the Notice "LOO-5
 Auto-Ship requested · Undo"; Undo is Stop Auto-Ship (`lf task auto off`), and
 so is the button, which reads **Stop Auto-Ship** while auto is on. While auto is on,
 the sentence names auto instead of you, and the Task's board card and sidebar
@@ -752,7 +752,7 @@ When the selected Task's lifecycle becomes completed or abandoned, it stays
 visible with a green **Done** or red **Abandoned** header. Navigating away restores the ordinary
 sidebar filters. **Back** (⌘[) returns to the retained workspace and its sidebar
 row, preserving conversations, files and drafts without starting execution.
-**Start from…** in **…** lists `start` and the Task's interactive steps; picking
+**Start from…** in **…** lists `start` and the Task's breakpoints; picking
 one runs `lf task run ISSUE --from STEP` as a child of the app. **Complete** changes Task status independently: the row leaves the list in the
 click and the next Task opens. A refused completion brings the row back with a
 Notice saying why; completing again never replays the Graph.

@@ -422,7 +422,7 @@
       "type": "object"
     },
     "AutoState": {
-      "description": "Auto, a setting on the Task: whether its interactive steps run headless,\nstanding in for the person, and whether its landing may merge.",
+      "description": "Auto, a setting on the Task: whether its Graph runs through breakpoints\non the default path, and whether its landing may merge.",
       "oneOf": [
         {
           "const": "on",
@@ -14518,28 +14518,6 @@
         },
         {
           "additionalProperties": false,
-          "description": "Nothing runs: the Task now waits at this breakpoint.",
-          "properties": {
-            "issue": {
-              "type": "string"
-            },
-            "state": {
-              "const": "waiting",
-              "type": "string"
-            },
-            "step": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "state",
-            "issue",
-            "step"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
           "description": "Nothing remained: the Task is at `end`.",
           "properties": {
             "issue": {
@@ -14943,17 +14921,17 @@
         },
         {
           "const": "idle",
-          "description": "A checkout, no Graph running and not at an interactive step: before its first run,\nor after a stopped one.",
+          "description": "A checkout, no Graph running and not at a breakpoint: before its first run,\nor after a stopped one.",
           "type": "string"
         },
         {
           "const": "active",
-          "description": "Between Graphs at an interactive step, in a conversation in its Task Session.",
+          "description": "Parked at a breakpoint, its Task conversation presenting what the preceding step produced.",
           "type": "string"
         },
         {
           "const": "moving",
-          "description": "A Graph runs for it. Its auto setting says whether the run stands in\nat interactive steps or stops there for a person.",
+          "description": "A Graph runs for it. Its auto setting says whether the run passes\nbreakpoints or stops there for a person.",
           "type": "string"
         },
         {

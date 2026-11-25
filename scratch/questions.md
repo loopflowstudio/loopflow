@@ -30,6 +30,16 @@ questions in `scratch/concept-review.html`.
   passes. If pass 3 or 4 slows the perf work, they split cleanly as stacked
   Tasks (lifetimes; job budget and file bounds).
 
+# Open from write-docs
+
+- **`machine.jobs` portability and `machine: <id>` shorthand:** `machine` is
+  currently `Placement` (`PersonalScoped`, `Merge`, `Portable`, accepting string
+  shorthand `machine: mini`). A core cap is about the Machine running the build,
+  not where work routes: should `machine.jobs` be host-local (not forwarded from
+  a laptop to a remote Machine/rental), and how should it coexist with `machine:
+  mini` shorthand in the same YAML file (expand shorthand on write, or move to a
+  separate host-local key)?
+
 # Resolved during concept review
 
 - **`Hosted::pass` `open_sqlite` site**: confirmed in source (`hosted.rs:572` →

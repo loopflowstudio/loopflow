@@ -341,7 +341,7 @@ Asana, Doppler and OpenCode. See [Native authentication](subscriptions.md).
 | `lf commit`, `lf sync [TASK\|BRANCH]`, `lf wt …` | Git operations with Task and stack awareness |
 | `lf machine …`, `lf pool …`, `lf ondemand …` | SSH machines, pools, and cloud rentals |
 | `lf machine login\|logins\|logout` | What each Machine is signed in to |
-| `lf server status`, `lf install` | Local client server and updates |
+| `lf server status`, `lf server diagnostics`, `lf install` | Local client server, runtime counters, and updates |
 
 Full flags: [`lf pr`](lf-reference.md#lf-pr), [`lf repo`](lf-reference.md#lf-repo),
 [`lf wt`](lf-reference.md#lf-wt), [`lf machine`](lf-reference.md#lf-machine).

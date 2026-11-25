@@ -531,3 +531,14 @@ then-current budgets.
 - `scratch/concept-review.html` — pre-implementation concept review written and reconciled into this plan.
 - `uv run python scripts/benchmarks/server_idle.py target/release/lf --seconds 60` — not run yet; implement runs it on base and branch.
 - `sample 77346 3` on the live server, 2026-11-25 — run at kickoff, results above.
+
+## User docs written before implementation
+
+- `docs/server.md` — `lf server diagnostics --json` example and field reference, plus custom `LF_HOME` detached server and holder lifetimes.
+- `docs/config.md` — `machine.jobs` setting and automatic Graph-step build job budget (`CARGO_BUILD_JOBS`, `NEXTEST_TEST_THREADS`, `MAKEFLAGS`, `LF_JOBS`, `nice 5`).
+- `docs/troubleshooting.md` — `lf server diagnostics --json`, automatic hourly log rotation and file retention, and custom `LF_HOME` auto-exit.
+- `docs/ops.md` — `lf server diagnostics` in the reference table.
+
+Open question surfaced while writing `docs/config.md`:
+
+- **`machine.jobs` vs `Placement` portability and string shorthand:** `machine` in `config/catalog.rs` is currently `Placement` (`PersonalScoped`, `Merge`, `Portable`) and accepts string shorthand (`machine: mini`) as well as `{tasks, session, capacity}`. Should `machine.jobs` be host-local (so a laptop's cap does not forward to a 64-core remote Machine or rental), and should `lf set --global machine.jobs 4` expand an existing `machine: mini` shorthand to `{tasks: mini, session: mini, jobs: 4}` or use a separate host-local key?

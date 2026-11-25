@@ -1035,7 +1035,7 @@ struct TaskFilesTests {
         files.comments.add(anchor: ["uno", "second"])
         #expect(files.comments.items.first?.anchor == ["uno", "second"])
         await document.reconcile(snapshot("above\nuno\nsecond\nthird", path: document.path))
-        #expect(files.comments.items.first?.selection.range == "L2-3")
+        #expect(files.comments.items.first?.selection?.range == "L2-3")
         await files.diffReview.loadReview()
         let file = try #require(files.diffReview.shownReview?.file(document.path))
         let diff = ReviewStream(store: files, reader: .changes, files: [file], split: false, addToConversation: nil)
@@ -2683,6 +2683,137 @@ struct TaskFilesTests {
         let view = TaskFilesView(store: store, checkoutBase: nil)
         _ = try view.inspect().find(text: "plan.md")
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "files-open")
+    }
+
+    @Test func reviewPageBridgeOwnsStateClearsAfterSendAndForwardsOperations() async throws {
+        #expect(TaskFilesStore.isScratchPage("scratch/ship-review.html"))
+        #expect(!TaskFilesStore.isScratchPage("scratch/ship-review.page.html"))
+
+        let files = try twoFileStore()
+        let bridge = TaskHTMLBridge(store: files)
+        let pagePath = "scratch/ship-review.html"
+
+        // 1. Fresh ready returns null.
+        let initial = await bridge.handle(["type": "ready", "path": pagePath, "build_id": "b1"])
+        #expect(initial.0 is NSNull && initial.1 == nil)
+
+        // 2. Sync saves opaque state + page items; ready with same (path, build_id) restores it.
+        let savedState: [String: Any] = [
+            "notes": [["id": "n1", "section": "Design", "quote": "loopback carrier", "text": "keep\tthis\nshort"]],
+            "choices": ["f1": ["label": "Finding 1", "value": "File Task"]],
+            "multiselects": [String: Any](),
+            "questions": [String: Any](),
+            "offlineActions": [Any](),
+            "receipts": [["key": "action-0", "kind": "task.create", "summary": "LOO-1200"]],
+        ]
+        let syncedItems: [[String: Any]] = [
+            ["id": "note:n1", "reference": "`scratch/ship-review.html` § Design › \"loopback carrier\" keep\tthis\nshort", "text": "keep this short"],
+            ["id": "choice:f1", "reference": "`scratch/ship-review.html` § Finding 1: File Task", "text": "File Task"],
+        ]
+        _ = await bridge.handle([
+            "type": "sync",
+            "path": pagePath,
+            "build_id": "b1",
+            "state": savedState,
+            "items": syncedItems,
+        ])
+        #expect(files.comments.items.count == 2)
+        let restored = await bridge.handle(["type": "ready", "path": pagePath, "build_id": "b1"])
+        let restoredDict = try #require(restored.0 as? [String: Any])
+        #expect((restoredDict["notes"] as? [[String: Any]])?.count == 1)
+
+        // 3. Add a Diff line comment and run reconcile — .page comments are skipped without crash.
+        let doc = files.document("a.swift")
+        await doc.reconcile(snapshot("uno\nsecond\nthird", path: "a.swift"))
+        files.comments.select(path: "a.swift", source: .diff(side: .new, revision: files.diffReview.revision), line: 1, extend: false)
+        files.comments.draft = "Explain\nthis line"
+        files.comments.add(anchor: ["uno"])
+        files.comments.reconcile(doc)
+        files.comments.reconcile(path: "a.swift", revision: files.diffReview.revision, file: nil)
+        #expect(files.comments.items.count == 3)
+
+        // 4. Failed send keeps items and saved state; successful send delivers one clean line and clears state.
+        let beforeClear = files.comments.pageClearGeneration
+        var delivered: [String] = []
+        func send(available: Bool) throws {
+            let strip = ReviewCommentsStrip(store: files, isFocused: true) {
+                if available { delivered.append($0) }
+                return available
+            }
+            try strip.inspect().find(viewWithAccessibilityIdentifier: "changes-send").button().tap()
+        }
+        try send(available: false)
+        #expect(files.comments.items.count == 3 && files.comments.pageClearGeneration == beforeClear)
+
+        try send(available: true)
+        #expect(files.comments.items.isEmpty)
+        #expect(files.comments.pageClearGeneration == beforeClear + 1)
+        let sent = try #require(delivered.first)
+        #expect(!sent.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7f })
+        #expect(sent.contains("(1) `scratch/ship-review.html` § Design › \"loopback carrier\" keep this short"))
+        #expect(sent.contains("(2) `scratch/ship-review.html` § Finding 1: File Task"))
+        #expect(sent.contains("(3) `a.swift:L1` (after, \(files.diffReview.revision)) · lines since changed Explain this line"))
+        #expect(sent.contains("[already ran: task.create → LOO-1200]"))
+
+        // 5. ready after unmounted send returns null (no resurrection).
+        let afterSend = await bridge.handle(["type": "ready", "path": pagePath, "build_id": "b1"])
+        #expect(afterSend.0 is NSNull)
+
+        // 6. Rebuild with a new build_id clears stale state and items from the previous build.
+        _ = await bridge.handle([
+            "type": "sync", "path": pagePath, "build_id": "b1",
+            "state": savedState, "items": syncedItems,
+        ])
+        #expect(files.comments.items.count == 2)
+        let rebuilt = await bridge.handle(["type": "ready", "path": pagePath, "build_id": "b2"])
+        #expect(rebuilt.0 is NSNull)
+        #expect(files.comments.items.isEmpty)
+
+        // 7. Operation forwarding: peer Machine substitutes localRepository; local checkout keeps stamped directory.
+        let captured = OSAllocatedUnfairLock<[(JSONValue, String?)]>(initialState: [])
+        let peerStore = TaskFilesStore(issue: "TEST-1", cwd: "/remote/checkout", machine: "home_peer",
+                                       query: RegistryQuery { _, _ in "{}" })
+        peerStore.localRepository = "/local/repo"
+        peerStore.sendPageOperation = { op, reqID in
+            captured.withLock { $0.append((op, reqID)) }
+            return RawJSON(Data(#"{"task":{"identifier":"LOO-1201"}}"#.utf8))
+        }
+        let peerBridge = TaskHTMLBridge(store: peerStore)
+        let opReply = await peerBridge.handle([
+            "type": "operation",
+            "id": "op-1",
+            "request_id": "req-uuid-1",
+            "operation": ["kind": "task.create", "directory": "/remote/checkout", "title": "Follow up"],
+        ])
+        let opResult = try #require((opReply.0 as? [String: Any])?["result"] as? [String: Any])
+        #expect((opResult["task"] as? [String: Any])?["identifier"] as? String == "LOO-1201")
+        let forwarded = try #require(captured.withLock { $0.first })
+        #expect(forwarded.1 == "req-uuid-1")
+        #expect(forwarded.0["directory"] == .string("/local/repo"))
+
+        // Error surfaces cleanly as { "error": ... }.
+        peerStore.sendPageOperation = { _, _ in throw RegistryQueryError("permission denied") }
+        let errReply = await peerBridge.handle([
+            "type": "operation",
+            "id": "op-2",
+            "operation": ["kind": "pr.land", "directory": "/remote/checkout"],
+        ])
+        #expect((errReply.0 as? [String: Any])?["error"] as? String == "permission denied")
+
+        // 8. TaskFileReadingView attaches the bridge; ReviewRendered keeps TaskHTMLView read-only (bridge == nil).
+        let htmlDoc = files.document(pagePath)
+        await htmlDoc.reconcile(snapshot("<h1>Review</h1>", path: pagePath))
+        let readingHTML = try TaskFileReadingView(document: htmlDoc, store: files)
+            .inspect().find(TaskHTMLView.self).actualView()
+        #expect(readingHTML.bridge != nil)
+
+        let reviewFile = ReviewFile(path: pagePath, oldPath: nil, status: .modified, blocks: [])
+        await files.workingTree.refresh()
+        _ = try await files.workingTree.readSides(reviewFile)
+        let rendered = ReviewRendered(store: files, reader: .changes, file: reviewFile, rendering: .html, split: true)
+        let renderedHTMLViews = try rendered.inspect().findAll(TaskHTMLView.self).map { try $0.actualView() }
+        #expect(!renderedHTMLViews.isEmpty)
+        #expect(renderedHTMLViews.allSatisfy { $0.bridge == nil })
     }
 }
 private func fileJSON(_ url: URL) throws -> [String: Any] {

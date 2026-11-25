@@ -445,19 +445,32 @@ button).
    top-level `identifier`), and `context::explain_in` returns the internal
    `TaskId` rather than the readable identifier (`LOO-1109`) — both fixed so the
    runtime button (`Steer <issue> ⌘↩`) and `Filed <id>` receipt show readable IDs.
-3. **Next — Desktop bridge.** `TaskFileReadingView` handler (`ready`/`sync`/`operation`),
-   Swift `ReviewComments` as sole state owner (two-case anchor, clear on
-   unmounted send), `ServerClient` raw JSON `Operation` forward,
-   `ReviewRenderedView` kept read-only. Swift headless tests.
-   The page side already exists: `runtime.js` posts `ready` (awaits saved
-   state), `sync`, and `operation` (awaits the reply) to
-   `messageHandlers.loopflow` and skips `localStorage` under it. Missing on the
-   page side: an entry point Swift calls to clear a mounted page after
-   `insert(into:)` (nothing assigns a `window.*` hook today) — add it with the
-   Swift handler. Will teach: whether a reply-capable handler plus raw-JSON
-   `ServerClient` send fits without a new `ServerOperation` case.
+3. **Done — Desktop bridge.** Added `TaskHTMLBridge` (reply-capable
+   `WKScriptMessageHandlerWithReply` named `loopflow`, registered in `.page`
+   content world) on `TaskHTMLView` and attached it only in `TaskFileReadingView`
+   (`TaskFilesView.swift`), leaving `ReviewRenderedView` read-only (`bridge == nil`).
+   Updated `ReviewComment` with a two-case `Anchor` (`.lines(ReviewSelection)` |
+   `.page(path: String, reference: String)`), skipped line reconciliation for
+   `.page`, collapsed control characters and whitespace onto one line (with any
+   `[already ran: …]` receipt suffix), and made `ReviewComments` the sole owner
+   of page draft state (`pageReady`, `syncPage`, clearing `pageStates` and
+   bumping `pageClearGeneration` on successful `insert(into:)` so mounted
+   `TaskHTMLView` calls `window.__lfDesktopApplyState?.(null)` in `.page`).
+   Added `ServerLink.sendRawOperation` / `ServerClient.rawOperation` without a
+   new `ServerOperation` case, wired peer-Machine `directory` substitution via
+   `TaskFilesStore.localRepository`, and aligned `TaskFilesStore.isScratchPage`
+   to exclude `*.page.html`. Headless Swift tests pass (`ReviewDiffTests`,
+   `ServerClientTests/rawOperationForwardsJSONPayloadWithRequestId`,
+   `ServerProtocolTests/everyEncodedOperationIsTheDescribedOperation`,
+   `TaskFilesTests/reviewPageBridgeOwnsStateClearsAfterSendAndForwardsOperations`).
+   *What this slice taught:* `runtime.js` already exposed `window.__lfDesktopApplyState`
+   from Pass 2 (no JS/Rust edit needed); encoding `RawOperationRequest` directly
+   in `ServerLink.sendRawOperation` reuses `admitted` busy retries and upload
+   tickets without adding a `ServerOperation` case or touching `ServerProtocolTests`;
+   and `TaskFilesStore.isScratchPage` also needed the `*.page.html` filter so local
+   FSEvents match Rust's `ops/task/find.rs`.
    Open shape question for compress: `page_build.rs` is 1434 lines in one file.
-4. **Pending — Skills and docs.** The five skills, `lf help page` alignment,
+4. **Next — Skills and docs.** The five skills, `lf help page` alignment,
    `LOOPFLOW.md`, `server/README.md`, goldens, and keeping the pre-written user
    docs in sync with any CLI/behavior adjustments. LOO-1109's own
    `ship-review.page.html` is the first page built with the kit.

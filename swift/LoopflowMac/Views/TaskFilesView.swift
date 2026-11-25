@@ -542,7 +542,8 @@ struct TaskFileReadingView: View {
         case "html" where store.visit?.showsSource != true:
             let baseURL = store.machine == nil
                 ? URL(fileURLWithPath: store.cwd).appendingPathComponent(document.path) : nil
-            TaskHTMLView(html: document.text, baseURL: baseURL, find: store.find, ready: ready)
+            TaskHTMLView(html: document.text, baseURL: baseURL, find: store.find,
+                         bridge: TaskHTMLBridge(store: store), ready: ready)
                 .accessibilityIdentifier("files-rendered-html")
         case "md" where store.visit?.showsSource != true:
             ScrollViewReader { proxy in

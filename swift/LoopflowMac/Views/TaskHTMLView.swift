@@ -1,7 +1,110 @@
 #if os(macOS)
 import AppKit
+import Loopflow
 import SwiftUI
 import WebKit
+
+/// Connects an interactive review page (`TaskFileReadingView`) to Swift's
+/// `ReviewComments` store and `ServerClient` without exposing any bridge to
+/// read-only Diff views (`ReviewRenderedView`).
+@MainActor
+struct TaskHTMLBridge {
+    static let handlerName = "loopflow"
+    static let clearScript = "window.__lfDesktopApplyState?.(null);"
+
+    let store: TaskFilesStore
+
+    var clearGeneration: Int { store.comments.pageClearGeneration }
+
+    func makeMessageHandler() -> any WKScriptMessageHandlerWithReply {
+        LoopflowScriptMessageHandler(store: store)
+    }
+
+    func handle(_ body: Any) async -> (Any?, String?) {
+        guard let payload = body as? [String: Any],
+              let type = payload["type"] as? String else {
+            return (nil, "Invalid bridge message")
+        }
+        switch type {
+        case "ready":
+            guard let path = payload["path"] as? String,
+                  let buildID = payload["build_id"] as? String else {
+                return (NSNull(), nil)
+            }
+            guard let saved = store.comments.pageReady(path: path, buildID: buildID) else {
+                return (NSNull(), nil)
+            }
+            return ((try? Self.foundationObject(from: saved)) ?? NSNull(), nil)
+
+        case "sync":
+            guard let path = payload["path"] as? String,
+                  let buildID = payload["build_id"] as? String,
+                  let rawState = payload["state"],
+                  let state = try? Self.jsonValue(from: rawState) else {
+                return (NSNull(), nil)
+            }
+            let rawItems = payload["items"] as? [[String: Any]] ?? []
+            let pageItems = rawItems.compactMap { entry -> ReviewComments.PageItem? in
+                guard let reference = entry["reference"] as? String, !reference.isEmpty else { return nil }
+                return ReviewComments.PageItem(reference: reference, text: entry["text"] as? String ?? "")
+            }
+            store.comments.syncPage(path: path, buildID: buildID, state: state, items: pageItems)
+            return (NSNull(), nil)
+
+        case "operation":
+            guard let rawOperation = payload["operation"],
+                  case .object(var fields)? = try? Self.jsonValue(from: rawOperation) else {
+                return (["error": "Invalid operation payload"], nil)
+            }
+            if store.machine != nil,
+               fields["directory"] != nil,
+               let localDirectory = store.localRepository ?? store.measurementRepository {
+                fields["directory"] = .string(localDirectory)
+            }
+            let requestID = payload["request_id"] as? String
+            do {
+                let raw = try await store.sendPageOperation(.object(fields), requestID)
+                let result = try JSONSerialization.jsonObject(with: raw.bytes, options: .fragmentsAllowed)
+                return (["result": result], nil)
+            } catch {
+                return (["error": error.localizedDescription], nil)
+            }
+
+        default:
+            return (nil, "Unknown bridge message type: \(type)")
+        }
+    }
+
+    private static func jsonValue(from object: Any) throws -> JSONValue {
+        guard JSONSerialization.isValidJSONObject(object) else {
+            throw RegistryQueryError("Expected a JSON object or array")
+        }
+        let data = try JSONSerialization.data(withJSONObject: object)
+        return try JSONDecoder().decode(JSONValue.self, from: data)
+    }
+
+    private static func foundationObject(from value: JSONValue) throws -> Any {
+        let data = try JSONEncoder().encode(value)
+        return try JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)
+    }
+}
+
+/// Weakly holds the store so `WKUserContentController` retains no cycle with `WebPage`.
+private final class LoopflowScriptMessageHandler: NSObject, WKScriptMessageHandlerWithReply {
+    weak var store: TaskFilesStore?
+
+    init(store: TaskFilesStore) {
+        self.store = store
+    }
+
+    func userContentController(
+        _ userContentController: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) async -> (Any?, String?) {
+        guard let store else { return (NSNull(), nil) }
+        return await TaskHTMLBridge(store: store).handle(message.body)
+    }
+}
 
 /// Pages run their scripts but never reach the network; links open in the browser.
 /// A rewrite reloads in place at the same scroll position.
@@ -9,6 +112,7 @@ struct TaskHTMLView: View {
     let html: String
     let baseURL: URL?
     var find: FileFind?
+    var bridge: TaskHTMLBridge? = nil
     var pageIndex = 0
     var pageCount = 1
     var ready: () -> Void = {}
@@ -39,6 +143,12 @@ struct TaskHTMLView: View {
             }
         }
         .task(id: html) { await show() }
+        .onChange(of: bridge?.clearGeneration ?? 0) { _, _ in
+            guard let page, bridge != nil else { return }
+            Task {
+                _ = try? await page.callJavaScript(TaskHTMLBridge.clearScript, contentWorld: .page)
+            }
+        }
         .task(id: FileFind.Scan(query: find?.query, revision: loaded)) {
             guard let page, loaded > 0 else { return }
             let needle = find?.query ?? ""
@@ -132,6 +242,10 @@ struct TaskHTMLView: View {
             guard !Task.isCancelled else { return }
             let configuration = WebPage.Configuration()
             configuration.userContentController.add(rules)
+            if let bridge {
+                configuration.userContentController.addScriptMessageHandler(
+                    bridge.makeMessageHandler(), contentWorld: .page, name: TaskHTMLBridge.handlerName)
+            }
             page = WebPage(configuration: configuration, navigationDecider: TaskHTMLLinks())
         }
         guard let page else { return }

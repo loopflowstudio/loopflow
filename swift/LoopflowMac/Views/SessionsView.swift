@@ -389,6 +389,7 @@ final class SessionsWorkspace {
         let files = TaskFilesStore(issue: issue, cwd: cwd, machine: machine, machineLabel: machineLabel,
                                    localMachineID: localMachineId, query: query)
         files.measurementRepository = measurementRepository
+        files.localRepository = retainedStore?.repoPath ?? measurementRepository
         taskFiles = files
         files.restoreDrafts(unavailableDrafts)
         unavailableDrafts.removeAll()

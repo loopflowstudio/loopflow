@@ -32,7 +32,10 @@ struct ReviewStream: View {
     var body: some View {
         if reader == .changes {
             // A comment whose file left the comparison still waits to be sent.
-            ForEach(store.comments.items.filter { $0.original.source.revision == revision && store.diffReview.review?.file($0.selection.path) == nil }) { comment in
+            ForEach(store.comments.items.filter { comment in
+                guard let selection = comment.selection, let original = comment.original else { return false }
+                return original.source.revision == revision && store.diffReview.review?.file(selection.path) == nil
+            }) { comment in
                 ReviewCommentRow(store: store, comment: comment)
             }
         }
@@ -49,7 +52,7 @@ struct ReviewStream: View {
             if headsFirstFile || file.path != files.first?.path {
                 fileHeader(file, headed: headings[file.path] != nil).id("file:\(file.path)")
             }
-            ForEach(store.comments.items.filter { $0.detached && $0.original.source.revision == revision && $0.selection.path == file.path }) { comment in
+            ForEach(store.comments.items.filter { $0.detached && $0.original?.source.revision == revision && $0.selection?.path == file.path }) { comment in
                 ReviewCommentRow(store: store, comment: comment)
             }
             if reader == .changes, store.diffReview.isViewed(file) {
@@ -345,9 +348,9 @@ struct ReviewStream: View {
             ReviewCommentEditor(store: store, selection: selection, excerpt: { selection.excerpt(in: file) }, addToConversation: addToConversation)
         }
         ForEach(store.comments.items.filter { comment in
-            guard case .diff(let side, let commentRevision) = comment.selection.source else { return false }
-            return commentRevision == revision && !comment.detached && comment.selection.path == file.path
-                && comment.selection.last == (side == .old ? old : new)
+            guard let selection = comment.selection, case .diff(let side, let commentRevision) = selection.source else { return false }
+            return commentRevision == revision && !comment.detached && selection.path == file.path
+                && selection.last == (side == .old ? old : new)
         }) { comment in
             ReviewCommentRow(store: store, comment: comment)
         }
@@ -720,7 +723,7 @@ struct ReviewCommentRow: View {
     }
 
     private var place: String {
-        let selection = comment.selection
+        guard let selection = comment.selection else { return comment.path }
         let lines = "\((selection.path as NSString).lastPathComponent):\(selection.range) · \(selection.source.label)"
         return comment.detached ? "\(lines) · these lines have changed since; still sent" : lines
     }

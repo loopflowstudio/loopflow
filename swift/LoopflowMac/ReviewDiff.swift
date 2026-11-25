@@ -746,26 +746,60 @@ struct ReviewSelection: Equatable, Sendable {
 }
 
 struct ReviewComment: Equatable, Sendable, Identifiable {
+    enum Anchor: Equatable, Sendable {
+        case lines(ReviewSelection)
+        case page(path: String, reference: String)
+    }
+
     let id = UUID()
-    let original: ReviewSelection
+    let target: Anchor
     let text: String
+    /// Original line text for `.lines` comments, used to re-anchor across edits; empty for `.page`.
     let anchor: [String]
     private var start: Int?
-    var detached: Bool { start == nil }
-    var selection: ReviewSelection {
+
+    var detached: Bool {
+        guard case .lines = target else { return false }
+        return start == nil
+    }
+
+    var path: String {
+        switch target {
+        case .lines(let selection): selection.path
+        case .page(let path, _): path
+        }
+    }
+
+    /// The original line selection for a `.lines` comment; nil for `.page`.
+    var original: ReviewSelection? {
+        guard case .lines(let selection) = target else { return nil }
+        return selection
+    }
+
+    /// The current (possibly re-anchored) line selection for a `.lines` comment; nil for `.page`.
+    var selection: ReviewSelection? {
+        guard case .lines(let original) = target else { return nil }
         guard let start else { return original }
         return ReviewSelection(path: original.path, source: original.source,
                                first: start, last: start + original.last - original.first)
     }
 
     init(selection: ReviewSelection, text: String, anchor: [String]) {
-        original = selection
+        target = .lines(selection)
         self.text = text
         self.anchor = anchor
         start = selection.first
     }
 
+    init(pagePath: String, reference: String, text: String = "") {
+        target = .page(path: pagePath, reference: reference)
+        self.text = text
+        anchor = []
+        start = nil
+    }
+
     func anchored(in lines: [Int: String]) -> Self {
+        guard case .lines(let original) = target else { return self }
         var next = self
         next.start = nil
         guard let first = anchor.first, anchor.count == original.last - original.first + 1 else { return next }
@@ -778,21 +812,51 @@ struct ReviewComment: Equatable, Sendable, Identifiable {
         return next
     }
 
-    static func message(_ comments: [ReviewComment]) -> String {
-        comments.enumerated().map { index, comment in
+    static func oneLine(_ text: String) -> String {
+        let cleaned = String(String.UnicodeScalarView(text.unicodeScalars.map { scalar in
+            (scalar.value < 0x20 || scalar.value == 0x7f) ? UnicodeScalar(0x20)! : scalar
+        }))
+        return cleaned.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    static func message(_ comments: [ReviewComment], receipts: [String] = []) -> String {
+        let body = comments.enumerated().map { index, comment in
             let prefix = comments.count > 1 ? "(\(index + 1)) " : ""
-            let changed = comment.detached ? "· lines since changed " : ""
-            let words = comment.text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-            return prefix + comment.selection.reference + changed + words
-        }.joined(separator: " ") + " "
+            switch comment.target {
+            case .lines:
+                let changed = comment.detached ? "· lines since changed " : ""
+                let words = oneLine(comment.text)
+                let reference = comment.selection?.reference ?? ""
+                return prefix + reference + changed + words
+            case .page(_, let reference):
+                return prefix + oneLine(reference)
+            }
+        }.joined(separator: " ")
+        let suffix = receipts.isEmpty ? "" : " [already ran: \(receipts.map(oneLine).joined(separator: "; "))]"
+        return body + suffix + " "
     }
 }
 
 @MainActor @Observable
 final class ReviewComments {
+    struct PageKey: Hashable, Sendable {
+        let path: String
+        let buildID: String
+    }
+
+    struct PageItem: Equatable, Sendable {
+        let reference: String
+        let text: String
+    }
+
     var items: [ReviewComment] = []
     var selection: ReviewSelection? { didSet { if oldValue != selection { draft = "" } } }
     var draft = ""
+    /// Saved opaque runtime state per rendered review page build. Swift owns this
+    /// so Desktop pages never touch `localStorage` and cannot resurrect sent notes.
+    private var pageStates: [PageKey: JSONValue] = [:]
+    /// Incremented after `insert(into:)` succeeds so a mounted `TaskHTMLView` clears itself.
+    private(set) var pageClearGeneration = 0
 
     func select(path: String, source: ReviewSelection.Source, line: Int, extend: Bool) {
         if extend, let current = selection, current.path == path, current.source == source {
@@ -808,9 +872,46 @@ final class ReviewComments {
         self.selection = nil
     }
 
+    /// Answer a review page's `ready` handshake. Returns saved state for `(path, buildID)`,
+    /// or `nil` when absent, cleared after send, or rebuilt with a new `buildID` (clearing
+    /// any stale state and items left over from an earlier build of `path`).
+    func pageReady(path: String, buildID: String) -> JSONValue? {
+        let key = PageKey(path: path, buildID: buildID)
+        if let saved = pageStates[key] { return saved }
+        let staleKeys = pageStates.keys.filter { $0.path == path && $0.buildID != buildID }
+        if !staleKeys.isEmpty {
+            for stale in staleKeys { pageStates.removeValue(forKey: stale) }
+            items.removeAll {
+                if case .page(let itemPath, _) = $0.target { itemPath == path } else { false }
+            }
+        }
+        return nil
+    }
+
+    /// Store `state` for `(path, buildID)` and replace `path`'s `.page` entries in `items`.
+    func syncPage(path: String, buildID: String, state: JSONValue, items pageItems: [PageItem]) {
+        for stale in pageStates.keys where stale.path == path && stale.buildID != buildID {
+            pageStates.removeValue(forKey: stale)
+        }
+        pageStates[PageKey(path: path, buildID: buildID)] = state
+        let firstIndex = items.firstIndex {
+            if case .page(let itemPath, _) = $0.target { itemPath == path } else { false }
+        }
+        items.removeAll {
+            if case .page(let itemPath, _) = $0.target { itemPath == path } else { false }
+        }
+        let replacements = pageItems.map { ReviewComment(pagePath: path, reference: $0.reference, text: $0.text) }
+        if let firstIndex, firstIndex <= items.count {
+            items.insert(contentsOf: replacements, at: firstIndex)
+        } else {
+            items.append(contentsOf: replacements)
+        }
+    }
+
     func reconcile(_ document: TaskFileDocument) {
         let indices = items.indices.filter {
-            items[$0].original.path == document.path && items[$0].original.source.isFile
+            guard let original = items[$0].original else { return false }
+            return original.path == document.path && original.source.isFile
         }
         guard !indices.isEmpty else { return }
         let lines = document.text.utf8.split(separator: 10, omittingEmptySubsequences: false).enumerated().map {
@@ -822,14 +923,36 @@ final class ReviewComments {
 
     func reconcile(path: String, revision: String, file: ReviewFile?) {
         for index in items.indices {
-            let selection = items[index].original
-            guard selection.path == path, selection.source.revision == revision else { continue }
+            guard let selection = items[index].original,
+                  selection.path == path, selection.source.revision == revision else { continue }
             items[index] = items[index].anchored(in: file.map { selection.numbered(in: $0) } ?? [:])
         }
     }
 
     func insert(into conversation: (String) -> Bool) {
-        if !items.isEmpty, conversation(ReviewComment.message(items)) { items.removeAll() }
+        guard !items.isEmpty else { return }
+        guard conversation(ReviewComment.message(items, receipts: pageReceipts())) else { return }
+        items.removeAll()
+        pageStates.removeAll()
+        pageClearGeneration += 1
+    }
+
+    private func pageReceipts() -> [String] {
+        var ran: [String] = []
+        for key in pageStates.keys.sorted(by: { $0.path < $1.path }) {
+            guard case .object(let fields) = pageStates[key],
+                  case .array(let receipts) = fields["receipts"] else { continue }
+            for entry in receipts {
+                guard case .object(let receipt) = entry,
+                      case .string(let kind) = receipt["kind"] else { continue }
+                if case .string(let summary) = receipt["summary"], !summary.isEmpty {
+                    ran.append("\(kind) → \(summary)")
+                } else {
+                    ran.append(kind)
+                }
+            }
+        }
+        return ran
     }
 }
 #endif

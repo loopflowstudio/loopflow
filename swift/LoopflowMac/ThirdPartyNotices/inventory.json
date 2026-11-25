@@ -1,6 +1,6 @@
 {
   "inputs": {
-    "Cargo.lock": "f50600f3d8cdbdf48d782fcf62815a5d43c95adfc28eefdef186e95f2f1b1a4f",
+    "Cargo.lock": "6ffbcfc9a9e6ada86cfbb076bdc2439ab9f7aa1ac10ee3ae2e6c621a2683bdde",
     "swift/GhosttyKitPatches/0001-command-blocks.patch": "304566cfebd53802689026ba72271297c1487a661f979b9986fe25c5dd6f3e11",
     "swift/GhosttyKitPatches/0002-embedded-login-session.patch": "a487a5fbbed854105bfacde7eb5885313fa45ae5cb8cfb7887af56ae41595288",
     "swift/GhosttyKitPatches/0003-program-status.patch": "4f658df88384d38dc9b4f044ee1099190698e3d7e5a71c36b26c479af69170d8",
@@ -1543,6 +1543,15 @@
       }
     },
     {
+      "id": "encoding_rs_io@0.1.8",
+      "scope": "lf",
+      "license": "MIT OR Apache-2.0",
+      "source": {
+        "url": "https://static.crates.io/crates/encoding_rs_io/encoding_rs_io-0.1.8.crate",
+        "sha256": "fba3fe847045ecff794b9c138293a80db914678c453ad63fbf0c6a9eb6e00b22"
+      }
+    },
+    {
       "id": "equivalent@1.0.2",
       "scope": "lf",
       "license": "Apache-2.0 OR MIT",
@@ -1756,6 +1765,33 @@
       "source": {
         "url": "https://static.crates.io/crates/globset/globset-0.4.18.crate",
         "sha256": "52dfc19153a48bde0cbd630453615c8151bce3a5adfac7a0aebfbf0a1e1f57e3"
+      }
+    },
+    {
+      "id": "grep-matcher@0.1.10",
+      "scope": "lf",
+      "license": "Unlicense OR MIT",
+      "source": {
+        "url": "https://static.crates.io/crates/grep-matcher/grep-matcher-0.1.10.crate",
+        "sha256": "2749f3ee57cd8e3ec525b1e7767303128ee83bd19b3ea2e878e3be793f6484c3"
+      }
+    },
+    {
+      "id": "grep-regex@0.1.15",
+      "scope": "lf",
+      "license": "Unlicense OR MIT",
+      "source": {
+        "url": "https://static.crates.io/crates/grep-regex/grep-regex-0.1.15.crate",
+        "sha256": "a0697a1fa79c8bcd1c86afa18d7361963e80bc47f0b6e75c24d420ad3aadcc07"
+      }
+    },
+    {
+      "id": "grep-searcher@0.1.18",
+      "scope": "lf",
+      "license": "Unlicense OR MIT",
+      "source": {
+        "url": "https://static.crates.io/crates/grep-searcher/grep-searcher-0.1.18.crate",
+        "sha256": "10863a5777b86c61ef2b19bd5f34b9983d5093af1758c7f88036e88c3134bf28"
       }
     },
     {
@@ -2125,6 +2161,15 @@
       "source": {
         "url": "https://static.crates.io/crates/memchr/memchr-2.8.0.crate",
         "sha256": "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
+      }
+    },
+    {
+      "id": "memmap2@0.9.12",
+      "scope": "lf",
+      "license": "MIT OR Apache-2.0",
+      "source": {
+        "url": "https://static.crates.io/crates/memmap2/memmap2-0.9.12.crate",
+        "sha256": "6b0ca1155a9ecc25aa12e8313a119f32edf0255fea2f44839c4ac0a12b2ac157"
       }
     },
     {
@@ -3217,5 +3262,5 @@
       }
     }
   ],
-  "notices_sha256": "f7b686cb45a016a3dace3460bfe58092433c53b78be187033f780f00de902762"
+  "notices_sha256": "a4a98e4a4d2be741b5e7cbdcd93ee9f40520874b4898d80beecafb28fbaf51f4"
 }

@@ -686,8 +686,43 @@ store reads again on file events. Twice a list stayed stale after a `git
 checkout` of one file plus an edit to another; the next write to any file
 cleared it.
 
+Files' pane actions need `-p files` (`lf --task <id> desktop do files-find -p files`);
+without it the command answers "Several panes are eligible". `lf desktop files
+<path>[:LINE[-END]]` presents a file and builds jump history for `files-back` and
+`files-forward`. A relaunch can restore with the session pane zoomed, which hides
+Files while `desktop files` still answers `files`: `desktop zoom --off -p session`.
+With the QA hook (see above): `field Find file|<text>` (or `Find in file`, `Search
+checkout text`) types into the picker or Find bar, and `windowkey 0 - down|return|escape`
+drives the focused field. `click` presses Buttons (Read, Edit, Diff, the sidebar
+toggle; it toggles, so send it once). SwiftUI tap gestures never fire from the
+hook in a window that isn't key: rail and outline rows and the update bar's
+Open. `tap <window> <x> <y> m` (down and up through the event queue) is a
+code-reader ⌘-click; the definitions peek's rows then answer `click`. A plain
+press on the reader's text or gutter is AppKit's first click in an inactive
+window and never reaches the view; `mousedown <window> <x> <y> [<x2> <y2>] [s|m]`
+queues the drag and release and calls the hit view's own `mouseDown`, which
+drives drag-selection, gutter line picks and ⇧-click ranges. The comment card's
+field is matched by its placeholder (`field Comment on main.rs:L6 · working
+file|<text>`, then `windowkey 0 - return`); `desktop capture -p session` shows
+what Send to conversation typed, since `snap` draws no Ghostty pane.
+`desktop files <path>:<line>` from another file is the check for landing in a
+newly mounted long file (`scrolls` shows the clip's y).
+`field` matches a placeholder set as plain or attributed text. `snap` shows
+WebKit pages only right after a load and goes blank once the display sleeps;
+`web <png>` takes WebKit's own snapshot and writes body text and `scrollY` beside
+it, and `webscroll <y>` scrolls the page, which is how the settled HTML reload and
+its scroll restore are checked. BSD `sed -i` writes `scratch/.!<pid>!<page>` and
+renames it: a quick atomic-save check for the scratch rail.
+`scrolls` lists every scroll view's visible rect and document size. It tells a
+scroll that never happened from content too narrow to scroll: the code reader's
+document must be as wide as its widest line. Put the wide line below a short
+line 1 when checking sideways reveals. A shorter line 1 once hid a clipped
+reader. To trace a SwiftUI task, append to a file under the private directory:
+`NSLog` lines did not reach `/usr/bin/log stream` (in zsh, bare `log` is a
+builtin). `sips --cropOffset` takes y, then x.
+
 In-memory view state (the layout picker's `reviewLayout`, Source,
-`TaskFilesStore.sourceFiles`) and the change stepper (`]`) have no
+`DiffReviewState.sourceFiles`) and the change stepper (`]`) have no
 control command. Use the QA hook above to click Source, the layout picker
 or the stepper in an instrumented build.
 

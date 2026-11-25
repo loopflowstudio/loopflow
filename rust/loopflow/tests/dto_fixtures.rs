@@ -220,12 +220,16 @@ fn session_history_lists_turns_beside_observations() {
 fn task_files_share_exact_bases_rename_paths_and_lossless_revisions() {
     #[derive(serde::Serialize, serde::Deserialize)]
     struct Files {
+        symbols: loopflow_execution::ops::task::TaskSymbols,
+        grep: loopflow_execution::ops::task::TaskGrepResults,
+        find: loopflow_execution::ops::task::TaskFileInventory,
         directory: loopflow_execution::ops::task::TaskDirectory,
         changes: loopflow_execution::ops::task::TaskChangesSnapshot,
         diff: loopflow_execution::ops::task::TaskDiffSnapshot,
         file: loopflow_execution::ops::task::TaskFileSnapshot,
         image: loopflow_execution::ops::task::TaskFileSnapshot,
         save: loopflow_execution::ops::task::TaskFileSave,
+        watch: loopflow_execution::ops::task::TaskFilesRevision,
     }
     let json = include_str!("../../../tests/fixtures/dto/task_files.json");
     let files: Files = serde_json::from_str(json).unwrap();
@@ -235,6 +239,8 @@ fn task_files_share_exact_bases_rename_paths_and_lossless_revisions() {
     assert_eq!(files.changes.files[0].changes, 1);
     assert_eq!(files.file.content.as_deref(), Some("\u{feff}notes\r\n"));
     assert_eq!(files.image.data.as_deref(), Some("iVBORw0KGgo="));
+    assert_eq!(files.watch.scratch_pages.len(), 1);
+    assert_eq!(files.watch.scratch_pages[0].path, "scratch/notes.md");
     assert_eq!(
         serde_json::to_value(files).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()

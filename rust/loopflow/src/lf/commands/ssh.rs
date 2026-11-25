@@ -100,6 +100,9 @@ pub(super) fn run_with_io(
             cmd: crate::lf::TaskCommand::Location { .. }
                 | crate::lf::TaskCommand::Claim { .. }
                 | crate::lf::TaskCommand::Unassign { .. }
+                | crate::lf::TaskCommand::Find { .. }
+                | crate::lf::TaskCommand::Grep { .. }
+                | crate::lf::TaskCommand::Symbols { .. }
                 | crate::lf::TaskCommand::Files { .. }
                 | crate::lf::TaskCommand::File { .. }
                 | crate::lf::TaskCommand::Diff { .. }
@@ -145,10 +148,14 @@ pub(super) fn run_with_io(
     // Automatic routing already chose both Machine and plan. Keep that reading
     // together rather than combining its Machine with a second plan reading.
     let routed = task_route.is_some();
+    let search = match &cli.command {
+        Some(crate::lf::Commands::Task { cmd }) => checkout_search(cmd, task_route.as_ref()),
+        _ => None,
+    };
     let work_route = match task_route {
         Some(route) => Some(route),
         // A path/name addresses the destination's filesystem, not the caller's.
-        None if cli.repo.is_some() => None,
+        None if cli.repo.is_some() || search.is_some() => None,
         None => super::work_route::resolve(cli)?,
     };
     if let Some(route) = work_route
@@ -181,6 +188,22 @@ pub(super) fn run_with_io(
         None if cli.repo.is_some() => None,
         None => loopflow_execution::machine::task::current_repository(directory)?,
     };
+    // The checkout's server shares one inventory across a peer picker's keystrokes.
+    if let (Some((read, true)), Some(repository), false) = (search, &repository, preview) {
+        use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
+        let sender = Sender {
+            repository: repository.clone(),
+            selection: Selection::capture(directory, None)?,
+            secrets: Secrets::default(),
+        };
+        let mut connection =
+            loopflow_execution::machine::client::Connection::open_on(&target, sender, None)?;
+        let answer = connection.request(crate::server::wire::Operation::Read(read))?;
+        return output(
+            &mut io,
+            &format!("{}\n", serde_json::to_string_pretty(&answer.result)?),
+        );
+    }
     // A plain command reads what it runs with from its environment.
     let mut environment =
         loopflow_execution::machine::wire::Selection::capture(directory, source.clone())?
@@ -481,6 +504,59 @@ pub(crate) fn localize_remote_sessions(
         }
     }
     Ok(())
+}
+
+fn checkout_search(
+    cmd: &crate::lf::TaskCommand,
+    route: Option<&TaskExecutionRoute>,
+) -> Option<(super::read::Read, bool)> {
+    use super::read::Read;
+    use crate::lf::TaskCommand;
+
+    let owner_issue =
+        |issue: &str| route.map_or_else(|| issue.to_owned(), |route| route.peer_selector.clone());
+    match cmd {
+        TaskCommand::Find {
+            issue,
+            query,
+            limit,
+            json,
+        } => Some((
+            Read::TaskFind {
+                issue: owner_issue(issue),
+                query: query.clone(),
+                limit: *limit,
+            },
+            *json,
+        )),
+        TaskCommand::Symbols {
+            issue,
+            name,
+            path,
+            json,
+        } => Some((
+            Read::TaskSymbols {
+                issue: owner_issue(issue),
+                name: name.clone(),
+                path: path.clone(),
+            },
+            *json,
+        )),
+        TaskCommand::Grep {
+            issue,
+            query,
+            whole_word,
+            json,
+        } => Some((
+            Read::TaskGrep {
+                issue: owner_issue(issue),
+                query: query.clone(),
+                whole_word: *whole_word,
+            },
+            *json,
+        )),
+        _ => None,
+    }
 }
 
 fn output(

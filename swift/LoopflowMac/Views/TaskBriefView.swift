@@ -152,14 +152,14 @@ struct TaskBriefView: View {
     /// Label beside value, every value at `text`, every row wrapping.
     private var facts: some View {
         let delivery = TaskDelivery.describe(record: task.pr, taskOpen: !task.isCompleted, reading: store.pullRequest.pullRequest,
-            error: store.pullRequest.error, readAt: store.pullRequest.readAt, localHead: store.changes?.headCommit,
+            error: store.pullRequest.error, readAt: store.pullRequest.readAt, localHead: store.workingChanges?.headCommit,
             runsOn: store.machineName)
         let related = TaskBrief.related(in: description, excluding: task.task.identifier)
         let outline = TaskBrief.outline(description)
         return Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 6) {
             GridRow {
                 label("Pull request")
-                Button { store.page = .changes; store.noteInteraction() } label: {
+                Button { store.page = .changes } label: {
                     Text(delivery.headline).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
                 }
                 .buttonStyle(WorkPlainButtonStyle()).help("Show Diff")

@@ -472,7 +472,7 @@ Answer a lost line: lf repo tracker answer <id> --keep-theirs, or --use-mine.
 
 In a connected repository a new Wave's Project goes to Linear with it. If that
 send fails, `lf wave status` shows `Project … (local)` and its Tasks wait in the
-queue until `lf wave plan connect <wave>`. Linking another Linear Project
+queue until `lf wave create <wave>` makes it. Linking another Linear Project
 replaces the one Loopflow made while none of the Wave's Tasks is in Linear yet.
 A Task in no Wave goes to Linear right away, as a team issue.
 
@@ -567,9 +567,8 @@ $ lf wave status billing/refunds
 A Wave is one Project, made with the Wave: `lf wave create billing/refunds`
 makes the Project `refunds`, and in a repository with Linear or Asana makes it
 there too before it returns. Can't reach the tracker? The command fails and
-names `lf wave plan connect billing/refunds`, which makes it (in Asana, `lf
-wave create billing/refunds` again). A Wave that arrived without one (from an
-upgrade) gets its tracker Project from that command or the first Task sent
+says to run it again, which makes it. A Wave that arrived without one (from
+an upgrade) gets its tracker Project from that command or the first Task sent
 into it; `lf wave sync` and Desktop's refresh never make one. Until then `lf
 wave status` and Desktop say the Project is not in the tracker yet and name
 the command that makes it. Tasks reordered meanwhile keep that order in the

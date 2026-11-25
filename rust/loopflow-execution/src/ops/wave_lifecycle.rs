@@ -57,7 +57,7 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
     super::tracker::create_wave_project(&store, &added.main_checkout, &added.id)
         .await
         .map_err(|error| {
-            let retry = super::tracker::make_project_command(&added.main_checkout, &added.name);
+            let retry = super::tracker::make_project_command(&added.name);
             lifecycle_error(format!(
                 "wave/{} has no tracker Project yet: {}. Run `{retry}` to make it.",
                 added.name,

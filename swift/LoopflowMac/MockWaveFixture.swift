@@ -53,7 +53,7 @@ enum MockWaveFixture {
             {
               "id": "project-1", "tracker_id": null, "sync": {"actions": []},
               "slug": "release-feedback", "name": "Release feedback", "status": "started", "url": null,
-              "unbound": "not in Linear yet; `lf wave plan connect release-feedback` makes it"
+              "unbound": "not in Linear yet; `lf wave create release-feedback` makes it"
             }
             """#
         do {

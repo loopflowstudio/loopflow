@@ -359,7 +359,7 @@ fn adding_a_wave_offline_fails_and_a_second_add_makes_its_project() {
                 .unwrap_err()
                 .to_string();
             assert!(
-                error.contains("Run `lf wave plan connect billing` to make it"),
+                error.contains("Run `lf wave create billing` to make it"),
                 "{error}"
             );
             let wave = fixture

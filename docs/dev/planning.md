@@ -439,7 +439,7 @@ they return (`tracker::create_wave_project`); a tracker error fails the
 command. A drain about to send a Task naming an unbound live Project creates
 it the same way. `lf wave sync` (Desktop's planning clock runs it) never
 does; `ProjectSummary.unbound` carries the sentence naming the command that
-does (`tracker::make_project_command`), and both surfaces print it. Each create carries the Project's UUID:
+does (`lf wave create <wave>`, from `tracker::make_project_command`), and both surfaces print it. Each create carries the Project's UUID:
 Linear refuses it a second time and the refusal finds the existing Project,
 Asana's is found by its footer, so a lost reply never makes two. A live Wave links the tracker Project
 through `projects.external_project_id`. Issues in that tracker Project belong to the Wave.

@@ -430,7 +430,7 @@ pub fn connect_wave(
             (None, _) => format!(
                 "Linear Project `{}` is not made yet; `{}` makes it",
                 result.project_name,
-                loopflow_execution::ops::tracker::make_project_command(repo_root, &result.wave)
+                loopflow_execution::ops::tracker::make_project_command(&result.wave)
             ),
         };
         let team_state = if result.team_created {

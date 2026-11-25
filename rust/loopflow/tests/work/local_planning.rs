@@ -1053,7 +1053,7 @@ fn a_wave_is_made_with_one_project_and_every_task_joins_it() {
         .unwrap();
         assert!(status.contains("· completed"), "{status}");
         assert_eq!(
-            status.contains("not in Linear yet; `lf wave plan connect product` makes it"),
+            status.contains("not in Linear yet; `lf wave create product` makes it"),
             connected,
             "{status}"
         );
@@ -2201,12 +2201,12 @@ fn wave_sync_offline_leaves_the_project_unbound_and_queues_no_create() {
     );
     assert_eq!(
         status["project"]["value"]["unbound"],
-        "not in Linear yet; `lf wave plan connect inbox` makes it"
+        "not in Linear yet; `lf wave create inbox` makes it"
     );
 }
 
 #[test]
-fn wave_sync_makes_no_project_and_connect_makes_only_its_own() {
+fn wave_sync_makes_no_project_and_wave_create_makes_only_its_own() {
     use crate::lf::commands::write::Write;
     use loopflow_execution::test_support::planning_tasks::with_planning_task;
     use loopflow_execution::work::wave::Wave;
@@ -2225,14 +2225,12 @@ fn wave_sync_makes_no_project_and_connect_makes_only_its_own() {
             .block_on(fixture.store.create_wave(&billing))
             .unwrap();
         runtime.block_on(state.lock()).export_mode = true;
-        let connect = || {
-            Write::WavePlanConnect {
+        // The command the unbound sentence names.
+        let create = || {
+            Write::WaveCreate {
                 directory: repo.into(),
-                wave: Some("billing".into()),
-                project: None,
-                all: false,
-                team_key: None,
-                team_name: None,
+                wave: "billing".into(),
+                objective: None,
             }
             .run()
         };
@@ -2252,12 +2250,12 @@ fn wave_sync_makes_no_project_and_connect_makes_only_its_own() {
         );
         assert_eq!(
             status["project"]["value"]["unbound"],
-            "not in Linear yet; `lf wave plan connect billing` makes it"
+            "not in Linear yet; `lf wave create billing` makes it"
         );
         assert!(runtime.block_on(state.lock()).extra_projects.is_empty());
 
         runtime.block_on(state.lock()).field_outage = true;
-        assert!(connect().is_err());
+        assert!(create().is_err());
         runtime.block_on(state.lock()).field_outage = false;
         let id = runtime
             .block_on(fixture.store.project_of_wave(billing.id()))
@@ -2268,8 +2266,15 @@ fn wave_sync_makes_no_project_and_connect_makes_only_its_own() {
             .unwrap()
             .to_string();
         for _ in 0..2 {
-            let receipts = serde_json::to_value(connect().unwrap()).unwrap();
-            assert_eq!(receipts[0]["project_id"], external);
+            create().unwrap();
+            let project = runtime
+                .block_on(fixture.store.project_of_wave(billing.id()))
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                project.tracker_id.as_ref().map(|id| id.as_str()),
+                Some(external.as_str())
+            );
         }
         let linear = runtime.block_on(state.lock());
         let names: Vec<_> = linear

@@ -1354,7 +1354,8 @@ async fn refresh_async(
         };
         let Some(linked) = linked_project(&store, registered.id()).await? else {
             diagnostics.push(format!(
-                "wave/{wave} links no Linear Project; run `lf wave plan connect {wave}`"
+                "wave/{wave} links no Linear Project; run `{}`",
+                super::tracker::make_project_command(wave)
             ));
             continue;
         };

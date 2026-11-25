@@ -740,15 +740,34 @@ drain makes one a queued Task names (question 2).
    the full matrix in CI, and the `oauth_tests::…sqlite_contention…` failure
    checked on the base. `check_migrations.py` passes since the base merge
    (2026-11-24).
-2. Review the two slice 12 choices that differ from the slice text
-   (`scratch/questions.md`): tracker down leaves the Wave recorded unbound,
-   and a drain creates an unbound Project a Task is sent into.
-3. Reviewer's look: Asana's footer search stays as the synchronous create's
+2. Reviewer's look: Asana's footer search stays as the synchronous create's
    lost-reply recovery (a retried `lf wave create` after a lost reply would
    otherwise make a second Asana project). It was slice 11's cross-Machine
    path; if gate review finds it unneeded, delete it.
-4. Review slice 14's Asana choice (`scratch/questions.md`): the unbound
-   sentence names `lf wave create <wave>` there, since connect is Linear's.
-5. Not this Task: a queued Task create's field snapshot ("3 sure": stays).
+3. Not this Task: a queued Task create's field snapshot ("3 sure": stays).
    Already on main: `lf wave status --sync` (no such flag) in
    `task/delivery.rs:343`, `commands/tracker.rs:49`, `docs/dev/planning.md:274`.
+
+## Slice 15 (human-review answers, 2026-11-24)
+
+Jack Heart: "1b 2a 3a".
+
+- 1b: `lf wave create <wave>` is the one command named for making an unbound
+  Project in either tracker. `tracker::make_project_command` becomes a
+  constant format (or goes); connect stays Linear's "attach a Linear
+  Project" verb. Update the create error, status line, `unbound` sentence,
+  docs and the four message assertions.
+- 2a: a queued Task makes its unbound Project during any drain: keep.
+- 3a: tracker down during `lf wave create` leaves the Wave recorded with an
+  unbound Project: keep.
+
+Jack Heart, 2026-11-24, after "1b 2a 3a": "after that, just ship this".
+
+Built: `make_project_command(wave)` is `lf wave create <wave>` for any
+tracker; the create error, connect receipt, the unbound sentence, Linear's
+"links no Linear Project" diagnostic, `docs/work.md`, `docs/dev/planning.md`
+and `split-wave` (its separate connect step went: create makes the Project)
+name it. `wave_sync_makes_no_project_and_wave_create_makes_only_its_own`
+retries through `Write::WaveCreate`. `lf wave plan connect <wave>` with no
+Project still makes one; it stays Linear's setup and attach verb.
+`refresh_wave`'s comment names its drain as the exception.

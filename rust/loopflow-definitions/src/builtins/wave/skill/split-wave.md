@@ -29,8 +29,7 @@ Each child gets a fresh goal, not a slice of the parent's prose:
 
 4. **Create the children.**
    ```bash
-   lf wave create <wave>/<child>                    # registers it and commits its files on main
-   lf wave plan connect <wave>/<child>              # makes its Linear Project
+   lf wave create <wave>/<child>                    # registers it, commits its files on main, makes its tracker Project
    lf task create --wave <wave>/<child> --title "…" --notes "…"
    ```
    Write each child's `GOAL.md` and `MEMORY.md` in its directory. Each child

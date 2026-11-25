@@ -97,14 +97,10 @@ pub fn connected(repo: &str) -> bool {
     queued_tracker(Path::new(repo)).is_some()
 }
 
-/// The command that makes `wave`'s Project in `repo`'s tracker: connecting
-/// the Wave, or in an Asana repository adding it again (connect would move
-/// the repository to Linear).
-pub fn make_project_command(repo: &Path, wave: &str) -> String {
-    match queued_tracker(repo) {
-        Some(TrackerKind::Asana) => format!("lf wave create {wave}"),
-        _ => format!("lf wave plan connect {wave}"),
-    }
+/// The command that makes `wave`'s Project in the repository's tracker,
+/// whichever tracker that is: adding the Wave again.
+pub fn make_project_command(wave: &str) -> String {
+    format!("lf wave create {wave}")
 }
 
 /// What a live Wave's Project the tracker does not hold yet says, and the
@@ -114,7 +110,7 @@ pub fn unbound_project(repo: &Path, wave: &str) -> Option<String> {
     Some(format!(
         "not in {} yet; `{}` makes it",
         tracker.display_name(),
-        make_project_command(repo, wave)
+        make_project_command(wave)
     ))
 }
 

@@ -59,7 +59,7 @@ struct WaveDetailReadingTests {
     @Test("an unbound Project says under its name which command makes it in the tracker")
     @MainActor
     func unboundProjectNamesItsMaker() throws {
-        let sentence = "not in Linear yet; `lf wave plan connect current` makes it"
+        let sentence = "not in Linear yet; `lf wave create current` makes it"
         let unbound = try #require(try planningWave { wave in
             var reading = wave["project"] as! [String: Any]
             var project = reading["value"] as! [String: Any]

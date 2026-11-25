@@ -1,8 +1,48 @@
 ---
 extends: builtin
-docs: scripts/testing.md
 ---
 ## In this repository
+
+### Focused tests
+
+Run from the checkout root with inherited `LF_*` unset and `< /dev/null` —
+inline in zsh: `env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') <cmd> < /dev/null`.
+
+```bash
+cargo test -p loopflow-execution --lib skills::catalog::          # one library module
+cargo test -p loopflow-harness claude_decode                      # one decoder or transcript reader; builds no storage or execution
+cargo test -p loopflow --test integration context_tests::         # one integration module
+cargo test -p loopflow --test golden_prompt                       # one standalone binary
+uv run pytest python/tests/test_gate_bounded.py                   # one Python file
+```
+
+Never `cargo test`, `cargo test --all` or `cargo nextest run --all` here.
+
+### Crates and surfaces
+
+- `rust/loopflow-model` — shared domain/ID/status types (wire-facing; changes reach Swift)
+- `rust/loopflow-storage` — SQLite store, migrations, `SCHEMA.md`
+- `rust/loopflow-harness` — provider decoders, transcripts (builds no storage or execution)
+- `rust/loopflow-execution` — launch, skills, shipping, wire/transport types
+- `rust/loopflow` — CLI, server (`src/server/`), integration tests
+- `swift/Loopflow` — shared Swift library (DTOs, server client, themes, shared views used by Mac and iOS)
+- `swift/LoopflowMac` — macOS Desktop shell and GhosttyKit integration
+- `swift/LoopflowiOS` — iPhone app target (`scripts/test_ios.py`)
+- `website/` — site and generated CLI reference
+
+**DTO parity.** A wire field change (in `rust/loopflow-model/`,
+`rust/loopflow/src/server/`, `wire.rs`, `read_stream.rs`, or CLI `--json`
+reads/writes) updates `tests/fixtures/dto/` and Rust + Swift required-nullable
+decoders (`swift/Loopflow/`), then runs
+`scripts/test_desktop.sh --filter DTOFixtureTests` and
+`uv run python scripts/test_ios.py`.
+
+**iPhone parity.** A change to shared Swift views, themes, models or Task
+status (`swift/Loopflow/`) is checked in the iOS target too:
+`uv run python scripts/check_swift_multiplatform_boundaries.py` and
+`uv run python scripts/test_ios.py`.
+
+### UI rules
 
 **A number on screen holds still.** Show progress until a count or total
 finishes loading, then draw the final value once; never let it climb live.

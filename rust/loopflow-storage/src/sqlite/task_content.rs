@@ -141,22 +141,6 @@ impl SqliteStore {
         tx.commit()?;
         Ok(task)
     }
-
-    /// `id` takes `to`'s place, moving into `to`'s Project when it is in
-    /// another; returns that Project's order.
-    pub fn reorder_task(&self, id: &TaskId, to: &TaskId) -> StoreResult<Vec<String>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let task = super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
-        // The moved Task is the one that is missing; a missing place is a bad argument.
-        let target = super::children::task_on(&tx, to)?
-            .ok_or_else(|| StoreError::InvalidData(format!("{to} is no Task; nothing changed.")))?;
-        super::children::require_task_not_deleted(&tx, &task)?;
-        super::children::require_task_not_deleted(&tx, &target)?;
-        let order = super::planning_order::move_in(&tx, &task, &target)?;
-        tx.commit()?;
-        Ok(order)
-    }
 }
 
 fn validate_edit(
@@ -190,7 +174,7 @@ fn validate_edit(
 }
 
 /// Move the Task into `destination`, as one planning edit its tracker sends.
-pub(super) fn move_task_in(
+fn move_task_in(
     conn: &rusqlite::Connection,
     id: &TaskId,
     expected_project: Option<&ProjectId>,

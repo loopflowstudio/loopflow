@@ -115,7 +115,7 @@ struct DashboardView: View {
                 }
                 // Working Tasks fill in the shared Task order; a saved Dashboard's
                 // visible occurrences fill in its arrangement order.
-                DashboardSlotGrid(members: workingTasks ? model.workingTaskMembers : plan.projection.visible,
+                DashboardSlotGrid(members: workingTasks ? plan.taskTiles : plan.projection.visible,
                                   focused: workspaces.selectedWork, layout: plan.slots,
                                   editing: editingSlots && plan.dashboardID != nil && !model.dashboardSaving
                                       ? DashboardSlotEditing { writeSlots(plan, $0) } : nil,
@@ -176,7 +176,7 @@ struct WaveTiles: View {
 
     var body: some View {
         if let plan = model.boardPlan(view) {
-            let members = model.boardTiles(view)
+            let members = plan.taskTiles
             if members.isEmpty {
                 HStack(spacing: Spacing.sm) {
                     Text("No planned or started Tasks.").emptyLine()
@@ -269,7 +269,11 @@ struct DashboardTile: View {
                 .dropDestination(for: String.self) { values, _ in
                     guard let value = values.first else { return false }
                     if workingTasks, let task = TaskOrderDrag.taskID(value) {
-                        model.reorderWorkingTask(task, to: member.work.id); return true
+                        let source = WorkWorkspaceKey(repository: plan.repository, kind: .task, id: task)
+                        let side = TaskOrderDrag.side(moving: source, onto: member.work,
+                                                      in: plan.resolution.members.map(\.work))
+                        model.reorderWorkingTask(source, to: member.work.id, side: side)
+                        return true
                     }
                     guard arrangeable, let id = plan.dashboardID, !model.dashboardSaving,
                           let other = plan.resolution.members.first(where: { $0.token == value }), other.work != member.work else { return false }

@@ -30,7 +30,7 @@ def executable_name(info_plist: Path) -> str:
 
 def install_app_executable(build_dir: Path, info_plist: Path, contents: Path) -> Path:
     """Copy the built app into Contents/MacOS under its CFBundleExecutable name,
-    embed the frameworks it links, and return the executable."""
+    embed its frameworks and SwiftPM resources, and return the executable."""
     source = build_dir / SWIFT_APP_PRODUCT
     if not source.is_file():
         raise RuntimeError(f"Missing built app executable: {source}")
@@ -38,6 +38,11 @@ def install_app_executable(build_dir: Path, info_plist: Path, contents: Path) ->
     executable.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(source, executable)
     _embed_frameworks(build_dir, executable)
+    for bundle in build_dir.glob("*.bundle"):
+        destination = contents / "Resources" / bundle.name
+        if destination.exists():
+            shutil.rmtree(destination)
+        shutil.copytree(bundle, destination, symlinks=True)
     return executable
 
 

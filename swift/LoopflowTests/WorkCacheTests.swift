@@ -309,7 +309,7 @@ struct WorkCacheTests {
         #expect(atLoad.count <= limit + 1) // Sixteen and a one-slot page, not the whole board.
         #expect(registry.openWork.count == Prefetch.working.count)
 
-        let tiles = model.workingTaskMembers.map(\.work.id)
+        let tiles = model.boardTiles(.workingTasks).map(\.work.id)
         let page = try #require(tiles.firstIndex { !atLoad.contains($0) })
         model.turnPage(.workingTasks, to: page)
         await spin { await !source.preparedTasks.contains(tiles[page]) }
@@ -335,7 +335,7 @@ struct WorkCacheTests {
         model.selectWorkingTasksDashboard()
         await spin { registry.preparationCount > 0 }
         let prepared = await source.preparedTasks
-        let cold = try #require(model.workingTaskMembers.map(\.work.id).first { !prepared.contains($0) })
+        let cold = try #require(model.boardTiles(.workingTasks).map(\.work.id).first { !prepared.contains($0) })
 
         let pane = try #require(registry.retained(key(cold))).multiplexer.focusedPane
         let target = DesktopPaneTarget(repository: key(cold).repository, window: UUID().uuidString, work: key(cold),

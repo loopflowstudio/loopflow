@@ -1008,8 +1008,8 @@ impl Entry {
     }
 
     /// Hand the store the terminal's Program Status when it changed: the
-    /// server reads it for every held terminal, viewed or not. A rebuilt
-    /// screen reports what its replay holds.
+    /// server records output and acknowledgements from typing, including
+    /// an empty set of records after the last result is dismissed.
     fn report(&mut self, terminal: &TerminalId, statuses: &mpsc::Sender<(TerminalId, Records)>) {
         let Some(records) = self.hosted.program_status() else {
             return;

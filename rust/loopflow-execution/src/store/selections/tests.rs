@@ -1,11 +1,11 @@
 use crate::process::attachment;
 use crate::store::selections;
 
-use loopflow_model::durable::{RepositoryId, TaskId};
+use loopflow_model::durable::RepositoryId;
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::selection::{
-    Arrangement, ArrangementMode, DashboardId, Selection, SelectionExpression, SelectionId,
-    WorkWorkspaceKind,
+    Arrangement, ArrangementMode, DashboardId, Selection, SelectionError, SelectionExpression,
+    SelectionId, WorkWorkspaceKind,
 };
 
 fn fixture() -> (tempfile::TempDir, SqliteStore, RepositoryId) {
@@ -184,18 +184,25 @@ fn dashboard_order_moves_under_its_revision_and_only_reordering_touches() {
     .unwrap();
     assert_eq!(restored.arrangement.mode, ArrangementMode::Auto);
 
-    let moved =
-        selections::reorder_dashboard(&store, &repo, &id, restored.revision, &c.work, &a.work)
-            .unwrap();
+    let mut edit = restored.arrangement.to_edit();
+    edit.order.rotate_right(1);
+    let save_order = || {
+        selections::save_dashboard(
+            &store,
+            &repo,
+            &id,
+            Some(restored.revision),
+            &restored.selection,
+            &edit,
+        )
+    };
+    let moved = save_order().unwrap();
     assert_eq!(moved.arrangement.order, [c.clone(), a.clone(), b.clone()]);
     assert_eq!(moved.arrangement.mode, ArrangementMode::Touched);
     assert_eq!(moved.revision, restored.revision + 1);
 
     let revisions = store.revisions().unwrap();
-    assert!(
-        selections::reorder_dashboard(&store, &repo, &id, restored.revision, &a.work, &c.work)
-            .is_err()
-    );
+    assert!(save_order().is_err());
     assert_eq!(store.revisions().unwrap(), revisions);
     assert_eq!(
         selections::read_dashboard(&store, &repo, &id)
@@ -243,48 +250,13 @@ fn owned_unstarted_task_is_open_but_excluded_from_working_queries() {
 }
 
 #[test]
-fn a_move_among_equal_ranks_lands_where_the_board_shows_its_target() {
-    let (_dir, store, _) = fixture();
-    let (one, two, three, four) = (
-        "task_11111111111111111111111111111111",
-        "task_22222222222222222222222222222222",
-        "task_33333333333333333333333333333333",
-        "task_44444444444444444444444444444444",
-    );
-    let id = |id: &str| TaskId::parse(id).unwrap();
-    // Older stores hold many Tasks at one rank, created in another order than
-    // their ids; the board breaks the tie by id.
-    store
-        .conn
-        .lock()
-        .unwrap()
-        .execute_batch(
-            "UPDATE tasks SET planning_rank=0, created_at=100-CAST(substr(issue_identifier,5) AS INTEGER)",
-        )
-        .unwrap();
-    assert_eq!(
-        store.reorder_task(&id(four), &id(one)).unwrap(),
-        [four, one, two, three]
-    );
-}
-
-#[test]
-fn a_task_move_changes_its_rank_in_every_plan_and_a_drop_in_another_project_joins_it() {
+fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_prepend() {
     let (_dir, store, repo) = fixture();
-    let (one, two, three, four, five) = (
+    let (one, two, three) = (
         "task_11111111111111111111111111111111",
         "task_22222222222222222222222222222222",
         "task_33333333333333333333333333333333",
-        "task_44444444444444444444444444444444",
-        "task_55555555555555555555555555555555",
     );
-    let id = |id: &str| TaskId::parse(id).unwrap();
-    let working = || {
-        selections::view_plan(&store, &repo, None)
-            .unwrap()
-            .resolution
-            .task_ids()
-    };
     // With a checkout, FIX-1 is idle and Working.
     store
         .conn
@@ -295,14 +267,30 @@ fn a_task_move_changes_its_rank_in_every_plan_and_a_drop_in_another_project_join
             [],
         )
         .unwrap();
-    assert_eq!(working(), [one, two]);
-    // The move is a rank edit: the whole Project's order comes back.
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute("UPDATE tasks SET planning_rank=0 WHERE id=?1", [two])
+        .unwrap();
     assert_eq!(
-        store.reorder_task(&id(two), &id(one)).unwrap(),
-        [two, one, three, four]
+        selections::view_plan(&store, &repo, None)
+            .unwrap()
+            .resolution
+            .task_ids(),
+        [one, two]
     );
-    assert_eq!(working(), [two, one]);
-    assert_eq!(store.task(&id(two)).unwrap().unwrap().rank, 0);
+    assert_eq!(
+        store.reorder_working_task(&repo, two, one, None).unwrap(),
+        [two, one]
+    );
+    assert_eq!(
+        selections::view_plan(&store, &repo, None)
+            .unwrap()
+            .resolution
+            .task_ids(),
+        [two, one]
+    );
     let plans = selections::selection_plans(&store, &repo).unwrap();
     let wave = plans
         .iter()
@@ -321,47 +309,123 @@ fn a_task_move_changes_its_rank_in_every_plan_and_a_drop_in_another_project_join
             "INSERT INTO task_events(task_id,kind_json,created_at) VALUES('{three}','{{\"kind\":\"started\"}}',2); INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,writer_machine_id,written_here) VALUES('own_33333333333333333333333333333333','{three}','recorded',NULL,NULL,2,2000,(SELECT id FROM machines WHERE is_local=1),1); INSERT INTO task_checkouts(task_id,worktree) VALUES('{three}','/repo/fix-3');"
         ))
         .unwrap();
-    assert_eq!(working(), [two, one, three]);
     assert_eq!(
-        store.reorder_task(&id(three), &id(two)).unwrap(),
-        [three, two, one, four]
+        selections::view_plan(&store, &repo, None)
+            .unwrap()
+            .resolution
+            .task_ids(),
+        [three, two, one]
     );
-    assert_eq!(working(), [three, two, one]);
+    let revisions = store.revisions().unwrap();
+    // A done Task is not a Working Tasks member, as either side of a drop; the
+    // refusal names it and nothing is written.
+    let done = "task_44444444444444444444444444444444";
+    for (task, to) in [(done, one), (one, done)] {
+        assert!(matches!(store.reorder_working_task(&repo, task, to, None),
+            Err(crate::store::StoreError::Selection(SelectionError::NotWorking(id))) if id == done));
+    }
+    assert_eq!(store.revisions().unwrap(), revisions);
+    assert_eq!(
+        selections::view_plan(&store, &repo, None)
+            .unwrap()
+            .resolution
+            .task_ids(),
+        [three, two, one]
+    );
+}
 
-    // A Project ranked first puts its Tasks first, whatever their own rank.
-    store
-        .conn
-        .lock()
+#[test]
+fn sidebar_step_follows_the_captured_cursor_and_disappears_without_a_graph() {
+    let (_dir, store, repo) = fixture();
+    let id =
+        loopflow_model::durable::TaskId::parse("task_22222222222222222222222222222222").unwrap();
+    let step = || {
+        selections::view_plan(&store, &repo, None)
+            .unwrap()
+            .contents
+            .into_iter()
+            .find(|content| content.work.id == id.as_str())
+            .unwrap()
+            .graph_step
+    };
+    assert_eq!(step(), None);
+    let graph = crate::task_graph::CapturedGraph::load("code", _dir.path())
         .unwrap()
-        .execute_batch(&format!(
-            "UPDATE projects SET planning_rank=1;
-             INSERT INTO projects(id,wave_id,created_at,project_name,status,planning_rank) VALUES('proj_22222222222222222222222222222222','11111111-1111-1111-1111-111111111111',2,'First','started',0);
-             INSERT INTO tasks(repository_id,id,project_id,issue_identifier,issue_title,issue_description,workspace_slug,created_at,updated_at,planning_rank)
-             VALUES('repo_11111111111111111111111111111111','{five}','proj_22222222222222222222222222222222','FIX-5','Other','','',2,2,9);
-             INSERT INTO task_events(task_id,kind_json,created_at) VALUES('{five}','{{\"kind\":\"started\"}}',2);
-             INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,writer_machine_id,written_here) VALUES('own_55555555555555555555555555555555','{five}','recorded',NULL,NULL,2,2000,(SELECT id FROM machines WHERE is_local=1),1);
-             INSERT INTO task_checkouts(task_id,worktree) VALUES('{five}','/repo/fix-5');"
-        ))
         .unwrap();
-    assert_eq!(working(), [five, three, two, one]);
-    // Dropped among another Project's Tasks, it joins that Project there.
-    assert_eq!(
-        store.reorder_task(&id(five), &id(one)).unwrap(),
-        [three, two, five, one, four]
-    );
-    assert_eq!(working(), [three, two, five, one]);
-    // Standalone Tasks follow even a Project at the largest supported rank.
+    let cursor = graph.find("implement").unwrap().cursor();
     store
-        .conn
-        .lock()
-        .unwrap()
-        .execute_batch(&format!(
-            "UPDATE projects SET planning_rank={};
-         UPDATE tasks SET project_id=NULL WHERE id='{five}';",
-            u32::MAX
-        ))
+        .take_up_task_graph(&id, &serde_json::to_string(&graph).unwrap())
         .unwrap();
-    assert_eq!(working(), [three, two, one, five]);
+    assert_eq!(step(), None, "before the first step");
+    store.set_task_graph_step(&id, "end").unwrap();
+    assert_eq!(step(), None, "after the last step");
+    store.set_task_graph_step(&id, "review").unwrap();
+    assert_eq!(step().as_deref(), Some("review"));
+    let carrier = store.test_lf_process();
+    let started = loopflow_storage::graph_process::ExecutionStart::reserved(1);
+    let run_from = |step: &str, cursor: &str| {
+        assert!(store
+            .start_task_graph_run(&id, step, None, cursor, (&carrier, &started))
+            .unwrap());
+    };
+    run_from("review", &serde_json::to_string(&cursor).unwrap());
+    assert_eq!(step().as_deref(), Some("implement"));
+    let past_end = serde_json::to_string(&crate::graph::runner::ExecutionCursor {
+        index: graph.steps.len(),
+        ..Default::default()
+    })
+    .unwrap();
+    store
+        .advance_task_graph_run(&id, &carrier, &past_end)
+        .unwrap();
+    assert_eq!(step().as_deref(), Some("review"));
+    store.set_task_graph_step(&id, "end").unwrap();
+    run_from("end", &past_end);
+    assert_eq!(step(), None);
+}
+
+#[test]
+fn repository_and_wave_tiles_open_only_the_unfinished_primary() {
+    let (_dir, store, repo) = fixture();
+    // A tile's resume argv names an `lf`; pin it rather than find the Machine's install.
+    let _lock = crate::journal::test_env_lock();
+    let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+    std::env::set_var("LF_HOME", _dir.path());
+    std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+    let session = store.test_session("conversation", &crate::session_record::new_artifact_key());
+    let db = || store.conn.lock().unwrap();
+    db().execute(
+        "INSERT INTO task_primary_sessions(task_id,session_id)
+        SELECT id,?1 FROM tasks WHERE issue_identifier='FIX-2'",
+        [&session.id],
+    )
+    .unwrap();
+
+    let check = |primary: Option<&str>| {
+        let tiles: Vec<_> = selections::selection_plans(&store, &repo)
+            .unwrap()
+            .into_iter()
+            .flat_map(|plan| plan.contents)
+            .filter(|content| content.identifier.as_deref() == Some("FIX-2"))
+            .collect();
+        assert_eq!(tiles.len(), 2);
+        for tile in tiles {
+            assert_eq!(tile.title, "Idle");
+            assert_eq!(tile.location.unwrap().cwd, "/repo/fix-2");
+            assert_eq!(tile.primary_session.as_deref(), primary);
+            assert_eq!(
+                tile.argv.and_then(|args| args.last().cloned()).as_deref(),
+                primary
+            );
+        }
+    };
+    check(Some("conversation"));
+    db().execute(
+        "UPDATE agent_sessions SET completed_at=2 WHERE id=?1",
+        [&session.id],
+    )
+    .unwrap();
+    check(None);
 }
 
 #[test]

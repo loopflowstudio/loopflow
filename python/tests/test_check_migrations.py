@@ -320,3 +320,53 @@ def test_a_contract_of_a_marking_migration_drops_only_marked_members(repo: Path)
     result = check(repo)
     assert result.returncode == 0, result.stderr
 
+
+def test_a_keeping_mark_names_a_member_marked_leaving(repo: Path):
+    merge(repo, "stop_waves.sql", "-- leaving: waves LOO-1\n", 31)
+    keeping = repo / MIGRATIONS / "keep.sql"
+
+    keeping.write_text("-- keeping: waves LOO-2\n")
+    result = check(repo)
+    assert result.returncode == 0, result.stderr
+
+    keeping.write_text("-- keeping: graphs LOO-2\n")
+    result = check(repo)
+    assert result.returncode == 1
+    assert "keeps graphs, which no earlier migration marks leaving" in result.stderr
+
+    keeping.write_text("-- keeping: pools LOO-2\n")
+    result = check(repo)
+    assert result.returncode == 1
+    assert "keeps pools, but no such table or column exists" in result.stderr
+
+
+@pytest.mark.parametrize("kept", ["-- keeping: graphs LOO-2\n", "-- keeping: waves.name LOO-2\n"])
+def test_a_contract_cannot_drop_a_kept_member(repo: Path, kept: str):
+    merge(repo, "add_name.sql", "ALTER TABLE waves ADD COLUMN name TEXT;\n", 40)
+    merge(repo, "add_title.sql", "-- leaving: waves.name LOO-1\n-- leaving: graphs LOO-1\n", 31)
+    merge(repo, "keep.sql", kept, 20)
+    (repo / MIGRATIONS / "drop_marked.sql").write_text(
+        CONTRACT + "ALTER TABLE waves DROP COLUMN name;\nDROP TABLE graphs;\n"
+    )
+    result = check(repo)
+    assert result.returncode == 1
+    assert "which add_title does not mark leaving or a later migration keeps" in result.stderr
+
+
+def test_marking_a_kept_member_again_restarts_its_clock(repo: Path):
+    merge(repo, "add_title.sql", "-- leaving: graphs LOO-1\n", 60)
+    merge(repo, "keep_graphs.sql", "-- keeping: graphs LOO-2\n", 50)
+    merge(repo, "stop_graphs.sql", "-- leaving: graphs LOO-3\n", 10)
+    contract = repo / MIGRATIONS / "drop_graphs.sql"
+
+    contract.write_text(CONTRACT + "DROP TABLE graphs;\n")
+    result = check(repo)
+    assert result.returncode == 1
+    assert "which add_title does not mark leaving or a later migration keeps" in result.stderr
+
+    contract.write_text(
+        "-- expand: stop_graphs\n-- exports: ~/.lf/exports/graphs.json\nDROP TABLE graphs;\n"
+    )
+    result = check(repo)
+    assert result.returncode == 1
+    assert "contracts stop_graphs, which merged 10 days ago" in result.stderr

@@ -90,7 +90,7 @@ struct WorkPaletteTests {
         #expect(palette.keyboardFocus != palette.selectionEdge)
         #expect(palette.keyboardFocus != palette.failure)
         for (state, label) in [(ProgramStatusState.working, "Busy"), (.blocked, "Blocked"),
-                               (.error, "Error"), (.done, "Done"), (.idle, "Available")] {
+                               (.error, "Error"), (.done, "Finished"), (.idle, "Available")] {
             let report = ProgramStatusReport(state: state, id: nil, kind: nil, progress: nil,
                                              app: nil, title: nil, msg: nil)
             for selected in [false, true] {

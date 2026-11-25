@@ -164,6 +164,16 @@ When that migration carries marks, the contract may drop only marked members.
 A mark must name a table or column that exists and a Task ID; it is a comment,
 so a marked member stays fully readable until the contract runs.
 
+A merged mark never changes, so taking a member back is a new migration:
+
+```sql
+-- keeping: task_orders LOO-1063
+```
+
+A keeping mark names a member an earlier migration marks leaving. The member
+leaves `due_removals.py`, `SCHEMA.md` and the test stores' guard, and no
+contract may drop it. Marking it leaving again starts a new clock.
+
 `rust/loopflow-storage/SCHEMA.md` is generated from the migrations and lists
 every table under its product concept, with each leaving member's Task and the
 migration that marked it. `uv run python scripts/schema_page.py` rewrites it;
@@ -197,7 +207,8 @@ f5981e removes the write 30 days after that release.
   whose `-- expand:` step merged `STAGING_DAYS` ago and whose `-- exports:` names
   where the dropped data went.
 - Every `-- leaving:` mark names a current table or column and a Task ID; a
-  contract whose expand step carries marks drops only marked members.
+  contract whose expand step carries marks drops only marked members no later
+  `-- keeping:` took back. A keeping mark names a member marked leaving.
 
 ## What a database can be told
 

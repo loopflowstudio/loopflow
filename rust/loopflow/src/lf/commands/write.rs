@@ -303,7 +303,15 @@ writes! {
     TaskUnpause { directory: PathBuf, issue: String, run: bool } => Option<task::TaskRun>;
     { issue, run, .. } => match remote {
         Some(remote) => remote.call()?,
-        None => task::unpause(directory, issue, *run, None, false, environment)?,
+        None => task::unpause(
+            directory,
+            issue,
+            *run,
+            None,
+            false,
+            environment,
+            crate::lf::navigation::command_merges,
+        )?,
     },
 
     /// `lf task interrupt <issue> --json`.

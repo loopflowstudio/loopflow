@@ -53,13 +53,16 @@ pub fn run_refusal(issue: &str) -> String {
     format!("Task is paused; run `lf task unpause {issue}` to lift the hold")
 }
 
-pub(super) fn require_unpaused_in(conn: &Connection, task: &TaskId) -> StoreResult<()> {
-    let paused: bool = conn.query_row(
+pub(super) fn is_paused_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
+    Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM task_pauses WHERE task_id=?1)",
         [task.as_str()],
         |row| row.get(0),
-    )?;
-    if paused {
+    )?)
+}
+
+pub(super) fn require_unpaused_in(conn: &Connection, task: &TaskId) -> StoreResult<()> {
+    if is_paused_in(conn, task)? {
         let issue = children::short_task_id(conn, task)?.unwrap_or_else(|| task.to_string());
         return Err(StoreError::InvalidData(run_refusal(&issue)));
     }
@@ -179,13 +182,18 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn release_task_pause(&self, task: &TaskId) -> StoreResult<()> {
+    pub fn release_task_pause(&self, task: &TaskId, settle_step: Option<&str>) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if !clear_in(&tx, task)? {
             return Err(StoreError::InvalidData("Task is not paused".into()));
         }
-        settle_carrier(&tx, task)?;
+        match settle_step {
+            Some(step) => {
+                super::task_work::set_step_in(&tx, task, step)?;
+            }
+            None => settle_carrier(&tx, task)?,
+        }
         tx.commit()?;
         Ok(())
     }
@@ -247,6 +255,78 @@ mod tests {
             .unwrap();
         assert_eq!(store.task_state(&id).unwrap(), TaskState::Abandoned);
         assert!(store.task_pause(&id).unwrap().is_none());
+    }
+
+    #[test]
+    fn arriving_at_end_while_paused_keeps_the_hold_without_requesting_completion() {
+        use crate::execution::TaskState;
+        use crate::graph_process::ExecutionStart;
+        use crate::process::Starter;
+        use crate::sqlite::task_work::END;
+        use loopflow_model::id::{LfProcessId, TraceId};
+
+        let (_home, store, fixture, _) = crate::test_fixture::task();
+        let id = fixture.id;
+        store
+            .create_task(&crate::work::task::NewTask {
+                id: id.clone(),
+                repository_id: fixture.repository_id,
+                parent_task_id: None,
+                project_id: None,
+                title: "Draining final step".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        store
+            .take_up_task_graph(&id, r#"{"name":"landing","steps":[]}"#)
+            .unwrap();
+        let carrier = LfProcessId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?2,1)",
+                rusqlite::params![carrier, TraceId::new()],
+            )
+            .unwrap();
+        }
+        assert!(store
+            .start_task_graph_run(
+                &id,
+                "start",
+                None,
+                r#"{"index":0}"#,
+                (&carrier, &ExecutionStart::reserved(1)),
+            )
+            .unwrap());
+        store
+            .begin_task_pause(&id, &Starter::Person { name: None }, vec![])
+            .unwrap();
+
+        assert!(store.arrive_task_graph(&id, &carrier, END).unwrap());
+        assert_eq!(store.task_state(&id).unwrap(), TaskState::Paused);
+        assert!(store.task_pause(&id).unwrap().is_some());
+        assert!(store.task_completion_pending(&id).unwrap().is_none());
+        let row = store.task_graph_row(&id).unwrap().unwrap();
+        assert_eq!(row.step, END);
+        assert!(row.run.is_none());
+
+        store.settle_task_pause(&id, false).unwrap();
+        // Settling a dead stop cursor on release clears the hold and run cursor together.
+        assert!(store
+            .start_task_graph_run(
+                &id,
+                END,
+                None,
+                r#"{"index":0}"#,
+                (&carrier, &ExecutionStart::reserved(1)),
+            )
+            .unwrap());
+        store.release_task_pause(&id, Some("ship-review")).unwrap();
+        assert!(store.task_pause(&id).unwrap().is_none());
+        let settled = store.task_graph_row(&id).unwrap().unwrap();
+        assert_eq!(settled.step, "ship-review");
+        assert!(settled.run.is_none());
     }
 
     #[test]

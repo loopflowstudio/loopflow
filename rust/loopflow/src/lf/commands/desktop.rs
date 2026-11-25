@@ -670,7 +670,13 @@ pub(crate) fn read_task_pane(
         let store = loopflow_execution::store::read_existing_registry()?
             .map(std::sync::Arc::new)
             .context("no Loopflow store exists on this Machine")?;
-        let status = loopflow_execution::ops::task::read_task_status(&store, &repo, issue).await?;
+        let status = loopflow_execution::ops::task::read_task_status(
+            &store,
+            &repo,
+            issue,
+            crate::lf::navigation::command_merges,
+        )
+        .await?;
         super::waves::task_pane(&store, status).await
     })
 }
@@ -686,7 +692,13 @@ pub(crate) fn subscribe_task_pane(
         let store = loopflow_execution::store::read_existing_registry()?
             .map(std::sync::Arc::new)
             .context("no Loopflow store exists on this Machine")?;
-        let status = loopflow_execution::ops::task::read_task_status(&store, &repo, issue).await?;
+        let status = loopflow_execution::ops::task::read_task_status(
+            &store,
+            &repo,
+            issue,
+            crate::lf::navigation::command_merges,
+        )
+        .await?;
         anyhow::Ok(
             status
                 .task

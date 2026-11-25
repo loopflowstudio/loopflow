@@ -370,7 +370,8 @@ pub(super) fn auto_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult
 
 /// The run `carrier` started stopped at `step`, or reached `end`: put the
 /// Task there. A Task another run or a person moved meanwhile stays put.
-/// Returns whether this put the Task at `end`, which requests completion.
+/// Returns whether this put the Task at `end`, which requests completion
+/// unless the Task is paused.
 fn arrive_in(
     tx: &rusqlite::Transaction<'_>,
     task: &TaskId,
@@ -390,13 +391,17 @@ fn arrive_in(
         ],
     )? > 0;
     let ended = arrived && step == END;
-    if ended {
+    if ended && !super::task_pause::is_paused_in(tx, task)? {
         super::children::request_completion_in(tx, task, None)?;
     }
     Ok(ended)
 }
 
-fn set_step_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, step: &str) -> StoreResult<bool> {
+pub(super) fn set_step_in(
+    tx: &rusqlite::Transaction<'_>,
+    task: &TaskId,
+    step: &str,
+) -> StoreResult<bool> {
     Ok(tx.execute(
         "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,run_pid=NULL,run_os_started_at=NULL,
              run_died_at=NULL,

@@ -657,7 +657,10 @@ fn format_task_pr_line(
 }
 
 fn print_task(task: &loopflow_execution::work::task::Task, json: bool) -> anyhow::Result<()> {
-    let snapshot = loopflow_execution::ops::task::task_snapshot(task)?;
+    let snapshot = loopflow_execution::ops::task::task_snapshot(
+        task,
+        loopflow::lf::navigation::command_merges,
+    )?;
     print_task_snapshot(&snapshot, json)
 }
 
@@ -1075,7 +1078,11 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             subscribe,
             ..
         } => {
-            let status = loopflow_execution::ops::task::task_status(repo, issue.as_deref())?;
+            let status = loopflow_execution::ops::task::task_status(
+                repo,
+                issue.as_deref(),
+                loopflow::lf::navigation::command_merges,
+            )?;
             // A Task another Machine runs is read where it runs.
             let mut remote_line = None;
             if let Some(task) = &status.task {
@@ -1382,6 +1389,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 cli.agent.as_deref(),
                 cli.batch,
                 &[],
+                loopflow::lf::navigation::command_merges,
             )?;
             if *json {
                 println!("{}", serde_json::to_string(&receipt)?);
@@ -1422,7 +1430,12 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             } else {
                 loopflow_execution::ops::task::TaskWaitUntil::Terminal
             };
-            let waited = loopflow_execution::engine::task::wait(issue, until, timeout)?;
+            let waited = loopflow_execution::engine::task::wait(
+                issue,
+                until,
+                timeout,
+                loopflow::lf::navigation::command_merges,
+            )?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&waited)?);
                 Ok(())

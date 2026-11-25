@@ -341,6 +341,7 @@ pub fn task_detail_facts(
                 input.step,
                 cursor.as_ref(),
                 input.auto,
+                &mut cached,
             )))
         } else {
             Ok(GraphDetail::Ships(graph.ships_before_review(

@@ -268,9 +268,10 @@ pub fn unpause(
     agent: Option<&str>,
     approve: bool,
     environment: &[(String, String)],
+    merges: fn(&[String]) -> bool,
 ) -> Result<Option<TaskRun>> {
     if !start {
-        crate::ops::task::pause::unpause(issue).map_err(written)?;
+        crate::ops::task::pause::unpause(issue, merges).map_err(written)?;
         return Ok(None);
     }
     let mut args = run_flags(agent, approve);
@@ -293,8 +294,8 @@ pub fn ownership(directory: &Path, issue: &str, change: OwnershipChange) -> Resu
 }
 
 /// One `task.wait` reading: the Task now and whether it reached `until`.
-pub fn waited(issue: &str, until: TaskWaitUntil) -> Result<Waited> {
-    match crate::ops::task::task_wait_now(issue, until) {
+pub fn waited(issue: &str, until: TaskWaitUntil, merges: fn(&[String]) -> bool) -> Result<Waited> {
+    match crate::ops::task::task_wait_now(issue, until, merges) {
         Ok(Some((task, reached))) => Ok(Waited { reached, task }),
         Ok(None) => Err(missing(issue)),
         Err(error) => Err(Error::refused(&error.into(), ErrorCode::Unavailable)),
@@ -303,8 +304,13 @@ pub fn waited(issue: &str, until: TaskWaitUntil) -> Result<Waited> {
 
 /// `lf task wait`: read until the Task reaches `until` or `timeout` passes,
 /// and return the last reading.
-pub fn wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -> Result<Waited> {
-    match crate::ops::task::task_wait(issue, until, timeout) {
+pub fn wait(
+    issue: &str,
+    until: TaskWaitUntil,
+    timeout: Option<Duration>,
+    merges: fn(&[String]) -> bool,
+) -> Result<Waited> {
+    match crate::ops::task::task_wait(issue, until, timeout, merges) {
         Ok(Some((task, reached))) => Ok(Waited { reached, task }),
         Ok(None) => Err(missing(issue)),
         Err(error) => Err(Error::refused(&error.into(), ErrorCode::Unavailable)),
@@ -316,14 +322,15 @@ pub fn wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -> Res
 pub fn subscribe_wait(
     issue: String,
     until: TaskWaitUntil,
+    merges: fn(&[String]) -> bool,
     transport: Transport,
 ) -> anyhow::Result<Option<Subscription>> {
     crate::read_stream::start(
         crate::read_stream::Watch::State,
         (issue, until),
-        |store, (issue, until): (String, TaskWaitUntil)| async move {
+        move |store, (issue, until): (String, TaskWaitUntil)| async move {
             let store = crate::read_stream::require_store(store)?;
-            match crate::ops::task::task_wait_reading(&store, &issue, until).await? {
+            match crate::ops::task::task_wait_reading(&store, &issue, until, merges).await? {
                 Some((task, reached)) => Ok(Waited { reached, task }),
                 None => Err(missing(&issue).into()),
             }

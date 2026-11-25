@@ -17,18 +17,22 @@ pub(crate) fn carrier_may_run(carrier: &TaskCarrier) -> bool {
 pub fn task_graph(store: &SqliteStore, task: &TaskId) -> StoreResult<Option<TaskGraph>> {
     store
         .task_graph_row(task)?
-        .map(|row| decode_row(row).map(read_task_graph))
+        .map(|row| decode_row(row).map(|row| read_task_graph(row, |_| false)))
         .transpose()
 }
 
-pub fn task_work(store: &SqliteStore, task: &TaskId) -> StoreResult<TaskWork> {
+pub fn task_work(
+    store: &SqliteStore,
+    task: &TaskId,
+    merges: fn(&[String]) -> bool,
+) -> StoreResult<TaskWork> {
     let records = store.task_work_records(task)?;
     Ok(TaskWork {
         sessions: records.sessions,
         graph_processes: records.graph_processes,
         graph: records
             .graph
-            .map(|row| decode_row(row).map(read_task_graph))
+            .map(|row| decode_row(row).map(|row| read_task_graph(row, merges)))
             .transpose()?,
     })
 }
@@ -36,6 +40,7 @@ pub fn task_work(store: &SqliteStore, task: &TaskId) -> StoreResult<TaskWork> {
 pub fn task_overview(
     store: &SqliteStore,
     task: &TaskId,
+    merges: fn(&[String]) -> bool,
 ) -> StoreResult<(TaskOverview, Vec<crate::durable::GraphProcessDetail>)> {
     let (records, details) = store.task_overview_records(task)?;
     Ok((
@@ -44,7 +49,7 @@ pub fn task_overview(
             graph_processes: records.graph_processes,
             graph: records
                 .graph
-                .map(|row| decode_row(row).map(read_task_graph))
+                .map(|row| decode_row(row).map(|row| read_task_graph(row, merges)))
                 .transpose()?,
         },
         details,
@@ -83,13 +88,13 @@ pub(crate) fn settled_task_position(
     })
 }
 
-fn read_task_graph(row: TaskGraphRow) -> TaskGraph {
+fn read_task_graph(row: TaskGraphRow, merges: impl FnMut(&[String]) -> bool) -> TaskGraph {
     let run = row.run.as_ref().map(|(cursor, process)| TaskGraphRun {
         cursor,
         lf_process_id: process.id.to_string(),
         running: carrier_may_run(process),
     });
-    TaskGraph::read(&row.graph, row.step, run, row.auto, row.pause)
+    TaskGraph::read(&row.graph, row.step, run, row.auto, row.pause, merges)
 }
 
 #[cfg(test)]
@@ -122,7 +127,7 @@ mod tests {
             auto: None,
             pause: None,
         };
-        let running = |row| match read_task_graph(row).position {
+        let running = |row| match read_task_graph(row, |_| false).position {
             TaskGraphPosition::Run { running, .. } => running,
             TaskGraphPosition::At { .. } => panic!("the Task is on a run"),
         };
@@ -237,19 +242,6 @@ fn decode_row(row: SavedTaskGraphRow) -> StoreResult<TaskGraphRow> {
 }
 pub fn task_graph_row(store: &SqliteStore, task: &TaskId) -> StoreResult<Option<TaskGraphRow>> {
     store.task_graph_row(task)?.map(decode_row).transpose()
-}
-
-/// Whether unpausing restarts the saved run: a Task waiting for a person, at
-/// a landing stop with auto off or at its end stays there. A Task with no
-/// Graph yet starts one.
-pub fn resumes_on_unpause(store: &SqliteStore, task: &TaskId) -> StoreResult<bool> {
-    Ok(task_graph_row(store, task)?.is_none_or(|row| {
-        row.graph.resumes_on_unpause(
-            &row.step,
-            row.run.as_ref().map(|(cursor, _)| cursor),
-            row.auto,
-        )
-    }))
 }
 pub(crate) fn task_graph_record(
     store: &SqliteStore,

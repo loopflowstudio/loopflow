@@ -1118,9 +1118,11 @@ impl Read {
                 directory,
                 pr.as_deref(),
             )?),
-            Self::TaskWait { issue, until } => {
-                value(&loopflow_execution::engine::task::waited(issue, *until)?)
-            }
+            Self::TaskWait { issue, until } => value(&loopflow_execution::engine::task::waited(
+                issue,
+                *until,
+                crate::lf::navigation::command_merges,
+            )?),
         }
     }
 
@@ -1246,9 +1248,12 @@ impl Read {
                 &super::tracker::status_repository(&directory)?,
                 transport,
             ),
-            Self::TaskWait { issue, until } => {
-                loopflow_execution::engine::task::subscribe_wait(issue, until, transport)
-            }
+            Self::TaskWait { issue, until } => loopflow_execution::engine::task::subscribe_wait(
+                issue,
+                until,
+                crate::lf::navigation::command_merges,
+                transport,
+            ),
             other => {
                 return Err(loopflow_execution::engine::Error::new(
                     loopflow_execution::engine::ErrorCode::Invalid,

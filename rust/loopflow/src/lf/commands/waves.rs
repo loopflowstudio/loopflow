@@ -1213,9 +1213,13 @@ where
             let reading = reading.clone();
             async move {
                 let store = loopflow_execution::read_stream::require_store(store)?;
-                let status =
-                    loopflow_execution::ops::task::read_task_status(&store, &repo, &args.issue)
-                        .await?;
+                let status = loopflow_execution::ops::task::read_task_status(
+                    &store,
+                    &repo,
+                    &args.issue,
+                    crate::lf::navigation::command_merges,
+                )
+                .await?;
                 Ok(serde_json::to_value(reading(store, status).await?)?)
             }
         },
@@ -1466,7 +1470,12 @@ pub(crate) fn read_task_detail(
         }
     }
     rt.block_on(async {
-        let status = loopflow_execution::ops::task::registered_task_status(&store, task).await?;
+        let status = loopflow_execution::ops::task::registered_task_status(
+            &store,
+            task,
+            crate::lf::navigation::command_merges,
+        )
+        .await?;
         task_detail(&store, status, unanswered).await
     })
 }
@@ -4754,11 +4763,15 @@ mod tests {
             );
         };
         assert!(reason.contains("no such table: task_events"), "{reason}");
-        let graph = loopflow_execution::store::task_work::task_overview(&store.sqlite, &task)
-            .unwrap()
-            .0
-            .graph
-            .unwrap();
+        let graph = loopflow_execution::store::task_work::task_overview(
+            &store.sqlite,
+            &task,
+            crate::lf::navigation::command_merges,
+        )
+        .unwrap()
+        .0
+        .graph
+        .unwrap();
         assert_eq!(graph.name, "feature");
         assert!(
             matches!(graph.position, loopflow_execution::task_graph::TaskGraphPosition::At { ref step } if step == "end")

@@ -187,7 +187,12 @@ pub fn task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {
         .task(&id)?
         .context("Task is no longer recorded")?;
     let pane = tokio::runtime::Runtime::new()?.block_on(async {
-        let status = loopflow_execution::ops::task::registered_task_status(&store, task).await?;
+        let status = loopflow_execution::ops::task::registered_task_status(
+            &store,
+            task,
+            crate::lf::navigation::command_merges,
+        )
+        .await?;
         super::waves::task_pane(&store, status).await
     })?;
     let row = pane.row.context("registered Task has no planning row")?;

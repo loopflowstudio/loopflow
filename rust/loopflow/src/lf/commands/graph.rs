@@ -1261,13 +1261,6 @@ impl SkillExecutor for &RunningGraph<'_> {
         skill: &ConcreteSkill,
         ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
-        if self.interrupted() {
-            eprintln!(
-                "Graph {} interrupted before {}.",
-                self.graph, skill.skill.name
-            );
-            return Ok(SkillOutcome::Interrupted);
-        }
         let Some(standing_in) = self.stands_in(skill)? else {
             let step = skill.interactive_step().unwrap_or(&skill.skill.name);
             eprintln!("Stopped at {step}; the Task waits there for its conversation.");
@@ -1275,6 +1268,13 @@ impl SkillExecutor for &RunningGraph<'_> {
         };
         if let Some(step) = self.stopped_landing()? {
             return Ok(SkillOutcome::StopsAt(step));
+        }
+        if self.interrupted() {
+            eprintln!(
+                "Graph {} interrupted before {}.",
+                self.graph, skill.skill.name
+            );
+            return Ok(SkillOutcome::Interrupted);
         }
         loopflow_execution::ops::tracker_events::sync_repository(
             &self.store,
@@ -1381,12 +1381,12 @@ impl SkillExecutor for &RunningGraph<'_> {
         _ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
         let label = ops.item.display_name();
+        if let Some(step) = self.stopped_landing()? {
+            return Ok(SkillOutcome::StopsAt(step));
+        }
         if self.interrupted() {
             eprintln!("Graph {} interrupted before {label}.", self.graph);
             return Ok(SkillOutcome::Interrupted);
-        }
-        if let Some(step) = self.stopped_landing()? {
-            return Ok(SkillOutcome::StopsAt(step));
         }
         loopflow_execution::ops::tracker_events::sync_repository(
             &self.store,

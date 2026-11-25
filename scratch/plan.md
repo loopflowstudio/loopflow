@@ -10,42 +10,20 @@ During a build, `lf task pause INF-123` stops the worker, every subprocess in th
 
 ## Remaining, in order
 
-### 1. Align natural stops and end-of-Graph completion under a pause hold
-Concept review at `1a8c2450bd` (`scratch/concept-review.html`) found one remaining model split between a stopped `Run` cursor and a natural stop (`interactive:`, `auto: off` landing, `end`) under a pause hold:
-
-- **Arrive at natural stops before checking `interrupted()` (`rust/loopflow/src/lf/commands/graph.rs`):**
-  - In `RunningGraph::run_skill`, check `stands_in(skill)` (returning `StopsAt(step)` when `None`) and `stopped_landing()` (returning `StopsAt(step)` when `Some`) **before** `if self.interrupted()`. When `auto` is on (or `-b`), `stands_in` returns `Some(true)` and `self.interrupted()` still stops before spawning any stand-in agent.
-  - In `RunningGraph::run_command`, check `stopped_landing()` **before** `if self.interrupted()`.
-  - Effect: when a draining `cmd:` exits `0` right before `interactive: demo` (or `land` with `auto: off`), the Graph arrives at `At { step }` under the hold (`WorkflowAction::Unpause`, `"Paused at demo. \`lf task unpause\` lifts the hold."`) instead of leaving a phantom `Run` cursor that promises `unpause --run` will resume it and breaks plain `unpause` into `Idle` / `Run: demo`.
-- **Do not auto-complete a paused Task at `end` (`rust/loopflow-storage/src/sqlite/task_work.rs`):**
-  - In `arrive_in`, only call `request_completion_in(tx, task, None)` when `ended` is true **and** `task_pauses` has no row for `task`.
-  - Effect: when a draining final `cmd:` step exits `0` under a hold, the Task arrives at `Paused: end` (`WorkflowAction::Unpause`) and stays open and held — never silently completing itself (clearing its hold) and never failing `complete_task` with `"Task is still stopping"` to write a `completion_error`.
-- **Keep `resumes_on_unpause` and `release` honest when Auto is off (`rust/loopflow-execution/src/task_graph.rs`, `rust/loopflow-execution/src/ops/task/pause.rs`, `rust/loopflow-storage/src/sqlite/task_pause.rs`, `rust/loopflow-execution/src/ops/task.rs`):**
-  - In `CapturedGraph::resumes_on_unpause` (and a small helper returning the parked stop name for a `Place` + `AutoState`), treat `Some(cursor)` as non-resuming when `place` is an `interactive:` step with `auto != Some(AutoState::On)` (and, where `merges` is available in `pause::release`, `ownership::task_detail_facts`, and `try_start_task_run`, when `place` is a landing step with `auto == Some(AutoState::Off)`).
-  - Keep the saved cursor intact while paused so flipping Auto off and back on stays reversible; when `release_task_pause` lifts a hold on a dead cursor standing at one of those stops, settle `task_graphs` to `At { step }` (`step = <stop>, run_start = NULL, lf_process_id = NULL`) in the same transaction.
-  - In `try_start_task_run`, also handle a starting landing step with `auto == Some(AutoState::Off)` by settling `set_task_graph_step` and returning `TaskRunStart::Waiting(step)` so unpausing/running never spawns a throwaway `GraphProcess` just to hit `stopped_landing()`.
-- **Focused tests to prove the slice first:**
-  1. Unit tests in `task_graph.rs` (`resumes_on_unpause` / `TaskGraph::read` for `Some(cursor)` on `ship-review` with `auto: off` vs `auto: on`, and `At { step: "demo" }` paused wording).
-  2. Storage test in `sqlite/task_pause.rs` or `task_work.rs`: `arrive_task_graph(..., END)` while paused keeps `task_pauses` and writes no `completion_request`.
-  3. Integration tests in `task_graph_launch_tests.rs`:
-     - Draining `cmd:` followed by `interactive: demo`: arrives at `Paused: demo` (`Unpause`, `"Paused at demo. \`lf task unpause\` lifts the hold."`); both plain `unpause` and `unpause --run` leave `Active` at `demo` without re-running `cmd:`.
-     - Draining final `cmd:` (1-step Graph): arrives at `Paused: end` (`Unpause`), stays `paused` with no `completion_error`.
-     - Pause with `auto: on` at `ship-review` (or `land`), turn `auto off`, verify `Unpause` (not `Resume`), then `unpause --run` settles cleanly to `At` without spawning a Graph process.
-
-### 2. Gate & CI
+### 1. Gate & CI
 - Run gate (`scripts/test.py` with focused Rust filter, Swift Mac & iOS, architecture, documented commands) on the branch merged with #1997.
-- The C1 fixes from 2d9b3ca205 and the stop-alignment slice above get a live Mac Dev app look (and Simulator check for iPhone if needed) in review.
+- The C1 fixes from 2d9b3ca205 and the natural-stop alignment pass get a live Mac Dev app look (and Simulator check for iPhone if needed) in review.
 - CI covers the five-harness worker matrix, Linux session enumeration, and full lifeline/attachment/hosted-terminal suites.
 
-### 3. Named gaps for the PR
+### 2. Named gaps for the PR
 Separate-session Codex 0.171.0 tool jobs can survive pause (`osPid: null` in app-server). A pause first issued after a move's payload is sent and before the destination checkout exists can need a retry on arrival.
 
-### 4. Kept by decision (outside LOO-1078)
+### 3. Kept by decision (outside LOO-1078)
 Paused sidebar rows may still show `Available · inferred` from the open primary Task Session; holistic session-vs-worker availability semantics belong to a dedicated design pass (`scratch/questions.md`). Pre-existing `task_complete` leaving a running Graph step alive until exit and the raw step UUID in `task_execution.rs:336` (#1974) remain outside this Task.
 
 ## What exists
 - **Hold.** `task_pauses(task_id PK, paused_at, paused_by, stopping_sessions)` on the execution Machine; `TaskState::Paused` derived in `sqlite/durable.rs::task_state_sql`. Pause applies only to open, started Tasks. Unpause, complete, abandon, reopen and unassign clear it; unassign refuses while `stopping_sessions` has live members. `lf task move` carries the hold in `MovedTask`; the source keeps it until arrival.
-- **Stop.** Headless workers get their own OS session; pause, interrupt and the reaper stop its verified members, including reparented jobs. Pause records the hold, the session members and a Graph stop in one transaction, then signals outside the admission and SQLite locks; a separate per-Task cleanup lock serializes cleanup with unpause and move send. In-flight mutations (`lf land`) drain, advance their checkpoint past themselves on exit 0 (preserving real non-zero failures), and stop before the next automatic step; the receipt and `TaskGraph.sentence` name them. Natural stops (`interactive:`, `auto: off` landing, and `end` without auto-completion) are aligned in remaining slice 1.
+- **Stop.** Headless workers get their own OS session; pause, interrupt and the reaper stop its verified members, including reparented jobs. Pause records the hold, the session members and a Graph stop in one transaction, then signals outside the admission and SQLite locks; a separate per-Task cleanup lock serializes cleanup with unpause and move send. In-flight mutations (`lf land`) drain, advance their checkpoint past themselves on exit 0 (preserving real non-zero failures), and stop before the next automatic step; the receipt and `TaskGraph.sentence` name them. Natural stops (`interactive:` without Auto, `auto: off` landing, and `end` without auto-completion) arrive cleanly under the hold (`Unpause`, no phantom `Run`, no silent auto-complete); turning Auto off while paused on an interactive or landing cursor switches `Resume` to `Unpause` across status, snapshot, and roadmap via one `stop_at` + `command_merges` predicate, and unpausing settles the dead stop cursor to `At { step }` in the release transaction without spawning a Graph process.
 - **Gates.** `lf task run`, `lf task auto on`, carrier and limit recovery, and operator recommendations (`TaskActionModel` NoAction) respect the hold. Conversations do not: steers, child-Task updates and primary recovery reach the open Task Session as usual.
 - **Surfaces.** `lf task pause`, `lf task unpause [--run]` (a parked `--run` prints the Graph's sentence and the command that moves it), `lf task list --state paused`, served `task.pause` / `task.unpause` routed to the execution Machine, `TaskRunControl` refusal and `pausing` flag, Swift DTOs (`WorkflowAction::Pausing` / `"pausing"`). Docs: `docs/work.md`, `surfaces.md`, `orchestration.md`, `sessions.md`, `troubleshooting.md`, `agent-api.md`, `DESIGN.md`, `swift/README.md`.
 - **Task bar (C1).** `TaskWorkflowControls` on Mac and iPhone: fixed ▶/⏸, a borderless step track whose buttons start from their step, the current step grown into the menu chip, Auto and ✓ at the far end; it folds to ▶ + chip when narrow. Rust words every chip (`WorkflowControl.label`) with the top-level step first (`build · implement`, `Paused: build · implement`, `Pausing: deliver · land`, `Run: build · implement`, `Waiting: deliver · land`, `Paused: plan` at `start`), and emits `WorkflowAction::Pausing` while stopping or draining so the primary button stays a disabled amber `pause.fill` without relying on cross-stream `roadmap.runControl.pausing`. ▶ sends smart unpause (no plain-unpause control in apps), Mac has no `···` and iPhone moves `···` to the navigation toolbar; both Mac and iPhone track the `.task` stream's `readAt` in `PendingChanges`, patch `reading.row` on iPhone, and post `<ID> completed · Undo` (reselecting the reopened Task on Mac and wired on iPhone swipe-to-complete).
@@ -53,6 +31,13 @@ Paused sidebar rows may still show `Available · inferred` from the open primary
 - **Verify.** New code and feature Graphs end with automatic verify after deliver. Previously captured Graphs keep their own steps. A post-merge check that fails gets a linked fix-forward Task.
 
 ## What runs showed
+
+### Natural stops and end-of-Graph alignment under a pause hold
+- `cargo test -p loopflow-storage --lib sqlite::task_pause::tests::` (3 passed): `arrive_task_graph(..., END)` while paused writes `step = "end"`, retains `task_pauses`, and creates no pending completion; `release_task_pause(..., Some("ship-review"))` clears the hold and settles the dead cursor to `At { step: "ship-review" }` in one transaction.
+- `cargo test -p loopflow-execution --lib task_graph::tests::` (9 passed) and `ops::task::pause::tests::` (1 passed): `CapturedGraph::stop_at` + `resumes_on_unpause` switch `Resume` to `Unpause` when Auto is off on `ship-review` or `land --wait-and-fix` while keeping `implement` resumable.
+- `LOOPFLOW_TEST_LF="$PWD/target/debug/lf" cargo test -p loopflow --lib` (5 passed): `draining_command_before_interactive_step_arrives_under_pause_hold`, `draining_final_command_arrives_at_paused_end_without_completing`, `auto_off_while_paused_at_interactive_or_landing_cursor_settles_on_unpause`, `pause_during_land_finishes_the_merge_and_stops_before_the_next_step`, and `a_draining_command_preserves_failure_and_advances_when_it_exits_zero`. Also verified `auto_off_sticks_through_a_headless_relaunch` (passed).
+- Caught by the integration test: `desktop task --json` reads `execution.work.graph` through `snapshot_here` → `store::task_work::task_work`, so threading `command_merges` through `task_work`, `task_overview`, `snapshot_here`, `task_snapshot`, `task_status`, `task_wait`, and `pause::release` kept every surface on the same predicate.
+- `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `uv run python scripts/check_architecture.py` passed.
 
 ### Concept-review alignment pass (C1 labels, `WorkflowAction::Pausing`, draining `cmd:` advancement, Swift parity)
 - Rust: `task_graph::tests::` (8 passed), `ops::task::pause::tests::` (1 passed), `lf::commands::graph::tests::a_draining_command_preserves_failure_and_advances_when_it_exits_zero` (1 passed), `task_graph_launch_tests::pause_during_land_finishes_the_merge_and_stops_before_the_next_step` (1 passed — verified `control` is `{"action":"pausing","label":"Pausing: pr land --local"}` during merge, cursor advances to `sync --plan` with `Paused: sync --plan`, and `unpause --run` runs only `sync --plan` to `end`), `ops::task::lifecycle_tests::` (1 passed), `server::schema::tests::` (8 passed after regenerating `tests/fixtures/dto/server_schema.json`), `dto_fixtures::` (50 passed), `documented_commands::` (4 passed). `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `uv run python scripts/check_architecture.py` passed.

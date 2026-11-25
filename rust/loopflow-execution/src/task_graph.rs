@@ -303,15 +303,19 @@ impl CapturedGraph {
         place.is_some_and(|place| !self.needs_review(&place, stop_at_landing, &mut merges))
     }
 
-    /// A run restarts at its saved cursor. A Task waiting for a person stays there.
+    /// A run restarts at its saved cursor unless `auto` now parks at that step.
+    /// A Task already waiting for a person stays there.
     pub(crate) fn resumes_on_unpause(
         &self,
         step: &str,
         cursor: Option<&ExecutionCursor>,
         auto: Option<AutoState>,
+        merges: impl FnMut(&[String]) -> bool,
     ) -> bool {
         match cursor {
-            Some(cursor) => self.place_of(cursor).is_some(),
+            Some(cursor) => self
+                .place_of(cursor)
+                .is_some_and(|place| self.stop_at(&place, auto, merges).is_none()),
             None if step == START => true,
             None => {
                 step != END && auto != Some(AutoState::Off) && self.interactive_step(step).is_none()
@@ -355,6 +359,36 @@ impl CapturedGraph {
             ConcreteStep::Skill(skill) => skill.interactive_step(),
             _ => None,
         }
+    }
+
+    /// The landing step at `place`, if it is one.
+    pub fn landing_at(
+        &self,
+        place: &Place,
+        merges: impl FnMut(&[String]) -> bool,
+    ) -> Option<String> {
+        landing_name(self.step_at(place), merges)
+    }
+
+    /// The natural stop `place` parks at under `auto`: an interactive step
+    /// without auto on, or a landing step with auto off.
+    pub fn stop_at(
+        &self,
+        place: &Place,
+        auto: Option<AutoState>,
+        merges: impl FnMut(&[String]) -> bool,
+    ) -> Option<String> {
+        if auto != Some(AutoState::On) {
+            if let Some(step) = self.interactive_at(place) {
+                return Some(step.to_owned());
+            }
+        }
+        if auto == Some(AutoState::Off) {
+            if let Some(step) = self.landing_at(place, merges) {
+                return Some(step);
+            }
+        }
+        None
     }
 
     /// What a person calls the step at `place`; an operation by the display
@@ -612,6 +646,7 @@ impl TaskGraph {
         run: Option<TaskGraphRun<'_>>,
         auto: Option<AutoState>,
         pause: Option<PauseStage>,
+        merges: impl FnMut(&[String]) -> bool,
     ) -> Self {
         let (steps, indices) = workflow(&graph.steps);
         let top = |place: &Place| {
@@ -620,7 +655,7 @@ impl TaskGraph {
         };
         let top_name = |place: &Place| steps[top(place) as usize].name.as_str();
         let resumes = pause.is_some()
-            && graph.resumes_on_unpause(&step, run.as_ref().map(|run| run.cursor), auto);
+            && graph.resumes_on_unpause(&step, run.as_ref().map(|run| run.cursor), auto, merges);
         let pausing = pause == Some(PauseStage::Stopping)
             || (pause.is_some() && run.as_ref().is_some_and(|run| run.running));
         let unpause = if resumes {
@@ -937,7 +972,7 @@ pub(crate) mod tests {
         let graph = CapturedGraph::load("feature", repo.path())
             .unwrap()
             .unwrap();
-        let at = |step: &str| TaskGraph::read(&graph, step.into(), None, None, None);
+        let at = |step: &str| TaskGraph::read(&graph, step.into(), None, None, None, test_merges);
         let mark = |state| Auto {
             state,
             at: 0,
@@ -987,6 +1022,7 @@ pub(crate) mod tests {
                 run,
                 None,
                 held.then_some(PauseStage::Held),
+                test_merges,
             )
             .control;
             assert_eq!((control.action, control.label.as_str()), (action, label));
@@ -1077,7 +1113,8 @@ pub(crate) mod tests {
                 lf_process_id: "worker".into(),
                 running,
             });
-            let control = TaskGraph::read(&code, step.into(), run, auto, pause).control;
+            let control =
+                TaskGraph::read(&code, step.into(), run, auto, pause, test_merges).control;
             assert_eq!((control.action, control.label.as_str()), (action, label));
         }
     }
@@ -1101,6 +1138,7 @@ pub(crate) mod tests {
                     }),
                 auto,
                 None,
+                test_merges,
             )
         };
         let start = read("start", None, None);
@@ -1202,7 +1240,14 @@ pub(crate) mod tests {
                 lf_process_id: "carrier".into(),
                 running,
             };
-            let reading = TaskGraph::read(&graph, "start".into(), Some(run), None, Some(pause));
+            let reading = TaskGraph::read(
+                &graph,
+                "start".into(),
+                Some(run),
+                None,
+                Some(pause),
+                test_merges,
+            );
             assert_eq!(reading.sentence, sentence);
             assert_eq!(
                 (reading.control.action, reading.control.label.as_str()),
@@ -1215,10 +1260,109 @@ pub(crate) mod tests {
                 "ship-review".into(),
                 None,
                 Some(AutoState::On),
-                Some(PauseStage::Held)
+                Some(PauseStage::Held),
+                test_merges,
             )
             .sentence,
             "Paused at ship-review. `lf task unpause` lifts the hold."
+        );
+    }
+
+    #[test]
+    fn paused_stop_cursors_honour_auto_and_do_not_promise_resume() {
+        use super::WorkflowAction::{Resume, Unpause};
+        use loopflow_storage::sqlite::task_work::PauseStage;
+
+        let repo = tempfile::tempdir().unwrap();
+        let code = CapturedGraph::load("code", repo.path()).unwrap().unwrap();
+        let review = code.find("ship-review").unwrap().cursor();
+        let land = code.find("land --wait-and-fix").unwrap().cursor();
+        let implement = code.find("implement").unwrap().cursor();
+        let read = |cursor: &crate::graph::runner::ExecutionCursor, auto| {
+            TaskGraph::read(
+                &code,
+                "start".into(),
+                Some(TaskGraphRun {
+                    cursor,
+                    lf_process_id: "carrier".into(),
+                    running: false,
+                }),
+                auto,
+                Some(PauseStage::Held),
+                test_merges,
+            )
+        };
+
+        // Turning auto off while paused on ship-review or land switches Resume -> Unpause.
+        for (cursor, auto, action, sentence) in [
+            (
+                &review,
+                Some(AutoState::On),
+                Resume,
+                "Paused at ship-review. `lf task unpause --run` resumes it.",
+            ),
+            (
+                &review,
+                Some(AutoState::Off),
+                Unpause,
+                "Paused at ship-review. `lf task unpause` lifts the hold.",
+            ),
+            (
+                &review,
+                None,
+                Unpause,
+                "Paused at ship-review. `lf task unpause` lifts the hold.",
+            ),
+            (
+                &land,
+                Some(AutoState::On),
+                Resume,
+                "Paused in deliver at land --wait-and-fix. `lf task unpause --run` resumes it.",
+            ),
+            (
+                &land,
+                None,
+                Resume,
+                "Paused in deliver at land --wait-and-fix. `lf task unpause --run` resumes it.",
+            ),
+            (
+                &land,
+                Some(AutoState::Off),
+                Unpause,
+                "Paused in deliver at land --wait-and-fix. `lf task unpause` lifts the hold.",
+            ),
+            (
+                &implement,
+                Some(AutoState::Off),
+                Resume,
+                "Paused in build at implement. `lf task unpause --run` resumes it.",
+            ),
+        ] {
+            let reading = read(cursor, auto);
+            assert_eq!(reading.control.action, action, "{sentence}");
+            assert_eq!(reading.sentence, sentence);
+        }
+
+        // Arriving at an interactive step under a hold stays At { step } with Unpause wording.
+        write(
+            repo.path(),
+            ".lf/graphs/demo.yaml",
+            "- cmd: help graph\n- interactive: demo\n",
+        );
+        let demo = CapturedGraph::load("demo", repo.path()).unwrap().unwrap();
+        let parked = TaskGraph::read(
+            &demo,
+            "demo".into(),
+            None,
+            None,
+            Some(PauseStage::Held),
+            test_merges,
+        );
+        assert_eq!(parked.control.action, Unpause);
+        assert_eq!(parked.control.label, "Paused: demo");
+        assert_eq!(
+            parked.sentence,
+            "Paused at demo. `lf task unpause` lifts the hold."
         );
     }
 
@@ -1245,6 +1389,7 @@ pub(crate) mod tests {
                     }),
                     None,
                     None,
+                    test_merges,
                 );
                 line.steps[line.current_step.unwrap() as usize].name.clone()
             })

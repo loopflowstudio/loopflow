@@ -185,8 +185,8 @@ pub(crate) fn before_unassign(store: &SqliteStore, task: &Task) -> OpsResult<()>
     Ok(())
 }
 
-pub fn unpause(issue: &str) -> OpsResult<()> {
-    release(issue, false).map(drop)
+pub fn unpause(issue: &str, merges: fn(&[String]) -> bool) -> OpsResult<()> {
+    release(issue, false, merges).map(drop)
 }
 
 /// Where a Task that `lf task unpause --run` left in place waits, and the
@@ -219,7 +219,11 @@ pub fn parked(issue: &str) -> OpsResult<Option<String>> {
 }
 
 /// Keep admission through placement when the detached unpause carries on as the run.
-pub(super) fn release(issue: &str, resume: bool) -> OpsResult<Option<(TaskId, File)>> {
+pub(super) fn release(
+    issue: &str,
+    resume: bool,
+    merges: fn(&[String]) -> bool,
+) -> OpsResult<Option<(TaskId, File)>> {
     block_on_task(async {
         let (store, task, _cleanup) = resolve(issue, task_execution_route).await?;
         finish_if_jobs_exited(&store.sqlite, &task)?;
@@ -229,10 +233,26 @@ pub(super) fn release(issue: &str, resume: bool) -> OpsResult<Option<(TaskId, Fi
                 Error::conflict(format!("{} is still finishing {run}", task.identifier)).into(),
             );
         }
+        let row =
+            crate::store::task_work::task_graph_row(&store.sqlite, &task.id).map_err(task_error)?;
+        let settle_step = row.as_ref().and_then(|row| {
+            let (cursor, _) = row.run.as_ref()?;
+            let place = row.graph.place_of(cursor)?;
+            row.graph.stop_at(&place, row.auto, merges)
+        });
         let start = resume
-            && crate::store::task_work::resumes_on_unpause(&store.sqlite, &task.id)
-                .map_err(task_error)?;
-        store.sqlite.release_task_pause(&task.id).map_err(refused)?;
+            && row.as_ref().is_none_or(|row| {
+                row.graph.resumes_on_unpause(
+                    &row.step,
+                    row.run.as_ref().map(|(cursor, _)| cursor),
+                    row.auto,
+                    merges,
+                )
+            });
+        store
+            .sqlite
+            .release_task_pause(&task.id, settle_step.as_deref())
+            .map_err(refused)?;
         Ok(start.then_some((task.id, admission)))
     })
 }

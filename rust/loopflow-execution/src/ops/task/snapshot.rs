@@ -19,16 +19,17 @@ use loopflow_model::durable::MachineId;
 use loopflow_storage::work::task::{PrPhase, Task, TaskPr};
 use sha2::{Digest, Sha256};
 
-pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
+pub fn task_snapshot(task: &Task, merges: fn(&[String]) -> bool) -> OpsResult<TaskSnapshot> {
     block_on_task(async {
         let store = task_store().await?;
-        read_task_snapshot(&store, task.clone()).await
+        read_task_snapshot(&store, task.clone(), merges).await
     })
 }
 
 pub(super) async fn read_task_snapshot(
     store: &SharedStore,
     mut task: Task,
+    merges: fn(&[String]) -> bool,
 ) -> OpsResult<TaskSnapshot> {
     let (local, ownership) = store
         .sqlite
@@ -37,13 +38,14 @@ pub(super) async fn read_task_snapshot(
     if ownership.owner_elsewhere(&local).is_some() {
         task.worktree = None;
     }
-    snapshot_here(store, task, local).await
+    snapshot_here(store, task, local, merges).await
 }
 
 pub(super) async fn snapshot_here(
     store: &SharedStore,
     task: Task,
     local: MachineId,
+    merges: fn(&[String]) -> bool,
 ) -> OpsResult<TaskSnapshot> {
     let wave = owning_wave(store, &task).await?;
     let repo = repository_for_task(store, &task)?;
@@ -76,7 +78,7 @@ pub(super) async fn snapshot_here(
     )
     .map_err(task_error)?;
     let work_set =
-        crate::store::task_work::task_work(&store.sqlite, &task.id).map_err(task_error)?;
+        crate::store::task_work::task_work(&store.sqlite, &task.id, merges).map_err(task_error)?;
     let auto = store.sqlite.task_auto(&task.id).map_err(task_error)?;
     if execution.state == crate::ops::task_execution::TaskExecutionState::Idle {
         if let Some((step, off)) = work_set

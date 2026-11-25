@@ -389,10 +389,14 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         .as_str()
         .expect("roadmap condition reason")
         .contains("is initializing worktree"));
-    let projected = task_status(repo.path(), Some("INF-123"))
-        .expect("read Task")
-        .execution
-        .expect("execution");
+    let projected = task_status(
+        repo.path(),
+        Some("INF-123"),
+        loopflow::lf::navigation::command_merges,
+    )
+    .expect("read Task")
+    .execution
+    .expect("execution");
     assert_eq!(projected.actions.recommended, Some(TaskAction::NoAction));
 
     rusqlite::Connection::open(home.path().join("loopflow.db"))
@@ -456,10 +460,14 @@ fn missing_worktree_status_is_actionable_and_read_only() {
         .block_on(task.store.task_prs(&task.task.id))
         .expect("read PRs before status");
 
-    let snapshot = task_status(&missing_path, Some("INF-123"))
-        .expect("status survives the absent worktree")
-        .execution
-        .expect("execution");
+    let snapshot = task_status(
+        &missing_path,
+        Some("INF-123"),
+        loopflow::lf::navigation::command_merges,
+    )
+    .expect("status survives the absent worktree")
+    .execution
+    .expect("execution");
 
     assert_eq!(snapshot.actions.recommended, Some(TaskAction::NoAction));
     assert!(snapshot
@@ -533,7 +541,11 @@ fn research_checkout_restores_and_reads_files_without_a_pull_request() {
         .files
         .iter()
         .any(|file| file.path == "draft.md" && file.untracked));
-    let snapshot = loopflow_execution::ops::task::task_snapshot(&restored).unwrap();
+    let snapshot = loopflow_execution::ops::task::task_snapshot(
+        &restored,
+        loopflow::lf::navigation::command_merges,
+    )
+    .unwrap();
     assert!(snapshot.pr.is_none());
     assert_eq!(snapshot.branch.as_deref(), Some("research"));
     assert!(runtime

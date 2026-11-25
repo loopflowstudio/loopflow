@@ -2962,7 +2962,7 @@ exec "#,
     let args = ["task", "move", task.as_str(), "--machine", "mini"];
     assert!(!command(&args).status.success());
     assert!(plan.remote.task_pause(&task).unwrap().is_some());
-    plan.remote.release_task_pause(&task).unwrap();
+    plan.remote.release_task_pause(&task, None).unwrap();
     executable(&remote_lf, &working);
     assert_success(&command(&args));
     assert_eq!(plan.remote.task_pause(&task).unwrap(), None);

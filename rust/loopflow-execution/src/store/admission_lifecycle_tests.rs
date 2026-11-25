@@ -167,7 +167,7 @@ fn checkout_exclusion_preserves_registration_and_retry() {
     // A conversation already running in the checkout keeps having no Task.
     assert!(store.session_task(&session.id).unwrap().is_none());
     assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
-    let work = crate::store::task_work::task_work(&store, &task.id).unwrap();
+    let work = crate::store::task_work::task_work(&store, &task.id, |_| false).unwrap();
     assert!(work.sessions.is_empty());
     // Allocating the checkout claims the Task; the earlier session does not.
     assert!(store.task_owned(&task.id).unwrap());
@@ -182,7 +182,7 @@ fn checkout_session_membership_survives_project_transfer_without_binding() {
     conversation.cwd = task.worktree.clone().unwrap();
     conversation.work_source = None;
     let session = crate::store::sessions::create_session(&store, conversation, None).unwrap();
-    let before = crate::store::task_work::task_work(&store, &task_id).unwrap();
+    let before = crate::store::task_work::task_work(&store, &task_id, |_| false).unwrap();
     assert_eq!(before.sessions.len(), 1);
     assert_eq!(before.sessions[0].id, session.id.as_str());
     // A conversation started inside a checkout records its Task.
@@ -210,7 +210,7 @@ fn checkout_session_membership_survives_project_transfer_without_binding() {
     let retained = store.task(&task_id).unwrap().unwrap();
     assert_eq!(retained.project_id, Some(successor));
     assert_eq!(retained.worktree, task.worktree);
-    let after = crate::store::task_work::task_work(&store, &task_id).unwrap();
+    let after = crate::store::task_work::task_work(&store, &task_id, |_| false).unwrap();
     assert_eq!(after.sessions, before.sessions);
     // The conversation follows its Task into the other Wave.
     let mut moved = session;

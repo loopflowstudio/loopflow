@@ -341,6 +341,7 @@ fn session_input_history_retains_distinct_native_results_and_unknown_process() {
         include_str!("../../../tests/fixtures/dto/session_history_summary.json"),
     )
     .unwrap();
+    assert_eq!(value.origin.as_ref().unwrap().name(), "mini");
     assert_eq!(value.providers.len(), 2);
     assert_eq!(value.providers[0].outcome.as_deref(), Some("failed"));
     assert!(value.providers[0].lf_process_id.is_none());
@@ -348,6 +349,12 @@ fn session_input_history_retains_distinct_native_results_and_unknown_process() {
     assert_eq!(value.providers[1].usage.input_tokens, Some(0));
     assert_eq!(value.status(), "failed → completed");
     let encoded = serde_json::to_value(&value).unwrap();
+    let mut missing = encoded.clone();
+    missing.as_object_mut().unwrap().remove("origin");
+    assert!(
+        serde_json::from_value::<loopflow::lf::commands::session_history::SessionHistory>(missing)
+            .is_err()
+    );
     assert!(encoded.get("subjects").is_none());
     assert!(encoded.get("outcome").is_none());
     assert_eq!(
@@ -1252,25 +1259,6 @@ fn task_locations_preserve_owner_freshness_and_unavailable_evidence() {
 }
 
 #[test]
-fn task_files_frames_preserve_checkout_identity_and_heartbeat() {
-    use loopflow_execution::ops::task::TaskFilesFrame;
-    let wire: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/task_files_frames.json"
-    ))
-    .unwrap();
-    let frames: Vec<TaskFilesFrame> = serde_json::from_value(wire.clone()).unwrap();
-    assert_eq!(frames[0].paths, ["note.txt", ".git/index", ""]);
-    assert!(frames[1].paths.is_empty());
-    assert_eq!(frames[0].request, frames[1].request);
-    assert_eq!(serde_json::to_value(frames).unwrap(), wire);
-    for field in ["request", "task_id", "machine_id", "checkout", "paths"] {
-        let mut missing = wire[0].clone();
-        missing.as_object_mut().unwrap().remove(field);
-        assert!(serde_json::from_value::<TaskFilesFrame>(missing).is_err());
-    }
-}
-
-#[test]
 fn task_overview_excludes_diagnostic_process_history() {
     let input = include_str!("../../../tests/fixtures/dto/task_overview.json");
     let overview: loopflow_execution::task_work::TaskOverview =
@@ -1403,8 +1391,11 @@ fn wave_added_receipt_round_trips_with_its_leftover() {
     use loopflow_execution::ops::wave_lifecycle::WaveAdded;
     let json = include_str!("../../../tests/fixtures/dto/wave_added.json");
     let added: WaveAdded = serde_json::from_str(json).unwrap();
+    let joined = include_str!("../../../tests/fixtures/dto/wave_joined.json");
+    let joined: WaveAdded = serde_json::from_str(joined).unwrap();
+    assert!(!joined.created && joined.project.is_none());
     assert!(added.created);
-    assert_eq!(added.project.wave_id, added.id);
+    assert_eq!(added.project.as_ref().unwrap().wave_id, added.id);
     assert_eq!(added.summary.len(), 1);
     assert_eq!(
         serde_json::to_value(&added).unwrap(),

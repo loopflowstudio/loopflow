@@ -1,5 +1,5 @@
 use super::SqliteStore;
-use crate::rental::{Hardware, Ownership, Provider, Usd};
+use crate::rental::{Hardware, ModalSizing, OnDemand, Ownership, Provider, Usd};
 use loopflow_model::durable::{MachineId, TaskId};
 
 fn store() -> (tempfile::TempDir, SqliteStore) {
@@ -10,6 +10,76 @@ fn store() -> (tempfile::TempDir, SqliteStore) {
 
 fn usd(text: &str) -> Usd {
     Usd::parse(text).unwrap()
+}
+
+#[test]
+fn modal_admission_prices_peak_in_both_modes() {
+    let (_dir, store) = store();
+    let legacy = r#"{"vcpus":8,"memory_gb":16,"disk_gb":10,"gpu":null,"spot":false}"#;
+    let mut declaration = OnDemand {
+        name: "modal".into(),
+        provider: Provider::Modal,
+        hardware: serde_json::from_str(legacy).unwrap(),
+        max_machines: 3,
+        max_usd_per_hour: usd("1"),
+        hours: 4.0,
+        logins: Vec::new(),
+    };
+    for (setting, mode) in [
+        (None, ModalSizing::Burst),
+        (Some(ModalSizing::Reserved), ModalSizing::Reserved),
+    ] {
+        declaration.hardware.modal_sizing = setting;
+        let rental = store
+            .admit_rental_prepared(&declaration, None, Some(usd("0.95184")), false)
+            .unwrap();
+        assert_eq!(rental.hardware.modal_sizing, Some(mode));
+        assert_eq!(rental.usd_per_hour, usd("0.95184"));
+        assert_eq!(
+            rental.deadline - rental.created_at,
+            time::Duration::hours(1)
+        );
+        let cost = rental.cost_until(rental.deadline + time::Duration::minutes(30));
+        let saved = store.set_rental_cost(&rental.id, cost).unwrap();
+        assert_eq!(saved.cost.to_string(), "ceiling estimate $0.95184");
+        assert_eq!(
+            serde_json::to_value(&saved).unwrap()["ceiling_estimate_usd"],
+            "0.95184"
+        );
+    }
+    declaration.max_usd_per_hour = usd("0.95");
+    assert!(store
+        .admit_rental_prepared(&declaration, None, None, false)
+        .unwrap_err()
+        .to_string()
+        .contains("above its $0.95/h limit"));
+}
+
+#[test]
+fn modal_pre_limit_rentals_keep_their_recorded_terms() {
+    let (_dir, store) = store();
+    let id = crate::rental::RentalId::new();
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO rentals(id,ondemand,provider,provider_name,by_hand,hardware,
+            usd_per_hour,cap_usd,deadline,state,created_at,ended_at,cost_usd)
+         VALUES(?1,'modal','modal','old',1,?2,'0.95184','3.80736',14401,'ended',1,3601,'0.95184')",
+            (
+                id.as_str(),
+                r#"{"vcpus":8,"memory_gb":16,"disk_gb":10,"gpu":null,"spot":false}"#,
+            ),
+        )
+        .unwrap();
+    let old = store.rental(&id).unwrap();
+    assert_eq!(old.hardware.modal_sizing, None);
+    assert_eq!(old.cap_usd, usd("3.80736"));
+    assert_eq!(old.deadline.unix_timestamp(), 14401);
+    let json = serde_json::to_value(old).unwrap();
+    assert_eq!(json["cost_usd"], "0.95184");
+    assert!(json.get("ceiling_estimate_usd").is_none());
 }
 
 #[test]

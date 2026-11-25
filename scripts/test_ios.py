@@ -7,9 +7,12 @@ Additional arguments pass straight to xcodebuild. No personal Simulator is used.
 
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -38,6 +41,8 @@ def _terminate(signum: int, _frame: object) -> None:
 
 def main() -> int:
     env = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
+    # Fixtures with Machines run this source's `lf` through the host below.
+    subprocess.run(["cargo", "build", "-p", "loopflow", "--bin", "lf"], cwd=ROOT, env=env, check=True)
     # The project links the GhosttyKit archive Package.swift pins.
     subprocess.run(["swift", "package", "resolve"], cwd=ROOT / "swift", env=env, check=True)
     subprocess.run(
@@ -61,6 +66,15 @@ def main() -> int:
     device = result.stdout.strip()
     print(f"Test Simulator: {device}", flush=True)
     signal.signal(signal.SIGTERM, _terminate)
+    # The Simulator cannot start Machine processes; this host runs them for the tests.
+    # Short: server sockets live under the homes the tests create in /tmp.
+    hosting = tempfile.mkdtemp(prefix="lf-ios-", dir="/tmp")
+    socket = os.path.join(hosting, "host.sock")
+    host = subprocess.Popen(
+        [sys.executable, "-I", str(ROOT / "scripts/ios_fixture_host.py"), socket], env=env
+    )
+    while not os.path.exists(socket) and host.poll() is None:
+        time.sleep(0.05)
     try:
         return subprocess.run(
             [
@@ -84,10 +98,14 @@ def main() -> int:
                 *sys.argv[1:],
             ],
             cwd=ROOT,
-            env=env,
+            # xcodebuild hands TEST_RUNNER_ variables to the tests without the prefix.
+            env={**env, "TEST_RUNNER_LOOPFLOW_FIXTURE_HOST": socket},
             stdin=subprocess.DEVNULL,
         ).returncode
     finally:
+        host.terminate()
+        host.wait()
+        shutil.rmtree(hosting, ignore_errors=True)
         # Xcode may already have shut it down after testing.
         subprocess.run(
             ["xcrun", "simctl", "shutdown", device],

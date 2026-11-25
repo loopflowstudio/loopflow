@@ -13,64 +13,6 @@
       ],
       "type": "object"
     },
-    "Account": {
-      "additionalProperties": false,
-      "properties": {
-        "provider": {
-          "$ref": "#/$defs/Provider"
-        }
-      },
-      "required": [
-        "provider"
-      ],
-      "type": "object"
-    },
-    "AccountReport": {
-      "additionalProperties": false,
-      "properties": {
-        "accounts": {
-          "items": {
-            "$ref": "#/$defs/AccountRow"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "accounts"
-      ],
-      "type": "object"
-    },
-    "AccountRow": {
-      "additionalProperties": false,
-      "properties": {
-        "expires_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "login": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "provider": {
-          "$ref": "#/$defs/Provider"
-        },
-        "state": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "provider",
-        "login",
-        "state",
-        "expires_at"
-      ],
-      "type": "object"
-    },
     "Action": {
       "oneOf": [
         {
@@ -6728,18 +6670,6 @@
       ],
       "type": "object"
     },
-    "Provider": {
-      "enum": [
-        "github",
-        "claude",
-        "codex",
-        "opencodezen",
-        "linear",
-        "asana",
-        "doppler"
-      ],
-      "type": "string"
-    },
     "ProviderHistory": {
       "description": "An exact native turn, or an older provider observation with unknown native\nidentity. References identify evidence; they confer no process/settlement API.",
       "properties": {
@@ -6989,11 +6919,19 @@
             },
             "request_id": {
               "type": "string"
+            },
+            "task": {
+              "description": "The Task the creation was for: a Task another Machine runs keeps\nits receipt there, as `--task <task>` reads it.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
             "kind",
-            "request_id"
+            "request_id",
+            "task"
           ],
           "type": "object",
           "x-result": {
@@ -7406,6 +7344,27 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/TaskDirectory"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Subscribe to changes in a Task checkout. A new revision invalidates the file tree.",
+          "properties": {
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.files.watch",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "issue"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/TaskFilesRevision"
           }
         },
         {
@@ -8316,46 +8275,6 @@
               "unresolved": 0
             },
             "wave": "product"
-          }
-        },
-        {
-          "additionalProperties": false,
-          "description": "`lf account [<provider>] --json`: saved service authentication.",
-          "examples": [
-            {
-              "kind": "account.list",
-              "target": "linear"
-            }
-          ],
-          "properties": {
-            "kind": {
-              "const": "account.list",
-              "type": "string"
-            },
-            "target": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          "required": [
-            "kind",
-            "target"
-          ],
-          "type": "object",
-          "x-result": {
-            "$ref": "#/$defs/AccountReport"
-          },
-          "x-result-example": {
-            "accounts": [
-              {
-                "expires_at": 1794614400,
-                "login": "maya@example.com",
-                "provider": "linear",
-                "state": "active"
-              }
-            ]
           }
         },
         {
@@ -9978,11 +9897,13 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "A ticket for the Session's held terminal, answered `{ticket,\nterminal_id, expires_in_ms}`. A new connection presents the ticket as\nits first message (`attach`) and becomes the bridge; this connection\nstays a client. An orderly terminal sends a final `0x07` frame with\nJSON `{reason: replaced|finished|retired}` (see `x-terminal-close`).\nAfter `replaced`, attaching by the same Session reaches its next terminal.\nBare EOF leaves the reason unknown. A Session no terminal\nruns is `not_found`; attaching never starts a provider.",
+          "description": "A ticket for the Session's held terminal, answered `{ticket,\nterminal_id, expires_in_ms}`. A new connection presents the ticket as\nits first message (`attach`) and becomes the bridge; this connection\nstays a client. An orderly terminal sends a final `0x07` frame with\nJSON `{reason: replaced|finished|retired}` (see `x-terminal-close`).\nAfter `replaced`, attaching by the same Session reaches its next terminal.\nBare EOF leaves the reason unknown. A Session no terminal\nruns is `not_found`; attaching never starts a provider. A Session\nanother Machine runs is attached there and bridged through here.",
           "examples": [
             {
               "kind": "session.attach",
+              "machine": null,
               "session": "session_5e55105e000040008000000000000001",
+              "task": null,
               "terminal_id": null
             }
           ],
@@ -9991,8 +9912,22 @@
               "const": "session.attach",
               "type": "string"
             },
+            "machine": {
+              "description": "For a Session with no Task here, the Machine that runs it.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "session": {
               "$ref": "#/$defs/LfSessionId"
+            },
+            "task": {
+              "description": "The Session's Task: the server attaches wherever the Task runs.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "terminal_id": {
               "anyOf": [
@@ -10009,7 +9944,9 @@
           "required": [
             "kind",
             "session",
-            "terminal_id"
+            "terminal_id",
+            "task",
+            "machine"
           ],
           "type": "object",
           "x-result": {
@@ -10135,17 +10072,27 @@
         },
         {
           "additionalProperties": false,
-          "description": "Continue an existing Session in a held terminal: `lf session resume`\nof exactly `session`, in its directory, with the server's environment.\nAnswers `{terminal_id}`; repeating `request` answers the terminal it\nstarted. For a client with no environment of its own to send.",
+          "description": "Continue an existing Session in a held terminal: `lf session resume`\nof exactly `session`, in its directory, with the server's environment.\nAnswers `{terminal_id}`; repeating `request` answers the terminal it\nstarted. For a client with no environment of its own to send. A\nSession another Machine runs continues there.",
           "examples": [
             {
+              "agent": "claude",
               "cols": 60,
               "kind": "session.continue",
+              "machine": null,
               "request": "3f2a7c1e-9b4d-4e8a-a1c6-5d0e7f9b2c34",
               "rows": 40,
-              "session": "session_5e55105e000040008000000000000001"
+              "session": "session_5e55105e000040008000000000000001",
+              "task": "task_00000000000000000000000000000001"
             }
           ],
           "properties": {
+            "agent": {
+              "description": "The caller's `--agent` (`harness[:model]`): the Session continues on\nit, importing its history when the harness differs. Null keeps the\nSession's own.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "cols": {
               "format": "uint16",
               "maximum": 65535,
@@ -10155,6 +10102,13 @@
             "kind": {
               "const": "session.continue",
               "type": "string"
+            },
+            "machine": {
+              "description": "For a Session with no Task here, the Machine that runs it.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "request": {
               "type": "string"
@@ -10167,6 +10121,13 @@
             },
             "session": {
               "$ref": "#/$defs/LfSessionId"
+            },
+            "task": {
+              "description": "The Session's Task: the server attaches wherever the Task runs.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -10174,11 +10135,144 @@
             "session",
             "request",
             "rows",
-            "cols"
+            "cols",
+            "task",
+            "machine",
+            "agent"
           ],
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/SessionStarted"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Start a Task shell in the checkout of the Machine that runs the Task\nand answer `{terminal_id}`. `shell_id` names it there: repeating it\nanswers the same terminal and starts nothing. `command` runs first\nafter login startup; `bootstrap` is Desktop's Ghostty startup JSON.\nA Task with no checkout is `not_found {reason: \"not_started\"}`.",
+          "examples": [
+            {
+              "bootstrap": null,
+              "cols": 60,
+              "command": [],
+              "issue": "task_00000000000000000000000000000001",
+              "kind": "task.shell.start",
+              "rows": 40,
+              "shell_id": "mobile-task_00000000000000000000000000000001"
+            }
+          ],
+          "properties": {
+            "bootstrap": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cols": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "command": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.shell.start",
+              "type": "string"
+            },
+            "rows": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "shell_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "issue",
+            "shell_id",
+            "rows",
+            "cols",
+            "bootstrap",
+            "command"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/SessionStarted"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "A ticket for a Task shell's running terminal, like `session.attach`.\nIt never starts one: an ended or unknown shell is `not_found`. A shell\nis named only on the Machine that started it.",
+          "examples": [
+            {
+              "issue": "task_00000000000000000000000000000001",
+              "kind": "task.shell.attach",
+              "shell_id": "mobile-task_00000000000000000000000000000001"
+            }
+          ],
+          "properties": {
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.shell.attach",
+              "type": "string"
+            },
+            "shell_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "issue",
+            "shell_id"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/SessionAttached"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Close a Task shell and end its terminal; answers `{}`.",
+          "properties": {
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.shell.close",
+              "type": "string"
+            },
+            "machine": {
+              "description": "The Machine that started the shell, which keeps it after the\nTask moves; null closes it where the Task runs.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "shell_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "issue",
+            "shell_id",
+            "machine"
+          ],
+          "type": "object",
+          "x-result": {
+            "additionalProperties": false,
+            "type": "object"
           }
         },
         {
@@ -10793,6 +10887,16 @@
           "format": "int64",
           "type": "integer"
         },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "providers": {
           "items": {
             "$ref": "#/$defs/ProviderHistory"
@@ -10892,6 +10996,7 @@
         }
       },
       "required": [
+        "origin",
         "session_id",
         "captured",
         "artifact_key",
@@ -10926,6 +11031,25 @@
         "unknown"
       ],
       "type": "string"
+    },
+    "SessionOrigin": {
+      "description": "The Machine a collected Session was read from.",
+      "properties": {
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "machine_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "machine_id",
+        "label"
+      ],
+      "type": "object"
     },
     "SessionOutlook": {
       "description": "Whether a conversation that is not running comes up, and what brings it.\nThe server works this out; no client does it again from `ended` and\n`start`.",
@@ -14270,6 +14394,43 @@
       ],
       "type": "string"
     },
+    "TaskFilesRevision": {
+      "description": "A Task's file invalidation on this Machine. `checkout` and `revision` are\nnull until the Task has a checkout here; readers rescan on a new revision,\nincluding when multiple changes coalesce while their connection is busy.",
+      "properties": {
+        "checkout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "machine_id": {
+          "type": "string"
+        },
+        "machine_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "machine_id",
+        "machine_label",
+        "checkout",
+        "revision"
+      ],
+      "type": "object"
+    },
     "TaskFollowUp": {
       "description": "Historical keep-open scope, retained for event decoding only.",
       "properties": {
@@ -16288,7 +16449,14 @@
           "type": "string"
         },
         "project": {
-          "$ref": "#/$defs/Project"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Project"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "summary": {
           "items": {
@@ -18338,6 +18506,13 @@
             },
             "request_id": {
               "type": "string"
+            },
+            "task": {
+              "description": "The Task whose conversation this is; it is prepared where that Task runs.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -18345,6 +18520,7 @@
             "directory",
             "request_id",
             "id",
+            "task",
             "agent"
           ],
           "type": "object",
@@ -18540,6 +18716,7 @@
               "directory": "/repo",
               "kind": "wave.plan.bind",
               "project": "5e55105e-0000-4000-8000-000000000042",
+              "replace": false,
               "wave": "product"
             }
           ],
@@ -18554,12 +18731,16 @@
             "project": {
               "type": "string"
             },
+            "replace": {
+              "type": "boolean"
+            },
             "wave": {
               "type": "string"
             }
           },
           "required": [
             "kind",
+            "replace",
             "directory",
             "wave",
             "project"
@@ -18973,76 +19154,6 @@
             "created": true,
             "path": "/Users/maya/src/loopflow.spike",
             "strategy": "create"
-          }
-        },
-        {
-          "additionalProperties": false,
-          "description": "`lf account disconnect <provider>`: disconnect a service.",
-          "examples": [
-            {
-              "kind": "account.disconnect",
-              "provider": "linear"
-            }
-          ],
-          "properties": {
-            "kind": {
-              "const": "account.disconnect",
-              "type": "string"
-            },
-            "provider": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "provider"
-          ],
-          "type": "object",
-          "x-result": {
-            "$ref": "#/$defs/Account"
-          },
-          "x-result-example": {
-            "provider": "linear"
-          }
-        },
-        {
-          "additionalProperties": false,
-          "description": "`lf account connect <provider>`: connect a service.",
-          "examples": [
-            {
-              "api_key": false,
-              "chrome_profile": "Profile 1",
-              "kind": "account.connect",
-              "provider": "linear"
-            }
-          ],
-          "properties": {
-            "api_key": {
-              "type": "boolean"
-            },
-            "chrome_profile": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "kind": {
-              "const": "account.connect",
-              "type": "string"
-            },
-            "provider": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "provider",
-            "chrome_profile",
-            "api_key"
-          ],
-          "type": "object",
-          "x-result": {
-            "$ref": "#/$defs/Account"
           }
         },
         {
@@ -20124,8 +20235,8 @@
     }
   ],
   "title": "Loopflow server protocol",
-  "x-min-revision": 8,
-  "x-revision": 9,
+  "x-min-revision": 10,
+  "x-revision": 10,
   "x-terminal-close": {
     "payload": {
       "$ref": "#/$defs/Close"

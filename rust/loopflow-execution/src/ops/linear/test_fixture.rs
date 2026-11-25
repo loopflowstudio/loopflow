@@ -203,8 +203,9 @@ pub async fn capture_inventory(
     initiative: &str,
     store: &Store,
 ) -> crate::ops::OpsResult<crate::test_linear_input::Inventory> {
-    let projects =
-        super::checked_projects_with_store(repo, context, initiative, wave, store).await?;
+    let projects = super::checked_projects_with_store(repo, context, initiative, wave, store)
+        .await?
+        .managed;
     let items = context
         .client
         .list_project_issues(&projects)

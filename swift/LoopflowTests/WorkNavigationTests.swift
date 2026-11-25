@@ -662,7 +662,9 @@ struct WorkNavigationTests {
         let entry = registry.open(key, title: "Repository", location: record.workspace?.identity)
         let store = entry.sessionStore(repoPath: "/src/loopflow", query: RegistryQuery { args, _ in
             // Gate the repository conversation's preparation; showing it then attaches at once.
-            if args.first == "--repo" { await gate.wait() }
+            // Only the repository conversation is prepared: opening `other` reads nothing.
+            guard args.first == "--repo" else { throw RegistryQueryError("Unexpected read \(args)") }
+            await gate.wait()
             return json
         })
         let first = Task { await registry.openConversation(in: entry, store: store) }

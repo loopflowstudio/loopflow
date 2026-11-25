@@ -218,6 +218,30 @@ pub struct TrackerProject {
     #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid_vec")]
     pub team_ids: Vec<String>,
 }
+/// The current candidate comes from the complete Initiative, before its
+/// Projects are narrowed to the repository Team for ingestion.
+#[derive(Debug)]
+pub struct InitiativeProjects {
+    pub managed: Vec<TrackerProject>,
+    pub sole_started: Option<String>,
+}
+
+impl InitiativeProjects {
+    pub fn from_inventory(projects: Vec<TrackerProject>) -> Self {
+        let mut started = projects
+            .iter()
+            .filter(|project| project.status == ProjectStatus::Started);
+        let sole_started = started
+            .next()
+            .filter(|_| started.next().is_none())
+            .map(|p| p.id.clone());
+        Self {
+            managed: projects,
+            sole_started,
+        }
+    }
+}
+
 pub fn revision_nanos(revision: Option<&str>) -> StoreResult<Option<i64>> {
     revision
         .map(|revision| {

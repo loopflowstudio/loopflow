@@ -141,8 +141,9 @@ A flag switches it; `lf install` with no flag, `lf schedule` and a rerun of
 `install.sh` follow it, `stable` when none is recorded. `install.sh` installs
 `stable` or `preview`; `dev` comes from CI artifacts through `lf install --dev`,
 which on a Mac installs that run's signed, notarized Loopflow.app with its `lf`.
-Every install of a build schedules `lf install` daily (launchd, or cron on Linux)
-unless a cadence is already installed, so a Machine stays on its stream unasked.
+Installation schedules `lf install` daily with launchd or cron, keeping any
+existing cadence. On Linux without crontab, installation reports that updates
+and cleanup are unscheduled.
 [Turning it off](../docs/ops.md#updates-and-scheduling) is a launchd step; on Linux the next
 install adds the line back.
 

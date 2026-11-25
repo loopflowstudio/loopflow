@@ -41,32 +41,6 @@ fn resolve_project_id(conn: &Connection, wave: &WaveId, project: &str) -> StoreR
     })
 }
 
-// Initial binding and one-time import share the same identity decision.
-fn bind_in(conn: &Connection, wave: &WaveId, project: &str) -> StoreResult<ProjectId> {
-    let id = resolve_project_id(conn, wave, project)?;
-    let selected: Option<String> = conn.query_row(
-        "SELECT current_project_id FROM waves WHERE id=?1",
-        [wave],
-        |row| row.get(0),
-    )?;
-    if selected
-        .as_deref()
-        .is_some_and(|selected| selected != id.as_str())
-    {
-        return Err(StoreError::InvalidAuthority(
-            "Wave already has a different configured Project".into(),
-        ));
-    }
-    planning_write::local(
-        conn,
-        &crate::work::edit::WorkEdit::for_target(
-            wave.as_str(),
-            &[Edit::WaveProject(Some(id.to_string()))],
-        ),
-    )?;
-    Ok(id)
-}
-
 fn write_in(
     conn: &Connection,
     wave: &WaveId,
@@ -106,10 +80,51 @@ pub fn write_project_binding(
 }
 
 impl SqliteStore {
-    pub fn bind_project(&self, wave: &WaveId, project: &str) -> StoreResult<Project> {
+    /// Issue observations and local Project selections do not record a complete inventory.
+    pub fn needs_linear_inventory(&self, wave: &WaveId, initiative: &str) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT NOT EXISTS(SELECT 1 FROM tracker_wave_sync WHERE wave_id=?1 AND initiative=?2)",
+            params![wave, initiative],
+            |row| row.get(0),
+        )?)
+    }
+
+    pub fn bind_project(
+        &self,
+        wave: &WaveId,
+        project: &str,
+        expected: Option<&str>,
+    ) -> StoreResult<Project> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let project = bind_in(&tx, wave, project)?;
+        let project = resolve_project_id(&tx, wave, project)?;
+        let before = readiness_in(&tx, wave, Execution::result)?;
+        if before.project_id.as_deref() != Some(project.as_str()) {
+            if before.project_id.as_deref() != expected {
+                return Err(StoreError::InvalidAuthority("Wave already has a different configured Project; inspect it before using --replace".into()));
+            }
+            if let Some(pending) = before.pending_successor {
+                let settled = tx.execute(
+                    "UPDATE project_transitions SET settled_at=?3 WHERE wave_id=?1 AND successor_id=?2
+                     AND successor_id=?4 AND predecessor_id IS NULL AND reset_name IS NULL
+                     AND local_plan_json IS NOT NULL AND settled_at IS NULL",
+                    params![wave, pending, crate::rows::now_unix(), expected],
+                )?;
+                if settled != 1 {
+                    return Err(StoreError::InvalidAuthority(
+                        "an unfinished Project transition owns selection".into(),
+                    ));
+                }
+            }
+            planning_write::local(
+                &tx,
+                &crate::work::edit::WorkEdit::for_target(
+                    wave.as_str(),
+                    &[Edit::WaveProject(Some(project.to_string()))],
+                ),
+            )?;
+        }
         let candidate = super::children::project_in(&tx, &project)?;
         match readiness_in(&tx, wave, Execution::result)?.state {
             ProjectReadinessState::Unavailable | ProjectReadinessState::Terminal => return Err(StoreError::InvalidAuthority(
@@ -443,6 +458,45 @@ mod tests {
         let receipt: (String,bool) = store.conn.lock().unwrap().query_row("SELECT successor_id,settled_at IS NOT NULL FROM project_transitions WHERE wave_id=?1",[wave.id()],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
         assert_eq!(receipt, (reserved.into(), true));
         assert!(store.project(&id).unwrap().unwrap().tracker_id.is_none());
+    }
+
+    #[test]
+    fn replacing_a_generated_project_settles_only_its_own_transition() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&dir.path().join("loopflow.db")).unwrap();
+        let wave = Wave::new(WaveId::new(), "coverage".into(), "/repo".into());
+        crate::test_fixture::wave(&store, &wave);
+        let old = store.ensure_project(wave.id(), "rules").unwrap();
+        let other = loopflow_model::durable::ProjectId::new();
+        let pending = loopflow_model::durable::ProjectId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,description,status)
+                VALUES(?1,?2,1,1,'rules','Rules','','started')", rusqlite::params![other.as_str(), wave.id()]).unwrap();
+            conn.execute(
+                "UPDATE project_transitions SET settled_at=NULL,successor_id=?2 WHERE wave_id=?1",
+                rusqlite::params![wave.id(), pending.as_str()],
+            )
+            .unwrap();
+        }
+        let replace = || store.bind_project(wave.id(), other.as_str(), Some(old.as_str()));
+        assert!(replace().is_err());
+        assert_eq!(store.selected_project(wave.id()).unwrap().unwrap().id, old);
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE project_transitions SET successor_id=?2 WHERE wave_id=?1",
+                rusqlite::params![wave.id(), old.as_str()],
+            )
+            .unwrap();
+        assert_eq!(replace().unwrap().id, other);
+        let ready = store
+            .project_readiness(wave.id(), crate::graph_process::Execution::result)
+            .unwrap();
+        assert!(ready.pending_successor.is_none());
+        assert_eq!(store.project(&old).unwrap().unwrap().name, "rules");
     }
 
     #[test]

@@ -321,6 +321,25 @@ impl Cli {
     /// Reject argument combinations the derive cannot express, as the usage
     /// errors they are, before anything runs.
     pub fn checked(mut self) -> Result<Self, clap::Error> {
+        if let Some(Commands::Open(open)) = &mut self.command {
+            if let Some(machine) = self.machine.take() {
+                if open.selection.machine.replace(machine).is_some() {
+                    return Err(clap::Error::raw(
+                        clap::error::ErrorKind::ArgumentConflict,
+                        "select a Machine only once",
+                    ));
+                }
+            }
+            if open.selection.machine.is_some()
+                && (open.selection.session.is_none()
+                    || self.task.is_some()
+                    || self.wave.is_some()
+                    || open.selection.url.is_some())
+            {
+                return Err(clap::Error::raw(clap::error::ErrorKind::ArgumentConflict,
+                    "use --machine with --session for a Session on that Machine; a Task selects its own Machine"));
+            }
+        }
         if let Some(Commands::Session { cmd }) = &self.command {
             let selected = match cmd {
                 SessionCommand::Resume { id, connection, .. }
@@ -369,14 +388,6 @@ impl Cli {
         if self.json && !self.context && !self.explain {
             return Err(clap::Error::raw(clap::error::ErrorKind::ArgumentConflict,
                 "root --json requires --context or --explain; use the command's own --json when available\n"));
-        }
-        if let Some(Commands::Account { cmd, target, json }) = &self.command {
-            if let Some(misuse) = AccountCommand::misuse(cmd.as_ref(), target.as_deref(), *json) {
-                return Err(clap::Error::raw(
-                    clap::error::ErrorKind::ArgumentConflict,
-                    format!("{misuse}\n"),
-                ));
-            }
         }
         Ok(self)
     }
@@ -593,21 +604,6 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: MachineCommand,
     },
-    /// Service authentication; native Claude and Codex logins belong to their clients
-    #[command(
-        after_help = "lf account linear --json\nlf account connect linear --chrome-profile Work"
-    )]
-    Account {
-        #[command(subcommand)]
-        cmd: Option<AccountCommand>,
-        /// A service provider
-        #[arg(value_parser = parse_service_provider)]
-        target: Option<String>,
-        /// Emit the accounts as one JSON document
-        #[arg(long)]
-        json: bool,
-    },
-
     /// This repository: its identity and checkout, its tracker, releases, CI,
     /// people and size
     #[command(args_conflicts_with_subcommands = true)]
@@ -752,7 +748,7 @@ pub enum RepoCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum DesktopCommand {
-    /// Desktop shell runtime on the recorded Machine; does not contact the GUI.
+    /// Desktop's Task shell viewer: the local server runs the shell wherever the Task runs; does not contact the GUI.
     #[command(hide = true)]
     Shell {
         #[command(flatten)]
@@ -1141,7 +1137,6 @@ impl Commands {
             Self::Pr { cmd } => pr_changes_work(cmd.as_ref()),
             Self::Wt { cmd } => cmd.changes_work(),
             Self::Machine { cmd } => cmd.changes_work(),
-            Self::Account { cmd, .. } => cmd.is_some(),
             Self::Server { .. } | Self::Holder { .. } => false,
             Self::Commit { .. } | Self::Sync(_) | Self::Steer { .. } => true,
             Self::Repo { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
@@ -1167,7 +1162,6 @@ impl TaskCommand {
             | Self::List { .. }
             | Self::Show { .. }
             | Self::Location { .. }
-            | Self::WatchFiles { .. }
             | Self::Status { .. }
             | Self::Diff { .. }
             | Self::Changes { .. }
@@ -1384,6 +1378,9 @@ pub enum ServerCommand {
     /// Look up a submitted creation without retrying it
     Receipt {
         request_id: String,
+        /// The Task the creation was for, read where that Task runs
+        #[arg(long)]
+        task: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -1414,13 +1411,12 @@ pub enum ServerCommand {
 impl MachineCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::Self_ { .. } | Self::Doctor { .. } | Self::List { .. } | Self::Status { .. } => {
-                false
-            }
-            Self::Credentials { cmd } => match cmd {
-                MachineCredentialCommand::Inspect { .. } => false,
-                MachineCredentialCommand::Receive => true,
-            },
+            Self::Self_ { .. }
+            | Self::Doctor { .. }
+            | Self::List { .. }
+            | Self::Status { .. }
+            | Self::Logins { .. } => false,
+            Self::Credentials { .. } => true,
             Self::Pool { cmd } => match cmd {
                 PoolCommand::List { .. } => false,
                 PoolCommand::Add { .. }
@@ -1437,7 +1433,9 @@ impl MachineCommand {
             },
             Self::Hub { machine, clear } => machine.is_some() || *clear,
             Self::Prune { .. }
-            | Self::Connect { .. }
+            | Self::Forward { .. }
+            | Self::Login { .. }
+            | Self::Logout { .. }
             | Self::Public { .. }
             | Self::Add { .. }
             | Self::Rename { .. }
@@ -1469,7 +1467,8 @@ impl SelfCommand {
     pub fn changes_work(&self) -> bool {
         match self {
             Self::Install { cmd, .. } => match cmd {
-                Some(InstallCommand::Server | InstallCommand::Preflight { .. }) => false,
+                Some(InstallCommand::Server { profile_stdin }) => *profile_stdin,
+                Some(InstallCommand::Preflight { .. }) => false,
                 None
                 | Some(
                     InstallCommand::Schedule { .. }
@@ -2028,6 +2027,9 @@ pub enum WavePlanCommand {
     Bind {
         wave: String,
         project: String,
+        /// Replace the current selection, retaining its Project and Tasks.
+        #[arg(long)]
+        replace: bool,
         #[arg(long)]
         json: bool,
     },
@@ -2358,14 +2360,6 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     /// Run one cleanup pass for a Task, or all pending Tasks on this Machine
     #[command(hide = true)]
     Retire { issue: Option<String> },
-    /// Stream invalidations from an existing Task checkout (JSON lines)
-    WatchFiles {
-        issue: String,
-        #[arg(long)]
-        checkout: std::path::PathBuf,
-        #[arg(long)]
-        request: String,
-    },
     /// Show durable Task facts and its recorded work
     Status {
         /// Task issue; defaults to the Task in this checkout
@@ -2569,7 +2563,6 @@ impl TaskCommand {
             Self::Auto { cmd } => cmd.issue().as_deref(),
             Self::Detail { issue, .. }
             | Self::Show { issue, .. }
-            | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
             | Self::Unassign { issue, .. }
@@ -2605,7 +2598,6 @@ impl TaskCommand {
             Self::Auto { cmd } => cmd.issue_mut().as_mut(),
             Self::Detail { issue, .. }
             | Self::Show { issue, .. }
-            | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
             | Self::Unassign { issue, .. }
@@ -2644,7 +2636,11 @@ pub enum InstallFrequency {
 pub enum InstallCommand {
     /// Reconcile the selected installation's local server for a client.
     #[command(hide = true)]
-    Server,
+    Server {
+        /// Retain a rental caller’s portable profile from stdin before starting.
+        #[arg(long)]
+        profile_stdin: bool,
+    },
     /// Run `lf install` on your stream on a schedule (launchd, also at login; cron on Linux),
     Schedule {
         /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time).
@@ -3038,16 +3034,52 @@ pub enum ConfigCommand {
 /// Name and connect to machines.
 #[derive(Debug, Subcommand)]
 pub enum MachineCommand {
-    /// Install a separate login on an added machine using this laptop's browser.
-    Connect {
-        target: String,
-        /// github, opencode or linear
+    /// Replace configured forward.files on the named Machine and optionally restart one conversation.
+    Forward {
+        label: String,
+        /// Restart this Task's primary Session after all files arrive
+        #[arg(long, conflicts_with = "session")]
+        task: Option<String>,
+        /// Restart this Session's provider after all files arrive
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// Sign Machines in through each provider's own login, approved in this
+    /// Machine's browser; with no Machine named, this one
+    Login {
+        /// claude, codex, github, linear, asana, doppler or opencode
         provider: loopflow_execution::provider_auth::Provider,
-        email: Option<String>,
+        /// Added Machines to sign in; claude, asana and doppler sign
+        /// in on this Machine only (Claude reaches others as a forwarded token)
+        machines: Vec<String>,
+        /// Open the approval page in this Chrome profile, by name or directory
         #[arg(long)]
         chrome_profile: Option<String>,
+        /// Store an API key from the environment instead (OpenCode, this Machine)
+        #[arg(long, conflicts_with = "machines")]
+        api_key: bool,
+        /// Every added Machine whose login reads signed out, or that refused a
+        /// launch with none since
+        #[arg(long, conflicts_with_all = ["machines", "api_key"])]
+        refused: bool,
     },
-    /// Inspect or receive service credentials (credential bytes use stdin only).
+    /// Sign Machines out through each provider's own logout; with no Machine
+    /// named, this one
+    Logout {
+        /// claude, codex, github, linear, asana, doppler or opencode
+        provider: loopflow_execution::provider_auth::Provider,
+        /// Added Machines to sign out
+        machines: Vec<String>,
+    },
+    /// What a Machine is signed in to, asked of its own clients; with no
+    /// Machine named, this one
+    Logins {
+        /// An added Machine
+        machine: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Receive service credentials (credential bytes use stdin only).
     Credentials {
         #[command(subcommand)]
         cmd: MachineCredentialCommand,
@@ -3180,6 +3212,9 @@ pub enum OndemandCommand {
         /// the provider may end it early, losing unpushed work
         #[arg(long)]
         spot: bool,
+        /// Reserve the full CPU and memory limits on Modal
+        #[arg(long)]
+        reserved: bool,
         /// Hard deadline for each machine it rents, at most 24
         #[arg(long, default_value_t = loopflow_storage::rental::DEFAULT_HOURS)]
         hours: f64,
@@ -3189,6 +3224,11 @@ pub enum OndemandCommand {
         /// Above this hourly price nothing is rented
         #[arg(long, value_name = "USD")]
         max_usd_per_hour: loopflow_storage::rental::Usd,
+        /// Providers each rental is signed in to as it starts (codex, github,
+        /// linear or opencode); unset, each of those signed in here. Claude
+        /// arrives with each launch as the token `forward.env` names
+        #[arg(long, value_delimiter = ',', value_name = "PROVIDER")]
+        logins: Vec<loopflow_execution::provider_auth::Provider>,
     },
     /// Templates, budgets and the machines each has rented
     List {
@@ -3214,51 +3254,16 @@ pub enum OndemandCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum MachineCredentialCommand {
-    /// Report whether this account is installed, without logging in.
-    Inspect {
-        provider: loopflow_execution::provider_auth::Provider,
-        login: String,
+    /// Resume the selected conversation with the newly delivered files.
+    #[command(hide = true)]
+    Restart {
+        /// Select the Task's primary Session
+        #[arg(long)]
+        task: bool,
+        id: String,
     },
     /// Receive a fresh login as JSON on stdin; preserve existing accounts.
     Receive,
-}
-
-/// Service credentials. Claude and Codex authenticate in their native clients.
-#[derive(Debug, Subcommand)]
-pub enum AccountCommand {
-    /// Connect a service
-    Connect {
-        #[arg(value_parser = parse_service_provider)]
-        target: String,
-        #[arg(long, conflicts_with = "api_key")]
-        chrome_profile: Option<String>,
-        #[arg(long)]
-        api_key: bool,
-    },
-    /// Disconnect a service
-    Disconnect {
-        #[arg(value_parser = parse_service_provider)]
-        target: String,
-    },
-}
-fn parse_service_provider(raw: &str) -> Result<String, String> {
-    match raw.parse::<loopflow_execution::provider_auth::Provider>() {
-        Ok(loopflow_execution::provider_auth::Provider::Claude) => {
-            Err("Claude signs in natively: run `claude`, then /login".to_owned())
-        }
-        Ok(loopflow_execution::provider_auth::Provider::Codex) => {
-            Err("Codex signs in natively: run `codex login`".to_owned())
-        }
-        Ok(_) => Ok(raw.to_owned()),
-        Err(error) => Err(error.to_string()),
-    }
-}
-impl AccountCommand {
-    fn misuse(cmd: Option<&Self>, target: Option<&str>, overview: bool) -> Option<String> {
-        cmd?;
-        (target.is_some() || overview)
-            .then(|| "put service arguments after the account verb".to_owned())
-    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -3438,27 +3443,25 @@ mod tests {
     use clap::CommandFactory;
 
     #[test]
-    fn native_login_controls_are_absent_and_service_auth_remains() {
+    fn every_provider_signs_in_and_out_through_machine_login() {
         for args in [
             vec!["lf", "--account", "claude=old@", "implement"],
             vec!["lf", "--only-account", "codex=old@", "implement"],
-            vec!["lf", "account", "next"],
-            vec!["lf", "account", "use", "old@"],
-            vec!["lf", "account", "pause", "old@"],
-            vec!["lf", "account", "redeem-reset", "old@"],
             vec!["lf", "session", "list", "--blocked"],
             vec!["lf", "machine", "credentials", "renew"],
+            vec!["lf", "machine", "credentials", "inspect", "github", "jack"],
+            vec!["lf", "machine", "login", "codex", "mini", "--refused"],
         ] {
             assert!(Cli::try_parse_from(&args).is_err(), "{args:?}");
         }
-        for (provider, login) in [("claude", "/login"), ("codex", "codex login")] {
-            let error = Cli::try_parse_from(["lf", "account", "connect", provider]).unwrap_err();
-            assert!(error.to_string().contains(login), "{error}");
+        for provider in [
+            "claude", "codex", "github", "linear", "asana", "doppler", "opencode",
+        ] {
+            for verb in ["login", "logout"] {
+                assert!(Cli::try_parse_from(["lf", "machine", verb, provider, "mini"]).is_ok());
+            }
         }
-        for service in ["github", "linear", "asana", "doppler", "opencode"] {
-            assert!(Cli::try_parse_from(["lf", "account", "connect", service]).is_ok());
-            assert!(Cli::try_parse_from(["lf", "account", "disconnect", service]).is_ok());
-        }
+        assert!(Cli::try_parse_from(["lf", "machine", "login", "claude", "--refused"]).is_ok());
         assert!(
             Cli::try_parse_from(["lf", "session", "move", "--on", "claude", "-a", "codex"]).is_ok()
         );
@@ -3486,17 +3489,21 @@ mod tests {
     fn desktop_shell_runtime_needs_no_gui_and_task_shell_is_removed() {
         assert!(Cli::try_parse_from(["lf", "task", "shell", "task-id"]).is_err());
         let cli = Cli::try_parse_from([
+            "lf", "desktop", "shell", "task-id", "--id", "shell-id", "--create",
+        ])
+        .unwrap();
+        // Only Close names the Machine that started the shell.
+        assert!(Cli::try_parse_from([
             "lf",
             "desktop",
             "shell",
             "task-id",
-            "--checkout",
-            "/checkout",
             "--id",
-            "shell-id",
-            "--create",
+            "s",
+            "--started-on",
+            "home_1",
         ])
-        .unwrap();
+        .is_err());
         let Some(Commands::Desktop { cmd }) = cli.command else {
             panic!("Desktop runtime command");
         };

@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
 use crate::rental::{
-    self, Hardware, OnDemand, Ownership, Provider, Rental, RentalId, RentalState, Usd,
+    self, Hardware, OnDemand, Ownership, Provider, Rental, RentalCost, RentalId, RentalState, Usd,
 };
 use crate::rows::now_unix;
 use crate::{StoreError, StoreResult};
@@ -30,7 +30,13 @@ const RENTAL_COLUMNS: &str = "id,ondemand,provider,provider_name,provider_id,mac
 
 fn map_rental(row: &rusqlite::Row<'_>) -> StoreResult<Rental> {
     let provider: String = row.get(2)?;
-    let hardware: String = row.get(7)?;
+    let hardware: Hardware = serde_json::from_str(&row.get::<_, String>(7)?)?;
+    let amount = row.get::<_, Option<String>>(14)?.map(usd).transpose()?;
+    let cost = if hardware.modal_sizing.is_some() {
+        RentalCost::CeilingEstimateUsd(amount)
+    } else {
+        RentalCost::CostUsd(amount)
+    };
     let state: String = row.get(11)?;
     Ok(Rental {
         id: RentalId::from_raw(row.get::<_, String>(0)?),
@@ -41,7 +47,7 @@ fn map_rental(row: &rusqlite::Row<'_>) -> StoreResult<Rental> {
         provider_id: row.get(4)?,
         machine_id: row.get::<_, Option<String>>(5)?.map(MachineId::from_raw),
         by_hand: row.get(6)?,
-        hardware: serde_json::from_str::<Hardware>(&hardware)?,
+        hardware,
         usd_per_hour: usd(row.get(8)?)?,
         cap_usd: usd(row.get(9)?)?,
         deadline: at(row.get(10)?)?,
@@ -49,7 +55,7 @@ fn map_rental(row: &rusqlite::Row<'_>) -> StoreResult<Rental> {
             .ok_or_else(|| invalid(format!("unknown rental state {state}")))?,
         created_at: at(row.get(12)?)?,
         ended_at: row.get::<_, Option<i64>>(13)?.map(at).transpose()?,
-        cost_usd: row.get::<_, Option<String>>(14)?.map(usd).transpose()?,
+        cost,
     })
 }
 

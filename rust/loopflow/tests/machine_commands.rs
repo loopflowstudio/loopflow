@@ -1,8 +1,11 @@
 //! Public commands with isolated stores and a simulated SSH endpoint.
 use crate::support;
+#[allow(dead_code)] // The transport suite also drives the daemon's failure controls.
+#[path = "support/tailscale.rs"]
+mod tailscale;
 use std::fs;
-use std::io::Write;
-use std::os::fd::FromRawFd;
+use std::io::{self, Write};
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
@@ -23,7 +26,7 @@ impl Machines {
     }
 
     fn uninitialized() -> Self {
-        let root = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir_in("/tmp").unwrap();
         let home = root.path().join("local");
         let remote = root.path().join("remote");
         fs::create_dir_all(&home).unwrap();
@@ -37,6 +40,7 @@ impl Machines {
             &root.path().join("bin/ssh"),
             &format!(
                 r#"#!/bin/sh
+[ -e "$0.offline" ] && exit 255
 for arg in "$@"; do remote_command="$arg"; done
 cd '{remote}' || exit 1
 exec env -i HOME='{remote}' PATH='{remote}/bin:/usr/bin:/bin' bash -c "$remote_command"
@@ -124,12 +128,44 @@ esac
         let mut master = unsafe { fs::File::from_raw_fd(master) };
         // SAFETY: slave is the other fresh owned descriptor from openpty.
         let slave = unsafe { fs::File::from_raw_fd(slave) };
+        // No echo: what the terminal shows is lf's own output, not the answer.
+        // SAFETY: slave is an open terminal descriptor; termios is written by tcgetattr.
+        unsafe {
+            let mut termios = std::mem::zeroed::<libc::termios>();
+            assert_eq!(libc::tcgetattr(slave.as_raw_fd(), &mut termios), 0);
+            termios.c_lflag &= !libc::ECHO;
+            assert_eq!(
+                libc::tcsetattr(slave.as_raw_fd(), libc::TCSANOW, &termios),
+                0
+            );
+        }
         master.write_all(answer.as_bytes()).unwrap();
-        self.command(args)
+        let mut screen = master.try_clone().unwrap();
+        let reader = std::thread::spawn(move || {
+            let mut shown = Vec::new();
+            // Reading ends with EIO once lf and its children close the terminal.
+            let _ = io::Read::read_to_end(&mut screen, &mut shown);
+            shown
+        });
+        let mut command = self.command(args);
+        // SAFETY: setsid and TIOCSCTTY are async-signal-safe; stdin is the pty
+        // slave, which becomes the controlling terminal with lf in its foreground.
+        unsafe {
+            std::os::unix::process::CommandExt::pre_exec(&mut command, || {
+                if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut output = command
             .stdin(Stdio::from(slave.try_clone().unwrap()))
             .stderr(Stdio::from(slave))
             .output()
-            .unwrap()
+            .unwrap();
+        drop(command);
+        output.stderr = reader.join().unwrap();
+        output
     }
 
     fn missing_remote(&self) {
@@ -173,6 +209,320 @@ fn assert_success(output: &Output) {
     );
 }
 
+/// A stand-in `codex` that behaves as `codex login --device-auth` does: it
+/// prints the page and its code, then polls until someone approves.
+fn fake_codex(path: &Path) {
+    executable(
+        path,
+        r#"#!/bin/sh
+case "$1 $2" in
+"login --device-auth")
+  [ "$BROWSER" = true ] || exit 3
+  printf '\nFollow these steps to sign in with ChatGPT using device code authorization:\n\n'
+  printf '1. Open this link in your browser and sign in to your account\n   \033[94mhttps://auth.openai.com/codex/device\033[0m\n\n'
+  printf '2. Enter this one-time code \033[90m(expires in 15 minutes)\033[0m\n   \033[94mABCD-1234\033[0m\n\n'
+  i=0
+  while [ ! -f "$HOME/codex-approved" ]; do
+    i=$((i+1)); [ $i -gt 300 ] && { echo 'Error: device code expired' >&2; exit 1; }
+    sleep 0.1
+  done
+  echo 'Logged in using ChatGPT' > "$HOME/codex-auth"
+  echo 'Successfully logged in';;
+"login status")
+  [ -f "$HOME/codex-auth" ] && exec cat "$HOME/codex-auth"
+  echo 'Not logged in' >&2; exit 1;;
+"logout ")
+  rm -f "$HOME/codex-auth"; echo 'Successfully logged out';;
+*) exit 2;;
+esac
+"#,
+    );
+}
+
+/// The remote runs this build of `lf` over its own store.
+fn remote_lf(fixture: &Machines) {
+    let remote = fixture.root.path().join("remote");
+    support::seed_store(&remote.join("store"));
+    executable(
+        &remote.join(".local/bin/lf"),
+        &format!(
+            "#!/bin/sh\nexport LF_HOME='{}' LF_BIN='{}'\nexec '{}' \"$@\"\n",
+            remote.join("store").display(),
+            env!("CARGO_BIN_EXE_lf"),
+            env!("CARGO_BIN_EXE_lf"),
+        ),
+    );
+}
+
+fn login_states(fixture: &Machines, args: &[&str]) -> Vec<(String, String, Value)> {
+    fixture
+        .json(args)
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            (
+                row["provider"].as_str().unwrap().to_string(),
+                row["state"].as_str().unwrap().to_string(),
+                row["account"].clone(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_command_approver_signs_machines_in_to_codex_without_a_terminal() {
+    let fixture = Machines::new();
+    let root = fixture.root.path();
+    let remote = root.join("remote");
+    remote_lf(&fixture);
+    fake_codex(&remote.join(".local/bin/codex"));
+    fake_codex(&root.join("bin/codex"));
+    // The approver sees the page in `LF_APPROVE_*` and approves on every Machine.
+    let approve = root.join("approve");
+    executable(
+        &approve,
+        &format!(
+            r#"#!/bin/sh
+printf '%s|%s|%s|%s\n' "$LF_APPROVE_PROVIDER" "$LF_APPROVE_MACHINE" "$LF_APPROVE_URL" "${{LF_APPROVE_CODE-none}}" >> '{seen}'
+touch '{remote}/codex-approved' '{local}/codex-approved'
+"#,
+            seen = root.join("approvals").display(),
+            remote = remote.display(),
+            local = root.join("local").display(),
+        ),
+    );
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
+    assert_success(&fixture.run(&[
+        "set",
+        "--global",
+        "approvers.codex.command",
+        approve.to_str().unwrap(),
+    ]));
+
+    let before = login_states(&fixture, &["machine", "logins", "mini", "--json"]);
+    assert_eq!(before[0].0, "claude");
+    assert_ne!(before[0].1, "forwarded");
+    assert_eq!(
+        before[1],
+        ("codex".into(), "signed_out".into(), Value::Null)
+    );
+    assert!(before[2..]
+        .iter()
+        .all(|(_, state, _)| state == "signed_out"));
+
+    let codex = fixture.run(&["machine", "login", "codex", "mini"]);
+    assert_success(&codex);
+    assert_eq!(
+        String::from_utf8_lossy(&codex.stdout).trim(),
+        "mini: Codex signed in (ChatGPT)"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("approvals")).unwrap().trim(),
+        "codex|mini|https://auth.openai.com/codex/device|ABCD-1234"
+    );
+
+    // Claude arrives with each launch as the token `forward.env` names.
+    assert_success(&fixture.run(&[
+        "set",
+        "--global",
+        "forward.env",
+        "[CLAUDE_CODE_OAUTH_TOKEN]",
+    ]));
+    // Named without a value here, nothing would reach a launch.
+    let unset = login_states(&fixture, &["machine", "logins", "mini", "--json"]);
+    assert_eq!(unset[0].1, before[0].1);
+    assert_eq!(
+        unset[0].2,
+        Value::from("CLAUDE_CODE_OAUTH_TOKEN has no value here")
+    );
+    let output = fixture
+        .command(&["machine", "logins", "mini", "--json"])
+        .env("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-fixture")
+        .output()
+        .unwrap();
+    assert_success(&output);
+    let after: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(after[0]["state"], "forwarded");
+    assert_eq!(after[0]["account"], "CLAUDE_CODE_OAUTH_TOKEN");
+    assert_eq!(after[1]["state"], "signed_in");
+    assert_eq!(after[1]["account"], "ChatGPT");
+
+    // With no Machine named, the same login runs here.
+    assert_eq!(
+        login_states(&fixture, &["machine", "logins", "--json"])[1].1,
+        "signed_out"
+    );
+    let here = fixture.run(&["machine", "login", "codex"]);
+    assert_success(&here);
+    assert!(String::from_utf8_lossy(&here.stdout)
+        .trim()
+        .ends_with(": Codex signed in (ChatGPT)"));
+    assert_eq!(
+        login_states(&fixture, &["machine", "logins", "--json"])[1].1,
+        "signed_in"
+    );
+}
+
+#[test]
+fn refused_signs_in_again_only_the_machines_that_signed_out_or_refused_a_launch() {
+    let fixture = Machines::new();
+    let remote = fixture.root.path().join("remote");
+    remote_lf(&fixture);
+    fake_codex(&remote.join(".local/bin/codex"));
+    fs::write(remote.join("codex-auth"), "Logged in using ChatGPT\n").unwrap();
+    fs::write(remote.join("codex-approved"), "").unwrap();
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
+    assert_success(&fixture.run(&["set", "--global", "approvers.codex.command", "exit 0"]));
+    let refused = |fixture: &Machines| {
+        let output = fixture.run(&["machine", "login", "codex", "--refused"]);
+        assert_success(&output);
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+    assert_eq!(refused(&fixture), "No Machine needs a Codex login");
+
+    let logout = fixture.run(&["machine", "logout", "codex", "mini"]);
+    assert_success(&logout);
+    assert_eq!(
+        String::from_utf8_lossy(&logout.stdout).trim(),
+        "mini: Codex signed out"
+    );
+    assert!(!remote.join("codex-auth").exists());
+    assert_eq!(refused(&fixture), "mini: Codex signed in (ChatGPT)");
+
+    // Signed in, but the last Codex launch there was refused with none since.
+    // The refusal alone is what `logins` reads; its Graph step is left out.
+    rusqlite::Connection::open(remote.join("store/loopflow.db"))
+        .unwrap()
+        .execute_batch(
+            "PRAGMA foreign_keys=OFF;
+             INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,updated_at)
+             VALUES('step','codex','mini has no Codex login',1);",
+        )
+        .unwrap();
+    let rows = fixture.json(&["machine", "logins", "mini", "--json"]);
+    let codex = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["provider"] == "codex")
+        .unwrap();
+    assert_eq!(codex["state"], "signed_in");
+    assert_eq!(codex["refused"]["reason"], "mini has no Codex login");
+    assert_eq!(refused(&fixture), "mini: Codex signed in (ChatGPT)");
+}
+
+#[test]
+fn services_that_sign_in_here_only_never_reach_another_machine() {
+    let fixture = Machines::new();
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
+    let reached = fixture.root.path().join("ssh-reached");
+    executable(
+        &fixture.root.path().join("bin/ssh"),
+        &format!("#!/bin/sh\ntouch '{}'\nexit 1\n", reached.display()),
+    );
+    let output = fixture.run(&["machine", "login", "asana", "mini"]);
+    assert!(!output.status.success());
+    let shown = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        shown.contains("Asana signs in on each Machine itself; run `lf machine login asana` there"),
+        "{shown}"
+    );
+    assert!(!reached.exists());
+
+    // Claude reaches other Machines only as a forwarded token.
+    let output = fixture.run(&["machine", "login", "claude", "mini"]);
+    assert!(!output.status.success());
+    let shown = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        shown.contains(
+            "Claude reaches mini as a forwarded token: run `claude setup-token`, store it with \
+             `doppler secrets set CLAUDE_CODE_OAUTH_TOKEN`, and add CLAUDE_CODE_OAUTH_TOKEN to `forward.env`"
+        ),
+        "{shown}"
+    );
+    let output = fixture.run(&["machine", "login", "claude", "--refused"]);
+    assert!(!output.status.success());
+    assert!(!reached.exists());
+
+    let output = fixture.run(&[
+        "ondemand",
+        "add",
+        "quote",
+        "--provider",
+        "daytona",
+        "--vcpus",
+        "4",
+        "--memory-gb",
+        "8",
+        "--max",
+        "1",
+        "--max-usd-per-hour",
+        "1",
+        "--logins",
+        "codex,doppler",
+    ]);
+    assert!(!output.status.success());
+    let shown = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        shown.contains("Doppler signs in on each Machine itself"),
+        "{shown}"
+    );
+    let listed = fixture.run(&["ondemand", "list"]);
+    assert!(
+        !String::from_utf8_lossy(&listed.stdout).contains("quote"),
+        "{listed:?}"
+    );
+}
+
+#[test]
+fn a_refusing_approver_leaves_the_machine_signed_out() {
+    let fixture = Machines::new();
+    fake_codex(&fixture.root.path().join("remote/.local/bin/codex"));
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
+    assert_success(&fixture.run(&["set", "--global", "approvers.codex.command", "exit 7"]));
+    let output = fixture.run(&["machine", "login", "codex", "mini"]);
+    assert!(!output.status.success());
+    let shown = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        shown.contains("the approver for Codex exited with exit status: 7; mini was not signed in"),
+        "{shown}"
+    );
+    assert!(!fixture.root.path().join("remote/codex-auth").exists());
+}
+
+#[test]
+fn modal_ondemand_list_records_the_sizing_mode_before_any_rental() {
+    let fixture = Machines::new();
+    for (name, flags) in [("burst", &[][..]), ("reserved", &["--reserved"][..])] {
+        let mut args = vec![
+            "ondemand",
+            "add",
+            name,
+            "--provider",
+            "modal",
+            "--vcpus",
+            "8",
+            "--memory-gb",
+            "16",
+            "--max",
+            "1",
+            "--max-usd-per-hour",
+            "1.00",
+        ];
+        args.extend_from_slice(flags);
+        assert_success(&fixture.run(&args));
+    }
+
+    let listings = fixture.json(&["ondemand", "list", "--json"]);
+    let listings = listings.as_array().unwrap();
+    assert_eq!(listings.len(), 2);
+    for listing in listings {
+        assert_eq!(listing["hardware"]["modal_sizing"], listing["name"]);
+        assert!(listing["rentals"].as_array().unwrap().is_empty());
+    }
+}
+
 #[test]
 fn remote_file_input_reaches_the_command_without_replacing_the_transport_script() {
     let fixture = Machines::new();
@@ -211,7 +561,7 @@ fn remote_file_input_reaches_the_command_without_replacing_the_transport_script(
 }
 
 #[test]
-fn remote_session_open_returns_an_owner_pinned_terminal_command() {
+fn remote_session_open_returns_a_local_viewer_of_the_owners_session() {
     let fixture = Machines::new();
     let machine = fixture.json(&["machine", "add", "mini", "--json"]);
     let mut record: Value = serde_json::from_str::<Vec<Value>>(include_str!(
@@ -250,8 +600,19 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         .iter()
         .map(|v| v.as_str().unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(argv[0], env!("CARGO_BIN_EXE_lf"));
-    assert!(argv.contains(&"-T"));
+    // The viewer opens here; this Machine's server attaches it on mini.
+    assert_eq!(
+        argv,
+        [
+            env!("CARGO_BIN_EXE_lf"),
+            "open",
+            "--machine",
+            machine["id"].as_str().unwrap(),
+            "--session",
+            id.as_str(),
+            "--here",
+        ]
+    );
     for target in [
         vec!["session", "resume", id.as_str()],
         vec!["session", "resume"],
@@ -268,11 +629,6 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         arguments.push("--json");
         assert_eq!(fixture.json(&arguments)["open_argv"], opened["open_argv"]);
     }
-    assert_eq!(&argv[1..4], &["session", "attach", "--"]);
-    let script = argv.last().unwrap();
-    assert!(script.contains("LF_VIEWER_STREAM='1'"), "{script}");
-    assert!(script.contains("/remote/private home"), "{script}");
-    assert!(!script.contains("session remote"), "{script}");
     assert_eq!(opened["workspace"], record["workspace"]);
 }
 
@@ -1943,109 +2299,6 @@ fn set_machine_changes_local_preferences_without_copying_or_moving_work() {
     );
 }
 
-#[test]
-fn remote_file_observer_keeps_the_recorded_owner_and_streams_changes() {
-    use loopflow_execution::durable::RepositoryId;
-    use loopflow_execution::ops::task::TaskFilesFrame;
-
-    use std::io::{BufRead, BufReader};
-    use std::sync::mpsc;
-    use std::time::Duration;
-
-    let fixture = preview_machines();
-    let repo = loopflow_test_support::TestRepo::new();
-    let path = repo.path().canonicalize().unwrap();
-    let remote_home = fixture.root.path().join("remote/store");
-    let registered =
-        support::register_task_with_pr(&remote_home, &path, "companions", &repo.head_sha());
-    let store = loopflow_execution::store::open_sqlite(&remote_home.join("loopflow.db")).unwrap();
-    let repository = RepositoryId::new();
-    loopflow_execution::repository::location::bind_repository(
-        &store,
-        path.to_str().unwrap(),
-        &repository,
-    )
-    .unwrap();
-    let owner = loopflow_execution::store::machines::local_machine(&store)
-        .unwrap()
-        .id;
-    fs::write(path.join(".gitignore"), "target/\n").unwrap();
-    fs::create_dir(path.join("target")).unwrap();
-    let rejected = fixture.run(&[
-        "--machine",
-        "mini",
-        "--repo-id",
-        repository.as_str(),
-        "task",
-        "watch-files",
-        registered.task.id.as_str(),
-        "--checkout",
-        "/different-checkout",
-        "--request",
-        "stale-request",
-    ]);
-    assert!(!rejected.status.success());
-    assert!(String::from_utf8_lossy(&rejected.stderr).contains("checkout changed"));
-    assert!(rejected.stdout.is_empty());
-
-    let mut child = fixture
-        .command(&[
-            "--machine",
-            "mini",
-            "--repo-id",
-            repository.as_str(),
-            "task",
-            "watch-files",
-            registered.task.id.as_str(),
-            "--checkout",
-            path.to_str().unwrap(),
-            "--request",
-            "owned-request",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let stdout = child.stdout.take().unwrap();
-    let (send, receive) = mpsc::channel();
-    std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines() {
-            if send.send(line.unwrap()).is_err() {
-                break;
-            }
-        }
-    });
-    let read = || -> TaskFilesFrame {
-        serde_json::from_str(&receive.recv_timeout(Duration::from_secs(10)).unwrap()).unwrap()
-    };
-    let first = read();
-    assert_eq!(first.request, "owned-request");
-    assert_eq!(first.task_id, registered.task.id);
-    assert_eq!(first.machine_id, owner);
-    assert_eq!(first.checkout, path.to_str().unwrap());
-    assert_eq!(first.paths, [""]);
-    // Ignored build output never invalidates; an atomic replacement must, even
-    // when dirty status stays dirty.
-    fs::write(path.join("target/out"), "build\n").unwrap();
-    repo.create_file("replacement", "new peer contents\n");
-    fs::rename(path.join("replacement"), path.join("note.txt")).unwrap();
-    let mut changed = Vec::new();
-    for _ in 0..5 {
-        changed.extend(read().paths);
-        if changed.iter().any(|path| path == "note.txt") {
-            break;
-        }
-    }
-    // Closing the reader's stdin must drain the remote observer, not leave it resident.
-    drop(child.stdin.take());
-    let output = child.wait_with_output().unwrap();
-    assert_success(&output);
-    assert!(changed.iter().any(|path| path == "note.txt"));
-    assert!(!changed.iter().any(|path| path.starts_with("target")));
-    assert!(!fixture.root.path().join("forbidden-effect").exists());
-}
-
 /// Claude's project directory for a checkout.
 fn claude_project(path: &Path) -> String {
     path.to_string_lossy()
@@ -2325,11 +2578,21 @@ fn place(
 
 /// A Claude conversation in `cwd`, admitted the way connecting admits it.
 fn claude_conversation(fixture: &Machines, cwd: &Path, conversation: &str) -> String {
-    let project = fixture
-        .root
-        .path()
-        .join("local/.claude/projects")
-        .join(claude_project(cwd));
+    import_claude_conversation(
+        &fixture.root.path().join("local"),
+        cwd,
+        conversation,
+        fixture.command(&[]),
+    )
+}
+
+fn import_claude_conversation(
+    home: &Path,
+    cwd: &Path,
+    conversation: &str,
+    mut lf: Command,
+) -> String {
+    let project = home.join(".claude/projects").join(claude_project(cwd));
     fs::create_dir_all(&project).unwrap();
     fs::write(
         project.join(format!("{conversation}.jsonl")),
@@ -2339,8 +2602,8 @@ fn claude_conversation(fixture: &Machines, cwd: &Path, conversation: &str) -> St
         ),
     )
     .unwrap();
-    let admitted = fixture
-        .command(&["session", "resume", conversation, "--prepare", "--json"])
+    let admitted = lf
+        .args(["session", "resume", conversation, "--prepare", "--json"])
         .current_dir(cwd)
         .output()
         .unwrap();
@@ -4345,7 +4608,16 @@ impl Drop for Child {
 /// The laptop's server, ready, and its socket.
 fn served(fixture: &Machines) -> (Child, String) {
     use std::time::{Duration, Instant};
-    let server = Child(fixture.command(&["server", "run"]).spawn().unwrap());
+    let server = Child(
+        fixture
+            .command(&["server", "run"])
+            .env(
+                "TS_SOCKET",
+                fixture.root.path().join("local/tailscaled.sock"),
+            )
+            .spawn()
+            .unwrap(),
+    );
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         let output = fixture.run(&["server", "status"]);
@@ -4359,6 +4631,1176 @@ fn served(fixture: &Machines) -> (Child, String) {
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+/// Open a held terminal through a ticket the laptop's server issued: its
+/// `bridged` answer, then the viewer protocol until the terminal shows `expected`.
+fn bridged_terminal(socket: &Path, ticket: &str, expected: &str) {
+    use std::io::Read as _;
+    let mut stream = std::os::unix::net::UnixStream::connect(socket).unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+        .unwrap();
+    stream
+        .write_all(format!("{}\n", serde_json::json!({"type":"attach","ticket":ticket})).as_bytes())
+        .unwrap();
+    let mut answer = Vec::new();
+    let mut byte = [0];
+    while {
+        stream.read_exact(&mut byte).unwrap();
+        byte[0] != b'\n'
+    } {
+        answer.push(byte[0]);
+    }
+    let answer: Value = serde_json::from_slice(&answer).unwrap();
+    assert_eq!(answer["type"], "bridged", "{answer}");
+    stream.write_all(&viewer_attach()).unwrap();
+    terminal_shows(expected, |buffer| stream.read_exact(buffer));
+}
+
+fn viewer_attach() -> Vec<u8> {
+    use loopflow_execution::transport::wire::{frame, Tag};
+    let request = serde_json::json!({"kind":"attach","rows":24,"cols":400,"id":1});
+    frame(Tag::Request, &serde_json::to_vec(&request).unwrap())
+}
+
+fn terminal_shows(expected: &str, mut read_exact: impl FnMut(&mut [u8]) -> std::io::Result<()>) {
+    use loopflow_execution::transport::wire::Tag;
+    let mut shown = String::new();
+    while !shown.contains(expected) {
+        let mut header = [0; 5];
+        read_exact(&mut header)
+            .unwrap_or_else(|error| panic!("waiting for {expected}: {error}; saw {shown}"));
+        let mut payload = vec![0; u32::from_be_bytes(header[1..].try_into().unwrap()) as usize];
+        read_exact(&mut payload).unwrap();
+        if header[0] == Tag::Snapshot as u8 || header[0] == Tag::Out as u8 {
+            shown.push_str(&String::from_utf8_lossy(&payload));
+        }
+        assert_ne!(
+            header[0],
+            Tag::Close as u8,
+            "closed before {expected}: {shown}"
+        );
+    }
+}
+
+struct PairedPhone {
+    _daemon: tailscale::Daemon,
+    pem: String,
+    port: u16,
+    control: tailscale::PhoneSocket,
+}
+
+impl PairedPhone {
+    fn pair(
+        fixture: &Machines,
+        client: &mut loopflow_execution::machine::client::Connection,
+    ) -> Self {
+        use loopflow::server::wire::{Hello, ServerOperation, MIN_REVISION, REVISION};
+        let cert = rcgen::generate_simple_self_signed(vec!["fixture.tail.ts.net".into()]).unwrap();
+        let pem = cert.cert.pem();
+        let daemon = tailscale::Daemon::start(
+            &fixture.root.path().join("local"),
+            &tailscale::status(1),
+            format!("{}{pem}", cert.signing_key.serialize_pem()),
+        );
+        let answer = client
+            .request(ServerOperation::MobileConfigure {
+                configuration: Some(tailscale::approval(0)),
+            })
+            .unwrap()
+            .result;
+        let port = reqwest::Url::parse(answer["configuration"]["endpoint"].as_str().unwrap())
+            .unwrap()
+            .port()
+            .unwrap();
+        let mut control = tailscale::connect(port, &pem, "/v1/machine").unwrap();
+        Self::send(
+            &mut control,
+            loopflow::server::wire::ClientMessage::Hello(Hello {
+                revision: REVISION,
+                min_revision: MIN_REVISION,
+                client: loopflow_execution::machine::client::identity("mobile", "phone"),
+            }),
+        );
+        assert_eq!(tailscale::text(&mut control)["type"], "welcome");
+        Self {
+            _daemon: daemon,
+            pem,
+            port,
+            control,
+        }
+    }
+
+    fn send(socket: &mut tailscale::PhoneSocket, request: loopflow::server::wire::ClientMessage) {
+        use tokio_tungstenite::tungstenite::Message;
+        socket
+            .send(Message::text(serde_json::to_string(&request).unwrap()))
+            .unwrap();
+    }
+
+    fn request(&mut self, operation: loopflow::server::wire::ServerOperation) -> Value {
+        use loopflow::server::wire::{ClientMessage, Operation};
+        Self::send(
+            &mut self.control,
+            ClientMessage::Request {
+                id: "phone".into(),
+                operation: Operation::Server(operation),
+                sender: None,
+                select: None,
+                request_id: None,
+            },
+        );
+        let mut answer = tailscale::text(&mut self.control);
+        assert_eq!(answer["type"], "response", "{answer}");
+        answer["result"].take()
+    }
+
+    fn attach(
+        &mut self,
+        operation: loopflow::server::wire::ServerOperation,
+        terminal: &Value,
+    ) -> tailscale::PhoneSocket {
+        use tokio_tungstenite::tungstenite::Message;
+        let issued = self.request(operation);
+        assert_eq!(&issued["terminal_id"], terminal);
+        let mut socket = tailscale::connect(self.port, &self.pem, "/v1/ticket").unwrap();
+        Self::send(
+            &mut socket,
+            loopflow::server::wire::ClientMessage::Attach {
+                ticket: issued["ticket"].as_str().unwrap().into(),
+            },
+        );
+        let bridge = tailscale::text(&mut socket);
+        assert_eq!(bridge["type"], "bridged", "{bridge}");
+        assert_eq!(&bridge["terminal_id"], terminal);
+        socket.send(Message::binary(viewer_attach())).unwrap();
+        socket
+    }
+}
+
+fn phone_terminal_shows(mut socket: tailscale::PhoneSocket, expected: &str) {
+    use tokio_tungstenite::tungstenite::Message;
+    // A WebSocket message can hold any part of a viewer frame.
+    let mut bytes = std::iter::from_fn(|| match socket.read().unwrap() {
+        Message::Binary(chunk) => Some(chunk),
+        other => panic!("expected terminal bytes: {other:?}"),
+    })
+    .flatten();
+    terminal_shows(expected, |buffer| {
+        for byte in buffer {
+            *byte = bytes.next().unwrap();
+        }
+        Ok(())
+    });
+}
+
+fn available_reading(
+    watches: &mut loopflow_execution::machine::client::Connection,
+    id: &str,
+) -> Value {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let frame = watches
+            .reading(id)
+            .unwrap()
+            .expect("subscription stays open");
+        let Some(reason) = frame["unavailable"].as_str() else {
+            break frame;
+        };
+        assert!(
+            reason.contains("mini") && std::time::Instant::now() < deadline,
+            "{frame}"
+        );
+    }
+}
+
+/// The local host runs the pane command and keeps its stdin open. Only the
+/// peer has the provider threads whose output and input we see in those tabs.
+#[test]
+fn open_remote_workspace() {
+    let fixture = preview_machines();
+    let (plan, task) = task_on_mini(&fixture);
+    let local = fixture.root.path().join("local");
+    let remote = fixture.root.path().join("remote");
+    let peer = rusqlite::Connection::open(remote.join("store/loopflow.db")).unwrap();
+    let laptop = rusqlite::Connection::open(local.join("loopflow.db")).unwrap();
+    let stale = local.join("former checkout");
+    fs::create_dir(&stale).unwrap();
+    for (db, path) in [(&peer, &plan.remote_path), (&laptop, &stale)] {
+        db.execute(
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+            [task.as_str(), path.to_str().unwrap()],
+        )
+        .unwrap();
+    }
+    let _peer = served_mini(&fixture);
+    let (_server, _) = served(&fixture);
+    let _ended = EndRecorded(vec![local.clone(), remote.join("store")]);
+
+    let threads = [
+        "0199a213-81c0-7800-8aa1-bbab2a035a61",
+        "0199a213-81c0-7800-8aa1-bbab2a035a62",
+        "0199a213-81c0-7800-8aa1-bbab2a035a63",
+    ];
+    let unrelated = loopflow_test_support::TestRepo::new();
+    let sessions = threads.map(|thread| {
+        let cwd = if thread == threads[2] {
+            unrelated.path()
+        } else {
+            &plan.remote_path
+        };
+        import_claude_conversation(&remote, cwd, thread, mini_command(&fixture, &[]))
+    });
+    for session in &sessions[..2] {
+        peer.execute(
+            "UPDATE agent_sessions SET task_id=?1,wave_id=?2 WHERE id=?3",
+            rusqlite::params![
+                task.as_str(),
+                plan.remote.task(&task).unwrap().unwrap().wave_id,
+                session
+            ],
+        )
+        .unwrap();
+    }
+    fs::write(
+        remote.join(".claude.json"),
+        r#"{"projects":{"/":{"hasTrustDialogAccepted":true}}}"#,
+    )
+    .unwrap();
+    executable(
+        &remote.join(".local/bin/claude"),
+        r#"#!/bin/bash
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+while [ "$#" -ge 2 ]; do
+  if [ "$1" = --resume ]; then
+    printf 'mini %s\n' "$2"
+    if read -r -t 60 answer < /dev/tty; then printf 'mini %s received %s\n' "$2" "$answer"; fi
+    exit
+  fi
+  shift
+done
+printf 'mini fresh\n'
+if read -r -t 60 answer < /dev/tty; then printf 'mini fresh received %s\n' "$answer"; fi
+"#,
+    );
+    // Start before marking it primary so the recovery watcher sees a running
+    // conversation. The other Sessions have only saved history.
+    let peer_socket = server_socket(&remote.join("store"), "machine");
+    let mut client =
+        loopflow_execution::machine::client::Connection::open_at(&peer_socket).unwrap();
+    let primary: loopflow_model::id::LfSessionId = sessions[0].as_str().into();
+    let started = client
+        .request(loopflow::server::wire::ServerOperation::SessionContinue {
+            session: primary.clone(),
+            task: None,
+            machine: None,
+            agent: None,
+            request: "existing-primary".into(),
+            rows: 24,
+            cols: 80,
+        })
+        .unwrap();
+    let started: loopflow::server::wire::SessionStarted =
+        serde_json::from_value(started.result).unwrap();
+    let attached = client
+        .session_ticket(&primary, Some(started.terminal_id), None, None)
+        .unwrap();
+    bridged_terminal(
+        &peer_socket,
+        &attached.ticket,
+        &format!("mini {}", threads[0]),
+    );
+    peer.execute(
+        "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+        [task.as_str(), &sessions[0]],
+    )
+    .unwrap();
+    executable(
+        &fixture.root.path().join("bin/tmux"),
+        r#"#!/bin/sh
+[ "$1" = new-window ] || exit 1
+while [ "$1" != -c ]; do shift; done
+cd "$2" || exit 1
+(pwd -P; /bin/sh -c "$3"; touch "$HOME/tab-closed") < "$HOME/tab-input" > "$HOME/tab-output" 2>&1 &
+echo %local-tab
+"#,
+    );
+    let fifo = local.join("tab-input");
+    assert!(Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .unwrap()
+        .success());
+    let mut input = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(fifo)
+        .unwrap();
+    // A Task with no conversation yet starts one on mini with the caller's agent.
+    let (fresh_plan, fresh) = task_on_mini(&fixture);
+    peer.execute(
+        "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+        [fresh.as_str(), fresh_plan.remote_path.to_str().unwrap()],
+    )
+    .unwrap();
+    for (index, mut args) in [
+        vec!["open", "--task", task.as_str()],
+        vec!["open", "--task", task.as_str(), "--session", &sessions[1]],
+        vec!["open", "--machine", "mini", "--session", &sessions[2]],
+        vec!["--machine", "mini", "open", "--session", &sessions[2]],
+        vec!["-a", "claude", "open", "--task", fresh.as_str()],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        args.extend(["--host", "tmux", "--tab", "--json"]);
+        let cwd = match index {
+            0 | 1 => &plan.local_path,
+            4 => &fresh_plan.local_path,
+            _ => &local,
+        };
+        let opened = fixture.command(&args).current_dir(cwd).output().unwrap();
+        let tab = || fs::read_to_string(local.join("tab-output")).unwrap_or_default();
+        assert!(
+            opened.status.success(),
+            "{args:?}: {opened:?}, tab: {}",
+            tab()
+        );
+        let report: Value = serde_json::from_slice(&opened.stdout).unwrap();
+        let receipt = &report["receipts"][0];
+        assert_eq!(receipt["status"], "usable", "{receipt}");
+        assert_eq!(receipt["destination"], "%local-tab");
+        let expected_retry = if index == 4 {
+            serde_json::json!(["lf", "open", "--task", fresh.as_str()])
+        } else if index < 2 {
+            let mut retry = vec!["lf", "open", "--task", task.as_str()];
+            if index == 1 {
+                retry.extend(["--session", &sessions[1]]);
+            }
+            serde_json::json!(retry)
+        } else {
+            let mini = loopflow_execution::store::machines::local_machine(&plan.remote).unwrap();
+            serde_json::json!(["lf", "open", "--machine", mini.id, "--session", sessions[2]])
+        };
+        assert_eq!(receipt["fallback_argv"], expected_retry);
+        writeln!(input, "tab-{index}").unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !local.join("tab-closed").exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "tab did not close: {}",
+                tab()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let text = tab();
+        assert_eq!(text.lines().next(), cwd.canonicalize().unwrap().to_str());
+        let answer = match index {
+            4 => "mini fresh".to_owned(),
+            _ => format!("mini {}", threads[index.min(2)]),
+        };
+        assert!(
+            text.contains(&format!("{answer} received tab-{index}")),
+            "{text}"
+        );
+        // Leaving names the command that returns from this Machine.
+        let retry: Vec<String> = serde_json::from_value(expected_retry).unwrap();
+        assert!(text.contains(&retry.join(" ")), "{text}");
+        assert!(!text.contains("lf resume"), "{text}");
+        fs::remove_file(local.join("tab-closed")).unwrap();
+    }
+
+    // A Desktop pane on mini's terminal reads its readiness from the bridged
+    // viewer, as it does from a local one; without it the pane takes no input.
+    let short = tempfile::tempdir_in("/tmp").unwrap();
+    let status = short.path().join("status.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&status).unwrap();
+    let (ready, readings) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::BufRead as _;
+        let (stream, _) = listener.accept().unwrap();
+        for line in std::io::BufReader::new(stream).lines() {
+            let reading: Value = serde_json::from_str(&line.unwrap()).unwrap();
+            let usable = reading["state"] == "connected" && reading["native_ready"] == true;
+            if usable && ready.send(reading).is_err() {
+                return;
+            }
+        }
+    });
+    let mut pane = fixture
+        .command(&["open", "--task", task.as_str(), "--here"])
+        .current_dir(&plan.local_path)
+        .env("LF_SERVER_STATUS", &status)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let reading = readings.recv_timeout(std::time::Duration::from_secs(30));
+    pane.kill().unwrap();
+    pane.wait().unwrap();
+    reading.expect("the bridged viewer reports a connected, ready terminal");
+}
+
+#[test]
+fn server_routed_task_workspace() {
+    use loopflow::lf::commands::{read::Read, write::Write};
+    use loopflow_execution::engine::{Error, ErrorCode};
+    use loopflow_execution::machine::client::Connection;
+
+    let fixture = preview_machines();
+    let offline = fixture.root.path().join("bin/ssh.offline");
+    let plan = SharedPlan::new(&fixture);
+    // Both Machines imported the same tracker issue under their own Task ID.
+    let task = plan.local_task();
+    let peer_task = plan.task();
+    let mini = loopflow_execution::store::machines::local_machine(&plan.remote).unwrap();
+    loopflow_execution::store::ownership::claim_task(&plan.remote, &peer_task).unwrap();
+    loopflow_execution::store::ownership::claim_task(&plan.local, &task).unwrap();
+    let database = |path| rusqlite::Connection::open(fixture.root.path().join(path)).unwrap();
+    let local = database("local/loopflow.db");
+    let peer = database("remote/store/loopflow.db");
+    for (db, id) in [(&local, &task), (&peer, &peer_task)] {
+        db.execute(
+            "UPDATE tasks SET external_issue_id='shared-tracker-key', issue_identifier='WORK-42' WHERE id=?1",
+            [id.as_str()],
+        ).unwrap();
+    }
+    let checkout = |db: &rusqlite::Connection, id: &str, path: &Path| {
+        db.execute(
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+            [id, path.to_str().unwrap()],
+        )
+        .unwrap();
+    };
+    checkout(&local, task.as_str(), &plan.local_path);
+    let file = "document.txt";
+    fs::write(plan.local_path.join(file), "old laptop copy").unwrap();
+    let server_on_mini = served_mini(&fixture);
+    let (_server, socket) = served(&fixture);
+    let mut client = Connection::open_at(Path::new(&socket)).unwrap();
+    let read_file = Read::TaskFile {
+        issue: task.to_string(),
+        path: file.into(),
+        at: None,
+    };
+    let before_move = client.request(&read_file).unwrap().result;
+    assert_eq!(before_move["content"], "old laptop copy");
+    loopflow_execution::store::ownership::begin_task_move(&plan.local, &task, &mini.id).unwrap();
+    let absent = client
+        .request(&read_file)
+        .unwrap_err()
+        .downcast::<Error>()
+        .unwrap();
+    assert_eq!(absent.code, ErrorCode::NotFound);
+    assert_eq!(
+        absent.data.as_ref().unwrap(),
+        &serde_json::json!({"reason":"not_started","task_id":peer_task})
+    );
+
+    // The file watch follows the Task, not a checkout: it waits on mini.
+    let mut unstarted = Connection::open_at(Path::new(&socket)).unwrap();
+    unstarted
+        .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+        .unwrap();
+    let unstarted_id = unstarted
+        .subscribe(
+            Read::TaskFilesWatch {
+                issue: task.to_string(),
+            },
+            None,
+        )
+        .unwrap();
+    let waiting = available_reading(&mut unstarted, &unstarted_id);
+    assert_eq!(
+        waiting["body"],
+        serde_json::json!({
+            "task_id": task,
+            "machine_id": mini.id,
+            "machine_label": "mini",
+            "checkout": null,
+            "revision": null,
+        })
+    );
+
+    let board = client
+        .request(Read::PlanList {
+            directory: plan.local_path.clone(),
+            wave: None,
+            task: Some(task.to_string()),
+            all: false,
+        })
+        .unwrap()
+        .result;
+    let row = &board["tasks"]["items"][0];
+    assert_eq!(row["task"]["id"], task.as_str(), "{board}");
+    assert_eq!(row["runtime"]["owner"]["machine"]["id"], mini.id.as_str());
+    assert_eq!(row["reference"].get("workspace"), Some(&Value::Null));
+    let waited = client
+        .request(Read::TaskWait {
+            issue: task.to_string(),
+            until: loopflow_execution::ops::task::TaskWaitUntil::Terminal,
+        })
+        .unwrap()
+        .result;
+    assert_eq!(waited["task"]["task_id"], task.as_str());
+    for field in ["machine_id", "worktree", "branch", "base_commit"] {
+        assert_eq!(waited["task"].get(field), Some(&Value::Null), "{field}");
+    }
+
+    checkout(&peer, peer_task.as_str(), &plan.remote_path);
+    let mut live = available_reading(&mut unstarted, &unstarted_id);
+    while live["body"]["checkout"].is_null() {
+        live = available_reading(&mut unstarted, &unstarted_id);
+    }
+    assert_eq!(live["body"]["checkout"], plan.remote_path.to_str().unwrap());
+    assert!(live["body"]["revision"].is_string(), "{live}");
+    drop(unstarted);
+    fs::write(plan.remote_path.join(file), "from mini\n").unwrap();
+    git(&plan.remote_path, &["add", file]);
+    git(&plan.remote_path, &["commit", "-qm", "File on mini"]);
+    let tree = client
+        .request(Read::TaskFiles {
+            issue: task.to_string(),
+            path: String::new(),
+            cursor: None,
+            show_ignored: false,
+        })
+        .unwrap()
+        .result;
+    assert!(tree["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["path"] == file));
+    let original = client.request(&read_file).unwrap().result;
+    assert_eq!(original["content"], "from mini\n");
+    let graph = support::record_graph(
+        &fixture.root.path().join("remote/store"),
+        &plan.remote_path,
+        "remote-run",
+        "inspect",
+        "succeeded",
+    );
+    let remote = fixture.root.path().join("remote");
+    let thread = "0199a213-81c0-7800-8aa1-bbab2a035a65";
+    let session = import_claude_conversation(
+        &remote,
+        &plan.remote_path,
+        thread,
+        mini_command(&fixture, &[]),
+    );
+    let session = session.as_str();
+    peer.execute(
+        "UPDATE agent_sessions SET cwd=?2,repo=?2,task_id=?3,wave_id=?4 WHERE id=?1",
+        rusqlite::params![
+            session,
+            plan.remote_path.to_str().unwrap(),
+            peer_task.as_str(),
+            plan.remote.task(&peer_task).unwrap().unwrap().wave_id,
+        ],
+    )
+    .unwrap();
+    let peer_client = || {
+        let output = mini_command(&fixture, &["server", "status"])
+            .output()
+            .unwrap();
+        assert_success(&output);
+        let status: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let clients: Vec<_> = status["clients"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| {
+                row["client"]["kind"] == loopflow_execution::machine::wire::MACHINE_CLIENT
+            })
+            .collect();
+        assert_eq!(clients.len(), 1, "{status}");
+        (
+            clients[0]["id"].clone(),
+            clients[0]["requests"].as_u64().unwrap(),
+        )
+    };
+    let (connection_id, requests) = peer_client();
+    let directory = plan.local_path.clone();
+    let pane = client
+        .request(Read::TaskGet {
+            directory: directory.clone(),
+            issue: task.to_string(),
+        })
+        .unwrap()
+        .result;
+    // Mini answers; the reading names the Task, its repository and mini as
+    // this Machine does. The files stay in mini's checkout.
+    let workspace = &pane["row"]["reference"]["workspace"];
+    assert_eq!(workspace["machine_id"], mini.id.as_str());
+    assert_eq!(workspace["machine_label"], "mini");
+    assert_eq!(workspace["worktree"], plan.remote_path.to_str().unwrap());
+    assert_eq!(pane["row"]["task"]["id"], task.as_str());
+    assert_eq!(
+        pane["row"]["task"]["repo"],
+        plan.local_path.to_str().unwrap()
+    );
+    let detail = client
+        .request(Read::TaskDetail {
+            directory: directory.clone(),
+            issue: task.to_string(),
+        })
+        .unwrap()
+        .result;
+    assert_eq!(detail["task"]["id"], task.as_str());
+    let runs = client
+        .request(Read::TaskRuns {
+            directory: directory.clone(),
+            task: task.to_string(),
+            after: None,
+        })
+        .unwrap()
+        .result;
+    assert_eq!(runs["entries"][0]["id"], graph);
+    let sessions = |task| Read::SessionList {
+        directory: directory.clone(),
+        task,
+        headless: true,
+        after: None,
+        limit: Some(1),
+    };
+    let scoped = client
+        .request(sessions(Some(task.to_string())))
+        .unwrap()
+        .result;
+    assert_eq!(scoped["entries"][0]["id"], session);
+    // Read here, mini's record names this Machine's Task and opens with `lf open`.
+    let record = &scoped["entries"][0];
+    assert_eq!(record["task_ids"][0], task.as_str(), "{record}");
+    assert_eq!(record["work"]["id"], task.as_str(), "{record}");
+    assert!(!record.to_string().contains("lf resume"), "{record}");
+    let argv = record["open_argv"].as_array().unwrap();
+    assert_eq!(argv[1..3], ["open", "--task"], "{record}");
+    // `lf session list --task` here lists what mini runs, not this store's none.
+    let listed = fixture
+        .command(&["session", "list", "--headless", "--task", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    let listed = String::from_utf8_lossy(&listed.stdout);
+    assert!(listed.contains(session), "{listed}");
+    assert!(!listed.contains("lf resume"), "{listed}");
+    let local_sessions = client.request(sessions(None)).unwrap().result;
+    assert!(local_sessions["entries"].as_array().unwrap().is_empty());
+    // Both repositories use WORK-42. The next request on this same pipe
+    // resolves the label in its own repository on each Machine.
+    let (other, other_task) = task_on_mini(&fixture);
+    for db in [&local, &peer] {
+        db.execute(
+            "UPDATE tasks SET issue_identifier='WORK-42' WHERE id=?1",
+            [other_task.as_str()],
+        )
+        .unwrap();
+    }
+    let detail = client
+        .request(Read::TaskDetail {
+            directory: other.local_path.clone(),
+            issue: "WORK-42".into(),
+        })
+        .unwrap()
+        .result;
+    assert_eq!(detail["task"]["repo"], other.local_path.to_str().unwrap());
+    // A Reset sent to mini keeps its receipt there; naming the Task reads it.
+    peer.execute(
+        "INSERT INTO creation_receipts
+            (request_id,kind,fingerprint,task_id,session_id,artifact_key,milestone,result,created_at,updated_at,run)
+            VALUES ('reset-on-mini','session.new','fingerprint',NULL,'session_1',NULL,'stopping',NULL,1,1,0)",
+        [],
+    )
+    .unwrap();
+    let mut receipt = |task: Option<String>| {
+        client
+            .request(Read::CreationGet {
+                request_id: "reset-on-mini".into(),
+                task,
+            })
+            .unwrap()
+            .result
+    };
+    assert_eq!(receipt(None), Value::Null);
+    let routed = receipt(Some(task.to_string()));
+    assert_eq!(routed["request_id"], "reset-on-mini", "{routed}");
+    assert_eq!(routed["session_id"], "session_1");
+    assert_eq!(peer_client(), (connection_id.clone(), requests + 6));
+
+    let save = |base: &Value| Write::TaskSave {
+        directory: plan.local_path.clone(),
+        issue: task.to_string(),
+        path: file.into(),
+        revision: base["revision"].as_str().unwrap().into(),
+        content: "edited on mini\n".into(),
+    };
+    let conflict = client.request(save(&before_move)).unwrap().result;
+    assert_eq!(conflict["published"], false);
+    assert_eq!(conflict["file"]["content"], "from mini\n");
+    assert_eq!(
+        client
+            .request_as(
+                save(&original),
+                None,
+                Some("save-on-mini".into()),
+                ErrorCode::OutcomeUnknown
+            )
+            .unwrap()
+            .result["published"],
+        true
+    );
+    assert_eq!(
+        fs::read_to_string(plan.remote_path.join(file)).unwrap(),
+        "edited on mini\n"
+    );
+    assert_eq!(
+        fs::read_to_string(plan.local_path.join(file)).unwrap(),
+        "old laptop copy"
+    );
+    assert_eq!(peer_client(), (connection_id, requests + 8));
+    assert!(plan
+        .remote
+        .command_answer("save-on-mini")
+        .unwrap()
+        .is_some());
+    let changes = client
+        .request(Read::TaskChanges {
+            issue: task.to_string(),
+            base: "head".into(),
+            head: None,
+        })
+        .unwrap()
+        .result;
+    assert!(changes["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["path"] == file));
+    let diff = client
+        .request(Read::TaskDiff {
+            issue: task.to_string(),
+            path: Some(file.into()),
+            base: "head".into(),
+            head: None,
+            draft: None,
+        })
+        .unwrap()
+        .result;
+    assert!(diff["patch"].as_str().unwrap().contains("+edited on mini"));
+
+    // The draft fits the file limit, but its JSON escapes need an upload ticket.
+    let draft = "\"".repeat(loopflow_execution::machine::wire::MAX_MESSAGE / 2);
+    let preview = client
+        .request(Read::TaskDiff {
+            issue: task.to_string(),
+            path: Some(file.into()),
+            base: "head".into(),
+            head: None,
+            draft: Some(draft),
+        })
+        .unwrap()
+        .result;
+    assert!(preview["patch"].as_str().unwrap().contains("-from mini"));
+    // Subscribe once on the laptop. Mini's checkout changes without any
+    // laptop write, then the same streams follow the claim back home.
+    checkout(&local, other_task.as_str(), &other.local_path);
+    checkout(&peer, other_task.as_str(), &other.remote_path);
+    let laptop = loopflow_execution::store::machines::local_machine(&other.local).unwrap();
+    {
+        let mut watches = Connection::open_at(Path::new(&socket)).unwrap();
+        watches
+            .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+            .unwrap();
+        let pane_id = watches
+            .subscribe(
+                Read::TaskGet {
+                    directory: other.local_path.clone(),
+                    issue: other_task.to_string(),
+                },
+                Some(vec!["row.reference.workspace.machine_id".into()]),
+            )
+            .unwrap();
+        let workspace_machine =
+            |frame: Value| frame["body"]["row"]["reference"]["workspace"]["machine_id"].clone();
+        assert_eq!(
+            workspace_machine(available_reading(&mut watches, &pane_id)),
+            mini.id.as_str()
+        );
+        let files_id = watches
+            .subscribe(
+                Read::TaskFilesWatch {
+                    issue: other_task.to_string(),
+                },
+                None,
+            )
+            .unwrap();
+        let initial = available_reading(&mut watches, &files_id);
+        assert_eq!(
+            initial["body"]["checkout"],
+            other.remote_path.to_str().unwrap()
+        );
+        fs::write(other.remote_path.join("from-mini.txt"), "hello").unwrap();
+        let modified = available_reading(&mut watches, &files_id);
+        assert_ne!(modified["body"]["revision"], initial["body"]["revision"]);
+
+        let status_id = watches
+            .subscribe(
+                Read::TaskStatus {
+                    directory: other.local_path.clone(),
+                    issue: other_task.to_string(),
+                },
+                Some(vec!["task.title".into()]),
+            )
+            .unwrap();
+        let _ = available_reading(&mut watches, &status_id);
+        peer.execute(
+            "UPDATE tasks SET issue_title='An edit on mini' WHERE id=?1",
+            [other_task.as_str()],
+        )
+        .unwrap();
+        assert_eq!(
+            available_reading(&mut watches, &status_id)["body"]["task"]["title"],
+            "An edit on mini"
+        );
+        watches.checkpoint(&pane_id, 17).unwrap();
+        assert_eq!(available_reading(&mut watches, &pane_id)["answers"], 17);
+
+        // A shell stays on the Machine that started it. Attach follows the
+        // Task; Close names the starting Machine.
+        let moving_shell = || TaskShellAttach {
+            issue: other_task.to_string(),
+            shell_id: "moving-shell".into(),
+        };
+        let moving = client
+            .request(TaskShellStart {
+                issue: other_task.to_string(),
+                shell_id: "moving-shell".into(),
+                rows: 24,
+                cols: 80,
+                bootstrap: None,
+                command: Vec::new(),
+            })
+            .unwrap()
+            .result;
+        client.request(moving_shell()).unwrap();
+
+        loopflow_execution::store::ownership::move_claim(&other.remote, &other_task, &laptop.id)
+            .unwrap();
+        // Mini has released the checkout. The laptop still subscribes there
+        // until its plan learns the move.
+        assert!(workspace_machine(available_reading(&mut watches, &pane_id)).is_null());
+        other.to_local();
+        assert_eq!(
+            workspace_machine(available_reading(&mut watches, &pane_id)),
+            laptop.id.as_str()
+        );
+        let elsewhere = client
+            .request(moving_shell())
+            .unwrap_err()
+            .downcast::<Error>()
+            .unwrap();
+        assert_eq!(elsewhere.code, ErrorCode::NotFound, "{elsewhere:?}");
+        assert_eq!(elsewhere.data.unwrap()["shell_id"], "moving-shell");
+        client
+            .request(TaskShellClose {
+                issue: other_task.to_string(),
+                shell_id: "moving-shell".into(),
+                machine: Some(mini.id.clone()),
+            })
+            .unwrap();
+        held_ended(&peer, &moving["terminal_id"]);
+        // The laptop may read the Task before its checkout there is recorded.
+        let mut frame = available_reading(&mut watches, &files_id);
+        while frame["body"]["machine_id"] == mini.id.as_str() || frame["body"]["checkout"].is_null()
+        {
+            frame = available_reading(&mut watches, &files_id);
+        }
+        assert_eq!(
+            frame["body"]["machine_label"],
+            laptop.label.clone().map_or(Value::Null, Value::from)
+        );
+        assert_eq!(
+            frame["body"]["checkout"],
+            other.local_path.to_str().unwrap()
+        );
+        local
+            .execute(
+                "UPDATE tasks SET issue_title='An edit on laptop' WHERE id=?1",
+                [other_task.as_str()],
+            )
+            .unwrap();
+        while available_reading(&mut watches, &status_id)["body"]["task"]["title"]
+            != "An edit on laptop"
+        {}
+        // The fresh SSH handshake on re-route fails until mini is reachable.
+        fs::write(&offline, "").unwrap();
+        loopflow_execution::store::ownership::move_claim(&other.local, &other_task, &mini.id)
+            .unwrap();
+        for id in [&pane_id, &files_id] {
+            // Drain readings from before the move until each stream has tried mini.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            loop {
+                let frame = watches
+                    .reading(id)
+                    .unwrap()
+                    .expect("subscription stays open");
+                if let Some(reason) = frame["unavailable"].as_str() {
+                    assert!(
+                        reason.contains("mini") && frame["body"].is_null(),
+                        "{frame}"
+                    );
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "missing peer outage: {frame}"
+                );
+            }
+        }
+        other.to_remote();
+        fs::remove_file(&offline).unwrap();
+        assert_eq!(
+            workspace_machine(available_reading(&mut watches, &pane_id)),
+            mini.id.as_str()
+        );
+        let mut frame = available_reading(&mut watches, &files_id);
+        while frame["body"]["checkout"].is_null() {
+            frame = available_reading(&mut watches, &files_id);
+        }
+        assert_eq!(
+            frame["body"]["checkout"],
+            other.remote_path.to_str().unwrap()
+        );
+        // Back on mini, the shell Close ended there has ended.
+        let ended = client
+            .request(moving_shell())
+            .unwrap_err()
+            .downcast::<Error>()
+            .unwrap();
+        assert!(
+            ended.data.as_ref().unwrap()["terminal_id"].is_string(),
+            "{ended:?}"
+        );
+    }
+    // Only mini has this provider thread. It prints its cwd only when lf resumes it.
+    fs::write(
+        remote.join(".claude.json"),
+        r#"{"projects":{"/":{"hasTrustDialogAccepted":true}}}"#,
+    )
+    .unwrap();
+    executable(
+        &remote.join(".local/bin/claude"),
+        &format!(
+            r#"#!/bin/bash
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+while [ "$#" -ge 2 ]; do
+    if [ "$1" = --resume ] && [ "$2" = "{thread}" ]; then
+        printf 'on mini: %s\n' "$(pwd -P)"
+        if read -r -t 60 answer < /dev/tty; then
+            printf 'received %s on mini: %s\n' "$answer" "$(pwd -P)"
+        fi
+        exit
+    fi
+    shift
+done
+exit 1
+"#
+        ),
+    );
+    let _ended = EndRecorded(vec![remote.join("store")]);
+    let resume = loopflow::server::wire::ServerOperation::SessionContinue {
+        session: session.into(),
+        task: Some(task.to_string()),
+        machine: None,
+        agent: None,
+        request: "resume-on-mini".into(),
+        rows: 24,
+        cols: 400,
+    };
+    let mut phone = PairedPhone::pair(&fixture, &mut client);
+    let held = client.request(&resume).unwrap().result["terminal_id"].clone();
+    assert!(held.is_string());
+    assert_eq!(phone.request(resume)["terminal_id"], held);
+    let attach = |task| loopflow::server::wire::ServerOperation::SessionAttach {
+        session: session.into(),
+        terminal_id: None,
+        task,
+        machine: None,
+    };
+    let unrouted = client
+        .request(attach(None))
+        .unwrap_err()
+        .downcast::<Error>()
+        .unwrap();
+    assert_eq!(unrouted.code, ErrorCode::NotFound, "{unrouted:?}");
+    let issued = client
+        .request(attach(Some(task.to_string())))
+        .unwrap()
+        .result;
+    assert_eq!(issued["terminal_id"], held);
+    let expected = format!(
+        "on mini: {}",
+        plan.remote_path.canonicalize().unwrap().display()
+    );
+    bridged_terminal(
+        Path::new(&socket),
+        issued["ticket"].as_str().unwrap(),
+        &expected,
+    );
+
+    let mut viewer = phone.attach(attach(Some(task.to_string())), &held);
+    use loopflow_execution::transport::wire::{frame, Tag};
+    viewer
+        .send(tokio_tungstenite::tungstenite::Message::binary(frame(
+            Tag::Input,
+            b"hello\r",
+        )))
+        .unwrap();
+    phone_terminal_shows(viewer, &format!("received hello {expected}"));
+
+    // A Task shell starts in mini's checkout, once, and attaches the same way.
+    use loopflow::server::wire::ServerOperation::{
+        TaskShellAttach, TaskShellClose, TaskShellStart,
+    };
+    let start = TaskShellStart {
+        issue: task.to_string(),
+        shell_id: "laptop-shell".into(),
+        rows: 24,
+        cols: 400,
+        bootstrap: None,
+        command: [
+            "/bin/sh",
+            "-c",
+            "printf 'shell on mini: %s\\n' \"$(pwd -P)\"",
+        ]
+        .map(str::to_owned)
+        .to_vec(),
+    };
+    let started = client.request(&start).unwrap().result;
+    assert_eq!(client.request(&start).unwrap().result, started);
+    let shell_attach = || TaskShellAttach {
+        issue: task.to_string(),
+        shell_id: "laptop-shell".into(),
+    };
+    let issued = client.request(shell_attach()).unwrap().result;
+    assert_eq!(issued["terminal_id"], started["terminal_id"]);
+    let expected = format!(
+        "shell on mini: {}",
+        plan.remote_path.canonicalize().unwrap().display()
+    );
+    bridged_terminal(
+        Path::new(&socket),
+        issued["ticket"].as_str().unwrap(),
+        &expected,
+    );
+    phone_terminal_shows(
+        phone.attach(shell_attach(), &started["terminal_id"]),
+        &expected,
+    );
+    client
+        .request(TaskShellClose {
+            issue: task.to_string(),
+            shell_id: "laptop-shell".into(),
+            machine: None,
+        })
+        .unwrap();
+    held_ended(&peer, &started["terminal_id"]);
+    let ended = client
+        .request(shell_attach())
+        .unwrap_err()
+        .downcast::<Error>()
+        .unwrap();
+    assert_eq!(ended.code, ErrorCode::NotFound, "{ended:?}");
+
+    // Losing an established stream also leaves its subscription alive. A
+    // checkpoint during the outage must receive a reading from a fresh attempt.
+    let mut watches = Connection::open_at(Path::new(&socket)).unwrap();
+    watches
+        .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+        .unwrap();
+    let files = watches
+        .subscribe(
+            Read::TaskFilesWatch {
+                issue: task.to_string(),
+            },
+            None,
+        )
+        .unwrap();
+    let initial = available_reading(&mut watches, &files);
+    watches.checkpoint(&files, 41).unwrap();
+    while available_reading(&mut watches, &files)["answers"] != 41 {}
+    fs::write(&offline, "").unwrap();
+    drop(server_on_mini);
+    loop {
+        let frame = watches.reading(&files).unwrap().unwrap();
+        if let Some(reason) = frame["unavailable"].as_str() {
+            assert!(
+                reason.contains("mini") && frame["body"].is_null(),
+                "{frame}"
+            );
+            break;
+        }
+        assert_eq!(frame["body"]["checkout"], initial["body"]["checkout"]);
+    }
+    watches.checkpoint(&files, 42).unwrap();
+    loop {
+        let retry = watches.reading(&files).unwrap().unwrap();
+        assert!(
+            retry["unavailable"].as_str().unwrap().contains("mini"),
+            "{retry}"
+        );
+        if retry["answers"] == 42 {
+            break;
+        }
+    }
+    let restarted = served_mini(&fixture);
+    fs::remove_file(&offline).unwrap();
+    let recovered = available_reading(&mut watches, &files);
+    assert_eq!(recovered["body"]["checkout"], initial["body"]["checkout"]);
+    assert_ne!(recovered["body"]["revision"], initial["body"]["revision"]);
+    drop(watches);
+    // Restarting under the idle request pipe also reconnects the next read.
+    assert_eq!(
+        client.request(&read_file).unwrap().result["content"],
+        "edited on mini\n"
+    );
+    drop(restarted);
+    let restarted = served_mini(&fixture);
+    let saved = client
+        .request_as(
+            save(&original),
+            None,
+            Some("save-after-restart".into()),
+            ErrorCode::OutcomeUnknown,
+        )
+        .unwrap();
+    assert_eq!(saved.result["published"], false);
+    assert!(plan
+        .remote
+        .command_answer("save-after-restart")
+        .unwrap()
+        .is_some());
+    fs::write(offline, "").unwrap();
+    drop(restarted);
+    let unknown = client
+        .request(save(&original))
+        .unwrap_err()
+        .downcast::<Error>()
+        .unwrap();
+    assert_eq!(unknown.code, ErrorCode::OutcomeUnknown);
+    let offline = client
+        .request(&read_file)
+        .unwrap_err()
+        .downcast::<Error>()
+        .unwrap();
+    assert_eq!(offline.code, ErrorCode::Unavailable);
+    let data = offline.data.unwrap();
+    assert_eq!(data["resource"], "machine");
+    assert_eq!(data["machine_label"], "mini");
+    assert!(offline.message.contains("mini"));
 }
 
 #[test]
@@ -4569,6 +6011,25 @@ fn served_pause_holds_the_remote_cursor_and_status_names_unpause() {
     assert!(plan.local.task_pause(&task).unwrap().is_none());
 }
 
+/// Wait until the Machine whose store `sql` opens records that `terminal` ended.
+fn held_ended(sql: &rusqlite::Connection, terminal: &Value) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while sql
+        .query_row(
+            "SELECT ended_at IS NULL FROM held_terminals WHERE id=?1",
+            [terminal.as_str().unwrap()],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap()
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{terminal} kept running"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 /// A Task mini runs and mini's records claim, read back to the laptop.
 fn task_on_mini(fixture: &Machines) -> (SharedPlan, loopflow_execution::durable::TaskId) {
     let plan = SharedPlan::new(fixture);
@@ -4580,25 +6041,31 @@ fn task_on_mini(fixture: &Machines) -> (SharedPlan, loopflow_execution::durable:
     (plan, task)
 }
 
+fn mini_command(fixture: &Machines, args: &[&str]) -> Command {
+    let remote = fixture.root.path().join("remote");
+    let mut command = Command::new(remote.join(".local/bin/lf"));
+    command
+        .env_clear()
+        .env("HOME", &remote)
+        .env("PATH", "/usr/bin:/bin")
+        .current_dir(&remote)
+        .args(args);
+    command
+}
+
 /// Mini's own server, ready, as `lf server connect` there finds it.
 fn served_mini(fixture: &Machines) -> Child {
     use std::time::{Duration, Instant};
-    let remote = fixture.root.path().join("remote");
-    let lf = |args: &[&str]| {
-        let mut command = Command::new(remote.join(".local/bin/lf"));
-        command
-            .env_clear()
-            .env("HOME", &remote)
-            .env("PATH", "/usr/bin:/bin")
-            .current_dir(&remote)
-            .args(args);
-        command
-    };
-    let server = Child(lf(&["server", "run"]).spawn().unwrap());
+    let server = Child(mini_command(fixture, &["server", "run"]).spawn().unwrap());
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
-        let status: Value =
-            serde_json::from_slice(&lf(&["server", "status"]).output().unwrap().stdout).unwrap();
+        let status: Value = serde_json::from_slice(
+            &mini_command(fixture, &["server", "status"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap();
         if status["ready"] == true {
             return server;
         }
@@ -4661,6 +6128,59 @@ fn entry_input(record: &Path) -> (Value, Value) {
         .lines()
         .map(|line| serde_json::from_str::<Value>(line).unwrap());
     (lines.next().unwrap(), lines.next().unwrap())
+}
+
+#[test]
+fn a_placed_task_retries_on_its_owner_after_the_launch_connection_breaks() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let task = plan.local_task();
+    plan.to_remote();
+    assert_success(&fixture.run(&["pool", "add", "lab"]));
+    assert_success(&fixture.run(&["machine", "add", "mini", "--pool", "lab"]));
+    let ssh = fixture.root.path().join("bin/ssh");
+    let working = fs::read_to_string(&ssh).unwrap();
+    executable(&ssh, "#!/bin/sh\nexit 88\n");
+    let run = |placement: &[&str]| {
+        let mut args = vec!["task", "run", task.as_str()];
+        args.extend(placement);
+        fixture
+            .command(&args)
+            .current_dir(&plan.local_path)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap()
+    };
+    assert!(!run(&["--pool", "lab"]).status.success());
+    let owner = loopflow_execution::store::ownership::task_ownership(&plan.local, &task).unwrap();
+    assert_eq!(owner.log.len(), 1);
+    let mini = loopflow_execution::store::machines::local_machine(&plan.remote)
+        .unwrap()
+        .id;
+    assert_eq!(owner.log[0].machine_id.as_ref(), Some(&mini));
+
+    let unreachable = run(&["--rent", "modal"]);
+    assert!(!unreachable.status.success());
+    assert!(
+        String::from_utf8_lossy(&unreachable.stderr).contains("could not read"),
+        "{unreachable:?}"
+    );
+
+    executable(&ssh, &working);
+    let record = fixture.root.path().join("entry");
+    fs::create_dir(&record).unwrap();
+    let mut detail: Value =
+        serde_json::from_str(include_str!("../../../tests/fixtures/dto/task_detail.json")).unwrap();
+    detail["task"]["id"] = task.to_string().into();
+    answering_entry(&fixture, &record, &detail);
+    assert_success(&run(&["--rent", "modal"]));
+    let (_, request) = entry_input(&record);
+    assert_eq!(request["operation"]["kind"], "task.status");
+    assert_eq!(request["operation"]["issue"], task.as_str());
+    assert_eq!(
+        loopflow_execution::store::ownership::task_ownership(&plan.local, &task).unwrap(),
+        owner
+    );
 }
 
 #[test]
@@ -5371,6 +6891,77 @@ fn an_lf_that_dies_before_answering_says_so_and_what_it_printed() {
     );
 }
 
+/// `lf task file`, `files` and `save` on the laptop reach mini's checkout,
+/// never the one left on the laptop.
+#[test]
+fn task_file_commands_read_and_save_on_the_owning_machine() {
+    let fixture = preview_machines();
+    let (plan, task) = task_on_mini(&fixture);
+    let local = fixture.root.path().join("local");
+    let stale = local.join("former checkout");
+    fs::create_dir(&stale).unwrap();
+    fs::write(stale.join("notes.txt"), "stale on the laptop\n").unwrap();
+    fs::write(plan.remote_path.join("notes.txt"), "written on mini\n").unwrap();
+    for (db, path) in [
+        (
+            &fixture.root.path().join("remote/store/loopflow.db"),
+            &plan.remote_path,
+        ),
+        (&local.join("loopflow.db"), &stale),
+    ] {
+        rusqlite::Connection::open(db)
+            .unwrap()
+            .execute(
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+                [task.as_str(), path.to_str().unwrap()],
+            )
+            .unwrap();
+    }
+    let _peer = served_mini(&fixture);
+    let _ended = EndRecorded(vec![fixture.root.path().join("remote/store")]);
+
+    let listed = fixture.run(&["task", "files", task.as_str()]);
+    assert!(listed.status.success(), "{listed:?}");
+    assert!(String::from_utf8_lossy(&listed.stdout)
+        .lines()
+        .any(|path| path == "notes.txt"));
+    let read = fixture.run(&["task", "file", task.as_str(), "notes.txt", "--json"]);
+    assert!(read.status.success(), "{read:?}");
+    let read: Value = serde_json::from_slice(&read.stdout).unwrap();
+    assert_eq!(read["content"], "written on mini\n");
+
+    let mut save = fixture.command(&[
+        "task",
+        "save",
+        task.as_str(),
+        "notes.txt",
+        "--revision",
+        read["revision"].as_str().unwrap(),
+    ]);
+    let mut child = save
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"saved from the laptop\n")
+        .unwrap();
+    let saved = child.wait_with_output().unwrap();
+    assert!(saved.status.success(), "{saved:?}");
+    assert_eq!(
+        fs::read_to_string(plan.remote_path.join("notes.txt")).unwrap(),
+        "saved from the laptop\n"
+    );
+    assert_eq!(
+        fs::read_to_string(stale.join("notes.txt")).unwrap(),
+        "stale on the laptop\n"
+    );
+}
+
 #[test]
 fn an_unreachable_destination_names_the_ssh_check_not_its_server() {
     let fixture = preview_machines();
@@ -5457,10 +7048,107 @@ fn a_served_resume_opens_the_session_on_your_session_machine_as_a_typed_operatio
         .iter()
         .map(|arg| arg.as_str().unwrap())
         .collect();
-    assert_eq!(argv[0], env!("CARGO_BIN_EXE_lf"));
-    assert_eq!(&argv[1..4], &["session", "attach", "--"]);
-    assert!(argv.last().unwrap().contains("LF_VIEWER_STREAM='1'"));
+    assert_eq!(
+        argv,
+        [
+            env!("CARGO_BIN_EXE_lf"),
+            "open",
+            "--machine",
+            machine["id"].as_str().unwrap(),
+            "--session",
+            record["id"].as_str().unwrap(),
+            "--here",
+        ]
+    );
     assert_eq!(opened["workspace"], record["workspace"]);
+}
+
+/// A served `session.new` or a resume naming a Session and its Task, for a
+/// Task mini runs, is prepared on mini and read here under this Machine's Task.
+#[test]
+fn a_served_task_conversation_write_is_prepared_where_the_task_runs() {
+    use loopflow::lf::commands::write::Write as Mutation;
+    use loopflow::server::wire::Operation;
+    use loopflow_execution::machine::client::Connection;
+
+    let mut answer: Value = serde_json::from_str::<Vec<Value>>(include_str!(
+        "../../../tests/fixtures/dto/sessions.json"
+    ))
+    .unwrap()
+    .remove(0);
+    let session = answer["id"].as_str().unwrap().to_owned();
+    // Mini knows the Task under its own ID.
+    let peer_task = loopflow_execution::durable::TaskId::new().to_string();
+    answer["task_ids"] = serde_json::json!([peer_task]);
+    answer["work"]["id"] = peer_task.as_str().into();
+    answer["workspace"]["task_id"] = peer_task.as_str().into();
+    for (kind, write) in [
+        (
+            "session.new",
+            (|directory, task, id| Mutation::SessionNew {
+                directory,
+                request_id: "reset-on-mini".into(),
+                id,
+                task: Some(task),
+                agent: None,
+            }) as fn(std::path::PathBuf, String, String) -> Mutation,
+        ),
+        ("session.resume", |directory, task, id| {
+            Mutation::SessionResume {
+                directory,
+                id: Some(id),
+                task: Some(task),
+                wave: None,
+                agent: None,
+            }
+        }),
+    ] {
+        let fixture = preview_machines();
+        let (plan, task) = task_on_mini(&fixture);
+        let mut answer = answer.clone();
+        answer["workspace"]["machine_id"] =
+            loopflow_execution::store::machines::local_machine(&plan.remote)
+                .unwrap()
+                .id
+                .as_str()
+                .into();
+        let record = fixture.root.path().join("entry");
+        fs::create_dir_all(&record).unwrap();
+        answering_entry(&fixture, &record, &answer);
+        let (server, socket) = served(&fixture);
+        let mut connection = Connection::open_at(Path::new(&socket)).unwrap();
+        connection
+            .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+            .unwrap();
+        let opened = connection
+            .request(Operation::Write(write(
+                plan.local_path.clone(),
+                task.to_string(),
+                session.clone(),
+            )))
+            .unwrap()
+            .result;
+        drop(server);
+
+        let (_, request) = entry_input(&record);
+        assert_eq!(request["operation"]["kind"], kind);
+        assert!(request["operation"]["task"].is_string(), "{request}");
+        assert_eq!(opened["task_ids"][0], task.as_str(), "{kind}: {opened}");
+        assert_eq!(opened["work"]["id"], task.as_str(), "{kind}");
+        assert_eq!(opened["workspace"]["task_id"], task.as_str(), "{kind}");
+        let argv: Vec<&str> = opened["open_argv"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|arg| arg.as_str().unwrap())
+            .collect();
+        assert_eq!(argv[1..3], ["open", "--task"], "{kind}: {opened}");
+        assert_eq!(
+            argv[4..],
+            ["--session", session.as_str(), "--here"],
+            "{kind}"
+        );
+    }
 }
 
 /// The held terminal of `owner` under `home`, as the owner names its socket.
@@ -5677,4 +7365,529 @@ read -r answer < /dev/tty
 
     assert_success(&moved);
     assert!(shown.contains(&notice), "{notice:?} missing from:\n{shown}");
+}
+
+#[test]
+fn ending_a_rental_its_provider_terminated_settles_and_leaves_the_default_listings() {
+    use loopflow_execution::rental::{RentalId, RentalState};
+    use loopflow_execution::store::{machines, open_sqlite};
+    use serde_json::json;
+
+    let fixture = preview_machines();
+    let root = fixture.root.path();
+    assert_success(&fixture.run(&[
+        "ondemand",
+        "add",
+        "modal",
+        "--provider",
+        "modal",
+        "--vcpus",
+        "2",
+        "--memory-gb",
+        "4",
+        "--max",
+        "1",
+        "--max-usd-per-hour",
+        "1.00",
+    ]));
+    let local = open_sqlite(&root.join("local/loopflow.db")).unwrap();
+    let pod = open_sqlite(&root.join("remote/store/loopflow.db")).unwrap();
+    let origin = machines::local_machine(&pod).unwrap().id;
+    drop(pod);
+    let rental = RentalId::new();
+    let created = chrono::Utc::now().timestamp() - 3600;
+    local
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO rentals(id,ondemand,provider,provider_name,provider_id,by_hand,hardware,
+            usd_per_hour,cap_usd,deadline,state,created_at,machine_id)
+         VALUES(?1,'modal','modal',?1,'sb-fixture',1,
+            '{\"vcpus\":2,\"memory_gb\":4,\"disk_gb\":8,\"spot\":false,\"modal_sizing\":\"burst\"}',
+            '0.24','1.00',?3,'running',?4,?2)",
+            rusqlite::params![
+                rental.as_str(),
+                origin.as_str(),
+                created + 4 * 3600,
+                created
+            ],
+        )
+        .unwrap();
+
+    // Modal terminated the sandbox: SSH reaches nothing and the provider knows no such sandbox.
+    fs::rename(root.join("remote"), root.join("unreachable")).unwrap();
+    executable(
+        &root.join("bin/uv"),
+        "#!/bin/sh\ncat >/dev/null\nprintf 'null\\n'\n",
+    );
+    let ended = fixture
+        .command(&["machine", "end", "mini"])
+        .env("MODAL_TOKEN_ID", "fixture")
+        .output()
+        .unwrap();
+    assert_success(&ended);
+    let said = String::from_utf8_lossy(&ended.stdout);
+    assert!(
+        said.contains("mini was already gone (ended; ceiling estimate $0.24"),
+        "{said}"
+    );
+    assert_eq!(local.rental(&rental).unwrap().state, RentalState::Ended);
+
+    // The default listings leave its dead route out; its label still resolves.
+    assert_eq!(fixture.json(&["machine", "list", "--json"]), json!([]));
+    assert_eq!(fixture.json(&["machine", "status", "--json"]), json!([]));
+    let listed = fixture.command(&["machine", "list"]).output().unwrap();
+    assert_success(&listed);
+    assert_eq!(String::from_utf8_lossy(&listed.stdout), "No Machines.\n");
+    assert_eq!(
+        fixture.json(&["machine", "list", "mini", "--json"])[0]["label"],
+        "mini"
+    );
+    assert_eq!(
+        fixture.json(&["machine", "status", "mini", "--json"])[0]["state"],
+        "ended_rental"
+    );
+    let ondemands = fixture.json(&["ondemand", "list", "--json"]);
+    let rentals = &ondemands[0]["rentals"];
+    assert_eq!(rentals[0]["machine"], "mini", "{ondemands}");
+    assert_eq!(rentals[0]["state"], "ended");
+}
+
+#[test]
+fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
+    use loopflow_execution::rental::{recovery, RentalId, RentalState};
+    use loopflow_execution::store::{machines, open_sqlite};
+    use serde_json::json;
+
+    let fixture = preview_machines();
+    let root = fixture.root.path();
+    let remote = root.join("remote");
+    let local = open_sqlite(&root.join("local/loopflow.db")).unwrap();
+    let pod = open_sqlite(&remote.join("store/loopflow.db")).unwrap();
+    let origin = machines::local_machine(&pod).unwrap().id;
+    let rental = RentalId::new();
+    local
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO rentals(id,ondemand,provider,provider_name,provider_id,by_hand,hardware,
+            usd_per_hour,cap_usd,deadline,state,created_at,machine_id)
+         VALUES(?1,'modal','modal',?1,'sb-fixture',1,
+            '{\"vcpus\":2,\"memory_gb\":4,\"disk_gb\":8,\"spot\":false}',
+            '0.24','1.00',4000000000,'running',1,?2)",
+            [rental.as_str(), origin.as_str()],
+        )
+        .unwrap();
+
+    let id = "ee47b779adc741ca89d6c3ae288cc68c";
+    let thread = "0199a213-81c0-4800-8aa1-bbab2a035a01";
+    let started = chrono::Utc::now().timestamp() - 3600;
+    let session = pod.test_session_at(id, "64f34281b74d4594ac53ec251cb05619", started - 5);
+    pod.conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET provider='claude',provider_thread=?2,
+                start_failure='Waiting for a harness: codex has no usable login' WHERE id=?1",
+            [id, thread],
+        )
+        .unwrap();
+    let request = r#"Count the marbles in "jar A""#;
+    let project = remote.join(".claude/projects/-fixture");
+    fs::create_dir_all(&project).unwrap();
+    let transcript = project.join(format!("{thread}.jsonl"));
+    fs::write(
+        &transcript,
+        json!({"type":"user","userType":"external","uuid":"first-turn",
+        "timestamp":"2026-10-16T10:00:00Z","message":{"role":"user","content":request}})
+        .to_string(),
+    )
+    .unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    let local_repo = repo.path().canonicalize().unwrap();
+    let task_id = SharedPlan::create_task(&local, &local_repo);
+    let local_repo = local_repo.to_str().unwrap().to_owned();
+    let task = local.task(&task_id).unwrap().unwrap();
+    let project = local
+        .project(task.project_id.as_ref().unwrap())
+        .unwrap()
+        .unwrap();
+    pod.record_turn_start(id, &thread.into(), "first-turn", started);
+    let turn_origin = loopflow_storage::session::SessionTurnOrigin {
+        session_id: id.into(),
+        lf_process_id: loopflow_model::id::LfProcessId::new(),
+        agent_process_id: loopflow_model::id::AgentProcessId::new(),
+        captured_event: None,
+        task_id: Some(task_id.to_string()),
+        wave_id: None,
+        project_id: None,
+        repository: None,
+        skill: None,
+        provider: Some("claude".into()),
+        graph: None,
+        step: None,
+    };
+    pod.record_session_turn_origin(&thread.into(), "first-turn", &turn_origin);
+    // The Session's captured input ran two more turns, one before it joined the Task.
+    let input = session.artifact_key.clone().unwrap();
+    let captured = pod.captured_sequence(&input).unwrap().unwrap();
+    for (turn, at, task, input_tokens, output_tokens) in [
+        ("unscoped-turn", started + 10, None, 13, 4),
+        (
+            "captured-turn",
+            started + 20,
+            Some(task_id.to_string()),
+            11,
+            2,
+        ),
+    ] {
+        pod.record_turn_start(id, &thread.into(), turn, at);
+        pod.record_session_turn_origin(
+            &thread.into(),
+            turn,
+            &loopflow_storage::session::SessionTurnOrigin {
+                lf_process_id: loopflow_model::id::LfProcessId::new(),
+                agent_process_id: loopflow_model::id::AgentProcessId::new(),
+                captured_event: Some(captured),
+                task_id: task,
+                ..turn_origin.clone()
+            },
+        );
+        pod.record_turn_completion(
+            id,
+            &thread.into(),
+            turn,
+            at + 1,
+            &json!({"status":"completed","context":{"first_request_tokens":input_tokens,
+                "peak_request_tokens":input_tokens,"tool_results":0,"tool_output_tokens":0,
+                "compactions":0,"compaction_tokens":null}}),
+        );
+        assert!(pod.record_turn_usage(
+            id,
+            &thread.into(),
+            turn,
+            at + 1,
+            &json!({"final":true,"usage":{"input_tokens":input_tokens,"output_tokens":output_tokens}})
+        ));
+    }
+    pod.retain_session_observation(
+        &session,
+        &loopflow_storage::session::SessionObservation {
+            artifact_key: session.artifact_key.clone().unwrap(),
+            source: "silence:sample".into(),
+            observed_at: started + 1,
+            task_id: None,
+            wave_id: None,
+            payload: json!({"source":"silence","detail":"waiting for the count"}),
+        },
+    )
+    .unwrap();
+
+    // The rental assembled the input's context; collection copies its capture.
+    let capture =
+        loopflow_execution::session_record::record_dir(&remote.join("store"), &input).unwrap();
+    fs::create_dir_all(&capture).unwrap();
+    fs::write(
+        capture.join("context.json"),
+        json!({"context":{"system":null,"task":{"assets":[]},"decisions":[]}}).to_string(),
+    )
+    .unwrap();
+
+    let _env = support::ambient::EnvGuard::clear(&["PATH", "MODAL_TOKEN_ID"]);
+    std::env::set_var(
+        "PATH",
+        format!("{}:/usr/bin:/bin", root.join("bin").display()),
+    );
+    let (server, _) = served(&fixture);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let first = loop {
+        if let Some(cursor) = local.copied_cursor(&origin).unwrap() {
+            break cursor;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the server did not collect its running rental"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    drop(server);
+    let ssh = root.join("bin/ssh");
+    let relay = fs::read_to_string(&ssh).unwrap();
+    // SSH delivers valid lines, then loses the connection before confirming the export.
+    executable(
+        &ssh,
+        &format!("{}\nexit 255\n", relay.replace("exec env -i", "env -i")),
+    );
+    assert!(pod.record_turn_usage(
+        id,
+        &thread.into(),
+        "first-turn",
+        started + 2,
+        &json!({
+            "final":true,"usage":{"input_tokens":31,"output_tokens":7,"cost_usd":0.25}
+        })
+    ));
+    recovery::check().unwrap();
+    assert_eq!(local.copied_cursor(&origin).unwrap(), Some(first));
+    // The first turn's late usage did not arrive; the input's turns did.
+    assert_eq!(
+        local
+            .saved_copied_history(id)
+            .unwrap()
+            .unwrap()
+            .usage
+            .input_tokens,
+        Some(24)
+    );
+    executable(&ssh, &relay);
+    recovery::check().unwrap();
+    let latest = local.copied_cursor(&origin).unwrap().unwrap();
+    assert!(latest.history > first.history);
+
+    // Nothing on the origin can answer these reads, including after a server restart.
+    let lost = root.join("unreachable");
+    fs::rename(&remote, &lost).unwrap();
+    let (server, socket) = served(&fixture);
+    let history = fixture.json(&["session", "history", "show", id, "--json"]);
+    assert_eq!(history["session"]["origin"], origin.as_str());
+    assert_eq!(history["turns"].as_array().unwrap().len(), 3);
+    assert!(history["events"]
+        .to_string()
+        .contains("waiting for the count"));
+    let text = fixture.run(&["session", "history", "show", id, "--transcript"]);
+    assert_success(&text);
+    assert!(String::from_utf8_lossy(&text.stdout).contains("Count the marbles"));
+    let search = |options: &[&str]| {
+        let mut args = vec!["session", "history", "search", "MARBLES", "--json"];
+        args.extend_from_slice(options);
+        fixture.json(&args)["hits"].clone()
+    };
+    for scope in [
+        ["--since", "1d"],
+        ["--task", task.identifier.as_str()],
+        ["--project", project.slug.as_str()],
+        ["--wave", "owners"],
+    ] {
+        let hits = search(&scope);
+        assert_eq!(hits.as_array().unwrap().len(), 1, "{scope:?}: {hits}");
+        assert_eq!(hits[0]["session_id"], id);
+        assert_eq!(hits[0]["snippet"], request);
+        assert_eq!(
+            hits[0]["origin"],
+            json!({"machine_id":origin, "label":"mini"})
+        );
+    }
+    for scope in [
+        ["--task", "MISSING-123"],
+        ["--wave", "unrelated"],
+        ["--project", "unrelated"],
+        ["--since", "2099-01-01T00:00:00Z"],
+        ["--limit", "0"],
+    ] {
+        assert_eq!(search(&scope), json!([]), "{scope:?}");
+    }
+    assert_eq!(
+        search(&["--task", &task.identifier, "--since", "30m"]),
+        json!([]),
+        "collecting an hour-old input now must not move it into the last half hour"
+    );
+    let result = fixture.run(&["session", "history", "search", r#""JAR A""#]);
+    assert_success(&result);
+    assert!(String::from_utf8_lossy(&result.stdout).contains("from mini"));
+    let scoped_usage = |scope: &[&str]| {
+        let mut args = vec!["session", "usage", "--json"];
+        args.extend_from_slice(scope);
+        fixture.json(&args)
+    };
+    // Work scopes count only the input's turns that ran for the Task.
+    for (scope, input_usage) in [
+        (["--task", task.identifier.as_str()], (11, 2)),
+        (["--wave", "owners"], (11, 2)),
+        (["--project", project.slug.as_str()], (11, 2)),
+        (["--days", "1"], (24, 6)),
+    ] {
+        let rows = scoped_usage(&scope);
+        let rows: Vec<_> = rows
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["session_id"] == id)
+            .collect();
+        assert_eq!(rows.len(), 2, "{scope:?}: {rows:?}");
+        let (turn, captured_input) = (rows[0], rows[1]);
+        for row in &rows {
+            assert_eq!(row["origin"], json!({"machine_id":origin, "label":"mini"}));
+        }
+        assert_eq!(turn["artifact_key"], Value::Null);
+        assert_eq!(turn["task_identifier"], task.identifier);
+        assert_eq!(turn["observed_at"], started);
+        assert_eq!(turn["usage"]["input_tokens"], 31);
+        assert_eq!(turn["usage"]["output_tokens"], 7);
+        assert_eq!(turn["usage"]["cost_usd"], 0.25);
+        assert_eq!(captured_input["artifact_key"], input);
+        assert_eq!(captured_input["observed_at"], started - 5);
+        // The Task lives here, so its rows name this Machine's checkout.
+        for row in &rows {
+            assert_eq!(row["repo"], local_repo, "{scope:?} {row}");
+        }
+        assert_eq!(
+            captured_input["usage"]["input_tokens"], input_usage.0,
+            "{scope:?}"
+        );
+        assert_eq!(
+            captured_input["usage"]["output_tokens"], input_usage.1,
+            "{scope:?}"
+        );
+        assert_eq!(captured_input["usage"]["cost_usd"], Value::Null);
+    }
+    let mut connection =
+        loopflow_execution::machine::client::Connection::open_at(Path::new(&socket)).unwrap();
+    let desktop = connection
+        .request(loopflow::server::wire::Operation::Read(
+            loopflow::lf::commands::read::Read::SessionUsage {
+                days: 0,
+                wave: None,
+                project: None,
+                task: Some(task.identifier.clone()),
+            },
+        ))
+        .unwrap()
+        .result;
+    assert_eq!(
+        desktop,
+        scoped_usage(&["--days", "0", "--task", &task.identifier])
+    );
+    // The copied capture and turn contexts explain the step with nothing missing.
+    let context = scoped_usage(&["--context", "--task", &task.identifier]);
+    let step = context["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|step| step["input"] == input)
+        .unwrap_or_else(|| panic!("{context}"));
+    assert_eq!(step["gaps"], json!([]), "{step}");
+    assert_eq!(step["first_request_tokens"], 13);
+    assert_eq!(step["peak_request_tokens"], 13);
+    // The Session's own history view reads the same copied step.
+    let shown = fixture.json(&["session", "history", "show", id, "--context", "--json"]);
+    assert_eq!(shown, *step);
+    // Why the rental could not start it outlives the rental.
+    let listed = fixture.run(&["session", "list"]);
+    assert_success(&listed);
+    let listed = String::from_utf8_lossy(&listed.stdout);
+    assert!(
+        listed.contains("from mini\n  could not start: codex has no usable login\n"),
+        "{listed}"
+    );
+    let human = fixture.run(&["session", "usage", "--task", &task.identifier]);
+    assert_success(&human);
+    assert!(String::from_utf8_lossy(&human.stdout).contains("from mini"));
+    let weekly = scoped_usage(&["--weekly", "--task", &task.identifier]);
+    let weekly_input: i64 = weekly["weeks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|week| week["total"]["input_tokens"].as_i64().unwrap())
+        .sum();
+    assert_eq!(weekly_input, 42);
+    let usage = || fixture.json(&["session", "usage", "--session", id, "--json"]);
+    let before = usage();
+    assert_eq!(before["origin_machine_id"], origin.as_str());
+    assert!(before["collected_at"].is_number());
+    assert_eq!(before["usage"]["input_tokens"], 55);
+    assert_eq!(before["usage"]["output_tokens"], 13);
+    assert_eq!(before["usage"]["cost_usd"], 0.25);
+    assert_eq!(local.rental(&rental).unwrap().state, RentalState::Running);
+    drop(server);
+
+    // Restore the route to exercise ordinary give-back on the same records.
+    fs::rename(lost, &remote).unwrap();
+    recovery::check().unwrap();
+    // The provider still runs it until the give-back deletes it.
+    executable(
+        &root.join("bin/uv"),
+        "#!/bin/sh\ncat >/dev/null\nfor op; do :; done\n\
+         [ \"$op\" = get ] && echo '{\"id\":\"sb-fixture\",\"gone\":false,\"route\":null}' || echo null\n",
+    );
+    let ended = fixture
+        .command(&["machine", "end", "mini"])
+        .env("MODAL_TOKEN_ID", "fixture")
+        .output()
+        .unwrap();
+    assert_success(&ended);
+    assert!(String::from_utf8_lossy(&ended.stdout).contains("Returned mini"));
+    assert_eq!(local.rental(&rental).unwrap().state, RentalState::Ended);
+    assert_eq!(usage()["usage"], before["usage"]);
+    let transcript = fixture.json(&["session", "history", "show", id, "--transcript", "--json"]);
+    assert_eq!(transcript["turns"].as_array().unwrap().len(), 1);
+    assert_eq!(transcript["origin_machine_id"], origin.as_str());
+
+    // Continuing the provider thread locally re-observes the first turn's
+    // transcript. Its dispatch, Work and usage were recorded on the rental.
+    local.test_session(id, "14208d263a454517a4e9eb974ed4dc93");
+    local.record_turn_start(id, &thread.into(), "first-turn", started);
+    let second = started + 120;
+    local.record_turn_start(id, &thread.into(), "second-turn", second);
+    local.record_session_turn_origin(
+        &thread.into(),
+        "second-turn",
+        &loopflow_storage::session::SessionTurnOrigin {
+            lf_process_id: loopflow_model::id::LfProcessId::new(),
+            agent_process_id: loopflow_model::id::AgentProcessId::new(),
+            ..turn_origin
+        },
+    );
+    local.record_turn_completion(
+        id,
+        &thread.into(),
+        "second-turn",
+        second + 1,
+        &json!({"status":"completed"}),
+    );
+    assert!(local.record_turn_usage(
+        id,
+        &thread.into(),
+        "second-turn",
+        second + 1,
+        &json!({"final":true,"usage":{"input_tokens":5,"output_tokens":3}})
+    ));
+    let combined = scoped_usage(&["--task", &task.identifier]);
+    let rows = combined.as_array().unwrap();
+    assert_eq!(rows.len(), 3, "{combined}");
+    assert_eq!(rows[0]["origin"], Value::Null);
+    assert_eq!(rows[0]["usage"]["input_tokens"], 5);
+    assert_eq!(rows[0]["usage"]["cost_usd"], Value::Null);
+    assert_eq!(rows[1]["origin"]["machine_id"], origin.as_str());
+    assert_eq!(rows[1]["usage"]["input_tokens"], 31);
+    assert_eq!(rows[2]["origin"]["machine_id"], origin.as_str());
+    assert_eq!(rows[2]["artifact_key"], input);
+    assert_eq!(rows[2]["usage"]["input_tokens"], 11);
+    let mixed = usage();
+    assert!(mixed["origin_machine_id"].is_null());
+    assert_eq!(mixed["origins"].as_array().unwrap().len(), 2);
+    assert_eq!(mixed["usage"]["streams"], 4);
+    assert_eq!(mixed["usage"]["input_tokens"], 60);
+    assert_eq!(mixed["usage"]["output_tokens"], 16);
+    assert_eq!(mixed["usage"]["cost_usd"], 0.25);
+    let recent = |since| {
+        loopflow_execution::store::sessions::recent_conversation_history(
+            &local,
+            None,
+            None,
+            Some(&task.identifier),
+            since,
+            1,
+        )
+        .unwrap()
+    };
+    let (rows, truncated) = recent(started);
+    assert!(truncated);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].origin.as_ref().unwrap().machine_id, origin);
+    let (rows, truncated) = recent(second);
+    assert!(!truncated);
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].origin.is_none());
 }

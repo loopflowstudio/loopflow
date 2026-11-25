@@ -69,9 +69,9 @@ impl Provider {
     pub fn api_key_configure_error(self) -> Option<&'static str> {
         match self {
             Self::Linear => {
-                Some("Linear requires OAuth. Run 'lf account connect linear' to connect.")
+                Some("Linear requires OAuth. Run 'lf machine login linear' to connect.")
             }
-            Self::Asana => Some("Asana requires OAuth. Run 'lf account connect asana' to connect."),
+            Self::Asana => Some("Asana requires OAuth. Run 'lf machine login asana' to connect."),
             _ => None,
         }
     }

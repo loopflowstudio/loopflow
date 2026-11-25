@@ -202,7 +202,7 @@ rental. See [Connect clients](server.md) for server lifecycle and phone access.
 
 ```bash
 lf machine add mini                              # register an SSH host; offers to install lf
-ssh mini                                         # sign in with Claude/Codex on mini
+lf machine login codex mini                      # approve here; mini keeps its own login
 lf --machine mini task list                      # run any lf command on mini
 lf task move LOO-12 --machine mini               # move a Task and its Session to mini
 lf --wave product set machine mini               # default new Tasks in `product` to mini
@@ -210,7 +210,13 @@ lf machine hub mini                              # exchange this Machine's plan 
 ```
 
 `--machine` runs the entire command on the target host in its saved repository.
-`lf machine remove mini` forgets the connection without stopping work running
+`lf open` is the exception: it always opens here and attaches to the
+conversation on the other Machine
+([Open a Task that runs on another Machine](workspaces.md#open-a-task-that-runs-on-another-machine)).
+A Task that runs on mini needs no `--machine` to inspect or edit:
+`lf task status`, `lf task files`, `file`, `changes`, `diff` and `save` read
+and write mini's checkout, and Desktop and the phone read its files, changes,
+shells and Sessions from mini through your local server. `lf machine remove mini` forgets the connection without stopping work running
 there. Machines that clone the same repository share its plan through Git; a
 hub makes that take seconds. See
 [Share the plan](work.md#share-the-plan-with-your-team).
@@ -221,11 +227,20 @@ are free:
 ```bash
 lf pool add lab && lf machine add jack@mini --pool lab
 lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 --max-usd-per-hour 0.40
+lf ondemand add modal --provider modal --vcpus 8 --memory-gb 16 --max 2 --max-usd-per-hour 1
 lf ondemand add gpu --provider runpod --vcpus 8 --memory-gb 32 --gpu A40 --max 1 --max-usd-per-hour 1
-lf task run LOO-570 --pool lab --rent code --quote   # preview placement and max cost
-lf task run LOO-570 --pool lab --rent code           # use a free lab machine, else rent one
-lf --wave infrastructure set machine.capacity code   # Wave Tasks rent from `code`
-lf machine end code-1                                # return a rented machine early
+lf task run LOO-570 --pool lab --rent modal --quote   # preview placement, burst ceiling, and max cost
+lf task run LOO-570 --pool lab --rent modal           # use a free lab machine, else rent one
+lf --wave infrastructure set machine.capacity modal   # Wave Tasks rent from `modal`
+lf machine end modal-1                                # copy records home and return early
+```
+
+```text
+$ lf task run LOO-570 --rent modal --quote
+would rent 8 vCPU 16 GB burst on modal at $0.95184/h ceiling, ≤ $3.80736 until 18:40; runs nothing
+
+$ lf machine end modal-1
+Returned modal-1 (2 sessions copied; ceiling estimate $0.24)
 ```
 
 - **Supported rental providers:** Daytona (`DAYTONA_API_KEY`), Modal
@@ -233,16 +248,45 @@ lf machine end code-1                                # return a rented machine e
   (`RUNPOD_API_KEY`), and AWS (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
   `AWS_REGION`). Pass keys via `doppler run -- lf …`.
 - **Options:** `--gpu` requests a GPU (RunPod, AWS, Modal); `--spot` rents
-  interruptible capacity (AWS, RunPod).
-- **Credentials on rentals:** Owned SSH machines use their own native logins.
-  For unattended rentals, forward explicitly named tokens or auth files via
-  `forward.env` / `forward.files` ([Remote Machines and rentals](subscriptions.md#remote-machines-and-rentals)).
-  Linear receives a short-lived access token refreshed from your laptop (the
-  refresh grant stays local).
-- **Automatic cleanup:** Rented machines return 15 minutes after their last
-  Task finishes, copying Sessions and Graph runs back home first so
-  `lf session list` shows them (`from code-1`). Unpushed work blocks return
-  unless you pass `--force`.
+  interruptible capacity (AWS, RunPod); `--reserved` (Modal only) pins the CPU
+  and memory floor to `--vcpus` and `--memory-gb` instead of bursting.
+- **Modal burst sizing and cost estimates:** By default, Modal sandboxes start
+  at Modal's minimum floor (`0.125` physical core, `128 MiB`) and burst up to
+  `--vcpus` and `--memory-gb`, so charges follow usage above that floor.
+  Pass `--reserved` to pin floor equal to ceiling. Quotes, hourly limits,
+  dollar caps, and timeouts still price the full ceiling; uptime-derived cost
+  in `lf ondemand list` and `lf machine end` is labeled as a ceiling estimate.
+  In rental JSON, `ceiling_estimate_usd` gives that estimate. Rentals created
+  before Modal limits were recorded keep their original `cost_usd`.
+- A rental claims the Task once its repository is ready. If the launch connection
+  drops, repeat the placement command. It checks the recorded Machine and reports
+  a Graph that already started. Plain `lf task run` advances that Graph.
+- A rental runs the Linux build matching the caller. Your Machine fetches the
+  release or dev package before signing in. For a local build or an
+  expired CI artifact, set `LF_RENT_LINUX_BIN` to the Linux executable.
+- From the first SSH shell, `lf config show` reports the caller’s global agent
+  preferences. Use `lf config show --skill <name>` to see a skill’s route.
+  The rental keeps its own installation stream.
+- **Rental credentials.** Task placement signs the rental in to the
+  template's `--logins` or the supported providers signed in here, plus GitHub
+  for a GitHub origin and Linear for a Linear-backed repository. Command
+  approvers let sign-in run unattended. Claude uses a forwarded setup token.
+  Linear receives a short-lived access token refreshed from your laptop.
+  Use `lf machine forward <label>` to refresh named files on a live rental.
+  See [Rentals](subscriptions.md#rentals) and [Per-run secrets](subscriptions.md#per-run-secrets).
+- Your Machine collects rental Session history while its server runs. After a
+  sandbox disappears, `lf session list` names the origin (`from modal-1`) and
+  says why the rental could not start a Session, when it could not.
+  Search the collected text with `lf session history search <text> --task <id>`.
+  Read the last collected transcript with `lf session history show <id> --transcript`
+  and its token and cost totals with `lf session usage --session <id>`.
+- Task rentals return 15 minutes after their last Task finishes. Give-back
+  makes a final copy. Unpushed work blocks return unless you pass `--force`,
+  including when SSH cannot reach a sandbox that is still running.
+- If the provider already ended the sandbox, `lf machine end modal-1` settles it
+  without `--force` and brings its Tasks back to your Machine. Ended rentals
+  leave `lf machine list` and `lf machine status`; `lf machine status modal-1`
+  and `lf ondemand list` still show them.
 
 ## Updates and scheduling
 
@@ -260,7 +304,11 @@ launchctl bootout gui/$(id -u)/com.loopflow.refresh
 ```
 
 Re-enable with `launchctl enable gui/$(id -u)/com.loopflow.refresh && lf schedule`.
-On Linux, remove the `# loopflow install schedule` crontab line.
+On Linux, remove the `# loopflow install schedule` crontab line. When
+`crontab` is missing, `lf install` finishes and reports that automatic
+updates and cleanup are unscheduled. An explicit `lf install schedule`
+reports the missing command. On a container without a systemd user manager,
+the first connection starts a detached server and logs to `~/.lf/logs/server.log`.
 
 For any other recurring job, such as settling landings with Desktop closed
 (`lf pr reconcile`) or running a daily `wave-operate` or release, use your OS
@@ -271,14 +319,14 @@ agent.
 ## Authentication
 
 ```bash
-codex login                                      # native login on the execution Machine
-lf -a codex implement
-lf account connect linear --chrome-profile Work  # service auth
+lf machine login codex mini          # Codex's own sign-in, on mini
+lf machine login linear --chrome-profile Work
+lf machine logins mini
 ```
 
-Claude Code and Codex own their native logins and credential refresh. `lf account`
-manages service authentication for GitHub, Linear, Asana, Notion, Doppler, and
-OpenCode. See [Native authentication](subscriptions.md).
+Claude Code and Codex own their native logins and credential refresh;
+`lf machine login` runs them where they are used and signs in GitHub, Linear,
+Asana, Doppler and OpenCode. See [Native authentication](subscriptions.md).
 
 ## Reference
 
@@ -292,12 +340,11 @@ OpenCode. See [Native authentication](subscriptions.md).
 | `lf repo release run\|check\|status\|regress\|promote` | End-to-end releases and stable promotion |
 | `lf commit`, `lf sync [TASK\|BRANCH]`, `lf wt …` | Git operations with Task and stack awareness |
 | `lf machine …`, `lf pool …`, `lf ondemand …` | SSH machines, pools, and cloud rentals |
+| `lf machine login\|logins\|logout` | What each Machine is signed in to |
 | `lf server status`, `lf install` | Local client server and updates |
-| `lf account` | Service authentication (GitHub, Linear, Asana, OpenCode) |
 
 Full flags: [`lf pr`](lf-reference.md#lf-pr), [`lf repo`](lf-reference.md#lf-repo),
-[`lf wt`](lf-reference.md#lf-wt), [`lf machine`](lf-reference.md#lf-machine),
-[`lf account`](lf-reference.md#lf-account).
+[`lf wt`](lf-reference.md#lf-wt), [`lf machine`](lf-reference.md#lf-machine).
 
 Next: [Surfaces](surfaces.md): Loopflow Desktop, Rex, cmux, Herdr, tmux, and
 building your own UI.

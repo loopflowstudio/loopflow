@@ -9,7 +9,6 @@
 //! `ops` keeps the domain functions; an operation composes them into the unit
 //! a client names (`task.run`), one module per namespace.
 
-pub mod account;
 pub mod checkout;
 pub mod config;
 pub mod creation;
@@ -107,10 +106,24 @@ impl Error {
         self
     }
 
+    /// The [`Error`] anywhere in `error`'s chain, including one an
+    /// [`OpsError::Refused`](crate::ops::OpsError::Refused) carries.
+    fn named(error: &anyhow::Error) -> Option<&Self> {
+        use crate::ops::OpsError;
+        error.chain().find_map(|cause| {
+            cause
+                .downcast_ref::<Self>()
+                .or_else(|| match cause.downcast_ref() {
+                    Some(OpsError::Refused(named)) => Some(named),
+                    _ => None,
+                })
+        })
+    }
+
     /// The [`Error`] a shared function named anywhere in `error`'s chain, else
     /// `otherwise` with the error's text.
     pub fn refused(error: &anyhow::Error, otherwise: ErrorCode) -> Self {
-        match error.chain().find_map(|cause| cause.downcast_ref::<Self>()) {
+        match Self::named(error) {
             Some(named) => named.clone(),
             None => Self::new(otherwise, error.to_string()),
         }
@@ -121,7 +134,7 @@ impl Error {
     pub fn written(error: &anyhow::Error) -> Self {
         use crate::store::StoreError;
         use loopflow_storage::work::selection::SelectionError;
-        if let Some(named) = error.chain().find_map(|cause| cause.downcast_ref::<Self>()) {
+        if let Some(named) = Self::named(error) {
             return named.clone();
         }
         if let Some(crate::ops::OpsError::TaskNotFound(issue)) =

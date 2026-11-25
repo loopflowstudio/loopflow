@@ -36,7 +36,7 @@ struct CreationSubmissionTests {
         let server = Server()
         func client() -> CreationSubmissions {
             CreationSubmissions(directory: root, machine: { "original-machine" },
-                lookup: { await server.lookup($0) }, send: { try await server.send($0) })
+                lookup: { id, _ in await server.lookup(id) }, send: { try await server.send($0) })
         }
         let payload = Data(#"{"kind":"task.create","request_id":"same","directory":"/original-repo"}"#.utf8)
         let record = SubmittedCreation(requestID: "same", destination: "original-machine", payload: payload,
@@ -62,11 +62,11 @@ struct CreationSubmissionTests {
         let record = SubmittedCreation(requestID: "same", destination: "original-machine", payload: Data(),
             version: ServerProtocol.revision, submittedAt: Date())
         let client = CreationSubmissions(directory: root, machine: { "original-machine" },
-            lookup: { await server.lookup($0) }, send: { try await server.send($0) })
+            lookup: { id, _ in await server.lookup(id) }, send: { try await server.send($0) })
         try await client.save(record)
         #expect(try await client.reconcile(record)?.milestone == "run_requested")
         let other = CreationSubmissions(directory: root, machine: { "other-machine" },
-            lookup: { await server.lookup($0) }, send: { try await server.send($0) })
+            lookup: { id, _ in await server.lookup(id) }, send: { try await server.send($0) })
         await #expect(throws: (any Error).self) { try await other.reconcile(record) }
         #expect(await server.creations == 0)
         #expect(try await client.pending().count == 1)
@@ -77,7 +77,7 @@ struct CreationSubmissionTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let server = Server()
         let client = CreationSubmissions(directory: root, machine: { "original-machine" },
-            lookup: { await server.lookup($0) }, send: { try await server.send($0) })
+            lookup: { id, _ in await server.lookup(id) }, send: { try await server.send($0) })
         let older = SubmittedCreation(requestID: "older", destination: "original-machine", payload: Data(),
             version: ServerProtocol.revision - 1, submittedAt: Date())
         await server.unknown("older")
@@ -93,7 +93,7 @@ struct CreationSubmissionTests {
         try Data().write(to: root) // a file cannot hold submitted requests
         let server = Server()
         let client = CreationSubmissions(directory: root, machine: { "original-machine" },
-            lookup: { await server.lookup($0) }, send: { try await server.send($0) })
+            lookup: { id, _ in await server.lookup(id) }, send: { try await server.send($0) })
         let change = ServedWrite.taskCreate(directory: "/repo", requestID: "same", title: "Task", request: nil,
             wave: nil, parent: nil, graph: nil, session: nil, run: false)
         await #expect(throws: (any Error).self) { try await client.submit(change, requestID: "same") }
@@ -113,7 +113,7 @@ struct CreationSubmissionTests {
                 began.yield(())
                 for await _ in release { break }
                 return "machine"
-            }, lookup: { await server.lookup($0) }, send: { try await server.send($0) })
+            }, lookup: { id, _ in await server.lookup(id) }, send: { try await server.send($0) })
         let record = SubmittedCreation(requestID: "same", destination: "machine",
             payload: Data(#"{"kind":"task.create","request_id":"same","directory":"/repo"}"#.utf8),
             version: ServerProtocol.revision, submittedAt: Date())
@@ -126,7 +126,7 @@ struct CreationSubmissionTests {
         #expect(await server.submissions == 1)
 
         let unavailable = CreationSubmissions(directory: root, machine: { "machine" },
-            lookup: { _ in throw RegistryQueryError("unavailable") }, send: { try await server.send($0) })
+            lookup: { _, _ in throw RegistryQueryError("unavailable") }, send: { try await server.send($0) })
         await #expect(throws: (any Error).self) { try await unavailable.reconcile(record) }
         #expect(await server.submissions == 1)
         #expect(try await unavailable.pending().count == 1)
@@ -141,7 +141,7 @@ struct CreationSubmissionTests {
         actor Sends { var count = 0; func add() { count += 1 } }
         let sent = Sends()
         let client = CreationSubmissions(directory: root, machine: { "machine" },
-            lookup: { _ in ReadOutput(other) }, send: { _ in await sent.add(); return "{}" })
+            lookup: { _, _ in ReadOutput(other) }, send: { _ in await sent.add(); return "{}" })
         let record = try await client.record(.taskCreate(directory: "/repo", requestID: "not-the-fixture", title: nil,
             request: "work", wave: nil, parent: nil, graph: nil, session: nil, run: true), requestID: "not-the-fixture")
         await #expect(throws: (any Error).self) { try await client.reconcile(record) }
@@ -165,7 +165,7 @@ struct CreationSubmissionTests {
         let server = Server()
         await server.continuation("same")
         let client = CreationSubmissions(directory: root, machine: { "machine" },
-            lookup: { await server.lookup($0) }, send: { try await server.send($0) })
+            lookup: { id, _ in await server.lookup(id) }, send: { try await server.send($0) })
         let record = SubmittedCreation(requestID: "same", destination: "machine",
             payload: Data(#"{"kind":"task.create","request_id":"same","directory":"/repo"}"#.utf8),
             version: ServerProtocol.revision, submittedAt: Date())
@@ -176,13 +176,43 @@ struct CreationSubmissionTests {
         #expect(try await client.pending().first?.payload == record.payload)
     }
 
+    @MainActor @Test func aLostResetForATaskAnotherMachineRunsIsReadWhereThatTaskRuns() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        actor Owner {
+            private(set) var sends = 0
+            private(set) var asked: [String?] = []
+            func lookup(_ id: String, task: String?) -> ReadOutput {
+                asked.append(task)
+                // Only the Machine running the Task keeps the receipt.
+                guard task == "LOO-1" else { return ReadOutput("null") }
+                return ReadOutput(#"{"request_id":"\#(id)","kind":"session.new","milestone":"prepared","task_id":null,"session_id":"s1","result":null,"disposition":"complete","explanation":"Reset","run":false,"artifact_key":null,"launch":null,"created_at":1,"updated_at":2}"#)
+            }
+            func send() { sends += 1 }
+        }
+        let owner = Owner()
+        let client = CreationSubmissions(directory: root, machine: { "machine" },
+            lookup: { await owner.lookup($0, task: $1) }, send: { _ in await owner.send(); return "{}" })
+        _ = try await client.record(.sessionNew(directory: "/repo", requestID: "reset", id: "s1", task: "LOO-1",
+            agent: nil), requestID: "reset")
+        let recovery = CreationRecovery(submissions: client)
+        await recovery.refresh()
+        let item = try #require(recovery.items.first)
+        #expect(item.complete)
+        // The inspector reads the Task through its routed reading.
+        #expect(item.resource?.task == "LOO-1")
+        #expect(item.resource?.session == "s1")
+        #expect(await owner.asked == ["LOO-1"])
+        #expect(await owner.sends == 0)
+    }
+
     @MainActor @Test(arguments: [CreationRecovery.Presentation.task("original"), .session("original")])
     func mountedPresentationRetiresNormalAndPromotedResults(resource: CreationRecovery.Presentation) async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let server = Server()
         let client = CreationSubmissions(directory: root, machine: { "machine" },
-            lookup: { await server.lookup($0) }, send: { try await server.send($0) })
+            lookup: { id, _ in await server.lookup(id) }, send: { try await server.send($0) })
         _ = try await client.submit(.taskCreate(directory: "/repo", requestID: "same", title: nil,
             request: nil, wave: nil, parent: nil, graph: nil, session: nil, run: false), requestID: "same")
         let recovery = CreationRecovery(submissions: client)
@@ -204,7 +234,7 @@ struct CreationSubmissionTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let server = Server()
         let client = CreationSubmissions(directory: root, machine: { "machine" },
-            lookup: { await server.lookup($0) }, send: { try await server.send($0) })
+            lookup: { id, _ in await server.lookup(id) }, send: { try await server.send($0) })
         _ = try await client.submit(.taskCreate(directory: "/repo", requestID: "same", title: nil,
             request: nil, wave: nil, parent: nil, graph: nil, session: nil, run: false), requestID: "same")
         let recovery = CreationRecovery(submissions: client)

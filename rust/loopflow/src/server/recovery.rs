@@ -62,6 +62,7 @@ struct Watcher {
     store: Option<SqliteStore>,
     seen: Option<(StoreRevisions, SystemTime)>,
     settled: Option<SystemTime>,
+    agents_checked_at: Option<SystemTime>,
     conversations_due: Option<SystemTime>,
     runs_due: Option<SystemTime>,
 }
@@ -137,12 +138,14 @@ impl Watcher {
                 || terminals.pending_terminal(session, None).is_some()
         };
         let start = |conversation: &TaskConversation, request: String| {
-            if let Some(failure) = loopflow_execution::ops::recovery::launch_failure(conversation) {
-                anyhow::bail!(failure);
-            }
-            let mut start =
-                super::service::continuing(conversation.session.clone(), request.clone(), 0, 0)
-                    .map_err(|error| anyhow::anyhow!("{}", error.message))?;
+            let mut start = super::service::continuing(
+                conversation.session.clone(),
+                request.clone(),
+                0,
+                0,
+                None,
+            )
+            .map_err(|error| anyhow::anyhow!("{}", error.message))?;
             // The resume reads who started it from its request, not from an
             // environment the agent's own shells would inherit.
             let target = start.argv.len() - 2;
@@ -153,7 +156,26 @@ impl Watcher {
             pace(store, conversation);
             Ok(())
         };
-        match recover_conversations(store, unix(now), held, start) {
+        let refresh = due(self.agents_checked_at, now, UNREAD);
+        if refresh {
+            self.agents_checked_at = Some(now);
+        }
+        let mut agents = loopflow_execution::agent::MachineAgents::default();
+        let readiness = |conversation: &TaskConversation| {
+            if !refresh {
+                if let Some(failure) = conversation.start_failure.as_ref().filter(|reason| {
+                    reason.starts_with(loopflow_execution::ops::recovery::WAITING_FOR_HARNESS)
+                }) {
+                    return Ok(Some(failure.clone()));
+                }
+            }
+            loopflow_execution::ops::recovery::launch_failure(
+                store,
+                &conversation.session,
+                &mut agents,
+            )
+        };
+        match recover_conversations(store, unix(now), held, readiness, start) {
             Ok(wake) => self.conversations_due = wake.map(time_at),
             Err(error) => {
                 self.conversations_due = None;
@@ -205,6 +227,7 @@ fn recover_conversations(
     store: &SqliteStore,
     now: i64,
     held: impl Fn(&LfSessionId) -> bool,
+    mut readiness: impl FnMut(&TaskConversation) -> Result<Option<String>>,
     mut start: impl FnMut(&TaskConversation, String) -> Result<()>,
 ) -> Result<Option<i64>> {
     let due = loopflow_execution::ops::recovery::due_task_conversations(store, now)?;
@@ -213,6 +236,20 @@ fn recover_conversations(
         let TaskConversation { session, agent, .. } = &conversation;
         if held(session) {
             wake = Some(now + ENDING.as_secs() as i64);
+            continue;
+        }
+        let failure = match readiness(&conversation) {
+            Ok(failure) => failure,
+            Err(error) => {
+                tracing::warn!(%session, %error, "could not check this conversation’s harness");
+                continue;
+            }
+        };
+        if let Some(failure) = failure {
+            if conversation.start_failure.as_ref() != Some(&failure) {
+                store.record_start_failure(session, Some(&failure))?;
+                tracing::warn!(%session, task = %conversation.task, %failure);
+            }
             continue;
         }
         // A start after a death is counted before it is made. A first start
@@ -388,6 +425,7 @@ mod tests {
                 &self.store,
                 now,
                 |_| held,
+                |_| Ok(None),
                 |conversation, request| {
                     assert_eq!(conversation.session, self.session);
                     started.borrow_mut().push(request);
@@ -438,13 +476,42 @@ mod tests {
         assert_eq!(fixture.attempts(), (1, Some(NOW)));
         // The start is in flight: the next change starts nothing, and the
         // watcher reads again when the backoff comes due.
-        let wake = recover_conversations(&fixture.store, NOW + 30, |_| false, |_, _| Ok(()));
+        let wake = recover_conversations(
+            &fixture.store,
+            NOW + 30,
+            |_| false,
+            |_| Ok(None),
+            |_, _| Ok(()),
+        );
         assert_eq!(wake.unwrap(), Some(NOW + 60));
         // Still down a minute later: started again, as a new request.
         assert_eq!(
             fixture.pass(NOW + 60, false),
             [format!("recover:{}:{}:2", fixture.session, fixture.agent)]
         );
+    }
+
+    #[test]
+    fn a_missing_login_waits_without_spending_starts_and_recovers_after_sign_in() {
+        let fixture = fixture();
+        fixture.exited(137);
+        let reason = "Waiting for a harness: codex has no usable login";
+        for pass in 0..8 {
+            let wake = recover_conversations(
+                &fixture.store,
+                NOW + pass * 3600,
+                |_| false,
+                |_| Ok(Some(reason.into())),
+                |_, _| panic!("a missing login must not start a terminal"),
+            )
+            .unwrap();
+            assert_eq!(wake, None);
+            assert_eq!(fixture.attempts(), (0, None));
+            assert_eq!(fixture.failure().as_deref(), Some(reason));
+        }
+        assert_eq!(fixture.pass(NOW + 8 * 3600, false).len(), 1);
+        assert_eq!(fixture.attempts().0, 1);
+        assert_eq!(fixture.failure(), None);
     }
 
     #[test]
@@ -472,7 +539,9 @@ mod tests {
         assert!(fixture.pass(NOW, true).is_empty());
         assert_eq!(fixture.attempts(), (0, None));
         // Its terminal is ending: the watcher reads again soon.
-        let wake = recover_conversations(&fixture.store, NOW, |_| true, |_, _| Ok(())).unwrap();
+        let wake =
+            recover_conversations(&fixture.store, NOW, |_| true, |_| Ok(None), |_, _| Ok(()))
+                .unwrap();
         assert_eq!(wake, Some(NOW + 1));
     }
 
@@ -517,7 +586,8 @@ mod tests {
             &fixture.store,
             NOW,
             |_| false,
-            |_, _| Err(anyhow::anyhow!("claude is not installed")),
+            |_| Ok(None),
+            |_, _| Err(anyhow::anyhow!("no PTY left")),
         )
         .unwrap();
         assert_eq!(fixture.attempts(), (1, Some(NOW)));
@@ -591,6 +661,7 @@ mod tests {
             &fixture.store,
             NOW,
             |_| false,
+            |_| Ok(None),
             |_, _| Err(anyhow::anyhow!("no PTY left")),
         )
         .unwrap();

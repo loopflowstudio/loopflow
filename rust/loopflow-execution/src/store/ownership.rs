@@ -242,6 +242,7 @@ pub fn task_execution_route(store: &SqliteStore, task: &TaskId) -> StoreResult<T
         if let Some(saved) = store.task_execution_route_prepared(task, &facts)? {
             return Ok(TaskExecutionRoute {
                 task_id: task.clone(),
+                peer_selector: saved.peer_selector,
                 checkout: saved.checkout,
                 repository_id: saved.repository_id,
                 machine_id: saved.machine_id,

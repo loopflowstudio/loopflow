@@ -668,7 +668,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
 
 /// Run the prompt; a headless run returns where its input was recorded.
 fn run_prompt(
-    mut built: PromptBuild,
+    built: PromptBuild,
     cli: &Cli,
     kind: LaunchKind,
 ) -> Result<Option<std::path::PathBuf>> {
@@ -716,13 +716,10 @@ fn run_prompt(
         false,
         None,
     );
-    let cli_check_start = Instant::now();
-    loopflow_execution::agent::start_on_installed_agent(&mut built.agent_config, &built.process)
-        .map_err(|missing| anyhow!(missing))?;
-    debug!(
-        elapsed_ms = cli_check_start.elapsed().as_millis(),
-        "checked cli availability"
-    );
+    let harness = built.agent_config.agent.harness;
+    if !loopflow_execution::harness::launcher(harness).installed() {
+        anyhow::bail!(loopflow_execution::agent::missing_agent_message(harness));
+    }
 
     let runtime = begin_process_runtime(&built, "headless", cli.resume.as_deref(), None)?;
 

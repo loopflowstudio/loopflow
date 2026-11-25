@@ -32,7 +32,17 @@ pub fn run(
         command.arg("--").args(path);
         return Err(command.exec()).context("start Git's configured difftool");
     }
-    let snapshot = loopflow_execution::ops::task::task_diff(issue, path, base, head, draft)?;
+    // From the Machine that runs the Task; the difftool above needs a checkout here.
+    let snapshot: loopflow_execution::ops::task::TaskDiffSnapshot = serde_json::from_value(
+        super::read::Read::TaskDiff {
+            issue: issue.into(),
+            path: path.map(str::to_owned),
+            base: base.into(),
+            draft: draft.map(str::to_owned),
+            head: head.map(str::to_owned),
+        }
+        .read()?,
+    )?;
     if json {
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {

@@ -15,6 +15,8 @@ use crate::machine::ssh::sh_quote;
 pub struct Forwarded {
     env: Vec<(String, SecretString)>,
     files: Vec<(PathBuf, Vec<u8>)>,
+    /// `forward.env` names Claude's token but this Machine has no value for it.
+    lacks_claude_token: bool,
 }
 
 impl std::fmt::Debug for Forwarded {
@@ -28,16 +30,20 @@ impl std::fmt::Debug for Forwarded {
                 "files",
                 &self.files.iter().map(|(path, _)| path).collect::<Vec<_>>(),
             )
+            .field("lacks_claude_token", &self.lacks_claude_token)
             .finish()
     }
 }
 
 /// Every value `forward` names, or the first one this Machine cannot supply.
+/// Claude's token is a login, not a secret the launch needs: without a value
+/// it is left out, and Claude reads signed out where the launch runs.
 pub fn read(directory: &Path) -> Result<Forwarded> {
     let config = crate::config::load_config(Some(directory))?
         .unwrap_or_default()
         .forward;
     let mut env = Vec::new();
+    let mut lacks_claude_token = false;
     for name in config.env {
         if !valid_name(&name) {
             bail!("forward.env entry {name:?} is not an environment variable name");
@@ -45,18 +51,27 @@ pub fn read(directory: &Path) -> Result<Forwarded> {
         let value = std::env::var(&name)
             .ok()
             .filter(|value| !value.is_empty())
-            .or_else(|| doppler_value(&name, directory))
-            .ok_or_else(|| {
-                anyhow!(
-                    "forward.env names {name}, which has no value on this Machine: export it, \
-                     or store it with `doppler secrets set {name}`"
-                )
-            })?;
-        env.push((name, SecretString::new(value)));
+            .or_else(|| doppler_value(&name, directory));
+        match value {
+            Some(value) => env.push((name, SecretString::new(value))),
+            None if name == crate::machine::login::CLAUDE_TOKEN_ENV => lacks_claude_token = true,
+            None => bail!(
+                "forward.env names {name}, which has no value on this Machine: export it, \
+                 or store it with `doppler secrets set {name}`"
+            ),
+        }
     }
+    Ok(Forwarded {
+        env,
+        files: read_files(config.files)?,
+        lacks_claude_token,
+    })
+}
+
+fn read_files(entries: Vec<String>) -> Result<Vec<(PathBuf, Vec<u8>)>> {
     let home = dirs::home_dir().context("this user has no home directory")?;
     let mut files = Vec::new();
-    for entry in config.files {
+    for entry in entries {
         let relative = home_relative(&entry)?;
         let bytes = std::fs::read(home.join(&relative)).map_err(|error| {
             anyhow!(
@@ -66,13 +81,8 @@ pub fn read(directory: &Path) -> Result<Forwarded> {
         })?;
         files.push((relative, bytes));
     }
-    Ok(Forwarded { env, files })
+    Ok(files)
 }
-
-/// What Claude and Codex sign in with: a setup or access token in the
-/// environment, or the login file under the home.
-const AGENT_LOGIN_ENV: [&str; 2] = ["CLAUDE_CODE_OAUTH_TOKEN", "CODEX_ACCESS_TOKEN"];
-const AGENT_LOGIN_FILES: [&str; 2] = [".claude/.credentials.json", ".codex/auth.json"];
 
 impl Forwarded {
     /// The environment values, which a request carries itself; the files stay
@@ -81,31 +91,15 @@ impl Forwarded {
         crate::machine::wire::Secrets(std::mem::take(&mut self.env))
     }
 
-    fn carries_agent_login(&self) -> bool {
-        self.env
-            .iter()
-            .any(|(name, _)| AGENT_LOGIN_ENV.contains(&name.as_str()))
-            || self
-                .files
-                .iter()
-                .any(|(path, _)| AGENT_LOGIN_FILES.iter().any(|file| path == Path::new(file)))
+    /// Whether each launch carries environment variable `name`.
+    pub fn carries_env(&self, name: &str) -> bool {
+        self.env.iter().any(|(carried, _)| carried == name)
     }
-}
 
-/// `read` for an on-demand rental, which starts with no login of its own: a
-/// `forward` that carries no Claude or Codex login stops it before anything
-/// is rented.
-pub fn read_for_rental(directory: &Path) -> Result<Forwarded> {
-    let forwarded = read(directory)?;
-    if !forwarded.carries_agent_login() {
-        bail!(
-            "an on-demand rental has no Claude or Codex login, and `forward` names none to carry; \
-             after `claude setup-token`, `doppler secrets set CLAUDE_CODE_OAUTH_TOKEN` and \
-             `lf set --global forward.env '[CLAUDE_CODE_OAUTH_TOKEN]'`, \
-             or `lf set --global forward.files '[~/.codex/auth.json]'`"
-        );
+    /// Whether `forward.env` names Claude's token but this Machine has no value.
+    pub fn lacks_claude_token(&self) -> bool {
+        self.lacks_claude_token
     }
-    Ok(forwarded)
 }
 
 /// Forwarded environment files older than this were never read by their
@@ -123,27 +117,65 @@ pub fn deliver(
     forwarded: &Forwarded,
     notices: &mut dyn Write,
 ) -> Result<Option<String>> {
+    transfer(machine, forwarded, FileDelivery::Keep, notices)
+}
+
+#[derive(Clone, Copy)]
+enum FileDelivery {
+    Keep,
+    Replace,
+}
+
+/// Explicit refresh reads only the named files, including when a launch token is unavailable.
+pub fn refresh_files(directory: &Path, machine: &Machine) -> Result<usize> {
+    let config = crate::config::load_config(Some(directory))?.unwrap_or_default();
+    let forwarded = Forwarded {
+        env: Vec::new(),
+        files: read_files(config.forward.files)?,
+        lacks_claude_token: false,
+    };
+    transfer(
+        machine,
+        &forwarded,
+        FileDelivery::Replace,
+        &mut std::io::sink(),
+    )?;
+    Ok(forwarded.files.len())
+}
+
+fn transfer(
+    machine: &Machine,
+    forwarded: &Forwarded,
+    delivery: FileDelivery,
+    notices: &mut dyn Write,
+) -> Result<Option<String>> {
     if forwarded.env.is_empty() && forwarded.files.is_empty() {
         return Ok(None);
     }
-    let mut script = vec![
-        "set -e".to_owned(),
-        "umask 077".to_owned(),
-        format!(
-            "[ ! -d \"$HOME/.lf/forward\" ] || find \"$HOME/.lf/forward\" -type f -mmin +{UNREAD_MINUTES} -exec rm -f {{}} +"
-        ),
-    ];
+    let mut script = vec!["set -e".to_owned(), "umask 077".to_owned()];
+    let mode = match delivery {
+        FileDelivery::Keep => {
+            script.push(format!(
+                "[ ! -d \"$HOME/.lf/forward\" ] || find \"$HOME/.lf/forward\" -type f -mmin +{UNREAD_MINUTES} -exec rm -f {{}} +"
+            ));
+            "keep"
+        }
+        FileDelivery::Replace => {
+            // Verify the registered identity on the connection that replaces the login.
+            script.push(crate::machine::ssh::remote_path());
+            script.push(format!(
+                "{}={} lf machine self </dev/null >/dev/null",
+                crate::machine::ssh::EXPECTED_MACHINE_ID_ENV,
+                sh_quote(machine.id.as_str())
+            ));
+            "replace"
+        }
+    };
+    script.push(include_str!("forward.sh").into());
     let mut input = Vec::new();
     for (relative, bytes) in &forwarded.files {
-        let path = remote_path(&relative.to_string_lossy());
-        let shown = sh_quote(&format!("~/{}", relative.display()));
-        let count = bytes.len();
-        script.push(format!(
-            "p={path}; t=\"$p.lf-forward\"; d=$(dirname \"$p\"); [ -d \"$d\" ] || mkdir -p \"$d\"; \
-             dd bs=1 count={count} of=\"$t\" 2>/dev/null; \
-             if [ -e \"$p\" ]; then cmp -s \"$t\" \"$p\" || echo kept {shown}; rm -f \"$t\"; \
-             else chmod 600 \"$t\"; mv \"$t\" \"$p\"; fi"
-        ));
+        let path = sh_quote(&relative.to_string_lossy());
+        script.push(format!("receive_file {path} {} {mode}", bytes.len()));
         input.extend_from_slice(bytes);
     }
     let env_file = (!forwarded.env.is_empty()).then(|| {
@@ -248,30 +280,8 @@ fn doppler_value(name: &str, directory: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{home_relative, sourced, valid_name, Forwarded};
-    use secrecy::SecretString;
-    use std::path::PathBuf;
-
-    #[test]
-    fn a_rental_needs_a_forwarded_claude_or_codex_login() {
-        let forwarded = |env: &[&str], files: &[&str]| Forwarded {
-            env: env
-                .iter()
-                .map(|name| (name.to_string(), SecretString::new("value".into())))
-                .collect(),
-            files: files
-                .iter()
-                .map(|path| (PathBuf::from(path), Vec::new()))
-                .collect(),
-        };
-        assert!(!forwarded(&[], &[]).carries_agent_login());
-        assert!(
-            !forwarded(&["GH_TOKEN", "ANTHROPIC_API_KEY"], &[".ssh/config"]).carries_agent_login()
-        );
-        assert!(forwarded(&["CLAUDE_CODE_OAUTH_TOKEN"], &[]).carries_agent_login());
-        assert!(forwarded(&[], &[".codex/auth.json"]).carries_agent_login());
-        assert!(forwarded(&[], &[".claude/.credentials.json"]).carries_agent_login());
-    }
+    use super::{home_relative, read, sourced, valid_name};
+    use crate::config::environment::EnvVarGuard;
 
     #[test]
     fn names_and_paths_are_checked_before_anything_moves() {
@@ -293,5 +303,38 @@ mod tests {
             sourced(".lf/forward/abc", "exec lf\n"),
             "f=\"$HOME\"/'.lf/forward/abc'; . \"$f\"; rm -f \"$f\"\nexec lf\n"
         );
+    }
+
+    #[test]
+    fn a_missing_claude_token_is_left_out_while_other_missing_names_stop_the_launch() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        // No `doppler` to ask, and neither name has a value here.
+        let _path = EnvVarGuard::set("PATH", home.path().to_str().unwrap());
+        let _token = EnvVarGuard::set("CLAUDE_CODE_OAUTH_TOKEN", "");
+        let _other = EnvVarGuard::set("LF_TEST_FORWARD_DEPLOY", "");
+        let config = home.path().join("config.yaml");
+        std::fs::write(&config, "forward:\n  env: [CLAUDE_CODE_OAUTH_TOKEN]\n").unwrap();
+        let forwarded = read(home.path()).unwrap();
+        assert!(!forwarded.carries_env("CLAUDE_CODE_OAUTH_TOKEN"));
+        assert!(forwarded.lacks_claude_token());
+
+        std::fs::write(
+            &config,
+            "forward:\n  env: [CLAUDE_CODE_OAUTH_TOKEN, LF_TEST_FORWARD_DEPLOY]\n",
+        )
+        .unwrap();
+        let error = read(home.path()).unwrap_err().to_string();
+        assert!(
+            error.contains("forward.env names LF_TEST_FORWARD_DEPLOY"),
+            "{error}"
+        );
+
+        let _token = EnvVarGuard::set("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-fixture");
+        std::fs::write(&config, "forward:\n  env: [CLAUDE_CODE_OAUTH_TOKEN]\n").unwrap();
+        let forwarded = read(home.path()).unwrap();
+        assert!(forwarded.carries_env("CLAUDE_CODE_OAUTH_TOKEN"));
+        assert!(!forwarded.lacks_claude_token());
     }
 }

@@ -1,0 +1,1 @@
+{"type":"request","id":"shell-1","operation":{"kind":"task.shell.start","issue":"task_00000000000000000000000000000001","shell_id":"mobile-task_00000000000000000000000000000001","rows":40,"cols":60,"bootstrap":null,"command":[]},"select":null,"sender":null,"request_id":null}

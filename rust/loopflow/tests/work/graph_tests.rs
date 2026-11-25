@@ -835,6 +835,24 @@ printf '%s' "$answer" > "$LF_HOME/$step.answer"
 "#,
         );
 
+        let path = format!("{}:/usr/bin:/bin", bin.display());
+        // First-open migrations in a debug build take most of the deadline;
+        // finish them before the clock starts.
+        let migrated = lf_command(
+            repo.path(),
+            home.path(),
+            &["desktop", "portfolio", "--json"],
+            Some(&path),
+        )
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+        assert!(
+            migrated.status.success(),
+            "{}",
+            String::from_utf8_lossy(&migrated.stderr)
+        );
+
         let mut master = -1;
         let mut slave = -1;
         // SAFETY: valid output pointers; null selects default terminal settings.
@@ -856,7 +874,6 @@ printf '%s' "$answer" > "$LF_HOME/$step.answer"
         let slave = unsafe { fs::File::from_raw_fd(slave) };
         let log_path = home.path().join("output");
         let log = fs::File::create(&log_path).unwrap();
-        let path = format!("{}:/usr/bin:/bin", bin.display());
         let mut command = lf_command(repo.path(), home.path(), &flags, Some(&path));
         command
             .args(["-a", "claude"])

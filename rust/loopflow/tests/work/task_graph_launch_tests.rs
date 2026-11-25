@@ -646,11 +646,11 @@ fn task_run_open_successful_quote_launches_and_opens_nothing() {
         "add",
         "quote",
         "--provider",
-        "daytona",
+        "modal",
         "--vcpus",
-        "4",
-        "--memory-gb",
         "8",
+        "--memory-gb",
+        "16",
         "--max",
         "1",
         "--max-usd-per-hour",
@@ -671,7 +671,8 @@ fn task_run_open_successful_quote_launches_and_opens_nothing() {
     assert!(output.status.success(), "{output:?}");
     let text = String::from_utf8_lossy(&output.stdout);
     assert!(
-        text.contains("would rent") && text.contains("runs nothing"),
+        text.contains("would rent 8 vCPU 16 GB burst on modal at $0.95184/h ceiling, ≤ $3.80736")
+            && text.contains("runs nothing"),
         "{text}"
     );
     assert!(!task.home.path().join("opened").exists());
@@ -898,8 +899,14 @@ import os
 import shutil
 import sys
 
+if sys.argv[1:] == ['auth', 'status']:
+    sys.exit(0)
 if '--version' in sys.argv:
     print('fixture')
+    sys.exit(0)
+# The launch's login probe is not a launch.
+if sys.argv[1:3] == ['auth', 'status']:
+    print(json.dumps({'loggedIn': True}))
     sys.exit(0)
 security = shutil.which('security')
 stores = glob.glob(os.path.join(os.path.dirname(security), 'keychain', '*')) if security else []
@@ -2883,10 +2890,11 @@ fn a_step_that_cannot_launch_is_not_started_again() {
         })
         .unwrap();
     assert!(
-        recorded.starts_with(&format!(
-            "'opencode' is not installed{}codex",
-            loopflow_execution::ops::task_execution::MOVED_TO
-        )),
+        recorded.starts_with("'opencode' is not installed")
+            && recorded.ends_with(&format!(
+                "{}codex",
+                loopflow_execution::ops::task_execution::MOVED_TO
+            )),
         "{recorded}"
     );
 }
@@ -3530,6 +3538,8 @@ fn successful_final_graph_keeps_arrival_when_completion_fails_and_never_replays(
 /// LF_HOME, waits before answering.
 const STAND_IN_CLAUDE: &str = r#"#!/usr/bin/python3
 import json, os, sys, time
+if sys.argv[1:] == ['auth', 'status']:
+    sys.exit(0)
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)

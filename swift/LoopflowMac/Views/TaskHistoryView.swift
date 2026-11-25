@@ -74,6 +74,9 @@ struct TaskHistoryView: View {
                     Text(Self.agent(input))
                         .font(Typography.meta)
                         .foregroundStyle(palette.textSecondary)
+                    if let origin = input.origin {
+                        Text("from \(origin.name)").font(Typography.meta).foregroundStyle(palette.textSecondary)
+                    }
                     Spacer(minLength: Spacing.sm)
                     Text(Self.started(input.observedAt))
                         .font(Typography.meta)
@@ -82,7 +85,7 @@ struct TaskHistoryView: View {
                         .font(Typography.meta)
                         .foregroundStyle(palette.textSecondary)
                         .frame(minWidth: 72, alignment: .trailing)
-                    Text(Self.shortId(input.id))
+                    Text(Self.shortId(input.artifactKey ?? input.sessionId))
                         .font(Typography.mono)
                         .foregroundStyle(palette.textTertiary)
                         .textSelection(.enabled)

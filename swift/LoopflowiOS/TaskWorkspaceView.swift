@@ -1,8 +1,9 @@
 import Loopflow
 import SwiftUI
 
-/// One Task on the phone: where it stands on its Graph, then its conversation.
-/// The Changes that Desktop shows beside it open over it.
+/// One Task on the phone: where it stands on its Graph and which Machine runs
+/// it, then its Session, Files, Changes and Shell. All four come from the
+/// paired Machine, which reaches the Task wherever it runs.
 struct TaskWorkspaceView: View {
     let client: RemoteMobileClient
     let feed: TaskFeed
@@ -10,55 +11,99 @@ struct TaskWorkspaceView: View {
     @Environment(\.theme) private var theme
     @Environment(\.dismiss) private var dismiss
     @Binding var draft: String
-    @State private var showsChanges = false
+    /// The pane chosen here; until then the Session, or Changes before there is one.
+    @State private var chosen: Pane?
     @State private var confirmingAbandon = false
     @State private var selectedSession: String?
     @State private var sessionDrafts: [String: String] = [:]
     @State private var outline: WorkflowOutline?
+    @State private var shellDraft = ""
     /// The Task as the Machine last read it.
     @State private var reading = Loaded<Reading>.loading
-    /// The conversation that began while the screen was showing.
+    /// The conversation the Machine running the Task names, when the list's row named none.
     @State private var begun: String?
+    @State private var files: TaskFilesTree
     @Environment(\.scenePhase) private var scenePhase
+
+    init(client: RemoteMobileClient, feed: TaskFeed, task: MobileTask, draft: Binding<String>) {
+        self.client = client
+        self.feed = feed
+        self.task = task
+        _draft = draft
+        _files = State(initialValue: TaskFilesTree(client: client, issue: task.id))
+    }
+
+    enum Pane: String, CaseIterable, Identifiable {
+        case session = "Session", files = "Files", changes = "Changes", shell = "Shell"
+        var id: Self { self }
+    }
+
+    private var primarySession: String? { task.primarySession ?? begun }
+    private var session: String? { selectedSession ?? primarySession }
+    private var pane: Pane { chosen ?? (session == nil ? .changes : .session) }
 
     var body: some View {
         VStack(spacing: 0) {
-            if case .value(let reading) = reading, let row = reading.row, feed.pendingChanges.acceptsChanges {
-                let actions = reading.actions(for: row, outline: outline)
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    if let graph = reading.work.graph {
-                        WorkflowLine(graph: graph, auto: actions.auto == .on, style: .steps)
-                            .accessibilityHint(graph.sentence)
-                    }
-                    HStack {
-                        Spacer(minLength: 0)
-                        controls(row, actions)
-                        metadata(row, sessions: reading.work.sessions)
-                    }
-                    if let reason = actions.primaryRefusal ?? (row.lifecycle == .paused ? nil : actions.autoRefusal) {
-                        Text(reason).font(Typography.meta).foregroundStyle(theme.palette.warning)
-                            .accessibilityIdentifier("task-actions-refusal")
-                    }
-                }
-                .font(Typography.text)
-                .padding(.horizontal, Spacing.sm)
-                .padding(.vertical, Spacing.xs)
-                .overlay(alignment: .bottom) { Rectangle().fill(theme.palette.border).frame(height: 1) }
-                .task(id: reading.work.graph == nil ? row.graphName : nil) {
-                    outline = nil
-                    if reading.work.graph == nil, let name = row.graphName {
-                        let catalog = try? await client.query.graphCatalog(cwd: row.task.repo)
-                        if !Task.isCancelled { outline = catalog?.first { $0.name == name }?.workflow }
-                    }
-                }
+            header
+            Picker("View", selection: Binding(get: { pane }, set: { chosen = $0 })) {
+                ForEach(Pane.allCases) { Text($0.rawValue).tag($0) }
             }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.sm)
             content
         }
+        .background(theme.palette.background)
+        .navigationTitle(task.title)
+        .navigationBarTitleDisplayMode(.inline)
         .overlay { NoticeView(center: feed.notices) }
-        .task(id: scenePhase == .active) { await watchTask() }
+        .task(id: scenePhase == .active) {
+            guard scenePhase == .active else { return }
+            async let files: Void = files.follow()
+            await watchTask()
+            await files
+        }
     }
 
-    /// What the Machine read of one Task: its work (the Graph it took up and
+    @ViewBuilder private var header: some View {
+        if case .value(let reading) = reading, let row = reading.row, feed.pendingChanges.acceptsChanges {
+            let actions = reading.actions(for: row, outline: outline)
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                if let graph = reading.work.graph {
+                    WorkflowLine(graph: graph, auto: actions.auto == .on, style: .steps)
+                        .accessibilityHint(graph.sentence)
+                }
+                if let machine = reading.machine(pairedWith: client.savedMachine.machineID) {
+                    Label("On \(machine)", systemImage: "desktopcomputer")
+                        .font(Typography.meta)
+                        .foregroundStyle(theme.palette.textSecondary)
+                        .accessibilityIdentifier("task-machine")
+                }
+                HStack {
+                    Spacer(minLength: 0)
+                    controls(row, actions)
+                    metadata(row, sessions: reading.work.sessions)
+                }
+                if let reason = actions.primaryRefusal ?? (row.lifecycle == .paused ? nil : actions.autoRefusal) {
+                    Text(reason).font(Typography.meta).foregroundStyle(theme.palette.warning)
+                        .accessibilityIdentifier("task-actions-refusal")
+                }
+            }
+            .font(Typography.text)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
+            .overlay(alignment: .bottom) { Rectangle().fill(theme.palette.border).frame(height: 1) }
+            .task(id: reading.work.graph == nil ? row.graphName : nil) {
+                outline = nil
+                if reading.work.graph == nil, let name = row.graphName {
+                    let catalog = try? await client.query.graphCatalog(cwd: row.task.repo)
+                    if !Task.isCancelled { outline = catalog?.first { $0.name == name }?.workflow }
+                }
+            }
+        }
+    }
+
+    /// What a Machine read of one Task: its work (the Graph it took up and
     /// its Sessions), its row, and its auto mark.
     struct Reading: Equatable {
         let work: TaskOverview
@@ -69,8 +114,12 @@ struct TaskWorkspaceView: View {
             TaskActions(work: work, row: row, execution: execution, outline: outline)
         }
 
-        /// Nil until the Task starts.
-        var checkout: String? { row?.reference.workspace?.worktree }
+        /// The Machine whose checkout this is, by name, when it is not `paired`.
+        func machine(pairedWith paired: String) -> String? {
+            guard let workspace = row?.reference.workspace, let id = workspace.machineId,
+                  StructuredIdentity.prefixed(id, "home_") != StructuredIdentity.prefixed(paired, "home_") else { return nil }
+            return workspace.machineLabel ?? id
+        }
     }
 
     /// Follow the Task's reading while the screen shows and the app is active.
@@ -92,13 +141,13 @@ struct TaskWorkspaceView: View {
         }
     }
 
-    /// A Task started from this screen gets its conversation here. A row that
-    /// names none yet is asked again on the next frame.
+    /// A Task whose row named no conversation gets one here once the Machine
+    /// running it names its primary. A reading that lists none yet asks nothing.
     private func openConversation() async {
         guard task.primarySession == nil, begun == nil else { return }
         do {
-            begun = try await Self.conversation(after: reading) { [client, id = task.id] repository in
-                try await client.task(id: id, directory: repository)?.primarySession
+            begun = try await Self.conversation(after: reading) { [client, id = task.id] in
+                try await client.primarySession(task: id)
             }
         } catch {
             feed.notices.post(Notice("The conversation couldn’t be opened: \(machineConnectionMessage(error))",
@@ -107,12 +156,11 @@ struct TaskWorkspaceView: View {
     }
 
     /// The conversation to open after `reading`: once it lists a Session, the
-    /// primary one the Task's row names. `primary` reads that row in a repository.
+    /// primary one the Machine running the Task names.
     static func conversation(after reading: Loaded<Reading>,
-                             primary: (String) async throws -> String?) async throws -> String? {
-        guard case .value(let reading) = reading, !reading.work.sessions.isEmpty,
-              let repository = reading.row?.task.repo else { return nil }
-        return try await primary(repository)
+                             primary: () async throws -> String?) async throws -> String? {
+        guard case .value(let reading) = reading, !reading.work.sessions.isEmpty else { return nil }
+        return try await primary()
     }
 
     /// One frame of the Task's reading.
@@ -186,51 +234,39 @@ struct TaskWorkspaceView: View {
             }
             if let pr = row.pr?.publication?.github { Link("Open PR #\(pr.number)", destination: pr.url) }
             ForEach(sessions.filter(\.interactive)) { session in
-                Button("Open \(session.title)") { selectedSession = session.id }
+                Button("Open \(session.title)") {
+                    selectedSession = session.id == primarySession ? nil : session.id
+                    chosen = .session
+                }
             }
         }
         .labelStyle(.iconOnly)
         .frame(width: 44, height: 44)
     }
 
+    /// The Machine of the latest reading: Changes reads again when it moves.
+    private var machine: String? {
+        guard case .value(let reading) = reading else { return nil }
+        return reading.row?.reference.workspace?.machineId
+    }
+
     @ViewBuilder private var content: some View {
-        if let session = selectedSession ?? task.primarySession ?? begun {
-            let sessionDraft = session == (task.primarySession ?? begun) ? $draft : Binding(
-                get: { sessionDrafts[session] ?? "" }, set: { sessionDrafts[session] = $0 })
-            SessionView(client: client, task: task, session: session, draft: sessionDraft) { showsChanges = true }
-                .id(session)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Changes", systemImage: "plusminus") { showsChanges = true }
-                    }
-                }
-                .sheet(isPresented: $showsChanges) {
-                    NavigationStack {
-                        TaskChangesView(client: client, task: task)
-                            .navigationTitle("Changes")
-                            .navigationBarTitleDisplayMode(.inline)
-                            .toolbar {
-                                ToolbarItem(placement: .confirmationAction) { Button("Done") { showsChanges = false } }
-                            }
-                    }
-                    .tint(theme.palette.accentInk)
-                    .presentationDetents([.medium, .large])
-                }
-        } else {
-            Group {
-                switch reading {
-                case .loading:
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-                case .value(let reading) where reading.checkout == nil:
-                    // Nothing is checked out until the Task starts, so there is nothing to ask the Machine for.
-                    StateView("No changes yet")
-                case .value, .failed:
-                    TaskChangesView(client: client, task: task)
-                }
+        switch pane {
+        case .session:
+            if let session {
+                let sessionDraft = session == primarySession ? $draft : Binding(
+                    get: { sessionDrafts[session] ?? "" }, set: { sessionDrafts[session] = $0 })
+                TerminalView(client: client, task: task, target: .session(session), draft: sessionDraft) { chosen = .changes }
+                    .id(session)
+            } else {
+                StateView("No conversation yet", sentence: "Run the Task to start one.")
             }
-            .background(theme.palette.background)
-            .navigationTitle(task.title)
-            .navigationBarTitleDisplayMode(.inline)
+        case .files:
+            TaskFilesTreeView(client: client, task: task, tree: files, path: "")
+        case .changes:
+            TaskChangesView(client: client, task: task, machine: machine)
+        case .shell:
+            TerminalView(client: client, task: task, target: .shell, draft: $shellDraft) { chosen = .changes }
         }
     }
 }
@@ -240,16 +276,23 @@ enum Loaded<Value> {
     case loading, failed(String), value(Value)
 }
 
-/// Files the Task changed from its base, each opening its diff.
+/// Files the Task changed from its base, each opening its diff. It reads
+/// again when the Task's checkout moves to another Machine.
 struct TaskChangesView: View {
     let client: RemoteMobileClient
     let task: MobileTask
+    let machine: String?
     @Environment(\.theme) private var theme
     @State private var changes = Loaded<TaskChangesSnapshot>.loading
+    @State private var notStarted = false
 
     var body: some View {
         Group {
             switch changes {
+            case _ where notStarted:
+                StateView("Not started", sentence: "The Task has no checkout yet.") {
+                    Button("Try again") { Task { await load() } }.buttonStyle(LoopflowButtonStyle(.accent))
+                }
             case .loading: ProgressView()
             case .failed(let message):
                 StateView("Couldn’t load", sentence: message) {
@@ -280,11 +323,17 @@ struct TaskChangesView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.palette.background)
-        .task { await load() }
+        .task(id: machine) { await load() }
     }
 
     private func load() async {
-        do { changes = .value(try await client.query.taskChanges(issue: task.id)) } catch {
+        do {
+            changes = .value(try await client.query.taskChanges(issue: task.id))
+            notStarted = false
+        } catch let refusal as ServerError where refusal.notStarted {
+            notStarted = true
+        } catch {
+            notStarted = false
             changes = .failed(machineConnectionMessage(error))
         }
     }

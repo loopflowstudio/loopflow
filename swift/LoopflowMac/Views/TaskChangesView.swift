@@ -110,7 +110,7 @@ struct TaskChangesView: View {
             }
             if showsDelivery {
                 DeliveryCard(store: store.pullRequest, record: task?.pr, taskOpen: task?.isCompleted == false,
-                             url: prURL, localHead: store.changes?.headCommit)
+                             url: prURL, localHead: store.changes?.headCommit, runsOn: store.machineName)
                     .clipShape(RoundedRectangle(cornerRadius: CornerRadius.row))
             }
         }
@@ -178,7 +178,7 @@ struct TaskChangesView: View {
 
     private func readSettings() async {
         // A checkout on another Machine keeps the defaults for this window only.
-        guard store.query.remoteMachine == nil else { return }
+        guard store.machine == nil else { return }
         do {
             struct Inspection: Decodable { let settings: [String: ConfigurationValue] }
             let work = ServedRead.configSettings(directory: store.cwd, wave: nil, skill: nil, graph: nil, step: nil)
@@ -221,7 +221,7 @@ struct TaskChangesView: View {
             let pullRequest = store.pullRequest
             let delivery = TaskDelivery.describe(record: task?.pr, taskOpen: task?.isCompleted == false,
                 reading: pullRequest.pullRequest, error: pullRequest.error, readAt: pullRequest.readAt,
-                localHead: store.changes?.headCommit, now: context.date)
+                localHead: store.changes?.headCommit, runsOn: store.machineName, now: context.date)
             let checks = pullRequest.pullRequest?.statusCheckRollup ?? []
             let dot: Color = delivery.warning ? palette.warning
                 : !delivery.readingIsCurrent ? palette.textTertiary
@@ -516,7 +516,7 @@ struct TaskChangesView: View {
                 }
                 .buttonStyle(WorkPlainButtonStyle()).font(Typography.meta)
             }
-            if store.query.remoteMachine == nil, let directory = store.changes?.recoveryDirectory {
+            if store.machine == nil, let directory = store.changes?.recoveryDirectory {
                 Button("Open saved versions") { NSWorkspace.shared.open(URL(fileURLWithPath: directory)) }
                     .buttonStyle(WorkPlainButtonStyle()).font(Typography.meta)
             }
@@ -768,6 +768,7 @@ struct DeliveryCard: View {
     let taskOpen: Bool
     let url: URL?
     let localHead: String?
+    let runsOn: String?
     @Environment(\.palette) private var palette
     @State private var showsChecks = false
     @State private var showsDescription = false
@@ -775,7 +776,7 @@ struct DeliveryCard: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 10)) { context in
             let delivery = TaskDelivery.describe(record: record, taskOpen: taskOpen, reading: store.pullRequest,
-                error: store.error, readAt: store.readAt, localHead: localHead, now: context.date)
+                error: store.error, readAt: store.readAt, localHead: localHead, runsOn: runsOn, now: context.date)
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                     Image(systemName: record?.publication?.github == nil ? "arrow.triangle.branch" : "arrow.triangle.pull")

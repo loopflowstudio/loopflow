@@ -1,4 +1,5 @@
 {
+  "origin": {"machine_id": "home_11111111111111111111111111111111", "label": "mini"},
   "session_id": "conversation-a",
   "task_pr_id": null,
   "repo": "/repo",

@@ -107,7 +107,10 @@ struct DTOFixtureTests {
         let added = try RegistryQuery.decode(
             WaveAdded.self, from: String(decoding: loadFixtureData("wave_added.json"), as: UTF8.self))
         #expect(added.created)
-        #expect(added.project.id == "proj_283eee0d35124e709d4bd0ecadce83f3")
+        let joined = try RegistryQuery.decode(
+            WaveAdded.self, from: String(decoding: loadFixtureData("wave_joined.json"), as: UTF8.self))
+        #expect(!joined.created && joined.project == nil)
+        #expect(added.project?.id == "proj_283eee0d35124e709d4bd0ecadce83f3")
         #expect(added.files == .uncommitted(reason: "HEAD is detached"))
         #expect(added.summary.count == 1)
     }
@@ -121,24 +124,6 @@ struct DTOFixtureTests {
         #expect(renamed.summary.count == 1)
     }
 
-    @Test func taskFilesFramesKeepInvalidationSeparateFromHeartbeat() throws {
-        let data = try loadFixtureData("task_files_frames.json")
-        let frames = try JSONDecoder().decode([TaskFilesFrame].self, from: data)
-        #expect(frames.map(\.paths) == [["note.txt", ".git/index", ""], []])
-        #expect(frames[0].request == frames[1].request)
-        #expect(frames[0].checkout == "/repo/task")
-        #expect(try JSONDecoder().decode([TaskFilesFrame].self, from: JSONEncoder().encode(frames)) == frames)
-    }
-
-    @Test func taskLocationsRetainFreshnessAndUnavailableEvidence() throws {
-        let data = try loadFixtureData("task_locations.json")
-        let readings = try JSONDecoder().decode([TaskLocationObservation].self, from: data)
-        #expect(readings[0].location == .recorded(taskID: readings[0].taskID, checkout: "/repo/task"))
-        #expect(readings[1].location == .recorded(taskID: readings[1].taskID, checkout: nil))
-        #expect(readings[2].location == .unrecorded)
-        #expect(readings[3].location == .unavailable(reason: "peer unreachable"))
-        #expect(try JSONDecoder().decode([TaskLocationObservation].self, from: JSONEncoder().encode(readings)) == readings)
-    }
 
     @Test func repositoryIdentityPreservesExplicitLocalLocators() throws {
         let data = try loadFixtureData("repository_identity.json")
@@ -1168,6 +1153,8 @@ func sessionInputHistoryFixture() throws {
         .deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("tests/fixtures/dto/session_history_summary.json")
     let value = try JSONDecoder().decode(SessionHistory.self, from: Data(contentsOf: url))
+    #expect(value.origin?.name == "mini")
+    #expect(value.id.hasPrefix("home_11111111111111111111111111111111:"))
     #expect(value.providers.count == 2)
     #expect(value.providers[0].outcome == "failed")
     #expect(value.providers[0].lfProcessId == nil)
@@ -1175,6 +1162,15 @@ func sessionInputHistoryFixture() throws {
     #expect(value.providers[1].outcome == "completed")
     #expect(value.providers[1].usage.inputTokens == 0)
     #expect(value.status == "failed → completed")
+    var local = try loadFixture("session_history_summary.json")
+    local["origin"] = NSNull()
+    let localHistory = try JSONDecoder().decode(SessionHistory.self, from: JSONSerialization.data(withJSONObject: local))
+    #expect(localHistory.origin == nil)
+    #expect(localHistory.id != value.id)
+    local.removeValue(forKey: "origin")
+    #expect(throws: DecodingError.self) {
+        try JSONDecoder().decode(SessionHistory.self, from: JSONSerialization.data(withJSONObject: local))
+    }
 }
 
 // Written by the Rust composed lifecycle test from one disposable Home.

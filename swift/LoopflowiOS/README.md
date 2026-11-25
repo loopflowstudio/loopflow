@@ -83,10 +83,26 @@ or **Unpause without running**. Cleanup disables unpause until the worker stops.
 The **Auto** switch stays armed during a hold and can be switched off.
 Tap ✓ to complete the Task. **…** opens its PR, Sessions, Wave moves and copy actions.
 
-**Changes** lists the files the Task changed; each opens its diff, and the diff
-opens the whole file. A Task with no conversation opens on its Changes; one
-that has not started says "No changes yet" and offers its first step. Once it
-starts, its conversation opens in place, without going back to the list. Task
+Under it, **Session · Files · Changes · Shell** switch what the screen shows.
+The paired Machine reaches the Task wherever it runs. When another Machine
+runs the Task, the workflow bar names it (**On mini**).
+
+- **Session** opens the Task's primary conversation. Pick a recorded Session
+  from **…** to open it in the same pane.
+- **Files** is the checkout's tree, changed files or not; a folder opens the
+  next level and a file opens as it stands. It re-reads itself when the
+  checkout changes or the Task moves.
+- **Changes** lists the files the Task changed; each opens its diff, and the
+  diff opens the whole file. It re-reads when the Task moves.
+- **Shell** is a shell in the Task's checkout, started the first time you open
+  it and kept running when you leave. After the Task moves, it says the shell
+  has ended and offers **New shell**, which starts one on the new Machine.
+
+A Task with no conversation opens on its Changes. One with no checkout yet
+says **Not started** on Files, Changes and Shell, with **Try again** on
+Changes and Shell; Files fills in by itself once the Task starts. When the Machine running the Task
+doesn’t answer, each view names it and offers **Try again** (**Reconnect** in a terminal). Once a
+conversation starts, it opens in place, without going back to the list. Task
 actions follow the Task itself, so they stay when the list's filter no longer
 shows it.
 
@@ -150,11 +166,12 @@ cd swift && swift test --filter DesignDisciplineTests
 |---|---|
 | `MachineConnection.swift`, `SavedMachine.swift` | The WebSocket that carries `Loopflow`'s shared `ServerLink`; saved address |
 | `RemoteMobileClient.swift`, `RemoteTaskObservation.swift` | Requests, the live Task reading (resumed after a lost connection), a Session attachment |
-| `SessionLink.swift` | The phone's hold on one Session |
-| `GhosttySurface.swift` | Ghostty's app and one terminal surface fed with the Session's bytes |
-| `SessionTerminal.swift`, `SessionView.swift` | Terminal scrolling, reply field and keys |
+| `TerminalLink.swift` | The phone's hold on one terminal: a Session or the Task's shell |
+| `GhosttySurface.swift` | Ghostty's app and one terminal surface fed with the terminal's bytes |
+| `SessionTerminal.swift`, `TerminalView.swift` | Terminal scrolling, reply field and keys |
 | `TaskListView.swift` | Repository, filter, search and the Task list |
-| `TaskWorkspaceView.swift` | A Task's conversation and its Changes |
+| `TaskWorkspaceView.swift` | A Task's Session, Changes, diffs and files |
+| `TaskFilesTree.swift` | Files: the checkout's tree, followed through `task.files.watch` |
 | `MobileTaskCreation.swift`, `MobileNewTaskView.swift` | New Task |
 
 ```sh

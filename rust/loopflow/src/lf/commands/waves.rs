@@ -905,7 +905,6 @@ pub struct TaskListArgs {
 pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
-        loopflow_execution::ops::plan_carriers::before_first_read(repo).await;
         let store = loopflow_execution::store::read_existing_registry()?.map(std::sync::Arc::new);
         let tasks = match &store {
             Some(store) => open_tasks(store, repo, query).await?,
@@ -986,7 +985,7 @@ fn peer_status(repo: &Path, task: &Task) -> super::read::Read {
     }
 }
 
-fn owner_detail(peer: &TaskPeer, repo: &Path, task: &Task) -> Result<TaskDetail> {
+pub(super) fn owner_detail(peer: &TaskPeer, repo: &Path, task: &Task) -> Result<TaskDetail> {
     let mut connection = peer.connect(repo, task, Some(TaskPeer::deadline()))?;
     let answer = connection.request(crate::server::wire::Operation::Read(peer_status(
         repo, task,
@@ -2374,6 +2373,19 @@ async fn snapshot_task_detail(
     let ownership = facts.ownership.get(&task.id);
     let owner = ownership.and_then(|ownership| ownership.owner.clone());
     let runs_on = ownership.and_then(|ownership| ownership.runs_on(&shared.local_machine));
+    // A Task another Machine runs has no checkout here; one left from before
+    // it moved is history, never its workspace or its progress.
+    let moved;
+    let task = match &runs_on {
+        Some(_) => {
+            moved = Task {
+                worktree: None,
+                ..task.clone()
+            };
+            &moved
+        }
+        None => task,
+    };
     let wave = task
         .wave_id
         .as_ref()
@@ -2387,14 +2399,13 @@ async fn snapshot_task_detail(
         task.worktree.as_deref().unwrap_or(repo),
         repo,
         wave,
-        None,
     )
     .ok()
     .map(|agent| agent.harness.as_str().to_owned());
     let runtime = snapshot_task_runtime(&execution, task, status, pending, owner, provider);
     let reference = task_reference(
         facts.issue_urls.get(&task.id).cloned(),
-        Some(task),
+        task,
         &shared.machines,
         &shared.local_machine,
     );
@@ -2854,15 +2865,14 @@ fn derive_task_condition(
     }
 }
 
-/// A Task's workspace is its checkout on this Machine, if it has one.
+/// A checkout left here after a move is absent from the Task's workspace.
 fn task_reference(
     issue_url: Option<String>,
-    task: Option<&Task>,
+    task: &Task,
     machines: &[loopflow_model::durable::Machine],
     local_machine: &loopflow_model::durable::MachineId,
 ) -> TaskReferenceSnapshot {
-    let workspace = task.and_then(|task| {
-        let task_worktree = task.worktree.as_ref()?;
+    let workspace = task.worktree.as_ref().map(|task_worktree| {
         let branch = Some(task.branch.clone());
         // A removed checkout has no root to resolve.
         let worktree = if loopflow_execution::observe::is_dir(task_worktree) {
@@ -2873,7 +2883,7 @@ fn task_reference(
         } else {
             task_worktree.clone()
         };
-        Some(TaskWorktreeSnapshot {
+        TaskWorktreeSnapshot {
             machine_label: machines
                 .iter()
                 .find(|machine| &machine.id == local_machine)
@@ -2884,7 +2894,7 @@ fn task_reference(
             base_commit: task.base_commit.clone(),
             worktree: worktree.display().to_string(),
             local_exists: loopflow_execution::observe::try_exists(&worktree).ok(),
-        })
+        }
     });
     TaskReferenceSnapshot {
         issue_url,
@@ -4169,6 +4179,31 @@ mod tests {
         );
         assert_eq!(workspace.worktree, "/local/checkout");
         assert_eq!(workspace.local_exists, Some(false));
+        assert_ne!(
+            detail.condition.local_progress.state,
+            super::LocalProgressEvidenceState::NotApplicable
+        );
+
+        db.execute(
+            "INSERT INTO task_ownership(id,task_id,kind,machine_id,at,ordered_at,writer_machine_id,written_here)
+             VALUES('own_55555555555555555555555555555555',?1,'claim',?2,1,1000,?2,0)",
+            [task.id.as_str(), peer.as_str()],
+        )
+        .unwrap();
+        let reads = super::DetailReads::read(&store, &[&task], &shared).unwrap();
+        let detail = super::snapshot_task_detail(&store, &task, false, &reads)
+            .await
+            .unwrap();
+        assert_eq!(
+            detail.runtime.unwrap().owner.unwrap().machine.id,
+            Some(peer)
+        );
+        assert!(detail.reference.workspace.is_none());
+        // The checkout left here is not the Task's progress either.
+        assert_eq!(
+            detail.condition.local_progress.state,
+            super::LocalProgressEvidenceState::NotApplicable
+        );
     }
 
     #[tokio::test]
@@ -4490,14 +4525,7 @@ mod tests {
                 "initiative_ids":["initiative"], "team_ids":["team"]
             }], "items":[]})).unwrap(),
         }, None).await.unwrap();
-        loopflow_storage::sqlite::project_selection::write_project_binding(
-            &store.sqlite,
-            wave.id(),
-            None,
-            "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3",
-            &loopflow_execution::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
-        )
-        .unwrap();
+        // The Initiative's sole In Progress Project binds when its inventory arrives.
         let super::Evidence::Ok { items, .. } = super::project_planning(&store, &wave).await else {
             panic!("Project plan unavailable");
         };

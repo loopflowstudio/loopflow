@@ -69,25 +69,25 @@ final class TaskActionsTests: XCTestCase {
         XCTAssertEqual(reason, "store is busy")
     }
 
-    func testATaskStartedFromItsScreenOpensTheConversationItsRowNames() async throws {
-        var asked: [String] = []
-        let begun = try await TaskWorkspaceView.conversation(after: try reading(sessions: true)) { repository in
-            asked.append(repository)
+    func testATaskStartedFromItsScreenOpensTheConversationTheMachineNames() async throws {
+        var asked = 0
+        let begun = try await TaskWorkspaceView.conversation(after: try reading(sessions: true)) {
+            asked += 1
             return "session-1"
         }
         XCTAssertEqual(begun, "session-1")
-        XCTAssertEqual(asked, ["/src/loopflow"])
+        XCTAssertEqual(asked, 1)
     }
 
-    func testARowThatNamesNoConversationYetLeavesTheScreenAsItIs() async throws {
-        let begun = try await TaskWorkspaceView.conversation(after: try reading(sessions: true)) { _ in nil }
+    func testAMachineThatNamesNoConversationYetLeavesTheScreenAsItIs() async throws {
+        let begun = try await TaskWorkspaceView.conversation(after: try reading(sessions: true)) { nil }
         XCTAssertNil(begun)
     }
 
     func testBeforeTheReadingListsASessionNothingIsAsked() async throws {
         for reading in [try reading(sessions: false), .loading, .failed("The Machine is away")] {
-            let begun = try await TaskWorkspaceView.conversation(after: reading) { _ in
-                XCTFail("the row is read only once a Session exists")
+            let begun = try await TaskWorkspaceView.conversation(after: reading) {
+                XCTFail("the primary is read only once a Session exists")
                 return nil
             }
             XCTAssertNil(begun)

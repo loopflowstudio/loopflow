@@ -61,3 +61,10 @@ Keep the fixed checkmark from the V4c prototype. A merged PR accents Complete im
 Bare CLI unpause still lifts the hold. The apps choose the existing served write from the saved Graph. If a sidebar row has no cursor reading, fetch it when Unpause is clicked.
 
 The phone’s metadata menu opens recorded conversations. The Mac’s independent New conversation starts a local Task shell. The phone’s held-terminal API can continue a recorded Session, but it has no matching independent-chat preparation operation.
+
+## Stack sync with remote workspaces
+
+Keep this Task's scratch files through the parent branch's scratch clear. On
+the phone, the Session pane opens the primary conversation by default.
+Choosing a recorded conversation in the metadata menu switches to that pane.
+The Shell pane keeps its own draft.

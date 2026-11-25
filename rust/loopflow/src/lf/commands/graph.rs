@@ -1001,6 +1001,9 @@ impl RunningGraph<'_> {
             loopflow_execution::journal::LF_EXECUTION_ID_ENV,
             run.as_str(),
         );
+        if kind == StepKind::Commit {
+            loopflow_execution::config::settings::independent_agent(command.as_std_mut())?;
+        }
         let step = (kind != StepKind::Commit).then_some(run);
         command.env(
             loopflow_execution::journal::GRAPH_STEP_ENV,
@@ -1206,12 +1209,7 @@ impl RunningGraph<'_> {
         {
             return;
         }
-        let mut args = ["commit", "--step", step].map(str::to_owned).to_vec();
-        // `commit-message` keeps its own agent; the run's writes the message
-        // only when it has none.
-        if let Some(agent) = &self.launcher.agent {
-            args.extend(["--agent".to_owned(), agent.clone()]);
-        }
+        let args = ["commit", "--step", step].map(str::to_owned);
         if let Err(error) = self.spawn("commit", StepKind::Commit, &args).await {
             tracing::warn!(%step, %error, "could not commit the step's edits");
         }

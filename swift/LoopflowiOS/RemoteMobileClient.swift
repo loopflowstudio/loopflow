@@ -37,8 +37,8 @@ final class RemoteMobileClient: MobileTaskCreationClient {
     private lazy var journal: CreationSubmissions = {
         let directory = URL.applicationSupportDirectory.appending(path: "submissions-\(savedMachine.machineID)")
         let machineID = savedMachine.machineID
-        return CreationSubmissions(directory: directory, machine: { machineID }, lookup: { [self] id in
-            try await connection().read(.creationGet(requestID: id), deadline: Self.requestDeadline)
+        return CreationSubmissions(directory: directory, machine: { machineID }, lookup: { [self] id, task in
+            try await connection().read(.creationGet(requestID: id, task: task), deadline: Self.requestDeadline)
         }, send: { [self] payload in
             let creation = try JSONDecoder().decode(JSONValue.self, from: payload)
             return String(decoding: try await connection().request(.submittedCreation(creation), deadline: Self.requestDeadline).bytes,
@@ -79,14 +79,28 @@ final class RemoteMobileClient: MobileTaskCreationClient {
 
     private struct Ticket: Decodable { let ticket: String }
 
-    /// Attaching fits the terminal to `size`.
-    func attach(sessionID: String, size: TerminalGeometry) async throws -> RemoteAttachment {
-        let ticket: String
-        do { ticket = try decode(Ticket.self, await request(.sessionAttach(session: sessionID))).ticket }
-        catch let error as ServerError where error.code == .notFound { throw SessionNotRunning() }
-        let terminal = try await MachineSocket.terminal(endpoint: savedMachine.endpoint, ticket: ticket)
-        do { return try await RemoteAttachment.open(sessionID: sessionID, socket: terminal, size: size) }
-        catch { terminal.close(); throw error }
+    /// The Session the Task opens on: its saved primary, read from the Machine
+    /// that runs the Task. Nil before it has one.
+    func primarySession(task: String) async throws -> String? {
+        try await query.taskDetail(issue: task).currentSession?.id
+    }
+
+    /// Attaching fits the terminal to `size`. The Machine attaches wherever the Task runs.
+    func attach(_ terminal: TerminalTarget, task: String, size: TerminalGeometry) async throws -> RemoteAttachment {
+        let ticket = try await ticket(terminal, task: task)
+        let socket = try await MachineSocket.terminal(endpoint: savedMachine.endpoint, ticket: ticket)
+        do { return try await RemoteAttachment.open(socket: socket, size: size) }
+        catch { socket.close(); throw error }
+    }
+
+    /// A single-use ticket for the running terminal; `SessionNotRunning` when none runs.
+    func ticket(_ terminal: TerminalTarget, task: String) async throws -> String {
+        let operation: ServerOperation = switch terminal {
+        case .session(let id): .sessionAttach(session: id, task: task)
+        case .shell: .taskShellAttach(issue: task, shellID: Self.shellID(task: task))
+        }
+        do { return try decode(Ticket.self, await request(operation)).ticket }
+        catch let error as ServerError where error.code == .notFound && !error.notStarted { throw SessionNotRunning() }
     }
 
     private struct Started: Decodable {
@@ -94,11 +108,28 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         enum CodingKeys: String, CodingKey { case terminalID = "terminal_id" }
     }
 
-    /// Continue a recorded conversation whose terminal has stopped, in a
-    /// terminal the Machine holds; repeating `request` starts nothing.
-    func startSession(sessionID: String, request: String, size: TerminalGeometry) async throws {
-        _ = try decode(Started.self, await self.request(.sessionContinue(
-            session: sessionID, request: request, rows: size.rows, cols: size.columns)))
+    /// Start the terminal where the Task runs: continue a recorded conversation
+    /// whose terminal stopped (repeating `request` starts nothing), or the
+    /// phone's shell in the Task's checkout (repeating its ID starts nothing).
+    func start(_ terminal: TerminalTarget, task: String, request: String, size: TerminalGeometry) async throws {
+        let operation: ServerOperation = switch terminal {
+        case .session(let id):
+            .sessionContinue(session: id, request: request, rows: size.rows, cols: size.columns, task: task, agent: nil)
+        case .shell:
+            .taskShellStart(issue: task, shellID: Self.shellID(task: task), rows: size.rows, cols: size.columns)
+        }
+        _ = try decode(Started.self, await self.request(operation))
+    }
+
+    /// The phone's one shell in a Task, named the same on every Machine.
+    static func shellID(task: String) -> String { "mobile-\(task)" }
+
+    /// The Task's checkout revision after each change there, wherever the Task runs.
+    func observeTaskFiles(issue: String) -> ServerWatch<RawJSON> {
+        ServerLink.subscribe(.taskFilesWatch(issue: issue), connect: { [self] in try await connection() }, map: { update in
+            guard case .reading(let frame) = update else { return nil }
+            return frame
+        })
     }
 
     func creationContext() async throws -> MobileCreationContext {
@@ -220,7 +251,6 @@ final class RemoteMobileClient: MobileTaskCreationClient {
 
 @MainActor
 final class RemoteAttachment {
-    let sessionID: String
     lazy var events = AsyncStream<TerminalEvent>(unfolding: { [weak self] in
         await self?.nextEvent()
     }, onCancel: { [weak self] in
@@ -239,15 +269,14 @@ final class RemoteAttachment {
     private var closed = false
     private var attachDeadline: Task<Void, Never>?
 
-    private init(sessionID: String, socket: MachineSocket) {
-        self.sessionID = sessionID
+    private init(socket: MachineSocket) {
         connection = socket
         (writes, outgoing) = AsyncStream.makeStream(bufferingPolicy: .bufferingOldest(64))
     }
 
     /// `socket` is an admitted terminal connection carrying the owner protocol.
-    static func open(sessionID: String, socket connection: MachineSocket, size: TerminalGeometry) async throws -> RemoteAttachment {
-        let link = RemoteAttachment(sessionID: sessionID, socket: connection)
+    static func open(socket connection: MachineSocket, size: TerminalGeometry) async throws -> RemoteAttachment {
+        let link = RemoteAttachment(socket: connection)
         let timeout = connection.deadline(seconds: 5)
         defer { timeout.cancel() }
         link.decoder.expectAttachment(1)

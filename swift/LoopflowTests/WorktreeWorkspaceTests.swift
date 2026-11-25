@@ -85,7 +85,7 @@ struct WorktreeWorkspaceTests {
         panes.showBrowser(.graphLog)
         panes.showBrowser(.files)
         panes.showBrowser(.graphLog)
-        guard case .browser(_, let tabs, let selected, _, _)? = panes.browserPane?.content else { throw RegistryQueryError("No browser") }
+        guard case .browser(_, let tabs, let selected, _)? = panes.browserPane?.content else { throw RegistryQueryError("No browser") }
         #expect(tabs == [.files, .graphLog])
         #expect(selected == "graph-log")
         #expect(panes.sessionPane?.sessionId == "design")

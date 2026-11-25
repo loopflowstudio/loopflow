@@ -1,4 +1,4 @@
-//! Name remote machines without transferring credentials or execution authority.
+//! Register Machines and manage their connections.
 
 use anyhow::{anyhow, Context};
 use serde::{Deserialize, Serialize};
@@ -10,6 +10,7 @@ use loopflow_execution::machine::connection::{
     find_machine, install_command, local_machine, probe, report_version, update_command,
     verify_identity, ConnectionFailure, FailureKind, INSTALL_COMMAND,
 };
+use loopflow_execution::machine::login;
 use loopflow_execution::machine::ssh::remote_path;
 use loopflow_execution::store::Store;
 use loopflow_model::durable::{DefaultScope, Machine, MachineDefault, MachineSetting};
@@ -49,6 +50,13 @@ fn prune(json: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// This Machine, for signing it in: a fresh home gets its store here.
+async fn this_machine() -> anyhow::Result<Machine> {
+    let config = loopflow_execution::store::storage_config_from_env()?;
+    let store = loopflow_execution::store::open_store(&config).await?;
+    Ok(store.local_machine().await?)
+}
+
 async fn existing_store() -> anyhow::Result<Store> {
     loopflow_execution::store::open_existing_store()
         .await?
@@ -56,19 +64,41 @@ async fn existing_store() -> anyhow::Result<Store> {
 }
 
 /// `lf machine list`: your registered Machines with the defaults naming them.
+/// Desktop lists ended rentals too; its status read shows them as ended.
 pub async fn machines() -> anyhow::Result<Vec<MachineListing>> {
-    listings(&existing_store().await?, None).await
+    let store = existing_store().await?;
+    let machines = store.machines().await?;
+    listings(&store, machines, true).await
 }
 
-async fn listings(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<MachineListing>> {
-    let mut machines = match label {
-        Some(label) => vec![find_machine(store, label).await?],
-        None => store.machines().await?,
-    };
+/// The Machines a command reads: the one labelled, else every registered
+/// Machine but rentals already given back, whose routes lead nowhere.
+async fn selected(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<Machine>> {
+    if let Some(label) = label {
+        return Ok(vec![find_machine(store, label).await?]);
+    }
+    let mut live = Vec::new();
+    for machine in store.machines().await? {
+        let ended = store
+            .sqlite
+            .rental_for_machine(&machine.id)?
+            .is_some_and(|rental| !rental.state.is_live());
+        if !ended {
+            live.push(machine);
+        }
+    }
+    Ok(live)
+}
+
+async fn listings(
+    store: &Store,
+    mut machines: Vec<Machine>,
+    with_local: bool,
+) -> anyhow::Result<Vec<MachineListing>> {
     let defaults = loopflow_execution::store::placement::machine_defaults(&store.sqlite)?;
     // This Machine is listed only when one of your defaults names it.
     let local = store.local_machine().await?;
-    if label.is_none() && defaults.iter().any(|d| d.machine_id == local.id) {
+    if with_local && defaults.iter().any(|d| d.machine_id == local.id) {
         machines.insert(0, local);
     }
     let hub = loopflow_execution::ops::plan_hub::hub(&store.sqlite)?.map(|hub| hub.id);
@@ -100,22 +130,78 @@ async fn listings(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<Mach
 
 async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
     match cmd {
-        MachineCommand::Connect {
-            target,
-            provider,
-            email,
-            chrome_profile,
+        MachineCommand::Forward {
+            label,
+            task,
+            session,
         } => {
             let machine =
-                loopflow_execution::machine::connection::resolve_target(target, false).await?;
-            return loopflow_execution::machine::credentials::connect(
+                loopflow_execution::machine::connection::find_registered_machine(label).await?;
+            let count = loopflow_execution::machine::forward::refresh_files(
+                &std::env::current_dir()?,
                 &machine,
-                *provider,
-                email.as_deref(),
-                chrome_profile.as_deref(),
-                batch,
+            )?;
+            let files = if count == 1 { "file" } else { "files" };
+            println!("Refreshed {count} {files} on {label}.");
+            if let Some(id) = task.as_ref().or(session.as_ref()) {
+                let mut args = vec!["machine".into(), "credentials".into(), "restart".into()];
+                if task.is_some() {
+                    args.push("--task".into());
+                }
+                args.extend(["--".into(), id.clone()]);
+                let reply =
+                    loopflow_execution::machine::ssh::request(&machine, &args, None).await?;
+                println!("Resuming {} on {label}.", String::from_utf8(reply)?.trim());
+            }
+            return Ok(());
+        }
+        MachineCommand::Login {
+            provider,
+            machines,
+            chrome_profile,
+            api_key,
+            refused,
+        } => {
+            if *refused || !machines.is_empty() {
+                login::require_reach(*provider, machines.first().map(String::as_str))?;
+            }
+            let targets = if *refused {
+                let targets = login::refused(*provider).await?;
+                if targets.is_empty() {
+                    println!("No Machine needs a {} login", provider.display_name());
+                }
+                targets
+            } else {
+                named_or_here(machines).await
+            };
+            return each(targets, "signed in", |machine| async move {
+                login::login(
+                    &machine,
+                    *provider,
+                    chrome_profile.as_deref(),
+                    *api_key,
+                    batch,
+                )
+                .await
+            })
+            .await;
+        }
+        MachineCommand::Logout { provider, machines } => {
+            return each(
+                named_or_here(machines).await,
+                "signed out",
+                |machine| async move { login::logout(&machine, *provider).await },
             )
             .await;
+        }
+        MachineCommand::Logins { machine, json } => {
+            let machine = match machine {
+                Some(target) => {
+                    loopflow_execution::machine::connection::resolve_target(target, false).await?
+                }
+                None => this_machine().await?,
+            };
+            return login::print_logins(&machine, *json).await;
         }
         MachineCommand::Credentials { cmd } => {
             return super::machine_credentials::receive(cmd).await
@@ -234,10 +320,14 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             }
         }
         MachineCommand::List { label, json } => {
-            let listings = listings(&store, label.as_deref()).await?;
+            let machines = selected(&store, label.as_deref()).await?;
+            let listings = listings(&store, machines, label.is_none()).await?;
             if *json {
                 println!("{}", serde_json::to_string(&listings)?);
             } else {
+                if listings.is_empty() {
+                    println!("No Machines.");
+                }
                 for listing in &listings {
                     print_machine(&listing.machine, false)?;
                     if listing.hub {
@@ -272,10 +362,10 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             }
         }
         MachineCommand::Status { label, json } => {
-            let machines = match label {
-                Some(label) => vec![find_machine(&store, label).await?],
-                None => store.machines().await?,
-            };
+            let machines = selected(&store, label.as_deref()).await?;
+            if machines.is_empty() && !*json {
+                println!("No Machines.");
+            }
             let mut statuses = Vec::new();
             for machine in machines {
                 let status = connection_status(&store, machine).await?;
@@ -305,7 +395,10 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             store.remove_machine(label).await?;
             println!("Removed {label}");
         }
-        MachineCommand::Connect { .. }
+        MachineCommand::Forward { .. }
+        | MachineCommand::Login { .. }
+        | MachineCommand::Logout { .. }
+        | MachineCommand::Logins { .. }
         | MachineCommand::Credentials { .. }
         | MachineCommand::Self_ { .. }
         | MachineCommand::Doctor { .. } => {
@@ -321,6 +414,52 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Each named Machine in turn, or this one; one Machine failing leaves the rest to try.
+async fn named_or_here(targets: &[String]) -> Vec<(String, anyhow::Result<Machine>)> {
+    if targets.is_empty() {
+        return vec![("this Machine".to_string(), this_machine().await)];
+    }
+    let mut resolved = Vec::new();
+    for target in targets {
+        let machine = loopflow_execution::machine::connection::resolve_target(target, false).await;
+        resolved.push((target.clone(), machine));
+    }
+    resolved
+}
+
+/// Runs `act` on every Machine, then names each that was not `done`. A single
+/// Machine's error is the whole error.
+async fn each<F, Fut>(
+    targets: Vec<(String, anyhow::Result<Machine>)>,
+    done: &str,
+    act: F,
+) -> anyhow::Result<()>
+where
+    F: Fn(Machine) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<()>>,
+{
+    let single = targets.len() == 1;
+    let mut failed = Vec::new();
+    for (name, machine) in targets {
+        let result = match machine {
+            Ok(machine) => act(machine).await,
+            Err(error) => Err(error),
+        };
+        if let Err(error) = result {
+            if single {
+                return Err(error);
+            }
+            eprintln!("{name}: {error:#}");
+            failed.push(name);
+        }
+    }
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(anyhow!("not {done}: {}", failed.join(", ")))
+    }
 }
 
 fn print_machine(machine: &Machine, json: bool) -> anyhow::Result<()> {
@@ -379,9 +518,12 @@ async fn connection_status(store: &Store, machine: Machine) -> anyhow::Result<Ma
         .rental_for_machine(&machine.id)?
         .filter(|rental| !rental.state.is_live());
     let (state, remote_version, error) = if let Some(rental) = ended {
-        let when = rental
-            .ended_at
-            .map_or_else(String::new, |at| format!(" {at}"));
+        let when = rental.ended_at.map_or_else(String::new, |at| {
+            format!(
+                " {}",
+                loopflow_execution::output::format_time(at.unix_timestamp())
+            )
+        });
         (
             ConnectionState::EndedRental,
             None,

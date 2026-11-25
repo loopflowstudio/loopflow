@@ -9,16 +9,17 @@ Installation prepares client access automatically. Desktop's first connection
 requests readiness through the selected installation; subsequent connections and
 terminal recovery never re-register a server. `lf server status` only observes.
 
-The foreground `lf server run` belongs to the OS supervisor. Desktop
-uses the service for all shared Work reads, writes and subscriptions, plus
-existing terminal attachment. It links no embedded Loopflow library. Desktop's UI automation socket remains app-owned.
+Desktop uses the service for all shared Work reads, writes and subscriptions,
+plus existing terminal attachment. It links no embedded Loopflow library. Desktop's UI automation socket remains app-owned.
 
 `installation/server.rs` owns registration and replacement. Its hidden
 `install server` bridge is for local clients, not a separate setup workflow.
 
 On macOS the signed selected app bundles `com.loopflow.server.plist` and
 registers it with SMAppService. Explicit development Machines use separately
-named launchd jobs. Linux uses a user systemd service. Closing Desktop does not
+named launchd jobs. Linux uses a systemd user service when its manager is available.
+Without a user manager, the first connection starts a detached `lf server run`
+and writes its output to `logs/server.log`. Closing Desktop does not
 stop the service. Work sessions and Desktop shells run in a holder the service starts with
 `setsid` and controls ([Held terminals](../../../loopflow-execution/src/transport/README.md#held-terminals));
 stopping or replacing the service leaves holders and their agents running.
@@ -94,11 +95,12 @@ agent attaches, or after 3 seconds, most recently updated Task first. Sessions
 and carriers share one backoff: the first start after a death is immediate,
 later ones wait 1 minute doubling to 30, and after 5 starts without a finished
 turn or step the Session and the Task run show the command that continues. A
-start that fails records its reason on the Session
-(`agent_sessions.start_failure`, for example `claude is not installed on this
-Machine's PATH`), cleared by the next start that succeeds, and retries on the
-same backoff. A first start that succeeds after failed ones clears their
-count too: nothing started again. A start under way (the agent is attached to
+failed terminal start records its reason in `agent_sessions.start_failure`
+and retries on that backoff. The server checks the recorded harness before
+counting a start. A missing executable or native login leaves the attempt
+count alone. The server rechecks blocked conversations on its periodic pass
+and starts them when their harness is ready. A successful first start clears
+the count of earlier failed attempts. A start under way (the agent is attached to
 its open held terminal and has no pid yet, `SessionSummary.launching`) reads
 `starting`, not `unknown`. A Session's `ended {at, exit_code}` and `start {attempts,
 last_started_at}` carry these facts, and its `outlook {kind, at, reason,
@@ -117,7 +119,7 @@ way `lf machine doctor`'s `ptys` check reads it. Only a Task's work session is
 started; a Wave's or repository's work session, a chat and a batch are
 reported, never started.
 
-## Local protocol, revision 9
+## Local protocol
 
 One connection per client over the same-user Unix socket. Every message is one
 JSON object per line (`serde_json` never emits a raw newline). Control messages
@@ -165,7 +167,7 @@ subscriptions carry `sender`, what the receiving server cannot know; a
 Machine's null `sender` is `invalid`, and a client on this Machine sends null:
 
 ```text
-→ {"type":"hello","revision":9,"min_revision":8,"client":{"kind":"machine",…}}
+→ {"type":"hello","revision":10,"min_revision":10,"client":{"kind":"machine",…}}
 ← {"type":"welcome",…}
 → {"type":"request","id":"…","operation":{"kind":"task.auto.off","directory":"/laptop/repo",…},"select":null,"sender":{"repository":"repo_…","selection":{"profile":{…},"participant":"…","agent":null,"settings":null,"source":null},"secrets":{}}}
 ← {"type":"response","id":"…","result":{…}}
@@ -177,6 +179,66 @@ operation's `directory` is the sender's), and starts any launch (`task.run`,
 which nothing prints (`Debug` shows names). Files `forward.files` names are
 delivered over SSH first. The sender waits 120 s for an answer; past that the
 request fails, naming the Machine and `ssh <route> lf server status`.
+
+### Tasks on another Machine
+
+A client names a Task and nothing else; this server alone decides where it is.
+When a request from this Machine's own clients (Desktop, the phone, the CLI)
+names a Task that `task_execution_route` gives to another Machine, the server
+sends it there and answers with that Machine's result:
+
+| Routed | Stays local |
+| --- | --- |
+| `task.status`, `.get`, `.detail`, `.changes`, `.diff`, `.file`, `.files`, `.files.watch`, `.save`; `task.runs` and `session.list` with a `task` | `plan.list`, `desktop.view.list`, `view.select`, `wave.plan`, `session.list` without a `task` |
+| `session.continue`, `.attach` with a `task`, a `machine`, or a Session this store records elsewhere | `session.start`, whose `argv`, `cwd` and `env` are the caller's |
+| `task.shell.start`, `.attach`, `.close` | |
+
+A request a peer sent is never sent on. The forwarded Task is named by its
+tracker ID (else its identifier, else its local ID for a trackerless plan),
+since two Machines can hold different local IDs for one Linear issue; the peer
+resolves it in its checkout of `sender.repository`. `task.save` sends no
+`forward.env` secrets and no `forward.files`.
+
+`peers.rs` keeps up to four idle `lf server connect` connections per Machine
+and route, closes them after 60 s idle, and opens a fresh one when the route
+changes. A read whose reused connection hits EOF or a reset retries once on a
+fresh one. A save retries only when it carries a `request_id`, which the
+peer's answer cache makes safe; otherwise a write lost mid-flight is
+`outcome_unknown`. Bare CLI commands outside the server still open one
+connection and close it on exit.
+
+A routed subscription (`task.get`, `task.status`, `task.files.watch`) belongs
+to the Task, not the Machine. The server watches `task_ownership` beside the
+peer stream; when the owner changes it drops the stream and subscribes on the
+new owner (or reads locally) under the same `id`. A source that has already
+recorded the move can publish a null workspace while the claim reaches the
+subscriber’s Machine. The destination reading's `reference.workspace.machine_id`
+names the new Machine, and `task.files.watch`
+sends a fresh file revision. Its body carries `task_id`, `machine_id`,
+`machine_label` (this Machine's name for the owner), `checkout` and an opaque
+`revision`. Refresh the tree when that revision changes. A Task with no
+checkout on its Machine yet reads null `checkout` and `revision`, and the same
+subscription goes live once the checkout is recorded, including at a move's
+destination. File events can coalesce while a client is busy. A checkpoint
+returns the current revision. If the peer connection fails, a reading carries
+the reason in `unavailable` and a null body. The same subscription tries the
+current owner again after five seconds or when the planning revision changes.
+Only a Task that does not exist ends the subscription (`not_found`).
+A draft carries its base revision, and
+`task.save`'s revision check is the only write guard after a move.
+
+When a peer owns a Task, the local plan row has a null `reference.workspace`
+and `runtime.owner` names the peer. Opening the Task with `task.get` returns
+the checkout from the owning Machine.
+
+Two errors name what went wrong:
+
+```text
+← {"type":"error","id":"changes","code":"not_found","message":"Task LOO-12 is not started","data":{"reason":"not_started","task_id":"…"}}
+← {"type":"error","id":"changes","code":"unavailable","message":"mini did not answer; run `ssh mini lf server status`","data":{"resource":"machine","machine_id":"…","machine_label":"mini","machine_name":"…"}}
+```
+
+No routed operation falls back to a local checkout, shell or Session.
 
 `machine/wire.rs` owns the envelope, endpoint and native request types;
 `server/wire.rs` instantiates the envelope with the CLI read/write operations.
@@ -218,8 +280,8 @@ a described kind with exactly its fields, every client fixture must be encoded
 by a test and every server fixture must decode.
 
 ```text
-→ {"type":"hello","revision":9,"min_revision":8,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
-← {"type":"welcome","client_id":"…","revision":9,"server_revision":9,"min_revision":8,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}
+→ {"type":"hello","revision":10,"min_revision":10,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
+← {"type":"welcome","client_id":"…","revision":10,"server_revision":10,"min_revision":10,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}
 → {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true},"select":null,"request_id":null,"sender":null}
 → {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null,"task":null},"select":["id","title","state"],"resume":null,"sender":null}
 ← {"type":"response","id":"a","trace_id":"…","result":{…}}
@@ -243,10 +305,18 @@ unavailable or uninitialized) and limits. The negotiated revision is the whole
 compatibility check: a server that speaks it offers every operation below, so
 no capability list travels. With no revision in
 common it answers `error {code: incompatible}` naming the side to update in
-its message and in `data.update` (`client` or `server`), then closes. This build speaks revisions 8 and 9; the shape lets a later server speak
+its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 10 only; the shape lets a later server speak
 two. A revision-1 client's four-byte length prefix starts below `0x20`; the
 server answers it a revision-1 framed `incompatible` error carrying `instance`
 and closes. That sniff is the whole compatibility layer and goes with revision 1.
+
+Revision 10 routes Task operations to the Task's Machine
+([Tasks on another Machine](#tasks-on-another-machine)).
+`session.continue` and `session.attach` carry required-nullable `task` and `machine`.
+`session.start` launches in the caller’s directory. Task shells use
+`task.shell.start`, `task.shell.attach` and `task.shell.close`.
+`task.files.watch` follows the Task's checkout, including before it exists.
+`session.continue` carries the caller's `agent`.
 
 Revision 7 answers each write once it has committed, with `revisions`: the
 store domains it advanced and their value after the commit. Planning sync and
@@ -316,9 +386,9 @@ on `code`; `outcome_unknown` means the request may have taken effect:
 | --- | --- | --- |
 | `incompatible` | No revision in common | `{server: {revision, min_revision}, update}` |
 | `invalid` | Malformed message, an operation this build does not have, or refused arguments, such as subscribing to a read with no subscription | `{kind}` for a refused operation, else null |
-| `not_found` | The named terminal, subscription, repository checkout, view member or record does not exist | what was named: `{terminal_id, current_terminal_id}`, `{id}`, `{repo_id}`, `{expression}` |
+| `not_found` | The named terminal, subscription, repository checkout, view member or record does not exist, or a Task has no checkout on its Machine yet | what was named: `{terminal_id, current_terminal_id}`, `{id}`, `{repo_id}`, `{expression}`; `{reason: "not_started", task_id}` for an unstarted Task |
 | `conflict` | The request contradicts current state: a still-unanswered transport ID or a creation ID reused with different content | `{id}` or `{request_id}` |
-| `unavailable` | A dependency is missing or failed: the Machine registry, a subscription, a read | `{resource}` when one is named |
+| `unavailable` | A dependency is missing or failed: the Machine registry, a subscription, a read, the Machine a Task runs on | `{resource}` when one is named; `{resource: "machine", machine_id, machine_label, machine_name}` for an unanswering Machine |
 | `outcome_unknown` | The operation may have run; inspect its creation receipt when available, otherwise the resource | creation details when known, otherwise null |
 | `busy` | Admission capacity reached, an oversized read answer, or retained subscription capacity is exhausted | `{max_connections}` at connection capacity; `{limit, max}` for request admission; `{limit: "retained_bytes"}` for an answer that exceeds the message limit |
 
@@ -399,11 +469,13 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.list` (`closed: true`) | `lf task list --closed --wave <wave>` | read |
 | `task.changes` | `lf task changes <issue>` | read |
 | `task.diff`, `task.file`, `task.files` | `lf task diff`, `lf task file`, `lf task files` | read |
+| `task.files.watch` | none; Desktop's and the phone's Files | subscription; file tree revision after a change under the checkout, a new checkout or a Task move |
+| `task.shell.start`, `.attach`, `.close` | `lf desktop shell`, which Desktop's Shell runs; the phone's Shell (`shell_id` `mobile-<task>`) | server; a Task shell by `shell_id`, held on the Machine that started it |
 | `task.context` | `lf task context <issue>` | read |
 | `task.runs` | `lf task runs <issue>` | read |
 | `task.wait` | `lf task wait <issue> --until <state>` | `engine::task` |
 | `task.create` | `lf task create [--session <id>] [--run] --request-id <id>` | write |
-| `creation.get` | `lf server receipt <request-id> --json` | read; no creation or launch |
+| `creation.get` | `lf server receipt <request-id> [--task <task>] --json` | read; no creation or launch; a `task` another Machine runs is read there |
 | `task.run` | `lf task run <issue>` | `engine::task` |
 | `task.auto.on` | `lf task auto on <issue>` | `engine::task` |
 | `task.auto.off` | `lf task auto off <issue>` | `engine::task` |
@@ -416,7 +488,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |
 | `session.list` | `lf session list` | read |
 | `session.card` | `lf session card <id>` | read |
-| `session.start` | start a held terminal, for example for `lf resume --task`, a Desktop pane or a Desktop Task shell | server |
+| `session.start` | start a held terminal, for example for `lf resume --task` or a Desktop pane | server |
 | `session.attach` | Desktop panes' relay and other clients that speak only the server protocol; CLI views of a held terminal enter `held.sock` directly | server |
 | `session.usage` | `lf session usage` (`lf usage`) | read |
 | `session.history` | `lf session history` (`lf history`) | read |
@@ -457,8 +529,6 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `pr.land` | `lf pr land` (`lf land`) | write; `engine::pr::land` (detached; the Process carrying the landing) |
 | `pr.checks`, `.reviews` | `lf pr checks`, `lf pr reviews` | read; `engine::pr::checks` (no `--subscribe`), `reviews` |
 | `checkout.commit`, `.sync`, `.create` | `lf commit`, `lf sync`, `lf wt create` | write; `engine::checkout::commit`, `sync` (detached unless `--plan`, `--continue`, `--abort`), `create` |
-| `account.list` | `lf account [<provider>]` | read; `engine::account::list` (service authentication) |
-| `account.connect`, `.disconnect` | `lf account connect`, `disconnect` | write; `engine::account::connect`, `disconnect` (service authentication) |
 | `skill.run` | `lf skill <name>` (`lf -b`, detached) | write; `engine::skill::run` (the Process carrying the run) |
 | `skill.list` | `lf list [<path>…]` | read; `lf::commands::list::list_children` |
 | `desktop.portfolio`, `.portfolio.set` | `lf desktop portfolio` (`lf portfolio`) | read, write |
@@ -522,7 +592,7 @@ the phone's `view.select` Task list and its creation destinations all read it.
   defaults, so a selected answer would not decode: it sends `null`, and gets
   a smaller payload only through a read with its own DTO.
 - `subscribe` takes a read with a subscription: `desktop.view.list`, `view.select`,
-  `session.list` without `limit`, `task.get`, `task.wait`, `session.history`,
+  `session.list` without `limit`, `task.get`, `task.status`, `task.files.watch`, `task.wait`, `session.history`,
   `plan.list` and `repo.tracker`. It answers
   a null `response`, then `reading {id,checkpoint,frame}` messages wrapping
   the existing complete `answers/unavailable/body` subscription frame. Typed
@@ -537,8 +607,8 @@ the phone's `view.select` Task list and its creation destinations all read it.
   pulls. Already admitted reads may finish and release their resources. Reader
   execution remains independent of the server's blocking pool. These readers
   own no provider or terminal lifetime. A subscription's arguments are fixed: new
-  arguments are a new subscription with a complete first reading. A subscription that
-  fails sends its `unavailable` reading, then `error {id, code: unavailable}`
+  arguments are a new subscription with a complete first reading. A terminal
+  reader failure sends its `unavailable` reading, then `error {id, code: unavailable}`
   ends the subscription; the connection stays open. A read with no subscription is
   `invalid`. On reconnect, supply the last applied reading's checkpoint to resume the
   same read without receiving an unchanged complete reading; see
@@ -571,10 +641,13 @@ the phone's `view.select` Task list and its creation destinations all read it.
   A null `wave` selects the repository. Both paths return the same creation
   receipt, described below. A write whose Work
   lives on another Machine (`task.run`, `task.auto.on`, `task.auto.off`,
-  `task.claim`, `task.unassign`, `session.resume`) goes to that Machine's
-  server over SSH and returns its answer; it never falls back to
-  local execution. Requests create no Process rows; diagnostics the shared
-  functions print go to the request's log. A refusal the shared code names
+  `task.claim`, `task.unassign`, `session.resume`, `session.new`) goes to that
+  Machine's server over SSH and returns its answer; it never falls back to
+  local execution. A Session write naming a `task` goes where that Task runs,
+  even when the Session last moved elsewhere, and the record it returns names
+  this Machine's Task first in `task_ids`, `work` and `workspace`. Requests
+  create no Process rows; diagnostics the shared functions print go to the
+  request's log. A refusal the shared code names
   (an empty name is `invalid`, a stale Dashboard revision `conflict`, a missing
   record `not_found`) answers that code; any other failure is
   `outcome_unknown`, since the write may have taken partial effect. A lost
@@ -590,10 +663,11 @@ the phone's `view.select` Task list and its creation destinations all read it.
   `outcome_unknown`, and repeating the same `request` settles it. It creates
   a process and, with `session.continue`, the only operation here that does;
   attaching never does.
-- `session.continue {session, request, rows, cols}` starts `lf session resume`
+- `session.continue {session, request, rows, cols, task, machine, agent}` starts `lf session resume`
   of exactly that Session in a held terminal, in its recorded directory, with
   the server's environment and its own `LF_HOME` and `LF_BIN`, for a client
-  with no environment to send (the phone). It answers and repeats like
+  with no environment to send (the phone). A non-null `agent` is passed as
+  `--agent`: another harness than the Session's imports its history. It answers and repeats like
   `session.start`; a Session `run_refusal` refuses is `conflict`.
 - Bulk. An answer or reading larger than `limits.max_message` never travels on
   the control connection: the client receives `bulk {id, ticket, bytes}`, redeems
@@ -630,8 +704,11 @@ an unknown, spent, expired or foreign ticket is `not_found {ticket}` with a null
 `bridged`, request a new ticket and bridge. Bridges read no Work and do not
 occupy the 64 client slots.
 
-`session.attach {session}` attaches to the Session's held terminal, and
-`{session, terminal_id}` only to that terminal. Either answers a ticket
+`session.attach {session, terminal_id: null, task, machine}` attaches to the
+Session's held terminal, and a non-null `terminal_id` only to that terminal.
+`task` and `machine` say where it runs: the Task's owner when `task` is named,
+else `machine`, else this Machine's record of the Session's Task or move; both
+null on a Session this Machine runs. `session.continue` routes the same way. Either answers a ticket
 `{ticket, terminal_id, expires_in_ms}`, and its bridge answers
 `bridged {terminal_id}`, then carries the
 [view protocol](../transport/README.md#view-protocol): raw bytes locally,
@@ -647,6 +724,25 @@ its own owner process is restarted by `lf resume`, not attached
 ([transport README](../transport/README.md#conversations-an-earlier-build-started)).
 `lf session resume` and `server::client::attach` perform both ticket steps.
 
+`task.shell.attach {issue, shell_id}` answers the same ticket for
+a Task shell and never starts one; `task.shell.start {issue, shell_id, rows,
+cols, bootstrap, command}` runs `command` after login startup, then `$SHELL`,
+in the owner's checkout, idempotent by `shell_id`, and answers `{terminal_id}`;
+`task.shell.close {issue, shell_id, machine}` ends it on `machine`, the
+Machine that started it, or where the Task runs when `machine` is null.
+Desktop passes Ghostty's `bootstrap`; the phone passes null. A `shell_id`
+exists only on the Machine that started it, so after a move attach reaches the
+new owner, which answers `not_found`, and the client offers a new shell. Close
+still reaches the shell on its own Machine.
+
+When the terminal is on another Machine, this server asks that Machine for its
+ticket and answers a ticket of its own, bound to the caller's admission like
+any other. Redeeming it opens `lf server connect` to the peer, presents the
+peer's ticket there, and answers `bridged` (or the peer's error) once the peer
+does. From then the bytes pass through unchanged, `0x07` endings included, on
+the local socket and the WebSocket carrier alike. A peer's terminal keeps
+running when the Task moves; its pane ends when the peer's bridge does.
+
 Each terminal has its own connection, so readings never wait behind terminal
 bytes and a control failure never closes a bridged terminal. Follow
 [terminal and provider recovery](#terminal-and-provider-recovery) to reconnect.
@@ -657,11 +753,11 @@ The [attachment contract above](#terminal-attachment) applies over the remote
 carrier (`lf server mobile`), with these transport differences.
 
 Connect to the host's `/v1/machine` WebSocket, complete
-[`hello`/`welcome`](#local-protocol-revision-7), and request `session.attach`
+[`hello`/`welcome`](#local-protocol), and request `session.attach`
 with a Session ID from `session.list`:
 
 ```text
-→ {"type":"request","id":"attach-1","operation":{"kind":"session.attach","session":"<session ID>","terminal_id":null},"select":null,"request_id":null}
+→ {"type":"request","id":"attach-1","operation":{"kind":"session.attach","session":"<session ID>","terminal_id":null,"task":null,"machine":null},"select":null,"request_id":null}
 ← {"type":"response","id":"attach-1","trace_id":"<trace ID>","result":{"ticket":"<ticket>","terminal_id":"<terminal ID>","expires_in_ms":60000}}
 ```
 
@@ -1099,7 +1195,7 @@ selecting fields out of any typed response can make it undecodable. Request
 the screen read when a typed client needs a smaller payload. Desktop's
 outline continues to use `plan.list` for its richer runtime data.
 
-Handle failures through the [protocol error codes](#local-protocol-revision-7).
+Handle failures through the [protocol error codes](#local-protocol).
 Check the named Task or Session when it cannot be found. If the host cannot
 answer, retain any previous display as stale and retry the read after recovery;
 an unavailable Session card does not establish that the Session ended.
@@ -1343,7 +1439,9 @@ finish local preparation or proceed to its first launch; `inspect` means retain
 it without resubmitting. The creation handler checks again under its request
 lock, so a lookup cannot authorize repeating an uncertain effect. The receipt
 retains original `run` intent; disposition is computed from the receipt and
-current resource, never persisted as another outcome.
+current resource, never persisted as another outcome. A creation for a Task
+another Machine runs (`session.new` there) keeps its receipt on that Machine;
+naming the `task` reads it there.
 
 After reconnect or cold startup, look up the receipt first. Send the saved bytes
 only for confirmed absence or `continue`. Unavailable lookup stays unavailable.

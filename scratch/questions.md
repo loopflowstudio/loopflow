@@ -5,3 +5,4 @@
 - Assumed: `lf task run`'s `merges:` line is driven by `CapturedGraph::reaches_landing` (using `landing_name`) rather than `TaskRunSelection::reaches_end`, so non-merging Graphs (`pursue`, `deep-clean`, etc.) stop warning that they may merge and custom post-merge-stop Graphs warn honestly.
 - Deferred outside LOO-1108: moving Swift's `StartFlow.merges` heuristic onto a `WorkflowOutline` wire field (requires a DTO schema change).
 - Deferred outside LOO-1108: hand edits in other repositories on this Machine (`manabot`, `fantasia`, `etude`, `etude-sdk`) that name `verify`.
+- Ship review (headless, nobody present): no reaction recorded. Filed 559762 for the Start menu merge flag; questions 1–4 in `scratch/ship-review.html` stay open.

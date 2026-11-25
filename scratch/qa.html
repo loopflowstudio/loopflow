@@ -1,0 +1,54 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LOO-1105 QA</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:860px;margin:2rem auto;padding:0 1rem;color:#222}
+h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem}
+pre{background:#f5f5f4;padding:.7rem;overflow-x:auto;font-size:13px}
+table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:.35rem .5rem;text-align:left}
+.ok{color:#176b2c}.open{color:#8a5a00}
+</style></head><body>
+<h1>LOO-1105 QA: repo skills, testing.md split, ci-fix overlay</h1>
+<p>The people this is for are agents launched with <code>implement</code>, <code>gate</code>, <code>ci-fix</code>, <code>qa</code> and <code>kickoff</code> in this repository. QA launched each one through the installed <code>lf 0.16.0+62a368e5c</code> and read what it delivered.</p>
+
+<h2>1. Each skill resolves to the repository overlay</h2>
+<p><code>lf help {implement,gate,ci-fix,qa,kickoff}</code> from the checkout: each header reads <code>— skill (.lf/skills/&lt;name&gt;.md)</code>, with the builtin body first and the repository section after. <span class="ok">Works.</span></p>
+
+<h2>2. What a launched agent receives</h2>
+<p>A disposable repository (<code>/tmp/lf1105.*</code>, bare origin, branch checkout) got this branch's <code>.lf/skills</code>, <code>.lf/qa</code>, <code>scripts/testing.md</code> and <code>scripts/build_cache.md</code>. A private <code>LF_HOME</code> and <code>-a claude:haiku</code> were used, with this probe:</p>
+<pre>lf -a claude:haiku -b skill &lt;name&gt; 'QA probe: do not run any commands or edit files. …'</pre>
+<p>Sizes come from <code>$LF_HOME/runs/*/*/context.json</code> (<code>context.task.text</code>, <code>context.task.assets[].label</code>).</p>
+<table>
+<tr><th>Skill</th><th>First turn</th><th>Attached docs</th><th>Agent's reply</th></tr>
+<tr><td>ci-fix</td><td>5,715 B</td><td>none</td><td><code>`required-integration`, NO</code> (overlay table present, testing.md not attached)</td></tr>
+<tr><td>implement (branch)</td><td>8,655 B</td><td>none</td><td>"NO; the first heading of the repository section is `## In this repository` (its first subheading is `### Focused tests`)."</td></tr>
+<tr><td>implement (main)</td><td>34,605 B</td><td><code>scripts/testing.md</code></td><td>OK</td></tr>
+<tr><td>gate</td><td>22,576 B</td><td><code>scripts/testing.md</code></td><td>"YES, with the exact heading "Gate: a few named tests; CI runs the suites" …"</td></tr>
+</table>
+<p class="ok">ci-fix gets the overlay without the 16 KB doc, implement's first turn is a quarter of main's, and gate still gets testing.md.</p>
+
+<h2>3. ci-fix's on-demand pointer</h2>
+<p>Each string ci-fix names for when to read <code>scripts/testing.md</code> exists there: <code>syspolicyd</code>, <code>TMPDIR</code>, <code>fseventsd</code>, <code>has no resident login</code>, <code>No agent selected</code> (1 each), <code>rust-filter</code> (4). <span class="ok">Works.</span></p>
+
+<h2>4. Links</h2>
+<p>All relative links and <code>#anchors</code> in the 17 changed Markdown files outside <code>scratch/</code> resolve: 0 broken. That covers <code>../qa/desktop.md#display-lock-preflight</code>, <code>../qa/served-launches.md</code>, <code>../qa/server.md</code> and <code>build_cache.md#builds</code>/<code>#shared-compilation-cache</code>. Every <code>.lf/qa/*.md</code> starts with <code>Read when</code>.</p>
+
+<h2>5. Display-lock preflight, locked</h2>
+<p>This Mac's screen was locked during QA, so the reading that had never been observed got observed:</p>
+<pre>$ ioreg -n Root -d1 | grep -oE '"(IOConsoleLocked|CGSSessionScreenIsLocked)"\s*=\s*\w+'
+"IOConsoleLocked" = Yes
+"CGSSessionScreenIsLocked"=Yes</pre>
+<p><code>CGSSessionScreenIsLocked</code> prints with no spaces, but the <code>\s*</code> pattern still matches. Compress had already seen the unlocked reading (<code>"IOConsoleLocked" = No</code>, CGS key absent). <span class="ok">Both branches of the note now match what the Mac printed.</span></p>
+
+<h2>6. Something people might trip on (not a bug in this change)</h2>
+<p>This qa step's own prompt carried <b>main's</b> <code>qa.md</code> (3,624 B, with "Starting a Task on a private Machine"), not the branch's. The Task's <code>code</code> Graph started at 16:11Z. The qa.md rewrite was committed at 16:32Z, and a Graph snapshots its skills when it starts (<code>graph/mod.rs</code> <code>xor_snapshot_preserves_all_routes_and_skills_after_source_deletion</code>). Landing's <code>lf --batch … skill ci-fix</code> is a fresh launch in the Task checkout, so the new ci-fix overlay reaches it. This is now written down in <code>.lf/qa/skills.md</code>.</p>
+
+<h2>Fixed</h2>
+<p>Nothing was broken. Notes were updated: <code>.lf/qa/skills.md</code> now explains how to measure what a skill delivers and that Graphs use the skills they started with. The plan and questions now record the locked preflight reading.</p>
+
+<h2>Result</h2>
+<ul>
+<li class="ok">Works: overlay resolution for all five skills, ci-fix without testing.md, implement at 8.7 KB (was 34.6 KB), gate with testing.md, every link and anchor, and the preflight in both states.</li>
+<li class="open">Not reached: the ci-fix overlay on a real failing PR (needs a red CI run), and the gate overlay's publish sequence (runs at gate). The haiku probes ran no commands, so they only show what the agent was told.</li>
+<li>Still wrong: nothing found.</li>
+</ul>
+</body></html>

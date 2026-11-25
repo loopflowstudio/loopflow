@@ -32,3 +32,12 @@ invalid report to repeat even on correction, such as
 `{"decision":"advance","summary":"passed","reason":"failed"}`. With Codex,
 run `lf -b --task <id> graph <name>` from the disposable Task checkout. Three
 rejected turns leave the Graph's diagnostic in `lf task status <id>`.
+
+To see what a skill change delivers, copy the branch's `.lf/` (and any `docs:`
+files) into a disposable repository and run
+`lf -a claude:haiku -b skill <name> 'Do not run commands. Reply OK.'` with a
+private `LF_HOME`. Each run writes `$LF_HOME/runs/<xx>/<key>/context.json`:
+`context.task.text` is the first turn and `context.task.assets[].label` names
+each attached file, so sizes before and after compare exactly. A Graph
+snapshots its skills when it starts, so a step of a Graph already running
+renders the skills from that start, not the checkout's current files.

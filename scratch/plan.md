@@ -35,8 +35,8 @@ changes, so no `golden_prompt` snapshots move.
   `skills/` only (`rust/loopflow/tests/documented_commands.rs:78`); `lf`
   commands quoted in `.lf/skills/` and `scripts/` were checked by hand.
 - `ioreg -n Root -d1 | grep -oE '"(IOConsoleLocked|CGSSessionScreenIsLocked)"\s*=\s*\w+'`
-  printed `"IOConsoleLocked" = No` on an unlocked Mac. The locked reading was
-  never observed.
+  printed `"IOConsoleLocked" = No` unlocked, and `"IOConsoleLocked" = Yes` plus
+  `"CGSSessionScreenIsLocked"=Yes` locked (qa, 2026-11-25).
 
 ## Checks (run 2026-11-25, this checkout)
 
@@ -51,10 +51,16 @@ changes, so no `golden_prompt` snapshots move.
   `scripts/build_cache.md` 187 L / 10,515 B; `implement.md` 3,382 B, 0 attached;
   `ci-fix.md` 2,787 B, 0 attached; `qa.md` 1,399 B (was 3,624 B).
 
+## QA (2026-11-25, `scratch/qa.html`)
+
+- Real `lf -b skill` launches on haiku in a disposable repo: first-turn text
+  ci-fix 5,715 B (no attachment), implement 8,655 B (main: 34,605 B with
+  `scripts/testing.md`), gate 22,576 B (`scripts/testing.md` attached).
+- Relative links and anchors in 17 changed Markdown files: 0 broken.
+
 ## Remains
 
 - **Gate**: publish; CI runs the suites. No Rust changed, so no local lint.
-  Deferred: the locked-display branch of the qa preflight (needs a locked Mac).
 
 ## Follow-ups (separate Tasks, not this PR)
 

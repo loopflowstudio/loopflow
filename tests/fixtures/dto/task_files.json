@@ -1,4 +1,49 @@
 {
+  "symbols": {
+    "hits": [
+      {"name": "read", "kind": "func", "path": "src/A.swift", "line": 3, "container": "A"},
+      {"name": "read", "kind": "func", "path": "src/B.swift", "line": 7, "container": "B"}
+    ],
+    "truncated": false
+  },
+  "grep": {
+    "hits": [
+      {
+        "path": "src/nested/Reader.swift",
+        "line": 1,
+        "start": 3,
+        "end": 9,
+        "revision": "d49b198fdd7a62d73eca883aa2fb88b47c02de0dd141509e8741bf43e271d1aa",
+        "excerpt_start": 0,
+        "excerpt": "// Reader"
+      },
+      {
+        "path": "src/nested/Reader.swift",
+        "line": 2,
+        "start": 5,
+        "end": 11,
+        "revision": "d49b198fdd7a62d73eca883aa2fb88b47c02de0dd141509e8741bf43e271d1aa",
+        "excerpt_start": 0,
+        "excerpt": "😀 Reader Reader"
+      },
+      {
+        "path": "src/nested/Reader.swift",
+        "line": 2,
+        "start": 12,
+        "end": 18,
+        "revision": "d49b198fdd7a62d73eca883aa2fb88b47c02de0dd141509e8741bf43e271d1aa",
+        "excerpt_start": 0,
+        "excerpt": "😀 Reader Reader"
+      }
+    ],
+    "truncated": false
+  },
+  "find": {
+    "paths": ["scratch/notes.md", "src/nested/Reader.swift"],
+    "scratch": ["scratch/notes.md"],
+    "latest_scratch_page": "scratch/notes.md",
+    "truncated": false
+  },
   "changes": {
     "issue_identifier": "TEST-1",
     "task_id": "task-files",
@@ -15,6 +60,7 @@
         "staged": false,
         "unstaged": false,
         "untracked": false,
+        "lines": {"added": 1, "removed": 1},
         "changes": 1
       }
     ],
@@ -103,5 +149,18 @@
       }
     ],
     "next_cursor": null
+  },
+  "watch": {
+    "task_id": "task-files",
+    "machine_id": "home_peer",
+    "machine_label": "mini",
+    "checkout": "/peer/checkout",
+    "revision": "r1",
+    "scratch_pages": [
+      {
+        "path": "scratch/notes.md",
+        "stamp": "1732500000.0:10"
+      }
+    ]
   }
 }

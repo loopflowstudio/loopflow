@@ -257,6 +257,11 @@ struct DesktopPaneControlTests {
         let bindings = DesktopAction.all.flatMap { action in action.keys.map { (action, $0) } }
         #expect(bindings.count >= 20)
         for (action, binding) in bindings {
+            let (keyModel, keyRegistry, _, _) = actionFixture()
+            let workspace = try #require(keyRegistry.retained(WorkWorkspaceKey(repository: repository, kind: .task, id: "b")))
+            let context = DesktopActionContext(model: keyModel, workspaces: keyRegistry, workspace: workspace,
+                pane: workspace.multiplexer.focusedPane, args: binding.args)
+            guard action.available(context) else { continue }
             let (found, args) = try #require(DesktopAction.binding(characters: {
                 if case .character(let character) = binding.key { return String(character) }
                 return binding.key == .tab ? "\t" : nil
@@ -268,15 +273,10 @@ struct DesktopPaneControlTests {
                 case .down: .downArrow
                 default: nil
                 }
-            }(), modifiers: binding.modifiers))
+            }(), modifiers: binding.modifiers, context: context))
             #expect(found.name == action.name, "\(binding.display)")
             #expect(args == binding.args)
 
-            let (keyModel, keyRegistry, _, _) = actionFixture()
-            let workspace = try #require(keyRegistry.retained(WorkWorkspaceKey(repository: repository, kind: .task, id: "b")))
-            let context = DesktopActionContext(model: keyModel, workspaces: keyRegistry, workspace: workspace,
-                pane: workspace.multiplexer.focusedPane, args: args)
-            guard action.available(context) else { continue }
             var keyFailure: Error?
             do { try action.perform(context) } catch { keyFailure = error }
 
@@ -657,6 +657,8 @@ struct DesktopPaneControlTests {
         let document = workspace.files(issue: task.id, cwd: identity.worktree).document("note.txt")
         document.editor.string = "unfinished draft"
         document.editor.setSelectedRange(NSRange(location: 2, length: 4))
+        _ = try router.perform(DesktopActionRequest("files", at: source, args: ["path": "scratch/first.html"]))
+        #expect(workspace.files(issue: task.id, cwd: identity.worktree).selection == "scratch/first.html")
         for action in ["files", "graph-log"] {
             let created = try router.perform(DesktopActionRequest(action, at: source))
             let reused = try router.perform(DesktopActionRequest(action, at: source))
@@ -680,14 +682,29 @@ struct DesktopPaneControlTests {
         _ = try router.perform(DesktopActionRequest("files", at: source, args: ["path": "docs/usage.md"]))
         #expect(documents.selection == "note.txt")
         #expect(documents.mode == .edit)
-        #expect(documents.tabs.contains { $0.path == "docs/usage.md" })
+        #expect(documents.browser.notice == .presented(.init(path: "docs/usage.md")))
+        documents.mode = .read
+        #expect(documents.browser.notice == nil && documents.openAndScratch.contains("docs/usage.md"))
+        _ = try router.perform(DesktopActionRequest("files", at: source, args: ["path": "scratch/explore.html"]))
+        #expect(documents.selection == "scratch/explore.html" && documents.visit == nil && documents.mode == .read)
+        _ = try router.perform(DesktopActionRequest("files", at: source, args: ["path": "src/Parser.swift", "lines": "8-12", "mode": "diff"]))
+        #expect(documents.selection == "src/Parser.swift" && documents.visit?.lines == 8...12 && documents.mode == .diff)
+        documents.page = .changes
+        _ = try router.perform(DesktopActionRequest("files", at: source, args: ["path": "README.md"]))
+        #expect(documents.page == .changes && documents.browser.notice == .presented(.init(path: "README.md")))
+        store.setFocusedPane(session.id)
+        store.setZoom(session.id, enabled: true)
+        #expect(!store.isVisible(try #require(store.browserPane)))
+        _ = try router.perform(DesktopActionRequest("files", at: source, args: ["path": "scratch/finished.html"]))
+        #expect(documents.selection == "scratch/finished.html" && documents.browser.notice == nil)
+        #expect(store.isVisible(try #require(store.browserPane)) && store.focusedPaneId == session.id)
         let shellReceipt = try router.perform(DesktopActionRequest("run", at: source))
         #expect(store.shell(shellReceipt.tab ?? "")?.location == identity)
         #expect(shellReceipt.pane == selected.id)
         #expect(store.layout.allPanes.count == 3)
         #expect(store.layout.pane(for: session.id) == session)
-        #expect(store.focusedPaneId == selected.id)
-        #expect(store.zoomedPaneId == selected.id)
+        #expect(store.focusedPaneId == session.id)
+        #expect(store.zoomedPaneId == nil)
         #expect(store.shell(try #require(selected.content.selectedShell).id)?.command == ["retained-shell-command"])
         #expect(document.editor.string == "unfinished draft")
         #expect(document.editor.selectedRange() == NSRange(location: 2, length: 4))
@@ -697,7 +714,7 @@ struct DesktopPaneControlTests {
         }
         let page = try router.perform(DesktopActionRequest("browse", at: source, args: ["url": "http://localhost:5173"]))
         #expect(store.browserPane?.content.selectedBrowserTab == .url(id: try #require(page.tab), url: try #require(URL(string: "http://localhost:5173"))))
-        #expect(store.focusedPaneId == selected.id)
+        #expect(store.focusedPaneId == session.id)
     }
 
     @Test("Web page Back, Forward and Reload act on the browser tab's retained page")

@@ -1281,6 +1281,74 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 *difftool,
             )
         }
+        TaskCommand::Symbols {
+            issue,
+            name,
+            path,
+            json,
+        } => {
+            let result =
+                loopflow_execution::ops::task::task_symbols(issue, name, path.as_deref(), &|| {
+                    false
+                })?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                for hit in result.hits {
+                    let enclosing = hit
+                        .container
+                        .map(|name| format!(" ({name})"))
+                        .unwrap_or_default();
+                    println!(
+                        "{}:{}:{} {}{}",
+                        hit.path, hit.line, hit.kind, hit.name, enclosing
+                    );
+                }
+                if result.truncated {
+                    eprintln!("Search results truncated.");
+                }
+            }
+            Ok(())
+        }
+        TaskCommand::Grep {
+            issue,
+            query,
+            whole_word,
+            json,
+        } => {
+            let result =
+                loopflow_execution::ops::task::task_grep(issue, query, *whole_word, &|| false)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                for hit in result.hits {
+                    println!("{}:{}:{}", hit.path, hit.line, hit.excerpt);
+                }
+                if result.truncated {
+                    eprintln!("Search results truncated.");
+                }
+            }
+            Ok(())
+        }
+        TaskCommand::Find {
+            issue,
+            query,
+            limit,
+            json,
+        } => {
+            let result = loopflow_execution::ops::task::task_find(issue, query.as_deref(), *limit)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                for path in result.paths {
+                    println!("{path}");
+                }
+                if result.truncated {
+                    eprintln!("File list truncated.");
+                }
+            }
+            Ok(())
+        }
         TaskCommand::Files {
             issue,
             directory,
@@ -1483,6 +1551,22 @@ fn init_tracing(verbose: bool) {
         .with_writer(|| loopflow_execution::diagnostic_log::DiagnosticLog)
         .event_format(loopflow_execution::diagnostic_log::IdentifiedLines)
         .init();
+}
+
+fn reads_task_checkout(cli: &Cli) -> bool {
+    matches!(
+        cli.command,
+        Some(Commands::Task {
+            cmd: TaskCommand::Location { .. }
+                | TaskCommand::Find { .. }
+                | TaskCommand::Grep { .. }
+                | TaskCommand::Symbols { .. }
+                | TaskCommand::File {
+                    recoveries: false,
+                    ..
+                }
+        })
+    )
 }
 
 fn desktop_intent_read(cli: &Cli) -> bool {
@@ -1740,12 +1824,7 @@ fn run() -> anyhow::Result<()> {
             let preview = desktop_intent_read(&cli)
                 || cli.context
                 || cli.explain
-                || matches!(
-                    cli.command,
-                    Some(Commands::Task {
-                        cmd: TaskCommand::Location { .. }
-                    })
-                );
+                || reads_task_checkout(&cli);
             // The target owns command flags, including --verbose; RUST_LOG controls transport logs.
             init_tracing(false);
             if !preview {
@@ -1833,12 +1912,6 @@ fn run() -> anyhow::Result<()> {
                 }
         })
     );
-    let location_read = matches!(
-        cli.command,
-        Some(Commands::Task {
-            cmd: TaskCommand::Location { .. }
-        })
-    );
     let desktop_read = desktop_intent_read(&cli);
     init_tracing(cli.verbose);
     // A turn or tool boundary binds no Work. A managed launch reports to
@@ -1897,7 +1970,7 @@ fn run() -> anyhow::Result<()> {
         && !cli.context
         && !cli.explain
         && !planning_read
-        && !location_read
+        && !reads_task_checkout(&cli)
         && !desktop_read
         && !matches!(
             cli.command,
@@ -3313,6 +3386,9 @@ fn execute_command(
                 | TaskCommand::Context { .. }
                 | TaskCommand::Runs { .. }
                 | TaskCommand::File { .. }
+                | TaskCommand::Find { .. }
+                | TaskCommand::Grep { .. }
+                | TaskCommand::Symbols { .. }
                 | TaskCommand::Files { .. }
                 | TaskCommand::Save { .. }),
         }) => run_task_command(cli, &std::env::current_dir()?, cmd),

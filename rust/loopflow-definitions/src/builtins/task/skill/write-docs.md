@@ -28,9 +28,8 @@ surprising prerequisite is design feedback.
    real product choice, write the exact question into the plan and
    report it.
 
-4. **Show it.** Run `lf open --host desktop --file <path>`, repeating `--file`
-   for several. It uses an open Loopflow Desktop and never launches one; with
-   none, report the paths and continue. Record the changed paths in the plan so
+4. **Show it.** Present each edited document with `lf desktop files <path>`.
+   If Desktop is unattached (exit 4), give the paths and continue. Record the changed paths in the plan so
    the next step reads them.
 
 Finish with the paths and any open question, and an invitation to edit the

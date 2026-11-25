@@ -128,6 +128,27 @@ struct DesktopActionContext {
         }
     }
 
+    fileprivate var filesBrowser: TaskFilesStore? {
+        guard let pane, let workspace, tab == nil || tab == pane.content.selectedTabID else { return nil }
+        switch pane.content.selectedBrowserTab {
+        case .files, .changes:
+            let task = model.task(id: workspace.key.id)?.task
+            return try? workspace.files(for: pane.content, task: task, query: RegistryQueryLocal.shared)
+        default: return nil
+        }
+    }
+
+    fileprivate var readingFiles: TaskFilesStore? {
+        guard let files = filesBrowser, let workspace,
+              files.shownPage(hasTask: model.task(id: workspace.key.id)?.task != nil) == .files else { return nil }
+        return files
+    }
+
+    fileprivate var editableFile: TaskFilesStore? {
+        guard let files = readingFiles, files.mode == .edit || files.selectedDocument?.canEdit == true else { return nil }
+        return files
+    }
+
     /// The addressed pane's terminal: a shell's addressed or selected tab, or the session.
     fileprivate var terminal: TerminalIdentity {
         get throws {
@@ -216,13 +237,25 @@ struct DesktopAction {
 
     /// The registry action and arguments a key press performs.
     static func binding(characters: String?, keyCode: UInt16 = 0, specialKey: NSEvent.SpecialKey? = nil,
-                        modifiers: NSEvent.ModifierFlags) -> (DesktopAction, [String: String])? {
+                        modifiers: NSEvent.ModifierFlags,
+                        context: @autoclosure () -> DesktopActionContext? = nil) -> (DesktopAction, [String: String])? {
+        var resolved: DesktopActionContext??
+        var windowBinding: (DesktopAction, [String: String])?
         for action in all {
-            if let binding = action.keys.first(where: {
+            guard let binding = action.keys.first(where: {
                 $0.matches(characters: characters, keyCode: keyCode, specialKey: specialKey, modifiers: modifiers)
-            }) { return (action, binding.args) }
+            }) else { continue }
+            let current = resolved ?? { let value = context(); resolved = .some(value); return value }()
+            if let current {
+                guard action.available(current.with(args: binding.args)) else { continue }
+                if action.scope == .window {
+                    windowBinding = (action, binding.args)
+                    continue
+                }
+            }
+            return (action, binding.args)
         }
-        return nil
+        return windowBinding
     }
 
     /// The socket's entry: resolve the exact target, then perform.
@@ -501,20 +534,83 @@ struct DesktopAction {
             return browserOutcome(workspace)
         },
         DesktopAction("files", "Show Files", scope: .pane,
-            arguments: [.init(name: "path", kind: .string, required: false)], available: taskTool) { context in
-            if let path = context.args["path"] {
-                guard !path.hasPrefix("/"), !path.split(separator: "/").contains("..") else {
-                    throw DesktopArgumentError("Files path must stay inside the checkout; nothing opened.")
+            arguments: [.init(name: "path", kind: .string, required: false), .init(name: "lines", kind: .string, required: false),
+                        .init(name: "mode", kind: .string, required: false)], available: taskTool) { context in
+            guard let path = context.args["path"] else { return try show(.files, context) }
+            guard !path.isEmpty, !path.hasPrefix("/"), !path.split(separator: "/").contains("..") else {
+                throw DesktopArgumentError("Files needs a path inside the checkout.")
+            }
+            let mode = context.args["mode"] ?? "read"
+            guard ["read", "diff"].contains(mode) else { throw DesktopArgumentError("Expected read or diff mode.") }
+            var lines: ClosedRange<Int>?
+            if let address = context.args["lines"] {
+                let ends = address.split(separator: "-", omittingEmptySubsequences: false)
+                guard (1...2).contains(ends.count), let start = Int(ends[0]), let end = ends.last.flatMap({ Int($0) }),
+                      start > 0, start <= end else { throw DesktopArgumentError("Expected LINE or LINE-END.") }
+                lines = start...end
+            }
+            let request = FilesBrowserState.Presentation(path: path, lines: lines, mode: mode == "diff" ? .diff : .read)
+            let workspace = try context.task
+            let task = context.model.task(id: workspace.key.id)?.task
+            if let pane = workspace.multiplexer.browserPane, workspace.multiplexer.isVisible(pane) {
+                switch pane.content.selectedBrowserTab {
+                case .files, .changes:
+                    let files = try workspace.files(for: pane.content, task: task, query: RegistryQueryLocal.shared)
+                    if files.holdsPresentation {
+                        files.browser.offer(request)
+                        return browserOutcome(workspace)
+                    }
+                default: break
                 }
             }
             let outcome = try show(.files, context)
-            if let path = context.args["path"] {
-                let workspace = try context.task
-                if let browser = workspace.multiplexer.browserPane {
-                    try workspace.files(for: browser.content, task: nil, query: RegistryQueryLocal.shared).presentFile(path)
-                }
+            if let pane = workspace.multiplexer.browserPane {
+                try workspace.files(for: pane.content, task: task, query: RegistryQueryLocal.shared).openPresentation(request)
             }
             return outcome
+        },
+        DesktopAction("files-find", "Find File in Checkout", scope: .pane,
+            keys: [.init(.character("p"), .command)], available: { $0.filesBrowser != nil }) { context in
+            guard let files = context.filesBrowser else { throw DesktopTargetError("Open the Task browser to find a file.") }
+            files.chooseFile()
+            return nil
+        },
+        DesktopAction("files-find-text", "Find in File", scope: .pane,
+            keys: [.init(.character("f"), .command)], available: { $0.readingFiles?.selection != nil }) { context in
+            guard let files = context.readingFiles, files.selection != nil else { throw DesktopTargetError("Open a file to find text.") }
+            files.filePicker = nil
+            if let find = files.find { find.focusRequest = UUID() } else { files.find = FileFind() }
+            return nil
+        },
+        DesktopAction("files-grep", "Search Text in Checkout", scope: .pane,
+            keys: [.init(.character("f"), [.shift, .command])], available: { $0.readingFiles != nil }) { context in
+            guard let files = context.readingFiles else { throw DesktopTargetError("Open Files to search the checkout.") }
+            files.chooseFile(.grep)
+            return nil
+        },
+        DesktopAction("files-outline", "Show File Outline", scope: .pane,
+            keys: [.init(.character("o"), [.command, .shift])], available: { $0.readingFiles?.selectedDocument != nil }) { context in
+            guard let files = context.readingFiles, files.selectedDocument != nil else { throw DesktopTargetError("Open a file to see its outline.") }
+            files.jumps.search(.outline, line: files.jumps.readingLine, in: files)
+            return nil
+        },
+        DesktopAction("files-back", "Previous File Location", scope: .pane,
+            keys: [.init(.character("["), .command)], available: { $0.readingFiles?.jumps.back.isEmpty == false }) { context in
+            guard let files = context.readingFiles, !files.jumps.back.isEmpty else { throw DesktopTargetError("No previous file location.") }
+            files.jumps.step(backwards: true, in: files)
+            return nil
+        },
+        DesktopAction("files-forward", "Next File Location", scope: .pane,
+            keys: [.init(.character("]"), .command)], available: { $0.readingFiles?.jumps.forward.isEmpty == false }) { context in
+            guard let files = context.readingFiles, !files.jumps.forward.isEmpty else { throw DesktopTargetError("No next file location.") }
+            files.jumps.step(backwards: false, in: files)
+            return nil
+        },
+        DesktopAction("files-edit", "Toggle File Editing", scope: .pane,
+            keys: [.init(.character("e"), [.control, .command])], available: { $0.editableFile != nil }) { context in
+            guard let files = context.editableFile else { throw DesktopTargetError("Open a text file in Files to edit it.") }
+            files.mode = files.mode == .edit ? .read : .edit
+            return nil
         },
         DesktopAction("details", "Show Task Details", scope: .pane,
             arguments: [.init(name: "page", kind: .string, required: true)],
@@ -528,7 +624,8 @@ struct DesktopAction {
             let outcome = try show(.files, context)
             let workspace = try context.task
             if let browser = workspace.multiplexer.browserPane {
-                try workspace.files(for: browser.content, task: nil, query: RegistryQueryLocal.shared).page = page
+                let task = context.model.task(id: workspace.key.id)?.task
+                try workspace.files(for: browser.content, task: task, query: RegistryQueryLocal.shared).page = page
             }
             return outcome
         },
@@ -658,6 +755,7 @@ struct DesktopActionMonitor: NSViewRepresentable {
         var context: () -> DesktopActionContext
         var failed: (Error) -> Void
         private var monitor: Any?
+        private weak var chordTarget: FileJumps.Target?
 
         init(context: @escaping () -> DesktopActionContext, failed: @escaping (Error) -> Void) {
             self.context = context
@@ -669,15 +767,35 @@ struct DesktopActionMonitor: NSViewRepresentable {
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self, let window = self.view?.window,
                       event.window === window, window.isKeyWindow, window.attachedSheet == nil,
-                      (window.firstResponder as? NSTextInputClient)?.hasMarkedText() != true,
-                      let (action, args) = DesktopAction.binding(characters: event.charactersIgnoringModifiers,
-                          keyCode: event.keyCode, specialKey: event.specialKey, modifiers: event.modifierFlags)
+                      (window.firstResponder as? NSTextInputClient)?.hasMarkedText() != true else {
+                    self?.chordTarget = nil
+                    return event
+                }
+                if self.handleReadKey(event.charactersIgnoringModifiers, modifiers: event.modifierFlags,
+                                      firstResponder: window.firstResponder) { return nil }
+                guard let (action, args) = DesktopAction.binding(characters: event.charactersIgnoringModifiers,
+                          keyCode: event.keyCode, specialKey: event.specialKey, modifiers: event.modifierFlags, context: self.context())
                 else { return event }
-                let context = self.context().with(args: args)
-                guard action.available(context) else { return event }
-                do { try action.perform(context) } catch { self.failed(error) }
+                do { try action.perform(self.context().with(args: args)) } catch { self.failed(error) }
                 return nil
             }
+        }
+
+        func handleReadKey(_ key: String?, modifiers: NSEvent.ModifierFlags, firstResponder: NSResponder?) -> Bool {
+            let pending = chordTarget
+            chordTarget = nil
+            guard modifiers.intersection([.command, .shift, .option, .control]).isEmpty,
+                  key == "g" || (pending != nil && (key == "d" || key == "r")),
+                  (firstResponder as? NSTextView)?.isEditable != true,
+                  let files = context().readingFiles, files.mode == .read, files.find == nil, files.filePicker == nil,
+                  let target = files.jumps.target, target.path == files.selection else { return false }
+            if key == "g" {
+                chordTarget = target
+                return true
+            }
+            guard pending === target else { return false }
+            files.jumps.search(key == "d" ? .definition(target.word) : .references(target.word), line: target.line, in: files)
+            return true
         }
 
         func uninstall() {

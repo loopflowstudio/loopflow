@@ -250,6 +250,10 @@ Round-trip fixtures under `tests/fixtures/dto/` cover the wire shape; a new
 field goes into the fixture and each language's fixture test. UI state types
 that carry DTO values are not DTOs.
 
+Swift protocol cases spell every part of the wire kind in lower camel case
+(`task.files.grep` → `taskFilesGrep`). Run
+`ServerProtocolTests/everyEncodedOperationIsTheDescribedOperation` when adding one.
+
 A sentence about state that both the CLI and Desktop show is written once, in
 Rust, and carried on the wire; each surface prints it. The same goes for the
 answer behind it (is it coming back, who starts it): one value, one predicate.

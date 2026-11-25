@@ -306,7 +306,7 @@ struct ContextSettingsWorkflowTests {
 
             try await set("diff_hidden", "[generated/**]", .personalRepository)
             let hidden = try #require(try await scope().settings["diff_hidden"])
-            #expect(TaskFilesStore.hidden(from: hidden)?.contains(.init(pattern: "generated/**", source: nil)) == true)
+            #expect(DiffReviewState.hidden(from: hidden)?.contains(.init(pattern: "generated/**", source: nil)) == true)
             let graph = ServedRead.configSettings(directory: repo.path, wave: nil, skill: nil, graph: "review", step: nil)
             let steps = try await ServerClient.read(graph, location: model.location).decode([SettingsTargetPicker.Step].self)
             #expect(steps.compactMap { $0.choice?.target } == [.step(graph: "review", step: "work"),

@@ -351,25 +351,24 @@ fn continue_delivery_scratch_conflicts(
     target_sha: &str,
     progress: &impl Progress,
 ) -> OpsResult<bool> {
-    let remaining = rerere_remaining(repo)?;
-    if remaining.is_empty() {
+    let unmerged = crate::git::git_stdout(repo, &["diff", "--diff-filter=U", "--name-only", "-z"])?;
+    let conflicts: Vec<&str> = unmerged
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .collect();
+    if conflicts.is_empty() {
         return Ok(false);
     }
     let merge_base = crate::git::merge_base(repo, "HEAD", target_sha)?;
     let added = crate::git::scratch::added(repo, &merge_base, "HEAD")?;
-    let mut scratch_paths = Vec::with_capacity(remaining.len());
-    for path in &remaining {
-        let Some(path_str) = path.to_str() else {
-            return Ok(false);
-        };
-        if !added.iter().any(|candidate| candidate == path_str)
-            || path_exists_in_tree(repo, target_sha, path_str)?
+    for path in &conflicts {
+        if !added.iter().any(|candidate| candidate == path)
+            || path_exists_in_tree(repo, target_sha, path)?
         {
             return Ok(false);
         }
-        scratch_paths.push(path_str);
     }
-    crate::git::scratch::remove(repo, &scratch_paths)?;
+    crate::git::scratch::remove(repo, &conflicts)?;
     progress.status("Completing merge after dropping branch-added scratch conflicts...");
     Ok(continue_merge(repo, None)?.success)
 }
@@ -854,7 +853,8 @@ pub fn sync_strategy_name(strategy: &SyncStrategy) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::restart_landed_branch;
+    use super::{abort_sync_for_resolution, restart_landed_branch, sync_for_delivery, SyncOptions};
+    use crate::ops::error::OpsError;
     use std::path::Path;
 
     fn git(repo: &Path, args: &[&str]) -> String {
@@ -1062,5 +1062,59 @@ mod tests {
                 "followup\n"
             );
         }
+    }
+
+    #[test]
+    fn delivery_keeps_scratch_and_stops_when_binary_conflict_exists() {
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file("scratch/.gitkeep", "");
+        std::fs::write(repo.path().join("asset.bin"), b"\x00\x01\x02base").unwrap();
+        repo.stage_all();
+        repo.commit("base binary");
+        repo.push();
+
+        // Parent adds scratch/plan.md and edits asset.bin.
+        repo.create_branch("parent");
+        std::fs::write(repo.path().join("asset.bin"), b"\x00\x01\x02parent").unwrap();
+        repo.create_file("scratch/plan.md", "parent plan\n");
+        repo.stage_all();
+        repo.commit("parent work");
+        let parent_head = repo.head_sha();
+
+        // Child stacks on parent, edits both asset.bin and inherited scratch/plan.md.
+        repo.create_branch("child");
+        std::fs::write(repo.path().join("asset.bin"), b"\x00\x01\x02child").unwrap();
+        repo.create_file("scratch/plan.md", "child plan edit\n");
+        repo.stage_all();
+        repo.commit("child work");
+
+        // Main receives parent's squash without scratch/plan.md plus a conflicting binary edit.
+        repo.checkout("main");
+        std::fs::write(repo.path().join("asset.bin"), b"\x00\x01\x02main").unwrap();
+        repo.stage_all();
+        repo.commit("main binary edit");
+        repo.push();
+
+        repo.checkout("child");
+        let result = sync_for_delivery(
+            repo.path(),
+            &SyncOptions {
+                onto: "origin/main".to_string(),
+                push: false,
+                fork_base: Some(parent_head),
+            },
+            &crate::ops::NullProgress,
+        );
+        assert!(
+            matches!(result, Err(OpsError::SyncConflict { .. })),
+            "delivery must stop when a binary conflict accompanies a scratch conflict: {result:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("scratch/plan.md")).unwrap(),
+            "child plan edit\n",
+            "scratch/plan.md must remain on disk for conflict resolution"
+        );
+        drop(result);
+        abort_sync_for_resolution(repo.path(), false).unwrap();
     }
 }

@@ -3,7 +3,8 @@ extends: builtin
 ---
 ## In this repository
 
-Check these Loopflow areas whenever the diff touches them:
+Check these Loopflow areas whenever the plan or diff touches them, and name
+concrete negative tests or leak checks for each affected area:
 
 - **Secrets and Doppler:** raw secrets must come from Doppler (`doppler run`),
   never dotfiles, hardcoded values, logs, error strings, or terminal output.

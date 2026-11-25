@@ -17,7 +17,19 @@ pub fn clear(repo: &Path) -> OpsResult<usize> {
 /// Clear committed additions against delivery's integration base and refuse
 /// when clearing leaves no authored changes.
 pub(crate) fn clear_for_delivery(repo: &Path, base: &str) -> OpsResult<usize> {
-    let cleared = clear_against(repo, base)?;
+    let added = crate::git::scratch::added(repo, base, "HEAD")?;
+    let changed = crate::git::git_stdout(repo, &["diff", "--name-only", "-z", base, "HEAD"])?;
+    let has_authored = changed
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .any(|path| !added.iter().any(|candidate| candidate == path));
+    if !has_authored {
+        return Err(OpsError::Message(
+            "no authored changes remain after integration; refusing to publish an empty PR"
+                .to_string(),
+        ));
+    }
+    let cleared = remove_and_commit(repo, &added)?;
     if crate::git::rev_parse(repo, "HEAD^{tree}")?
         == crate::git::rev_parse(repo, &format!("{base}^{{tree}}"))?
     {
@@ -31,10 +43,14 @@ pub(crate) fn clear_for_delivery(repo: &Path, base: &str) -> OpsResult<usize> {
 
 fn clear_against(repo: &Path, base: &str) -> OpsResult<usize> {
     let paths = crate::git::scratch::added(repo, base, "HEAD")?;
+    remove_and_commit(repo, &paths)
+}
+
+fn remove_and_commit(repo: &Path, paths: &[String]) -> OpsResult<usize> {
     if paths.is_empty() {
         return Ok(0);
     }
-    crate::git::scratch::remove(repo, &paths)?;
-    crate::ops::commit_selected(repo, &paths, Some("Clear added scratch files"))?;
+    crate::git::scratch::remove(repo, paths)?;
+    crate::ops::commit_selected(repo, paths, Some("Clear added scratch files"))?;
     Ok(paths.len())
 }

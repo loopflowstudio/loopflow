@@ -799,6 +799,16 @@ fn land_refuses_when_clearing_scratch_leaves_no_authored_change() {
             .contains("pr create"),
         "empty finalization must not create a PR"
     );
+    assert_eq!(
+        repo.head_sha(),
+        remote_head,
+        "empty refusal must not leave a local clear commit"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("scratch/notes.md")).unwrap(),
+        "notes only",
+        "empty refusal must keep notes intact on disk"
+    );
 }
 
 #[test]

@@ -49,6 +49,10 @@ attribution, observations and turn accounting. Verify the chosen shape in the
 native TUI before changing `ClaimedSteers`, the hook interface or the shared
 10,000-byte budget. Check a reopen, a later turn and a headless worker.
 
+### Focused check
+
+`cargo test -p loopflow --test session_launch_contract a_reopened_antigravity_task_hears_repository_direction_once` passed with the corrected fixture (1 passed, 28 filtered). Native results are in [QA](qa.html).
+
 ## Acceptance at gate
 
 ```sh

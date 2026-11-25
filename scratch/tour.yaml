@@ -1,7 +1,11 @@
-at: d501630c3829f761b268bef3f0901f8d02231661
+at: 24dd0805da9a0db23f8b1967fd3240c9091d8e64
 first:
   - path: docs/sessions.md
     why: When open and reopened conversations receive steers
+  - path: scratch/plan.md
+    why: Why inline display still needs a design
+  - path: .lf/qa/antigravity.md
+    why: What two real Antigravity terminals rendered
   - path: docs/dev/codebase.md
     why: What adding a provider requires
   - path: rust/loopflow-harness/src/lib.rs
@@ -16,6 +20,8 @@ first:
     why: Waiting news starts the Antigravity prompt hook
   - path: rust/loopflow/tests/session_launch_contract.rs
     why: Resume delivers once and stays quiet afterward
+  - path: rust/loopflow-execution/tests/support/agy_cli.py
+    why: Which hook replies the native provider drops
   - path: rust/loopflow/src/server/wake.rs
     why: Receipts and addressed messages on each wake route
   - path: rust/loopflow-execution/src/harness/launch_matrix.rs

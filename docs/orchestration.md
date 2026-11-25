@@ -259,12 +259,91 @@ lf -b task run LOO-12               # run headless through all remaining steps
 lf task auto on LOO-12              # auto on: an agent stands in for you at every remaining step
 ```
 
-At **`ship-review`**, Loopflow builds one HTML page (`scratch/ship-review.html`):
-what ships, in your terms, and everything the run left outside the PR, each
-with a proposal to fix it here, give it its own Task, or drop it. It is not a
-code review; concept review and gate already answered whether the change is
-right. Ask for changes in the Task conversation to loop back to `build`, or
-move on to `deliver`.
+At **`ship-review`**, Loopflow builds one comprehension page
+(`scratch/ship-review.html`) from `scratch/ship-review.page.html`: what was
+built, how it works on real diffs, the key data structures and APIs, the
+trade-offs and invariants to know going forward, findings as `Fix here` /
+`File Task` / `Drop` choices, and numbered questions—without passing-test
+counts or routine CI status. Open it with `lf page open scratch/ship-review.html`
+(or in Desktop Files), highlight text to comment, pick your choices, and press
+`⌘↩` to steer the Task directly, or move on to `deliver`.
+
+### Build and customize review pages
+
+Review skills (`ship-review`, `explore`, `concept-review`, `qa`, `demo`) write
+body-only HTML fragments under `scratch/<name>.page.html` and compile them into
+self-contained pages with `lf page build`:
+
+```html
+<!-- scratch/ship-review.page.html -->
+<h1>Retry budget per Task</h1>
+
+<h2>How it works</h2>
+<lf-diff path="src/retry.rs" lines="40-68">
+  <lf-note line="52">Counts attempts per Task ID rather than per process.</lf-note>
+</lf-diff>
+
+<h2>Findings</h2>
+<lf-component name="decision" id="f1" title="Cap retry log growth" recommendation="File Task">
+  <p>Long-running Tasks append one row per backoff tick without pruning.</p>
+</lf-component>
+
+<button data-lf='{"kind":"task.create","title":"Prune retry log rows"}'>File Task now</button>
+
+<div data-question="q1" data-label="Rented Machine retry default">
+  <p>1. Keep the 3-attempt default for rented Machines?</p>
+  <textarea></textarea>
+</div>
+```
+
+```bash
+lf page build scratch/ship-review.page.html              # → scratch/ship-review.html
+lf page build scratch/ship-review.page.html --base main  # override diff base
+lf page open scratch/ship-review.html                    # open in browser or Desktop Files
+```
+
+Source files contain body HTML only—no `<html>`, `<head>`, `<style>`, or
+`<script>`. `lf page build` wraps the body with the theme CSS, runtime script,
+and a JSON work stamp (work target, checkout, base/head, build hash), and
+expands:
+
+- `<lf-diff path="…" [lines="40-68"]>`: real hunks from Loopflow's diff engine
+  (including untracked files and renames; omit `lines` for every hunk in the
+  file). Add `<lf-note line="52">` (new line) or `<lf-note old-line="48">`
+  (deleted line) children; readers can toggle line notes off.
+- `<lf-file path="…" [lines="1-40"]>`: numbered lines as they stand on disk,
+  with optional `<lf-note line="…">` children, for unchanged code.
+- `<lf-component name="…">`: expands `.lf/components/<name>/template.html` (and
+  optional `style.css`), overriding builtins. Substitutes HTML-escaped
+  `{{attr}}` attributes and `<slot>` / `<slot name="…">` children. Built-in
+  components are `decision` (`id`, `title`, `recommendation`, body slot) and
+  `before-after` (`before` and `after` slots).
+- `data-choice`, `data-multiselect`, `data-question`: interactive controls
+  included in the `⌘↩` reply.
+- `data-lf='<partial JSON>'`: expands partial JSON into a strict Machine
+  `Operation` using the build checkout (injecting `directory` and per-click
+  `request_id` where needed) and validates it at build time.
+
+`lf page build` fails—naming the element and line—on any missing path in
+`<lf-diff>`, `<lf-file>`, or `[data-path]`, any `<lf-diff>` path or range not
+present in the diff, any unknown 7–40 hex commit SHA inside `<code>` (add
+`data-no-check` to opt out), any invalid `data-lf` operation, or any `<script>`
+or `<style>` tag in the source.
+
+Customize review pages for your repository without forking builtins:
+
+- **Theme:** add `.lf/theme.css` setting CSS custom properties for light and
+  dark modes; `lf page build` uses it in place of the built-in theme.
+- **Components:** add `.lf/components/<name>/template.html` (and optional
+  `style.css`) to define new `<lf-component>` blocks or override `decision` /
+  `before-after`.
+- **Skill rules:** extend a built-in review skill with `extends: lf:ship-review`
+  (or `explore`, `concept-review`, `qa`, `demo`) in `.lf/skills/` to add
+  repository-specific sections or checks while keeping the base skill.
+
+Run `lf help page` for the full authoring contract, and see
+[Review pages](surfaces.md#review-pages) for how pages behave in browsers,
+Desktop, and offline.
 
 ### Built-in Graphs
 

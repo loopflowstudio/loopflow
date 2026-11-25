@@ -435,8 +435,18 @@ button).
    unmounted send), `ServerClient` raw JSON `Operation` forward,
    `ReviewRenderedView` kept read-only. Swift headless tests.
 4. **Skills and docs.** The five skills, `lf help page`, `LOOPFLOW.md`,
-   `docs/surfaces.md`, `server/README.md`, goldens. LOO-1109's own
-   `ship-review.page.html` is the first page built with the kit.
+   `server/README.md`, goldens, and keeping the pre-written user docs in sync
+   with any CLI/behavior adjustments. LOO-1109's own `ship-review.page.html` is
+   the first page built with the kit.
+
+## User docs written ahead of implementation
+
+- `docs/surfaces.md` (`lf desktop files` narrowed to source files; new `## Review pages` section covering `lf page open`, host routing, highlight/choice/`⌘↩` replies, `data-lf` direct actions, reloads/restarts, peer Machines, and `lf page` reference link)
+- `docs/orchestration.md` (updated `ship-review` description; new `### Build and customize review pages` section covering `scratch/<name>.page.html`, `lf page build`, `<lf-diff>`, `<lf-file>`, `<lf-component>`, `data-*`, build checks, `.lf/theme.css`, `.lf/components/`, and `extends: lf:<skill>`)
+- `docs/getting-started.md` (updated `## 4. Pick up the conversation` for comprehension-focused `scratch/ship-review.html` and `lf page open`)
+- `docs/server.md` (added `## Browser review pages` for the loopback listener/token lifecycle and updated the local-only network claim)
+- `docs/security.md` (documented loopback listener admission, CSP, `page.url` local-only boundary, and URL credential handling under `## Local client server`)
+- `docs/index.md` (added `.lf/components/` and `.lf/theme.css` to `## Where files live`)
 
 ## Done when
 

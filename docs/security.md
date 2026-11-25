@@ -82,9 +82,28 @@ lf --machine mini -a codex implement
 ## Local client server
 
 The local Loopflow server listens on a private Unix socket accessible only to
-your OS user. Anyone admitted to a held terminal can type into it. Do not
-expose this socket over a network proxy; use `lf server mobile` (Tailscale) for
-authenticated phone access. See [Connect clients](server.md).
+your OS user, plus a loopback-only HTTP/WebSocket listener (`127.0.0.1:0`) for
+[browser review pages](surfaces.md#review-pages). Anyone admitted to a held
+terminal or a loopback page connection acts with your OS user's local Machine
+authority.
+
+- **Loopback admission:** each server start generates a fresh 32-byte random
+  token in memory (never written to disk or printed by `lf server status`).
+  Every request checks `Host: 127.0.0.1:<port>` (preventing DNS rebinding) and
+  the token in constant time; WebSocket upgrades also require a same-origin
+  `Origin: http://127.0.0.1:<port>` header. Everything else returns `404` with
+  no body and no CORS headers.
+- **Page isolation:** served HTML carries
+  `Content-Security-Policy: default-src 'self' 'unsafe-inline' data: blob:; connect-src 'self'`,
+  `Referrer-Policy: no-referrer`, and `Cache-Control: no-store`, matching
+  Desktop's offline rule.
+- **URL minting:** asking the server for a page URL (`page.url`) is permitted
+  only over the local Unix socket and refused on Tailscale or loopback
+  connections. Treat a printed loopback URL like a local session credential
+  until the server restarts.
+- **Remote access:** do not expose the Unix socket or loopback port over a
+  network proxy; use `lf server mobile` (Tailscale) for authenticated phone
+  access. See [Connect clients](server.md).
 
 ## Stored and transmitted data
 

@@ -110,17 +110,19 @@ lf session list                  # live conversations, OS-confirmed
 ## 4. Pick up the conversation
 
 When the PR is ready, the Task pauses at `ship-review` in its own conversation.
-It prepares one summary page (`scratch/ship-review.html`) covering what ships,
-how to try it, the choices made for you, and everything left outside the PR,
-each with a proposal to fix it here, give it its own Task or drop it.
+It builds one comprehension page (`scratch/ship-review.html`) covering what was
+built, how it works on real diffs, the key data structures and APIs, the
+trade-offs going forward, and findings to fix here, file as a Task, or drop.
 
 ```bash
-lf resume --task <ID>            # open from any terminal, on whichever harness it ran
+lf page open scratch/ship-review.html   # open in your browser or Desktop Files; highlight, choose, and press ⌘↩ to steer
+lf resume --task <ID>                   # open the conversation from any terminal, on whichever harness it ran
 ```
 
-Ask for changes right there. Close the terminal and come back next week: the
-conversation persists across window closes, `lf install` updates, crashes, and
-reboots.
+Highlight text on the page to leave notes, pick choices on findings, and press
+`⌘↩` to steer the Task directly—or talk in the conversation. Close the terminal
+and come back next week: the conversation persists across window closes,
+`lf install` updates, crashes, and reboots.
 
 ## 5. Land it
 

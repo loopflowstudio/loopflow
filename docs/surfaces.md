@@ -31,16 +31,16 @@ lf open --task LOO-12 --host desktop          # open in Loopflow Desktop
   `lf --task LOO-12 open --link --format markdown` (paste into PRs, Slack, or
   notes; installing `lf` registers the `loopflow:` URL handler).
 
-The Desktop presentation command opens a finished page or selects lines
-in a file for review.
+The Desktop presentation command opens a source file or selects lines for review
+(for review pages, use [`lf page open`](#review-pages)):
 
 ```bash
-lf desktop files scratch/explore.html
+lf desktop files src/parser.rs
 lf desktop files src/parser.rs:24-31 --mode diff
 ```
 
 A path opens in **Read** by default. Desktop keeps the prior reading position
-in Files’ jump history and preserves drafts, Undo and terminal focus. During
+in Files’ jump history and keeps drafts, Undo and terminal focus. During
 active editing or Diff review in a visible pane, the path appears in **Open & Scratch** with a
 dismissible `Presented <path> · Open` bar. Dismissing it keeps the file in the
 rail. Presenting from a zoomed conversation reveals the file beside it and
@@ -50,6 +50,66 @@ keeps keyboard focus in the terminal. An unattached Desktop returns exit status 
 terminal title via standard OSC sequences, plus native cmux tabs/workspaces and
 tmux windows. Rex and Herdr users can configure title display in those apps'
 own settings.
+
+## Review pages
+
+Review skills (`ship-review`, `explore`, `concept-review`, `qa`, `demo`) compile
+a self-contained HTML page under `scratch/` that you can annotate and answer
+from any host:
+
+```bash
+lf page open scratch/ship-review.html                  # opens in your browser or Desktop Files
+lf page open scratch/ship-review.html --print          # print the local URL without opening a window
+lf page open scratch/ship-review.html --host browser   # force browser (or --host desktop)
+```
+
+| Where you work | `lf page open` does | `⌘↩` sends |
+|---|---|---|
+| Browser beside Rex or any terminal | Opens `http://127.0.0.1:<port>/<token>/f/<path>` and prints it | `task.steer` (Task pages) or `session.steer` (Wave, standalone Session, repo) through `lf server`; the strip prints the server's delivery line |
+| Loopflow Desktop | Opens the page in **Files** quietly (`lf desktop files`) | Notes, choices, and answers join **Diff** line comments in Desktop's shared comments strip and insert into the conversation input |
+| Headless Graph step (`lf -b` / auto) | Prints the local URL and exits without popping a browser window | Desktop's `scratch/` watcher shows a quiet **Updated** notice if the Task is open; open the URL or file when ready |
+| Offline (`file://` or stopped server) | Double-click the file | Copies the same one-line message to the clipboard |
+
+On the page:
+
+- **Highlight to comment.** Drag across any text, click **Note**, and write your
+  comment. The runtime highlights the quote and anchors it to the nearest
+  heading.
+- **Choices and questions.** Click single-select choices (`Fix here`,
+  `File Task`, `Drop`), multi-select options, or type into numbered question
+  fields. Every selection queues into one reply.
+- **Send once (`⌘↩`).** All queued notes, choices, and answers format onto one
+  line identically across hosts:
+  ``(1) `scratch/ship-review.html` § <section> › "<quote>" <words> (2) …``
+  In a browser, the bottom strip shows the server's delivery sentence and clears
+  the queue only on success (even when a headless Graph worker built the page,
+  `task.steer` reaches the Task's active work or primary interactive Session).
+  In Desktop, the page's own bottom strip stays hidden so Desktop's comments
+  strip is the single queue; drafts survive switching to code files (including
+  for [Tasks on another Machine](#a-task-on-another-machine)) and clear when
+  sent. Side-by-side HTML diffs in **Diff** stay read-only.
+- **Direct action buttons.** A button wired to a Loopflow operation (for
+  example, **File Task now**) is separate from the reply queue. Clicking it
+  opens an inline confirmation showing the operation kind and fields, runs the
+  operation immediately, and replaces the button with an in-place receipt
+  (`Filed LOO-1200`). It never opens the reply strip or Desktop's comments
+  strip; if you also send queued notes with `⌘↩`, a short
+  `[already ran: task.create → LOO-1200]` suffix rides along so the agent does
+  not repeat it. Offline, clicking the button adds `Run: …` to the reply for
+  clipboard copy.
+
+Drafts are keyed by file path and build hash: reloading the page keeps them,
+and rebuilding the page starts clean. If `lf server` restarts while a page is
+open in a browser, the page shows a banner (`lf server restarted; run lf page
+open <path>`) and `⌘↩` falls back to copying. Browser loopback serves checkouts
+on this Machine; for peer-owned Tasks, open the page in Desktop. Hand-written
+`scratch/*.html` files without the page kit keep opening as plain pages with no
+strip. Passing a raw `*.page.html` source to `lf page open` exits with the
+`lf page build` command instead of serving uncompiled tags.
+
+To author or customize review pages and components, see
+[Build and customize review pages](orchestration.md#build-and-customize-review-pages)
+or run `lf help page`.
 
 ## Loopflow Desktop
 
@@ -62,8 +122,8 @@ The native macOS app reads the same local store as `lf`; it keeps no copy of its
   log, local dev URLs). **Files** opens files read-only by default with one-key
   **Edit** (⌃⌘E), checkout-wide **⌘P** fuzzy find and **⇧⌘F** grep, **⌘F**
   in-file find, **⌘-click** / `gd` jump to definition with **⌘[** / **⌘]** jump
-  history, line comments shared with **Diff** (⌘↩), and quiet update notices for
-  `scratch/` writes.
+  history, line and review-page comments shared with **Diff** (⌘↩), and quiet
+  update notices for `scratch/` writes.
 - **Dashboards:** saved side-by-side grids of Tasks selected by query. Each
   tile is headed by the Task's sidebar row, with the sentence saying where its
   workflow stands.
@@ -528,7 +588,8 @@ its last working report clears. Typing dismisses finished and error reports.
 | 4 | Desktop unreachable (not running or not macOS) |
 
 Run `lf desktop actions` for every verb and shortcut. Full flags:
-[`lf open`](lf-reference.md#lf-open), [`lf desktop`](lf-reference.md#lf-desktop).
+[`lf open`](lf-reference.md#lf-open), [`lf page`](lf-reference.md#lf-page),
+[`lf desktop`](lf-reference.md#lf-desktop).
 
 Next: [Telemetry](telemetry.md): cost, context budgets, transcripts, and
 health checks.

@@ -170,6 +170,8 @@ Each page picks up where the previous one leaves off:
   config.local.yaml       # Your private repo/Wave preferences (auto-excluded from Git)
   skills/                 # Repo Skills (extend or replace builtins)
   graphs/                 # Repo Graphs
+  components/             # Custom <lf-component> templates for review pages
+  theme.css               # Optional CSS custom properties for review pages
   qa/                     # Repo QA playbooks, updated by `qa`
   wave/<name>/            # Wave GOAL.md, MEMORY.md, and config.yaml
 scratch/                  # Temporary working notes (added files cleared on submit/land)

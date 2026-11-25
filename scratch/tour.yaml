@@ -1,15 +1,23 @@
-at: 016ef7deaae3004663cd2a9045b385d8b3e10932
+at: 121e0fe67ad003fe55f32037029671e52ae6e104
 first:
   - path: docs/sessions.md
-    why: What a steer does when the conversation reopens
+    why: When an open or reopened conversation hears a steer
   - path: scratch/plan.md
-    why: Why paste mode cannot identify an empty prompt
+    why: What the live Antigravity probes showed
+  - path: rust/loopflow-execution/src/harness/parity.rs
+    why: Every behavior, gap owner and verification method
   - path: rust/loopflow-execution/src/harness/mod.rs
-    why: How a harness starts its resumed turn
+    why: How each harness starts its resumed turn
   - path: rust/loopflow-execution/src/harness/native_session.rs
     why: Waiting news starts Antigravity's prompt hook
   - path: rust/loopflow-execution/src/agent/mod.rs
     why: Parent conversation markers removed before launch
   - path: rust/loopflow/tests/session_launch_contract.rs
     why: Public resume, delivery receipt and quiet reopen
+  - path: rust/loopflow/src/server/wake.rs
+    why: Queued steer and provider message on each route
+  - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
+    why: Worker behavior through real Task commands
+  - path: scripts/test_network.py
+    why: How the fixture hides installed provider executables
 hide: []

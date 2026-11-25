@@ -3,10 +3,12 @@ use crate::process::attachment;
 use serde_json::Value;
 
 use super::fact_writer::FactWriter;
+use super::parity::Behavior;
 use loopflow_harness::claude_decode::ClaudeDecoder;
 use loopflow_harness::codex_decode::{rpc_error, CodexDecoder};
 use loopflow_harness::fact::{self, Decoded, ProviderFact, ProviderTurn};
 use loopflow_harness::opencode_decode::Turn;
+use loopflow_harness::HarnessKind;
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use loopflow_model::id::AgentSessionId;
 
@@ -420,64 +422,43 @@ fn opencode_run_preserves_output_and_tools_and_leaves_usage_to_the_transcript() 
 fn each_harness_classifies_its_own_refusals() {
     use super::HarnessKind::{Antigravity, Claude, Codex, OpenCode, Pi};
     use crate::agent::AgentFailure::{CredentialInvalidated, ModelUnavailable, UsageLimit};
-    for (harness, code, message, failure) in [
-        // `~/.lf/runs/6c/6c7c…/opencode.stderr.log`.
-        (
-            OpenCode,
-            "opencode_error",
-            "Insufficient balance. This request is pay-as-you-go, billed to OpenCode Models credits. Top up at https://opencode.ai/console/billing?credits=1.",
-            UsageLimit,
-        ),
-        // `opencode run -m opencode/no-such-model-xyz`, 2.0.32.
-        (
-            OpenCode,
-            "opencode_error",
-            "Model unavailable: opencode/no-such-model-xyz",
-            ModelUnavailable,
-        ),
-        (Pi, "pi_error", "Your refresh token was revoked", CredentialInvalidated),
-        // `agy` 1.5.13, signed out and with an unknown `--model`.
-        (
-            Antigravity,
-            "agy_error",
-            "authentication failed or timed out",
-            CredentialInvalidated,
-        ),
-        (
-            Antigravity,
-            "agy_error",
-            "Error: authentication required. Run 'agy' to log in, then retry.",
-            CredentialInvalidated,
-        ),
-        (
-            Antigravity,
-            "agy_error",
-            "invalid model selection (--model \"no-such-model-xyz\" --effort \"\"): model no-such-model-xyz is not recognized as a known model or custom model in settings",
-            ModelUnavailable,
-        ),
-        // From the binary's strings; no quota refusal has been seen live.
-        (
-            Antigravity,
-            "agy_error",
-            "You have exhausted your quota on this model.",
-            UsageLimit,
-        ),
-        (Antigravity, "agy_error", "RESOURCE_EXHAUSTED", UsageLimit),
-        (Claude, "provider_rate_limited", "rejected: seven_day", UsageLimit),
-        (Codex, "provider_model_unavailable", "", ModelUnavailable),
-    ] {
-        assert_eq!(
-            super::launcher(harness).classify_failure(code, message),
-            Some(failure),
-            "{harness:?}: {message}"
-        );
+    for harness in HarnessKind::ALL {
+        let cases: &[(&str, &str, crate::agent::AgentFailure)] = match harness {
+            Claude | Codex => &[
+                ("provider_rate_limited", "rejected: seven_day", UsageLimit),
+                ("provider_credential_invalidated", "", CredentialInvalidated),
+                ("provider_model_unavailable", "", ModelUnavailable),
+            ],
+            OpenCode => &[
+                ("opencode_error", "Insufficient balance. This request is pay-as-you-go, billed to OpenCode Models credits. Top up at https://opencode.ai/console/billing?credits=1.", UsageLimit),
+                ("opencode_error", "Model unavailable: opencode/no-such-model-xyz", ModelUnavailable),
+                ("opencode_error", "Your refresh token was revoked", CredentialInvalidated),
+            ],
+            Pi => &[
+                ("pi_error", "Your refresh token was revoked", CredentialInvalidated),
+                ("pi_error", "Usage limit reached", UsageLimit),
+                ("pi_error", "Model is not available", ModelUnavailable),
+            ],
+            // agy 1.5.13 signed out and with an unknown model. The quota
+            // wording is from its binary's strings.
+            Antigravity => &[
+                ("agy_error", "authentication failed or timed out", CredentialInvalidated),
+                ("agy_error", "Error: authentication required. Run 'agy' to log in, then retry.", CredentialInvalidated),
+                ("agy_error", "invalid model selection (--model \"no-such-model-xyz\" --effort \"\"): model no-such-model-xyz is not recognized as a known model or custom model in settings", ModelUnavailable),
+                ("agy_error", "You have exhausted your quota on this model.", UsageLimit),
+                ("agy_error", "RESOURCE_EXHAUSTED", UsageLimit),
+            ],
+        };
+        for &(code, message, failure) in cases {
+            let classified = super::launcher(harness).classify_failure(code, message);
+            Behavior::RefusalFallthrough.assert_observed(harness, classified == Some(failure));
+        }
     }
 }
 
 /// Claude and Codex leave a transient failure to lf; the others retry their own.
 #[test]
 fn a_transient_failure_is_lfs_to_retry_only_where_the_provider_does_not() {
-    use loopflow_harness::HarnessKind;
     for harness in HarnessKind::ALL {
         let retried = super::launcher(harness)
             .classify_failure("fixture_error", "connection reset")
@@ -497,7 +478,6 @@ fn a_transient_failure_is_lfs_to_retry_only_where_the_provider_does_not() {
 fn every_harness_reads_a_synced_skill() {
     use crate::skills::{sync_skills, SkillSyncOptions};
     use loopflow_definitions::text::split_frontmatter;
-    use loopflow_harness::HarnessKind;
     use std::fs;
 
     let home = tempfile::TempDir::new().unwrap();
@@ -524,50 +504,37 @@ fn every_harness_reads_a_synced_skill() {
 
     for harness in HarnessKind::ALL {
         let installed = super::launcher(harness).capabilities().installed_skills;
-        if let Some(registry) = installed.global_registry {
+        let registered = installed.global_registry.is_none_or(|registry| {
             let config: serde_json::Value =
-                serde_json::from_str(&fs::read_to_string(home.path().join(registry)).unwrap())
-                    .unwrap();
+                serde_json::from_slice(&fs::read(home.path().join(registry)).unwrap()).unwrap();
             let global = std::path::absolute(home.path().join(installed.global)).unwrap();
-            assert!(
-                config["entries"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|entry| entry["path"].as_str() == global.to_str()),
-                "{harness:?}: {registry} doesn't list {}",
-                global.display()
-            );
-        }
+            config["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry["path"].as_str() == global.to_str())
+        });
         for (base, directory, skill, graph) in [
             (home.path(), installed.global, "implement", "code"),
             (repo.path(), installed.repository, "audit", "proof"),
         ] {
             for name in [skill, graph] {
                 let path = base.join(directory).join(name).join("SKILL.md");
-                let content = fs::read_to_string(&path)
-                    .unwrap_or_else(|error| panic!("{harness:?}: {}: {error}", path.display()));
-                let (frontmatter, _) = split_frontmatter(&content).expect("export has frontmatter");
-                let frontmatter: serde_yaml_ng::Value =
-                    serde_yaml_ng::from_str(frontmatter).unwrap();
-                assert_eq!(
-                    frontmatter["name"].as_str(),
-                    Some(name),
-                    "{}",
-                    path.display()
-                );
-                assert!(
-                    frontmatter["description"]
-                        .as_str()
-                        .is_some_and(|description| !description.trim().is_empty()),
-                    "{}",
-                    path.display()
-                );
-                assert_eq!(
-                    frontmatter["disable-model-invocation"].as_bool(),
-                    (name == graph).then_some(true),
-                    "{}",
-                    path.display()
+                let exported = fs::read_to_string(&path).ok().and_then(|content| {
+                    let (header, _) = split_frontmatter(&content)?;
+                    serde_yaml_ng::from_str::<serde_yaml_ng::Value>(header).ok()
+                });
+                Behavior::InstalledSkills.assert_observed(
+                    harness,
+                    registered
+                        && exported.is_some_and(|header| {
+                            header["name"].as_str() == Some(name)
+                                && header["description"]
+                                    .as_str()
+                                    .is_some_and(|d| !d.trim().is_empty())
+                                && header["disable-model-invocation"].as_bool()
+                                    == (name == graph).then_some(true)
+                        }),
                 );
             }
         }

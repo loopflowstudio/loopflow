@@ -21,6 +21,7 @@ mod launch_matrix;
 pub(crate) mod native_exit;
 pub mod native_session;
 pub mod opencode;
+pub mod parity;
 pub mod pi;
 pub mod task_updates;
 

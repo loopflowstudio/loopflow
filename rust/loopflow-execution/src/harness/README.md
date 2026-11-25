@@ -106,13 +106,10 @@ worktree lf created, the terminal is trusted for that session through
 
 ## Harness parity
 
-The table lists each behavior and its known gaps. LOO-1098 will generate
-these rows from `harness::parity::support` and check each automated row over
-`HarnessKind::ALL`. The verification column names the intended coverage.
-The Antigravity reopen check already runs through the CLI:
+Each cell comes from `harness::parity::support`. After changing a cell, regenerate the table:
 
 ```sh
-cargo test -p loopflow --test session_launch_contract a_reopened_antigravity_task_hears_repository_direction_once
+cargo test -p loopflow-execution --lib harness::parity::tests::regenerate_readme_table -- --ignored
 ```
 
 <!-- parity:start -->
@@ -122,15 +119,15 @@ cargo test -p loopflow --test session_launch_contract a_reopened_antigravity_tas
 | records its usage in the Task's history | yes | yes | yes | yes | yes | automated (`task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness`) |
 | receives the step's context | yes | yes | yes | yes | yes | automated (`task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness`) |
 | hears a steer sent while it runs, after its next tool | yes | yes | yes | yes | yes | automated (`task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness`) |
-| never asks permission, whatever `yolo` says | yes | yes | yes | yes | yes | automated (`harness::launch_matrix`) |
+| never asks permission, whatever `yolo` says | yes | yes | yes | yes | yes | automated (`harness::launch_matrix::every_harness_runs_all_four_launch_kinds`) |
 | is passed over when its CLI is not installed, or named once when it was the only choice | yes | yes | yes | yes | yes | automated (`task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again`) |
-| fails the turn, with the question as its reason, when it asks one and nobody is there; the run stops after that one attempt | no: not read (Task 48edb9) | no: not read (Task 48edb9) | yes | yes | no: not read (Task 48edb9) | automated (`task_graph_launch_tests::a_question_with_nobody_there_ends_the_step`) |
+| fails the turn, with the question as its reason, when it asks one and nobody is there; the run stops after that one attempt | no: question is not read (Task 48edb9) | no: question is not read (Task 48edb9) | yes | yes | no: question is not read (Task 48edb9) | automated (`task_graph_launch_tests::a_question_with_nobody_there_ends_the_step`) |
 | stops on `lf task interrupt` with its turn recorded interrupted; the next `lf task run` starts the step again | yes | yes | yes | yes | yes | automated (`task_graph_launch_tests::a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again`) |
 | moves to the next agent on a usage limit, a revoked login or a model the provider does not serve | yes | yes | yes | yes | yes | automated (`harness::conformance_tests::each_harness_classifies_its_own_refusals`) |
-| as an idle work session, hears a steer | yes | yes | yes | yes | no: next turn only (LOO-1098) | `server::wake::tests::` |
-| reopened work session takes waiting steers as a turn | yes | yes | yes | yes | yes | automated (`server::wake::tests::every_harness_takes_waiting_steers_on_reopen`) |
+| as an idle work session, hears a steer | yes | yes | yes | yes | no: next turn only (LOO-1099) | automated (`server::wake::tests::every_harness_wakes_its_idle_work_session`) |
+| reopened work session takes waiting steers as a turn | yes | yes | yes | yes | yes | automated (`server::wake::tests::reopened_work_sessions_take_waiting_steers`, `session_launch_contract::a_reopened_antigravity_task_hears_repository_direction_once`) |
 | lists synced skills and Graphs | yes | yes | yes | yes | yes | automated (`harness::conformance_tests::every_harness_reads_a_synced_skill`) |
-| opening in another viewer keeps the conversation | yes | yes | yes | yes | no: second viewer closes first (LOO-1097) | real provider (`transport_tests` proves held-terminal sharing; provider TUI checked live) |
+| opening in another viewer keeps the conversation | yes | yes | yes | yes | no: second viewer closes first (LOO-1097) | real provider (transport_tests covers held-terminal sharing. Check the provider TUI live) |
 <!-- parity:end -->
 
 Context and steers reach every harness the same way: it runs

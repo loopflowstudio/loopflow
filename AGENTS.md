@@ -367,6 +367,7 @@ Make the choice; don't leave it as a question.
 - With `LF_HOME` unset, `lf_home_dir` finds the account's real `~/.lf` even under an isolated `HOME`, so a fixture changing `LF_HOME` holds the env lock.
 - A fixture that launches an agent for a Task or a Wave holds a `loopflow_test_support::MachineServer` for its `LF_HOME`. Without one the launch runs `lf install server`, which registers a launchd or systemd job for the temporary home.
   Use `MachineServer::start_with_path` for provider stand-ins. A held `resume --task` finds its provider on the server's PATH.
+  `lf` restores system tool directories on startup. The missing-CLI Graph fixture uses `scripts/test_network.py` to hide installed providers from its processes.
 - To test a peer outage, disconnect the fixture's SSH before stopping its server. A reconnecting `lf server connect` starts the service again.
 - A fixture expecting turn hooks or `LF_PROVIDER_CONTEXT` launches a Task Graph
   worker or resumes a work session, with a `MachineServer` for its home.

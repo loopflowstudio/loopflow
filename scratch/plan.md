@@ -44,106 +44,27 @@ when that route is known. The earlier probe notes in
 `93d232bf1d:scratch/plan.md` record which hooks and sidecars receive an
 Antigravity server address on 1.5.16.
 
-### Executable UX parity contract (`harness::parity`)
+### Executable UX parity contract
 
-Create `rust/loopflow-execution/src/harness/parity.rs`:
+`harness::parity::support` declares 13 behaviors for every `HarnessKind`.
+The harness README is generated from those cells. Twelve rows name automated
+checks. Viewer handoff needs a live provider and its Antigravity gap belongs
+to LOO-1097. Headless questions on Claude, Codex and Antigravity belong to
+Task 48edb9.
 
-- `pub enum Behavior` (exhaustive, with `Behavior::ALL`)
-- `pub enum Support { Yes, Gap { why: &'static str, owner: &'static str } }`
-- `pub enum Verification { Automated(&'static str), RealProvider(&'static str) }`
-- `pub fn support(harness: HarnessKind, behavior: Behavior) -> Support` — exhaustive
-  match over `(HarnessKind, Behavior)` with no wildcard arms.
-- `pub fn verification(behavior: Behavior) -> Verification` — distinguishes the 12
-  behaviors verified across `HarnessKind::ALL` by automated tests from behaviors
-  whose real-provider failure cannot be reproduced honestly by a stand-in script
-  (currently `ViewerHandoff` / LOO-1097).
-
-| Behavior | Verification | Current gaps |
-|---|---|---|
-| `WorkerStep` (runs, settles, records answer & thread, Graph advances) | Automated (`a_task_step_runs_as_a_worker_on_every_harness`) | none |
-| `UsageRecording` (records usage in Task history) | Automated (same test) | none |
-| `StepContext` (receives step context) | Automated (same test) | none |
-| `MidTurnSteer` (hears steer after next tool) | Automated (same test) | none |
-| `HeadlessPermissions` (never asks permission whatever `yolo` says) | Automated (`harness::launch_matrix`) | none |
-| `MissingCli` (passed over when uninstalled, or named once when sole choice) | Automated (`a_step_that_cannot_launch_is_not_started_again`) | none |
-| `UnansweredQuestion` (fails turn with question when nobody is there) | Automated (`a_question_with_nobody_there_ends_the_step`) | Claude, Codex, Antigravity (Task 48edb9) |
-| `Interrupt` (stops on `lf task interrupt`, next run retries step) | Automated (`a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again`) | none |
-| `RefusalFallthrough` (classifies quota, revoked login, unserved model) | Automated (`conformance_tests::each_harness_classifies_its_own_refusals`) | none |
-| `IdleWorkSessionWake` (idle work session hears a steer) | Automated (`server::wake::tests::every_harness_wakes_its_idle_work_session`) | Antigravity (LOO-1098) |
-| `ReopenWaitingSteers` (reopened work session takes waiting steers) | Automated (`server::wake::tests::every_harness_takes_waiting_steers_on_reopen`) | none |
-| `InstalledSkills` (synced skills & Graphs listed) | Automated (`conformance_tests::every_harness_reads_a_synced_skill`) | none |
-| `ViewerHandoff` (opening in another viewer keeps the conversation) | RealProvider (`transport_tests` proves held-terminal sharing; provider TUI checked live) | Antigravity (LOO-1097) |
-
-## Conformance
-
-Every `Verification::Automated` behavior test loops over `HarnessKind::ALL` with
-an exhaustive `match` (never a hardcoded subset or string array) and checks
-`parity::support(harness, behavior)` both ways: `Support::Yes` must pass, and
-`Support::Gap` must still exhibit the gap, so fixing a gap fails the test until
-`parity.rs` and the README are updated. Failure messages name `{harness:?}` and
-the behavior.
-
-Specifically:
-- `server::wake::tests::every_harness_wakes_its_idle_work_session`: loops
-  `HarnessKind::ALL`, sets up each harness's idle reach from
-  the supported provider routes, saves a steer and checks delivery against
-  the support cell, including an unread steer for a gap.
-- A reopen test over `HarnessKind::ALL` should exercise actual `lf resume`
-  with a saved thread and waiting news. Observe the provider starting its
-  turn before anyone types and the same Session's delivery receipt.
-- `task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness`: switch
-  the hardcoded 5-tuple array to `for harness in HarnessKind::ALL`.
-- `task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again`: check
-  missing-CLI install hint and pass-over across `HarnessKind::ALL`.
-- `task_graph_launch_tests::a_question_with_nobody_there_ends_the_step`: loop
-  `HarnessKind::ALL`, asserting `Support::Yes` fails with `unanswered_question`
-  and `Support::Gap` does not.
-- Unify the three split interrupt tests (`…_on_claude_and_codex`,
-  `…_on_opencode_and_pi`, `…_on_antigravity`) into one loop over `HarnessKind::ALL`.
-- `harness::conformance_tests::each_harness_classifies_its_own_refusals`: loop
-  `HarnessKind::ALL` with an exhaustive `match` so every harness has refusal
-  classification fixtures.
-- `parity::tests::readme_table_matches_support`: renders the parity table between
-  markers (`<!-- parity:start -->` / `<!-- parity:end -->`) in
-  `rust/loopflow-execution/src/harness/README.md` and asserts exact match.
-  `cargo test -p loopflow-execution --lib harness::parity::tests::regenerate_readme_table -- --ignored`
-  rewrites it. Update `rust/loopflow/src/server/README.md` ("Waking an idle
-  conversation") to describe the implemented delivery mechanism.
-
-## Exclusions
-
-- Real-provider viewer handoff for `agy` (LOO-1097): tracked as a typed
-  `RealProvider` `Gap` owned by LOO-1097, not fixed here.
-- Reading a headless question on Claude, Codex, or Antigravity: tracked as a
-  typed `Automated` `Gap` owned by Task 48edb9.
-- Offline gate check verifying that a `Gap`'s owner Task is still open.
+Task Graph fixtures start workers, steer them during a tool call, interrupt
+and retry them, ask a question, and exercise both missing-CLI choices. The
+wake fixture checks the provider's addressed message and the Session's
+receipt. It covers the first boundary after reopen on Claude, Codex,
+OpenCode and Pi. Antigravity starts its turn earlier, at launch, so its cell
+also names the existing `lf resume --task` fixture.
 
 ## Remaining work
 
-Done so far: reopen wake for Antigravity (real agy 1.5.16 run above;
-`session_launch_contract` fixtures), nested-launch marker stripping, 5 Whys.
-`parity.rs` does not exist yet. The README table is still hand-written and
-cites tests that do not exist (`every_harness_takes_waiting_steers_on_reopen`,
-`every_harness_wakes_its_idle_work_session`, a single unified interrupt test).
-
-**Pass 2 (next): typed parity table.** Add `harness/parity.rs` as specified,
-generate the README table between the markers with its check and
-`--ignored` regenerate test, and convert each automated behavior test to an
-exhaustive loop over `HarnessKind::ALL` that checks the cell both ways
-(Conformance above). The reopen row cites a real test: either a loop over
-`HarnessKind::ALL` through `lf resume`, or the existing per-harness reopen
-fixtures named exactly. Teaches whether the `Verification` split holds once
-every row points at a real test.
-
-**Pass 3: idle-open Antigravity wake.** Stopped by the implementation finding
-above; no provider route is known. The idle-wake cell stays a `Gap`. Its
-owner must not be LOO-1098 itself: when this Task completes, the gap would
-point at a finished Task, which is the 5 Whys failure. File a follow-up Task
-for live idle wake before gate and name it as the owner (choice recorded in
-`questions.md`).
-
-Gate then runs the acceptance list and the live reopen demo; the idle-open
-half of demo step 1 is the follow-up Task's.
+Already-open Antigravity idle wake belongs to LOO-1099. Revisit a provider
+route there with the draft, dialog and server-replacement cases above.
+Gate owns the acceptance list and the live reopen demo. Gap owners are
+recorded in the table. Checking their tracker state offline is out of scope.
 
 ## Acceptance at gate
 
@@ -152,13 +73,15 @@ cargo test -p loopflow-terminal --lib ghostty_vt::
 cargo test -p loopflow-storage --lib query_plans::
 cargo test -p loopflow-execution --lib harness::parity::
 cargo test -p loopflow-execution --lib harness::conformance_tests::
+cargo test -p loopflow-execution --lib harness::launch_matrix::every_harness_runs_all_four_launch_kinds
 cargo test -p loopflow-execution --lib transport::
 cargo test -p loopflow --lib server::wake::tests::
 cargo test -p loopflow --lib server::boundary::tests::
 cargo test -p loopflow --lib task_graph_launch_tests::
+cargo test -p loopflow --test session_launch_contract a_reopened_antigravity_task_hears_repository_direction_once
 ```
 
-Live demo still required for delivery to an already open idle conversation.
+LOO-1099 owns the live demo for an already-open idle Antigravity conversation.
 
 ## Slice checks
 
@@ -166,3 +89,6 @@ Live demo still required for delivery to an already open idle conversation.
 - `session_launch_contract::task_conversation_preparation_is_passive_and_connect_uses_shared_launch_settings` passed with the same fixture PATH.
 - `harness::environment_tests::a_nested_provider_cannot_address_the_parent_antigravity_conversation` passed.
 - `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed. Gate and CI own the remaining suites.
+- The first missing-CLI run found Homebrew OpenCode after the fixture removed it from PATH. The worker ran the installed CLI and reported `ECONNREFUSED`. The fixture now hides system provider executables for its process tree.
+- The parity table regenerated and its drift check passed. The 10 named behavior fixtures passed on macOS, including the missing-CLI fixture with three installed provider executables hidden. Linux CI owns the private mount check. The macOS debug linker warned about the size of the unwind table.
+- `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and Ruff passed for the parity change.

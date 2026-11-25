@@ -1128,12 +1128,15 @@ fn a_reopened_antigravity_task_hears_repository_direction_once() {
         first[0]["conversation"].as_str().unwrap(),
     );
     let turns = heard();
-    assert_eq!(turns.len(), 1);
-    assert_eq!(turns[0]["conversation"], first[0]["conversation"]);
-    assert!(turns[0]["context"]
-        .as_str()
-        .unwrap()
-        .contains("REOPEN_DIRECTION"));
+    loopflow_execution::harness::parity::Behavior::ReopenWaitingSteers.assert_observed(
+        loopflow_harness::HarnessKind::Antigravity,
+        turns.len() == 1
+            && turns[0]["conversation"] == first[0]["conversation"]
+            && turns[0]["context"]
+                .as_str()
+                .is_some_and(|context| context.contains("REOPEN_DIRECTION")),
+    );
+
     let page = fixture
         .command()
         .args(["session", "steers", &session, "--json"])

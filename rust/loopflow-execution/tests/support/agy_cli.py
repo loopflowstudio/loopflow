@@ -201,6 +201,11 @@ def main():
     if (HOME / "hold-turn").exists():
         (HOME / "holding").write_text(conversation)
     _wait(lambda: not (HOME / "hold-turn").exists(), "turn")
+    if (HOME / "ask-question").exists():
+        tool = {"name": "ask_question", "parameters": {"Question": "Use the fixture?"}}
+        step += 1
+        for state in ("ACTIVE", "DONE"):
+            update(step, state, "tool", tool_name="ask_question", tool_info=tool)
     if (HOME / "tool_turn.py").exists():
         (HOME / "hook-context").write_text(context)
         tool = {"name": "run_command", "parameters": {"CommandLine": "echo hi"}}

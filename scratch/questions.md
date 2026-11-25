@@ -5,8 +5,9 @@
 - Revisit live idle wake after finding a reliable prompt or provider address.
   The trust dialog and model picker observations in the plan rule out the
   proposed paste-mode readiness check.
-- Own the Antigravity idle-wake gap with a new follow-up Task, not
-  LOO-1098, so the cell never points at a finished Task.
+- LOO-1099 owns the already-open Antigravity idle-wake gap.
+- Check reopen at the provider boundary on the four server-delivered routes
+  and through the native CLI launch on Antigravity.
 - Keep viewer handoff as a real-provider check (LOO-1097) and unanswered
   questions as an automated gap (48edb9).
 

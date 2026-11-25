@@ -118,8 +118,7 @@ uses outbound REST requests. Remote execution reaches the target Machine through
 
 A provider is one unit struct with two implementations: what it writes, then
 how lf launches it. Launch and transcript decisions branch on what the harness
-declares. The generated parity checks and idle-wake declaration below are
-planned in LOO-1098.
+declares. The parity table names the test or live check for each behavior.
 
 ```sh
 cargo test -p loopflow-harness <name>_decode                         # after steps 1-2
@@ -130,7 +129,8 @@ cargo test -p loopflow --lib server::wake::tests::                   # after ste
 ```
 
 1. In [`loopflow-harness`](../../rust/loopflow-harness/README.md), add the unit
-   struct, its `HarnessKind` variant and its line in `HarnessKind::harness()`.
+   struct and its `HarnessKind` variant. Include it in `HarnessKind::ALL` and
+   `HarnessKind::harness()`.
 2. Implement `Harness` on it. Map native output to the common stream in
    `<name>_decode.rs` and implement `transcript_reader` in
    `transcript/<name>.rs`. `transcript_home` has no default: name the client's
@@ -139,7 +139,7 @@ cargo test -p loopflow --lib server::wake::tests::                   # after ste
    omissions and finality. Captured output for normal, tool, error and retry
    turns goes in `src/testdata/` and `src/transcript/testdata/`.
 3. In execution, add `harness/<name>.rs` implementing `Launcher` on the same
-   struct: its `Capabilities` (including `idle_wake`), `open` for the native
+   struct: its `Capabilities`, `open` for the native
    interactive client and `driver` for the headless stream, and `recognizes`
    when a running process is its client by more than the command name. Add its
    line in `harness::launcher` and declare every `Behavior` cell in
@@ -149,8 +149,8 @@ cargo test -p loopflow --lib server::wake::tests::                   # after ste
 4. Add conformance fixtures and regenerate the parity table in
    `harness/README.md` (`cargo test -p loopflow-execution --lib harness::parity::tests::regenerate_readme_table -- --ignored`).
    `harness::launch_matrix`, `harness::conformance_tests`, `server::wake::tests`,
-   and `task_graph_launch_tests` iterate `HarnessKind::ALL` and verify every
-   automated behavior against `harness::parity::support`.
+   and `task_graph_launch_tests` iterate `HarnessKind::ALL`. The Antigravity
+   reopen fixture exercises the native launch through `lf resume --task`.
 5. Map the new edge in the checked architecture reference.
 
 Do not add a collector daemon, mandatory telemetry store, or synthetic final

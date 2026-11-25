@@ -41,6 +41,12 @@ message['session_id'] = 'stand-in'
 keep_claude_turn(message, 'Held.')
 print(json.dumps(message), flush=True)
 print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'stand-in'}), flush=True)
+if os.path.exists(os.path.join(home, 'ask-question')):
+    question = {'name': 'AskUserQuestion', 'type': 'tool_use', 'id': 'question',
+                'input': {'questions': [{'question': 'Use the fixture?', 'header': 'Fixture', 'options': [
+                    {'label': 'Yes', 'description': 'Use it'}, {'label': 'No', 'description': 'Skip it'}],
+                    'multiSelect': False}]}}
+    print(json.dumps({'type': 'assistant', 'message': {'content': [question]}}), flush=True)
 print(json.dumps({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'Held.'}]}}), flush=True)
 print(json.dumps({'type': 'result', 'uuid': 'stand-in-result', 'session_id': 'stand-in', 'subtype': 'success', 'is_error': False, 'result': 'Held.'}), flush=True)
 for line in sys.stdin:

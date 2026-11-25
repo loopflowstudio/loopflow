@@ -339,7 +339,9 @@ fn send_inbox(socket: &mut UnixStream, token: &str, thread: &str, text: &str) ->
 
 #[cfg(test)]
 mod tests {
+    use loopflow_execution::harness::parity::Behavior;
     use loopflow_execution::process::attachment;
+    use loopflow_harness::HarnessKind;
 
     use super::{after_turn, start_stopped, wake_idle, Watcher};
     use crate::server::wire::{BoundaryMoment, SessionBoundary};
@@ -363,7 +365,7 @@ mod tests {
     fn fixture(session: &str) -> Fixture {
         let home = tempfile::tempdir_in("/tmp").unwrap();
         let store =
-            loopflow_execution::store::opening::open_ephemeral(&home.path().join("store.db"))
+            loopflow_execution::store::opening::open_ephemeral(&home.path().join("loopflow.db"))
                 .unwrap();
         store.test_session(
             session,
@@ -459,7 +461,7 @@ mod tests {
 
     impl Fixture {
         fn store_path(&self) -> PathBuf {
-            self.home.path().join("store.db")
+            self.home.path().join("loopflow.db")
         }
 
         /// A Claude conversation whose turn ended, listening on its inbox.
@@ -583,18 +585,19 @@ mod tests {
     fn extension(
         socket: &Path,
         answer: &'static str,
+        count: usize,
     ) -> std::sync::mpsc::Receiver<serde_json::Value> {
         let listener = UnixListener::bind(socket).unwrap();
         let (taken, messages) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            for stream in listener.incoming() {
+            for stream in listener.incoming().take(count) {
                 let mut stream = stream.unwrap();
                 let mut wire = String::new();
                 stream.read_to_string(&mut wire).unwrap();
-                let _ = std::io::Write::write_all(&mut stream, answer.as_bytes());
                 if taken.send(serde_json::from_str(&wire).unwrap()).is_err() {
                     return;
                 }
+                let _ = std::io::Write::write_all(&mut stream, answer.as_bytes());
             }
         });
         messages
@@ -651,7 +654,7 @@ mod tests {
             let session = format!("wake-{provider}");
             let fixture = fixture(&session);
             let socket = fixture.home.path().join("s");
-            let messages = extension(&socket, "started\n");
+            let messages = extension(&socket, "started\n", 2);
             fixture.settle(provider, &socket);
             fixture.comment(&fixture.store, "c-1", "use the staging bucket");
             after_turn(&fixture.store, &session);
@@ -679,62 +682,167 @@ mod tests {
         }
     }
 
-    /// Codex runs no hook before its first turn: the launch reports a
-    /// reopened conversation's start, and the wake runs the waiting steer as
-    /// a turn on its app-server before anyone types.
     #[test]
-    fn a_reopened_codex_work_session_starts_a_turn_on_its_waiting_steer() {
-        let session = "wake-codex";
+    fn every_harness_wakes_its_idle_work_session() {
+        for harness in HarnessKind::ALL {
+            check_waiting_steer(harness, Behavior::IdleWorkSessionWake);
+        }
+    }
+
+    #[test]
+    fn reopened_work_sessions_take_waiting_steers() {
+        for harness in HarnessKind::ALL {
+            match harness {
+                HarnessKind::Claude
+                | HarnessKind::Codex
+                | HarnessKind::OpenCode
+                | HarnessKind::Pi => check_waiting_steer(harness, Behavior::ReopenWaitingSteers),
+                // The agy hook starts in the native launch. Its reopen receipt
+                // is checked through lf resume in session_launch_contract.
+                HarnessKind::Antigravity => {}
+            }
+        }
+    }
+
+    fn check_waiting_steer(harness: HarnessKind, behavior: Behavior) {
+        let session = "waiting";
         let fixture = fixture(session);
-        let endpoint = fixture.home.path().join("codex.sock");
-        let report = |moment, event: &str| {
+        // Pi's session_start records the provider thread in its Machine.
+        let _home = (harness == HarnessKind::Pi && behavior == Behavior::ReopenWaitingSteers)
+            .then(|| crate::test_support::EnvGuard::with_lf_home(&[], fixture.home.path()));
+        let store = &fixture.store;
+        let socket = fixture.home.path().join("s");
+        let thread = if harness == HarnessKind::Pi {
+            "/pi/session.jsonl"
+        } else {
+            "native"
+        };
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET provider=?2,provider_thread=?3 WHERE id=?1",
+                [session, harness.as_str(), thread],
+            )
+            .unwrap();
+
+        // Each listener returns the actual turn addressed to this conversation.
+        let (inbox, message): (Option<Inbox>, Box<dyn FnOnce() -> String>) = match harness {
+            HarnessKind::Claude => {
+                let listener = UnixListener::bind(&socket).unwrap();
+                (
+                    Some(Inbox::Claude(fixture.claude(&socket))),
+                    Box::new(move || {
+                        let frames = received(&listener);
+                        assert_eq!(frames[1]["session_id"], thread);
+                        frames[1]["message"]["content"].as_str().unwrap().to_owned()
+                    }),
+                )
+            }
+            HarnessKind::Codex => {
+                store
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .execute(
+                        "UPDATE agent_sessions SET agent_endpoint=?2 WHERE id=?1",
+                        rusqlite::params![session, socket.to_str().unwrap()],
+                    )
+                    .unwrap();
+                let server = codex_app_server(&socket);
+                (
+                    None,
+                    Box::new(move || {
+                        let start = server.join().unwrap();
+                        assert_eq!(start["method"], "turn/start");
+                        assert_eq!(start["params"]["threadId"], thread);
+                        start["params"]["toolOutput"]["output"].to_string()
+                    }),
+                )
+            }
+            HarnessKind::OpenCode | HarnessKind::Pi => {
+                let messages = extension(&socket, "started\n", 1);
+                (
+                    Some(Inbox::Socket(socket)),
+                    Box::new(move || {
+                        let message = messages.recv().unwrap();
+                        assert_eq!(message["thread"], thread);
+                        message["text"].as_str().unwrap().to_owned()
+                    }),
+                )
+            }
+            HarnessKind::Antigravity => (None, Box::new(|| panic!("agy has no idle inbox"))),
+        };
+
+        let report = |moment, callback, inbox| {
             super::super::boundary::answer(
-                &fixture.store,
+                store,
                 &SessionBoundary {
                     moment,
                     delivery: fixture.delivery.clone(),
                     adapter: Some(fixture.adapter.clone()),
-                    callback: serde_json::json!({"hook_event_name":event,"session_id":"native","source":"resume"}),
+                    callback,
                     gap: None,
                     printed: Vec::new(),
-                    inbox: None,
+                    inbox,
                 },
             )
             .unwrap()
             .1
         };
-        // The Codex before it was quit mid-turn.
-        report(BoundaryMoment::Tool, "UserPromptSubmit");
-        {
-            let conn = fixture.store.conn.lock().unwrap();
-            conn.execute("UPDATE session_activity SET agent_process_id='earlier'", [])
-                .unwrap();
-            conn.execute(
-                "UPDATE agent_sessions SET provider='codex',agent_endpoint=?2 WHERE id=?1",
-                rusqlite::params![session, endpoint.to_string_lossy()],
-            )
-            .unwrap();
-        }
-        fixture
-            .store
-            .save_session_steer(session, "Fixture author", "use the other table")
-            .unwrap();
-        let provider = codex_app_server(&endpoint);
-        let Some(super::super::boundary::After::Reachable(woken)) =
-            report(BoundaryMoment::Start, "SessionStart")
-        else {
-            panic!("a reopened Codex start leaves no wake");
+        let event = |name| serde_json::json!({"hook_event_name":name, "session_id":thread});
+        let steer = || {
+            store
+                .save_session_steer(session, "Fixture author", "use the other table")
+                .unwrap()
         };
-        after_turn(&fixture.store, &woken);
-        let start = provider.join().unwrap();
-        assert_eq!(start["method"], "turn/start");
-        assert_eq!(start["params"]["threadId"], "native");
-        let output = start["params"]["toolOutput"]["output"].to_string();
-        assert!(output.contains("use the other table"), "{output}");
-        assert_eq!(
-            fixture.store.session_steers(session, 0, 8).unwrap().pending,
-            0
-        );
+        if behavior == Behavior::ReopenWaitingSteers {
+            // The previous process quit mid-turn. Its successor's first
+            // boundary makes the saved conversation reachable before input.
+            report(BoundaryMoment::Tool, event("UserPromptSubmit"), None);
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute("UPDATE session_activity SET agent_process_id='earlier'", [])
+                .unwrap();
+            steer();
+            let (moment, callback) = match harness {
+                HarnessKind::Codex | HarnessKind::Claude => (
+                    BoundaryMoment::Start,
+                    serde_json::json!({"hook_event_name":"SessionStart","session_id":thread,"source":"resume"}),
+                ),
+                HarnessKind::OpenCode => (BoundaryMoment::Tool, event("OpenCodeMessagesTransform")),
+                HarnessKind::Pi => (
+                    BoundaryMoment::Event,
+                    serde_json::json!({"type":"session_start","sessionFile":thread}),
+                ),
+                HarnessKind::Antigravity => {
+                    unreachable!("Antigravity reopens through its launch prompt")
+                }
+            };
+            let after = report(moment, callback, inbox);
+            assert!(
+                matches!(after, Some(super::super::boundary::After::Reachable(id)) if id == session),
+                "{harness:?} {behavior:?}"
+            );
+        } else {
+            report(BoundaryMoment::Stop, event("Stop"), inbox);
+            steer();
+        }
+        after_turn(store, session);
+        let page = store.session_steers(session, 0, 8).unwrap();
+        assert_eq!(page.items.len(), 1, "{harness:?} {behavior:?}");
+        let delivered = page.items[0].delivered_at.is_some();
+        behavior.assert_observed(harness, delivered);
+        assert_eq!(page.pending, if delivered { 0 } else { 1 });
+        if delivered {
+            assert!(
+                message().contains("use the other table"),
+                "{harness:?} {behavior:?}"
+            );
+        }
     }
 
     #[test]
@@ -745,7 +853,7 @@ mod tests {
             let session = format!("wake-refused-{refused}");
             let fixture = fixture(&session);
             let socket = fixture.home.path().join("s");
-            let _messages = refused.then(|| extension(&socket, ""));
+            let _messages = refused.then(|| extension(&socket, "", 1));
             fixture.settle("opencode", &socket);
             fixture.comment(&fixture.store, "c-1", "use the staging bucket");
             after_turn(&fixture.store, &session);

@@ -131,11 +131,8 @@
     font-weight: 700;
     flex-shrink: 0;
   }
-  .btn.work { background: var(--work); color: #fff; }
   .btn.amber { background: var(--warn); color: #fff; }
-  .btn.amber.dim { opacity: .45; }
   .btn.plain { background: var(--code-bg); color: var(--fg); }
-  .btn.plain.dim { opacity: .45; }
   .chip {
     display: inline-flex;
     align-items: center;
@@ -147,7 +144,6 @@
     font-size: 12px;
     white-space: nowrap;
   }
-  .chip.work { color: var(--work); background: var(--work-bg); }
   .chip.amber { color: var(--warn); background: var(--amber-bg); }
   .chip.plain { color: var(--fg); background: var(--code-bg); }
   .step { color: var(--mut); padding: 0 .2rem; font-size: 12px; }
@@ -165,8 +161,6 @@
     font-size: 12px;
     color: var(--mut);
   }
-  .chk.accent { color: var(--no); background: var(--warn-bg); font-weight: 700; }
-  .dots { color: var(--mut); font-weight: 700; padding: 0 .2rem; }
   .caption { font-size: 12.5px; color: var(--mut); margin: .45rem 0 0; }
   .caption b { color: var(--fg); }
   .caption .bad { color: var(--no); font-weight: 600; }
@@ -196,26 +190,25 @@
 
 <h1>Task pause, Working groups, and C1 workflow bar</h1>
 <p class="sub">
-  <strong>Area reviewed:</strong> Task pause &amp; unpause, Working list grouping (<code>Active</code> / <code>Shipping</code> / <code>Paused</code>), automatic post-merge <code>verify</code>, and the C1 Task workflow bar + <code>PendingChanges</code> + <code>Complete · Undo</code> across SQLite, Rust execution, CLI, server wire, Loopflow for Mac, and Loopflow for iPhone — at <code>8ad26dbb89</code> against stack base <code>3c9f1979fc</code>.
+  <strong>Area reviewed:</strong> Task pause &amp; unpause, saved Graph position under a hold (<code>At</code> vs <code>Run</code>, draining commands, and Auto toggling while paused), Working list grouping (<code>Active</code> / <code>Shipping</code> / <code>Paused</code>), automatic post-merge <code>verify</code>, and the C1 Task workflow bar + <code>PendingChanges</code> + <code>Complete · Undo</code> across SQLite, Rust execution, CLI, server wire, Loopflow for Mac, and Loopflow for iPhone — at <code>1a8c2450bd</code> against <code>origin/main</code> (<code>41023c8e55</code>).
   <span class="tag built">built</span> is committed at <code>HEAD</code>;
-  <span class="tag existing">existing bug/mismatch</span> is what <code>HEAD</code> does today;
+  <span class="tag existing">existing mismatch</span> is what <code>HEAD</code> does today;
   <span class="tag proposed">proposed</span> is written into <code>scratch/plan.md</code> for the next pass;
   <span class="tag choice">choice made</span> is selected for review.
 </p>
 
 <div class="verdict">
-  <strong>Verdict — iterate once to align the C1 bar, draining commands, and PendingChanges:</strong>
-  The pause hold, OS-session teardown, Working groups, automatic <code>verify</code>, and position-aware unpause hold up end to end.
-  When the C1 track replaced the separate V4c pill, four real conceptual mismatches remained in the code at <code>8ad26dbb89</code>:
-  (1) <code>WorkflowControl</code> still drops the top-level step on non-running chips and lacks a <code>Pausing</code> action (splitting pausing across <code>taskWork</code> and <code>roadmap.runControl.pausing</code> and flipping <code>⏸ → ▶</code> while draining);
-  (2) a draining <code>cmd:</code> step (such as <code>lf land</code>) that exits <code>0</code> during pause records <code>StepExit::Interrupted</code> instead of advancing, so <code>unpause --run</code> runs it twice;
-  (3) <code>PendingChanges</code> does not track <code>.task</code> stream revisions (causing a <code>"Reading workflow…"</code> flash) or patch iPhone’s <code>TaskWorkspaceView</code>, Mac’s <code>Complete · Undo</code> does not reselect the reopened Task, and iPhone still keeps <code>···</code> inside the workflow bar;
-  (4) <code>docs/surfaces.md</code> and <code>DESIGN.md</code> still describe the pre-C1 bar and Auto-Undo.
+  <strong>Verdict — iterate once to align natural stops and end-of-Graph completion under a pause hold:</strong>
+  Pass 1’s four gaps are built and verified in <code>2d9b3ca205</code>, <code>a3e62d706f</code>, and <code>1a8c2450bd</code> (step-prefixed C1 chips, <code>WorkflowAction::Pausing</code>, draining <code>cmd:</code> advancement + status wording, <code>PendingChanges</code> <code>.task</code> <code>readAt</code>, Mac Undo reselection, iPhone row patching &amp; toolbar <code>···</code>, and updated docs).
+  Reviewing the whole pause-to-unpause lifecycle at <code>1a8c2450bd</code> uncovered one remaining conceptual split — <strong>a saved <code>Run</code> cursor standing on a natural stop (<code>interactive:</code>, <code>auto: off</code> landing, or <code>end</code>) under a hold</strong>:
+  (1) when a draining <code>cmd:</code> exits <code>0</code> and advances onto an <code>interactive:</code> step or an <code>auto: off</code> landing step, <code>graph.rs</code> checks <code>interrupted()</code> before <code>stands_in()</code> / <code>stopped_landing()</code> and leaves a phantom stopped <code>Run</code> instead of arriving (reproduced live in QA: status promised <code>lf task unpause --run</code> would resume <code>demo</code>, and plain <code>unpause</code> leaves <code>Idle</code> / <code>Run: demo</code> needing two clicks);
+  (2) <code>CapturedGraph::resumes_on_unpause</code> assumes every <code>Some(cursor)</code> resumes, ignoring <code>interactive_at</code> and <code>auto: off</code> landing (breaking Auto-off-while-paused too);
+  (3) when a draining final <code>cmd:</code> reaches <code>end</code>, <code>arrive_in</code> unconditionally calls <code>request_completion_in</code>, so a paused Task silently auto-completes (clearing its hold) or stamps a <code>completion_error</code> (<code>"Task is still stopping"</code>).
 </div>
 
 <h2>1. Do the product’s concepts and the code’s concepts line up?</h2>
 <table>
-  <tr><th>Product concept / action</th><th>Code behind it at <code>8ad26dbb89</code></th><th>Line up?</th><th>Mismatch / status</th></tr>
+  <tr><th>Product concept / action</th><th>Code behind it at <code>1a8c2450bd</code></th><th>Line up?</th><th>Mismatch / status</th></tr>
   <tr>
     <td><b>Pause a started Task</b><br>Stops the worker and subprocesses in its OS session; keeps ownership, checkout, PR, cursor, and open conversation. Refuses unstarted, closed, busy, or wrong-Machine Tasks with <code>conflict</code>.</td>
     <td><code>ops::task::pause::pause</code> → <code>begin_task_pause</code> (<code>task_pauses</code> + <code>TaskEventKind::Paused</code>) → <code>settle_worker_session</code> → <code>settle_task_pause</code>; cleanup lock serializes pause, unpause, unassign, and move send.</td>
@@ -238,7 +231,7 @@
     <td><b>Paused Tasks stay quiet (out of Portfolio Now)</b><br>Dirty checkouts and paused waits clear condition; explicit conversation reports still show on the row, else <code>Paused</code>.</td>
     <td><code>derive_task_condition</code> returns <code>Clear</code> for <code>TaskState::Paused</code>; <code>RoadmapTask.need</code> clears on optimistic pause.</td>
     <td class="yes">yes</td>
-    <td><span class="tag built">built</span> See Q1 on inferred <code>Available</code> (kept outside LOO-1078 by decision).</td>
+    <td><span class="tag built">built</span> See Q1 on inferred <code>Available</code> (outside LOO-1078 by decision).</td>
   </tr>
   <tr>
     <td><b>Automatic <code>verify</code> after <code>deliver</code></b><br>Fast bounded post-merge check on <code>main</code>; files a linked fix-forward Task on failure.</td>
@@ -247,166 +240,124 @@
     <td><span class="tag built">built</span></td>
   </tr>
   <tr>
-    <td><b>Smart Unpause (position-aware)</b><br>Resumes automatic work; lifts the hold without advancing past <code>ship-review</code>, <code>auto: off</code> landing stops, or <code>end</code>. Apps have one unpause control.</td>
-    <td><code>CapturedGraph::resumes_on_unpause</code> shared by <code>TaskGraph::read</code>, batched <code>saved_task_detail_facts</code>, and <code>pause::release</code> under <code>admission</code>; Mac and iPhone send <code>task.unpause { run: true }</code> via <code>PendingChanges</code>.</td>
+    <td><b>C1 workflow track &amp; <code>WorkflowAction::Pausing</code></b><br>Top-level step stays in every chip label; stopping/draining stays disabled amber <code>⏸</code> with no cross-stream split; Mac &amp; iPhone share one bar, <code>PendingChanges</code> tracks <code>.task</code> <code>readAt</code>, Mac Undo reselects, iPhone moves <code>···</code> to nav toolbar.</td>
+    <td><code>TaskGraph::read</code> (<code>chip_step</code>, <code>WorkflowAction::Pausing</code>), <code>TaskWorkflowControls</code>, <code>PendingChanges</code>, <code>WorkModel</code>, <code>TaskWorkspaceView</code>, <code>TaskListView</code>, updated <code>docs/surfaces.md</code> &amp; <code>DESIGN.md</code>.</td>
     <td class="yes">yes</td>
-    <td><span class="tag built">built</span></td>
+    <td><span class="tag built">built</span> Verified in Mac Dev app QA (<code>a3e62d706f</code>) + 110 Mac &amp; 12 iOS tests.</td>
   </tr>
   <tr class="mismatch">
-    <td><b>C1 workflow chip replaces the current top-level step in the track</b><br>The track shows every top-level step, with the active step grown into the menu chip (and standing alone when folded).</td>
-    <td><code>TaskGraph::read</code> (<code>task_graph.rs:467–769</code>) emits <code>build · implement</code> only while running. For <code>Paused</code>, <code>Pausing</code>, <code>Run</code> (stopped), and <code>Waiting</code>, it emits only the inner step (<code>Paused: implement</code>, <code>Waiting: land</code>); at <code>start</code> it emits <code>Paused: start</code> in <code>plan</code>’s slot.</td>
+    <td><b>Natural stops after a draining <code>cmd:</code> or Auto-off while paused</b><br>When a draining command finishes right before a human step or <code>auto: off</code> landing — or Auto is turned off while paused on one — the Task stands at that stop (<code>Paused: &lt;step&gt;</code>, <code>Unpause</code> lifts the hold without promising a run).</td>
+    <td><code>graph.rs:1264,1384</code> checks <code>interrupted()</code> before <code>stands_in()</code> / <code>stopped_landing()</code>, leaving a phantom <code>Run</code> cursor on <code>demo</code> instead of calling <code>arrive_task_graph</code>. <code>CapturedGraph::resumes_on_unpause</code> (<code>task_graph.rs:314</code>) treats every <code>Some(cursor)</code> as runnable.</td>
     <td class="no">no</td>
-    <td><span class="tag existing">biggest mismatch</span> <b>Leftover V4c shape:</b> top-level step disappears from the track whenever paused, stopped, or waiting. <span class="tag proposed">proposed</span> Always name top-level step first: <code>Paused: build · implement</code>, <code>Pausing: deliver · land</code>, <code>Run: build · implement</code>, <code>Waiting: deliver · land</code>, <code>Paused: plan</code> at <code>start</code>.</td>
+    <td><span class="tag existing">biggest mismatch</span> <b>Code state the person never sees:</b> a stopped <code>Run</code> pointing at a human/landing stop promises <code>unpause --run</code> resumes it (caught in QA), leaves plain <code>unpause</code> stuck in <code>Idle</code> / <code>Run: demo</code> needing two clicks, and spawns a throwaway <code>GraphProcess</code> at <code>land</code>. <span class="tag proposed">proposed</span> Check natural stops before <code>interrupted()</code> in <code>graph.rs</code>; check stop eligibility for <code>Some(cursor)</code> in <code>resumes_on_unpause</code>; settle dead stop cursors to <code>At { step }</code> on unpause.</td>
   </tr>
   <tr class="mismatch">
-    <td><b>Pausing state on the workflow bar</b><br>While a worker or draining command is stopping, the bar stays in Pausing with a disabled <code>⏸</code>.</td>
-    <td><code>WorkflowAction</code> has no <code>Pausing</code> case: <code>TaskGraph::read</code> emits <code>Resume</code>/<code>Unpause</code> with label <code>Pausing: …</code>. <code>TaskWorkflowControls</code> draws a dimmed <code>▶</code> once the RPC answers, and <code>TaskActions</code> must cross-read <code>roadmap.runControl.pausing</code> from another stream to disable it.</td>
+    <td><b>Draining final <code>cmd:</code> step stays held at <code>Paused: end</code></b><br>A pause keeps the Task open and held even if the finishing command was the last step of the Graph; the person decides when to unpause and complete.</td>
+    <td><code>arrive_in</code> (<code>task_work.rs:392–395</code>) unconditionally calls <code>request_completion_in</code> on <code>step == END</code>; <code>carry_placed_task</code> calls <code>task_run_finished</code> → <code>settle_pending_completion</code> → <code>complete_task</code> → <code>task_pause::clear_in</code>.</td>
     <td class="no">no</td>
-    <td><span class="tag existing">split owner</span> One state split across <code>TaskGraph.control.label</code> and <code>RoadmapTask.runControl.pausing</code>; glyph flips <code>⏸ → ▶</code> while still pausing. <span class="tag proposed">proposed</span> Add <code>WorkflowAction::Pausing</code> so <code>TaskGraph.control</code> owns disabled amber <code>⏸</code> alone.</td>
-  </tr>
-  <tr class="mismatch">
-    <td><b>Draining <code>cmd:</code> step finishes cleanly on pause</b><br>An in-flight command (such as <code>lf land</code>) finishes, advances the cursor past itself, and pauses before the next step.</td>
-    <td><code>graph.rs:1130</code> checks <code>if signalled || self.interrupted()</code> before <code>status.code()</code>, returning <code>StepExit::Interrupted</code> even when the drained command exited <code>0</code> (or failed non-zero). Cursor stays on the finished command; <code>unpause --run</code> runs it again.</td>
-    <td class="no">no</td>
-    <td><span class="tag existing">execution mismatch</span> Finished work recorded as interrupted and re-executed on unpause; real failure masked. <span class="tag proposed">proposed</span> Only killed steps (<code>signalled</code>) force <code>StepExit::Interrupted</code>; drained <code>0</code> returns <code>Finished</code>, advances cursor, and stops before the next step.</td>
-  </tr>
-  <tr class="mismatch">
-    <td><b>Optimistic changes hold until the affected view catches up; <code>Complete · Undo</code> is reversible on Mac and iPhone</b><br>Clicking ▶/⏸/step/Auto/✓ settles smoothly without flashing <code>Reading workflow…</code>; undoing Complete returns to the Task; no <code>···</code> in the workflow bar.</td>
-    <td><code>WorkModel.swift:1850</code> and <code>TaskWorkspaceView.swift:129</code> never pass <code>.task</code> frame <code>readAt</code> to <code>PendingChanges</code>; <code>TaskWorkspaceView</code> never patches <code>reading.row</code> through <code>PendingChanges</code> and still mounts <code>···</code> beside <code>✓</code>; Mac <code>Complete → Undo</code> leaves selection on the next Task; iPhone swipe-to-complete has no Undo.</td>
-    <td class="no">no</td>
-    <td><span class="tag existing">split action ownership</span> <span class="tag proposed">proposed</span> Feed <code>.task</code> <code>readAt</code> into <code>PendingChanges</code> on both apps; patch iPhone <code>reading.row</code>; reselect on Mac Undo and add Undo to iPhone swipe-to-complete; move iPhone <code>···</code> into the navigation bar trailing toolbar.</td>
-  </tr>
-  <tr class="mismatch">
-    <td><b>Docs &amp; design system match shipped C1 bar</b><br><code>docs/surfaces.md</code> and <code>DESIGN.md</code> describe the current controls and Undo notice.</td>
-    <td><code>docs/surfaces.md:113</code> still says Auto posts an Undo notice; <code>docs/surfaces.md:269</code> still draws the old pill bar; <code>DESIGN.md:79–82</code> contradicts <code>DESIGN.md:260–266</code>.</td>
-    <td class="no">no</td>
-    <td><span class="tag existing">stale docs</span> <span class="tag proposed">proposed</span> Update both files in the same pass.</td>
+    <td><span class="tag existing">hold violation</span> Silently completes the paused Task (clearing its hold) if cleanup already settled, or fails with <code>"Task is still stopping"</code> and writes a red <code>completion_error</code> banner. <span class="tag proposed">proposed</span> Skip <code>request_completion_in</code> in <code>arrive_in</code> when a <code>task_pauses</code> row exists.</td>
   </tr>
 </table>
 
-<h2>2. Biggest mismatch: C1 chip labels &amp; <code>WorkflowAction::Pausing</code></h2>
+<h2>2. Biggest mismatch: phantom stopped <code>Run</code> vs natural stops under a hold</h2>
 <p>
-  In V4c, the track sat beside a separate pill (<code>code plan build … [▶ | Paused: implement ▾]</code>), so <code>build</code> stayed visible on the track.
-  In C1, the chip <strong>replaces</strong> the current top-level step in the track (and stands alone when the pane narrows).
-  Because <code>WorkflowControl</code> still drops the top-level step for every non-running state and has no <code>Pausing</code> action, pausing makes the top-level step vanish and flips the transport icon from <code>⏸</code> to <code>▶</code> while the command is still finishing:
+  Product-wise, a Task on a Graph is either <strong>mid-run on automatic work</strong> (so unpause resumes it) or <strong>parked at a natural stop</strong> (an <code>interactive:</code> step without Auto, a landing step with Auto off, or <code>end</code> — so unpause lifts the hold and stops there).
+  At <code>1a8c2450bd</code>, three places disagree on that line:
 </p>
 
-<h3>A. Paused inside a composed step (<code>code</code>: <code>build</code> → <code>implement</code>)</h3>
+<h3>A. Draining <code>cmd:</code> finishes before a human step (<code>forge</code> → <code>interactive: demo</code>)</h3>
 <div class="pair">
   <div class="card before">
-    <span class="tag existing">existing at 8ad26dbb89</span>
+    <span class="tag existing">existing at 1a8c2450bd (caught in QA)</span>
     <div class="bar">
       <span class="track">
         <span class="btn amber">▶</span>
-        <span class="step done">plan</span>
-        <span class="chip amber">Paused: implement ⌄</span>
-        <span class="step ahead">👤 ship-review</span>
-        <span class="step ahead">deliver</span>
-        <span class="step ahead">verify</span>
+        <span class="step done">forge</span>
+        <span class="chip amber">Paused: demo ⌄</span>
+        <span class="step ahead">finish</span>
+        <span class="step ahead">settle</span>
       </span>
       <span class="right"><span class="sw">Auto ○</span><span class="chk">✓</span></span>
     </div>
-    <p class="caption"><span class="bad">Missing step:</span> <code>build</code> disappeared from the track. When multiple top-level steps share an inner step (QA’s <code>forge</code>/<code>finish</code>/<code>settle</code> → <code>help graph</code>), <code>Paused: help graph</code> cannot tell them apart.</p>
+    <div class="flow">DB: step="start", run_start={index:1 (demo)}, carrier=dead
+action:   WorkflowAction::Resume ("Unpause and run")
+sentence: "Paused at demo. `lf task unpause --run` resumes it."
+plain `lf task unpause`:
+  ↳ TaskState::Idle (NOT Active!)
+  ↳ chip: `Run: demo`, sentence: "Stopped at demo. `lf task run` starts it again."
+  ↳ first `lf task run` only moves to `demo · next: finish` (needs 2 clicks!)</div>
   </div>
   <div class="card after">
     <span class="tag proposed">proposed</span>
     <div class="bar">
       <span class="track">
         <span class="btn amber">▶</span>
-        <span class="step done">plan</span>
-        <span class="chip amber">Paused: build · implement ⌄</span>
-        <span class="step ahead">👤 ship-review</span>
-        <span class="step ahead">deliver</span>
-        <span class="step ahead">verify</span>
+        <span class="step done">forge</span>
+        <span class="chip amber">Paused: demo ⌄</span>
+        <span class="step ahead">finish</span>
+        <span class="step ahead">settle</span>
       </span>
       <span class="right"><span class="sw">Auto ○</span><span class="chk">✓</span></span>
     </div>
-    <p class="caption"><span class="good">Aligned:</span> Top-level step stays in its slot in every state (<code>build · implement</code>, <code>Paused: build · implement</code>, <code>Run: build · implement</code>, <code>Waiting: deliver · land</code>; top-level alone when inner matches, e.g. <code>Paused: ship-review</code>, <code>Paused: plan</code> at <code>start</code>).</p>
+    <div class="flow">run_skill checks stands_in() before interrupted() → StopsAt("demo")
+DB: step="demo", run_start=NULL, carrier=NULL, task_pauses=Held
+action:   WorkflowAction::Unpause ("Unpause")
+sentence: "Paused at demo. `lf task unpause` lifts the hold."
+plain `lf task unpause` OR `unpause --run` (▶):
+  ↳ TaskState::Active, chip: `demo · next: finish`
+  ↳ sentence: "Waiting for you at demo." (1 click continues past it)</div>
   </div>
 </div>
 
-<h3>B. Pausing a draining command (<code>deliver</code> → <code>land</code>)</h3>
+<h3>B. Auto turned off while paused on an interactive or landing cursor</h3>
 <div class="pair">
   <div class="card before">
-    <span class="tag existing">existing at 8ad26dbb89</span>
-    <div class="bar">
-      <span class="track">
-        <span class="btn amber dim">▶</span>
-        <span class="step done">plan</span>
-        <span class="step done">build</span>
-        <span class="step done">👤 ship-review</span>
-        <span class="chip amber">Pausing: land ⌄</span>
-        <span class="step ahead">verify</span>
-      </span>
-      <span class="right"><span class="sw">Auto ○</span><span class="chk">✓</span></span>
-    </div>
-    <p class="caption"><span class="bad">Split owner + glyph flip:</span> Click sends <code>⏸ Pausing…</code>, RPC answer flips glyph to dimmed <code>▶</code> because <code>action == .resume</code>, disabled only via <code>roadmap.runControl.pausing</code>. <code>deliver</code> vanished.</p>
+    <span class="tag existing">existing at 1a8c2450bd (task_graph.rs:314)</span>
+    <div class="flow">1. Auto is ON; Graph runs `ship-review` (or stands at `land`)
+2. Pause → DB keeps `run_start={ship-review}` (or `{land}`)
+3. User flips Auto OFF while paused (supported in docs/surfaces.md)
+4. resumes_on_unpause sees `Some(cursor)` → returns TRUE!
+   ↳ sentence promises `lf task unpause --run` resumes it
+   ↳ at `land`: ▶ spawns a detached carrier + new GraphProcess row
+     just for `run_command` to hit `stopped_landing()` and exit!
+   ↳ plain `unpause` leaves phantom `Run: ship-review` / `Run: deliver · land`</div>
   </div>
   <div class="card after">
     <span class="tag proposed">proposed</span>
-    <div class="bar">
-      <span class="track">
-        <span class="btn amber dim">⏸</span>
-        <span class="step done">plan</span>
-        <span class="step done">build</span>
-        <span class="step done">👤 ship-review</span>
-        <span class="chip amber">Pausing: deliver · land ⌄</span>
-        <span class="step ahead">verify</span>
-      </span>
-      <span class="right"><span class="sw">Auto ○</span><span class="chk">✓</span></span>
-    </div>
-    <p class="caption"><span class="good">Single owner:</span> <code>WorkflowAction::Pausing</code> keeps a disabled amber <code>⏸</code> until cleanup settles, then flips once to active amber <code>▶</code> (<code>Paused: verify</code> once <code>land</code> exits 0 and advances).</p>
+    <div class="flow">1. Auto is ON; Graph runs `ship-review` (or stands at `land`)
+2. Pause → DB keeps `run_start={ship-review}` (or `{land}`)
+3. User flips Auto OFF while paused:
+   ↳ `resumes_on_unpause` checks `place` against `auto`: returns FALSE
+   ↳ `WorkflowAction::Unpause`, "Paused at …. `lf task unpause` lifts the hold."
+   ↳ (Flipping Auto back ON before unpausing restores `Resume` intact!)
+4. On `unpause` (plain or `--run`), `release` settles dead stop cursor
+   to `At { step }` in the same tx → `ship-review · next: deliver` or
+   `Waiting: deliver · land`, with zero wasted GraphProcess</div>
   </div>
 </div>
 
-<h3>C. Draining <code>cmd:</code> step on pause — execution &amp; recovery</h3>
+<h3>C. Draining final <code>cmd:</code> step reaches <code>end</code> under a hold</h3>
 <div class="pair">
   <div class="card before">
-    <span class="tag existing">existing at 8ad26dbb89 (graph.rs:1130)</span>
-    <div class="flow">1. Graph runs `deliver → land` (cmd:)
-2. User clicks ⏸ Pause → hold commits; `land` drains (not killed)
-3. `land` merges PR and exits 0
-4. spawn() checks `signalled || self.interrupted()` BEFORE exit code
-   ↳ Returns StepExit::Interrupted!
-   ↳ Cursor stays ON `land`; log says "interrupted at land"
-5. User clicks ▶ Unpause → `land` runs a SECOND TIME</div>
+    <span class="tag existing">existing at 1a8c2450bd (task_work.rs:392)</span>
+    <div class="flow">1. 1-step Graph `- cmd: pr land --local` is running
+2. User clicks ⏸ Pause → `pr land --local` drains and exits 0
+3. `drive()` returns `GraphOutcome::Completed`
+4. `arrive_in` sets `step="end"` AND calls `request_completion_in`!
+5. `task_run_finished` → `settle_completion` → `complete_task`:
+   ↳ If pause settled first: Task silently completes &amp; deletes hold!
+   ↳ If still settling: fails with "Task is still stopping" and
+     stamps red `completion_error` on the paused Task!</div>
   </div>
   <div class="card after">
     <span class="tag proposed">proposed</span>
-    <div class="flow">1. Graph runs `deliver → land` (cmd:)
-2. User clicks ⏸ Pause → hold commits; `land` drains (`signalled == false`)
-3. `land` merges PR and exits 0
-4. spawn() checks `signalled` first; `!signalled && exit 0` → StepExit::Finished
-   ↳ runner settles step &amp; checkpoints cursor at `verify` (or `end`)
-   ↳ Next iteration hits `self.interrupted()` BEFORE spawning `verify`
-5. Task sits at `Paused: verify` (or `Paused: end`); ▶ runs `verify`, never `land` twice
-   (If draining `cmd:` exits non-zero, its real failure is recorded.)</div>
-  </div>
-</div>
-
-<h3>D. iPhone Task bar &amp; <code>PendingChanges</code> parity</h3>
-<div class="pair">
-  <div class="card before">
-    <span class="tag existing">existing at 8ad26dbb89 (iPhone 375 pt)</span>
-    <div class="bar">
-      <span class="track">
-        <span class="btn work">⏸</span>
-        <span class="chip work">build · impl… ⌄</span>
-      </span>
-      <span class="right"><span class="sw">Auto ●</span><span class="chk">✓</span><span class="dots">···</span></span>
-    </div>
-    <p class="caption"><span class="bad">Crowded + unpatched:</span> <code>···</code> steals 44 pt inside the workflow bar; <code>reading.row</code> skips <code>PendingChanges.apply</code> (so <code>✓</code> stays clickable after tap); <code>.task</code> stream doesn’t report <code>readAt</code> to <code>PendingChanges</code> on Mac or iPhone.</p>
-  </div>
-  <div class="card after">
-    <span class="tag proposed">proposed (iPhone 375 pt)</span>
-    <div class="bar">
-      <span class="track">
-        <span class="btn work">⏸</span>
-        <span class="chip work">build · implement ⌄</span>
-      </span>
-      <span class="right"><span class="sw">Auto ●</span><span class="chk">✓</span></span>
-    </div>
-    <p class="caption"><span class="good">Aligned with Mac:</span> Move <code>···</code> into iOS <code>.toolbar { .topBarTrailing }</code>; feed <code>.task</code> <code>readAt</code> into <code>PendingChanges</code> on Mac &amp; iPhone; patch <code>reading.row</code>; reselect on Mac <code>Complete → Undo</code> and add Undo to iPhone swipe-to-complete.</p>
+    <div class="flow">1. 1-step Graph `- cmd: pr land --local` is running
+2. User clicks ⏸ Pause → `pr land --local` drains and exits 0
+3. `drive()` returns `GraphOutcome::Completed`
+4. `arrive_in` sets `step="end"`, sees `task_pauses`, skips `request_completion_in`
+5. Task stays open and held at `Paused: end` (`WorkflowAction::Unpause`)
+   ↳ "Paused at end. `lf task unpause` lifts the hold."
+   ↳ Unpause lifts hold → `Done` chip + accented ✓ Complete</div>
   </div>
 </div>
 
@@ -415,47 +366,45 @@
   <tr><th>Path / counterexample</th><th>Behavior after proposed pass</th><th>Code owner</th></tr>
   <tr>
     <td><b>1. Pause mid-build (<code>build</code> → <code>implement</code>)</b></td>
-    <td>Click ⏸ → <code>Pausing…</code> stays until <code>taskWork</code> catches up (no <code>Reading workflow…</code> flash) → <code>Paused: build · implement</code> with amber ▶; row sits in Working › <strong>Paused</strong>; primary conversation stays open and receives steers.</td>
-    <td><code>ops::task::pause</code>, <code>TaskGraph::read</code>, <code>PendingChanges</code>.</td>
+    <td>Click ⏸ → <code>Pausing…</code> → <code>Paused: build · implement</code> with amber ▶ (<code>Resume</code>); row sits in Working › <strong>Paused</strong>; primary conversation stays open and receives steers.</td>
+    <td><code>ops::task::pause</code>, <code>TaskGraph::read</code>, <code>PendingChanges</code>. <span class="tag built">built</span></td>
   </tr>
   <tr>
-    <td><b>2. Failure &amp; recovery: draining <code>lf land</code> exits 0, or fails, or crashes mid-cleanup</b></td>
-    <td>While finishing: disabled amber ⏸ + <code>Pausing: deliver · land</code>; unpause refuses with <code>conflict</code>. Exit 0 advances cursor to <code>verify</code> (or <code>end</code>) and stops cleanly before starting it. Non-zero exit records the real failure under the hold. Crash mid-cleanup retains <code>stopping_sessions</code>; unassign refuses; repeat <code>lf task pause</code> finishes cleanup.</td>
-    <td><code>graph.rs::spawn</code>, <code>WorkflowAction::Pausing</code>, <code>task_pauses.stopping_sessions</code>.</td>
+    <td><b>2. Draining <code>cmd:</code> exits 0 before an automatic step (<code>pr land --local</code> → <code>sync --plan</code>)</b></td>
+    <td>While finishing: disabled amber ⏸ + <code>Pausing: pr land --local</code>. Exit 0 advances cursor to <code>sync --plan</code>, hits <code>interrupted()</code> before spawning it → <code>Paused: sync --plan</code> (<code>Resume</code>). Status says <code>pr land --local finished; the Task is paused before its next step</code>. <code>unpause --run</code> runs only <code>sync --plan</code>.</td>
+    <td><code>graph.rs::spawn</code>, <code>ops/task_execution.rs</code>. <span class="tag built">built</span></td>
   </tr>
   <tr>
-    <td><b>3. Counterexample: draining <code>cmd:</code> is the last step of the Graph</b></td>
-    <td>Command exits 0 → runner reaches <code>GraphOutcome::Completed</code> → <code>arrive_task_graph</code> writes <code>step = "end"</code> while keeping <code>task_pauses</code>. Task stands at <code>Paused: end</code> (<code>WorkflowAction::Unpause</code>); ▶ lifts the hold at <code>end</code> without re-running the command.</td>
-    <td><code>graph.rs</code>, <code>CapturedGraph::resumes_on_unpause</code>.</td>
+    <td><b>3. Counterexample: draining <code>cmd:</code> exits 0 before <code>interactive: demo</code> (auto off) vs with <code>auto: on</code></b></td>
+    <td>Auto off/unset: <code>stands_in()</code> returns <code>None</code> before <code>interrupted()</code> → arrives at <code>At { step: "demo" }</code> under the hold (<code>Unpause</code>, <code>"Paused at demo. `lf task unpause` lifts the hold."</code>). Unpause goes straight to <code>Active</code> / <code>demo · next: finish</code>. Auto on: <code>stands_in()</code> returns <code>Some(true)</code>, then <code>interrupted()</code> stops before spawning any stand-in agent → <code>Paused: demo</code> (<code>Resume</code>).</td>
+    <td><code>graph.rs::run_skill</code>. <span class="tag proposed">proposed</span></td>
   </tr>
   <tr>
-    <td><b>4. Counterexample: click ✓ Complete, then click Undo within 6 s</b></td>
-    <td>Mac moves selection to next row and posts <code>LOO-4 completed · Undo</code>; clicking Undo sends <code>task.reopen</code> and immediately reselects <code>LOO-4</code> so the next click hits the right Task. On iPhone, both ✓ and swipe-to-complete post <code>completed · Undo</code>, and ✓ disables immediately via patched <code>reading.row</code>.</td>
-    <td><code>WorkModel.completeTask</code>, <code>TaskListView</code>, <code>TaskWorkspaceView</code>, <code>PendingChanges</code>.</td>
+    <td><b>4. Counterexample: draining <code>cmd:</code> is the last step of the Graph</b></td>
+    <td>Command exits 0 → <code>arrive_in</code> writes <code>step = "end"</code> and skips <code>request_completion_in</code> because <code>task_pauses</code> exists. Task stays open at <code>Paused: end</code> (<code>Unpause</code>); no silent auto-complete and no <code>completion_error</code>.</td>
+    <td><code>sqlite/task_work.rs::arrive_in</code>. <span class="tag proposed">proposed</span></td>
   </tr>
   <tr>
-    <td><b>5. Counterexample: stale client clicks ▶ after Task reached <code>ship-review</code></b></td>
-    <td><code>unpause_task_run</code> checks <code>resumes_on_unpause</code> under <code>admission</code>, lifts the hold, and returns <code>null</code>; human review is never skipped.</td>
-    <td><code>pause::release</code> + <code>unpause_task_run</code>.</td>
+    <td><b>5. Counterexample: pause while <code>auto: on</code> at <code>ship-review</code> or <code>land</code>, then turn Auto off</b></td>
+    <td><code>resumes_on_unpause</code> returns <code>false</code> (switching action to <code>Unpause</code> and wording to <code>lift the hold</code>). Turning Auto back on before unpausing restores <code>Resume</code>. Unpausing with Auto off settles the dead cursor to <code>At { step }</code> in the same transaction without spawning a <code>GraphProcess</code>.</td>
+    <td><code>task_graph.rs</code>, <code>ops/task/pause.rs</code>, <code>sqlite/task_pause.rs</code>, <code>ops/task.rs::try_start_task_run</code>. <span class="tag proposed">proposed</span></td>
   </tr>
   <tr>
-    <td><b>6. Counterexample: PR merges, then automatic <code>verify</code> fails</b></td>
-    <td><code>✓ Complete</code> lights up accented while the chip stays <code>Run: verify</code> (one click retries); <code>TaskActions.completeReady</code> and <code>TaskGraph.control</code> stay independent.</td>
-    <td><code>TaskGraph::read</code> + <code>TaskActions.completeReady</code>.</td>
+    <td><b>6. Failure &amp; recovery: draining <code>cmd:</code> exits non-zero, or pause caller crashes mid-cleanup</b></td>
+    <td>Non-zero exit records the real failure under the hold. Crash mid-cleanup retains <code>stopping_sessions</code>; unassign refuses; repeat <code>lf task pause</code> finishes cleanup.</td>
+    <td><code>graph.rs::spawn</code>, <code>task_pauses.stopping_sessions</code>. <span class="tag built">built</span></td>
   </tr>
 </table>
 
 <h2>4. Choices made for review &amp; scope boundaries</h2>
 <div class="note-box">
   <ul class="tight">
-    <li><span class="tag choice">choice made</span> <strong>Top-level step in every C1 chip label:</strong>
-      Use <code>&lt;Status&gt;: &lt;top&gt; · &lt;inner&gt;</code> when <code>top != inner</code> (e.g., <code>Paused: build · implement</code>, <code>Pausing: deliver · land</code>, <code>Run: build · implement</code>, <code>Waiting: deliver · land</code>) and <code>&lt;Status&gt;: &lt;top&gt;</code> when top-level or at <code>start</code> (<code>Paused: plan</code>). Passed over omitting the top-level step because C1 replaced the top-level step button with the chip.</li>
-    <li><span class="tag choice">choice made</span> <strong><code>WorkflowAction::Pausing</code> on the wire:</strong>
-      Add a dedicated <code>pausing</code> action rather than overloading <code>resume</code>/<code>unpause</code> + <code>roadmap.runControl.pausing</code>. Passed over leaving it split because the split caused the <code>⏸ → ▶</code> glyph flip and required two subscriptions to agree.</li>
-    <li><span class="tag choice">choice made</span> <strong>Advance cursor when a draining <code>cmd:</code> step exits 0:</strong>
-      Passed over keeping the cursor on the drained step because non-idempotent commands would execute twice on <code>unpause --run</code> and the Graph log misrepresented exit 0 as interrupted.</li>
-    <li><span class="tag choice">choice made</span> <strong>Reselect Task on Mac <code>Complete → Undo</code> &amp; move iPhone <code>···</code> to nav toolbar:</strong>
-      Both directly fix flow regressions spotted in the C1 QA walkthrough while keeping Mac’s bar free of <code>···</code>.</li>
+    <li><span class="tag choice">choice made</span> <strong>Check natural stops before <code>interrupted()</code> in <code>graph.rs</code>:</strong>
+      When a draining operation exits <code>0</code> and the next step is already a stop (<code>stands_in == None</code> or <code>stopped_landing == Some</code>), the Graph genuinely arrived at that stop rather than being interrupted mid-run. Passed over keeping <code>interrupted()</code> first because it invented a phantom <code>Run</code> state the person never expects.</li>
+    <li><span class="tag choice">choice made</span> <strong>Keep paused Tasks open when a draining final command reaches <code>end</code>:</strong>
+      Skip <code>request_completion_in</code> in <code>arrive_in</code> while a <code>task_pauses</code> row exists. Passed over auto-completing because a paused Task must never close itself or erase its hold without the person’s click.</li>
+    <li><span class="tag choice">choice made</span> <strong>Keep the saved cursor while paused, settle dead stop cursors on unpause:</strong>
+      Letting Auto toggle off and back on while paused keeps <code>Resume</code> reversible until unpause; once unpaused with Auto off, <code>release</code> settles a dead interactive/landing cursor to <code>At { step }</code> in the same transaction.</li>
     <li><strong>Outside LOO-1078 (separate outcomes):</strong>
       (1) Holistic session-vs-worker availability semantics (paused sidebar rows showing <code>Available · inferred</code> from the open primary conversation);
       (2) Separate-session Codex 0.171.0 tool jobs (<code>osPid: null</code> in app-server);
@@ -470,11 +419,11 @@
     <br>a) <b>Kept for a dedicated design pass:</b> paused rows continue showing <code>Available · inferred</code> when the open primary conversation has no explicit program report.
     <br>b) Let <code>Paused</code> win over inferred availability while keeping explicit reports (<code>Blocked</code>, <code>Error</code>, <code>Busy</code>, reported <code>Available</code>).</li>
   <li><b>Paused chip prefix in C1 when a composed step is long (e.g. <code>Paused: deliver · land --wait-and-fix</code>):</b>
-    <br>a) <b>Chosen for this pass:</b> always include the top-level step (<code>Paused: deliver · land --wait-and-fix</code>), letting narrow panes tail-truncate the chip while the full step stays in the hover sentence.
+    <br>a) <b>Built:</b> always include the top-level step (<code>Paused: deliver · land --wait-and-fix</code>), letting narrow panes tail-truncate the chip while the full step stays in the hover sentence.
     <br>b) Show only the top-level step when paused (<code>Paused: deliver</code>), leaving the inner step for the hover sentence and <code>lf task status</code>.</li>
-  <li><b>iPhone Task metadata menu (<code>Move to Wave</code>, <code>Copy ID</code>, <code>Open PR</code>, <code>Open session</code>):</b>
-    <br>a) <b>Chosen for this pass:</b> move <code>···</code> into the navigation bar’s trailing toolbar item so the workflow bar matches Mac and keeps full width on 375 pt screens.
-    <br>b) Fold those metadata items into the workflow chip menu on iPhone so there is only one menu on the screen.</li>
+  <li><b>Draining final <code>cmd:</code> step reaching <code>end</code> while paused:</b>
+    <br>a) <b>Chosen for this pass:</b> keep the Task open at <code>Paused: end</code> until unpaused, then offer accented <code>✓ Complete</code>.
+    <br>b) Let reaching <code>end</code> auto-complete the Task and clear the pause hold anyway.</li>
 </ol>
 
 </body>

@@ -267,8 +267,8 @@ at the next turn end or launch.
 
 Keep several Task conversations open while a Graph finishes and a teammate adds
 a comment. Each work session hears what changed on its Tasks: a Graph
-run that settled, with its error when it failed or blocked, the Task stopping
-at an interactive step or the end, a merged PR, the Task closing, or a
+run that settled, with its error when it failed or blocked, the Task parking
+at a breakpoint or the end, a merged PR, the Task closing, or a
 comment from anyone else. A comment with direction arrives once as a steer
 (source `comment:<id>`).
 

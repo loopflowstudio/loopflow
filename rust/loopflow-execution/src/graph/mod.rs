@@ -86,8 +86,8 @@ pub struct Step {
     pub target: Target,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
-    /// An interactive step: a person takes part here, in the Task conversation. Written
-    /// `interactive: <skill>`.
+    /// LOO-1100: the released `interactive: <skill>` spelling, which compiles as
+    /// `<skill>` followed by a breakpoint.
     #[serde(default, alias = "human", skip_serializing_if = "std::ops::Not::not")]
     pub interactive: bool,
 }
@@ -230,10 +230,10 @@ pub struct GraphDefinition {
 pub struct ConcreteSkill {
     pub skill: Skill,
     pub id: Option<String>,
-    /// An interactive step, where a person takes part; its id is `id`, else the skill name.
+    /// LOO-1100: an unconverted released interactive occurrence; its id is `id`, else the skill name.
     #[serde(alias = "human")]
     pub interactive: bool,
-    /// Unique navigation name when composition repeats an interactive step.
+    /// Unique navigation name when composition repeats a released interactive occurrence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interactive_name: Option<String>,
     /// A deciding occurrence returns this many steps back in its own body.
@@ -242,7 +242,7 @@ pub struct ConcreteSkill {
 }
 
 impl ConcreteSkill {
-    /// The interactive step this occurrence is, when a person takes part at it.
+    /// LOO-1100: the released interactive step this occurrence is.
     pub fn interactive_step(&self) -> Option<&str> {
         self.interactive.then(|| {
             self.interactive_name

@@ -124,7 +124,7 @@ fn defer_holds_the_lifecycle_and_a_run_is_moving_whatever_its_auto_setting() {
         at: loopflow_storage::rows::now_unix(),
         by: crate::process::Starter::Person { name: None },
     };
-    // State says what is happening, whoever takes the interactive steps:
+    // State says what is happening, whether or not auto passes breakpoints:
     // the running Task is moving with auto off and with it on.
     for setting in [
         loopflow_storage::sqlite::AutoState::Off,

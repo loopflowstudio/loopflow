@@ -277,8 +277,8 @@ fn run_restarts_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Ta
         .unwrap_or(TaskRunRestarts { count: 0, at: None }))
 }
 
-/// Auto, a setting on the Task: whether its interactive steps run headless,
-/// standing in for the person, and whether its landing may merge.
+/// Auto, a setting on the Task: whether its Graph runs through breakpoints
+/// on the default path, and whether its landing may merge.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]

@@ -148,8 +148,8 @@ pub fn died_run(
 }
 
 /// Carry again each run on this Machine whose `lf task run` died, as
-/// `lf task run ISSUE`: it stands in at interactive steps when auto is
-/// on and stops at the next one otherwise. Unassigned, moved and finished
+/// `lf task run ISSUE`: it passes breakpoints when auto is
+/// on and parks at the next one otherwise. Unassigned, moved and finished
 /// Tasks wait. Returns when the soonest run still waiting its backoff comes due.
 pub(crate) fn restart_runs() -> OpsResult<Option<i64>> {
     block_on_task(async {

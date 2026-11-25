@@ -179,8 +179,8 @@ pub struct GraphExecutionFacts {
 }
 
 /// The Graph a Task took up and never ran: it stands at `start`, no run
-/// carries it and no GraphProcess was started for it. A Task waiting at an
-/// interactive step has run. A conversation opening on such a Task
+/// carries it and no GraphProcess was started for it. A Task parked at a
+/// breakpoint has run. A conversation opening on such a Task
 /// owes its setup, and the Task reads as starting that Graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnrunGraph {

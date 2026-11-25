@@ -109,7 +109,7 @@ pub fn run(
 
 /// `task.auto.on`: turn auto on and start the Task's run detached, as
 /// `lf task auto on <issue>` does: it returns what `task.run` returns, and the
-/// run stands in at each interactive step until the PR lands. It is the one
+/// run passes each breakpoint until the PR lands. It is the one
 /// way to turn auto on.
 pub fn auto_on(directory: &Path, issue: &str, environment: &[(String, String)]) -> Result<TaskRun> {
     launch::start_with(directory, &spell_auto_on(issue), environment)

@@ -648,7 +648,7 @@ mod tests {
         );
         assert_eq!(graph.find("start").unwrap().cursor().index, 0);
         assert!(graph.find("no-such-step").is_none());
-        // After the last interactive step nothing remains.
+        // After the last breakpoint nothing remains.
         let verify = graph.find("after-verify").unwrap();
         assert!(graph
             .after(&verify)

@@ -101,7 +101,7 @@ impl TaskObservation {
     }
 
     /// How the Task's standing moved since `old`, as a conductor hears it:
-    /// it stopped at an interactive step, a run ended without succeeding, its
+    /// it parked at a breakpoint, a run ended without succeeding, its
     /// PR merged, it closed. Steps passing inside a run are not news.
     fn news(&self, old: &Self) -> Vec<String> {
         // A relaunch that fails where a run in `old` did says nothing new

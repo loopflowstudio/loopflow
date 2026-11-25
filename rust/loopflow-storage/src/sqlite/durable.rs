@@ -294,8 +294,8 @@ pub(super) fn map_machine_by_id(
 
 /// Completion and abandonment are durable. An open Task's state follows
 /// what it is doing: its Task run's carrier still has an OS process, or a
-/// Graph run in its work has not ended. The auto setting says who takes the
-/// interactive steps; state never reads it.
+/// Graph run in its work has not ended. The auto setting says whether a run passes
+/// breakpoints; state never reads it.
 /// A Task with neither a checkout nor a Graph taken up is unstarted; creation
 /// admits a Graph before setup makes the checkout.
 pub(crate) fn task_state_sql(t: &str) -> String {

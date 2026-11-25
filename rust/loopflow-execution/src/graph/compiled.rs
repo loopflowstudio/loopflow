@@ -592,17 +592,16 @@ mod tests {
     }
 
     #[test]
-    fn builtin_graphs_compile_with_expected_steps_stops_and_loops() {
-        type Case<'a> = (&'a str, &'a [&'a str], &'a [usize], &'a [(usize, usize)]);
+    fn builtin_graphs_compile_expected_steps_and_loops_without_stops() {
+        type Case<'a> = (&'a str, &'a [&'a str], &'a [(usize, usize)]);
         let repo = tempfile::tempdir().unwrap();
         let cases: &[Case<'_>] = &[
-            ("queue", &["compress", "sync", "realign", "gate"], &[], &[]),
-            ("refresh", &["sync", "realign"], &[], &[]),
-            ("task-design", &["kickoff"], &[], &[]),
+            ("queue", &["compress", "sync", "realign", "gate"], &[]),
+            ("refresh", &["sync", "realign"], &[]),
+            ("task-design", &["kickoff"], &[]),
             (
                 "incident",
                 &["unbreak", "debug", "5whys", "launch-plan"],
-                &[],
                 &[],
             ),
             (
@@ -620,24 +619,17 @@ mod tests {
                     "qa",
                     "pr-publish",
                 ],
-                &[],
                 &[(5, 4), (7, 4)],
             ),
             (
                 "quick",
                 &["sync", "implement", "qa", "gate", "land --wait-and-fix"],
-                &[],
                 &[(1, 0)],
             ),
-            (
-                "deliver",
-                &["reflect", "gate", "land --wait-and-fix"],
-                &[],
-                &[],
-            ),
-            ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[], &[]),
+            ("deliver", &["reflect", "gate", "land --wait-and-fix"], &[]),
+            ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[]),
         ];
-        for (name, labels, interactive, returns) in cases {
+        for (name, labels, returns) in cases {
             let compiled = compile_builtin(repo.path(), name);
             assert_eq!(
                 compiled
@@ -648,15 +640,9 @@ mod tests {
                 *labels,
                 "{name}"
             );
-            assert_eq!(
-                compiled
-                    .steps
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, s)| s.interactive.then_some(i))
-                    .collect::<Vec<_>>(),
-                *interactive,
-                "{name}"
+            assert!(
+                compiled.steps.iter().all(|s| !s.interactive),
+                "{name} should have no interactive stops"
             );
             let actual_returns: Vec<_> = compiled
                 .steps

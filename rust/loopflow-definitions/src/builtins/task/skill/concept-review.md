@@ -42,7 +42,7 @@ worth it even when the code grows.
 
 A finding earns its place by making the design smaller, more direct or more
 true to the experience. A model that is wrong in the area this work touches
-is this work, however large the fix: take another big pass to get it right.
+is this work, however large the fix, even if it takes another big pass.
 Every finding goes on the page, marked as this work or as a separate outcome
 stated plainly with what it would take. More behavior is scope, not review.
 When a finding turns on a design choice, show it on the page as a
@@ -72,8 +72,8 @@ edit `scratch/plan.md`, code or docs, and it does not decide a loop.
 The page is the review. This is often what stands in for code review: the
 work is built, and the question is whether its concepts are right. When a
 page already exists for the work exactly as it stands, open with that one
-instead of reviewing again. Change nothing else. Don't update the plan or the
-design unless asked; the person reads the page and decides what happens next.
+instead of reviewing again. Don't update the plan or the design unless asked;
+the person reads the page and decides what happens next.
 
 When they want to go further, explore the biggest mismatch together before
 presenting a full redesign, draft the affected usage docs, and regenerate the

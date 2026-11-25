@@ -65,7 +65,7 @@ struct WorkflowLineTests {
 
     @Test("Standing at a breakpoint: the breakpoint waits")
     func waitingAtYou() {
-        let line = WorkflowLine(graph: graph(.breakpoint(step: "after-ship-review", arrival: "arr_1"), current: 2,
+        let line = WorkflowLine(graph: graph(.breakpoint(step: "after-ship-review", arrival: "arr_1", blocked: false), current: 2,
                                              sentence: "At breakpoint after-ship-review."), auto: false)
         #expect(line.tones == [.done, .done, .waiting, .ahead, .ahead])
         #expect(line.sentence == "At breakpoint after-ship-review.")
@@ -73,7 +73,7 @@ struct WorkflowLineTests {
 
     @Test("Auto on: the sentence names auto, and the step still runs")
     func autoOn() {
-        let sentence = "build is running implement. Auto stands in next at after-ship-review."
+        let sentence = "build is running implement. Auto continues through after-ship-review."
         let line = WorkflowLine(graph: graph(run(running: true), current: 1, sentence: sentence), auto: true)
         #expect(line.tones == [.done, .running, .ahead, .ahead, .ahead])
         #expect(line.sentence == sentence)

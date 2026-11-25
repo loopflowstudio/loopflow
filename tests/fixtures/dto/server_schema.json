@@ -13779,6 +13779,9 @@
             "arrival": {
               "$ref": "#/$defs/LfProcessId"
             },
+            "blocked": {
+              "type": "boolean"
+            },
             "kind": {
               "const": "breakpoint",
               "type": "string"
@@ -13790,7 +13793,8 @@
           "required": [
             "kind",
             "step",
-            "arrival"
+            "arrival",
+            "blocked"
           ],
           "type": "object"
         },
@@ -15065,6 +15069,11 @@
     "TaskWaitUntil": {
       "description": "What `lf task wait --until` waits for.",
       "oneOf": [
+        {
+          "const": "breakpoint",
+          "description": "It waits at a breakpoint, its Graph reached `end`, or it finished first.",
+          "type": "string"
+        },
         {
           "const": "submitted",
           "description": "Its PR is open, or it finished first.",

@@ -84,7 +84,9 @@ use time::format_description::well_known::Rfc3339;
 )]
 #[serde(rename_all = "snake_case")]
 pub enum TaskWaitUntil {
-    /// Its PR is open, it waits at a breakpoint, or it finished first.
+    /// It waits at a breakpoint, its Graph reached `end`, or it finished first.
+    Breakpoint,
+    /// Its PR is open, or it finished first.
     #[serde(rename = "submitted")]
     Open,
     /// It is done or abandoned.
@@ -733,10 +735,15 @@ pub fn task_place(
             .sqlite
             .require_task_launch(&task.id)
             .map_err(task_error)?;
-        let start = start_task_run(&store, &mut task, &options, mode, merges).await?;
+        let (start, breakpoint_arrival) =
+            start_task_run(&store, &mut task, &options, mode, merges).await?;
 
         if let Some(reason) = reason {
-            append_task_comment(&store, &task, reason, true)?;
+            if let Some(arrival) = breakpoint_arrival {
+                append_breakpoint_reply_comment(&store, &task, reason, &arrival)?;
+            } else {
+                append_task_comment(&store, &task, reason, true)?;
+            }
         }
         Ok((task, start))
     })
@@ -979,6 +986,7 @@ pub fn select_task_run(
         .reason
         .as_deref()
         .filter(|text| !text.trim().is_empty());
+    let mut iterated = false;
     let mut start = match (from, row.as_ref().and_then(|row| row.run.as_ref()), parked) {
         (Some(name), _, _) => Some(
             graph
@@ -1009,13 +1017,51 @@ pub fn select_task_run(
         (None, None, Some(arrival)) => {
             let mut cursor = arrival.cursor.clone();
             if let Some(decision) = options.decision {
-                let verdict = cursor.leaf_mut().progress.verdict.as_mut()
-                    .ok_or_else(|| task_error("this breakpoint has no loop decision"))?;
-                verdict.decision = decision;
-                if let Some(reason) = reason {
-                    verdict.summary = reason.to_owned();
+                let (body, leaf) = cursor.current_body(&graph.steps);
+                if crate::graph::return_target(body, leaf.index).is_none() {
+                    return Err(task_error("this breakpoint has no loop decision"));
+                }
+                let progress = &mut cursor.leaf_mut().progress;
+                match progress.verdict.as_mut() {
+                    Some(verdict) => {
+                        verdict.decision = decision;
+                        if let Some(reason) = reason {
+                            verdict.summary = reason.to_owned();
+                        }
+                    }
+                    None => {
+                        let summary = match reason {
+                            Some(reason) => reason.to_owned(),
+                            None if decision
+                                == crate::graph::transitions::GraphDecision::Iterate =>
+                            {
+                                return Err(task_error(
+                                    "iterating at this breakpoint requires `--reason <direction>`",
+                                ));
+                            }
+                            None => "continue".to_owned(),
+                        };
+                        progress.verdict = Some(crate::graph::transitions::GraphVerdict {
+                            decision,
+                            summary,
+                        });
+                    }
+                }
+            } else if let Some(reason) = reason.filter(|_| !options.auto_on) {
+                if let Some(verdict) = cursor.leaf_mut().progress.verdict.as_mut() {
+                    if verdict.decision == crate::graph::transitions::GraphDecision::Iterate {
+                        verdict.summary = reason.to_owned();
+                    }
                 }
             }
+            iterated = cursor
+                .leaf()
+                .progress
+                .verdict
+                .as_ref()
+                .is_some_and(|verdict| {
+                    verdict.decision == crate::graph::transitions::GraphDecision::Iterate
+                });
             cursor.finish(&graph.steps).map_err(task_error)?;
             graph.place_of(&cursor).map(|place| RunStart { place, cursor })
         }
@@ -1037,7 +1083,9 @@ pub fn select_task_run(
         }
     };
     if let (Some(_), Some(start), Some(reason)) = (parked, &mut start, reason) {
-        start.cursor.leaf_mut().progress.direction = Some(reason.to_owned());
+        if !options.auto_on && !iterated {
+            start.cursor.leaf_mut().progress.handoff = Some(reason.to_owned());
+        }
     }
     Ok(TaskRunSelection {
         previous: row,
@@ -1058,7 +1106,7 @@ async fn start_task_run(
     options: &TaskProcessOptions,
     mode: TaskRunMode,
     merges: fn(&[String]) -> bool,
-) -> OpsResult<TaskRunStart> {
+) -> OpsResult<(TaskRunStart, Option<loopflow_model::id::LfProcessId>)> {
     loop {
         if let Some(start) = try_start_task_run(store, task, options, mode, merges).await? {
             return Ok(start);
@@ -1073,7 +1121,7 @@ async fn try_start_task_run(
     options: &TaskProcessOptions,
     mode: TaskRunMode,
     merges: fn(&[String]) -> bool,
-) -> OpsResult<Option<TaskRunStart>> {
+) -> OpsResult<Option<(TaskRunStart, Option<loopflow_model::id::LfProcessId>)>> {
     let requested = options.graph.as_deref();
     let from = options.from.as_deref();
     let auto_on = options.auto_on;
@@ -1089,18 +1137,21 @@ async fn try_start_task_run(
             auto::turn_on(store, task)?;
             if let Some(graph_process) = auto::running_graph(store, task, &carrier.id).await? {
                 let at = row.graph.step_name_of(cursor);
-                return Ok(Some(TaskRunStart::Live {
-                    run: format!(
-                        "{} at {}",
-                        row.graph.name,
-                        at.as_deref().unwrap_or(&row.step)
-                    ),
-                    graph_process,
-                }));
+                return Ok(Some((
+                    TaskRunStart::Live {
+                        run: format!(
+                            "{} at {}",
+                            row.graph.name,
+                            at.as_deref().unwrap_or(&row.step)
+                        ),
+                        graph_process,
+                    },
+                    None,
+                )));
             }
         }
         Some((row, None)) if row.step == crate::task_graph::END && from.is_none() => {
-            return Ok(Some(TaskRunStart::Ended));
+            return Ok(Some((TaskRunStart::Ended, None)));
         }
         _ => {}
     }
@@ -1166,14 +1217,16 @@ async fn try_start_task_run(
         }
     };
     let arrival = row.breakpoint.as_ref().map(|stop| &stop.id);
-    let lost_claim = || -> OpsResult<Option<TaskRunStart>> {
-        if arrival.is_some() && (!auto_on || options.at_arrival.is_some()) {
-            return Err(task_error(format!(
-                "Task {issue} already continued from this breakpoint"
-            )));
-        }
-        Ok(None)
-    };
+    let lost_claim =
+        || -> OpsResult<Option<(TaskRunStart, Option<loopflow_model::id::LfProcessId>)>> {
+            if arrival.is_some() && (!auto_on || options.at_arrival.is_some()) {
+                return Err(task_error(format!(
+                    "Task {issue} already continued from this breakpoint"
+                )));
+            }
+            Ok(None)
+        };
+    let claimed_arrival = arrival.filter(|_| !auto_on).cloned();
     let Some(start) = start else {
         let ended = match &row.run {
             Some((_, carrier)) => {
@@ -1188,7 +1241,7 @@ async fn try_start_task_run(
             return lost_claim();
         }
         settle_pending_completion(store, task).await?;
-        return Ok(Some(TaskRunStart::Ended));
+        return Ok(Some((TaskRunStart::Ended, claimed_arrival)));
     };
     let label = if start.place == crate::task_graph::Place::default() {
         format!("{} from start", graph.name)
@@ -1207,10 +1260,13 @@ async fn try_start_task_run(
     {
         return lost_claim();
     }
-    Ok(Some(TaskRunStart::Run {
-        step: label,
-        merges,
-    }))
+    Ok(Some((
+        TaskRunStart::Run {
+            step: label,
+            merges,
+        },
+        claimed_arrival,
+    )))
 }
 
 /// The run this process carried ended; settle a completion its arrival at
@@ -3681,6 +3737,22 @@ pub fn append_task_comment(
     })
 }
 
+fn append_breakpoint_reply_comment(
+    store: &Store,
+    task: &Task,
+    message: &str,
+    arrival: &loopflow_model::id::LfProcessId,
+) -> OpsResult<String> {
+    append_task_comment_with_marker(
+        store,
+        task,
+        message,
+        false,
+        Some(&format!("<!-- loopflow-breakpoint:{arrival} -->")),
+        || crate::config::participant_name().map_err(task_error),
+    )
+}
+
 pub(crate) fn append_task_comment_as(
     store: &Store,
     task: &Task,
@@ -3688,12 +3760,25 @@ pub(crate) fn append_task_comment_as(
     steer: bool,
     participant: impl FnOnce() -> OpsResult<Option<String>>,
 ) -> OpsResult<String> {
+    append_task_comment_with_marker(store, task, message, steer, None, participant)
+}
+
+fn append_task_comment_with_marker(
+    store: &Store,
+    task: &Task,
+    message: &str,
+    steer: bool,
+    custom_marker: Option<&str>,
+    participant: impl FnOnce() -> OpsResult<Option<String>>,
+) -> OpsResult<String> {
     validate_task_comment_input(message)?;
     let id = uuid::Uuid::new_v4().to_string();
     let capture = crate::session_record::inherited_capture_key().map_err(task_error)?;
     let provenance =
         capture.or_else(|| crate::journal::agent_caller().map(|caller| caller.session_id.into()));
-    let (body, author) = if let Some(provenance) = provenance.filter(|_| !steer) {
+    let (body, author) = if let Some(provenance) =
+        provenance.filter(|_| !steer && custom_marker.is_none())
+    {
         (
             format!(
                 "{}\n\n<!-- loopflow-progress:{provenance}:{id} -->",
@@ -3733,11 +3818,11 @@ pub(crate) fn append_task_comment_as(
             },
             None => loopflow_model::comment::TaskCommentAuthor::Person { name },
         };
+        let suffix = custom_marker
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("<!-- loopflow-steer:{id} -->"));
         (
-            format!(
-                "{}{requester}{marker}\n\n<!-- loopflow-steer:{id} -->",
-                message.trim()
-            ),
+            format!("{}{requester}{marker}\n\n{suffix}", message.trim()),
             author,
         )
     };
@@ -3901,13 +3986,19 @@ async fn task_wait_condition(
         WorkStatus::Done | WorkStatus::Abandoned
     );
     let reached = match until {
-        TaskWaitUntil::Open => {
+        TaskWaitUntil::Breakpoint => {
             finished
                 || store
                     .sqlite
                     .task_graph_row(&task.id)
                     .map_err(task_error)?
-                    .is_some_and(|row| row.breakpoint.is_some())
+                    .is_some_and(|row| {
+                        row.breakpoint.is_some()
+                            || (row.run.is_none() && row.step == crate::task_graph::END)
+                    })
+        }
+        TaskWaitUntil::Open => {
+            finished
                 || store
                     .active_task_pr(&task.id)
                     .await

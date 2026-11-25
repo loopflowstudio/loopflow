@@ -93,4 +93,36 @@ struct TaskActionsTests {
         let execution = try JSONDecoder().decode(TaskExecution.self, from: loadFixtureData("task_checkout.json"))
         #expect(TaskActions(work: try work(nil), row: try row(auto: true), execution: execution).auto == .off)
     }
+
+    @Test("A blocked breakpoint omits the plain Continue button; an unblocked one offers Continue with its arrival")
+    func breakpointBlocking() throws {
+        let ready = try actions(["kind": "breakpoint", "step": "after-ship-review", "arrival": "arr_1", "blocked": false], row())
+        #expect(ready.run == TaskActions.Run(label: "Continue", help: "lf task run W2-144 --at-arrival arr_1", arrival: "arr_1"))
+
+        let blocked = try actions(["kind": "breakpoint", "step": "after-ship-review", "arrival": "arr_1", "blocked": true], row())
+        #expect(blocked.run == nil)
+    }
+
+    @Test("Start from… lists start and top-level runnable stages, excluding standalone breakpoints")
+    func startFromSteps() throws {
+        let graph = TaskGraph(
+            name: "feature",
+            breakpoints: ["after-explore", "after-ship-review", "after-verify"],
+            position: .at(step: "start"),
+            steps: [
+                .init(name: "explore", breakpoint: false),
+                .init(name: "after-explore", breakpoint: true),
+                .init(name: "plan", breakpoint: false),
+                .init(name: "build", breakpoint: false),
+                .init(name: "ship-review", breakpoint: false),
+                .init(name: "after-ship-review", breakpoint: true),
+                .init(name: "deliver", breakpoint: false),
+                .init(name: "verify", breakpoint: false),
+                .init(name: "after-verify", breakpoint: true),
+            ],
+            currentStep: nil,
+            sentence: "Not started."
+        )
+        #expect(graph.startFromSteps == ["start", "explore", "plan", "build", "ship-review", "deliver", "verify"])
+    }
 }

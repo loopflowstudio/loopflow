@@ -683,6 +683,7 @@ impl Read {
             }
             Self::TaskWait { issue, until } => {
                 let until = match until {
+                    loopflow_execution::ops::task::TaskWaitUntil::Breakpoint => "breakpoint",
                     loopflow_execution::ops::task::TaskWaitUntil::Open => "submitted",
                     loopflow_execution::ops::task::TaskWaitUntil::Terminal => "terminal",
                 };

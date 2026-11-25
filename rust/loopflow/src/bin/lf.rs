@@ -1374,10 +1374,10 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 .as_deref()
                 .map(loopflow_execution::config::parse_duration)
                 .transpose()?;
-            let until = if until == "submitted" {
-                loopflow_execution::ops::task::TaskWaitUntil::Open
-            } else {
-                loopflow_execution::ops::task::TaskWaitUntil::Terminal
+            let until = match until.as_str() {
+                "breakpoint" => loopflow_execution::ops::task::TaskWaitUntil::Breakpoint,
+                "submitted" => loopflow_execution::ops::task::TaskWaitUntil::Open,
+                _ => loopflow_execution::ops::task::TaskWaitUntil::Terminal,
             };
             let waited = loopflow_execution::engine::task::wait(issue, until, timeout)?;
             if *json {

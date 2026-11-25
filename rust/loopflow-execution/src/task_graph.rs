@@ -424,6 +424,7 @@ pub enum TaskGraphPosition {
     Breakpoint {
         step: String,
         arrival: loopflow_model::id::LfProcessId,
+        blocked: bool,
     },
     /// `lf task run` (`lf_process_id`) carries the Task on from `step`, and
     /// runs `at`. `running` is read from that Process: a run that ended
@@ -478,6 +479,7 @@ impl TaskGraph {
                     TaskGraphPosition::Breakpoint {
                         step,
                         arrival: stop.id.clone(),
+                        blocked: stop.blocked_reason().is_some(),
                     },
                     place.as_ref().map(top),
                     sentence,
@@ -520,7 +522,7 @@ impl TaskGraph {
                     match (next, auto) {
                         (None, _) => running,
                         (Some(next), Some(AutoState::On)) => {
-                            format!("{running} Auto stands in next at {next}.")
+                            format!("{running} Auto continues through {next}.")
                         }
                         (Some(next), _) => format!("{running} You are next needed at {next}."),
                     }
@@ -758,7 +760,7 @@ mod tests {
         let auto = read("plan", Some(("implement", true)), Some(AutoState::On));
         assert_eq!(
             auto.sentence,
-            "build is running implement. Auto stands in next at after-ship-review."
+            "build is running implement. Auto continues through after-ship-review."
         );
         let stopped = read("plan", Some(("implement", false)), None);
         assert_eq!(

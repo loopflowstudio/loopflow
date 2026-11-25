@@ -9,7 +9,7 @@ import Testing
 struct DTOFixtureTests {
     @Test func breakpointOffersContinuationForThePresentedArrival() throws {
         let graph = try JSONDecoder().decode(TaskGraph.self, from: loadFixtureData("task_graph_breakpoint.json"))
-        #expect(graph.position == .breakpoint(step: "after-research", arrival: "11111111-1111-4111-8111-111111111111"))
+        #expect(graph.position == .breakpoint(step: "after-research", arrival: "11111111-1111-4111-8111-111111111111", blocked: false))
         #expect(graph.breakpoints == ["after-research"])
         #expect(graph.waitingStep == "after-research")
         #expect(graph.steps.map(\.breakpoint) == [false, true])

@@ -129,11 +129,11 @@ public struct TaskGraph: Codable, Sendable, Equatable {
     /// longer running stopped, and the next `lf task run` starts it again at `at`.
     public enum Position: Codable, Sendable, Equatable {
         case at(step: String)
-        case breakpoint(step: String, arrival: String)
+        case breakpoint(step: String, arrival: String, blocked: Bool)
         case run(step: String, at: String, lfProcessId: String, running: Bool)
 
         enum CodingKeys: String, CodingKey {
-            case kind, step, at, running, arrival
+            case kind, step, at, running, arrival, blocked
             case lfProcessId = "lf_process_id"
         }
 
@@ -144,7 +144,8 @@ public struct TaskGraph: Codable, Sendable, Equatable {
                 self = .at(step: try container.decode(String.self, forKey: .step))
             case "breakpoint":
                 self = .breakpoint(step: try container.decode(String.self, forKey: .step),
-                                   arrival: try container.decode(String.self, forKey: .arrival))
+                                   arrival: try container.decode(String.self, forKey: .arrival),
+                                   blocked: try container.decode(Bool.self, forKey: .blocked))
             case "run":
                 self = .run(
                     step: try container.decode(String.self, forKey: .step),
@@ -163,10 +164,11 @@ public struct TaskGraph: Codable, Sendable, Equatable {
             case .at(let step):
                 try container.encode("at", forKey: .kind)
                 try container.encode(step, forKey: .step)
-            case .breakpoint(let step, let arrival):
+            case .breakpoint(let step, let arrival, let blocked):
                 try container.encode("breakpoint", forKey: .kind)
                 try container.encode(step, forKey: .step)
                 try container.encode(arrival, forKey: .arrival)
+                try container.encode(blocked, forKey: .blocked)
             case .run(let step, let at, let lfProcessId, let running):
                 try container.encode("run", forKey: .kind)
                 try container.encode(step, forKey: .step)
@@ -179,7 +181,7 @@ public struct TaskGraph: Codable, Sendable, Equatable {
         /// Where the Task waits, or the step its run left.
         public var step: String {
             switch self {
-            case .at(let step), .breakpoint(let step, _), .run(let step, _, _, _): step
+            case .at(let step), .breakpoint(let step, _, _), .run(let step, _, _, _): step
             }
         }
     }
@@ -214,10 +216,24 @@ public struct TaskGraph: Codable, Sendable, Equatable {
     /// The breakpoint where a person takes part now (or a legacy capture's stop).
     public var waitingStep: String? {
         switch position {
-        case .breakpoint(let step, _): return step
+        case .breakpoint(let step, _, _): return step
         case .at(let step): return breakpoints.first { $0 == step }
         case .run: return nil
         }
+    }
+
+    /// `start` plus top-level runnable work steps (excluding standalone breakpoints),
+    /// in Graph order without duplicates.
+    public var startFromSteps: [String] {
+        let stops = Set(breakpoints)
+        var seen: Set<String> = [Self.start]
+        var result = [Self.start]
+        for step in steps where !stops.contains(step.name) {
+            if seen.insert(step.name).inserted {
+                result.append(step.name)
+            }
+        }
+        return result
     }
 }
 

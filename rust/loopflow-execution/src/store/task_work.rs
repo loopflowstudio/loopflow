@@ -67,10 +67,14 @@ pub(crate) fn settled_task_position(
     }
     Ok(match row.run {
         None => Some(match row.breakpoint {
-            Some(record) => TaskGraphPosition::Breakpoint {
-                step: row.step,
-                arrival: serde_json::from_str::<BreakpointArrival>(&record)?.id,
-            },
+            Some(record) => {
+                let arrival = serde_json::from_str::<BreakpointArrival>(&record)?;
+                TaskGraphPosition::Breakpoint {
+                    step: row.step,
+                    blocked: arrival.blocked_reason().is_some(),
+                    arrival: arrival.id,
+                }
+            }
             None => TaskGraphPosition::At { step: row.step },
         }),
         Some((_, carrier)) if carrier_may_run(&carrier) => previous.cloned(),

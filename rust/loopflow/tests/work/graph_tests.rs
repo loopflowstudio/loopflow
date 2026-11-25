@@ -2426,6 +2426,18 @@ elif "<lf:skill:kickoff>" in turn:
                 )),
                 "{kickoff}"
             );
+            assert_eq!(
+                kickoff.matches(reply).count(),
+                1,
+                "breakpoint reply must reach kickoff once without double-steering:\n{kickoff}"
+            );
+            assert!(task
+                .store
+                .task_comments(&task.task.id)
+                .unwrap()
+                .comments
+                .iter()
+                .any(|c| c.body.starts_with(reply) && c.body.contains("loopflow-breakpoint:")));
         } else {
             assert!(!kickoff.contains(reply));
         }

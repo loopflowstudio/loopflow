@@ -40,8 +40,27 @@ pub struct GraphProgress {
     /// Backward traversals by the deciding step's index in its body, retained
     /// for the invocation.
     pub repeats: BTreeMap<String, u32>,
+    /// Loop iteration direction, set by `finish_step` on `Iterate` and cleared
+    /// when a deciding step advances.
     pub direction: Option<String>,
+    /// Single-step breakpoint reply handoff (non-loop or `advance --reason`).
+    /// Consumed by the immediate next step and cleared as soon as that step settles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff: Option<String>,
     pub verdict: Option<GraphVerdict>,
+}
+
+impl GraphProgress {
+    /// Direction delivered to the current step: any active loop iteration
+    /// direction plus any single-step breakpoint handoff.
+    pub fn step_direction(&self) -> Option<String> {
+        match (&self.direction, &self.handoff) {
+            (Some(direction), Some(handoff)) => Some(format!("{direction}\n\n{handoff}")),
+            (Some(direction), None) => Some(direction.clone()),
+            (None, Some(handoff)) => Some(handoff.clone()),
+            (None, None) => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +119,7 @@ pub fn finish_step(
             };
             let traversals = progress.repeats.entry(index.to_string()).or_default();
             *traversals = traversals.saturating_add(1);
+            progress.handoff = None;
             progress.direction = Some(
                 progress
                     .verdict
@@ -110,6 +130,7 @@ pub fn finish_step(
             Ok(GraphTransition::Repeat(target))
         }
         GraphDecision::Advance => {
+            progress.handoff = None;
             if progress.verdict.take().is_some() {
                 progress.direction = None;
             }
@@ -297,6 +318,7 @@ mod tests {
             let mut progress = GraphProgress {
                 repeats: [("1".to_owned(), 1)].into(),
                 direction: Some("preserved direction".to_owned()),
+                handoff: Some("preserved handoff".to_owned()),
                 verdict: verdict.map(|(decision, summary)| GraphVerdict {
                     decision,
                     summary: summary.to_owned(),
@@ -316,6 +338,7 @@ mod tests {
             let mut progress = GraphProgress {
                 repeats: [("1".to_owned(), traversals)].into(),
                 direction: Some("retained".to_owned()),
+                handoff: None,
                 verdict: None,
             };
             decide(&mut progress, GraphDecision::Iterate, "one more pass");
@@ -387,5 +410,36 @@ mod tests {
             recovered.direction.as_deref(),
             Some("recover this direction")
         );
+    }
+
+    #[test]
+    fn one_step_handoff_clears_after_next_step_without_affecting_loop_direction() {
+        let steps = [
+            step("kickoff", None),
+            step("write-docs", None),
+            step("implement", None),
+        ];
+        let mut progress = GraphProgress {
+            handoff: Some("1b — compact layout".to_owned()),
+            ..GraphProgress::default()
+        };
+        assert_eq!(
+            progress.step_direction().as_deref(),
+            Some("1b — compact layout")
+        );
+        assert_eq!(
+            finish_step(&steps, 0, &mut progress).unwrap(),
+            GraphTransition::Next(1)
+        );
+        assert_eq!(progress.handoff, None);
+        assert_eq!(progress.direction, None);
+        assert_eq!(progress.step_direction(), None);
+
+        // Older saved progress without `handoff` decodes cleanly.
+        let legacy: GraphProgress = serde_json::from_value(
+            serde_json::json!({"repeats":{},"direction":null,"verdict":null}),
+        )
+        .unwrap();
+        assert_eq!(legacy.handoff, None);
     }
 }

@@ -226,9 +226,9 @@ struct TaskActionItems: View {
 
     var body: some View {
         if let workflow = work?.graph {
-            // Start the next run at a step: back, ahead, or at a breakpoint.
+            // Start the next run at `start` or any top-level runnable work stage.
             Menu("Start from…") {
-                ForEach([TaskGraph.start] + workflow.breakpoints, id: \.self) { step in
+                ForEach(workflow.startFromSteps, id: \.self) { step in
                     Button(step) { model.startTaskFromInput(nil, from: step, task: task) }
                         .accessibilityIdentifier("task-workflow-move-\(step)")
                 }

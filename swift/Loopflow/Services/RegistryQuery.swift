@@ -81,7 +81,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case prChecks(directory: String, required: Bool)
     /// Requested reviews and review submissions, each with its commit.
     case prReviews(directory: String, pr: String?)
-    /// The Task now and whether it reached `until` (`submitted` or
+    /// The Task now and whether it reached `until` (`breakpoint`, `submitted` or
     /// `terminal`); subscribed, it ends after the reading that reached it.
     case taskWait(issue: String, until: String)
     /// A whole-tree revision of the Task's checkout after each change there,

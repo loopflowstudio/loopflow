@@ -611,7 +611,7 @@ the phone's `view.select` Task list and its creation destinations all read it.
   `invalid`. On reconnect, supply the last applied reading's checkpoint to resume the
   same read without receiving an unchanged complete reading; see
   [Reconnect a watch](#reconnect-a-watch). `task.wait {issue,
-  until}` (`submitted` or `terminal`) reads `{reached, task}` whenever the Task
+  until}` (`breakpoint`, `submitted` or `terminal`) reads `{reached, task}` whenever the Task
   changes; after the reading whose `reached` is true and its events, the server
   sends `ended {id}` and nothing more for it. Requested once, it is that reading now, as
   `lf task wait --timeout 0s --json` prints it.

@@ -639,7 +639,8 @@ fn execute(
                         .expect("Graph position mutex poisoned")
                         .clone();
                     let mut text = running.breakpoint_review(step, &cursor)?;
-                    let deciding = cursor.leaf().progress.verdict.is_some();
+                    let (body, leaf) = cursor.current_body(running.steps);
+                    let deciding = return_target(body, leaf.index).is_some();
                     text.push_str(&format!("\nPresent the result, links, proposed next action and questions in this conversation. Discuss questions here. When the person chooses, continue with `lf task run --at-arrival {carrier} --reason <their-reply-and-selected-option>`."));
                     if deciding {
                         text.push_str(" To change the loop decision, include `--decision advance` or `--decision iterate`.");

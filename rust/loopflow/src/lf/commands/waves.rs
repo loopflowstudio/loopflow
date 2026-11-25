@@ -2325,11 +2325,6 @@ async fn snapshot_task_detail(
         .steps
         .get(&task.id)
         .is_some_and(|step| step == loopflow_execution::task_graph::END);
-    let finished = loopflow_execution::ops::task_actions::Finished::of(
-        &status.work_status(),
-        pr.as_ref().map(TaskPr::phase),
-        at_end,
-    );
     // An open Task another Machine runs moves there; this Machine's execution
     // records are what it left behind.
     let lifecycle = status.lifecycle(task.state.as_deref());
@@ -2337,8 +2332,10 @@ async fn snapshot_task_detail(
     let elsewhere = runs_on.as_ref().filter(|_| observed.is_none());
     let breakpoint = if elsewhere.is_none()
         && observed == Some(TaskState::Active)
-        && execution.state == TaskExecutionState::Idle
-    {
+        && matches!(
+            execution.state,
+            TaskExecutionState::Idle | TaskExecutionState::Blocked
+        ) {
         facts
             .breakpoints
             .get(&task.id)
@@ -2350,13 +2347,19 @@ async fn snapshot_task_detail(
                 Ok::<_, serde_json::Error>((blocked, sentence))
             })
             .transpose()?
+            .filter(|(blocked, _)| execution.state == TaskExecutionState::Idle || *blocked)
     } else {
         None
     };
+    let finished = loopflow_execution::ops::task_actions::Finished::of(
+        &status.work_status(),
+        pr.as_ref().map(TaskPr::phase),
+        at_end,
+        breakpoint.is_some(),
+    );
     let conducting = finished
         .filter(|_| {
             elsewhere.is_none()
-                && breakpoint.is_none()
                 && open_children > 0
                 && execution.state != TaskExecutionState::Running
         })
@@ -2371,6 +2374,11 @@ async fn snapshot_task_detail(
             owner: NextMoveOwner::User,
             reason: "Unassigned; nothing moves it until `lf task claim` or `lf task run`".into(),
         }
+    } else if let Some((_, sentence)) = &breakpoint {
+        NextMove {
+            owner: NextMoveOwner::User,
+            reason: sentence.clone(),
+        }
     } else if execution.state != TaskExecutionState::Idle && !runtime.status.is_terminal() {
         NextMove {
             owner: match execution.state {
@@ -2378,11 +2386,6 @@ async fn snapshot_task_detail(
                 _ => NextMoveOwner::Task,
             },
             reason: execution.reason.clone(),
-        }
-    } else if let Some((_, sentence)) = &breakpoint {
-        NextMove {
-            owner: NextMoveOwner::User,
-            reason: sentence.clone(),
         }
     } else if let Some(reason) = conducting.clone() {
         NextMove {
@@ -2435,6 +2438,12 @@ async fn snapshot_task_detail(
             .filter(|pr| pr.phase() == PrPhase::Open)
             .map(|pr| pr.presentation().is_some()),
         at_end,
+        breakpoint: breakpoint.as_ref().map(|(blocked, sentence)| {
+            loopflow_execution::ops::task_actions::BreakpointActionEvidence {
+                blocked: *blocked,
+                sentence: sentence.as_str(),
+            }
+        }),
         open_children,
         completion_refusal: completion_refusal.as_deref(),
         run_refusal: run_refusal.as_deref(),
@@ -2457,18 +2466,6 @@ async fn snapshot_task_detail(
         TaskActionModel {
             recommended: Some(TaskAction::NoAction),
             reason: next_move.reason.clone(),
-        }
-    } else if let Some((_, sentence)) = &breakpoint {
-        if let Some(refusal) = launch_refusal.as_deref().or(run_refusal.as_deref()) {
-            TaskActionModel {
-                recommended: Some(TaskAction::NoAction),
-                reason: refusal.to_string(),
-            }
-        } else {
-            TaskActionModel {
-                recommended: Some(TaskAction::Run),
-                reason: sentence.clone(),
-            }
         }
     } else {
         derive_task_actions(&action_evidence)
@@ -2698,14 +2695,17 @@ fn derive_task_condition(
     let settled = runtime
         .map(|runtime| runtime.status)
         .filter(|status| status.is_terminal() && !unresolved_execution);
+    let blocked_breakpoint = execution
+        .is_some_and(|execution| execution.state == TaskExecutionState::Blocked)
+        && breakpoint.is_some_and(|(blocked, _)| blocked);
     let (state, reason) = if let Some(status) = settled {
         let reason = match status {
             TaskState::Abandoned => "Task is abandoned",
             _ => "Task is complete",
         };
         (TaskConditionState::Clear, reason.to_string())
-    } else if let Some(execution) =
-        execution.filter(|execution| execution.state != TaskExecutionState::Idle)
+    } else if let Some(execution) = execution
+        .filter(|execution| execution.state != TaskExecutionState::Idle && !blocked_breakpoint)
     {
         let state = match execution.state {
             TaskExecutionState::Starting
@@ -4352,6 +4352,7 @@ mod tests {
                 latest_pr_merge_request: None,
                 latest_pr_presentation_current: None,
                 at_end: false,
+                breakpoint: None,
                 open_children: 0,
                 completion_refusal: None,
                 run_refusal: None,
@@ -4479,6 +4480,7 @@ mod tests {
                     latest_pr_merge_request: None,
                     latest_pr_presentation_current: None,
                     at_end: false,
+                    breakpoint: None,
                     open_children: 0,
                     completion_refusal: None,
                     run_refusal: None,
@@ -4512,6 +4514,7 @@ mod tests {
             latest_pr_merge_request: None,
             latest_pr_presentation_current: Some(true),
             at_end: false,
+            breakpoint: None,
             open_children: 0,
             completion_refusal: None,
             run_refusal: None,
@@ -4684,5 +4687,168 @@ mod tests {
             loopflow_execution::store::migrations::latest_applied_version_sqlite(&conn).unwrap(),
             frontier
         );
+    }
+
+    #[test]
+    fn blocked_auto_breakpoint_agrees_between_waves_and_selections() {
+        let _ledger = loopflow_execution::journal::TestLedgerGuard::new();
+        let repo = loopflow_test_support::TestRepo::new();
+        let checkout = repo.path().canonicalize().unwrap();
+        let database = tempfile::tempdir().unwrap();
+        let store: loopflow_execution::store::SharedStore =
+            Arc::new(loopflow_execution::store::Store {
+                sqlite: loopflow_execution::store::opening::open_ephemeral(
+                    &database.path().join("store.db"),
+                )
+                .unwrap(),
+            });
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let repo_id = loopflow_execution::repository::location::ensure_repository(
+            &store.sqlite,
+            checkout.to_str().unwrap(),
+        )
+        .unwrap();
+        let wave = Wave::new(
+            loopflow_model::id::WaveId::new(),
+            "product".into(),
+            checkout.display().to_string(),
+        );
+        runtime.block_on(store.create_wave(&wave)).unwrap();
+        let task = store
+            .sqlite
+            .create_task(&loopflow_execution::work::task::NewTask {
+                parent_task_id: None,
+                repository_id: repo_id.clone(),
+                id: loopflow_model::durable::TaskId::new(),
+                project_id: None,
+                title: "Blocked breakpoint".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        loopflow_execution::store::ownership::claim_task(&store.sqlite, &task.id).unwrap();
+        let graph = loopflow_execution::task_graph::CapturedGraph::load("feature", &checkout)
+            .unwrap()
+            .unwrap();
+        store
+            .sqlite
+            .take_up_task_graph(&task.id, &serde_json::to_string(&graph).unwrap())
+            .unwrap();
+        let mut cursor = graph.find("after-ship-review").unwrap().cursor();
+        cursor.leaf_mut().progress.verdict =
+            Some(loopflow_execution::graph::transitions::GraphVerdict {
+                decision: loopflow_execution::graph::transitions::GraphDecision::Blocked,
+                summary: "Two incompatible schema migrations".into(),
+            });
+        let carrier = loopflow_model::id::LfProcessId::new();
+        {
+            let conn = store.sqlite.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?2,1)",
+                rusqlite::params![
+                    carrier.as_str(),
+                    loopflow_model::id::TraceId::new().as_str()
+                ],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE task_graphs SET lf_process_id=?2, run_start='{}', breakpoint=NULL WHERE task_id=?1",
+                rusqlite::params![task.id.as_str(), carrier.as_str()],
+            )
+            .unwrap();
+        }
+        let arrival = loopflow_execution::store::task_work::BreakpointArrival {
+            id: carrier.clone(),
+            cursor,
+        };
+        store
+            .sqlite
+            .arrive_task_graph(
+                &task.id,
+                &carrier,
+                "after-ship-review",
+                Some((&serde_json::to_string(&arrival).unwrap(), "Review ready")),
+            )
+            .unwrap();
+        // Record the non-zero blocked GraphHeld exit that auto:on / -b leaves behind.
+        let graph_proc = loopflow_model::id::LfProcessId::new();
+        let compiled = loopflow_execution::graph::compiled::compile("feature", &graph.steps);
+        store
+            .sqlite
+            .record_graph(
+                &graph_proc,
+                &compiled,
+                Some(&task.id),
+                &loopflow_storage::graph_process::ExecutionStart::reserved(1),
+                Some(&checkout.display().to_string()),
+                Some(&checkout.display().to_string()),
+                None,
+            )
+            .unwrap();
+        store
+            .sqlite
+            .finish_run(
+                loopflow_storage::graph_process::RunOwner::GraphRun,
+                &graph_proc,
+                2,
+                Some(i32::from(loopflow_execution::process::GraphHeld::EXIT)),
+                Some("blocked: Two incompatible schema migrations"),
+            )
+            .unwrap();
+
+        let roadmap = runtime
+            .block_on(super::show_roadmap(
+                Some(&store),
+                &checkout,
+                None,
+                None,
+                false,
+                false,
+            ))
+            .unwrap();
+        let super::Evidence::Ok { items, .. } = roadmap.tasks else {
+            panic!("expected available tasks");
+        };
+        let row = items
+            .iter()
+            .find(|item| item.task.identifier == task.identifier)
+            .unwrap();
+        assert!(row
+            .selection_states
+            .contains(&loopflow_execution::work::selection::SelectionState::Breakpoint));
+        assert_eq!(row.next_move.owner, NextMoveOwner::User);
+        assert_eq!(
+            row.next_move.reason,
+            "At breakpoint after-ship-review. Blocked: Two incompatible schema migrations"
+        );
+        assert_eq!(row.condition.state, TaskConditionState::Blocked);
+        assert_eq!(
+            row.condition.reason,
+            "At breakpoint after-ship-review. Blocked: Two incompatible schema migrations"
+        );
+        assert_eq!(
+            row.actions.recommended,
+            Some(loopflow_execution::ops::task_actions::TaskAction::NoAction)
+        );
+        assert_eq!(
+            row.actions.reason,
+            "At breakpoint after-ship-review. Blocked: Two incompatible schema migrations"
+        );
+
+        // Verify sqlite::selections also reports SelectionState::Breakpoint for the same Task.
+        let plan = loopflow_execution::store::selections::plan_selection(
+            &store.sqlite,
+            &repo_id,
+            loopflow_execution::store::sqlite::selections::repository_default(),
+        )
+        .unwrap();
+        let tile = plan
+            .contents
+            .iter()
+            .find(|c| c.work.id == task.id.as_str())
+            .unwrap();
+        assert!(tile
+            .states
+            .contains(&loopflow_execution::work::selection::SelectionState::Breakpoint));
     }
 }

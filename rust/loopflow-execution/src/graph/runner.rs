@@ -152,7 +152,7 @@ impl<E: SkillExecutor> GraphRunner<E> {
                 index: cursor.index,
                 total: items.len(),
             }),
-            direction: leaf.progress.direction.clone(),
+            direction: leaf.progress.step_direction(),
         };
         let (outcome, process) = match item {
             ConcreteStep::Breakpoint(stop) => {
@@ -285,6 +285,7 @@ impl ExecutionCursor {
                     .insert(format!("{prefix}{key}"), *count);
             }
             self.progress.direction = cursor.progress.direction.clone();
+            self.progress.handoff = None;
             self.child = None;
         } else if let Some(ConcreteStep::Xor(branch)) = steps.get(self.index) {
             let selected = self
@@ -295,6 +296,7 @@ impl ExecutionCursor {
                 .paths
                 .get(&selected)
                 .ok_or_else(|| anyhow!("unknown XOR path {selected:?}"))?;
+            self.progress.handoff = None;
             if !path.steps.is_empty() {
                 let prefix = format!("xor:{}:{selected}/", self.index);
                 let repeats = self
@@ -311,6 +313,7 @@ impl ExecutionCursor {
                     cursor: Self {
                         progress: TransitionProgress {
                             direction: self.progress.direction.clone(),
+                            handoff: None,
                             repeats,
                             verdict: None,
                         },
@@ -326,6 +329,7 @@ impl ExecutionCursor {
                 "loop at step {} requires a decision",
                 self.index
             );
+            self.progress.handoff = None;
             self.index += 1;
             return Ok(());
         }
@@ -1351,5 +1355,121 @@ mod tests {
         let outcome = runner.run(&items, 0).await.expect("runner run");
         assert_eq!(outcome, GraphOutcome::Completed);
         assert_eq!(executor.calls(), vec!["op:sync --fast".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn breakpoint_handoff_reaches_immediate_next_step_only_while_iterate_carries_loop() {
+        let repo = fixture_repo().expect("tempdir");
+        let items = vec![
+            step("kickoff", None),
+            step("write-docs", None),
+            step("implement", None),
+            step("ship-review", None),
+            ConcreteStep::Breakpoint(crate::graph::Breakpoint {
+                name: "after-ship-review".into(),
+                returns: Some(2),
+                sources: vec![],
+            }),
+            step("deliver", None),
+            step("verify", None),
+        ];
+
+        // 1. Non-loop handoff from after-explore reaches kickoff once and clears before write-docs/implement.
+        let executor = RecordingExecutor::new(repo.path().to_path_buf())
+            .with_wait("after-ship-review")
+            .with_outcomes(
+                "ship-review",
+                vec![decision(GraphDecision::Advance, "looks good")],
+            );
+        let mut cursor = ExecutionCursor {
+            index: 0,
+            progress: crate::graph::transitions::GraphProgress {
+                handoff: Some("1b — compact layout".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let outcome = GraphRunner::new(executor.clone())
+            .run_with_cursor(&items, &mut cursor)
+            .await
+            .unwrap();
+        assert_eq!(outcome, GraphOutcome::StoppedAt("after-ship-review".into()));
+        let seen: Vec<_> = executor
+            .contexts
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(name, ctx)| (name.clone(), ctx.direction.clone()))
+            .collect();
+        assert_eq!(
+            seen,
+            vec![
+                ("kickoff".into(), Some("1b — compact layout".into())),
+                ("write-docs".into(), None),
+                ("implement".into(), None),
+                ("ship-review".into(), None),
+            ]
+        );
+
+        // 2. Iterating at after-ship-review carries direction across every step of the repeated loop body
+        //    (implement + ship-review), then advancing with a one-step handoff delivers it to deliver only,
+        //    never leaking into verify.
+        cursor.leaf_mut().progress.verdict = Some(GraphVerdict {
+            decision: GraphDecision::Iterate,
+            summary: "Fix the failing edge test".into(),
+        });
+        cursor.finish(&items).unwrap();
+        let executor2 = RecordingExecutor::new(repo.path().to_path_buf())
+            .with_wait("after-ship-review")
+            .with_outcomes(
+                "ship-review",
+                vec![decision(GraphDecision::Advance, "fixed")],
+            );
+        let outcome = GraphRunner::new(executor2.clone())
+            .run_with_cursor(&items, &mut cursor)
+            .await
+            .unwrap();
+        assert_eq!(outcome, GraphOutcome::StoppedAt("after-ship-review".into()));
+        let loop_seen: Vec<_> = executor2
+            .contexts
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(name, ctx)| (name.clone(), ctx.direction.clone()))
+            .collect();
+        assert_eq!(
+            loop_seen,
+            vec![
+                ("implement".into(), Some("Fix the failing edge test".into())),
+                (
+                    "ship-review".into(),
+                    Some("Fix the failing edge test".into())
+                ),
+            ]
+        );
+
+        // Advance with a one-step reply: clears loop direction, reaches deliver once, not verify.
+        cursor.finish(&items).unwrap();
+        cursor.leaf_mut().progress.handoff = Some("Note the follow-up in PR".into());
+        let executor3 = RecordingExecutor::new(repo.path().to_path_buf());
+        let outcome = GraphRunner::new(executor3.clone())
+            .run_with_cursor(&items, &mut cursor)
+            .await
+            .unwrap();
+        assert_eq!(outcome, GraphOutcome::Completed);
+        let post_seen: Vec<_> = executor3
+            .contexts
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(name, ctx)| (name.clone(), ctx.direction.clone()))
+            .collect();
+        assert_eq!(
+            post_seen,
+            vec![
+                ("deliver".into(), Some("Note the follow-up in PR".into())),
+                ("verify".into(), None),
+            ]
+        );
     }
 }

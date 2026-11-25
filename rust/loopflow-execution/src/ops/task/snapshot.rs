@@ -78,18 +78,36 @@ pub(super) async fn snapshot_here(
     let work_set =
         crate::store::task_work::task_work(&store.sqlite, &task.id).map_err(task_error)?;
     let auto = store.sqlite.task_auto(&task.id).map_err(task_error)?;
-    if execution.state == crate::ops::task_execution::TaskExecutionState::Idle {
-        if let Some(graph) = work_set.graph.as_ref() {
-            // A run that parked ended its carrier; the Graph itself goes on.
-            if let crate::task_graph::TaskGraphPosition::Breakpoint { step, .. } = &graph.position {
-                execution.reason = format!(
-                    "Graph {} stopped at breakpoint {step}; `lf task run {}` continues it",
-                    graph.name, task.identifier
-                );
-            } else if let Some(wait) = graph.waiting_to_land(auto.as_ref(), &task.identifier) {
-                execution.state = crate::ops::task_execution::TaskExecutionState::Waiting;
-                execution.reason = wait;
+    let mut breakpoint_evidence = None;
+    if let Some(graph) = work_set.graph.as_ref() {
+        match &graph.position {
+            crate::task_graph::TaskGraphPosition::Breakpoint { step, blocked, .. }
+                if execution.state == crate::ops::task_execution::TaskExecutionState::Idle
+                    || (execution.state
+                        == crate::ops::task_execution::TaskExecutionState::Blocked
+                        && *blocked) =>
+            {
+                // A run that parked ended its carrier; the Graph itself goes on.
+                execution.reason = if *blocked {
+                    graph.sentence.clone()
+                } else {
+                    format!(
+                        "Graph {} stopped at breakpoint {step}; `lf task run {}` continues it",
+                        graph.name, task.identifier
+                    )
+                };
+                breakpoint_evidence = Some(crate::ops::task_actions::BreakpointActionEvidence {
+                    blocked: *blocked,
+                    sentence: graph.sentence.as_str(),
+                });
             }
+            _ if execution.state == crate::ops::task_execution::TaskExecutionState::Idle => {
+                if let Some(wait) = graph.waiting_to_land(auto.as_ref(), &task.identifier) {
+                    execution.state = crate::ops::task_execution::TaskExecutionState::Waiting;
+                    execution.reason = wait;
+                }
+            }
+            _ => {}
         }
     }
     let status = store.task_state(&task.id).await.map_err(task_error)?;
@@ -145,6 +163,7 @@ pub(super) async fn snapshot_here(
                     crate::task_graph::TaskGraphPosition::At { step } if step == crate::task_graph::END
                 )
             }),
+            breakpoint: breakpoint_evidence,
             open_children: store
                 .sqlite
                 .open_task_child_count(&task.id)

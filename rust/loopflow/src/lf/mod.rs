@@ -2492,9 +2492,14 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     /// Wait without polling an LM
     Wait {
         issue: String,
-        /// `submitted`: its PR is open, it waits at a breakpoint, or it is
-        /// done. `terminal`: it is done or abandoned.
-        #[arg(long, default_value = "terminal", value_parser = ["submitted", "terminal"])]
+        /// `breakpoint`: it waits at a breakpoint, its Graph reached `end`, or
+        /// it is done. `submitted`: its PR is open, or it is done. `terminal`:
+        /// it is done or abandoned.
+        #[arg(
+            long,
+            default_value = "terminal",
+            value_parser = ["breakpoint", "submitted", "terminal"]
+        )]
         until: String,
         #[arg(long)]
         timeout: Option<String>,

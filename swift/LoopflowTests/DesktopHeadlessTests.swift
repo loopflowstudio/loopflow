@@ -472,12 +472,17 @@ struct DesktopHeadlessTests {
         #expect(try await tapped(3) == ["task", "run", task.task.identifier, "--json"])
 
         // Going back is the same command a person would type; Start from… in "…"
-        // lists `start` and each interactive step.
-        for step in ["start", "review-design", "demo"] {
+        // lists `start` and each top-level runnable work step, omitting standalone breakpoints.
+        for step in ["start", "plan", "build"] {
             _ = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move-\(step)")
         }
-        try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move-review-design").button().tap()
-        #expect(try await tapped(4) == ["task", "run", task.task.identifier, "--from", "review-design", "--json"])
+        for stop in ["review-design", "demo"] {
+            #expect(throws: (any Error).self) {
+                try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move-\(stop)")
+            }
+        }
+        try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move-plan").button().tap()
+        #expect(try await tapped(4) == ["task", "run", task.task.identifier, "--from", "plan", "--json"])
 
         // Completion has its own operation and does not move the Workflow.
         model.completeTask(task, children: nil)

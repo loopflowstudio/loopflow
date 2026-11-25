@@ -297,14 +297,10 @@ fn prepared_placement_consumes_accepted_facts_before_checkout_or_execution() {
             "Recover work.",
         )
         .unwrap();
-        let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
-            "../../../../../tests/fixtures/dto/task_history_planning.json"
-        ))
-        .unwrap();
-        snapshot.projects.truncate(1);
+        let mut snapshot = crate::test_linear_input::task_history_inventory();
         snapshot.items.truncate(1);
-        snapshot.projects[0].id = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3".into();
-        snapshot.projects[0].status = loopflow_storage::work::project::ProjectStatus::Started;
+        snapshot.project.id = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3".into();
+        snapshot.project.status = loopflow_storage::work::project::ProjectStatus::Started;
         snapshot.items[0].id = "new-issue".into();
         snapshot.items[0].completed = false;
         snapshot.items[0].completed_at = None;
@@ -318,7 +314,6 @@ fn prepared_placement_consumes_accepted_facts_before_checkout_or_execution() {
             .block_on(fixture.store.seed_inventory(
                 crate::test_linear_input::InventoryFixture {
                     wave_id: fixture.task.wave_id.clone().unwrap(),
-                    initiative: snapshot.projects[0].initiative_ids[0].clone(),
                     synced_at: 7,
                     snapshot,
                 },
@@ -737,7 +732,7 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         repository.display().to_string(),
     );
     let project = Project {
-        id: ProjectId::new(),
+        id: ProjectId::for_wave(wave.id()),
 
         summary: String::new(),
         status: loopflow_storage::work::project::ProjectStatus::Started,
@@ -745,8 +740,6 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         slug: "task-recovery".to_string(),
         name: "Task recovery".to_string(),
         description: "Keep automatic Task recovery bounded.".to_string(),
-        krs: Vec::new(),
-        metric_targets: Vec::new(),
         tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
@@ -804,14 +797,6 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
     };
     store.create_wave(&wave).await.unwrap();
     store.create_project(&project).await.unwrap();
-    loopflow_storage::sqlite::project_selection::write_project_binding(
-        &store.sqlite,
-        wave.id(),
-        None,
-        project.tracker_id.as_ref().unwrap().as_str(),
-        &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
-    )
-    .unwrap();
     store.seed_task(&task, &pr).await.unwrap();
     let work = store
         .work_for_child(&ChildRef::Task(task.id.clone()))

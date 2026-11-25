@@ -11,10 +11,9 @@ fn membership_moves_preserve_work_and_capture_owners() {
     let canonical = repo.path().canonicalize().unwrap();
     let path = canonical.to_str().unwrap();
     let repository = crate::repository::location::ensure_repository(&store, path).unwrap();
-    let product =
-        crate::work::wave::bootstrap::ensure_wave_project(&store, path, "product").unwrap();
-    let other = crate::work::wave::bootstrap::ensure_wave_project(&store, path, "other").unwrap();
-    let foreign = crate::work::wave::bootstrap::ensure_wave_project(
+    let product = crate::test_support::seed_wave_project(&store, path, "product").unwrap();
+    let other = crate::test_support::seed_wave_project(&store, path, "other").unwrap();
+    let foreign = crate::test_support::seed_wave_project(
         &store,
         foreign_repo.path().to_str().unwrap(),
         "foreign",
@@ -53,7 +52,9 @@ fn membership_moves_preserve_work_and_capture_owners() {
             .unwrap();
         assert!(store.task(&task.id).unwrap().unwrap().project_id.is_none());
     }
-    store.move_task(&task.id, None, Some(&product.id)).unwrap();
+    store
+        .move_task(&task.id, None, Some(&product.wave_id))
+        .unwrap();
     assert_eq!(store.session_history(&session.id, 0, 0).unwrap(), before);
     assert_eq!(
         store.session(&session.id).unwrap().unwrap().wave_id,
@@ -71,12 +72,14 @@ fn membership_moves_preserve_work_and_capture_owners() {
     )
     .unwrap();
     assert_eq!(next.wave_id, Some(product.wave_id.clone()));
-    assert!(store.move_task(&task.id, None, Some(&other.id)).is_err());
     assert!(store
-        .move_task(&task.id, Some(&product.id), Some(&foreign.id))
+        .move_task(&task.id, None, Some(&other.wave_id))
+        .is_err());
+    assert!(store
+        .move_task(&task.id, Some(&product.id), Some(&foreign.wave_id))
         .is_err());
     store
-        .move_task(&task.id, Some(&product.id), Some(&product.id))
+        .move_task(&task.id, Some(&product.id), Some(&product.wave_id))
         .unwrap();
     store.move_task(&task.id, Some(&product.id), None).unwrap();
     let final_input = crate::store::sessions::replace_session_input(

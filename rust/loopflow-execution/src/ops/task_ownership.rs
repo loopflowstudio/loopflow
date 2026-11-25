@@ -6,6 +6,7 @@ use crate::ops::{OpsError, OpsResult};
 use crate::store::StoreResult;
 use loopflow_model::durable::{MachineId, TaskId, TaskOwnership, TaskRunsOn};
 use loopflow_storage::sqlite::task_moves::{MoveInFlight, MoveStage};
+use loopflow_storage::sqlite::tracker_actions::ActionOwner;
 use loopflow_storage::sqlite::SqliteStore;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,7 +75,7 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
                 super::planning_sync::sync_after_save(
                     &store,
                     &repo.to_string_lossy(),
-                    &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(id),
+                    Some(&ActionOwner::Task(id)),
                 )
                 .await;
             })
@@ -84,7 +85,7 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
             super::planning_sync::sync_after_save(
                 &store,
                 &repository.to_string_lossy(),
-                &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
+                Some(&ActionOwner::Task(task.id.clone())),
             )
             .await;
         }

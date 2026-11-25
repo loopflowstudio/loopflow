@@ -105,11 +105,6 @@ struct WavesView: View {
             Task { await refreshRepos() }
         }
         .onChange(of: model.workScope) { _, _ in model.syncWorkScope() }
-        .onChange(of: selectedWave?.id, initial: true) { _, _ in
-            if let wave = selectedWave {
-                model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave))
-            }
-        }
         // Waves arrive with every planning frame.
         .onChange(of: model.planningSequence) { _, _ in
             Task { await syncRepoStates() }
@@ -374,9 +369,6 @@ struct WavesView: View {
                 wave: wave,
                 repoPath: waveRepoPath(for: wave),
                 streamed: model.waveDetail(id: wave.id),
-                isProjectActivationPending: model.isProjectActivationPending(id: wave.id),
-                transportError: model.projectCommandErrors[wave.id],
-                onActivateProject: { model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave)) },
                 onClose: { selectedWaveId = nil },
                 onOpenTask: { id in
                     openTask(waveRepoPath(for: wave), id)
@@ -516,12 +508,12 @@ struct WavesView: View {
         }
     }
 
-    /// Each Wave's Projects arrive with the roadmap in every planning frame;
+    /// Each Wave's Project arrives with the roadmap in every planning frame;
     /// only the authored objective is read here, from its GOAL.md.
     private func buildWavePlanCache(registryWaves: [Wave]) -> [String: WavePlan] {
-        var projects: [String: WorkEvidence<ProjectPlanningSnapshot>] = [:]
+        var projects: [String: WorkReading<ProjectPlanningSnapshot?>] = [:]
         for roadmap in model.roadmap.value?.waves ?? [] {
-            projects[roadmap.wave.id] = roadmap.projects
+            projects[roadmap.wave.id] = roadmap.project
         }
 
         var plans: [String: WavePlan] = [:]
@@ -530,8 +522,8 @@ struct WavesView: View {
                 repoRoot: URL(fileURLWithPath: wave.repo),
                 waveName: wave.name
             ) ?? ""
-            if let projects = projects[wave.id] {
-                plans[wave.id] = WavePlan(objective: objective, projects: projects)
+            if let project = projects[wave.id] {
+                plans[wave.id] = WavePlan(objective: objective, project: project)
             } else if !objective.isEmpty {
                 plans[wave.id] = WavePlan(objective: objective)
             }

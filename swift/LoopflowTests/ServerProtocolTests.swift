@@ -276,9 +276,7 @@ struct ServerProtocolTests {
                 sequence: 1, records: ProgramStatusRecords(seen: true, records: [
                     ProgramStatusReport(state: .blocked, id: nil, kind: .question, progress: nil, app: nil,
                                         title: nil, msg: "Proceed?")]))),
-            ("wave_plan_bind", "bind-1", .wavePlanBind(directory: "/repo", wave: "product",
-                                                               project: "5e55105e-0000-4000-8000-000000000042", replace: false)),
-            ("wave_plan_connect", "connect-1", .wavePlanConnect(directory: "/repo", wave: "product", all: false,
+            ("wave_plan_connect", "connect-1", .wavePlanConnect(directory: "/repo", wave: "product", project: "Refunds", all: false,
                                                                         teamKey: "LOO", teamName: nil)),
             ("wave_plan_reteam", "reteam-1", .wavePlanReteam(directory: "/repo", apply: false)),
             ("repo_release", "release-1", .repoRelease(directory: "/repo", version: "minor", target: nil)),

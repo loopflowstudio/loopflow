@@ -219,17 +219,17 @@ async fn read_planning(
             };
             let project = destination
                 .as_ref()
-                .map(|wave| crate::ops::project::current_project(store, wave))
+                .map(|wave| store.sqlite.wave_project(wave.id()))
                 .transpose()?;
             report.action = Some(TaskPlanningAction::Move {
                 wave: destination.as_ref().map(|w| w.id().to_string()),
-                project: project.as_ref().map(|p| p.id.to_string()),
+                project: project.as_ref().map(ToString::to_string),
                 previous_project: task.project_id.as_ref().map(ToString::to_string),
             });
             if let Err(error) = store.sqlite.validate_task_move(
                 &task.id,
                 task.project_id.as_ref(),
-                project.as_ref().map(|p| &p.id),
+                project.as_ref(),
             ) {
                 report.impediments.push(error.to_string());
             }
@@ -396,18 +396,12 @@ async fn read_creation(
         value: wave.id().to_string(),
         source: "explicit".into(),
     };
-    let project = match crate::ops::project::current_project(store, &wave) {
-        Ok(project) => project,
-        Err(error) => {
-            report.impediments.push(error.to_string());
-            return Ok(());
-        }
-    };
+    let joined = store.sqlite.wave_project(wave.id())?;
     if let Some(TaskPlanningAction::Create {
         project: selected, ..
     }) = &mut report.action
     {
-        *selected = Some(project.id.to_string());
+        *selected = Some(joined.to_string());
     }
     Ok(())
 }

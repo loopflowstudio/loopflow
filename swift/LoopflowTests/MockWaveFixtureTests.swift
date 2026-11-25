@@ -35,11 +35,11 @@ struct MockWaveFixtureTests {
         #expect(try WorkFixture.emptyWorkActivity().items.isEmpty)
     }
 
-    @Test("the infrastructure plan keeps its current Project when live detail is unavailable")
+    @Test("the infrastructure plan keeps its Project when live detail is unavailable")
     func infrastructurePlan() {
-        let plan = MockWaveFixture.plans["wave-1"]
-        #expect(plan?.currentProject?.slug == "release-feedback")
-        #expect(plan?.currentProject?.krs.first?.text == "Every failed run has an owner")
+        let project = MockWaveFixture.plans["wave-1"]?.project.present
+        #expect(project?.slug == "release-feedback")
+        #expect(project?.status == .started)
     }
 
     @Test("the loading detail state withholds the snapshot and keeps the loading affordance")

@@ -1,7 +1,7 @@
-//! Shared recovery and execution helpers for Project and Task Work.
+//! Task interrupt receipts and live delivery.
 
 use crate::store::SharedStore;
-use loopflow_model::durable::WorkRef;
+use loopflow_model::durable::{TaskId, WorkRef};
 
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
@@ -30,11 +30,11 @@ impl WorkControlReceipt {
 /// boundary never resets it) — a request is acted on exactly once per run.
 pub(crate) async fn observe_interrupt(
     store: &SharedStore,
-    work: &WorkRef,
+    task: &TaskId,
     harness: &mut dyn crate::harness::Driver,
     cursor: &mut i64,
 ) {
-    match store.latest_interrupt_id(work).await {
+    match store.latest_interrupt_id(task).await {
         Ok(id) if id > *cursor => {
             *cursor = id;
             if let Err(error) = harness.interrupt().await {

@@ -99,24 +99,19 @@ impl Machine {
             })
             .collect();
         let payload = serde_json::json!({
-            "projects": [{
+            "project": {
                 "id": PROJECT, "slug": "reactive", "name": "Reactive", "summary": "",
-                "metric_targets": [], "status": "started", "krs": [],
-                "initiative_ids": ["initiative-product"], "team_ids": ["team-product"]
-            }],
+                "status": "started", "team_ids": ["team-product"]
+            },
             "items": items
         });
         self.store
             .seed_inventory(&InventoryFixture {
                 wave_id: self.wave.id().clone(),
-                initiative: "initiative-product".into(),
                 synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
                 snapshot: serde_json::from_value(payload).unwrap(),
             })
             .unwrap();
-        rusqlite::Connection::open(self.path().join("loopflow.db")).unwrap().execute(
-            "UPDATE waves SET current_project_id=(SELECT id FROM projects WHERE external_project_id=?2) WHERE id=?1 AND current_project_id IS NULL",
-            rusqlite::params![self.wave.id(),PROJECT]).unwrap();
     }
 
     /// Start `FIX-<index>` in a real Git checkout with one commit, and return it.

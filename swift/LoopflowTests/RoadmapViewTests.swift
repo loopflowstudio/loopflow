@@ -58,16 +58,6 @@ struct RoadmapViewTests {
         #expect(model.selection == nil)
     }
 
-    @Test @MainActor func contractIssuesAreANoticeWithTheirCountSummariesAndCopy() throws {
-        let notice = WaveContractIssueNotice(summaries: ["wave-a/latency: no instrument", "metrics.yaml: bad unit"])
-        let view = try notice.inspect().find(viewWithAccessibilityIdentifier: "wave-metric-contract-issues")
-        #expect(try view.find(text: "2 contract issues").string() == "2 contract issues")
-        #expect(try view.find(text: "metrics.yaml: bad unit").string() == "metrics.yaml: bad unit")
-        #expect(try view.find(button: "Copy").accessibilityIdentifier() == "wave-metric-contract-issues-copy")
-        #expect(try WaveContractIssueNotice(summaries: ["one"]).inspect().find(text: "1 contract issue").string()
-            == "1 contract issue")
-    }
-
     @Test @MainActor func aWaveOnTheRoadmapIsASectionUnderItsNameWithNoFrame() throws {
         let snapshot = try loadRoadmapFixture()
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No read needed") })

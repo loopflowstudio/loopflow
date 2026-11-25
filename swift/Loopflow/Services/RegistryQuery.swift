@@ -348,8 +348,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case sessionMove(directory: String, on: String?, agent: String)
     case waveCreate(directory: String, wave: String, objective: String?)
     case waveSync(directory: String, wave: String)
-    case wavePlanBind(directory: String, wave: String, project: String, replace: Bool)
-    case wavePlanConnect(directory: String, wave: String?, all: Bool, teamKey: String?, teamName: String?)
+    case wavePlanConnect(directory: String, wave: String?, project: String?, all: Bool, teamKey: String?, teamName: String?)
     /// Without `apply`, the plan: nothing moves.
     case wavePlanReteam(directory: String, apply: Bool)
     case graphCustomize(directory: String, name: String)
@@ -454,9 +453,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                 + argument("--on", on) + ["--json"]
         case .waveCreate(_, let wave, let objective): return ["wave", "create", wave] + argument("--objective", objective) + ["--json"]
         case .waveSync(_, let wave): return ["wave", "sync", wave, "--json"]
-        case .wavePlanBind(_, let wave, let project, let replace): return ["wave", "plan", "bind", wave, project, "--json"] + (replace ? ["--replace"] : [])
-        case .wavePlanConnect(_, let wave, let all, let teamKey, let teamName):
-            return ["wave", "plan", "connect"] + [wave].compactMap { $0 } + (all ? ["--all"] : [])
+        case .wavePlanConnect(_, let wave, let project, let all, let teamKey, let teamName):
+            return ["wave", "plan", "connect"] + [wave, project].compactMap { $0 } + (all ? ["--all"] : [])
                 + argument("--team-key", teamKey) + argument("--team-name", teamName) + ["--json"]
         case .wavePlanReteam(_, let apply): return ["wave", "plan", "reteam"] + (apply ? ["--apply"] : []) + ["--json"]
         case .graphCustomize(_, let name): return ["graph", "customize", name, "--json"]
@@ -637,10 +635,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("wave.create", ["directory": directory, "wave": wave, "objective": objective])
         case .waveSync(let directory, let wave):
             TaggedFields("wave.sync", ["directory": directory, "wave": wave])
-        case .wavePlanBind(let directory, let wave, let project, let replace):
-            TaggedFields("wave.plan.bind", ["directory": directory, "wave": wave, "project": project, "replace": replace])
-        case .wavePlanConnect(let directory, let wave, let all, let teamKey, let teamName):
-            TaggedFields("wave.plan.connect", ["directory": directory, "wave": wave, "all": all,
+        case .wavePlanConnect(let directory, let wave, let project, let all, let teamKey, let teamName):
+            TaggedFields("wave.plan.connect", ["directory": directory, "wave": wave, "project": project, "all": all,
                                                    "team_key": teamKey, "team_name": teamName])
         case .wavePlanReteam(let directory, let apply):
             TaggedFields("wave.plan.reteam", ["directory": directory, "apply": apply])
@@ -925,9 +921,9 @@ public struct RegistryQuery: Sendable {
         _ = try await write(.waveSync(directory: cwd, wave: wave))
     }
 
-    /// `lf wave create`: registers the Wave, commits its files on the main checkout and
-    /// ensures its first Project. Adding an existing Wave changes nothing, so this
-    /// is also the explicit opening/retry operation; periodic reads stay observational.
+    /// `lf wave create`: registers the Wave with its Project, commits its files on the main
+    /// checkout and, in a repository with a tracker, makes the Project there. Adding an existing
+    /// Wave changes nothing but a Project the tracker does not hold yet.
     /// The receipt's `summary` names anything left to finish.
     @discardableResult
     public func addWave(name: String, objective: String? = nil, cwd: String) async throws -> WaveAdded {
@@ -1438,81 +1434,45 @@ public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
 public struct WaveRoadmap: Sendable, Hashable {
     /// The graph the Wave's Tasks take up by default.
     public let graph: String?
-    public let projectReadiness: ProjectReadiness
     public let wave: WaveSnapshot
-    public let metricPortfolio: MetricPortfolio
-    public let projects: WorkEvidence<ProjectPlanningSnapshot>
-    public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
+    /// The Wave's one Project; nil when the Wave has made none yet.
+    public let project: WorkReading<ProjectPlanningSnapshot?>
     /// This Wave's share of the roadmap's Tasks, which the wire sends once.
     public let tasks: WorkEvidence<RoadmapTask>
-    public let unavailableTasks: [UnavailableTaskEvidence]
 
     public var workMap: WaveWorkMap {
-        WaveWorkMap(objective: wave.goal, projects: projects, tasks: tasks)
+        WaveWorkMap(objective: wave.goal, project: project, tasks: tasks)
     }
 
     enum CodingKeys: String, CodingKey {
-        case projectReadiness = "project_readiness"
-        case wave, projects, graph
-        case metricPortfolio = "metric_portfolio"
-        case unavailableTasks = "unavailable_tasks"
+        case wave, project, graph
     }
 
     init(from decoder: Decoder, roadmapTasks: WorkEvidence<RoadmapTask>) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         graph = try container.decode(String?.self, forKey: .graph)
-        projectReadiness = try container.decode(ProjectReadiness.self, forKey: .projectReadiness)
         let wave = try container.decode(WaveSnapshot.self, forKey: .wave)
         self.wave = wave
-        metricPortfolio = try container.decode(MetricPortfolio.self, forKey: .metricPortfolio)
-        projects = try container.decode(WorkEvidence<ProjectPlanningSnapshot>.self, forKey: .projects)
+        project = try container.decode(WorkReading<ProjectPlanningSnapshot?>.self, forKey: .project)
         tasks = roadmapTasks.filter { $0.task.waveId == wave.id }
-        unavailableTasks = try container.decode([UnavailableTaskEvidence].self, forKey: .unavailableTasks)
-    }
-}
-
-/// Durable Project Work that cannot join the current PM plan, including
-/// non-terminal Tasks stranded under a terminal historical Project.
-/// Non-terminal durable Task Work whose historical Project is absent from the
-/// current PM plan.
-public struct UnavailableTaskEvidence: Decodable, Sendable, Hashable {
-    public let workId: String
-    public let taskId: String
-    public let taskIdentifier: String
-    public let status: TaskState
-    public let owner: WorkNextMoveOwner
-    public let reason: String
-    public let recovery: String
-
-    enum CodingKeys: String, CodingKey {
-        case status, owner, reason, recovery
-        case workId = "work_id"
-        case taskId = "task_id"
-        case taskIdentifier = "task_identifier"
     }
 }
 
 /// `lf wave status <wave>` snapshot. Mirrors Rust `WaveDetailSnapshot` without
 /// reshaping or dropping fields, so every Wave surface starts from one reading.
 public struct WaveDetailSnapshot: Decodable, Sendable {
-    public let projectReadiness: ProjectReadiness
     public let wave: WaveSnapshot
-    public let projects: WorkEvidence<ProjectPlanningSnapshot>
-    public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
+    /// The Wave's one Project; nil when the Wave has made none yet.
+    public let project: WorkReading<ProjectPlanningSnapshot?>
     public let tasks: WorkEvidence<RoadmapTask>
-    public let metricPortfolio: MetricPortfolio
-    public let unavailableTasks: [UnavailableTaskEvidence]
     public let history: WorkEvidence<SessionHistory>
 
     public var workMap: WaveWorkMap {
-        WaveWorkMap(objective: wave.goal, projects: projects, tasks: tasks)
+        WaveWorkMap(objective: wave.goal, project: project, tasks: tasks)
     }
 
     enum CodingKeys: String, CodingKey {
-        case projectReadiness = "project_readiness"
-        case wave, projects, tasks, history
-        case metricPortfolio = "metric_portfolio"
-        case unavailableTasks = "unavailable_tasks"
+        case wave, project, tasks, history
     }
 }
 
@@ -1935,29 +1895,6 @@ public struct CodeSlice: Decodable, Sendable, Identifiable {
     public let ext: String
     public let lines: Int
     public let tokens: Int
-}
-
-public struct ProjectReadiness: Decodable, Sendable, Hashable {
-    public enum State: String, Decodable, Sendable { case unconfigured, unavailable, inactive, ready, terminal }
-    public let state: State
-    public let projectId: String?
-    public let observedAt: Int64?
-    public let pendingSuccessor: String?
-    public let activation: Activation?
-
-    public struct Activation: Decodable, Sendable, Hashable {
-        public let lfProcessId: String
-        public let completedAt: Int64?
-        public let outcome: String?
-        public let error: String?
-        enum CodingKeys: String, CodingKey {
-            case lfProcessId = "lf_process_id", completedAt = "completed_at", outcome, error
-        }
-    }
-    enum CodingKeys: String, CodingKey {
-        case state, activation
-        case projectId = "project_id", observedAt = "observed_at", pendingSuccessor = "pending_successor"
-    }
 }
 
 /// `[flag, value]` for a present value, the bare value with no flag, nothing when absent.

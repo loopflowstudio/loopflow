@@ -133,11 +133,36 @@ pub fn wave(store: &SqliteStore, wave: &crate::work::wave::Wave) {
     assert!(store.upsert_wave_prepared(wave, None).unwrap());
 }
 
+impl SqliteStore {
+    pub fn seed_project(&self, wave: &WaveId) -> StoreResult<Project> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let id = crate::sqlite::children::wave_project_in(&tx, wave)?;
+        let project = crate::sqlite::children::project_in(&tx, &id)?;
+        tx.commit()?;
+        Ok(project)
+    }
+
+    pub fn edit_project_fields(
+        &self,
+        project: &ProjectId,
+        values: &[crate::work::edit::WorkValue],
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        crate::sqlite::planning_write::local(
+            &tx,
+            &crate::work::edit::WorkEdit::for_target(project.as_str(), values),
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+}
+
 pub fn project(store: &SqliteStore, repo: &str, name: &str) -> Project {
     let wave = crate::work::wave::Wave::new(WaveId::new(), name.into(), repo.into());
     self::wave(store, &wave);
-    let project = store.ensure_project(wave.id(), name).unwrap();
-    store.project(&project).unwrap().unwrap()
+    store.seed_project(wave.id()).unwrap()
 }
 
 pub fn ownership(store: &SqliteStore, scope: TaskScope) -> OwnershipFacts {
@@ -296,8 +321,6 @@ pub fn task() -> (tempfile::TempDir, SqliteStore, Task, TaskPr) {
         slug: "probe".to_string(),
         name: "Probe".to_string(),
         description: "Probe Task execution".to_string(),
-        krs: Vec::new(),
-        metric_targets: Vec::new(),
         tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave_id.clone(),
@@ -305,14 +328,6 @@ pub fn task() -> (tempfile::TempDir, SqliteStore, Task, TaskPr) {
         updated_at: now,
     };
     store.insert_project(&project).unwrap();
-    crate::sqlite::project_selection::write_project_binding(
-        &store,
-        &wave_id,
-        None,
-        project.tracker_id.as_ref().unwrap().as_str(),
-        &crate::PlanningLocks::new(tempfile::tempfile().unwrap()),
-    )
-    .unwrap();
     let task = Task {
         parent_task_id: None,
         repository_id: crate::test_fixture::repository(&store, "/repo"),

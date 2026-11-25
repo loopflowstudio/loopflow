@@ -553,7 +553,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: DesktopCommand,
     },
-    /// Plans across Waves: what Desktop shows of each Wave's Projects and Tasks
+    /// Plans across Waves: what Desktop shows of each Wave's Project and Tasks
     Plan {
         #[command(subcommand)]
         cmd: PlanCommand,
@@ -1199,11 +1199,7 @@ impl WaveCommand {
             }
             Self::Plan { cmd, .. } => cmd.is_some(),
             Self::Remove { preview, .. } => !preview,
-            Self::EditProject { .. }
-            | Self::Create { .. }
-            | Self::Sync { .. }
-            | Self::Rename { .. }
-            | Self::UpdateProject { .. } => true,
+            Self::Create { .. } | Self::Sync { .. } | Self::Rename { .. } => true,
         }
     }
 }
@@ -1521,26 +1517,6 @@ pub enum SkillCommand {
     },
     #[command(external_subcommand)]
     External(Vec<String>),
-}
-
-/// Select a Wave's current Project, or an exact retained historical Project.
-#[derive(Args, Debug)]
-pub struct WaveProjectTarget {
-    /// Wave name or ID (default: the ambient Wave)
-    #[arg(conflicts_with = "project")]
-    pub wave: Option<String>,
-    /// Exact retained Project ID, tracker ID or unique name instead of current selection
-    #[arg(long)]
-    pub project: Option<String>,
-}
-
-impl WaveProjectTarget {
-    pub fn as_project_target(&self) -> loopflow_execution::ops::project::ProjectTarget<'_> {
-        match self.project.as_deref() {
-            Some(project) => loopflow_execution::ops::project::ProjectTarget::Project(project),
-            None => loopflow_execution::ops::project::ProjectTarget::Wave(self.wave.as_deref()),
-        }
-    }
 }
 
 const SETTING_KEYS: &str = "`lf config catalog` lists every preference and where it applies.
@@ -1893,7 +1869,7 @@ pub enum SessionCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
-    /// Read Projects and Tasks without starting work; an explicit Wave includes history
+    /// Read a Wave's Project and Tasks without starting work; an explicit Wave includes history
     Show {
         wave: Option<String>,
         /// Find an exact Task, including historical planning
@@ -1915,21 +1891,8 @@ pub enum WaveCommand {
         #[command(subcommand)]
         cmd: WaveGraphCommand,
     },
-    /// Edit the selected Project's name or summary
-    EditProject {
-        #[command(flatten)]
-        target: WaveProjectTarget,
-        #[arg(long)]
-        name: Option<String>,
-        #[arg(long)]
-        summary: Option<String>,
-        /// Authored Project prose
-        #[arg(long)]
-        description: Option<String>,
-    },
-
-    /// Create a Wave: register it, seed and commit .lf/wave/<name>/ on the main checkout,
-    /// and start its first Project. Creating an existing Wave changes nothing.
+    /// Create a Wave: register it, then seed and commit .lf/wave/<name>/ on the main
+    /// checkout. Creating an existing Wave changes nothing.
     Create {
         wave: String,
         /// Objective text for the new Wave's GOAL.md
@@ -1939,7 +1902,7 @@ pub enum WaveCommand {
         json: bool,
     },
     /// Remove a Wave and its child Waves. Open Tasks move to the parent Wave, or the
-    /// repository; Projects, completed Tasks and Sessions stay readable in history.
+    /// repository; completed Tasks and Sessions stay readable in history.
     #[command(after_help = "Run again to finish an interrupted removal.")]
     Remove {
         wave: String,
@@ -1952,8 +1915,8 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Print one Wave's Projects and Tasks as Desktop shows them; `bind`,
-    /// `connect` and `reteam` change where its planning lives
+    /// Print one Wave's Project and Tasks as Desktop shows them; `connect`
+    /// and `reteam` change where its planning lives
     #[command(args_conflicts_with_subcommands = true)]
     Plan {
         wave: Option<String>,
@@ -1962,8 +1925,8 @@ pub enum WaveCommand {
         #[command(subcommand)]
         cmd: Option<WavePlanCommand>,
     },
-    /// Refresh one Wave's planning from its tracker, then show its status;
-    /// a Wave with no Linear Initiative shows its local planning
+    /// Send one Wave's queued tracker changes and read its tracker Project,
+    /// then show its status; with no tracker, exchange the repository's plan
     Sync {
         /// Wave name (default: the ambient wave)
         wave: Option<String>,
@@ -1981,7 +1944,7 @@ pub enum WaveCommand {
         #[arg(long)]
         all: bool,
     },
-    /// Show one Wave's current Project, Task details, and execution evidence.
+    /// Show one Wave's Project, Tasks and execution evidence.
     Status {
         /// Wave name (default: the ambient wave)
         wave: Option<String>,
@@ -1995,47 +1958,31 @@ pub enum WaveCommand {
         selection: crate::lf::Selection,
     },
     /// Rename a Wave, moving .lf/wave/<name>/ on the main checkout; its Tasks,
-    /// Projects and Sessions keep their identity
+    /// Project and Sessions keep their identity
     Rename {
         wave: String,
-        /// The new name; omit to keep it while changing --repo or --title
+        /// The new name; omit to keep it while changing --repo
         new_name: Option<String>,
         /// Move the Wave to another repository
         #[arg(long)]
         repo: Option<PathBuf>,
-        /// Change the linked Initiative display title
-        #[arg(long)]
-        title: Option<String>,
         #[arg(long)]
         json: bool,
-    },
-    /// Replace the current Project's KRs and targets
-    UpdateProject {
-        #[arg(short = 'w', long)]
-        wave: Option<String>,
-        /// The Project KRs and metric targets as JSON
-        #[arg(long)]
-        file: std::path::PathBuf,
     },
 }
 
 #[derive(Subcommand, Debug)]
 pub enum WavePlanCommand {
-    /// Bind an existing Project UUID as this Wave's shared current selection
-    Bind {
-        wave: String,
-        project: String,
-        /// Replace the current selection, retaining its Project and Tasks.
-        #[arg(long)]
-        replace: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Connect a Wave to its Initiative and the repository's Team (Task prefix); a new name is added first
+    /// Link a Wave's Project to a Linear Project in the repository's Team
+    /// (Task prefix), or make one; a new Wave name is added first
     Connect {
         /// Wave name (auto-detected if omitted)
         wave: Option<String>,
-        /// Recursively initialize every Wave under .lf/wave/
+        /// An existing Linear Project to link: its URL, id or name.
+        /// Without one, the Wave's Project is made in Linear.
+        #[arg(conflicts_with = "all")]
+        project: Option<String>,
+        /// Connect every Wave under .lf/wave/
         #[arg(long, conflicts_with = "wave")]
         all: bool,
         /// Repository Team key = Task prefix (e.g. LOO). Defaults from the repository name.
@@ -3678,7 +3625,7 @@ mod tests {
             vec!["lf", "--repo", "loopflow", "steer", "keep attribution"],
             vec!["lf", "steer", "session_1", "keep attribution"],
             vec!["lf", "steer", "LOO-1", "keep attribution"],
-            vec!["lf", "wave", "rename", "product", "--title", "Product"],
+            vec!["lf", "wave", "rename", "product", "--repo", "../other"],
             vec!["lf", "task", "move", "LOO-1", "--machine", "mini"],
             vec![
                 "lf", "--wave", "product", "config", "set", "machine", "mini",
@@ -3856,14 +3803,14 @@ mod tests {
             "--wave",
             "product",
             ":",
-            "Which KR matters?",
+            "Which Task matters?",
         ])
         .expect("parse bound inline prompt");
 
         assert_eq!(cli.wave.as_deref(), Some("product"));
         assert!(matches!(
             cli.command,
-            Some(Commands::Inline { prompt }) if prompt == vec!["Which KR matters?"]
+            Some(Commands::Inline { prompt }) if prompt == vec!["Which Task matters?"]
         ));
     }
 

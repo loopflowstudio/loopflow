@@ -2,7 +2,7 @@
 
 pub mod events;
 
-use self::project_document::parse_project_document;
+use loopflow_storage::planning::project_document::parse_project_document;
 mod actions;
 mod cooldown;
 pub mod request_log;
@@ -17,8 +17,6 @@ use serde_json::{json, Value};
 
 #[cfg(test)]
 use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
-
-pub(crate) mod project_document;
 
 use thiserror::Error;
 
@@ -36,40 +34,6 @@ pub struct TeamBinding {
     pub id: String,
     pub key: String,
     pub created: bool,
-}
-
-pub(crate) fn validate_project_ownership(
-    wave: &str,
-    initiative_id: &str,
-    expected_team_id: Option<&str>,
-    project: &TrackerProject,
-) -> LinearResult<()> {
-    if project.initiative_ids.as_slice() != [initiative_id] {
-        return Err(LinearError::Message(format!(
-            "Linear Project `{}` ({}) in wave/{wave} belongs to Initiatives [{}]; expected exactly {initiative_id}",
-            project.name,
-            project.id,
-            project.initiative_ids.join(", ")
-        )));
-    }
-    let [team_id] = project.team_ids.as_slice() else {
-        return Err(LinearError::Message(format!(
-            "Linear Project `{}` ({}) in wave/{wave} belongs to {} Teams [{}]; expected exactly one repository Team",
-            project.name,
-            project.id,
-            project.team_ids.len(),
-            project.team_ids.join(", ")
-        )));
-    };
-    if expected_team_id.is_some_and(|expected| expected != team_id) {
-        return Err(LinearError::Message(format!(
-            "Linear Project `{}` ({}) in wave/{wave} belongs to Team {team_id}; expected repository Team {}",
-            project.name,
-            project.id,
-            expected_team_id.expect("checked as Some")
-        )));
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -265,73 +229,6 @@ const UPDATE_TEAM_DESCRIPTION_MUTATION: &str = r#"mutation UpdateTeamDescription
   }
 }"#;
 
-const CREATE_INITIATIVE_MUTATION: &str = r#"mutation CreateInitiative($name: String!, $description: String!) {
-  initiativeCreate(input: { name: $name, description: $description }) {
-    initiative {
-      id
-    }
-  }
-}"#;
-
-const UPDATE_INITIATIVE_MUTATION: &str = r#"mutation UpdateInitiative($id: String!, $input: InitiativeUpdateInput!) {
-  initiativeUpdate(id: $id, input: $input) {
-    success
-    initiative {
-      id
-    }
-  }
-}"#;
-
-const ARCHIVE_INITIATIVE_MUTATION: &str = r#"mutation ArchiveInitiative($id: String!) {
-  initiativeArchive(id: $id) {
-    success
-  }
-}"#;
-
-const LIST_INITIATIVES_QUERY: &str = r#"query ListInitiatives($after: String, $first: Int!) {
-  initiatives(after: $after, first: $first) {
-    nodes {
-      id
-      name
-      description
-    }
-    pageInfo {
-      hasNextPage
-      endCursor
-    }
-  }
-}"#;
-
-const LIST_INITIATIVE_PROJECTS_QUERY: &str = r#"query ListInitiativeProjects($initiativeId: String!, $after: String, $first: Int!, $includeArchived: Boolean!) {
-  initiative(id: $initiativeId) {
-    projects(after: $after, first: $first, includeSubInitiatives: false, includeArchived: $includeArchived) {
-      nodes {
-        id
-        name
-        updatedAt
-        description
-        content
-        archivedAt
-        status { type }
-        initiatives(first: 50) {
-          nodes {
-            id
-          }
-        }
-        teams(first: 50) {
-          nodes {
-            id
-          }
-        }
-      }
-      pageInfo {
-        hasNextPage
-        endCursor
-      }
-    }
-  }
-}"#;
-
 const SET_PROJECT_TEAMS_MUTATION: &str = r#"mutation SetProjectTeams($id: String!, $teamIds: [String!]!) {
   projectUpdate(id: $id, input: { teamIds: $teamIds }) {
     project {
@@ -410,10 +307,10 @@ macro_rules! project_fields {
     name
     updatedAt
     archivedAt
+    url
     description
     content
     status { type }
-    initiatives(first: 50) { nodes { id } }
     teams(first: 50) { nodes { id } }"#
     };
 }
@@ -894,85 +791,6 @@ impl LinearClient {
             })
     }
 
-    pub async fn create_wave(&self, name: &str, summary: &str) -> LinearResult<String> {
-        let response: InitiativeCreateData = self
-            .graphql(
-                CREATE_INITIATIVE_MUTATION,
-                json!({
-                    "name": name,
-                    "description": linear_description(summary),
-                }),
-            )
-            .await?;
-        Ok(response.initiative_create.initiative.id)
-    }
-
-    pub async fn rename_wave(&self, initiative_id: &str, name: &str) -> LinearResult<()> {
-        self.update_wave(initiative_id, Some(name), None).await
-    }
-
-    /// Archive a removed Wave's Initiative; Linear keeps it readable.
-    pub async fn archive_wave(&self, initiative_id: &str) -> LinearResult<()> {
-        let response: Value = self
-            .graphql(ARCHIVE_INITIATIVE_MUTATION, json!({"id": initiative_id}))
-            .await?;
-        if response["initiativeArchive"]["success"] != true {
-            return Err(LinearError::Message(format!(
-                "Linear did not confirm archive of Initiative {initiative_id}"
-            )));
-        }
-        Ok(())
-    }
-
-    pub async fn update_wave(
-        &self,
-        initiative_id: &str,
-        name: Option<&str>,
-        summary: Option<&str>,
-    ) -> LinearResult<()> {
-        let mut input = serde_json::Map::new();
-        if let Some(name) = name {
-            input.insert("name".into(), json!(name));
-        }
-        if let Some(summary) = summary {
-            input.insert("description".into(), json!(linear_description(summary)));
-        }
-        let response: Value = self
-            .graphql(
-                UPDATE_INITIATIVE_MUTATION,
-                json!({"id": initiative_id, "input": input}),
-            )
-            .await?;
-        if response["initiativeUpdate"]["success"] != true {
-            return Err(LinearError::Message(format!(
-                "Linear did not confirm update of Initiative {initiative_id}"
-            )));
-        }
-        Ok(())
-    }
-
-    pub async fn initiatives(&self) -> LinearResult<Vec<InitiativeNode>> {
-        let mut after = None;
-        let mut initiatives = Vec::new();
-        loop {
-            let response: InitiativesData = self
-                .graphql(
-                    LIST_INITIATIVES_QUERY,
-                    json!({
-                        "after": after,
-                        "first": LIST_PROJECTS_PAGE_SIZE,
-                    }),
-                )
-                .await?;
-            let page = response.initiatives;
-            initiatives.extend(page.nodes);
-            if !page.page_info.has_next_page {
-                return Ok(initiatives);
-            }
-            after = page.page_info.end_cursor;
-        }
-    }
-
     async fn project_status_id(
         &self,
         status: loopflow_storage::work::project::ProjectStatus,
@@ -1028,35 +846,6 @@ impl LinearClient {
         }
     }
 
-    pub async fn list_projects(&self, initiative_id: &str) -> LinearResult<Vec<TrackerProject>> {
-        let mut after = None;
-        let mut projects = Vec::new();
-        loop {
-            let response: InitiativeProjectsData = self
-                .graphql(
-                    LIST_INITIATIVE_PROJECTS_QUERY,
-                    json!({
-                        "initiativeId": initiative_id,
-                        "after": after,
-                        "first": LIST_PROJECTS_PAGE_SIZE,
-                        "includeArchived": false,
-                    }),
-                )
-                .await?;
-            let page = response.initiative.projects;
-            projects.extend(
-                page.nodes
-                    .into_iter()
-                    .map(ProjectNode::into_tracker_project)
-                    .collect::<LinearResult<Vec<_>>>()?,
-            );
-            if !page.page_info.has_next_page {
-                return Ok(projects);
-            }
-            after = page.page_info.end_cursor;
-        }
-    }
-
     pub(crate) async fn ordered_items(&self, project: &str) -> LinearResult<Vec<OrderedIssue>> {
         self.list_issue_nodes(project)
             .await?
@@ -1072,17 +861,6 @@ impl LinearClient {
                 })
             })
             .collect()
-    }
-
-    pub(crate) async fn list_project_issues(
-        &self,
-        projects: &[TrackerProject],
-    ) -> LinearResult<Vec<TrackerItem>> {
-        let lists = futures_util::future::try_join_all(
-            projects.iter().map(|project| self.list_items(&project.id)),
-        )
-        .await?;
-        Ok(lists.into_iter().flatten().collect())
     }
 
     pub(crate) async fn list_items(&self, project_id: &str) -> LinearResult<Vec<TrackerItem>> {
@@ -1377,7 +1155,6 @@ impl LinearClient {
                 r#"query FindProject($id: ID!) {
                 projects(filter: { id: { eq: $id } }, first: 2, includeArchived: true) {
                     nodes { id name updatedAt archivedAt description content status { type }
-                        initiatives(first: 50) { nodes { id } }
                         teams(first: 50) { nodes { id } }
                     }
                     pageInfo { hasNextPage endCursor }
@@ -1402,39 +1179,48 @@ impl LinearClient {
             .transpose()
     }
 
-    pub(crate) async fn project_ownership(&self, project_id: &str) -> LinearResult<TrackerProject> {
-        self.project_node(project_id).await?.into_tracker_project()
-    }
-
-    pub(crate) async fn fetch_project_content(
-        &self,
-        id: &str,
-    ) -> LinearResult<(TrackerProject, String)> {
-        let node = self.project_node(id).await?;
-        let content = node.content.clone().unwrap_or_default();
-        Ok((node.into_tracker_project()?, content))
-    }
-
-    pub(crate) async fn project_field_input(
-        &self,
-        value: &loopflow_storage::work::edit::WorkValue,
-        content: &str,
-    ) -> LinearResult<Value> {
-        use loopflow_storage::work::edit::WorkValue;
-        match value {
-            WorkValue::ProjectName(value) => Ok(json!({"name": value})),
-            WorkValue::ProjectSummary(value) => Ok(json!({"description": value})),
-            WorkValue::ProjectStatus(value) => {
-                Ok(json!({"statusId": self.project_status_id(*value).await?}))
-            }
-            WorkValue::ProjectDescription(_) | WorkValue::Krs(_) | WorkValue::MetricTargets(_) => {
-                Ok(json!({"content": patch_project_field(content, value)?}))
-            }
-            _ => Err(LinearError::Message(format!(
-                "unsupported Project field {}",
-                value.field()
+    /// The Linear Project a person names: its id, its URL, its slug id or its
+    /// name. A name two live Projects share is an error naming both.
+    pub(crate) async fn named_project(&self, key: &str) -> LinearResult<Option<TrackerProject>> {
+        let key = key.trim();
+        // `https://linear.app/<workspace>/project/<name-slug>-<slugId>/overview`
+        let key = key
+            .split_once("/project/")
+            .map_or(key, |(_, path)| path.split('/').next().unwrap_or(path));
+        if uuid::Uuid::parse_str(key).is_ok() {
+            return self.find_project(key).await;
+        }
+        let slug_id = key.rsplit('-').next().unwrap_or(key);
+        let response: ProjectsData = self
+            .graphql(
+                r#"query NamedProject($slugId: String!, $name: String!) {
+                projects(filter: { or: [{ slugId: { eq: $slugId } }, { name: { eqIgnoreCase: $name } }] }, first: 3) {
+                    nodes { id name updatedAt archivedAt description content status { type }
+                        teams(first: 50) { nodes { id } }
+                    }
+                    pageInfo { hasNextPage endCursor }
+                }
+            }"#,
+                json!({ "slugId": slug_id, "name": key }),
+            )
+            .await?;
+        match <[ProjectNode; 1]>::try_from(response.projects.nodes) {
+            Ok([project]) => project.into_tracker_project().map(Some),
+            Err(nodes) if nodes.is_empty() => Ok(None),
+            Err(nodes) => Err(LinearError::Message(format!(
+                "{} Linear Projects match `{key}`: {}; name one by its URL",
+                nodes.len(),
+                nodes
+                    .iter()
+                    .map(|node| format!("`{}` ({})", node.name, node.id))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ))),
         }
+    }
+
+    pub(crate) async fn project_ownership(&self, project_id: &str) -> LinearResult<TrackerProject> {
+        self.project_node(project_id).await?.into_tracker_project()
     }
 
     pub(crate) async fn find_export_issue(
@@ -1494,37 +1280,6 @@ impl LinearClient {
                 .as_str()
                 .ok_or_else(|| LinearError::Message("creation identity is missing".into()))?,
         )
-    }
-
-    pub(crate) async fn deliver_project_attachment(
-        &self,
-        id: &str,
-        project: &str,
-        initiative: &str,
-    ) -> LinearResult<TrackerProject> {
-        let query = format!("mutation DeliverProjectAttachment($input: InitiativeToProjectCreateInput!) {{ initiativeToProjectCreate(input: $input) {{ success initiativeToProject {{ project {{ {PROJECT_RESPONSE_FIELDS} }} }} }} }}");
-        let response: Value = self
-            .graphql(
-                &query,
-                json!({"input":{"id":id,"projectId":project,"initiativeId":initiative}}),
-            )
-            .await?;
-        let payload = &response["initiativeToProjectCreate"];
-        if payload["success"] != true {
-            return Err(LinearError::Message(
-                "Project attachment was not confirmed; receipt retained".into(),
-            ));
-        }
-        let node: ProjectNode = serde_json::from_value(
-            payload["initiativeToProject"]["project"].clone(),
-        )
-        .map_err(|error| LinearError::Message(format!("invalid attached Project: {error}")))?;
-        if node.id != project {
-            return Err(LinearError::Message(
-                "Project attachment returned a different identity".into(),
-            ));
-        }
-        node.into_tracker_project()
     }
 
     /// The mutation's own response supplies confirmation; no follow-up read.
@@ -1915,12 +1670,6 @@ struct GraphqlErrorExtensions {
 }
 
 #[derive(Deserialize)]
-struct InitiativeCreateData {
-    #[serde(rename = "initiativeCreate")]
-    initiative_create: InitiativePayload,
-}
-
-#[derive(Deserialize)]
 struct IssueUpdateIdentifierData {
     #[serde(rename = "issueUpdate")]
     issue_update: IssueIdentifierPayload,
@@ -1935,11 +1684,6 @@ struct IssueIdentifierPayload {
 struct IssueIdentifierNode {
     #[serde(deserialize_with = "loopflow_model::id::deserialize_task_identifier")]
     identifier: String,
-}
-
-#[derive(Deserialize)]
-struct InitiativePayload {
-    initiative: IdNode,
 }
 
 #[derive(Deserialize)]
@@ -2275,7 +2019,7 @@ struct ProjectStatusNode {
     type_: loopflow_storage::work::project::ProjectStatus,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct ProjectStatusChoice {
     #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
     id: String,
@@ -2309,40 +2053,12 @@ struct ProjectNode {
     #[serde(rename = "archivedAt")]
     archived_at: Option<String>,
     status: ProjectStatusNode,
+    url: Option<String>,
     #[serde(deserialize_with = "Option::deserialize")]
     description: Option<String>,
     #[serde(deserialize_with = "Option::deserialize")]
     content: Option<String>,
-    initiatives: IdConnection,
     teams: IdConnection,
-}
-
-// Replace only the selected planning field, retaining unrelated tracker prose.
-fn patch_project_field(
-    content: &str,
-    value: &loopflow_storage::work::edit::WorkValue,
-) -> LinearResult<String> {
-    use loopflow_storage::work::edit::WorkValue;
-    use project_document::ProjectField::{Krs, Targets};
-    let document = parse_project_document(content)?;
-    let (owner, replacement) = match value {
-        WorkValue::ProjectDescription(Some(description)) => {
-            return Ok(document.replace_description(description)?)
-        }
-        WorkValue::Krs(krs) => (Krs, project_document::render_krs(krs)),
-        WorkValue::MetricTargets(targets) => {
-            loopflow_storage::work::project::validate_metric_targets(targets)
-                .map_err(LinearError::Message)?;
-            (Targets, project_document::render_metric_targets(targets))
-        }
-        _ => {
-            return Err(LinearError::Message(format!(
-                "unsupported content field {}",
-                value.field()
-            )))
-        }
-    };
-    Ok(document.rewrite(owner, &format!("{replacement}\n\n")))
 }
 
 impl ProjectNode {
@@ -2355,24 +2071,8 @@ impl ProjectNode {
             slug: project_slug(&self.name),
             name: self.name,
             summary: self.description.unwrap_or_default(),
-
-            metric_targets: content.metric_targets,
-            // Older rotation archived its predecessor without changing status.
-            // Retain that history without presenting it as a current plan.
-            status: if self.archived_at.is_some()
-                && self.status.type_ != loopflow_storage::work::project::ProjectStatus::Canceled
-            {
-                loopflow_storage::work::project::ProjectStatus::Completed
-            } else {
-                self.status.type_
-            },
-            krs: content.krs,
-            initiative_ids: self
-                .initiatives
-                .nodes
-                .into_iter()
-                .map(|initiative| initiative.id)
-                .collect(),
+            status: self.status.type_,
+            url: self.url,
             team_ids: self.teams.nodes.into_iter().map(|team| team.id).collect(),
         })
     }
@@ -2390,30 +2090,7 @@ struct IdConnection {
 }
 
 #[derive(Deserialize)]
-struct InitiativesData {
-    initiatives: Connection<InitiativeNode>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct InitiativeNode {
-    #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
-    pub id: String,
-    pub name: String,
-    pub description: Option<String>,
-}
-
-#[derive(Deserialize)]
 struct ProjectsData {
-    projects: Connection<ProjectNode>,
-}
-
-#[derive(Deserialize)]
-struct InitiativeProjectsData {
-    initiative: InitiativeWithProjects,
-}
-
-#[derive(Deserialize)]
-struct InitiativeWithProjects {
     projects: Connection<ProjectNode>,
 }
 
@@ -2493,145 +2170,8 @@ fn description_with_repository_claim(description: &str, repository: &str) -> Str
     }
 }
 
-pub(crate) fn linear_description(description: &str) -> String {
-    let summary = first_meaningful_paragraph(description);
-    if summary.is_empty() {
-        return String::new();
-    }
-
-    const MAX_DESCRIPTION_LEN: usize = 255;
-    summary.chars().take(MAX_DESCRIPTION_LEN).collect()
-}
-
-fn first_meaningful_paragraph(description: &str) -> String {
-    let mut lines = description.lines().peekable();
-    while let Some(line) = lines.next() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-
-        let mut paragraph = vec![trimmed];
-        while let Some(next_line) = lines.peek() {
-            let trimmed = next_line.trim();
-            if trimmed.is_empty() {
-                break;
-            }
-            if trimmed.starts_with('#') {
-                lines.next();
-                break;
-            }
-            paragraph.push(trimmed);
-            lines.next();
-        }
-
-        return paragraph.join(" ");
-    }
-
-    String::new()
-}
-
 #[cfg(test)]
 mod tests {
-    use loopflow_storage::work::edit::WorkValue;
-    #[tokio::test]
-    async fn project_markdown_prose_replacement_preserves_managed_fields() {
-        let client =
-            super::LinearClient::with_base_url("fixture".into(), None, "http://127.0.0.1:1".into());
-        let source = "Old introduction.\nworkflow: code\n## Metric targets\nTarget rationale.\n```json\n[{\"metric_id\":\"proof\",\"target\":{\"kind\":\"at_least\",\"value\":1.0}}]\n```\n## KRs\nPreamble.\n- [ ] Keep this criterion\n  across lines.\n\nOld closing.\n";
-        let before = super::parse_project_document(source).unwrap();
-        for description in ["", "New authored prose.", "## Examples\n````markdown\n```yaml\nworkflow: example\n```\n## KRs\n- [x] Example only\n````\nClosing prose.\n"] {
-            let input = client.project_field_input(&WorkValue::ProjectDescription(Some(description.into())), source).await.unwrap();
-            let after = input["content"].as_str().unwrap();
-            let parsed = super::parse_project_document(after).unwrap();
-            assert_eq!(parsed.description().trim(), description.trim());
-            assert!(after.contains("workflow: code\n"));
-            assert_eq!(parsed.krs, before.krs);
-            assert_eq!(parsed.metric_targets, before.metric_targets);
-            assert!(!after.contains("Old introduction"));
-            assert!(!after.contains("Target rationale"));
-            assert!(!after.contains("Old closing"));
-        }
-        for description in [
-            "workflow: replacement",
-            "## KRs\n- [x] Replacement",
-            "```markdown\nUnclosed example",
-        ] {
-            assert!(
-                client
-                    .project_field_input(
-                        &WorkValue::ProjectDescription(Some(description.into())),
-                        source
-                    )
-                    .await
-                    .is_err(),
-                "{description}"
-            );
-        }
-        assert!(client
-            .project_field_input(&WorkValue::ProjectDescription(None), source)
-            .await
-            .is_err());
-    }
-
-    #[test]
-    fn project_markdown_edits_preserve_examples_and_unknown_prose() {
-        for example in [
-            "````markdown\n```yaml\nworkflow: example\nflow: legacy\n```\n## KRs\n- [x] Example only\n````\n",
-            "~~~yaml\nworkflow: example\n## Metric targets\nnot JSON\n~~~\n",
-        ] {
-            let source = format!("## Example\n{example}\nworkflow: actual\n## Metric targets\nTarget rationale.\n```json\n[]\n```\nTarget note.\n## KRs\nKR preamble.\n- [ ] Original criterion\n\nParagraph after the criterion.\n{example}## Notes\nKeep these bytes.\n");
-            let before = super::parse_project_document(&source).unwrap();
-            assert_eq!(before.krs.len(), 1);
-            assert_eq!(before.krs[0].text, "Original criterion");
-            assert!(before.metric_targets.is_empty());
-            for (field, value) in [
-                ("krs", serde_json::json!([{"text":"New criterion","holds":true}])),
-                ("metric_targets", serde_json::json!([{"metric_id":"proof","target":{"kind":"at_least","value":1.0}}])),
-            ] {
-                let after = super::patch_project_field(&source, &serde_json::from_value(serde_json::json!({"field":field,"value":value})).unwrap()).unwrap();
-                assert_eq!(after.matches(example).count(), 2, "{field}: {after}");
-                for prose in ["Target rationale.\n", "Target note.\n", "KR preamble.\n", "Paragraph after the criterion.\n", "## Notes\nKeep these bytes.\n"] {
-                    assert!(after.contains(prose), "{field}: {after}");
-                }
-                let parsed = super::parse_project_document(&after).unwrap();
-                assert!(after.contains("workflow: actual\n"));
-                assert_eq!(parsed.krs, if field == "krs" { serde_json::from_value(value.clone()).unwrap() } else { before.krs.clone() });
-                assert_eq!(parsed.metric_targets, if field == "metric_targets" { serde_json::from_value(value).unwrap() } else { before.metric_targets.clone() });
-            }
-        }
-    }
-
-    #[test]
-    fn project_markdown_edits_reject_duplicate_targets() {
-        let targets = serde_json::from_value(serde_json::json!([
-            {"metric_id":"rate","target":{"kind":"at_least","value":1.0}},
-            {"metric_id":"rate","target":{"kind":"at_most","value":2.0}}
-        ]))
-        .unwrap();
-        assert!(
-            super::patch_project_field("workflow: code", &WorkValue::MetricTargets(targets))
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn project_markdown_edits_keep_unfenced_targets_separate_from_kr_prose() {
-        let source = "## Metric targets\n[]\n## KRs\nPreamble.\n- [ ] Existing proof\n";
-        let after = super::patch_project_field(
-            source,
-            &WorkValue::Krs(vec![loopflow_storage::work::project::ProjectKR {
-                text: "New proof".into(),
-                holds: true,
-            }]),
-        )
-        .unwrap();
-        assert!(after.contains("Preamble.\n"));
-        let content = super::parse_project_document(&after).unwrap();
-        assert!(content.metric_targets.is_empty());
-        assert_eq!(content.krs[0].text, "New proof");
-    }
-
     use super::*;
     use crate::linear::test_server::{self, json_response};
     use axum::http::StatusCode;
@@ -2651,7 +2191,7 @@ mod tests {
         for _ in 0..5 {
             let client = LinearClient::with_base_url("token".into(), None, url.clone());
             assert!(matches!(
-                client.initiatives().await,
+                client.project_statuses().await,
                 Err(crate::linear::LinearError::RateLimited { .. })
             ));
         }
@@ -2662,7 +2202,7 @@ mod tests {
     async fn last_allowed_response_is_returned_before_shared_pause() {
         let mut last = json_response(
             StatusCode::OK,
-            json!({"data":{"initiatives":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}),
+            json!({"data":{"projectStatuses":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}),
         );
         last.headers
             .push(("x-ratelimit-complexity-remaining".into(), "0".into()));
@@ -2673,9 +2213,9 @@ mod tests {
         ));
         let (url, requests) = test_server::spawn(vec![last]).await;
         let client = LinearClient::with_base_url("token".into(), None, url);
-        assert!(client.initiatives().await.unwrap().is_empty());
+        assert!(client.project_statuses().await.unwrap().is_empty());
         assert!(matches!(
-            client.initiatives().await,
+            client.project_statuses().await,
             Err(crate::linear::LinearError::RateLimited { .. })
         ));
         assert_eq!(requests.lock().await.len(), 1);
@@ -2699,10 +2239,7 @@ mod tests {
 
     #[test]
     fn task_history_tracker_facts_require_valid_observed_completion_dates() {
-        let planning: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
-            "../../../../tests/fixtures/dto/task_history_planning.json"
-        ))
-        .unwrap();
+        let planning = crate::test_linear_input::task_history_inventory();
         for item in planning.items {
             let mut wire = json!({
                 "id":item.id, "identifier":item.identifier, "updatedAt":item.revision,
@@ -3007,38 +2544,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_projects_resolves_owning_teams() {
-        let (base_url, requests) = test_server::spawn(vec![json_response(
-            StatusCode::OK,
-            json!({ "data": { "initiative": { "projects": {
-                "nodes": [{
-                    "id": "project-1",
-                    "name": "Unified Practice Targets",
-                    "description": "",
-                    "status": {"type":"started"},
-                    "content": "## Definition\n\nA bet.\n\n## KRs\n",
-                    "initiatives": { "nodes": [{ "id": "initiative-1" }] },
-                    "teams": { "nodes": [{ "id": "team-cadenza" }] }
-                }],
-                "pageInfo": { "hasNextPage": false, "endCursor": null }
-            } } } }),
-        )])
+    async fn a_project_is_named_by_url_or_name_and_a_shared_name_is_refused() {
+        let node = |id: &str| {
+            json!({
+                "id": id, "name": "Refunds", "description": "", "updatedAt": null,
+                "archivedAt": null, "status": {"type":"started"}, "content": "",
+                "teams": { "nodes": [{ "id": "team-billing" }] }
+            })
+        };
+        let page = |nodes: Vec<Value>| {
+            json_response(
+                StatusCode::OK,
+                json!({"data":{"projects":{"nodes":nodes,"pageInfo":{"hasNextPage":false,"endCursor":null}}}}),
+            )
+        };
+        let (base_url, requests) = test_server::spawn(vec![
+            page(vec![node("project-1")]),
+            page(vec![]),
+            page(vec![node("project-1"), node("project-2")]),
+        ])
         .await;
         let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
 
-        let projects = client
-            .list_projects("initiative-1")
+        let project = client
+            .named_project("https://linear.app/acme/project/refunds-1a2b3c4d5e6f/overview")
             .await
-            .expect("list projects");
+            .unwrap()
+            .unwrap();
+        assert_eq!(project.id, "project-1");
+        assert_eq!(project.team_ids, ["team-billing".to_string()]);
+        let request: Value = serde_json::from_str(&requests.lock().await[0].body).unwrap();
+        assert_eq!(request["variables"]["slugId"], "1a2b3c4d5e6f");
 
-        assert_eq!(projects.len(), 1);
-        assert_eq!(projects[0].team_ids, ["team-cadenza".to_string()]);
-        let request: Value =
-            serde_json::from_str(&requests.lock().await[0].body).expect("query json");
-        assert!(request["query"]
-            .as_str()
-            .expect("query string")
-            .contains("teams(first: 50)"));
+        assert!(client.named_project("Nothing").await.unwrap().is_none());
+        let error = client
+            .named_project("Refunds")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("2 Linear Projects match `Refunds`"),
+            "{error}"
+        );
     }
 
     #[tokio::test]
@@ -3408,7 +2955,6 @@ mod tests {
                     "id": "project-api", "name": "Product — Loopflow API",
                     "description": "", "status": {"type":"started"},
                     "content": "## Definition\n\nOne model.\n\n## KRs\n",
-                    "initiatives": { "nodes": [{ "id": "initiative-product" }] },
                     "teams": { "nodes": [{ "id": "team-loo" }] }
                 }
             } } }),
@@ -3424,7 +2970,6 @@ mod tests {
         let project = project.unwrap();
         assert_eq!(item.project_id.as_deref(), Some("project-api"));
         assert_eq!(item.team_id.as_deref(), Some("team-loo"));
-        assert_eq!(project.initiative_ids, ["initiative-product"]);
         assert_eq!(project.team_ids, ["team-loo"]);
     }
 
@@ -3477,18 +3022,6 @@ mod tests {
             );
         }
     }
-
-    #[test]
-    fn linear_description_skips_headings_and_truncates() {
-        let summary = linear_description(
-            "## Vision\n\nThis is the first paragraph.\n\n## Strategy\n\nSecond paragraph.",
-        );
-        assert_eq!(summary, "This is the first paragraph.");
-
-        let long = "a".repeat(300);
-        assert_eq!(linear_description(&long).len(), 255);
-        assert_eq!(linear_description(""), "");
-    }
 }
 
 #[cfg(test)]
@@ -3505,11 +3038,15 @@ mod model_tests {
     }
 
     #[test]
-    fn project_snapshot_requires_flow_and_status() {
+    fn project_snapshot_requires_status() {
         let value = serde_json::json!({
-            "id":"project-1", "slug":"plan", "name":"Plan", "summary":"",
-            "metric_targets":[], "krs":[], "initiative_ids":[], "team_ids":[]
+            "id":"718867bb-ee14-40cc-82a0-090c3118d78e", "slug":"plan", "name":"Plan", "summary":"",
+            "team_ids":[]
         });
-        assert!(serde_json::from_value::<TrackerProject>(value).is_err());
+        let error = serde_json::from_value::<TrackerProject>(value).unwrap_err();
+        assert!(
+            error.to_string().contains("missing field `status`"),
+            "{error}"
+        );
     }
 }

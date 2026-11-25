@@ -27,10 +27,7 @@ pub(crate) const WORK_TABLES: [&str; 4] = ["waves", "projects", "tasks", "task_c
 // typed variant and target, without another public object/kind model.
 pub(crate) fn table(value: &WorkValue) -> &'static str {
     match value {
-        WorkValue::WaveName(_)
-        | WorkValue::WaveParent(_)
-        | WorkValue::WaveRetired(_)
-        | WorkValue::WaveProject(_) => "waves",
+        WorkValue::WaveName(_) | WorkValue::WaveParent(_) | WorkValue::WaveRetired(_) => "waves",
         WorkValue::ProjectWave(_)
         | WorkValue::ProjectLinearId(_)
         | WorkValue::ProjectSlug(_)
@@ -40,9 +37,7 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         | WorkValue::ProjectStatus(_)
         | WorkValue::ProjectRank(_)
         | WorkValue::ProjectInitiatives(_)
-        | WorkValue::ProjectTeams(_)
-        | WorkValue::Krs(_)
-        | WorkValue::MetricTargets(_) => "projects",
+        | WorkValue::ProjectTeams(_) => "projects",
         WorkValue::TaskProject(_)
         | WorkValue::TaskParent(_)
         | WorkValue::TaskLinearId(_)
@@ -66,7 +61,6 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::WaveName(_) => "name",
         WorkValue::WaveParent(_) => "parent_wave_id",
         WorkValue::WaveRetired(_) => "retired_at",
-        WorkValue::WaveProject(_) => "current_project_id",
         WorkValue::ProjectWave(_) => "wave_id",
         WorkValue::ProjectLinearId(_) => "external_project_id",
         WorkValue::ProjectSlug(_) => "project_slug",
@@ -91,8 +85,6 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::TaskBranch(_) => "planning_branch_name",
         WorkValue::TaskTeam(_) => "planning_team_id",
         WorkValue::CommentTask(_) => "task_id",
-        WorkValue::Krs(_) => "krs",
-        WorkValue::MetricTargets(_) => "metric_targets",
         WorkValue::Disposition(_) => "disposition",
         WorkValue::CommentContent(_) => "content",
     }
@@ -100,21 +92,17 @@ fn column(value: &WorkValue) -> &'static str {
 
 pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<WorkValue>> {
     let values = match table {
-        "waves" => read_record(conn, "SELECT name,parent_wave_id,current_project_id,retired_at FROM waves WHERE id=?1", id, |row| {
-                    let retired: Option<i64> = row.get(3)?;
-                    let project: Option<String> = row.get(2)?;
+        "waves" => read_record(conn, "SELECT name,parent_wave_id,retired_at FROM waves WHERE id=?1", id, |row| {
+                    let retired: Option<i64> = row.get(2)?;
                     Ok([
                         WorkValue::WaveName(row.get(0)?),
                         WorkValue::WaveParent(row.get(1)?),
                     ]
                     .into_iter()
-                    // A clone registers authored Waves before it acquires their
-                    // planning. Missing selection is not an edit clearing a peer's.
-                    .chain(project.map(|id| WorkValue::WaveProject(Some(id))))
                     .chain(retired.map(|at| WorkValue::WaveRetired(Some(at))))
                     .collect())
         }),
-        "projects" => read_record(conn, "SELECT wave_id,external_project_id,project_slug,project_name,project_summary,description,status,planning_rank,planning_initiatives,planning_teams,krs,metric_targets FROM projects WHERE id=?1", id, |row| {
+        "projects" => read_record(conn, "SELECT wave_id,external_project_id,project_slug,project_name,project_summary,description,status,planning_rank,planning_initiatives,planning_teams FROM projects WHERE id=?1", id, |row| {
                     Ok(vec![
                         WorkValue::ProjectWave(row.get(0)?),
                         WorkValue::ProjectLinearId(row.get(1)?),
@@ -130,8 +118,6 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
                             &row.get::<_, String>(8)?,
                         )?),
                         WorkValue::ProjectTeams(serde_json::from_str(&row.get::<_, String>(9)?)?),
-                        WorkValue::Krs(serde_json::from_str(&row.get::<_, String>(10)?)?),
-                        WorkValue::MetricTargets(serde_json::from_str(&row.get::<_, String>(11)?)?),
                     ])
         }),
         "tasks" => read_record(conn, "SELECT project_id,external_issue_id,issue_identifier,issue_title,issue_description,planning_rank,planning_assignee,planning_due_date,planning_deleted_at,planning_url,planning_branch_name,planning_team_id,planning_state,planning_state IS 'completed',planning_completed_at,parent_task_id FROM tasks WHERE id=?1", id, |row| {
@@ -201,18 +187,6 @@ fn write_record(
     for edit in edits {
         let edit = &edit.change;
         edit.validate()?;
-        if let WorkValue::WaveProject(Some(project)) = edit {
-            let owner: Option<String> = conn
-                .query_row("SELECT wave_id FROM projects WHERE id=?1", [project], |r| {
-                    r.get(0)
-                })
-                .optional()?;
-            if owner.as_deref() != Some(id) {
-                return Err(StoreError::InvalidAuthority(
-                    "selected Project belongs to another Wave or is missing".into(),
-                ));
-            }
-        }
         if before.contains(edit) {
             continue;
         }
@@ -531,15 +505,16 @@ pub(crate) fn grouped(edits: &[WorkEdit]) -> BTreeMap<(&str, &str), Vec<WorkEdit
     records
 }
 
+fn canonicalized(edits: &[WorkEdit]) -> StoreResult<Vec<WorkEdit>> {
+    edits.iter().map(WorkEdit::canonicalized).collect()
+}
+
 pub(crate) fn write(
     conn: &Connection,
     edits: &[WorkEdit],
     origin: WriteOrigin,
 ) -> StoreResult<bool> {
-    let edits = edits
-        .iter()
-        .map(WorkEdit::canonicalized)
-        .collect::<StoreResult<Vec<_>>>()?;
+    let edits = canonicalized(edits)?;
     let mut changed = false;
     for ((table, id), values) in grouped(&edits) {
         changed |= write_record(conn, table, id, &values, origin, true)?;
@@ -565,10 +540,7 @@ pub(crate) fn create(
     edits: &[WorkEdit],
     origin: WriteOrigin,
 ) -> StoreResult<()> {
-    let edits = edits
-        .iter()
-        .map(WorkEdit::canonicalized)
-        .collect::<StoreResult<Vec<_>>>()?;
+    let edits = canonicalized(edits)?;
     let records = grouped(&edits);
     // Foreign-key parents exist before children even when the caller's edits
     // arrive in a different order. Fields still go through the common writer.
@@ -614,7 +586,7 @@ mod tests {
     fn plan(store: &SqliteStore) -> TaskId {
         let wave = Wave::new(WaveId::new(), "planning".into(), "/repo".into());
         crate::test_fixture::wave(store, &wave);
-        let project = ProjectId::new();
+        let project = ProjectId::for_wave(wave.id());
         {
             let mut conn = store.conn.lock().unwrap();
             let tx = conn.transaction().unwrap();
@@ -630,14 +602,6 @@ mod tests {
                     ],
                 ),
                 super::WriteOrigin::Local,
-            )
-            .unwrap();
-            local(
-                &tx,
-                &crate::work::edit::WorkEdit::for_target(
-                    wave.id().as_str(),
-                    &[Edit::WaveProject(Some(project.to_string()))],
-                ),
             )
             .unwrap();
             tx.commit().unwrap();
@@ -780,16 +744,7 @@ mod tests {
         let project = a.task(&task).unwrap().unwrap().project_id;
         let mut saved = a.project(project.as_ref().unwrap()).unwrap().unwrap();
         // These strings would be interpreted as Markdown by the retired storage path.
-        saved.description = "Authored purpose\nworkflow: literal prose".into();
-
-        saved.krs = vec![crate::work::project::ProjectKR {
-            text: "First line\n## Not a section\n- [ ] not another KR".into(),
-            holds: true,
-        }];
-        saved.metric_targets = vec![crate::metric::MetricTarget {
-            metric_id: "recovery".into(),
-            target: crate::metric::Threshold::AtLeast { value: 1.0 },
-        }];
+        saved.description = "Authored purpose\nworkflow: literal prose\n## KRs\n- [ ] prose".into();
         a.insert_project(&saved).unwrap();
         drop(a);
         let a = crate::test_fixture::open(&path).unwrap();

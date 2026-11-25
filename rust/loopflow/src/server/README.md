@@ -502,7 +502,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `wave.rename`, `.remove` | `lf wave rename`, `lf wave remove` | write |
 | `wave.machine` | `lf --wave <wave> set machine <machine>` | write |
 | `wave.sync` | `lf wave sync <wave>` | write |
-| `wave.plan.bind`, `.connect`, `.reteam` | `lf wave plan bind`, `connect`, `reteam` | write; `engine::wave::planning_bind`, `planning_connect`, `planning_reteam` |
+| `wave.plan.connect`, `.reteam` | `lf wave plan connect`, `reteam` | write; `engine::wave::planning_connect`, `planning_reteam` |
 | `plan.list` | `lf plan list` | read |
 | `plan.board` | `lf plan board` | read |
 | `repo.tracker` | `lf repo tracker` | read |

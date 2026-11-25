@@ -48,8 +48,7 @@ pub(crate) fn status_repository(directory: &Path) -> Result<std::path::PathBuf> 
 
 /// `lf wave status --sync` in a repository without Linear or Asana: one
 /// exchange by each carrier its plan has.
-pub fn refresh(checkout: &Path) -> Result<()> {
-    let repo = loopflow_execution::git::worktrees::main_repo_root(checkout)?;
+pub(super) fn refresh(repo: &Path) -> Result<()> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store().await?;
         loopflow_execution::ops::plan_carriers::sync(&store, &repo.to_string_lossy()).await

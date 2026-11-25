@@ -1,4 +1,4 @@
-at: deccc41ce6e3c73e53e67b5ea6c57a806aff4f0b
+at: fcf7334f604c631aac5c2138dbde93ec6e6519ca
 first:
   - path: docs/work.md
     why: Pause and resume from the saved step
@@ -52,24 +52,24 @@ first:
     why: Clear Portfolio Now as soon as pause takes effect
   - path: swift/Loopflow/Design/TaskActions.swift
     why: Combine Graph position with lifecycle and run refusals
+  - path: swift/Loopflow/Services/PendingChanges.swift
+    why: Send smart or plain unpause and preview the change
   - path: swift/Loopflow/Design/TaskWorkflowControls.swift
-    why: Share the split control across Mac and iPhone
+    why: Show pending writes and the resumable step override
   - path: swift/LoopflowMac/Views/TaskWorkView.swift
-    why: Connect workflow and metadata menus to Mac actions
+    why: Unpause from every Mac menu before opening the workspace
   - path: swift/LoopflowiOS/TaskWorkspaceView.swift
     why: Run or resume work beside the phone conversation
-  - path: swift/Loopflow/Services/PendingChanges.swift
-    why: Keep rows in place while pause or unpause settles
   - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
     why: Resume workers and keep parked Graphs waiting
   - path: rust/loopflow/tests/machine_commands.rs
     why: Honor the owning Machine’s cursor after a stale click
   - path: swift/LoopflowTests/TaskConceptTests.swift
-    why: Exercise group order, keyboard selection and paused conversations
+    why: Unpause an unopened row and restore a refused change
   - path: swift/LoopflowTests/TaskActionsTests.swift
-    why: Exercise unpause choices and the landing wait
+    why: Click both unpause choices and check post-merge verify
   - path: swift/LoopflowiOSTests/TaskActionsTests.swift
-    why: Measure the phone controls before and after pause
+    why: Tap Unpause at implement and ship-review on iPhone
   - path: swift/LoopflowiOSTests/TaskFeedTests.swift
     why: Open the Session and handle a refused unpause
 hide:

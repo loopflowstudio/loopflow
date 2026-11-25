@@ -46,6 +46,27 @@ fn input_time(path: &Path, id: &str) -> Option<i64> {
 }
 
 impl Harness for Claude {
+    fn recognizes_driver(&self, command: &str) -> bool {
+        crate::command_program(command, "claude")
+    }
+    fn sign_in_advice(&self) -> &'static str {
+        "run `claude auth login`"
+    }
+    fn caller_session_env(&self) -> &'static [&'static str] {
+        &[
+            "CLAUDECODE",
+            "CLAUDE_CODE_CHILD_SESSION",
+            "CLAUDE_CODE_SESSION_ID",
+            "CLAUDE_CODE_SESSION_ATTENDED",
+            "CLAUDE_CODE_ENTRYPOINT",
+            "CLAUDE_CODE_EXECPATH",
+            "CLAUDE_CODE_MESSAGING_SOCKET",
+            "CLAUDE_CODE_MESSAGING_TOKEN",
+            "CLAUDE_CODE_CHILD_NOTES_DIR",
+            "CLAUDE_PID",
+            "CLAUDE_EFFORT",
+        ]
+    }
     fn kind(&self) -> HarnessKind {
         HarnessKind::Claude
     }

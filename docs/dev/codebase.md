@@ -118,11 +118,10 @@ uses outbound REST requests. Remote execution reaches the target Machine through
 
 A provider is one unit struct with two implementations: what it writes, then
 how lf launches it. Launch and transcript decisions branch on what the harness
-declares. The parity table names the test or live check for each behavior.
+declares.
 
 ```sh
 cargo test -p loopflow-harness <name>_decode                         # after steps 1-2
-cargo test -p loopflow-execution --lib harness::parity::             # after steps 3-4
 cargo test -p loopflow-execution --lib harness::launch_matrix        # after step 4
 cargo test -p loopflow-execution --lib harness::conformance_tests::  # after step 4
 cargo test -p loopflow --lib server::wake::tests::                   # after step 4
@@ -131,7 +130,8 @@ cargo test -p loopflow --lib server::wake::tests::                   # after ste
 1. In [`loopflow-harness`](../../rust/loopflow-harness/README.md), add the unit
    struct and its `HarnessKind` variant. Include it in `HarnessKind::ALL` and
    `HarnessKind::harness()`.
-2. Implement `Harness` on it. Map native output to the common stream in
+2. Implement `Harness` on it, including its caller-session markers, driver
+   recognition and sign-in advice. Map native output to the common stream in
    `<name>_decode.rs` and implement `transcript_reader` in
    `transcript/<name>.rs`. `transcript_home` has no default: name the client's
    own home variable and directory. Supply the provider's saved-history layout
@@ -142,12 +142,9 @@ cargo test -p loopflow --lib server::wake::tests::                   # after ste
    struct: its `Capabilities`, `open` for the native
    interactive client and `driver` for the headless stream, and `recognizes`
    when a running process is its client by more than the command name. Add its
-   line in `harness::launcher` and declare every `Behavior` cell in
-   `harness::parity::support`: both matches are exhaustive, so execution does
-   not compile until the new variant fills them in. Its native client owns
-   authentication.
-4. Add conformance fixtures and regenerate the parity table in
-   `harness/README.md` (`cargo test -p loopflow-execution --lib harness::parity::tests::regenerate_readme_table -- --ignored`).
+   line in `harness::launcher`. Implement `idle_reach` for the endpoint that
+   starts a turn, and declare how a reopened work session receives its steers.
+4. Exercise the provider through the shared launch, worker and wake fixtures.
    `harness::launch_matrix`, `harness::conformance_tests`, `server::wake::tests`,
    and `task_graph_launch_tests` iterate `HarnessKind::ALL`. The Antigravity
    reopen fixture exercises the native launch through `lf resume --task`.

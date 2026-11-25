@@ -8,6 +8,12 @@ use crate::transcript::{self, Turn};
 use crate::{command_program, Harness, HarnessKind, Pi};
 
 impl Harness for Pi {
+    fn sign_in_advice(&self) -> &'static str {
+        "run `pi` and enter `/login`"
+    }
+    fn caller_session_env(&self) -> &'static [&'static str] {
+        &[]
+    }
     fn kind(&self) -> HarnessKind {
         HarnessKind::Pi
     }

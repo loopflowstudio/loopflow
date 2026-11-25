@@ -96,13 +96,7 @@ pub struct AgentProcessResult {
     pub failure: Option<AgentFailure>,
 }
 
-/// What a conversation sets in its own shells, lf's markers and its
-/// provider's. A conversation lf starts sets its own; it never inherits the
-/// caller's. An inherited `CLAUDE_CODE_CHILD_SESSION` turns off Claude's
-/// transcript; an inherited `CODEX_SANDBOX` hands a nested Codex its parent's
-/// sandbox. Settings a person chooses (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
-/// credentials) are not markers and pass through.
-pub(crate) const CALLER_SESSION_ENV: &[&str] = &[
+const LOOPFLOW_SESSION_ENV: &[&str] = &[
     crate::steer::PROVIDER_CONTEXT_ENV,
     crate::steer::BARE_STEER_ENV,
     crate::steer::STEER_SEEN_ENV,
@@ -116,51 +110,28 @@ pub(crate) const CALLER_SESSION_ENV: &[&str] = &[
     crate::session_record::CAPTURE_KEY_ENV,
     "LF_EXECUTION_ID",
     "LF_RUN_DIR",
-    // Claude Code
-    "CLAUDECODE",
-    "CLAUDE_CODE_CHILD_SESSION",
-    "CLAUDE_CODE_SESSION_ID",
-    "CLAUDE_CODE_SESSION_ATTENDED",
-    "CLAUDE_CODE_ENTRYPOINT",
-    "CLAUDE_CODE_EXECPATH",
-    "CLAUDE_CODE_MESSAGING_SOCKET",
-    "CLAUDE_CODE_MESSAGING_TOKEN",
-    "CLAUDE_CODE_CHILD_NOTES_DIR",
-    "CLAUDE_PID",
-    "CLAUDE_EFFORT",
     "AI_AGENT",
-    // Codex
-    "CODEX_CI",
-    "CODEX_SANDBOX",
-    "CODEX_SANDBOX_NETWORK_DISABLED",
-    "CODEX_SESSION_ID",
-    "CODEX_THREAD_ID",
-    "CODEX_TOOL_CALL_ID",
-    "CODEX_VERSION",
-    "CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
-    // OpenCode
-    "OPENCODE",
-    "OPENCODE_SESSION_ID",
-    "OPENCODE_TERMINAL",
-    "OPENCODE_CONFIG_CONTENT",
-    // Antigravity sets these in the conversation's tool environment.
-    "ANTIGRAVITY_AGENT",
-    "ANTIGRAVITY_AGENTAPI_EXE",
-    "ANTIGRAVITY_APP_DATA_DIR",
-    "ANTIGRAVITY_CONVERSATION_ID",
-    "ANTIGRAVITY_CSRF_TOKEN",
-    "ANTIGRAVITY_LS_ADDRESS",
-    "ANTIGRAVITY_LS_VERSION",
-    "ANTIGRAVITY_PROJECT_ID",
-    "ANTIGRAVITY_SOURCE_METADATA",
-    "ANTIGRAVITY_TRAJECTORY_ID",
 ];
+
+/// What a conversation sets in its own shells, lf's markers and its
+/// provider's. A conversation lf starts sets its own; it never inherits the
+/// caller's. An inherited `CLAUDE_CODE_CHILD_SESSION` turns off Claude's
+/// transcript; an inherited `CODEX_SANDBOX` hands a nested Codex its parent's
+/// sandbox. Settings a person chooses (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+/// credentials) are not markers and pass through.
+pub(crate) fn caller_session_env() -> impl Iterator<Item = &'static str> {
+    LOOPFLOW_SESSION_ENV.iter().copied().chain(
+        loopflow_harness::HarnessKind::ALL
+            .into_iter()
+            .flat_map(|kind| kind.harness().caller_session_env().iter().copied()),
+    )
+}
 
 /// Start `command` as a new conversation rather than the caller's child. Run
 /// it before applying the new conversation's environment, which sets lf's
 /// markers afresh.
 pub(crate) fn remove_caller_session_env(command: &mut std::process::Command) {
-    for name in CALLER_SESSION_ENV {
+    for name in caller_session_env() {
         command.env_remove(name);
     }
 }
@@ -758,8 +729,8 @@ fn run_admitted_agent(
         None
     };
     let mut process = process.clone();
-    for name in CALLER_SESSION_ENV {
-        launch.env.remove(*name);
+    for name in caller_session_env() {
+        launch.env.remove(name);
     }
     if let Some(runtime) = &implicit_runtime {
         process.runtime = Some(runtime.clone());

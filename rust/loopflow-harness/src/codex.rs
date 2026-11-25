@@ -31,6 +31,21 @@ fn input_times(path: &Path, wanted: &BTreeSet<&str>) -> BTreeMap<String, i64> {
 }
 
 impl Harness for Codex {
+    fn sign_in_advice(&self) -> &'static str {
+        "run `codex login`"
+    }
+    fn caller_session_env(&self) -> &'static [&'static str] {
+        &[
+            "CODEX_CI",
+            "CODEX_SANDBOX",
+            "CODEX_SANDBOX_NETWORK_DISABLED",
+            "CODEX_SESSION_ID",
+            "CODEX_THREAD_ID",
+            "CODEX_TOOL_CALL_ID",
+            "CODEX_VERSION",
+            "CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
+        ]
+    }
     fn kind(&self) -> HarnessKind {
         HarnessKind::Codex
     }

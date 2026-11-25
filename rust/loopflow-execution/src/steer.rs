@@ -152,6 +152,46 @@ pub fn render_complete(steers: &[Steer]) -> String {
     text
 }
 
+/// A managed conversation whose last boundary was a turn end, and how the
+/// Machine server reaches it there.
+#[derive(Debug, Clone)]
+pub struct IdleConversation {
+    pub adapter: SteerAdapter,
+    /// The Session's selected native conversation.
+    pub thread: String,
+    /// The Session's working directory, where rendered steers are saved.
+    pub cwd: std::path::PathBuf,
+    pub reach: IdleReach,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IdleReach {
+    /// The Session's private app-server.
+    Codex(std::path::PathBuf),
+    /// What the provider's own code listens on.
+    Inbox(Inbox),
+}
+
+fn idle_reach(candidate: &IdleCandidate) -> Option<IdleReach> {
+    let kind = loopflow_harness::HarnessKind::parse(candidate.provider.as_deref()?)?;
+    crate::harness::launcher(kind).idle_reach(&candidate.endpoints)
+}
+
+/// A recorded start leaves waiting input for the server when this launch
+/// has published the endpoint its harness uses.
+pub fn is_idle_reachable(
+    store: &loopflow_storage::sqlite::SqliteStore,
+    adapter: &SteerAdapter,
+) -> crate::store::StoreResult<bool> {
+    Ok(store
+        .idle_conversation_candidates(Some(&adapter.session))?
+        .iter()
+        .any(|candidate| {
+            candidate.adapter.agent_process_id == adapter.agent_process_id
+                && idle_reach(candidate).is_some()
+        }))
+}
+
 /// Only confirmed live, managed conversations can be woken.
 pub fn idle_conversations(
     store: &loopflow_storage::sqlite::SqliteStore,
@@ -160,14 +200,19 @@ pub fn idle_conversations(
     Ok(store
         .idle_conversation_candidates(session)?
         .into_iter()
+        .filter(|candidate| {
+            candidate.identity.is_some_and(|(pid, start)| {
+                crate::process::os_process::process_identity_evidence(pid, start)
+                    == crate::store::ProcessIdentityEvidence::Live
+            })
+        })
         .filter_map(|candidate| {
-            candidate
-                .identity
-                .is_some_and(|(pid, start)| {
-                    crate::process::os_process::process_identity_evidence(pid, start)
-                        == crate::store::ProcessIdentityEvidence::Live
-                })
-                .then_some(candidate.conversation)
+            Some(IdleConversation {
+                reach: idle_reach(&candidate)?,
+                adapter: candidate.adapter,
+                thread: candidate.thread,
+                cwd: candidate.cwd,
+            })
         })
         .collect())
 }

@@ -1,7 +1,7 @@
 //! Steers and Task updates for idle managed conversations, pushed by the
-//! Machine server. The store says which conversations are idle and how to
-//! reach them (`loopflow_execution::steer::idle_conversations`); when a steer is saved or
-//! the store's `task_updates` revision moves, one watcher reads them and wakes
+//! Machine server. The store records which conversations are idle. Each
+//! launcher selects its endpoint in `loopflow_execution::steer::idle_conversations`.
+//! When a steer is saved or the `task_updates` revision moves, one watcher wakes
 //! each one it has news for. A server restart forgets nothing. No process or
 //! clock per Session: Claude takes the message in its cross-session inbox,
 //! Codex as a turn its app-server starts, OpenCode and Pi as a turn their
@@ -339,7 +339,7 @@ fn send_inbox(socket: &mut UnixStream, token: &str, thread: &str, text: &str) ->
 
 #[cfg(test)]
 mod tests {
-    use loopflow_execution::harness::parity::Behavior;
+    use loopflow_execution::harness::{launcher, ReopenSteers};
     use loopflow_execution::process::attachment;
     use loopflow_harness::HarnessKind;
 
@@ -411,7 +411,7 @@ mod tests {
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
-                "UPDATE agent_sessions SET interactive=1 WHERE id=?1",
+                "UPDATE agent_sessions SET interactive=1,provider='claude' WHERE id=?1",
                 [session],
             )
             .unwrap();
@@ -685,30 +685,32 @@ mod tests {
     #[test]
     fn every_harness_wakes_its_idle_work_session() {
         for harness in HarnessKind::ALL {
-            check_waiting_steer(harness, Behavior::IdleWorkSessionWake);
+            check_waiting_steer(harness, WakeAt::TurnEnd);
         }
     }
 
     #[test]
     fn reopened_work_sessions_take_waiting_steers() {
         for harness in HarnessKind::ALL {
-            match harness {
-                HarnessKind::Claude
-                | HarnessKind::Codex
-                | HarnessKind::OpenCode
-                | HarnessKind::Pi => check_waiting_steer(harness, Behavior::ReopenWaitingSteers),
-                // The agy hook starts in the native launch. Its reopen receipt
-                // is checked through lf resume in session_launch_contract.
-                HarnessKind::Antigravity => {}
+            match launcher(harness).capabilities().reopen_steers {
+                ReopenSteers::ServerBoundary => check_waiting_steer(harness, WakeAt::Reopen),
+                // session_launch_contract runs every PromptHook fixture through lf resume.
+                ReopenSteers::PromptHook => continue,
             }
         }
     }
 
-    fn check_waiting_steer(harness: HarnessKind, behavior: Behavior) {
+    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+    enum WakeAt {
+        TurnEnd,
+        Reopen,
+    }
+
+    fn check_waiting_steer(harness: HarnessKind, wake_at: WakeAt) {
         let session = "waiting";
         let fixture = fixture(session);
         // Pi's session_start records the provider thread in its Machine.
-        let _home = (harness == HarnessKind::Pi && behavior == Behavior::ReopenWaitingSteers)
+        let _home = (harness == HarnessKind::Pi && wake_at == WakeAt::Reopen)
             .then(|| crate::test_support::EnvGuard::with_lf_home(&[], fixture.home.path()));
         let store = &fixture.store;
         let socket = fixture.home.path().join("s");
@@ -797,7 +799,7 @@ mod tests {
                 .save_session_steer(session, "Fixture author", "use the other table")
                 .unwrap()
         };
-        if behavior == Behavior::ReopenWaitingSteers {
+        if wake_at == WakeAt::Reopen {
             // The previous process quit mid-turn. Its successor's first
             // boundary makes the saved conversation reachable before input.
             report(BoundaryMoment::Tool, event("UserPromptSubmit"), None);
@@ -825,7 +827,7 @@ mod tests {
             let after = report(moment, callback, inbox);
             assert!(
                 matches!(after, Some(super::super::boundary::After::Reachable(id)) if id == session),
-                "{harness:?} {behavior:?}"
+                "{harness:?} {wake_at:?}"
             );
         } else {
             report(BoundaryMoment::Stop, event("Stop"), inbox);
@@ -833,15 +835,25 @@ mod tests {
         }
         after_turn(store, session);
         let page = store.session_steers(session, 0, 8).unwrap();
-        assert_eq!(page.items.len(), 1, "{harness:?} {behavior:?}");
-        let delivered = page.items[0].delivered_at.is_some();
-        behavior.assert_observed(harness, delivered);
-        assert_eq!(page.pending, if delivered { 0 } else { 1 });
-        if delivered {
-            assert!(
-                message().contains("use the other table"),
-                "{harness:?} {behavior:?}"
-            );
+        assert_eq!(page.items.len(), 1, "{harness:?} {wake_at:?}");
+        match harness {
+            // TODO(LOO-1099): an open idle agy reads this on its next turn.
+            HarnessKind::Antigravity => {
+                assert_eq!(wake_at, WakeAt::TurnEnd);
+                assert!(page.items[0].delivered_at.is_none());
+                assert_eq!(page.pending, 1);
+            }
+            HarnessKind::Claude | HarnessKind::Codex | HarnessKind::OpenCode | HarnessKind::Pi => {
+                assert!(
+                    page.items[0].delivered_at.is_some(),
+                    "{harness:?} {wake_at:?}"
+                );
+                assert_eq!(page.pending, 0);
+                assert!(
+                    message().contains("use the other table"),
+                    "{harness:?} {wake_at:?}"
+                );
+            }
         }
     }
 

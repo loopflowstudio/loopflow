@@ -28,7 +28,7 @@ Codex, OpenCode, Pi, Antigravity) write, and where?
 | | |
 |---|---|
 | `HarnessKind`; `Claude`, `Codex`, `OpenCode`, `Pi`, `Antigravity` | which client; one unit struct each |
-| `Harness` | what a client declares about itself: the commands that are it (`program`, `recognizes_driver`), where it keeps transcripts, how long it keeps them, its model names and sign-in advice |
+| `Harness` | headless driver recognition, caller-session environment, transcript locations and retention, model names and sign-in advice |
 | `{claude,codex,opencode,pi,antigravity}_decode`, `fact`, `lf_tag` | a live stream, decoded into facts |
 | `transcript` | a saved conversation read into `Turn`s: `read`, `find`, `scan`, and `read_current` for the turn in progress |
 

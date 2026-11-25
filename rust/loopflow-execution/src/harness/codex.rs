@@ -36,6 +36,7 @@ use crate::os_process::{
     agent_process_lifeline_path, hold_agent_process_lifeline, kill_process_group,
 };
 use crate::provider_auth::Provider;
+use crate::steer::{IdleEndpoints, IdleReach};
 use loopflow_harness::codex_decode::{self, CodexDecoder};
 use loopflow_harness::fact::{Decoded, ProviderFact};
 use loopflow_model::chat::types::ConversationEvent;
@@ -1075,13 +1076,18 @@ impl super::Launcher for loopflow_harness::Codex {
     fn classify_failure(&self, code: &str, message: &str) -> Option<crate::agent::AgentFailure> {
         crate::agent::provider_failure(code, message)
     }
+    fn idle_reach(&self, endpoints: &IdleEndpoints) -> Option<IdleReach> {
+        endpoints.endpoint.clone().map(IdleReach::Codex)
+    }
+
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
             thread: super::ThreadNaming {
                 bare: super::ThreadName::Reported,
                 managed: super::ThreadName::Reported,
             },
-            resume_input: super::ResumeInput::InitialPrompt,
+            initial_prompt_on_resume: true,
+            reopen_steers: super::ReopenSteers::ServerBoundary,
             native_skills: Some(crate::skills::catalog::SkillDialect::Codex),
             installed_skills: super::InstalledSkills {
                 global: ".agents/skills",

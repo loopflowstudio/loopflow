@@ -9,6 +9,20 @@ use crate::transcript::{self, Turn};
 use crate::{command_program, Antigravity, Harness, HarnessKind};
 
 impl Harness for Antigravity {
+    fn caller_session_env(&self) -> &'static [&'static str] {
+        &[
+            "ANTIGRAVITY_AGENT",
+            "ANTIGRAVITY_AGENTAPI_EXE",
+            "ANTIGRAVITY_APP_DATA_DIR",
+            "ANTIGRAVITY_CONVERSATION_ID",
+            "ANTIGRAVITY_CSRF_TOKEN",
+            "ANTIGRAVITY_LS_ADDRESS",
+            "ANTIGRAVITY_LS_VERSION",
+            "ANTIGRAVITY_PROJECT_ID",
+            "ANTIGRAVITY_SOURCE_METADATA",
+            "ANTIGRAVITY_TRAJECTORY_ID",
+        ]
+    }
     fn kind(&self) -> HarnessKind {
         HarnessKind::Antigravity
     }

@@ -9,6 +9,8 @@
 - **Already-open idle Antigravity wake:** Owned by LOO-1099 (live PTY probes ruled out `?2004h` paste-mode readiness due to trust dialog, slash menu, model picker, and server-adoption draft safety).
 - **Viewer handoff:** Owned by LOO-1097 (live provider TUI behavior).
 
+- `AI_AGENT` stays in the shared markers. A nested launch clears it regardless of which provider set it.
+
 # Probe side effect (2026-11-24)
 
 While probing, two `agentapi send-message` calls from this checkout's shell

@@ -19,6 +19,7 @@ use crate::harness::fact_writer::{FactWriter, RequestOrigins};
 use crate::harness::Recording;
 use crate::harness::{Driver as StreamDriver, HarnessError};
 use crate::provider_auth::Provider;
+use crate::steer::{IdleEndpoints, IdleReach, Inbox};
 use loopflow_harness::claude_decode::ClaudeDecoder;
 use loopflow_harness::fact::{Decoded, ProviderFact};
 use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
@@ -1294,13 +1295,21 @@ impl super::Launcher for loopflow_harness::Claude {
     fn classify_failure(&self, code: &str, message: &str) -> Option<crate::agent::AgentFailure> {
         crate::agent::provider_failure(code, message)
     }
+    fn idle_reach(&self, endpoints: &IdleEndpoints) -> Option<IdleReach> {
+        endpoints
+            .inbox
+            .clone()
+            .map(|path| IdleReach::Inbox(Inbox::Claude(path)))
+    }
+
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
             thread: super::ThreadNaming {
                 bare: super::ThreadName::Assigned,
                 managed: super::ThreadName::Assigned,
             },
-            resume_input: super::ResumeInput::NamedSteers,
+            initial_prompt_on_resume: false,
+            reopen_steers: super::ReopenSteers::ServerBoundary,
             native_skills: Some(crate::skills::catalog::SkillDialect::Claude),
             installed_skills: super::InstalledSkills {
                 global: ".claude/skills",

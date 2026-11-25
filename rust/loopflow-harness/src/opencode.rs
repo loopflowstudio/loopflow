@@ -25,6 +25,17 @@ fn is_supported_model_variant(variant: &str) -> bool {
 }
 
 impl Harness for OpenCode {
+    fn sign_in_advice(&self) -> &'static str {
+        "run `opencode auth login`"
+    }
+    fn caller_session_env(&self) -> &'static [&'static str] {
+        &[
+            "OPENCODE",
+            "OPENCODE_SESSION_ID",
+            "OPENCODE_TERMINAL",
+            "OPENCODE_CONFIG_CONTENT",
+        ]
+    }
     fn kind(&self) -> HarnessKind {
         HarnessKind::OpenCode
     }

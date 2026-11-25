@@ -442,14 +442,11 @@ fn read_news(
     // waiting steers to that wake, which runs them as a turn. A chat or a
     // worker reads them here; the next boundary claims what the wake could
     // not deliver.
-    if !unrecorded && matches!(boundary, NativeBoundary::Select { .. }) {
-        let wakes = store
-            .idle_conversation_candidates(Some(&adapter.session))?
-            .iter()
-            .any(|idle| idle.conversation.adapter.agent_process_id == adapter.agent_process_id);
-        if wakes {
-            return Ok(News::default());
-        }
+    if !unrecorded
+        && matches!(boundary, NativeBoundary::Select { .. })
+        && loopflow_execution::steer::is_idle_reachable(&store, adapter)?
+    {
+        return Ok(News::default());
     }
     let steers =
         loopflow_execution::steer::claim(&store, &delivery.repo, adapter, thread, boundary)?;

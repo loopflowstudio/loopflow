@@ -15,7 +15,7 @@ which knows nothing of the store or of launching.
 let launch = Launch {
     config: &config,
     harness,            // resolved once from the selected agent
-    run,                // Chat, Batch, WorkSession or Worker
+    kind,               // Chat, Batch, WorkSession or Worker
     recording: &recording, // store, Session and attachment; required before opening
     start: Start::Resume { thread: &thread },
     context_file: Some(&context),
@@ -44,7 +44,8 @@ Each harness file answers the rest:
 
 | method | answers |
 |---|---|
-| `capabilities()` | who names the thread, input on resume (`ResumeInput`), native skills, turn limit, output schema, respawn after crash, install hint |
+| `capabilities()` | who names the thread, empty-thread replay, steer delivery on reopen, native skills, turn limit, output schema, respawn after crash, install hint |
+| `idle_reach(endpoints)` | which recorded endpoint can wake an idle work session |
 | `classify_failure(code, message)` | what an error its decoder reported means for the run: next agent, retry, or nothing lf acts on |
 | `hook_callback(payload, declared, thread_file)` | what a hook callback from its provider means: the moment, and whether the conversation is one a person's input reached; Antigravity keeps the thread file on the conversation the person is in |
 | `hook_reply(event, text)` | the reply that puts text in front of the model, in the provider's shape |
@@ -104,31 +105,7 @@ rewrites the launch's thread file and is a start. In a
 worktree lf created, the terminal is trusted for that session through
 `--settings`, so the folder dialog does not stop the launch.
 
-## Harness parity
-
-Each cell comes from `harness::parity::support`. After changing a cell, regenerate the table:
-
-```sh
-cargo test -p loopflow-execution --lib harness::parity::tests::regenerate_readme_table -- --ignored
-```
-
-<!-- parity:start -->
-| behavior | Claude | Codex | OpenCode | Pi | Antigravity | verification |
-|---|---|---|---|---|---|---|
-| starts as a worker, settles, records its answer and native thread; the Graph advances | yes | yes | yes | yes | yes | automated (`task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness`) |
-| records its usage in the Task's history | yes | yes | yes | yes | yes | automated (`task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness`) |
-| receives the step's context | yes | yes | yes | yes | yes | automated (`task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness`) |
-| hears a steer sent while it runs, after its next tool | yes | yes | yes | yes | yes | automated (`task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness`) |
-| never asks permission, whatever `yolo` says | yes | yes | yes | yes | yes | automated (`harness::launch_matrix::every_harness_runs_all_four_launch_kinds`) |
-| is passed over when its CLI is not installed, or named once when it was the only choice | yes | yes | yes | yes | yes | automated (`task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again`) |
-| fails the turn, with the question as its reason, when it asks one and nobody is there; the run stops after that one attempt | no: question is not read (Task 48edb9) | no: question is not read (Task 48edb9) | yes | yes | no: question is not read (Task 48edb9) | automated (`task_graph_launch_tests::a_question_with_nobody_there_ends_the_step`) |
-| stops on `lf task interrupt` with its turn recorded interrupted; the next `lf task run` starts the step again | yes | yes | yes | yes | yes | automated (`task_graph_launch_tests::a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again`) |
-| moves to the next agent on a usage limit, a revoked login or a model the provider does not serve | yes | yes | yes | yes | yes | automated (`harness::conformance_tests::each_harness_classifies_its_own_refusals`) |
-| as an idle work session, hears a steer | yes | yes | yes | yes | no: next turn only (LOO-1099) | automated (`server::wake::tests::every_harness_wakes_its_idle_work_session`) |
-| reopened work session takes waiting steers as a turn | yes | yes | yes | yes | yes | automated (`server::wake::tests::reopened_work_sessions_take_waiting_steers`, `session_launch_contract::a_reopened_antigravity_task_hears_repository_direction_once`) |
-| lists synced skills and Graphs | yes | yes | yes | yes | yes | automated (`harness::conformance_tests::every_harness_reads_a_synced_skill`) |
-| opening in another viewer keeps the conversation | yes | yes | yes | yes | no: second viewer closes first (LOO-1097) | real provider (transport_tests covers held-terminal sharing. Check the provider TUI live) |
-<!-- parity:end -->
+## Steers and worker behavior
 
 Context and steers reach every harness the same way: it runs
 `lf __context-block` when the conversation starts and after each tool. Claude

@@ -306,7 +306,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE agent_sessions SET agent_interactive=1 WHERE agent_process_id=?1",
+                "UPDATE agent_sessions SET agent_interactive=1, provider='claude' WHERE agent_process_id=?1",
                 [&adapter.agent_process_id],
             )
             .unwrap();
@@ -530,29 +530,31 @@ mod tests {
         );
         // Its next boundary is not its first.
         assert!(answer(&store, &start).unwrap().1.is_none());
+        // A socket from another harness cannot receive this Claude session's turn.
+        store
+            .record_agent_inbox(
+                &adapter,
+                &loopflow_execution::steer::Inbox::Socket("/tmp/lf-wake-fixture/s".into()),
+            )
+            .unwrap();
+        assert!(!loopflow_execution::steer::is_idle_reachable(&store, &adapter).unwrap());
         // An inbox named late is new: the wake runs again, and claims nothing twice.
         let mut listening = boundary(
             BoundaryMoment::Tool,
             &adapter,
             &delivery,
-            serde_json::json!({"session_id":"native","hook_event_name":"OpenCodeMessagesTransform"}),
+            serde_json::json!({"session_id":"native","hook_event_name":"PreToolUse"}),
         );
-        listening.inbox = Some(loopflow_execution::steer::Inbox::Socket(
-            "/tmp/lf-wake-fixture/s".into(),
+        listening.inbox = Some(loopflow_execution::steer::Inbox::Claude(
+            "/tmp/lf-wake-fixture/peer.key".into(),
         ));
         assert!(matches!(
             answer(&store, &listening).unwrap().1,
             Some(After::Reachable(_))
         ));
-        // The same socket again is nothing new.
+        // The same inbox again is nothing new.
         assert!(answer(&store, &listening).unwrap().1.is_none());
-        assert_eq!(
-            store
-                .idle_conversation_candidates(Some("session"))
-                .unwrap()
-                .len(),
-            1
-        );
+        assert!(loopflow_execution::steer::is_idle_reachable(&store, &adapter).unwrap());
     }
 
     #[test]
@@ -565,18 +567,15 @@ mod tests {
             &delivery,
             serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit"}),
         );
-        prompt.inbox = Some(loopflow_execution::steer::Inbox::Socket(
-            "/tmp/lf-wake-fixture/s".into(),
+        prompt.inbox = Some(loopflow_execution::steer::Inbox::Claude(
+            "/tmp/lf-wake-fixture/peer.key".into(),
         ));
         answer(&store, &prompt).unwrap();
         assert_eq!(
             activity(&store),
             (false, adapter.agent_process_id.to_string())
         );
-        assert!(store
-            .idle_conversation_candidates(Some("session"))
-            .unwrap()
-            .is_empty());
+        assert!(!loopflow_execution::steer::is_idle_reachable(&store, &adapter).unwrap());
     }
 
     #[test]

@@ -911,12 +911,12 @@ and batches, prompt hooks are gated like tool hooks.
 
 The server keeps no list of conversations (`wake.rs`); it reads them from the
 store. A work session is idle when its last recorded native turn yielded
-(`session_activity`) and its AgentProcess is live, and reachable through its
-Codex app-server (`agent_sessions.agent_endpoint`) or what its boundaries
-saved: a Claude inbox key in `agent_sessions.agent_inbox`, where
+(`session_activity`) and its AgentProcess is live. Its launcher selects the
+recorded endpoint for its provider. Codex uses its app-server in
+`agent_sessions.agent_endpoint`, Claude the inbox key in `agent_sessions.agent_inbox`, where
 `sessions/<pid>.json` beside the key names the socket and must still name the
-conversation, or the socket an OpenCode plugin or Pi extension listens on in
-`agent_sessions.agent_socket`. One
+conversation. OpenCode and Pi use the socket their plugin or extension
+publishes in `agent_sessions.agent_socket`. One
 server thread waits on the store's change signal (`store::changes`) and reads
 the `task_updates` revision and the newest steer at start and whenever either
 moves; every idle conversation with news gets its unread steers, Task updates

@@ -1088,7 +1088,18 @@ fn task_conversation_preparation_is_passive_and_connect_uses_shared_launch_setti
 
 #[test]
 fn a_reopened_antigravity_task_hears_repository_direction_once() {
-    let fixture = Fixture::new("agy");
+    use loopflow_execution::harness::{launcher, ReopenSteers};
+    for harness in loopflow_harness::HarnessKind::ALL {
+        match launcher(harness).capabilities().reopen_steers {
+            ReopenSteers::PromptHook => check_prompt_hook_reopen(harness),
+            // server::wake exercises the first reported boundary on every server route.
+            ReopenSteers::ServerBoundary => continue,
+        }
+    }
+}
+
+fn check_prompt_hook_reopen(harness: loopflow_harness::HarnessKind) {
+    let fixture = Fixture::new(harness.as_str());
     let home = fixture.home.path();
     let machine = home.join("machine");
     let _env = support::EnvGuard::with_lf_home(&[], &machine);
@@ -1121,13 +1132,14 @@ fn a_reopened_antigravity_task_hears_repository_direction_once() {
         first[0]["conversation"].as_str().unwrap(),
     );
     let turns = heard();
-    loopflow_execution::harness::parity::Behavior::ReopenWaitingSteers.assert_observed(
-        loopflow_harness::HarnessKind::Antigravity,
-        turns.len() == 1
-            && turns[0]["conversation"] == first[0]["conversation"]
-            && turns[0]["context"]
-                .as_str()
-                .is_some_and(|context| context.contains("REOPEN_DIRECTION")),
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0]["conversation"], first[0]["conversation"]);
+    assert!(
+        turns[0]["context"]
+            .as_str()
+            .unwrap()
+            .contains("REOPEN_DIRECTION"),
+        "{turns:?}"
     );
 
     let page = fixture

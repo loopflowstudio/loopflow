@@ -6,16 +6,10 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use super::SqliteStore;
 use crate::process::SessionAttachment;
 use crate::steer::{
-    IdleConversation, IdleReach, Inbox, NativeBoundary, SessionSteerPage, SessionSteerStatus,
+    IdleCandidate, IdleEndpoints, Inbox, NativeBoundary, SessionSteerPage, SessionSteerStatus,
     Steer, SteerAdapter, SteerWake,
 };
 use crate::{StoreError, StoreResult};
-
-#[derive(Debug)]
-pub struct IdleCandidate {
-    pub conversation: IdleConversation,
-    pub identity: Option<(u32, i64)>,
-}
 
 impl SqliteStore {
     pub fn reserve_steer_adapter(
@@ -295,9 +289,8 @@ impl SqliteStore {
         Ok(changed > 0)
     }
 
-    /// Managed conversations whose last boundary was a turn end, on a live
-    /// AgentProcess the server can reach; only `session` when given. Driven
-    /// from unfinished processes: every Session ever recorded is far more.
+    /// Idle managed conversations, restricted to unfinished agents and, when
+    /// given, one Session. The harness chooses which endpoint it can use.
     pub fn idle_conversation_candidates(
         &self,
         session: Option<&str>,
@@ -305,30 +298,20 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
             "SELECT s.id,s.agent_process_id,a.capability,s.provider_thread,s.cwd,
-                CASE WHEN s.provider='codex' THEN s.agent_endpoint END,s.agent_inbox,
-                s.agent_pid,s.agent_os_started_at,s.agent_socket
+                s.provider,s.agent_endpoint,s.agent_inbox,s.agent_socket,s.agent_pid,s.agent_os_started_at
              FROM agent_sessions s INDEXED BY agent_sessions_unended_agent
              JOIN steer_adapters a ON a.agent_process_id=s.agent_process_id
              JOIN session_activity act ON act.session_id=s.id AND act.agent_process_id=s.agent_process_id
              WHERE s.agent_process_id IS NOT NULL AND s.agent_ended_at IS NULL
                AND act.yielded=1 AND s.interactive=1 AND s.provider_thread IS NOT NULL
-               AND (s.provider='codex' AND s.agent_endpoint IS NOT NULL OR s.agent_inbox IS NOT NULL
-                    OR s.agent_socket IS NOT NULL)
                AND (?1 IS NULL OR s.id=?1)",
         )?;
         let rows = statement.query_map([session], |row| {
-            // The query keeps only reachable conversations: with no endpoint
-            // or socket, the Claude key is there.
-            let path = |column| row.get::<_, Option<String>>(column);
-            let reach = match (path(5)?, path(9)?) {
-                (Some(endpoint), _) => IdleReach::Codex(endpoint.into()),
-                (None, Some(socket)) => IdleReach::Inbox(Inbox::Socket(socket.into())),
-                (None, None) => IdleReach::Inbox(Inbox::Claude(row.get::<_, String>(6)?.into())),
+            let path = |column| {
+                row.get::<_, Option<String>>(column)
+                    .map(|path| path.map(Into::into))
             };
-            let identity = row
-                .get::<_, Option<u32>>(7)?
-                .zip(row.get::<_, Option<i64>>(8)?);
-            let conversation = IdleConversation {
+            Ok(IdleCandidate {
                 adapter: SteerAdapter {
                     session: row.get(0)?,
                     agent_process_id: row.get(1)?,
@@ -336,11 +319,13 @@ impl SqliteStore {
                 },
                 thread: row.get(3)?,
                 cwd: row.get::<_, String>(4)?.into(),
-                reach,
-            };
-            Ok(IdleCandidate {
-                conversation,
-                identity,
+                provider: row.get(5)?,
+                endpoints: IdleEndpoints {
+                    endpoint: path(6)?,
+                    inbox: path(7)?,
+                    socket: path(8)?,
+                },
+                identity: row.get::<_, Option<u32>>(9)?.zip(row.get(10)?),
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)

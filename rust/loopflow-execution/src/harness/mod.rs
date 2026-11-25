@@ -21,7 +21,6 @@ mod launch_matrix;
 pub(crate) mod native_exit;
 pub mod native_session;
 pub mod opencode;
-pub mod parity;
 pub mod pi;
 pub mod task_updates;
 
@@ -34,6 +33,7 @@ use loopflow_model::id::AgentSessionId;
 use tokio::sync::mpsc;
 
 use crate::agent::AgentConfig;
+use crate::steer::{IdleEndpoints, IdleReach};
 use crate::transcript::{Gap, Located, RetentionState};
 
 pub(crate) fn configure_vendor_std_env(command: &mut std::process::Command) -> Result<()> {
@@ -375,11 +375,9 @@ pub struct InstalledSkills {
 
 /// What starts a turn when a work session reopens on an existing thread.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResumeInput {
-    /// The app-server replays the saved request only for an empty thread.
-    InitialPrompt,
-    /// A steer naming the stopped conversation brings its waiting input.
-    NamedSteers,
+pub enum ReopenSteers {
+    /// The server delivers waiting steers at the first reachable boundary.
+    ServerBoundary,
     /// An opening prompt runs the provider hook that reads waiting input.
     PromptHook,
 }
@@ -387,7 +385,9 @@ pub enum ResumeInput {
 #[derive(Debug, Clone, Copy)]
 pub struct Capabilities {
     pub thread: ThreadNaming,
-    pub resume_input: ResumeInput,
+    /// Replay the saved request if the resumed thread is empty.
+    pub initial_prompt_on_resume: bool,
+    pub reopen_steers: ReopenSteers,
     pub native_skills: Option<crate::skills::catalog::SkillDialect>,
     pub installed_skills: InstalledSkills,
     pub turn_limit: bool,
@@ -475,6 +475,8 @@ pub struct HookCallback {
 /// store and the process table.
 pub trait Launcher: Harness {
     fn capabilities(&self) -> Capabilities;
+    /// The published endpoint that accepts a turn for this idle harness.
+    fn idle_reach(&self, endpoints: &IdleEndpoints) -> Option<IdleReach>;
     /// What an error this harness's decoder reported says went wrong, for the
     /// failures the provider leaves to lf: a spent quota, a revoked login or
     /// an unserved model moves the run to the next agent in its order, and a

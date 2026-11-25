@@ -7,7 +7,7 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::{Launch, ResumeInput, Start};
+use super::{Launch, ReopenSteers, Start};
 use crate::agent::missing_agent_message;
 use crate::agent::AgentConfig;
 use crate::harness::native_exit::{attachment_lost, departure};
@@ -131,17 +131,21 @@ pub fn resume_session_with_env(
         config.agent,
     );
     if provider_session.is_some() {
-        config.task_prompt = match (kind, harness.capabilities().resume_input) {
+        let capabilities = harness.capabilities();
+        config.task_prompt = match kind {
             // Only the app-server knows whether the thread already had its first turn.
-            (LaunchKind::Worker | LaunchKind::WorkSession, ResumeInput::InitialPrompt) => {
+            LaunchKind::Worker | LaunchKind::WorkSession
+                if capabilities.initial_prompt_on_resume =>
+            {
                 config.task_prompt
             }
-            (LaunchKind::WorkSession, ResumeInput::PromptHook)
-                if config.conversation_context.is_some() =>
+            LaunchKind::WorkSession
+                if capabilities.reopen_steers == ReopenSteers::PromptHook
+                    && config.conversation_context.is_some() =>
             {
                 prompt_for_waiting_steers(&store, &session.id)
             }
-            (LaunchKind::Chat | LaunchKind::WorkSession, _) => {
+            LaunchKind::Chat | LaunchKind::WorkSession => {
                 let steers = store.take_steers_to_start(&session.id)?;
                 if steers.is_empty() {
                     String::new()
@@ -149,7 +153,7 @@ pub fn resume_session_with_env(
                     crate::steer::render_complete(&steers)
                 }
             }
-            (LaunchKind::Batch | LaunchKind::Worker, _) => String::new(),
+            LaunchKind::Batch | LaunchKind::Worker => String::new(),
         };
     }
     config.env.extend(extra_environment.clone());

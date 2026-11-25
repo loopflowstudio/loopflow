@@ -1,6 +1,5 @@
 use crate::test_linear_input::SeedLinear;
 use crate::test_support as support;
-use loopflow_execution::harness::parity::Behavior;
 use loopflow_execution::test_support::task_graph::holding_claude;
 use loopflow_harness::HarnessKind;
 
@@ -2123,19 +2122,19 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
             "{provider}: {}",
             String::from_utf8_lossy(&history.stderr)
         );
-        Behavior::WorkerStep.assert_observed(
-            harness,
+        assert!(
             String::from_utf8_lossy(&history.stdout).contains(answer),
+            "{provider}: missing worker answer"
         );
 
         let context = fs::read_to_string(home.join("hook-context")).unwrap();
-        Behavior::StepContext.assert_observed(
-            harness,
+        assert!(
             context.contains(&format!("This Session: {session}\n"))
                 && context.contains("This Session's Task: INF-123"),
+            "{provider}: {context}",
         );
         let steer = fs::read_to_string(home.join("hook-steer")).unwrap();
-        Behavior::MidTurnSteer.assert_observed(harness, steer.contains("WORKER_DIRECTION"));
+        assert!(steer.contains("WORKER_DIRECTION"), "{provider}: {steer}");
 
         let runs = task.run(&[
             "history", "usage", "--days", "0", "--task", "INF-123", "--json",
@@ -2149,9 +2148,9 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
             .map(|run| &run["usage"]);
         // Pi's stand-in counts its one model call its own way.
         let (input, output) = if provider == "pi" { (10, 3) } else { (20, 5) };
-        Behavior::UsageRecording.assert_observed(
-            harness,
+        assert!(
             usage.is_some_and(|u| u["input_tokens"] == input && u["output_tokens"] == output),
+            "{provider}: {usage:?}",
         );
     }
 }
@@ -2173,12 +2172,20 @@ fn a_question_with_nobody_there_ends_the_step() {
 
         let asked = task.task_run(&["task", "run", "INF-123", "worker", "-a", agent]);
         let reason = "asked a question with nobody there to answer it: Use the fixture?";
-        let stopped_on_question = !asked.success() && asked.text.contains(reason);
-        Behavior::UnansweredQuestion.assert_observed(harness, stopped_on_question);
-        if !stopped_on_question {
-            assert!(asked.success(), "{provider}: {}", asked.text);
-            assert_eq!(task.graph()["position"], at("review"), "{provider}");
-            continue;
+        match harness {
+            // TODO(Task 48edb9): these decoders still let the question pass.
+            HarnessKind::Claude | HarnessKind::Codex | HarnessKind::Antigravity => {
+                assert!(asked.success(), "{provider}: {}", asked.text);
+                assert_eq!(task.graph()["position"], at("review"), "{provider}");
+                continue;
+            }
+            HarnessKind::OpenCode | HarnessKind::Pi => {
+                assert!(
+                    !asked.success() && asked.text.contains(reason),
+                    "{provider}: {}",
+                    asked.text
+                );
+            }
         }
         assert!(
             asked
@@ -2248,7 +2255,7 @@ fn a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again() {
         wait_for("the worker's turn", || home.join("holding").exists());
         task.ok(&["task", "interrupt", "INF-123"]);
         let stopped = task.ran(started);
-        Behavior::Interrupt.assert_observed(harness, stopped.code == Some(130));
+        assert_eq!(stopped.code, Some(130), "{provider}: {}", stopped.text);
         assert_eq!(attempts(home, mark), ["interrupted"], "{provider}");
         assert_eq!(task.graph()["position"]["running"], false, "{provider}");
 
@@ -2305,8 +2312,12 @@ fn a_step_that_cannot_launch_is_not_started_again() {
     // Filtering PATH alone cannot model an uninstalled CLI: lf restores the
     // Machine's tool directories at startup. Use the same filesystem view as
     // gate when a developer runs this single test on a Machine with providers.
-    let home = std::env::var_os("HOME").unwrap();
-    let restored = loopflow_execution::os_process::tool_dirs(Path::new(&home));
+    let restored = [
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/usr/local/bin",
+        "/usr/local/sbin",
+    ];
     if restored.iter().any(|dir| {
         HarnessKind::ALL.iter().any(|kind| {
             loopflow_execution::os_process::which_on_path(&Path::new(dir).join(kind.as_str()))
@@ -2350,8 +2361,11 @@ fn a_step_that_cannot_launch_is_not_started_again() {
         let hint = loopflow_execution::harness::launcher(harness)
             .capabilities()
             .install_hint;
-        let reported =
-            !pinned.success() && pinned.text.contains(&missing) && pinned.text.contains(hint);
+        assert!(
+            !pinned.success() && pinned.text.contains(&missing) && pinned.text.contains(hint),
+            "{provider}: {}",
+            pinned.text
+        );
         assert!(
             pinned.text.contains("stopped before any agent started"),
             "{}",
@@ -2376,8 +2390,11 @@ fn a_step_that_cannot_launch_is_not_started_again() {
                 |row| row.get(0),
             )
             .unwrap();
-        Behavior::MissingCli
-            .assert_observed(harness, reported && moved.success() && ran_on_fallback);
+        assert!(moved.success(), "{provider}: {}", moved.text);
+        assert!(
+            ran_on_fallback,
+            "{provider}: no completed {fallback:?} worker"
+        );
         assert_eq!(task.graph()["position"], at("review"), "{}", moved.text);
         assert_eq!(support::recorded_graphs(task.home.path()).len(), 2);
         let recorded: String = db

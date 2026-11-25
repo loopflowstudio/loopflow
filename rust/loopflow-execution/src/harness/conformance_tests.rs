@@ -3,7 +3,6 @@ use crate::process::attachment;
 use serde_json::Value;
 
 use super::fact_writer::FactWriter;
-use super::parity::Behavior;
 use loopflow_harness::claude_decode::ClaudeDecoder;
 use loopflow_harness::codex_decode::{rpc_error, CodexDecoder};
 use loopflow_harness::fact::{self, Decoded, ProviderFact, ProviderTurn};
@@ -451,7 +450,7 @@ fn each_harness_classifies_its_own_refusals() {
         };
         for &(code, message, failure) in cases {
             let classified = super::launcher(harness).classify_failure(code, message);
-            Behavior::RefusalFallthrough.assert_observed(harness, classified == Some(failure));
+            assert_eq!(classified, Some(failure), "{harness:?}: {code}: {message}");
         }
     }
 }
@@ -478,6 +477,7 @@ fn a_transient_failure_is_lfs_to_retry_only_where_the_provider_does_not() {
 fn every_harness_reads_a_synced_skill() {
     use crate::skills::{sync_skills, SkillSyncOptions};
     use loopflow_definitions::text::split_frontmatter;
+    use loopflow_harness::HarnessKind;
     use std::fs;
 
     let home = tempfile::TempDir::new().unwrap();
@@ -504,37 +504,50 @@ fn every_harness_reads_a_synced_skill() {
 
     for harness in HarnessKind::ALL {
         let installed = super::launcher(harness).capabilities().installed_skills;
-        let registered = installed.global_registry.is_none_or(|registry| {
+        if let Some(registry) = installed.global_registry {
             let config: serde_json::Value =
-                serde_json::from_slice(&fs::read(home.path().join(registry)).unwrap()).unwrap();
+                serde_json::from_str(&fs::read_to_string(home.path().join(registry)).unwrap())
+                    .unwrap();
             let global = std::path::absolute(home.path().join(installed.global)).unwrap();
-            config["entries"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|entry| entry["path"].as_str() == global.to_str())
-        });
+            assert!(
+                config["entries"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|entry| entry["path"].as_str() == global.to_str()),
+                "{harness:?}: {registry} doesn't list {}",
+                global.display()
+            );
+        }
         for (base, directory, skill, graph) in [
             (home.path(), installed.global, "implement", "code"),
             (repo.path(), installed.repository, "audit", "proof"),
         ] {
             for name in [skill, graph] {
                 let path = base.join(directory).join(name).join("SKILL.md");
-                let exported = fs::read_to_string(&path).ok().and_then(|content| {
-                    let (header, _) = split_frontmatter(&content)?;
-                    serde_yaml_ng::from_str::<serde_yaml_ng::Value>(header).ok()
-                });
-                Behavior::InstalledSkills.assert_observed(
-                    harness,
-                    registered
-                        && exported.is_some_and(|header| {
-                            header["name"].as_str() == Some(name)
-                                && header["description"]
-                                    .as_str()
-                                    .is_some_and(|d| !d.trim().is_empty())
-                                && header["disable-model-invocation"].as_bool()
-                                    == (name == graph).then_some(true)
-                        }),
+                let content = fs::read_to_string(&path)
+                    .unwrap_or_else(|error| panic!("{harness:?}: {}: {error}", path.display()));
+                let (frontmatter, _) = split_frontmatter(&content).expect("export has frontmatter");
+                let frontmatter: serde_yaml_ng::Value =
+                    serde_yaml_ng::from_str(frontmatter).unwrap();
+                assert_eq!(
+                    frontmatter["name"].as_str(),
+                    Some(name),
+                    "{}",
+                    path.display()
+                );
+                assert!(
+                    frontmatter["description"]
+                        .as_str()
+                        .is_some_and(|description| !description.trim().is_empty()),
+                    "{}",
+                    path.display()
+                );
+                assert_eq!(
+                    frontmatter["disable-model-invocation"].as_bool(),
+                    (name == graph).then_some(true),
+                    "{}",
+                    path.display()
                 );
             }
         }

@@ -2062,8 +2062,9 @@ pub(crate) fn resume_native_session(
     let provider_session = saved_thread(store, artifact_key, native.provider)?;
     if provider_session.is_none() {
         if !loopflow_harness::HarnessKind::parse(native.provider).is_some_and(|kind| {
-            crate::harness::launcher(kind).capabilities().resume_input
-                == crate::harness::ResumeInput::InitialPrompt
+            crate::harness::launcher(kind)
+                .capabilities()
+                .initial_prompt_on_resume
         }) {
             return Ok(false);
         }

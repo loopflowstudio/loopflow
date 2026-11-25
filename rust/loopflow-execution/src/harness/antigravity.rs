@@ -21,6 +21,7 @@ use crate::agent::{AgentConfig, AgentFailure};
 use crate::context_block::ContextMoment;
 use crate::harness::fact_writer::FactWriter;
 use crate::harness::{Driver as StreamDriver, HarnessError, HookCallback, LaunchKind, Recording};
+use crate::steer::{IdleEndpoints, IdleReach};
 use loopflow_harness::antigravity_decode::Turn;
 use loopflow_harness::Harness;
 use loopflow_model::chat::types::ConversationEvent;
@@ -339,13 +340,19 @@ impl StreamDriver for Driver {
 }
 
 impl super::Launcher for loopflow_harness::Antigravity {
+    fn idle_reach(&self, _endpoints: &IdleEndpoints) -> Option<IdleReach> {
+        // TODO(LOO-1099): wake an already-open Antigravity conversation.
+        None
+    }
+
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
             thread: super::ThreadNaming {
                 bare: super::ThreadName::Reported,
                 managed: super::ThreadName::Reported,
             },
-            resume_input: super::ResumeInput::PromptHook,
+            initial_prompt_on_resume: false,
+            reopen_steers: super::ReopenSteers::PromptHook,
             native_skills: None,
             installed_skills: super::InstalledSkills {
                 // agy 1.5.14 ignores `~/` paths in this file; sync writes the

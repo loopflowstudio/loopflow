@@ -26,24 +26,22 @@ pub enum NativeBoundary<'a> {
     Turn,
 }
 
-/// A managed conversation whose last boundary was a turn end, and how the
-/// Machine server reaches it there.
-#[derive(Debug, Clone)]
-pub struct IdleConversation {
-    pub adapter: SteerAdapter,
-    /// The Session's selected native conversation.
-    pub thread: String,
-    /// The Session's working directory, where rendered steers are saved.
-    pub cwd: std::path::PathBuf,
-    pub reach: IdleReach,
+/// The endpoints recorded for an idle managed session.
+#[derive(Debug)]
+pub struct IdleEndpoints {
+    pub endpoint: Option<std::path::PathBuf>,
+    pub inbox: Option<std::path::PathBuf>,
+    pub socket: Option<std::path::PathBuf>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum IdleReach {
-    /// The Session's private app-server.
-    Codex(std::path::PathBuf),
-    /// What the provider's own code listens on.
-    Inbox(Inbox),
+#[derive(Debug)]
+pub struct IdleCandidate {
+    pub adapter: SteerAdapter,
+    pub thread: String,
+    pub cwd: std::path::PathBuf,
+    pub provider: Option<String>,
+    pub endpoints: IdleEndpoints,
+    pub identity: Option<(u32, i64)>,
 }
 
 /// Where code the provider loads takes a message for an idle conversation,

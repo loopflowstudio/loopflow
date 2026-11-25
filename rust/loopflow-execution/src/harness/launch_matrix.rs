@@ -21,7 +21,8 @@ const CALLER: &str = "caller";
 fn providers(home: &Path) {
     let bin = home.join("bin");
     std::fs::create_dir(&bin).unwrap();
-    let caller_session = serde_json::to_string(crate::agent::CALLER_SESSION_ENV).unwrap();
+    let caller_session =
+        serde_json::to_string(&crate::agent::caller_session_env().collect::<Vec<_>>()).unwrap();
     let record = format!(
         r#"
 import json, os, sys, uuid
@@ -111,9 +112,7 @@ fn every_harness_runs_all_four_launch_kinds() {
     // From here the test runs as if inside a Claude Code or Codex shell: their
     // markers must not reach a provider, while a person's own setting does.
     // lf's markers stay unset: this process is lf and reads them itself.
-    let provider_markers: Vec<&str> = crate::agent::CALLER_SESSION_ENV
-        .iter()
-        .copied()
+    let provider_markers: Vec<&str> = crate::agent::caller_session_env()
         .filter(|name| !name.starts_with("LF_"))
         .collect();
     let _caller = crate::test_ambient::EnvGuard::clear(&provider_markers);
@@ -265,7 +264,7 @@ fn every_harness_runs_all_four_launch_kinds() {
                         HarnessKind::Pi => flag("rpc"),
                     };
                     if mode == Mode::Headless {
-                        super::parity::Behavior::HeadlessPermissions.assert_observed(harness, skips);
+                        anyhow::ensure!(skips, "{row}: headless permission prompt");
                     } else if harness != HarnessKind::Pi {
                         anyhow::ensure!(skips == yolo, "{row}: yolo setting");
                     }

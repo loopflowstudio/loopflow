@@ -1,9 +1,11 @@
-at: f74e62eb8c1e44aeac9551ee27b617d716e9eab7
+at: e63e6c31c2c81f06c6f86b1a19710b3a19321200
 first:
   - path: docs/work.md
     why: Pause and resume from the saved step
   - path: docs/surfaces.md
     why: How Working looks across surfaces
+  - path: rust/loopflow-execution/src/task_graph.rs
+    why: Derive the next action from the saved Graph position
   - path: rust/loopflow-storage/src/execution.rs
     why: Lifecycle, board membership and Working groups
   - path: rust/loopflow-storage/src/migrations/task_pauses.sql
@@ -22,8 +24,6 @@ first:
     why: Distinguish an interrupted step from a failed run
   - path: rust/loopflow-execution/src/ops/task/run_recovery.rs
     why: Recheck pause before counting and restarting a carrier
-  - path: rust/loopflow-execution/src/task_graph.rs
-    why: Follow the captured cursor to review or landing
   - path: rust/loopflow-storage/src/sqlite/task_details.rs
     why: Read Graph names, steps and Working groups together
   - path: rust/loopflow-storage/src/work/selection.rs
@@ -44,16 +44,26 @@ first:
     why: Group each repository’s Working Tasks on iPhone
   - path: swift/Loopflow/Models/WaveWorkMap.swift
     why: Clear Portfolio Now as soon as pause takes effect
+  - path: swift/Loopflow/Design/TaskActions.swift
+    why: Combine Graph position with lifecycle and run refusals
+  - path: swift/Loopflow/Design/TaskWorkflowControls.swift
+    why: Share the split control across Mac and iPhone
   - path: swift/LoopflowMac/Views/TaskWorkView.swift
-    why: Use one pause action across Mac controls
+    why: Connect workflow and metadata menus to Mac actions
+  - path: swift/LoopflowiOS/TaskWorkspaceView.swift
+    why: Run or resume work beside the phone conversation
   - path: swift/Loopflow/Services/PendingChanges.swift
     why: Keep rows in place while pause or unpause settles
   - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
-    why: Stop the worker while its conversation survives
+    why: Resume a worker and leave review waiting
   - path: rust/loopflow/tests/machine_commands.rs
     why: Exercise pause during a two-Machine move
   - path: swift/LoopflowTests/TaskConceptTests.swift
     why: Exercise group order, keyboard selection and paused conversations
+  - path: swift/LoopflowTests/TaskActionsTests.swift
+    why: Click each unpause choice and check its write
+  - path: swift/LoopflowiOSTests/TaskActionsTests.swift
+    why: Measure the phone controls before and after pause
   - path: swift/LoopflowiOSTests/TaskFeedTests.swift
     why: Open the Session and handle a refused unpause
 hide:

@@ -485,6 +485,7 @@ impl<'a> RepositoryViews<'a> {
                     } else {
                         vec!["Work is unavailable; retained intent only".into()]
                     },
+                    open_children: None,
                 }
             })
             .collect();
@@ -549,7 +550,19 @@ fn fill_task_contents_in(
          LEFT JOIN task_graphs g ON g.task_id=t.id
          WHERE t.id IN (SELECT value FROM json_each(?1))",
     )?;
-    let mut rows = query.query([super::children::ids_json(tasks.keys().map(String::as_str))])?;
+    let ids = super::children::ids_json(tasks.keys().map(String::as_str));
+    let mut open_children = HashMap::<String, u32>::new();
+    let mut counts = conn.prepare(&format!(
+        "SELECT t.parent_task_id,COUNT(*) FROM tasks t
+         WHERE t.parent_task_id IN (SELECT value FROM json_each(?1)) AND {}
+         GROUP BY t.parent_task_id",
+        super::children::open_task_children_where()
+    ))?;
+    let mut count_rows = counts.query([&ids])?;
+    while let Some(row) = count_rows.next()? {
+        open_children.insert(row.get(0)?, row.get(1)?);
+    }
+    let mut rows = query.query([&ids])?;
     while let Some(row) = rows.next()? {
         let id: String = row.get(0)?;
         let title: String = row.get(1)?;
@@ -576,6 +589,7 @@ fn fill_task_contents_in(
             content.graph_step.clone_from(&step);
             content.primary_session.clone_from(&primary);
             content.location.clone_from(&location);
+            content.open_children = Some(open_children.get(&id).copied().unwrap_or(0));
             if primary.is_none() {
                 content
                     .unavailable

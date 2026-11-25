@@ -1234,12 +1234,20 @@ fn server_operations_match_their_lf_commands() {
         None,
     ))
     .unwrap();
-    // One recorded capture, so its history reads the same both ways.
+    // One recorded capture, so its history reads the same both ways. Mark the
+    // conversation quit so the server's recovery pass leaves it alone while
+    // reads and writes are compared.
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     loopflow_storage::sqlite::sessions::test_capture(
-        &rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap(),
+        &conn,
         session["id"].as_str().unwrap(),
         &loopflow_storage::session_record::new_artifact_key(),
     );
+    conn.execute(
+        "UPDATE agent_sessions SET agent_exit_code = 0 WHERE id = ?1",
+        [session["id"].as_str().unwrap()],
+    )
+    .unwrap();
     // Unpublished, so it can complete: `lf task complete` waits on a PR's merge.
     let unpublished: Value = serde_json::from_str::<serde_json::Value>(&read(
         repo.path(),
@@ -1836,6 +1844,7 @@ fn server_operations_match_their_lf_commands() {
                 Write::TaskComplete {
                     directory: directory.clone(),
                     issue: unpublished.clone(),
+                    children: None,
                 },
                 Write::TaskReopen {
                     directory: directory.clone(),
@@ -2549,10 +2558,25 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             }
             (path(directory), args)
         }
-        Write::TaskComplete { directory, issue } => (
-            path(directory),
-            words(&["task", "complete", issue, "--json"]),
-        ),
+        Write::TaskComplete {
+            directory,
+            issue,
+            children,
+        } => {
+            let mut args = words(&["task", "complete", issue]);
+            if let Some(children) = children {
+                args.push("--children".into());
+                args.push(
+                    serde_json::to_value(children)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .into(),
+                );
+            }
+            args.push("--json".into());
+            (path(directory), args)
+        }
         Write::TaskReopen { directory, issue } => {
             (path(directory), words(&["task", "reopen", issue, "--json"]))
         }

@@ -157,7 +157,8 @@
         "primary_session": "session_fixture_1",
         "location": null,
         "argv": null,
-        "unavailable": []
+        "unavailable": [],
+        "open_children": 0
       },
       {
         "work": {
@@ -175,7 +176,8 @@
         "primary_session": "session_fixture_2",
         "location": null,
         "argv": null,
-        "unavailable": []
+        "unavailable": [],
+        "open_children": 0
       },
       {
         "work": {
@@ -195,7 +197,8 @@
         "argv": null,
         "unavailable": [
           "No existing Session is recorded"
-        ]
+        ],
+        "open_children": 0
       }
     ],
     "name": null,

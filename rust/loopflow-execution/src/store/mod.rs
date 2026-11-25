@@ -949,7 +949,7 @@ mod tests {
                     != loopflow_storage::sqlite::tracker_actions::ActionKind::State));
             store
                 .sqlite
-                .reopen_task(&task.id, Some("New scope"))
+                .reopen_task(&task.id, Some("New scope"), false)
                 .unwrap();
             store
                 .sqlite

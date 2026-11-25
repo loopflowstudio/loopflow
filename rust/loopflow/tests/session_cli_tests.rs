@@ -708,6 +708,15 @@ fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
     let home = tempfile::tempdir().unwrap();
     let repo = loopflow_test_support::TestRepo::new();
     let lf = |args: &[&str]| lf_in(home.path(), repo.path(), args, None);
+    let refused = |args: &[&str]| {
+        let output = command(home.path(), args)
+            .current_dir(repo.path())
+            .env("HOME", home.path())
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{args:?} succeeded");
+        String::from_utf8(output.stderr).unwrap()
+    };
     let file = |title: &str, parent: Option<&str>| {
         let mut args = vec!["task", "create", "--title", title, "--json"];
         args.extend(parent.into_iter().flat_map(|parent| ["--parent", parent]));
@@ -772,8 +781,72 @@ fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
     let line = |listed: &str, start: String| listed.lines().any(|line| line.starts_with(&start));
     assert!(line(&listed, format!("  {reviewing} ·")), "{listed}");
 
+    // Bare completion refuses, writes nothing, and shows the whole open tree.
+    let refusal = refused(&["task", "complete", &parent]);
+    assert!(
+        refusal.contains(&format!(
+            "{parent} has 3 open children; say what happens to them:"
+        )),
+        "{refusal}"
+    );
+    // Each row is the indented identifier, title and standing, in aligned columns.
+    let row = |indent: &str, id: &str, title: &str, standing: &str| {
+        let line = refusal
+            .lines()
+            .find(|line| line.starts_with(&format!("{indent}{id} ")))
+            .unwrap_or_else(|| panic!("no row for {id}: {refusal}"));
+        let fields: Vec<&str> = line
+            .split("  ")
+            .map(str::trim)
+            .filter(|f| !f.is_empty())
+            .collect();
+        assert_eq!(fields, [id, title, standing], "{refusal}");
+        line.len() - standing.len()
+    };
+    let column = row("  ", &landed, "Retry budget per host", "#1980 merged");
+    assert_eq!(
+        row("    ", &grandchild, "Tune the budget", "unstarted"),
+        column
+    );
+    assert_eq!(
+        row("    ", &kept, "Budget dashboards", "#1982 open"),
+        column
+    );
+    assert_eq!(
+        row("  ", &unstarted, "Document the budget", "unstarted"),
+        column
+    );
+    assert!(
+        refusal.contains(&format!(
+            "lf task complete {parent} --children rehome    # direct children become top-level Tasks"
+        )),
+        "{refusal}"
+    );
+    assert!(
+        refusal.contains(&format!("lf task complete {parent} --children abandon")),
+        "{refusal}"
+    );
+    let status = json(lf(&["task", "status", &parent, "--json"]));
+    assert_ne!(status["task"]["state"], "done");
+    let written: (Option<i64>, i64) = database
+        .query_row(
+            "SELECT completion_request,(SELECT COUNT(*) FROM task_events WHERE task_id=?1
+                AND json_extract(kind_json,'$.kind') LIKE '%complet%') FROM tasks WHERE id=?1",
+            [&parent_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(written, (None, 0));
+
     // A child that becomes done settles its own children by the same rule.
-    let completed = json(lf(&["task", "complete", &parent, "--json"]));
+    let completed = json(lf(&[
+        "task",
+        "complete",
+        &parent,
+        "--children",
+        "abandon",
+        "--json",
+    ]));
     assert_eq!(completed["identifier"], parent);
     let outcomes = |children: &serde_json::Value| {
         children
@@ -836,15 +909,17 @@ fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
     assert_eq!(state(&kept), "abandoned");
     assert_eq!(state(&unstarted_child), "abandoned");
 
-    // Reopening a done parent with prior work restores `started` planning state;
-    // abandoned children cannot be reopened.
+    // Reopening restores `started` planning state for a done parent and an
+    // abandoned child alike.
     let reopened = json(lf(&["task", "reopen", &parent, "--json"]));
     assert_eq!(reopened["state"], "started");
-    let mut reopen_abandoned = command(home.path(), &["task", "reopen", &reviewing]);
-    reopen_abandoned
-        .current_dir(repo.path())
-        .env("HOME", home.path());
-    assert!(!reopen_abandoned.output().unwrap().status.success());
+    assert_eq!(
+        json(lf(&["task", "status", &parent, "--json"]))["task"]["pr"]["phase"],
+        "merged"
+    );
+    let reopened = json(lf(&["task", "reopen", &reviewing, "--json"]));
+    assert_eq!(reopened["state"], "started");
+    assert_ne!(state(&reviewing), "abandoned");
 
     // A Task with no PR whose Graph reached `end` stands the same way.
     let (planned_id, planned) = file("Plan the cache", None);
@@ -879,11 +954,104 @@ fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
     publish(&second_id, 1990, true);
     publish(&merged_id, 1991, true);
     assert_eq!(
-        lf(&["task", "complete", &second]),
+        lf(&["task", "complete", &second, "--children", "abandon"]),
         format!(
             "{second} done\n  {merged} done: #1991 merged\n    {idle} abandoned: no merged PR\n"
         )
     );
+
+    // Rehoming moves direct open children up to the nearest open ancestor,
+    // skipping a closed one; their own children come along.
+    let (top_id, top) = file("Rate limits", None);
+    let (closed_id, closed) = file("Rate limit design", Some(&top));
+    let (_, middle) = file("Per-host limits", Some(&closed));
+    let (moved_id, moved) = file("Limit config", Some(&middle));
+    let (_, finished) = file("Previous limit", Some(&middle));
+    lf(&["task", "complete", &finished]);
+    let (_, under_moved) = file("Limit config docs", Some(&moved));
+    database
+        .execute(
+            "UPDATE tasks SET planning_state='completed' WHERE id=?1",
+            [&closed_id],
+        )
+        .unwrap();
+    database
+        .execute(
+            "UPDATE tasks SET external_issue_id=?2 WHERE id=?1",
+            rusqlite::params![moved_id, uuid::Uuid::new_v4().to_string()],
+        )
+        .unwrap();
+    assert_eq!(
+        lf(&["task", "complete", &middle, "--children", "rehome"]),
+        format!("{middle} done\n  {moved} moved up to {top}\n")
+    );
+    let status = json(lf(&["task", "status", &moved, "--json"]));
+    assert_eq!(status["parent"]["identifier"], top);
+    assert_eq!(status["children"][0]["identifier"], under_moved);
+    assert_eq!(state(&moved), "unstarted");
+
+    assert_eq!(
+        json(lf(&["task", "status", &finished, "--json"]))["parent"]["identifier"],
+        middle
+    );
+    let queued_parent: String = database
+        .query_row(
+            "SELECT json_extract(value_json,'$.value') FROM tracker_actions
+         WHERE task_id=?1 AND subject='task_parent' AND phase='queued'",
+            [&moved_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(queued_parent, top_id);
+
+    // A parent whose PR has not merged refuses either choice and arms no
+    // request that could settle its children later.
+    let (unmerged_id, unmerged) = file("Limit headers", None);
+    let (_, waiting) = file("Limit header docs", Some(&unmerged));
+    publish(&unmerged_id, 1995, false);
+    let refusal = refused(&["task", "complete", &unmerged]);
+    assert!(
+        refusal.contains(&waiting) && refusal.contains("--children rehome"),
+        "{refusal}"
+    );
+    for policy in ["rehome", "abandon"] {
+        let refusal = refused(&["task", "complete", &unmerged, "--children", policy]);
+        assert!(refusal.contains("not merged"), "{refusal}");
+    }
+    let request: Option<i64> = database
+        .query_row(
+            "SELECT completion_request FROM tasks WHERE id=?1",
+            [&unmerged_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(request, None);
+    assert_eq!(state(&waiting), "unstarted");
+
+    // A deleted Task breaks the visible chain even with an open ancestor above it.
+    let (deleted_id, deleted) = file("Obsolete design", Some(&top));
+    let (_, lone) = file("Burst limits", Some(&deleted));
+    let (_, freed) = file("Burst config", Some(&lone));
+    database
+        .execute(
+            "UPDATE tasks SET planning_deleted_at=1 WHERE id=?1",
+            [&deleted_id],
+        )
+        .unwrap();
+    assert!(
+        refused(&["task", "complete", &lone]).contains("direct children become top-level Tasks")
+    );
+    let completed = json(lf(&[
+        "task",
+        "complete",
+        &lone,
+        "--children",
+        "rehome",
+        "--json",
+    ]));
+    assert_eq!(completed["children"][0]["outcome"], "rehomed");
+    assert!(completed["children"][0]["task"]["parent_id"].is_null());
+    assert!(json(lf(&["task", "status", &freed, "--json"]))["parent"].is_null());
 }
 
 #[cfg(unix)]

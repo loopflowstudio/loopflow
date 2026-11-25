@@ -16,7 +16,8 @@ def head(b): return subprocess.run(["git", "rev-parse", "origin/" + b], capture_
 def view(pr, fields):
     out = {"number": pr["number"], "url": "https://github.com/qa/repo/pull/%d" % pr["number"], "state": pr["state"],
            "isDraft": pr["draft"], "headRefOid": head(pr["head"]), "baseRefName": pr["base"], "headRefName": pr["head"],
-           "title": pr["title"], "body": pr["body"], "mergeCommit": None, "mergedAt": None}
+           "title": pr["title"], "body": pr["body"], "mergeCommit": None, "mergedAt": None,
+           "headRepository": {"nameWithOwner": "qa/repo"}}
     return {k: out.get(k) for k in fields.split(",")} if fields else out
 def find(sel):
     for pr in st["prs"]:
@@ -39,6 +40,8 @@ elif sub == "pr edit":
     for k, f in (("title", "--title"), ("body", "--body"), ("base", "--base")):
         if f in args: pr[k] = opt(f)
     save(); print("https://github.com/qa/repo/pull/%d" % pr["number"])
+elif sub == "pr close":
+    find(args[2])["state"] = "CLOSED"; save()
 elif sub == "pr ready":
     find(args[2])["draft"] = False; save()
 elif sub == "pr view":

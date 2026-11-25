@@ -3374,7 +3374,7 @@ mod tests {
             // A write has no answer to select from.
             client
                 .writer
-                .write_all(b"{\"type\":\"request\",\"id\":\"w\",\"operation\":{\"kind\":\"task.complete\",\"directory\":\"/r\",\"issue\":\"A-1\"},\"select\":[\"x\"],\"sender\":null,\"request_id\":null}\n")
+                .write_all(b"{\"type\":\"request\",\"id\":\"w\",\"operation\":{\"kind\":\"task.complete\",\"directory\":\"/r\",\"issue\":\"A-1\",\"children\":null},\"select\":[\"x\"],\"sender\":null,\"request_id\":null}\n")
                 .await
                 .unwrap();
             let ServerMessage::Error {
@@ -3399,7 +3399,7 @@ mod tests {
             ));
             client
                 .writer
-                .write_all(b"{\"type\":\"subscribe\",\"id\":\"w\",\"operation\":{\"kind\":\"task.complete\",\"directory\":\"/r\",\"issue\":\"A-1\"},\"sender\":null}\n")
+                .write_all(b"{\"type\":\"subscribe\",\"id\":\"w\",\"operation\":{\"kind\":\"task.complete\",\"directory\":\"/r\",\"issue\":\"A-1\",\"children\":null},\"sender\":null}\n")
                 .await
                 .unwrap();
             let ServerMessage::Error {

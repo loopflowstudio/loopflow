@@ -19,3 +19,5 @@
   - **Root cause found (`FileFind.swift:106-120`, `TaskFilePicker.swift:197-207`, `TaskFilesView.swift:52-54`):** Both `FileFindBar` and `TaskFilePickerView` render bare `PaletteSearchField` directly on `palette.background` with no input field surface/border (`CornerRadius.control` + `palette.surface` + `palette.borderStrong`) and no divider separating `documentRow` from `FileFindBar`, so the text field reads like a cramped second header row rather than an input box.
 - **Jack Heart (2026-11-24):** "`'/Users/jack/Desktop/Screenshot 2026-11-24 at 10.20.18 PM.png'` this treatment oesnt work"
 - **Jack Heart (2026-11-24):** "looks fine in Loopflow lgiht,"
+- **Jack Heart (2026-11-24):** "send this batch"
+- **Jack Heart (2026-11-25):** "ok lets land it"

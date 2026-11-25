@@ -2,6 +2,9 @@
 
 ## Outcome
 
+Status: built in `78bde1d766`; nothing remains before compress, qa and gate.
+
+
 A Task on `code`, `feature`, `pursue` or `redesign` runs `compress` and `qa`
 once, after the design has settled, instead of once per outer-loop pass. The
 measurement behind it (14 days, 5,796 sessions, 154 Tasks): 70.3% of qa spend
@@ -317,8 +320,6 @@ Docs (written in `write-docs`; read before implementation and keep in sync with 
 - `docs/work.md`: replaced "`realign` keeps plan, code, and memory in sync" with `wave-session` curating Wave `MEMORY.md`.
 - `swift/README.md:407`: read and kept (still true: `concept-review` runs in both `plan` and `build`).
 
-Note from writing `docs/surfaces.md`: Desktop's Start menu (`BacklogView.swift:148`) displays the first sentence of `description:` on one line. `ui.yaml`'s single 86-char sentence (`Build a Desktop, mobile or web UI change you try as it takes shape, then deliver it.`) is longer than the 4–6 word first sentences of `feature`/`code`/`redesign`/`research` and truncates in the menu; splitting it into two sentences (e.g. `Build and try a UI change, then deliver it. You try the running Desktop, mobile or web UI each pass.`) keeps the menu row untruncated if desired.
-
 ## Choices made for review
 
 1. **Wave memory curation moves to `wave_session.md`, not `wave_operate.md`.**
@@ -413,7 +414,7 @@ uv run python scripts/test.py --reuse-passing \
 
 One pass; it is prose, four YAML files, docs, and test expectations.
 
-- Built in one pass:
+- Built in one pass (`78bde1d766`):
   - Reordered `build.yaml` and `plan.yaml`; added `ui.yaml` (two-sentence description so Desktop's Start menu fits on one line, synced with `docs/surfaces.md`) and `fix.yaml`.
   - Updated `concept-review.md`, `realign.md`, `wave_session.md`, `implement.md` (110 lines), `demo.md`, `verify.md`, `kickoff.md`, `advance.md`, `write-docs.md`, `ship-review.md`; regenerated `tests/goldens/builtin_{implement,realign}.md`.
   - Updated Rust graph expectations in `compiled.rs` (including `fix` and `ui` cases), `graph/mod.rs` (`edges()` reports relative offsets `1` and `3`, not absolute indices), `commands/graph.rs`, and `task_graph.rs:631` (`write-docs` shifted by +1 after `realign` joined `plan`).

@@ -171,7 +171,7 @@ pub fn discover(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
                 }
                 Err(error) => format!("unavailable: {error}"),
             };
-            let (builtin, extends) = source.relations();
+            let (builtin, extends) = catalog.relations(source);
             entries.push(Entry {
                 name: name.clone(),
                 kind: "skill".into(),
@@ -232,6 +232,15 @@ mod tests {
         assert_eq!(
             entry.source_label(),
             ".lf/skills/qa.md, extends implement, replaces builtin"
+        );
+        let transitive = Entry {
+            builtin: Some(BuiltinRelation::Extends),
+            extends: Some("base-qa".into()),
+            ..entry
+        };
+        assert_eq!(
+            transitive.source_label(),
+            ".lf/skills/qa.md, extends base-qa"
         );
     }
 }

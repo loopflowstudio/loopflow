@@ -105,44 +105,11 @@ impl SkillSource {
             content: Some(body.to_string()),
         })
     }
-
-    /// How this file stands to the builtin of the same name, and any `extends:` target.
-    pub fn relations(
-        &self,
-    ) -> (
-        Option<crate::skills::listing::BuiltinRelation>,
-        Option<String>,
-    ) {
-        use crate::skills::listing::BuiltinRelation;
-        let Some(path) = self.path.as_ref() else {
-            return (None, None);
-        };
-        let Ok(content) = crate::observe::read_to_string(path) else {
-            return (None, None);
-        };
-        let extends = (self.dialect == SkillDialect::Loopflow)
-            .then(|| declared_extends(&content))
-            .flatten();
-        let builtin = builtins::resolve_builtin_skill(&self.name).and_then(|canonical| {
-            let builtin = builtins::get_builtin_skill(canonical)?;
-            let relation = if extends
-                .as_deref()
-                .is_some_and(|target| extends_same_builtin(target, canonical))
-            {
-                BuiltinRelation::Extends
-            } else if content.trim() == builtin.trim() {
-                BuiltinRelation::Copies
-            } else {
-                BuiltinRelation::Replaces
-            };
-            Some(relation)
-        });
-        (builtin, extends)
-    }
 }
 
-fn builtin_skill(name: &str) -> Option<&'static str> {
-    builtins::resolve_builtin_skill(name).and_then(builtins::get_builtin_skill)
+enum ExtendsTarget<'a> {
+    Builtin(&'static str),
+    Catalog(&'a SkillSource),
 }
 
 fn declared_extends(content: &str) -> Option<String> {
@@ -156,25 +123,53 @@ fn declared_extends(content: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn extends_same_builtin(target: &str, canonical: &str) -> bool {
-    // Temporary compatibility alias for released lf 0.16.0; LOO-1107 removes
-    // `extends: builtin` and migrates `.lf/skills/*.md` to `extends: lf:<name>`.
-    if target == "builtin" {
-        return true;
-    }
-    let candidate = target.strip_prefix("lf:").map(str::trim).unwrap_or(target);
-    builtins::resolve_builtin_skill(candidate) == Some(canonical)
-}
-
 fn merge_extension(
     parent: &str,
+    parent_dialect: SkillDialect,
     child_meta: serde_yaml_ng::Mapping,
     child_body: &str,
 ) -> Result<String, LoadError> {
     let (parent_frontmatter, parent_body) = split_frontmatter(parent).unwrap_or(("", parent));
-    let mut merged =
-        serde_yaml_ng::from_str::<serde_yaml_ng::Mapping>(parent_frontmatter).unwrap_or_default();
-    merged.extend(child_meta);
+    let mut merged = if parent_dialect == SkillDialect::Loopflow {
+        let mut value = serde_yaml_ng::from_str::<serde_yaml_ng::Mapping>(parent_frontmatter)
+            .map(Value::Mapping)
+            .unwrap_or_else(|_| Value::Mapping(serde_yaml_ng::Mapping::new()));
+        crate::config::normalize_context(&mut value);
+        value
+    } else {
+        // Native Claude/Codex frontmatter (e.g. `context: fork`, `agent: Explore`)
+        // belongs to the provider's schema, not Loopflow launch settings.
+        let mut map = serde_yaml_ng::Mapping::new();
+        if let Some(description) = serde_yaml_ng::from_str::<Value>(parent_frontmatter)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+        {
+            map.insert("description".into(), description.into());
+        }
+        Value::Mapping(map)
+    };
+    let mut child = Value::Mapping(child_meta);
+    crate::config::normalize_context(&mut child);
+    if let (Some(parent_map), Some(child_map)) = (merged.as_mapping_mut(), child.as_mapping()) {
+        if child_map.get("agent").is_some_and(|value| !value.is_null()) {
+            parent_map.remove("default_agent");
+        }
+        if child_map
+            .get("default_agent")
+            .is_some_and(|value| !value.is_null())
+        {
+            parent_map.remove("agent");
+        }
+    }
+    crate::config::files::overlay(&mut merged, &child);
+    let merged = merged
+        .as_mapping_mut()
+        .expect("normalized skill frontmatter is a mapping");
     merged.remove(Value::String("extends".to_string()));
     let body = match (parent_body.trim_end(), child_body.trim_start()) {
         ("", child) => child.to_string(),
@@ -184,7 +179,7 @@ fn merge_extension(
     if merged.is_empty() {
         return Ok(body);
     }
-    let frontmatter = serde_yaml_ng::to_string(&merged)
+    let frontmatter = serde_yaml_ng::to_string(merged)
         .map_err(|error| LoadError::InvalidSkill(error.to_string()))?;
     Ok(format!("---\n{frontmatter}---\n{body}"))
 }
@@ -313,22 +308,22 @@ impl SkillCatalog {
                 path.display()
             )));
         };
-        let parent_content = self.resolve_parent(source, path, target, visiting)?;
-        merge_extension(&parent_content, child_meta, addition)
+        let (parent_content, parent_dialect) =
+            self.resolve_parent(source, path, target, visiting)?;
+        merge_extension(&parent_content, parent_dialect, child_meta, addition)
     }
 
-    fn resolve_parent<'a>(
-        &'a self,
-        source: &'a SkillSource,
+    fn resolve_extends_target(
+        &self,
+        source: &SkillSource,
         path: &Path,
         target: &str,
-        visiting: &mut Vec<&'a str>,
-    ) -> Result<String, LoadError> {
+    ) -> Result<ExtendsTarget<'_>, LoadError> {
         if target == "builtin" {
             // Temporary compatibility alias for released lf 0.16.0; LOO-1107 removes
             // this and migrates `.lf/skills/*.md` to `extends: lf:<name>`.
-            return builtin_skill(&source.name)
-                .map(str::to_string)
+            return builtins::resolve_builtin_skill(&source.name)
+                .map(ExtendsTarget::Builtin)
                 .ok_or_else(|| {
                     LoadError::InvalidSkill(format!(
                         "{}: extends `builtin`, but no builtin skill is named {:?}",
@@ -345,8 +340,8 @@ impl SkillCatalog {
                     path.display()
                 )));
             }
-            return builtin_skill(builtin_name)
-                .map(str::to_string)
+            return builtins::resolve_builtin_skill(builtin_name)
+                .map(ExtendsTarget::Builtin)
                 .ok_or_else(|| {
                     LoadError::InvalidSkill(format!(
                         "{}: no builtin skill is named {:?}",
@@ -363,26 +358,130 @@ impl SkillCatalog {
             ))
         })?;
         if parent.name == source.name {
-            if let Some(builtin) = builtin_skill(&source.name) {
-                return Ok(builtin.to_string());
+            return builtins::resolve_builtin_skill(&source.name)
+                .map(ExtendsTarget::Builtin)
+                .ok_or_else(|| {
+                    LoadError::InvalidSkill(format!(
+                        "{}: no builtin skill is named {:?}",
+                        path.display(),
+                        source.name
+                    ))
+                });
+        }
+        Ok(ExtendsTarget::Catalog(parent))
+    }
+
+    fn resolve_parent<'a>(
+        &'a self,
+        source: &'a SkillSource,
+        path: &Path,
+        target: &str,
+        visiting: &mut Vec<&'a str>,
+    ) -> Result<(String, SkillDialect), LoadError> {
+        match self.resolve_extends_target(source, path, target)? {
+            ExtendsTarget::Builtin(canonical) => Ok((
+                builtins::get_builtin_skill(canonical)
+                    .expect("resolved builtin exists")
+                    .to_string(),
+                SkillDialect::Loopflow,
+            )),
+            ExtendsTarget::Catalog(parent) => {
+                visiting.push(&source.name);
+                if let Some(start) = visiting.iter().position(|name| *name == parent.name) {
+                    let cycle = visiting[start..]
+                        .iter()
+                        .copied()
+                        .chain(std::iter::once(parent.name.as_str()))
+                        .collect::<Vec<_>>()
+                        .join(" -> ");
+                    return Err(LoadError::InvalidSkill(format!(
+                        "{}: skill inheritance cycle: {cycle}",
+                        path.display()
+                    )));
+                }
+                let content = self.read_source_with(parent, visiting)?;
+                visiting.pop();
+                Ok((content, parent.dialect))
             }
         }
-        visiting.push(&source.name);
-        if let Some(start) = visiting.iter().position(|name| *name == parent.name) {
-            let cycle = visiting[start..]
-                .iter()
-                .copied()
-                .chain(std::iter::once(parent.name.as_str()))
-                .collect::<Vec<_>>()
-                .join(" -> ");
-            return Err(LoadError::InvalidSkill(format!(
-                "{}: skill inheritance cycle: {cycle}",
-                path.display()
-            )));
+    }
+
+    /// How `source` stands to the builtin of the same name, and its normalized `extends:` target.
+    pub fn relations(
+        &self,
+        source: &SkillSource,
+    ) -> (
+        Option<crate::skills::listing::BuiltinRelation>,
+        Option<String>,
+    ) {
+        use crate::skills::listing::BuiltinRelation;
+        let Some(path) = source.path.as_ref() else {
+            return (None, None);
+        };
+        let Ok(content) = crate::observe::read_to_string(path) else {
+            return (None, None);
+        };
+        let raw_extends = (source.dialect == SkillDialect::Loopflow)
+            .then(|| declared_extends(&content))
+            .flatten();
+        let extends = raw_extends.as_deref().map(|target| {
+            match self.resolve_extends_target(source, path, target) {
+                Ok(ExtendsTarget::Builtin(canonical)) => format!("lf:{canonical}"),
+                _ => target.to_string(),
+            }
+        });
+        let builtin = builtins::resolve_builtin_skill(&source.name).and_then(|canonical| {
+            let builtin = builtins::get_builtin_skill(canonical)?;
+            let relation = if raw_extends
+                .as_deref()
+                .is_some_and(|target| self.chain_extends_builtin(source, path, target, canonical))
+            {
+                BuiltinRelation::Extends
+            } else if content.trim() == builtin.trim() {
+                BuiltinRelation::Copies
+            } else {
+                BuiltinRelation::Replaces
+            };
+            Some(relation)
+        });
+        (builtin, extends)
+    }
+
+    fn chain_extends_builtin(
+        &self,
+        source: &SkillSource,
+        path: &Path,
+        target: &str,
+        canonical: &str,
+    ) -> bool {
+        let mut visited = HashSet::from([source.name.as_str()]);
+        let mut next = self.resolve_extends_target(source, path, target).ok();
+        while let Some(step) = next {
+            match step {
+                ExtendsTarget::Builtin(name) => return name == canonical,
+                ExtendsTarget::Catalog(parent) => {
+                    if !visited.insert(parent.name.as_str()) {
+                        return false;
+                    }
+                    let Some(parent_path) = parent.path.as_ref() else {
+                        return builtins::resolve_builtin_skill(&parent.name) == Some(canonical);
+                    };
+                    if parent.dialect != SkillDialect::Loopflow {
+                        return false;
+                    }
+                    let Ok(content) = crate::observe::read_to_string(parent_path) else {
+                        return false;
+                    };
+                    let Some(parent_target) = declared_extends(&content) else {
+                        return false;
+                    };
+                    next = self
+                        .resolve_extends_target(parent, parent_path, &parent_target)
+                        .ok();
+                }
+            }
         }
-        let content = self.read_source_with(parent, visiting)?;
-        visiting.pop();
-        Ok(content)
+        false
     }
 
     pub fn entries(&self) -> impl Iterator<Item = &SkillSource> {
@@ -766,7 +865,8 @@ mod tests {
         let err = catalog.load_skill("self-cycle").unwrap_err();
         assert!(matches!(err, crate::error::LoadError::InvalidSkill(_)));
         assert!(
-            err.to_string().contains("self-cycle -> self-cycle"),
+            err.to_string()
+                .contains("no builtin skill is named \"self-cycle\""),
             "{err}"
         );
 
@@ -781,6 +881,157 @@ mod tests {
                 .contains("implement -> loop-helper -> implement"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn extending_native_skill_inherits_only_body_and_description() {
+        let repo = TempDir::new().unwrap();
+        write(
+            repo.path(),
+            ".claude/skills/audit/SKILL.md",
+            "---\ndescription: Audit diff\nagent: Explore\ncontext: fork\ndefault_agent: native-persona\nallowed-tools: Read\n---\nCheck every invariant.\n",
+        );
+        write(
+            repo.path(),
+            ".lf/skills/my-audit.md",
+            "---\nextends: audit\n---\nCheck repo-specific rules.\n",
+        );
+        write(
+            repo.path(),
+            ".lf/skills/custom-audit.md",
+            "---\nextends: audit\ndescription: Custom audit\n---\nCustom rules.\n",
+        );
+        write(
+            repo.path(),
+            ".claude/skills/unfamiliar/SKILL.md",
+            "---\nallowed-tools: [\n---\nUnfamiliar native body.\n",
+        );
+        write(
+            repo.path(),
+            ".lf/skills/my-unfamiliar.md",
+            "---\nextends: unfamiliar\n---\nExtra step.\n",
+        );
+
+        let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
+
+        let my_audit = catalog.load_skill("my-audit").unwrap();
+        assert!(my_audit.agent.is_none());
+        assert!(my_audit.settings.is_empty());
+        assert_eq!(
+            my_audit.content.as_deref(),
+            Some("Check every invariant.\n\nCheck repo-specific rules.\n")
+        );
+        let my_audit_text = catalog
+            .read_source(catalog.resolve("my-audit").unwrap().unwrap())
+            .unwrap();
+        assert_eq!(
+            loopflow_definitions::text::skill_description(&my_audit_text).as_deref(),
+            Some("Audit diff")
+        );
+
+        let custom_audit_text = catalog
+            .read_source(catalog.resolve("custom-audit").unwrap().unwrap())
+            .unwrap();
+        assert_eq!(
+            loopflow_definitions::text::skill_description(&custom_audit_text).as_deref(),
+            Some("Custom audit")
+        );
+
+        let my_unfamiliar = catalog.load_skill("my-unfamiliar").unwrap();
+        assert!(my_unfamiliar.agent.is_none());
+        assert!(my_unfamiliar.settings.is_empty());
+        assert_eq!(
+            my_unfamiliar.content.as_deref(),
+            Some("Unfamiliar native body.\n\nExtra step.\n")
+        );
+    }
+
+    #[test]
+    fn skill_extension_merges_settings_by_semantics() {
+        let repo = TempDir::new().unwrap();
+        write(
+            repo.path(),
+            ".lf/skills/base-docs.md",
+            "---\ncontext:\n  docs: [a.md]\n  budgets:\n    memory_tokens: 1000\n    memory_bytes: 2000\nclaude:\n  model: sonnet\ncodex:\n  service_tier: default\n---\nBase.\n",
+        );
+        // Flat `docs:` normalizes into `context.docs` and overrides parent's `context.docs`.
+        write(
+            repo.path(),
+            ".lf/skills/override-docs.md",
+            "---\nextends: base-docs\ndocs: [b.md]\n---\nChild.\n",
+        );
+        // Nested `context:` and `context.budgets` merge recursively without wiping siblings.
+        write(
+            repo.path(),
+            ".lf/skills/merge-context.md",
+            "---\nextends: base-docs\ncontext:\n  diff_files: false\n  budgets:\n    memory_tokens: 500\ncodex:\n  service_tier: priority\n---\nChild.\n",
+        );
+        // Child `default_agent` clears inherited pinned `agent`, and vice versa.
+        write(
+            repo.path(),
+            ".lf/skills/pinned-parent.md",
+            "---\nagent: codex\n---\nPinned.\n",
+        );
+        write(
+            repo.path(),
+            ".lf/skills/default-child.md",
+            "---\nextends: pinned-parent\ndefault_agent: claude:opus\n---\nDefault.\n",
+        );
+        write(
+            repo.path(),
+            ".lf/skills/default-parent.md",
+            "---\ndefault_agent: codex\n---\nDefault.\n",
+        );
+        write(
+            repo.path(),
+            ".lf/skills/pinned-child.md",
+            "---\nextends: default-parent\nagent: claude:opus\n---\nPinned.\n",
+        );
+
+        let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
+
+        let override_docs = catalog.load_skill("override-docs").unwrap();
+        assert_eq!(
+            override_docs.docs.as_deref(),
+            Some(&["b.md".to_string()][..])
+        );
+
+        let merge_context = catalog.load_skill("merge-context").unwrap();
+        assert_eq!(
+            merge_context.docs.as_deref(),
+            Some(&["a.md".to_string()][..])
+        );
+        assert_eq!(
+            merge_context.settings["context"]["diff_files"].as_bool(),
+            Some(false)
+        );
+        assert_eq!(
+            merge_context.settings["context"]["budgets"]["memory_tokens"].as_u64(),
+            Some(500)
+        );
+        assert_eq!(
+            merge_context.settings["context"]["budgets"]["memory_bytes"].as_u64(),
+            Some(2000)
+        );
+        assert_eq!(
+            merge_context.settings["claude"]["model"].as_str(),
+            Some("sonnet")
+        );
+        assert_eq!(
+            merge_context.settings["codex"]["service_tier"].as_str(),
+            Some("priority")
+        );
+
+        let default_child = catalog.load_skill("default-child").unwrap();
+        assert!(default_child.agent.is_none());
+        assert_eq!(
+            default_child.settings["default_agent"].as_str(),
+            Some("claude:opus")
+        );
+
+        let pinned_child = catalog.load_skill("pinned-child").unwrap();
+        assert_eq!(pinned_child.agent.as_deref(), Some("claude:opus"));
+        assert!(!pinned_child.settings.contains_key("default_agent"));
     }
 
     #[test]
@@ -809,8 +1060,28 @@ mod tests {
         );
         write(
             repo.path(),
+            ".lf/skills/base-qa.md",
+            "---\nextends: lf:qa\n---\n## Base QA\n",
+        );
+        write(
+            repo.path(),
             ".lf/skills/qa.md",
-            "---\nextends: implement\n---\nOur own QA.\n",
+            "---\nextends: base-qa\n---\n## Repo QA\n",
+        );
+        write(
+            repo.path(),
+            ".lf/skills/verify.md",
+            "---\nextends: implement\n---\nOur own verify.\n",
+        );
+        write(
+            repo.path(),
+            ".lf/skills/realign.md",
+            "---\nextends: realign-cycle\n---\nCycle.\n",
+        );
+        write(
+            repo.path(),
+            ".lf/skills/realign-cycle.md",
+            "---\nextends: realign\n---\nCycle.\n",
         );
         write(
             repo.path(),
@@ -819,18 +1090,18 @@ mod tests {
         );
         write(repo.path(), ".lf/skills/mine.md", "Ours alone.\n");
         let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
-        let relations = |name: &str| catalog.resolve(name).unwrap().unwrap().relations();
+        let relations = |name: &str| catalog.relations(catalog.resolve(name).unwrap().unwrap());
         assert_eq!(
             relations("gate"),
             (Some(BuiltinRelation::Extends), Some("lf:gate".into()))
         );
         assert_eq!(
             relations("implement"),
-            (Some(BuiltinRelation::Extends), Some("implement".into()))
+            (Some(BuiltinRelation::Extends), Some("lf:implement".into()))
         );
         assert_eq!(
             relations("polish"),
-            (Some(BuiltinRelation::Extends), Some("builtin".into()))
+            (Some(BuiltinRelation::Extends), Some("lf:polish".into()))
         );
         assert_eq!(
             relations("card-implement"),
@@ -838,7 +1109,18 @@ mod tests {
         );
         assert_eq!(
             relations("qa"),
+            (Some(BuiltinRelation::Extends), Some("base-qa".into()))
+        );
+        assert_eq!(
+            relations("verify"),
             (Some(BuiltinRelation::Replaces), Some("implement".into()))
+        );
+        assert_eq!(
+            relations("realign"),
+            (
+                Some(BuiltinRelation::Replaces),
+                Some("realign-cycle".into())
+            )
         );
         assert_eq!(relations("debug"), (Some(BuiltinRelation::Copies), None));
         assert_eq!(relations("mine"), (None, None));

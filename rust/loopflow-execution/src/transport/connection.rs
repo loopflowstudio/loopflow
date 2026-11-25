@@ -264,25 +264,18 @@ impl Status {
                 std::thread::spawn(move || {
                     let result = super::registry::connect(&terminal);
                     // Presentation cannot prevent the terminal from reconnecting.
-                    let transition = crate::store::read_existing_registry()
-                        .ok()
-                        .flatten()
-                        .and_then(|store| {
-                            let session = session.as_ref()?;
-                            let current = store
-                                .sqlite
-                                .session_attachment(session.as_str())
-                                .ok()
-                                .flatten()?;
-                            store
-                                .sqlite
-                                .provider_transition(session.as_str())
-                                .ok()
-                                .flatten()
-                                .filter(|transition| {
-                                    transition.to_agent_process == current.agent_process_id
-                                })
-                        });
+                    let transition = session.as_deref().and_then(|session| {
+                        let store = crate::store::read_existing_registry().ok()??;
+                        let current = store.sqlite.session_attachment(session).ok()??;
+                        store
+                            .sqlite
+                            .provider_transition(session)
+                            .ok()
+                            .flatten()
+                            .filter(|transition| {
+                                transition.to_agent_process == current.agent_process_id
+                            })
+                    });
                     let _ = send.send((result, transition));
                 });
                 loop {

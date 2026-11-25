@@ -49,6 +49,7 @@ const HELD_ENV: &str = "LF_TRANSPORT_HELD";
 pub(crate) const WITHIN_ENV: &str = "LF_HELD_TERMINAL";
 const PARENT_ENV: &str = "LF_TRANSPORT_PARENT";
 const CONTROL_ENV: &str = "LF_TRANSPORT_CONTROL";
+const SKILL_CHECKPOINT_ENV: &str = "LF_SKILL_CHECKPOINT";
 const LIMIT: usize = 4 * 1024 * 1024;
 // Short liveness timers use uptime: laptop sleep is not a silent connection.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
@@ -282,8 +283,6 @@ impl LaunchInput {
     }
 }
 
-const SKILL_CHECKPOINT_ENV: &str = "LF_SKILL_CHECKPOINT";
-
 /// Whether this held Skill's original invocation owns its checkpoint.
 pub fn skill_checkpoint() -> Option<bool> {
     HANDOFF.get()?.checkpoint_skill
@@ -333,8 +332,7 @@ pub fn detach_current() -> Result<bool> {
     if !can_delegate_command() {
         return Ok(false);
     }
-    let mut argv: Vec<String> = std::env::args().collect();
-    let cwd = admit_current(&mut argv)?;
+    let (argv, cwd) = replay_current()?;
     let code = crate::os_process::detached::run(&argv, &cwd, false, &|command| {
         // No terminal shows detached work; it claims none.
         command
@@ -403,8 +401,11 @@ enum SessionHost {
 /// Bound conversations and remote viewers require the holder. At a terminal a
 /// standalone conversation can also use a holder that is already running.
 fn session_host(id: &str) -> Result<SessionHost> {
+    if current().is_some() {
+        return Ok(SessionHost::Here(LaunchKind::WorkSession));
+    }
     let required = requires_holder(id);
-    if cfg!(test) || current().is_some() || crate::os_process::detached::launched() {
+    if cfg!(test) || crate::os_process::detached::launched() {
         return Ok(SessionHost::Here(if required {
             LaunchKind::WorkSession
         } else {
@@ -423,10 +424,7 @@ fn session_host(id: &str) -> Result<SessionHost> {
 }
 
 fn requires_holder(id: &str) -> bool {
-    if current().is_some()
-        || std::env::var_os("LF_SERVER_STATUS").is_some()
-        || std::env::var_os(STREAM_ENV).is_some()
-    {
+    if std::env::var_os("LF_SERVER_STATUS").is_some() || std::env::var_os(STREAM_ENV).is_some() {
         return true;
     }
     static GAP: LazyLock<Mutex<crate::store::RecordingGap>> = LazyLock::new(Default::default);
@@ -1023,6 +1021,18 @@ fn viewer_hold(viewers: &[Viewer], previous: Option<ViewerHold>, now: i64) -> Op
     }
 }
 
+/// Keep a saved absence on `None` and date a lost viewer from its last heartbeat.
+pub(super) fn record_viewer_hold(
+    store: &loopflow_storage::sqlite::SqliteStore,
+    terminal: &TerminalId,
+    hold: Option<ViewerHold>,
+) -> loopflow_storage::StoreResult<()> {
+    match hold {
+        Some(hold) => store.record_viewer_hold(terminal, Some(hold)),
+        None => store.release_disconnected_viewers(terminal),
+    }
+}
+
 /// Ending execution releases its remaining viewers without restarting an
 /// absence clock that already ran while requested work finished.
 fn release_viewer_hold(terminal: &TerminalId, previous: Option<ViewerHold>) {
@@ -1031,8 +1041,8 @@ fn release_viewer_hold(terminal: &TerminalId, previous: Option<ViewerHold>) {
         previous,
         time::OffsetDateTime::now_utc().unix_timestamp(),
     );
-    let recorded =
-        crate::journal::process_ledger().and_then(|store| store.record_viewer_hold(terminal, hold));
+    let recorded = crate::journal::process_ledger()
+        .and_then(|store| record_viewer_hold(&store, terminal, hold));
     if let Err(error) = recorded {
         tracing::warn!(%error, %terminal, "cannot record Session viewer release; last observation expires");
     }
@@ -2548,7 +2558,7 @@ pub(crate) fn hand_exit_record(record: &NativeExit) -> Result<bool> {
     // decision or a closed connection before choosing who records the exit.
     let launcher_waits = handoff.checkpoint_skill.is_some();
     let request = if launcher_waits {
-        Request::SkillSession {
+        Request::BindSession {
             key: handoff.key.clone(),
             session: record.session.clone(),
         }

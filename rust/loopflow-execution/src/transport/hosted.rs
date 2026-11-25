@@ -388,7 +388,7 @@ impl Hosted {
                                 *exit_record = Some(record);
                                 viewer.reply(answers, Reply::Accepted);
                             }
-                            Request::SkillSession { key, session } if key == *control_key => {
+                            Request::BindSession { key, session } if key == *control_key => {
                                 bind_session(&session);
                                 viewer.reply(answers, Reply::Accepted);
                             }

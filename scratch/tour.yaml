@@ -1,4 +1,4 @@
-at: 413882030b19a0eeae77d035a4bce33c05aba87a
+at: f76edbe0dfdf7817e89e935688026f8636361532
 first:
   - path: docs/sessions.md
     why: Opening, detaching and resuming a shared conversation
@@ -9,7 +9,9 @@ first:
   - path: rust/loopflow/src/bin/lf.rs
     why: Delegate direct launches and finish a Skill
   - path: rust/loopflow-execution/src/transport.rs
-    why: Choose the host and pass checkpoint ownership
+    why: Choose the host, hold viewers and pass checkpoints
+  - path: rust/loopflow-execution/src/transport/wire.rs
+    why: Bind a Session and retire overdue chats
   - path: rust/loopflow-execution/src/transport/registry.rs
     why: Find the running terminal by Session after restart
   - path: rust/loopflow-execution/src/ops/task/retirement.rs

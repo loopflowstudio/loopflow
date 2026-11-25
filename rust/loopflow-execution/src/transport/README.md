@@ -286,11 +286,11 @@ Before `start` the server writes `<terminal>/meta.json`: the Session (when
 known at start), the start's `request`, and the control key the child's
 requests are checked against. For direct interactive launches (`lf -a agy`,
 `lf <skill>`), the `LfSession` is created inside the held child, so
-`Start.session` is `None`. Right before execing into the provider, the launcher
-sends `exit_record` over `held.sock` with the created Session ID; the server
-binds that Session in `Registry::live`, updates `meta.json`, and keeps the
-record in `exit-record.json` until settlement (so `session.attach`, `lf open`,
-and server restarts all resolve the Session, falling back to `exit-record.json`
+`Start.session` is `None`. Before starting the provider, a chat launcher
+sends `exit_record` (and a delegated Skill sends `bind_session`) over
+`held.sock` with the created Session ID; the server binds that Session in
+`Registry::live` and updates `meta.json` (and keeps an `exit_record` in
+`exit-record.json` until settlement, which server restarts also fall back to
 when `meta.session` is absent). The native client's announcement stays in
 `native-client.json` until that client ends. A launcher that execs its
 provider never announces it again, so a server that takes the terminal up

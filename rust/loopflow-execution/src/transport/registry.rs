@@ -60,9 +60,13 @@ impl Meta {
         place.terminal(terminal.as_str()).join("meta.json")
     }
 
-    fn read(place: &Place, terminal: &TerminalId) -> Option<Self> {
+    fn read_raw(place: &Place, terminal: &TerminalId) -> Option<Self> {
         let bytes = std::fs::read(Self::path(place, terminal)).ok()?;
-        let mut meta: Self = serde_json::from_slice(&bytes).ok()?;
+        serde_json::from_slice(&bytes).ok()
+    }
+
+    fn read(place: &Place, terminal: &TerminalId) -> Option<Self> {
+        let mut meta = Self::read_raw(place, terminal)?;
         if meta.session.is_none() {
             meta.session = super::hosted::read_kept::<crate::harness::native_exit::NativeExit>(
                 &exit_record_file(place, terminal),
@@ -1075,7 +1079,7 @@ fn bind_session(live: &Live, place: &Place, terminal: &TerminalId, session: &str
         };
         *slot = Some(session.into());
     }
-    let saved = Meta::read(place, terminal)
+    let saved = Meta::read_raw(place, terminal)
         .context("terminal has no readable meta.json")
         .and_then(|mut meta| {
             meta.session = Some(session.into());

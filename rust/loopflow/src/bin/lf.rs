@@ -3039,14 +3039,15 @@ fn dispatch_launch(
     binding: Option<&loopflow_execution::ops::WorkBinding>,
 ) -> anyhow::Result<()> {
     let target = resolve_cli_target(cli)?;
-    let skill = matches!(
-        target,
-        Some((loopflow_execution::definition::Target::Skill(_), _))
-    );
-    if (skill || matches!(cli.command, None | Some(Commands::Inline { .. })))
-        && loopflow_execution::transport::delegate_chat(kind, skill)?
-    {
-        return Ok(());
+    let delegated_skill = match (&target, &cli.command) {
+        (Some((loopflow_execution::definition::Target::Skill(_), _)), _) => Some(true),
+        (None, None | Some(Commands::Inline { .. })) => Some(false),
+        _ => None,
+    };
+    if let Some(skill) = delegated_skill {
+        if loopflow_execution::transport::delegate_chat(kind, skill)? {
+            return Ok(());
+        }
     }
     match target {
         Some((target, message)) => {

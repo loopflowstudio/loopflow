@@ -240,8 +240,9 @@ pub enum Request {
         #[serde(skip_serializing_if = "Option::is_none")]
         ready: Option<String>,
     },
-    /// A Skill launcher waits for its provider so it can finish the step.
-    SkillSession {
+    /// Bind the held terminal to the Session its direct child created without
+    /// handing off exit recording (for example, a Skill waiting to checkpoint).
+    BindSession {
         key: String,
         session: String,
     },

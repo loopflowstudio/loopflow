@@ -1,37 +1,33 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>LOO-1104 QA: named skill inheritance</title>
+<html><head><meta charset="utf-8"><title>LOO-1104 QA: skill inheritance review fixes</title>
 <style>body{font:15px/1.5 -apple-system,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}
 pre{background:#f5f5f5;padding:.8em;overflow-x:auto;font-size:13px}td,th{border-bottom:1px solid #ddd;padding:.3em .6em;text-align:left;vertical-align:top}table{border-collapse:collapse}.ok{color:#1a7f37}.no{color:#b35900}</style></head><body>
-<h1>LOO-1104 QA: <code>extends: &lt;name&gt;</code> / <code>extends: lf:&lt;name&gt;</code></h1>
-<p>Branch <code>lf</code> at <code>be73184b3b</code> (<code>cargo build -p loopflow --bin lf</code>), private <code>LF_HOME=/tmp/lf-qa-ext/home</code>,
-fixture repository <code>/tmp/lf-qa-ext/repo</code> with a bare origin. Launches went to a stand-in <code>claude</code> that saved its argv and stdin, so every prompt below is the exact text lf sent.
-The Graph and skill changes earlier in this Task were QA'd at <code>684bbae383</code>; this run covers what came after: named inheritance and its compress pass.</p>
+<h1>LOO-1104 QA: named skill inheritance, after the review fixes</h1>
+<p>Branch <code>lf</code> at <code>143bbffecd</code>, private <code>LF_HOME=/tmp/lf-qa-ext2/home</code>, fixture repository <code>/tmp/lf-qa-ext2/repo</code> with a bare origin.
+Launches went to a stand-in <code>claude</code> that saved argv and the first stdin line, so prompts below are what lf sent.
+Earlier runs covered the Graph and skill rewrites (<code>684bbae383</code>) and the first inheritance build (<code>00c7f89698</code>); this run covers <code>093386a924</code> and its compress pass.</p>
 
 <h2>Scenarios</h2>
 <table>
 <tr><th>Scenario</th><th>What I did</th><th>What I saw</th></tr>
-<tr><td>Listing</td><td><code>lf list skill</code> over 12 repository skills</td><td class="ok">Each shows its target: <code>(.lf/skills/qa.md, extends lf:qa)</code>, <code>(.lf/skills/card-implement.md, extends implement)</code>, <code>(.lf/skills/gate.md, extends builtin)</code>. A full copy reads <code>copies</code> in <code>--json</code>.</td></tr>
-<tr><td>Chain: child → repo overlay → builtin</td><td><code>card-implement</code> extends <code>implement</code>; <code>.lf/skills/implement.md</code> extends <code>implement</code> (itself); <code>lf -b -a claude card-implement probe</code></td><td class="ok">Prompt: builtin implement text, then <code>## Repo implement rules</code>, then <code>## Card rules</code>, inside <code>&lt;lf:skill:card-implement&gt;</code>. No <code>extends:</code> line leaks.</td></tr>
-<tr><td><code>extends: lf:qa</code></td><td>launch <code>qa</code></td><td class="ok">Builtin qa text with the repository section appended.</td></tr>
-<tr><td>Legacy <code>extends: builtin</code></td><td>launch <code>gate</code></td><td class="ok">Builtin gate text with the marker appended.</td></tr>
-<tr><td>Frontmatter merge</td><td><code>implement.md</code> sets <code>agent: claude:haiku</code>; <code>card2</code> extends it with <code>agent: claude:sonnet</code>; both launched without <code>-a</code></td><td class="ok"><code>card-implement</code> ran <code>--model haiku</code> (inherited); <code>card2</code> ran <code>--model sonnet</code> (child wins).</td></tr>
-<tr><td>Native and user-level parents</td><td><code>extends: probe</code> (a <code>.claude/skills/probe/SKILL.md</code>) and <code>extends: skillregistry/frontend-design</code> (<code>~/.lf/skills</code>)</td><td class="ok">Both compose under the child's name; descriptions inherited in the listing.</td></tr>
-<tr><td>Cycles</td><td><code>loopa ↔ loopb</code>, <code>selfie</code> extends itself with no builtin</td><td class="ok">Listing: <code>unavailable: … skill inheritance cycle: loopa -&gt; loopb -&gt; loopa</code>. Launch exits 1 with the same error; a Graph naming <code>loopa</code> fails <code>lf graph show</code> and <code>lf -b graph</code> before any agent starts.</td></tr>
-<tr><td>Missing targets</td><td><code>extends: nosuch</code>, <code>extends: lf:nosuch</code></td><td class="ok"><code>no skill is named "nosuch"</code> / <code>no builtin skill is named "nosuch"</code>, in the listing and at launch.</td></tr>
-<tr><td><code>lf skill customize</code></td><td><code>customize pr-message</code>, <code>customize card-implement</code> (exists), <code>customize ci-fix --full</code></td><td class="ok">New file starts <code>extends: lf:pr-message</code>; existing file path printed untouched; <code>--full</code> copies the builtin frontmatter and body.</td></tr>
+<tr><td>Native parent's frontmatter stays out</td><td><code>myaudit</code> extends <code>.claude/skills/audit/SKILL.md</code> (<code>agent: Explore</code>, <code>context: fork</code>, <code>allowed-tools</code>, <code>description: Audit diff</code>); listed, launched with and without <code>-a</code></td><td class="ok">Listing description <code>Audit diff</code>. Without <code>-a</code>: "No agent selected" (no attempt at an <code>Explore</code> agent, no <code>context</code> error). With <code>-a claude</code>: prompt is <code>Native audit body.</code> then <code>## My audit rules</code>; no <code>Explore</code> in argv.</td></tr>
+<tr><td>Child <code>docs:</code> replaces parent's <code>context.docs</code></td><td><code>base</code> has <code>context: {docs: [docs/a.md]}</code>; <code>kid-docs</code> sets top-level <code>docs: [docs/b.md]</code></td><td class="ok">One <code>&lt;lf:reference&gt;</code>: <code>docs/b.md</code>. No <code>a.md</code>.</td></tr>
+<tr><td>Nested <code>context</code> merges</td><td><code>kid-diff</code> sets only <code>context: {diff_files: false}</code></td><td class="ok">Parent's <code>docs/a.md</code> still delivered. <code>diff_files</code> itself isn't visible from a bare batch (the parent shows no diff files either); the catalog unit test asserts it, and <code>cargo test -p loopflow-execution --lib skills::</code> passed 43/43.</td></tr>
+<tr><td>Child <code>default_agent</code> beats parent <code>agent</code></td><td><code>base</code> pins <code>agent: codex</code>; <code>kid-default</code> sets <code>default_agent: claude:opus</code>; launched without <code>-a</code></td><td class="ok">Ran claude with <code>--model opus</code>. <code>kid-docs</code> (no agent of its own) inherited <code>codex</code>, as it should.</td></tr>
+<tr><td>Listing names the real source</td><td><code>lf list skill</code></td><td class="ok"><code>implement.md</code> (extends itself) and <code>gate.md</code> (<code>extends: builtin</code>) both read <code>extends lf:implement</code> / <code>extends lf:gate</code>. <code>qa.md</code> → <code>base-qa</code> → <code>lf:qa</code> reads <code>extends base-qa</code>, no false "replaces builtin".</td></tr>
+<tr><td>Chains still compose</td><td>launch <code>qa</code>, <code>implement</code>, <code>gate</code></td><td class="ok"><code>qa</code>: builtin sections, <code>## Base qa</code>, <code>## Repo qa</code>. <code>implement</code>: builtin then <code>## Repo implement rules</code>. <code>gate</code>: <code>## Gate marker</code> appended.</td></tr>
+<tr><td>Self-extension with no builtin</td><td><code>selfie</code> extends <code>selfie</code>; listing and a Graph naming it</td><td class="ok"><code>no builtin skill is named "selfie"</code> in both; <code>lf graph show bad</code> exits before any agent.</td></tr>
+<tr><td>Cycles</td><td><code>loopa ↔ loopb</code></td><td class="ok"><code>skill inheritance cycle: loopa -&gt; loopb -&gt; loopa</code>, unchanged.</td></tr>
 </table>
 
 <h2>Fixed</h2>
-<p>Nothing needed fixing. Added the stand-in recipe for reading composed launch text to <code>.lf/qa/skills.md</code>.</p>
+<p>No product fixes needed. <code>.lf/qa/skills.md</code> gained three traps that cost this run time: the stand-in must read stdin before answering, zsh needs <code>${=U}</code> to split an unset list, and bare batches never carry diff files.</p>
 
 <h2>Not reached</h2>
-<ul><li>Desktop's skill list with the new <code>extends</code> field: covered only by the updated <code>ServerProtocolTests.swift</code> fixture; no Dev app run (the field reaches the wire through the same <code>Entry</code> the CLI JSON printed above).</li>
-<li>A real provider turn: the stand-in proves what lf sends, not how a model reads it.</li></ul>
+<ul><li><code>diff_files: false</code> on a real Task step (only the unit test sees it).</li>
+<li>Desktop's skill list: no Dev app run; the <code>extends</code> value reaches it through the same listing entry the CLI printed.</li>
+<li>A real provider turn: the stand-in shows what lf sends, not how a model reads it.</li></ul>
 
-<h2>Still worth a look, worst first</h2>
-<ol>
-<li><code>selfie</code> extending itself with no builtin of that name reports <code>skill inheritance cycle: selfie -&gt; selfie</code>. True, but the person meant "the builtin", so <code>no builtin skill is named "selfie"</code> would say what to fix.</li>
-<li>A self-extending overlay lists as <code>(.lf/skills/implement.md, extends implement)</code>; the earlier <code>extends builtin</code> label said where the text comes from more plainly.</li>
-<li>A cycle error names the file where the walk closed (<code>loopb.md</code> when listing <code>loopa</code>); the chain in the message makes it findable.</li>
-</ol>
+<h2>Still worth a look</h2>
+<ol><li>A cycle error names the file where the walk closed (<code>loopb.md</code> when listing <code>loopa</code>); the chain in the message makes it findable.</li></ol>
 </body></html>

@@ -64,5 +64,10 @@ line is the stream-json user message holding `<lf:skill:<name>>…`; an inherite
 `agent:` shows as `--model` in argv. The batch never finishes against that
 stand-in, and macOS has no `timeout`: wrap it in `perl -e 'alarm 25; exec @ARGV'`.
 The four launches before the prompt are `auth status --json` and `--version`.
+Have the stand-in `read` one stdin line before printing its result; printing
+first lets lf exit before the prompt arrives and leaves the capture empty.
+In zsh, an unset list in a variable needs `env ${=U}` to split. A bare
+`lf -b <skill>` composes `docs:` into `<lf:reference>` blocks but never diff
+files, so `diff_files:` is visible only from a Task step.
 Cycles and missing targets refuse at launch and in `lf graph show` of a Graph
 that names the skill.

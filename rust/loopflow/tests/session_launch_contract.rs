@@ -1356,7 +1356,6 @@ fn resume_switches_a_bound_agy_conversation_to_claude_in_its_original_worktree()
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
-        .process_group(0)
         .spawn()
         .unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);

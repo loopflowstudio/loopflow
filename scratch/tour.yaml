@@ -1,4 +1,4 @@
-at: e1a15bfcf349dd29e60362217b1791945d381046
+at: e148403a52e0eb2161a04609f7be95cbf809a384
 first:
   - path: docs/work.md
     why: Binding rule, split-checkout output, and checkout adoption behavior
@@ -6,13 +6,13 @@ first:
     why: Storage and workspace admission invariants for bound Sessions
   - path: docs/sessions.md
   - path: rust/loopflow-storage/src/sqlite/children.rs
-    why: Drops cwd rewrite from promote_task_prepared
+    why: Drops cwd rewrite and pairs creation with its Wave
   - path: rust/loopflow-storage/src/sqlite/sessions.rs
     why: Guards admission on capture/bind and filters adoption lookup
   - path: rust/loopflow-execution/src/ops/task/adoption.rs
     why: Removes directory switching and logs split-checkout diagnostic
   - path: rust/loopflow-execution/src/ops/human_session/primary.rs
-    why: Restricts workspace admission to unstarted, unbound placeholders
+    why: Restricts scope lookup and workspace admission to unstarted placeholders
   - path: rust/loopflow-execution/src/ops/task.rs
     why: Passes Task ID when adopting a checkout conversation
   - path: rust/loopflow/src/lf/mod.rs
@@ -31,9 +31,9 @@ first:
     why: Updates Desktop bind expectations for unchanged cwd
 hide:
   - path: rust/loopflow-execution/src/store/children.rs
-    why: Drops unused destination parameter from promote_task
+    why: Signature update for promote_task
   - path: rust/loopflow-execution/src/store/ownership.rs
-    why: Drops unused destination parameter from promote_task
+    why: Signature update for promote_task
   - path: rust/loopflow-execution/src/store/children_tests.rs
     why: Signature update for promote_task
   - path: rust/loopflow-execution/src/store/ownership/tests.rs

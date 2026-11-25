@@ -352,8 +352,7 @@ impl SqliteStore {
     pub fn promote_task_prepared(
         &self,
         task_id: &TaskId,
-        creation: Option<&NewTask>,
-        creation_wave: Option<&WaveId>,
+        creation: Option<(&NewTask, Option<&WaveId>)>,
         placement: Option<&(PathBuf, TaskPr)>,
         session: Option<&crate::session::LfSession>,
         receipt: Option<&super::creation::TaskCreationRecord>,
@@ -363,7 +362,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let matches = match creation {
-            Some(input) => me.matches_promotion_in(&tx, input, creation_wave)?,
+            Some((input, wave)) => me.matches_promotion_in(&tx, input, wave)?,
             None => me.matches_task_in(&tx, task_id)?,
         };
         if !matches {
@@ -372,8 +371,8 @@ impl SqliteStore {
         if let Some(session) = session {
             super::sessions::require_current_actor_in(&tx, &session.id, caller)?;
         }
-        if let Some(input) = creation {
-            create_task_in(&tx, input, creation_wave)?;
+        if let Some((input, wave)) = creation {
+            create_task_in(&tx, input, wave)?;
         }
         if let Some((path, pr)) = placement {
             let current = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;

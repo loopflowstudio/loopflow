@@ -276,10 +276,7 @@ pub async fn admit_workspace(store: &SharedStore, session: LfSession) -> Result<
     }) {
         return Ok(session);
     }
-    let session = match store.sqlite.primary_scope(&session.id)? {
-        Some(scope) => admit_scope_workspace(store, session, scope).await?,
-        None => session,
-    };
+    let session = admit_scope_workspace(store, session).await?;
     leave_gone_directory(store, session).await
 }
 
@@ -319,14 +316,13 @@ async fn leave_gone_directory(store: &SharedStore, session: LfSession) -> Result
         .ok_or_else(|| session_not_found(&session.id))
 }
 
-async fn admit_scope_workspace(
-    store: &SharedStore,
-    session: LfSession,
-    scope: PrimaryScope,
-) -> Result<LfSession> {
+async fn admit_scope_workspace(store: &SharedStore, session: LfSession) -> Result<LfSession> {
     if session.captured.is_some() || session.bound_at.is_some() {
         return Ok(session);
     }
+    let Some(scope) = store.sqlite.primary_scope(&session.id)? else {
+        return Ok(session);
+    };
     let cwd = match &scope {
         PrimaryScope::Repository(repo) => ensure_scope_worktree(repo.as_path(), &scope)?.path,
         PrimaryScope::Wave(id) => {

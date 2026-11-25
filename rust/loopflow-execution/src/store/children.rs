@@ -16,8 +16,7 @@ impl Store {
     pub(crate) async fn promote_task(
         &self,
         task_id: &TaskId,
-        creation: Option<loopflow_storage::work::task::NewTask>,
-        creation_wave: Option<WaveId>,
+        creation: Option<(loopflow_storage::work::task::NewTask, Option<WaveId>)>,
         placement: Option<(std::path::PathBuf, TaskPr)>,
         session: Option<crate::session::LfSession>,
         acquisition: Option<Arc<super::PlanningLocks>>,
@@ -25,11 +24,11 @@ impl Store {
     ) -> StoreResult<Task> {
         let task_id = task_id.clone();
         run_planning_write(&self.sqlite, acquisition, move |store| {
+            let creation = creation.as_ref().map(|(task, wave)| (task, wave.as_ref()));
             crate::store::ownership::promote_task(
                 &store,
                 &task_id,
-                creation.as_ref(),
-                creation_wave.as_ref(),
+                creation,
                 placement.as_ref(),
                 session.as_ref(),
                 receipt.as_ref(),

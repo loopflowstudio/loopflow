@@ -133,8 +133,7 @@ fn new_task_reacquires_placement_after_wave_ancestry_changes() {
     assert!(store
         .promote_task_prepared(
             &creation.id,
-            Some(&creation),
-            None,
+            Some((&creation, None)),
             None,
             None,
             None,
@@ -150,8 +149,7 @@ fn new_task_reacquires_placement_after_wave_ancestry_changes() {
     super::promote_task(
         &store,
         &creation.id,
-        Some(&creation),
-        None,
+        Some((&creation, None)),
         None,
         None,
         None,
@@ -415,8 +413,7 @@ fn promotion_refuses_a_replaced_caller_for_either_title_source() {
         let history = store.session_history(&id, 0, 0).unwrap();
         let result = store.promote_task_prepared(
             &creation.id,
-            Some(&creation),
-            None,
+            Some((&creation, None)),
             None,
             Some(&before),
             None,
@@ -445,8 +442,7 @@ fn a_task_filed_or_moved_into_a_wave_is_in_its_project() {
     super::promote_task(
         &store,
         &standalone.id,
-        Some(&standalone),
-        None,
+        Some((&standalone, None)),
         None,
         None,
         None,
@@ -460,8 +456,7 @@ fn a_task_filed_or_moved_into_a_wave_is_in_its_project() {
     let filed = super::promote_task(
         &store,
         &creation.id,
-        Some(&creation),
-        Some(&wave),
+        Some((&creation, Some(&wave))),
         None,
         None,
         None,
@@ -477,8 +472,7 @@ fn a_task_filed_or_moved_into_a_wave_is_in_its_project() {
     let filed = super::promote_task(
         &store,
         &creation.id,
-        Some(&creation),
-        Some(&wave),
+        Some((&creation, Some(&wave))),
         None,
         None,
         None,

@@ -2439,7 +2439,7 @@ async fn file_task_in(
         )
         .await?;
         let id = task.id.clone();
-        let task = adoption::save(store, main, id, None, None, source, None, receipt).await?;
+        let task = adoption::save(store, main, id, None, source, None, receipt).await?;
         return store
             .get_task(&task.id)
             .await
@@ -2498,8 +2498,7 @@ async fn file_task_in(
         store,
         main,
         creation.id.clone(),
-        Some(creation),
-        selected.map(|wave| wave.id().clone()),
+        Some((creation, selected.map(|wave| wave.id().clone()))),
         source,
         acquisition,
         receipt,

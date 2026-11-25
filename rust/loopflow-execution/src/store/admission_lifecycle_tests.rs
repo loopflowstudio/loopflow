@@ -336,7 +336,8 @@ fn binding_keeps_its_directory_when_an_earlier_opening_admits_a_workspace() {
     conversation.interactive = true;
     conversation.cwd = dir.path().to_path_buf();
     let session = crate::store::sessions::create_session(&store, conversation, None).unwrap();
-    crate::store::ownership::promote_task(&store, &task_id, None, None, None, Some(&session), None)
+    assert!(session.captured.is_none());
+    crate::store::ownership::promote_task(&store, &task_id, None, None, Some(&session), None)
         .unwrap();
 
     let admitted = store
@@ -375,7 +376,6 @@ fn promotion_binding_survives_completion_after_placement_preparation() {
         let bound = crate::store::ownership::promote_task(
             &store,
             &task_id,
-            None,
             None,
             Some(&placement),
             Some(&session),

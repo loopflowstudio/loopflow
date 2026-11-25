@@ -719,16 +719,7 @@ impl Hosted {
                 if !child.outcome_unknown() {
                     close_viewers(&mut self.viewers, self.close_reason);
                 }
-                let _ = worker.send(StoreWork::ReleaseViewerHold {
-                    terminal: self.id.clone(),
-                    previous: self.observed_hold,
-                });
-                if let Some(bytes) = snapshot::encode(&self.output) {
-                    let _ = worker.send(StoreWork::LeaveSnapshot {
-                        terminal: self.id.clone(),
-                        bytes,
-                    });
-                }
+                self.leave_on_worker(worker);
                 return Ok(Pass::Ended(code, self.settling.take()));
             }
         }
@@ -749,12 +740,6 @@ impl Hosted {
                 answering,
                 Span::Aside { through: None },
             );
-            if let Some(bytes) = snapshot::encode(&self.output) {
-                let _ = worker.send(StoreWork::LeaveSnapshot {
-                    terminal: self.id.clone(),
-                    bytes,
-                });
-            }
             if let Some(viewer) = self
                 .viewers
                 .iter_mut()
@@ -764,13 +749,23 @@ impl Hosted {
                 let _ = viewer.flush();
             }
             // A held terminal has no process to signal: the notice ends it.
-            let _ = worker.send(StoreWork::ReleaseViewerHold {
-                terminal: self.id.clone(),
-                previous: self.observed_hold,
-            });
+            self.leave_on_worker(worker);
             child.retire();
         }
         Ok(Pass::Continue)
+    }
+
+    fn leave_on_worker(&self, worker: &mpsc::Sender<StoreWork>) {
+        if let Some(bytes) = snapshot::encode(&self.output) {
+            let _ = worker.send(StoreWork::LeaveSnapshot {
+                terminal: self.id.clone(),
+                bytes,
+            });
+        }
+        let _ = worker.send(StoreWork::ReleaseViewerHold {
+            terminal: self.id.clone(),
+            previous: self.observed_hold,
+        });
     }
 
     /// A paste the departed writer left open ends with it.

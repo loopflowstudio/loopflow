@@ -234,7 +234,14 @@ fn idle_count(path: &Path, mode: PoolMode) -> usize {
 /// 2. If `data_version` changed, check `(PRAGMA schema_version,
 ///    schema_migrations count & max rowid)` (<5 µs): unchanged means no DDL
 ///    or data-only migration occurred.
-pub(crate) fn is_stamp_fresh(conn: &Connection, stamp: &mut ValidatedStamp) -> bool {
+pub(crate) fn is_stamp_fresh(
+    conn: &Connection,
+    stamp: &mut ValidatedStamp,
+    require_shared_check: bool,
+) -> bool {
+    if require_shared_check && !stamp.shared_checked {
+        return false;
+    }
     let Ok(data_version) = read_data_version(conn) else {
         return false;
     };

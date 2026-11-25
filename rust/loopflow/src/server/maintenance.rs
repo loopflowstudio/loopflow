@@ -77,12 +77,7 @@ fn retain(path: &Path) -> anyhow::Result<()> {
         tracing::info!(?report, "store retention");
     }
     let files = loopflow_execution::store::file_retention::prune(path, now)?;
-    if files.log_rotated
-        || files.process_logs_removed > 0
-        || files.deliveries_removed > 0
-        || files.backups_removed > 0
-        || files.lock_files_removed > 0
-    {
+    if files.any() {
         tracing::info!(?files, "file retention");
     }
     Ok(())

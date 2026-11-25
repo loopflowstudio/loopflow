@@ -559,6 +559,28 @@ fn set_nonblocking(fd: std::os::fd::RawFd) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Drain a non-blocking pipe until `WouldBlock` or EOF, dropping it on EOF/error.
+fn drain_pipe(pipe: &mut Option<impl Read>, out: &mut Vec<u8>, buf: &mut [u8]) {
+    let Some(reader) = pipe.as_mut() else {
+        return;
+    };
+    loop {
+        match reader.read(buf) {
+            Ok(0) => {
+                *pipe = None;
+                break;
+            }
+            Ok(n) => out.extend_from_slice(&buf[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => {
+                *pipe = None;
+                break;
+            }
+        }
+    }
+}
+
 /// Run Git without a terminal, stopping its process group at the deadline.
 /// Multiplexes stdin/stdout/stderr with `poll(2)` so no extra threads are spawned.
 fn git_until(
@@ -630,36 +652,25 @@ fn git_until(
             revents: 0,
         }; 3];
         let mut nfds = 0usize;
-        let stdin_idx = stdin.as_ref().map(|pipe| {
+        let mut push_fd = |fd: std::os::fd::RawFd, events: libc::c_short| {
             let idx = nfds;
             fds[idx] = libc::pollfd {
-                fd: pipe.as_raw_fd(),
-                events: libc::POLLOUT,
+                fd,
+                events,
                 revents: 0,
             };
             nfds += 1;
             idx
-        });
-        let stdout_idx = stdout.as_ref().map(|pipe| {
-            let idx = nfds;
-            fds[idx] = libc::pollfd {
-                fd: pipe.as_raw_fd(),
-                events: libc::POLLIN,
-                revents: 0,
-            };
-            nfds += 1;
-            idx
-        });
-        let stderr_idx = stderr.as_ref().map(|pipe| {
-            let idx = nfds;
-            fds[idx] = libc::pollfd {
-                fd: pipe.as_raw_fd(),
-                events: libc::POLLIN,
-                revents: 0,
-            };
-            nfds += 1;
-            idx
-        });
+        };
+        let stdin_idx = stdin
+            .as_ref()
+            .map(|p| push_fd(p.as_raw_fd(), libc::POLLOUT));
+        let stdout_idx = stdout
+            .as_ref()
+            .map(|p| push_fd(p.as_raw_fd(), libc::POLLIN));
+        let stderr_idx = stderr
+            .as_ref()
+            .map(|p| push_fd(p.as_raw_fd(), libc::POLLIN));
 
         // SAFETY: `fds[..nfds]` contains valid open file descriptors.
         let ready = unsafe { libc::poll(fds.as_mut_ptr(), nfds as libc::nfds_t, timeout_ms) };
@@ -703,43 +714,11 @@ fn git_until(
                 }
             }
         }
-        if let (Some(idx), Some(pipe)) = (stdout_idx, stdout.as_mut()) {
-            if fds[idx].revents != 0 {
-                loop {
-                    match pipe.read(&mut buf) {
-                        Ok(0) => {
-                            stdout = None;
-                            break;
-                        }
-                        Ok(n) => out_bytes.extend_from_slice(&buf[..n]),
-                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                        Err(_) => {
-                            stdout = None;
-                            break;
-                        }
-                    }
-                }
-            }
+        if stdout_idx.is_some_and(|idx| fds[idx].revents != 0) {
+            drain_pipe(&mut stdout, &mut out_bytes, &mut buf);
         }
-        if let (Some(idx), Some(pipe)) = (stderr_idx, stderr.as_mut()) {
-            if fds[idx].revents != 0 {
-                loop {
-                    match pipe.read(&mut buf) {
-                        Ok(0) => {
-                            stderr = None;
-                            break;
-                        }
-                        Ok(n) => err_bytes.extend_from_slice(&buf[..n]),
-                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                        Err(_) => {
-                            stderr = None;
-                            break;
-                        }
-                    }
-                }
-            }
+        if stderr_idx.is_some_and(|idx| fds[idx].revents != 0) {
+            drain_pipe(&mut stderr, &mut err_bytes, &mut buf);
         }
     }
 

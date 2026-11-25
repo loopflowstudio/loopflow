@@ -1241,7 +1241,7 @@ pub(crate) fn record_armed_pr(
     options: &LandOptions,
     pr: &PrInfo,
 ) -> OpsResult<PrLanding> {
-    tokio::runtime::Runtime::new()?.block_on(async {
+    crate::runtime::block_on(async {
         let store = landing_store().await?;
         let landing = create_landing(&store, repo, options, pr).await?;
         store
@@ -1260,7 +1260,7 @@ pub(crate) fn reconcile_armed_pr(
 ) -> OpsResult<PrLanding> {
     let landing = record_armed_pr(repo, options, pr)?;
     let release = Some(Arc::new((lock.try_clone()?, lease.try_clone()?)));
-    tokio::runtime::Runtime::new()?.block_on(async {
+    crate::runtime::block_on(async {
         reconcile_pr_landing(
             landing_store().await?,
             landing,
@@ -1291,13 +1291,10 @@ pub struct DeliveryCheck {
 /// Observe and repair this PR until it merges; each check releases its claim.
 pub fn wait_for_merge(repo: &Path, options: &LandOptions, pr: &PrInfo) -> OpsResult<()> {
     let initial = record_armed_pr(repo, options, pr)?;
-    let runtime = tokio::runtime::Runtime::new()?;
-    let result = runtime.block_on(async {
+    crate::runtime::block_on(async {
         let store = landing_store().await?;
         wait_for_landing(&store, &initial.id).await
-    });
-    runtime.shutdown_background();
-    result
+    })
 }
 
 /// Check every 15 s until the PR merges or closes. A blocked check is a
@@ -1374,8 +1371,7 @@ pub(crate) async fn wait_with_io(
 }
 
 pub fn reconcile_repository(repo: &Path) -> OpsResult<DeliveryCheck> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    let result = runtime.block_on(async {
+    crate::runtime::block_on(async {
         let store = landing_store().await?;
         let mut report = DeliveryCheck {
             checked_at: OffsetDateTime::now_utc().unix_timestamp(),
@@ -1383,9 +1379,7 @@ pub fn reconcile_repository(repo: &Path) -> OpsResult<DeliveryCheck> {
         };
         reconcile_repository_async(repo, &store, &mut report.errors).await?;
         Ok(report)
-    });
-    runtime.shutdown_background();
-    result
+    })
 }
 
 async fn reconcile_repository_async(

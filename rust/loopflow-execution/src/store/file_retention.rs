@@ -34,6 +34,16 @@ pub struct FileRetentionReport {
     pub lock_files_removed: usize,
 }
 
+impl FileRetentionReport {
+    pub fn any(&self) -> bool {
+        self.log_rotated
+            || self.process_logs_removed > 0
+            || self.deliveries_removed > 0
+            || self.backups_removed > 0
+            || self.lock_files_removed > 0
+    }
+}
+
 /// Rotate `logs/lf.log` and prune stale files for the home owning `database`.
 pub fn prune(database: &Path, now: i64) -> StoreResult<FileRetentionReport> {
     let Some(home) = database.parent() else {
@@ -239,6 +249,9 @@ fn prune_backups(database: &Path, owners: &ActiveFileOwners, now: i64) -> usize 
 
 fn prune_lock_files(database: &Path, home: &Path, owners: &ActiveFileOwners, now: i64) -> usize {
     let mut removed = 0;
+    let canonical_db = database
+        .canonicalize()
+        .unwrap_or_else(|_| database.to_path_buf());
 
     // 1. `<db>.session-locks/<sha256(fence_locator)>`
     let active_fences: HashSet<String> = owners
@@ -246,11 +259,12 @@ fn prune_lock_files(database: &Path, home: &Path, owners: &ActiveFileOwners, now
         .iter()
         .map(|locator| hex::encode(Sha256::digest(locator.as_bytes())))
         .collect();
-    let session_locks = database
-        .canonicalize()
-        .unwrap_or_else(|_| database.to_path_buf())
-        .with_extension("session-locks");
-    removed += prune_lock_dir(&session_locks, &active_fences, None, now);
+    removed += prune_lock_dir(
+        &canonical_db.with_extension("session-locks"),
+        &active_fences,
+        None,
+        now,
+    );
 
     // 2. `<home>/human-sessions/.<sha256(session_id)[..16]>.launch.lock`
     let active_human_locks: HashSet<String> = owners
@@ -293,12 +307,8 @@ fn prune_lock_files(database: &Path, home: &Path, owners: &ActiveFileOwners, now
             )));
         }
     }
-    let admission_dir = database
-        .canonicalize()
-        .unwrap_or_else(|_| database.to_path_buf())
-        .with_extension("admission");
     removed += prune_lock_dir(
-        &admission_dir,
+        &canonical_db.with_extension("admission"),
         &active_admissions,
         Some(TRANSIENT_LOCK_GRACE_SECS),
         now,

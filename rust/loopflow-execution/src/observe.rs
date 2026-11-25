@@ -12,6 +12,9 @@ use std::time::{Duration, SystemTime};
 
 use notify::{RecursiveMode, Watcher};
 
+use crate::ops::task::TaskFileInventory;
+use crate::process::OsProcess;
+
 static SPAWNS: AtomicU64 = AtomicU64::new(0);
 
 /// Record a subprocess spawned by the server or observation layer.
@@ -33,9 +36,6 @@ pub fn current_held_facts() -> u64 {
 pub(crate) trait FactWatcher: Send + Sync {
     fn wake(&self);
 }
-
-use crate::ops::task::TaskFileInventory;
-use crate::process::OsProcess;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Fact {
@@ -264,6 +264,18 @@ struct Entry {
 }
 
 impl Entry {
+    fn new(answer: Option<Answer>, now: SystemTime) -> Self {
+        Self {
+            answer,
+            stat: None,
+            revision: 0,
+            checked: now,
+            used: now,
+            hinted_due: None,
+            dirty: false,
+        }
+    }
+
     fn update(&mut self, answer: Answer, stat: Option<StatStamp>, now: SystemTime) -> bool {
         let changed = self.answer.as_ref() != Some(&answer);
         if changed {
@@ -274,6 +286,13 @@ impl Entry {
         self.checked = now;
         changed
     }
+}
+
+fn min_time<T: Ord>(slot: &mut Option<T>, candidate: T) {
+    *slot = Some(match slot.take() {
+        Some(prev) => prev.min(candidate),
+        None => candidate,
+    });
 }
 
 struct FactSlot {
@@ -654,10 +673,7 @@ impl Cache {
             if due_at <= now {
                 due_now.push((slot.clone(), entry.checked, entry.stat.clone()));
             } else {
-                earliest_future = Some(match earliest_future {
-                    Some(prev) => prev.min(due_at),
-                    None => due_at,
-                });
+                min_time(&mut earliest_future, due_at);
             }
         }
 
@@ -672,10 +688,7 @@ impl Cache {
                     entry.checked = now;
                 }
                 if let Some(next) = self.held_due_at(&slot.fact, &entry) {
-                    earliest_future = Some(match earliest_future {
-                        Some(prev) => prev.min(next),
-                        None => next,
-                    });
+                    min_time(&mut earliest_future, next);
                 }
                 continue;
             }
@@ -704,10 +717,7 @@ impl Cache {
                 slot.notify_watchers();
             }
             if let Some(next) = next {
-                earliest_future = Some(match earliest_future {
-                    Some(prev) => prev.min(next),
-                    None => next,
-                });
+                min_time(&mut earliest_future, next);
             }
         }
 
@@ -881,15 +891,7 @@ impl Cache {
             Fact::RawConversations,
             FactSlot::new(
                 Fact::RawConversations,
-                Entry {
-                    answer: Some(Answer::Raw(raw)),
-                    stat: None,
-                    revision: 0,
-                    checked: SystemTime::now(),
-                    used: SystemTime::now(),
-                    hinted_due: None,
-                    dirty: false,
-                },
+                Entry::new(Some(Answer::Raw(raw)), SystemTime::now()),
             ),
         );
         Arc::new(cache)
@@ -899,11 +901,17 @@ impl Cache {
     /// returns. Used by one-shot served reads so they never keep background
     /// refreshes or checkout watches alive.
     pub fn read_once<T>(self: &Arc<Self>, read: impl FnOnce() -> T) -> T {
-        self.capture_inner(false, None, read).0
+        scope(
+            Some(Reading {
+                cache: self.clone(),
+                dependencies: None,
+            }),
+            read,
+        )
     }
 
     pub fn capture<T>(self: &Arc<Self>, read: impl FnOnce() -> T) -> (T, Dependencies) {
-        self.capture_inner(true, None, read)
+        self.capture_inner(None, read)
     }
 
     pub(crate) fn capture_for<T>(
@@ -911,12 +919,11 @@ impl Cache {
         watcher: Weak<dyn FactWatcher>,
         read: impl FnOnce() -> T,
     ) -> (T, Dependencies) {
-        self.capture_inner(true, Some(watcher), read)
+        self.capture_inner(Some(watcher), read)
     }
 
     fn capture_inner<T>(
         self: &Arc<Self>,
-        hold: bool,
         watcher: Option<Weak<dyn FactWatcher>>,
         read: impl FnOnce() -> T,
     ) -> (T, Dependencies) {
@@ -924,88 +931,73 @@ impl Cache {
         let result = scope(
             Some(Reading {
                 cache: self.clone(),
-                dependencies: dependencies.clone(),
+                dependencies: Some(dependencies.clone()),
             }),
             read,
         );
-        if hold {
-            let mut collected = HashMap::new();
-            dependencies.collect_slots(&mut collected);
-            let mut slots = Vec::with_capacity(collected.len());
-            #[cfg(target_os = "macos")]
-            let mut checkout_set = HashSet::new();
-            for (fact, slot) in collected {
-                slot.holders.fetch_add(1, Ordering::AcqRel);
-                if let Some(ref w) = watcher {
-                    slot.add_watcher(w.clone());
-                }
-                #[cfg(target_os = "macos")]
-                if self.use_fs_watcher {
-                    if let Some(root) = fact.checkout_root() {
-                        checkout_set.insert(root.to_path_buf());
-                    }
-                }
-                let _ = fact;
-                slots.push(slot);
+        let mut collected = HashMap::new();
+        dependencies.collect_slots(&mut collected);
+        let mut slots = Vec::with_capacity(collected.len());
+        #[cfg(target_os = "macos")]
+        let mut checkout_set = HashSet::new();
+        for (fact, slot) in collected {
+            slot.holders.fetch_add(1, Ordering::AcqRel);
+            if let Some(ref w) = watcher {
+                slot.add_watcher(w.clone());
             }
             #[cfg(target_os = "macos")]
-            let checkouts: Vec<PathBuf> = checkout_set.into_iter().collect();
-            #[cfg(target_os = "macos")]
-            for checkout in &checkouts {
-                self.acquire_checkout_watch(checkout);
+            if self.use_fs_watcher {
+                if let Some(root) = fact.checkout_root() {
+                    checkout_set.insert(root.to_path_buf());
+                }
             }
-            dependencies.0.lock().expect("observed dependencies").hold = Some(Hold {
-                cache: Arc::downgrade(self),
-                slots,
-                #[cfg(target_os = "macos")]
-                checkouts,
-            });
-            self.notify_refresh();
+            let _ = fact;
+            slots.push(slot);
         }
+        #[cfg(target_os = "macos")]
+        let checkouts: Vec<PathBuf> = checkout_set.into_iter().collect();
+        #[cfg(target_os = "macos")]
+        for checkout in &checkouts {
+            self.acquire_checkout_watch(checkout);
+        }
+        dependencies.0.lock().expect("observed dependencies").hold = Some(Hold {
+            cache: Arc::downgrade(self),
+            slots,
+            #[cfg(target_os = "macos")]
+            checkouts,
+        });
+        self.notify_refresh();
         (result, dependencies)
     }
 
-    fn read(&self, fact: Fact, dependencies: &Dependencies) -> Answer {
+    fn read(&self, fact: Fact, dependencies: Option<&Dependencies>) -> Answer {
+        let now = SystemTime::now();
         let slot = self
             .entries
             .lock()
             .expect("observation cache")
             .entry(fact.clone())
-            .or_insert_with(|| {
-                FactSlot::new(
-                    fact.clone(),
-                    Entry {
-                        answer: None,
-                        stat: None,
-                        revision: 0,
-                        checked: SystemTime::now(),
-                        used: SystemTime::now(),
-                        hinted_due: None,
-                        dirty: false,
-                    },
-                )
-            })
+            .or_insert_with(|| FactSlot::new(fact.clone(), Entry::new(None, now)))
             .clone();
         let mut observed = slot.entry.lock().expect("observed fact");
-        let now = SystemTime::now();
-        let must_observe = if observed.answer.is_none() {
-            true
+        let (must_observe, stat) = if observed.answer.is_none() {
+            (true, fact.stat_stamp())
         } else if !slot.is_held() {
-            if let Some(current_stat) = fact.stat_stamp() {
-                if observed.stat.as_ref() != Some(&current_stat) {
-                    true
-                } else {
+            match fact.stat_stamp() {
+                Some(current) if observed.stat.as_ref() == Some(&current) => {
                     observed.checked = now;
-                    false
+                    (false, None)
                 }
-            } else {
-                now.duration_since(observed.checked).unwrap_or_default() >= fact.interval()
+                Some(current) => (true, Some(current)),
+                None => (
+                    now.duration_since(observed.checked).unwrap_or_default() >= fact.interval(),
+                    None,
+                ),
             }
         } else {
-            false
+            (false, None)
         };
         if must_observe {
-            let stat = fact.stat_stamp();
             let answer = fact.observe();
             observed.update(answer, stat, now);
         }
@@ -1016,14 +1008,16 @@ impl Cache {
             .clone()
             .expect("fact observed before reading");
         drop(observed);
-        // Keep the first revision so a change during the reading stays visible.
-        dependencies
-            .0
-            .lock()
-            .expect("observed dependencies")
-            .facts
-            .entry(fact)
-            .or_insert((slot, revision));
+        if let Some(dependencies) = dependencies {
+            // Keep the first revision so a change during the reading stays visible.
+            dependencies
+                .0
+                .lock()
+                .expect("observed dependencies")
+                .facts
+                .entry(fact)
+                .or_insert((slot, revision));
+        }
         answer
     }
 
@@ -1436,42 +1430,34 @@ fn dispatch_fs_event(routes: &Mutex<FsWatchRoutes>, event: notify::Result<notify
 
     {
         let mut routes = routes.lock().expect("fs routes");
+        let mut queue_rescan = |routes: &FsWatchRoutes| {
+            for tr in &routes.transcripts {
+                transcript_actions.push(TranscriptAction::Rescan(tr.cache.clone()));
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let mut seen_caches = HashSet::new();
+                for route in routes.checkouts.values() {
+                    if seen_caches.insert(route.cache.as_ptr() as usize) {
+                        dirty_checkouts.push((route.cache.clone(), None));
+                    }
+                }
+            }
+        };
         match event {
             Ok(ref ev) if ev.kind.is_access() => return,
             Ok(ref ev) if ev.need_rescan() => {
                 for listener in &mut routes.path_listeners {
                     (listener.callback)(Ok(vec![String::new()]));
                 }
-                for tr in &routes.transcripts {
-                    transcript_actions.push(TranscriptAction::Rescan(tr.cache.clone()));
-                }
-                #[cfg(target_os = "macos")]
-                {
-                    let mut seen_caches = HashSet::new();
-                    for route in routes.checkouts.values() {
-                        if seen_caches.insert(route.cache.as_ptr() as usize) {
-                            dirty_checkouts.push((route.cache.clone(), None));
-                        }
-                    }
-                }
+                queue_rescan(&routes);
             }
             Err(err) => {
                 let message = err.to_string();
                 for listener in &mut routes.path_listeners {
                     (listener.callback)(Err(notify::Error::generic(&message)));
                 }
-                for tr in &routes.transcripts {
-                    transcript_actions.push(TranscriptAction::Rescan(tr.cache.clone()));
-                }
-                #[cfg(target_os = "macos")]
-                {
-                    let mut seen_caches = HashSet::new();
-                    for route in routes.checkouts.values() {
-                        if seen_caches.insert(route.cache.as_ptr() as usize) {
-                            dirty_checkouts.push((route.cache.clone(), None));
-                        }
-                    }
-                }
+                queue_rescan(&routes);
             }
             Ok(ev) => {
                 for listener in &mut routes.path_listeners {
@@ -1552,7 +1538,7 @@ fn dispatch_fs_event(routes: &Mutex<FsWatchRoutes>, event: notify::Result<notify
 #[derive(Clone)]
 struct Reading {
     cache: Arc<Cache>,
-    dependencies: Dependencies,
+    dependencies: Option<Dependencies>,
 }
 thread_local! {
     static READING: RefCell<Option<Reading>> = const { RefCell::new(None) };
@@ -1608,22 +1594,12 @@ pub fn active() -> bool {
 /// the draft in the serving Machine's observation cache.
 pub(crate) fn preview_files<T>(files: &BTreeMap<PathBuf, String>, read: impl FnOnce() -> T) -> T {
     let cache = Cache::default();
+    let now = SystemTime::now();
     for (path, text) in files {
         let fact = Fact::File(absolute(path));
         cache.entries.lock().expect("private preview cache").insert(
             fact.clone(),
-            FactSlot::new(
-                fact,
-                Entry {
-                    answer: Some(Answer::File(Ok(text.clone()))),
-                    stat: None,
-                    revision: 0,
-                    used: SystemTime::now(),
-                    checked: SystemTime::now(),
-                    hinted_due: None,
-                    dirty: false,
-                },
-            ),
+            FactSlot::new(fact, Entry::new(Some(Answer::File(Ok(text.clone()))), now)),
         );
     }
     Arc::new(cache).read_once(read)
@@ -1686,7 +1662,7 @@ pub fn derived<T: Send + Sync + 'static>(key: Derived, compute: impl FnOnce() ->
         let value = scope(
             Some(Reading {
                 cache: cache.clone(),
-                dependencies: dependencies.clone(),
+                dependencies: Some(dependencies.clone()),
             }),
             compute,
         );
@@ -1702,9 +1678,8 @@ pub fn derived<T: Send + Sync + 'static>(key: Derived, compute: impl FnOnce() ->
     computed.used = SystemTime::now();
     // Keep the first dependencies so a value computed again during the
     // reading stays visible as a change.
-    if let Some(reading) = reading {
-        reading
-            .dependencies
+    if let Some(dependencies) = reading.as_ref().and_then(|r| r.dependencies.as_ref()) {
+        dependencies
             .0
             .lock()
             .expect("observed dependencies")
@@ -1722,7 +1697,7 @@ pub fn derived<T: Send + Sync + 'static>(key: Derived, compute: impl FnOnce() ->
 fn read(fact: Fact) -> Answer {
     let reading = READING.with(|reading| reading.borrow().clone());
     match reading {
-        Some(reading) => reading.cache.read(fact, &reading.dependencies),
+        Some(reading) => reading.cache.read(fact, reading.dependencies.as_ref()),
         None => fact.observe(),
     }
 }

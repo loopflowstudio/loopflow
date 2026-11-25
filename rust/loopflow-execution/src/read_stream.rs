@@ -434,10 +434,7 @@ fn run_pull_waker_loop() {
             match target.poll_due(now) {
                 Ok(Some(at)) if at <= now => to_fire.push(target),
                 Ok(Some(at)) => {
-                    earliest = Some(match earliest {
-                        Some(prev) => prev.min(at),
-                        None => at,
-                    });
+                    earliest = Some(earliest.map_or(at, |prev| prev.min(at)));
                 }
                 Ok(None) | Err(()) => {}
             }
@@ -909,31 +906,34 @@ struct ObserverEntry {
     waker: StoreWaker,
 }
 
+fn ensure_observer<'a>(
+    observers: &'a mut HashMap<PathBuf, ObserverEntry>,
+    database: &Path,
+) -> &'a mut ObserverEntry {
+    observers.entry(database.to_owned()).or_insert_with(|| {
+        let store = StoreChanges::watch(database);
+        let waker = store.waker();
+        let watched = database.to_owned();
+        let _ = std::thread::Builder::new()
+            .name("store-observer".into())
+            .spawn(move || observe(&watched, store));
+        ObserverEntry {
+            followers: Vec::new(),
+            planning: Vec::new(),
+            waker,
+        }
+    })
+}
+
 /// Watch `database`'s planning revision through the shared `store-observer`
 /// thread without spawning an extra `StoreChanges` thread or polling on a 1 s clock.
 pub fn watch_planning(database: &Path) -> tokio::sync::watch::Receiver<Option<i64>> {
     let initial = read_store_revisions(database).map(|rev| rev.planning);
     let (send, receive) = tokio::sync::watch::channel(initial);
     let mut observers = observers();
-    if let Some(entry) = observers.get_mut(database) {
-        entry.planning.retain(|tx| !tx.is_closed());
-        entry.planning.push(send);
-    } else {
-        let store = StoreChanges::watch(database);
-        let waker = store.waker();
-        observers.insert(
-            database.to_owned(),
-            ObserverEntry {
-                followers: Vec::new(),
-                planning: vec![send],
-                waker,
-            },
-        );
-        let database = database.to_owned();
-        let _ = std::thread::Builder::new()
-            .name("store-observer".into())
-            .spawn(move || observe(&database, store));
-    }
+    let entry = ensure_observer(&mut observers, database);
+    entry.planning.retain(|tx| !tx.is_closed());
+    entry.planning.push(send);
     receive
 }
 
@@ -975,32 +975,16 @@ fn follow_store(database: &Path, inbox: &Arc<dyn Inbox>, watch: Watch, parent: O
         read_store_revisions(database)
     };
     let mut observers = observers();
-    let follower = Follower {
+    let existed = observers.contains_key(database);
+    let entry = ensure_observer(&mut observers, database);
+    entry.followers.push(Follower {
         inbox: Arc::downgrade(inbox),
         watch,
         parent,
         last_seen: initial,
-    };
-    if let Some(entry) = observers.get_mut(database) {
-        entry.followers.push(follower);
-        if watch == Watch::History || parent.is_some() {
-            entry.waker.wake();
-        }
-    } else {
-        let store = StoreChanges::watch(database);
-        let waker = store.waker();
-        observers.insert(
-            database.to_owned(),
-            ObserverEntry {
-                followers: vec![follower],
-                planning: Vec::new(),
-                waker,
-            },
-        );
-        let database = database.to_owned();
-        let _ = std::thread::Builder::new()
-            .name("store-observer".into())
-            .spawn(move || observe(&database, store));
+    });
+    if existed && (watch == Watch::History || parent.is_some()) {
+        entry.waker.wake();
     }
 }
 

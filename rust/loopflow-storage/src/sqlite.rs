@@ -304,6 +304,51 @@ fn open_fresh_read_only(path: &Path) -> StoreResult<Connection> {
     Ok(conn)
 }
 
+fn validate_shared_read_only(
+    path: &Path,
+    build: &super::migration_runner::MigrationBuild,
+    conn: &Connection,
+) -> StoreResult<()> {
+    // Validate the applied history first (preserving divergent/incompatible
+    // and store-ahead errors), then refuse if this binary knows a migration
+    // the store has not applied. An ordinary open must not hand back a store
+    // whose schema is older than this binary's code, which may query the
+    // columns that pending migration adds.
+    super::migration_runner::validate_sqlite_schema(build, conn)?;
+    if let Some(pending) = super::migration_runner::pending_shared_migration(build, conn)? {
+        return Err(StoreError::InvalidData(unapplied_message(path, &pending)));
+    }
+    Ok(())
+}
+
+fn validate_private_home(
+    path: &Path,
+    build: &super::migration_runner::MigrationBuild,
+    conn: &Connection,
+) -> StoreResult<()> {
+    // A private home holds exactly this build's schema; one changed outside lf
+    // is never repaired.
+    super::migration_runner::validate_sqlite_schema(build, conn).map_err(|error| {
+        StoreError::InvalidData(format!(
+            "{error}\nDatabase: {}\nA private LF_HOME is disposable: start a fresh one; \
+             lf will not repair it.",
+            path.display()
+        ))
+    })
+}
+
+fn require_existing_database(path: &Path, may_apply_migrations: bool) -> StoreResult<bool> {
+    let existing = std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0);
+    if !may_apply_migrations && !existing {
+        return Err(StoreError::InvalidData(format!(
+            "shared store {} is not initialized and an ordinary lf may not create it; \
+             install lf with `lf self install`",
+            path.display()
+        )));
+    }
+    Ok(existing)
+}
+
 fn home_dir_in(conn: &Connection) -> StoreResult<PathBuf> {
     conn.path()
         .and_then(|path| Path::new(path).parent())
@@ -621,126 +666,61 @@ impl SqliteStore {
         observers: &super::migration_runner::MigrationObservers<'_>,
         token_key: token_crypto::TokenKeySource,
     ) -> StoreResult<Self> {
-        let existing_database = std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0);
-        if !may_apply_migrations && !existing_database {
-            return Err(StoreError::InvalidData(format!(
-                "shared store {} is not initialized and an ordinary lf may not create it; \
-                 install lf with `lf self install`",
-                path.display()
-            )));
-        }
+        let existing_database = require_existing_database(path, may_apply_migrations)?;
+        let require_shared = shared_database && !may_apply_migrations;
 
-        if existing_database {
-            if let Some(key) = crate::pool::PoolKey::for_path(path, crate::pool::PoolMode::Write) {
-                if let Some(mut pooled) = crate::pool::take(&key) {
-                    crate::instrumentation::rearm_sqlite(&pooled.conn);
-                    pooled.conn.busy_timeout(busy)?;
-                    let needs_validation = if let Some(stamp) = &mut pooled.validated {
-                        if crate::pool::is_stamp_fresh(&pooled.conn, stamp)
-                            && (!shared_database || may_apply_migrations || stamp.shared_checked)
-                        {
-                            if may_apply_migrations && !stamp.tokens_migrated {
-                                migrate_plaintext_provider_tokens(&mut pooled.conn, token_key)?;
-                                stamp.tokens_migrated = true;
-                            }
-                            false
-                        } else {
-                            true
-                        }
-                    } else {
-                        true
-                    };
-                    if !needs_validation {
-                        return Ok(Self::with_pooled(
-                            pooled.conn,
-                            token_key,
-                            pooled.history,
-                            Some(key),
-                            pooled.validated,
-                        ));
-                    }
-                    // Schema or migration table changed externally: revalidate on this warm connection.
-                    if shared_database && !may_apply_migrations {
-                        super::migration_runner::validate_sqlite_schema(build, &pooled.conn)?;
-                        if let Some(pending) =
-                            super::migration_runner::pending_shared_migration(build, &pooled.conn)?
-                        {
-                            return Err(StoreError::InvalidData(unapplied_message(path, &pending)));
-                        }
-                    } else {
-                        super::migration_runner::apply_sqlite_with_backup(
-                            build,
-                            &pooled.conn,
-                            path,
-                            observers,
-                        )?;
-                        if !shared_database {
-                            super::migration_runner::validate_sqlite_schema(build, &pooled.conn)
-                                .map_err(|error| {
-                                    StoreError::InvalidData(format!(
-                                        "{error}\nDatabase: {}\nA private LF_HOME is disposable: start a fresh one; \
-                                         lf will not repair it.",
-                                        path.display()
-                                    ))
-                                })?;
-                        }
-                    }
-                    if may_apply_migrations {
+        let pooled = existing_database
+            .then(|| crate::pool::PoolKey::for_path(path, crate::pool::PoolMode::Write))
+            .flatten()
+            .and_then(|key| crate::pool::take(&key).map(|conn| (key, conn)));
+
+        let (mut conn, history, key, fresh_conn) = if let Some((key, mut pooled)) = pooled {
+            crate::instrumentation::rearm_sqlite(&pooled.conn);
+            pooled.conn.busy_timeout(busy)?;
+            if let Some(stamp) = &mut pooled.validated {
+                if crate::pool::is_stamp_fresh(&pooled.conn, stamp, require_shared) {
+                    if may_apply_migrations && !stamp.tokens_migrated {
                         migrate_plaintext_provider_tokens(&mut pooled.conn, token_key)?;
+                        stamp.tokens_migrated = true;
                     }
-                    let stamp = crate::pool::stamp_for(&pooled.conn, true, may_apply_migrations);
                     return Ok(Self::with_pooled(
                         pooled.conn,
                         token_key,
                         pooled.history,
                         Some(key),
-                        stamp,
+                        pooled.validated,
                     ));
                 }
             }
-        }
-
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|err| {
-                StoreError::InvalidData(format!("failed to create db dir: {err}"))
-            })?;
-        }
-
-        #[cfg(test)]
-        if !existing_database {
-            copy_test_store(path)?;
-        }
-        let mut conn = Connection::open(path)?;
-        conn.set_prepared_statement_cache_capacity(crate::pool::STATEMENT_CACHE_CAPACITY);
-        crate::instrumentation::record_connection_open();
-        crate::instrumentation::observe_sqlite(&conn);
-        // Install the handler before journal-mode negotiation: that pragma can
-        // itself meet another process opening the same WAL database.
-        configure_write_connection(&mut conn, path, busy)?;
-
-        if shared_database && !may_apply_migrations {
-            // Validate the applied history first (preserving divergent/incompatible
-            // and store-ahead errors), then refuse if this binary knows a migration
-            // the store has not applied. An ordinary open must not hand back a store
-            // whose schema is older than this binary's code, which may query the
-            // columns that pending migration adds.
-            super::migration_runner::validate_sqlite_schema(build, &conn)?;
-            if let Some(pending) = super::migration_runner::pending_shared_migration(build, &conn)?
-            {
-                return Err(StoreError::InvalidData(unapplied_message(path, &pending)));
+            (pooled.conn, pooled.history, Some(key), false)
+        } else {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|err| {
+                    StoreError::InvalidData(format!("failed to create db dir: {err}"))
+                })?;
             }
+            #[cfg(test)]
+            if !existing_database {
+                copy_test_store(path)?;
+            }
+            let mut conn = Connection::open(path)?;
+            conn.set_prepared_statement_cache_capacity(crate::pool::STATEMENT_CACHE_CAPACITY);
+            crate::instrumentation::record_connection_open();
+            crate::instrumentation::observe_sqlite(&conn);
+            // Install the handler before journal-mode negotiation: that pragma can
+            // itself meet another process opening the same WAL database.
+            configure_write_connection(&mut conn, path, busy)?;
+            let history = crate::history::HistoryFile::beside(Some(path));
+            let key = crate::pool::PoolKey::for_path(path, crate::pool::PoolMode::Write);
+            (conn, history, key, true)
+        };
+
+        if require_shared {
+            validate_shared_read_only(path, build, &conn)?;
         } else if existing_database {
             super::migration_runner::apply_sqlite_with_backup(build, &conn, path, observers)?;
             if !shared_database {
-                // A private home holds exactly this build's schema; one changed
-                // outside lf is never repaired.
-                super::migration_runner::validate_sqlite_schema(build, &conn).map_err(|error| {
-                    StoreError::InvalidData(format!(
-                        "{error}\nDatabase: {}\nA private LF_HOME is disposable: start a fresh one; \
-                         lf will not repair it.",
-                        path.display()
-                    ))
-                })?;
+                validate_private_home(path, build, &conn)?;
             }
         } else {
             super::migration_runner::apply_sqlite(build, &conn, observers)?;
@@ -748,9 +728,9 @@ impl SqliteStore {
         if may_apply_migrations {
             migrate_plaintext_provider_tokens(&mut conn, token_key)?;
         }
-        crate::history::attach(&conn, path);
-        let history = crate::history::HistoryFile::beside(Some(path));
-        let key = crate::pool::PoolKey::for_path(path, crate::pool::PoolMode::Write);
+        if fresh_conn {
+            crate::history::attach(&conn, path);
+        }
         let stamp = crate::pool::stamp_for(&conn, true, may_apply_migrations);
         Ok(Self::with_pooled(conn, token_key, history, key, stamp))
     }
@@ -762,29 +742,17 @@ impl SqliteStore {
         token_key: token_crypto::TokenKeySource,
     ) -> StoreResult<Self> {
         let key = crate::pool::PoolKey::for_path(path, crate::pool::PoolMode::ReadOnly);
-        if let Some(key_ref) = &key {
-            if let Some(pooled) = crate::pool::take(key_ref) {
-                crate::instrumentation::rearm_sqlite(&pooled.conn);
-                return Ok(Self::with_pooled(
-                    pooled.conn,
-                    token_key,
-                    pooled.history,
-                    key,
-                    pooled.validated,
-                ));
-            }
+        if let Some(pooled) = key.as_ref().and_then(crate::pool::take) {
+            crate::instrumentation::rearm_sqlite(&pooled.conn);
+            return Ok(Self::with_pooled(
+                pooled.conn,
+                token_key,
+                pooled.history,
+                key,
+                pooled.validated,
+            ));
         }
-        let conn = Connection::open_with_flags(
-            path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
-                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
-                | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-        )?;
-        conn.set_prepared_statement_cache_capacity(crate::pool::STATEMENT_CACHE_CAPACITY);
-        crate::instrumentation::record_connection_open();
-        crate::instrumentation::observe_sqlite(&conn);
-        conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
-        crate::history::attach(&conn, path);
+        let conn = open_fresh_read_only(path)?;
         let history = crate::history::HistoryFile::beside(Some(path));
         let key =
             key.or_else(|| crate::pool::PoolKey::for_path(path, crate::pool::PoolMode::ReadOnly));
@@ -802,14 +770,7 @@ impl SqliteStore {
         observers: &super::migration_runner::MigrationObservers<'_>,
         token_key: token_crypto::TokenKeySource,
     ) -> StoreResult<Self> {
-        let existing_database = std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0);
-        if !may_apply_migrations && !existing_database {
-            return Err(StoreError::InvalidData(format!(
-                "shared store {} is not initialized and an ordinary lf may not create it; \
-                 install lf with `lf self install`",
-                path.display()
-            )));
-        }
+        let existing_database = require_existing_database(path, may_apply_migrations)?;
         if !existing_database {
             drop(Self::open_prepared(
                 path,
@@ -823,40 +784,28 @@ impl SqliteStore {
         }
 
         let key = crate::pool::PoolKey::for_path(path, crate::pool::PoolMode::ReadOnly);
-        let (conn, history, mut validated) = if let Some(key_ref) = &key {
-            if let Some(pooled) = crate::pool::take(key_ref) {
+        let (conn, history, mut validated) = match key.as_ref().and_then(crate::pool::take) {
+            Some(pooled) => {
                 crate::instrumentation::rearm_sqlite(&pooled.conn);
                 (pooled.conn, pooled.history, pooled.validated)
-            } else {
-                let conn = open_fresh_read_only(path)?;
-                (conn, crate::history::HistoryFile::beside(Some(path)), None)
             }
-        } else {
-            let conn = open_fresh_read_only(path)?;
-            (conn, crate::history::HistoryFile::beside(Some(path)), None)
+            None => (
+                open_fresh_read_only(path)?,
+                crate::history::HistoryFile::beside(Some(path)),
+                None,
+            ),
         };
 
-        let fresh = if let Some(stamp) = &mut validated {
-            crate::pool::is_stamp_fresh(&conn, stamp)
-                && (!shared_database || may_apply_migrations || stamp.shared_checked)
-        } else {
-            false
-        };
-        if fresh {
-            return Ok(Self::with_pooled(conn, token_key, history, key, validated));
-        }
-
-        if shared_database && !may_apply_migrations {
-            super::migration_runner::validate_sqlite_schema(build, &conn)?;
-            if let Some(pending) = super::migration_runner::pending_shared_migration(build, &conn)?
-            {
-                return Err(StoreError::InvalidData(unapplied_message(path, &pending)));
+        let require_shared = shared_database && !may_apply_migrations;
+        if let Some(stamp) = &mut validated {
+            if crate::pool::is_stamp_fresh(&conn, stamp, require_shared) {
+                return Ok(Self::with_pooled(conn, token_key, history, key, validated));
             }
-            let stamp = crate::pool::stamp_for(&conn, true, false);
-            return Ok(Self::with_pooled(conn, token_key, history, key, stamp));
         }
 
-        if super::migration_runner::requires_migration_sqlite(build, &conn)? {
+        if require_shared {
+            validate_shared_read_only(path, build, &conn)?;
+        } else if super::migration_runner::requires_migration_sqlite(build, &conn)? {
             drop(conn);
             drop(Self::open_prepared(
                 path,
@@ -872,16 +821,8 @@ impl SqliteStore {
             let key = key
                 .or_else(|| crate::pool::PoolKey::for_path(path, crate::pool::PoolMode::ReadOnly));
             return Ok(Self::with_pooled(conn, token_key, history, key, stamp));
-        }
-
-        if !shared_database {
-            super::migration_runner::validate_sqlite_schema(build, &conn).map_err(|error| {
-                StoreError::InvalidData(format!(
-                    "{error}\nDatabase: {}\nA private LF_HOME is disposable: start a fresh one; \
-                     lf will not repair it.",
-                    path.display()
-                ))
-            })?;
+        } else if !shared_database {
+            validate_private_home(path, build, &conn)?;
         } else {
             super::migration_runner::validate_sqlite_schema(build, &conn)?;
         }

@@ -35,15 +35,19 @@ pub struct Retention {
     pub status: String,
 }
 
-pub fn project(value: &Value) -> Value {
-    let mut normalized = value.clone();
-    super::normalize_context(&mut normalized);
-    if let Some(machine) = normalized
+fn expand_machine_shorthand(value: &mut Value) {
+    if let Some(machine) = value
         .as_mapping_mut()
         .and_then(|map| map.get_mut("machine"))
     {
         let _ = super::placement::expand_shorthand(machine);
     }
+}
+
+pub fn project(value: &Value) -> Value {
+    let mut normalized = value.clone();
+    super::normalize_context(&mut normalized);
+    expand_machine_shorthand(&mut normalized);
     let value = &normalized;
     fn setting(value: &Value, key: &str) -> Option<Value> {
         let definition = super::catalog::definition(key)?;
@@ -108,12 +112,7 @@ pub fn project(value: &Value) -> Value {
 
 fn replace_projection(document: &mut Value, incoming: &Value) {
     super::normalize_context(document);
-    if let Some(machine) = document
-        .as_mapping_mut()
-        .and_then(|map| map.get_mut("machine"))
-    {
-        let _ = super::placement::expand_shorthand(machine);
-    }
+    expand_machine_shorthand(document);
     let previous = project(document);
     remove_projection(document, &previous);
     super::files::overlay(document, incoming);

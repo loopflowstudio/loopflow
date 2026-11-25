@@ -16,14 +16,14 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
         crate::ops::git_operation::prepare_agent_process(cwd)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
-    let executor = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    executor.block_on(async {
+    crate::runtime::block_on(async {
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
-        let launch = Launch { config: &config, ..*launch };
-        let mut harness = launch.harness
+        let launch = Launch {
+            config: &config,
+            ..*launch
+        };
+        let mut harness = launch
+            .harness
             .driver(&launch, event_tx, ApprovalPolicy::AutoApprove);
         harness.set_runtime(process.runtime.clone());
         harness
@@ -46,7 +46,8 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
             let mut failure = None;
             let mut input_tick = tokio::time::interval(Duration::from_millis(250));
             input_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            let mut activity_tick = tokio::time::interval(crate::session_record::activity::SAMPLE_INTERVAL);
+            let mut activity_tick =
+                tokio::time::interval(crate::session_record::activity::SAMPLE_INTERVAL);
             activity_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             while exit_code.is_none() {
                 tokio::select! {
@@ -96,7 +97,9 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
                 }
             }
             while let Ok(event) = event_rx.try_recv() {
-                if let Some(runtime) = runtime { runtime.record_conversation(event.clone()); }
+                if let Some(runtime) = runtime {
+                    runtime.record_conversation(event.clone());
+                }
                 if let ConversationEvent::Error { code, message, .. } = event {
                     report(&launch, &code, &message, &mut stderr, &mut failure);
                 }
@@ -119,13 +122,15 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
             Some(timeout) => match tokio::time::timeout(timeout, drive).await {
                 Ok(result) => result,
                 Err(_) => Err(CoreError::ExecutionFailed(format!(
-                        "agent timed out after {}ms",
-                        timeout.as_millis()
-                    ))),
+                    "agent timed out after {}ms",
+                    timeout.as_millis()
+                ))),
             },
             None => drive.await,
         };
-        harness.stop().await
+        harness
+            .stop()
+            .await
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         result
     })

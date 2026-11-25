@@ -555,20 +555,17 @@ pub(super) fn filter_file_preferences(
     let Some(root) = value.as_mapping_mut() else {
         return;
     };
-    if validate_mapping_once(root).is_err() {
-        _filter_invalid_values(root, &mut Vec::new(), file);
-    }
+    _validate_or_filter_block(root, Vec::new(), file);
     if let Some(skills) = root.get_mut("skills").and_then(Value::as_mapping_mut) {
         for (skill_key, target) in skills.iter_mut() {
-            let Some(skill_name) = skill_key.as_str() else {
-                continue;
-            };
-            let Some(skill_map) = target.as_mapping_mut() else {
-                continue;
-            };
-            if validate_mapping_once(skill_map).is_err() {
-                let mut prefix = vec!["skills".to_owned(), skill_name.to_owned()];
-                _filter_invalid_values(skill_map, &mut prefix, file);
+            if let (Some(skill_name), Some(skill_map)) =
+                (skill_key.as_str(), target.as_mapping_mut())
+            {
+                _validate_or_filter_block(
+                    skill_map,
+                    vec!["skills".to_owned(), skill_name.to_owned()],
+                    file,
+                );
             }
         }
     }
@@ -585,20 +582,19 @@ pub(super) fn filter_file_preferences(
                 continue;
             };
             for (step_key, step_value) in steps.iter_mut() {
-                let Some(step_name) = step_key.as_str() else {
-                    continue;
-                };
-                let Some(step_map) = step_value.as_mapping_mut() else {
-                    continue;
-                };
-                if validate_mapping_once(step_map).is_err() {
-                    let mut prefix = vec![
-                        "graphs".to_owned(),
-                        graph_name.to_owned(),
-                        "steps".to_owned(),
-                        step_name.to_owned(),
-                    ];
-                    _filter_invalid_values(step_map, &mut prefix, file);
+                if let (Some(step_name), Some(step_map)) =
+                    (step_key.as_str(), step_value.as_mapping_mut())
+                {
+                    _validate_or_filter_block(
+                        step_map,
+                        vec![
+                            "graphs".to_owned(),
+                            graph_name.to_owned(),
+                            "steps".to_owned(),
+                            step_name.to_owned(),
+                        ],
+                        file,
+                    );
                 }
             }
         }
@@ -682,14 +678,16 @@ fn _filter_file_structure(
     });
 }
 
-/// Slow path: only called when `validate_mapping_once` rejected a block, to
-/// pinpoint and drop the offending keys while keeping their valid neighbours.
-fn _filter_invalid_values(
+/// Validate a block in one deserialization, falling back to per-leaf filtering
+/// only on error to pinpoint and drop offending keys while keeping neighbours.
+fn _validate_or_filter_block(
     map: &mut serde_yaml_ng::Mapping,
-    prefix: &mut Vec<String>,
+    mut prefix: Vec<String>,
     file: &std::path::Path,
 ) {
-    _filter_invalid_leaves(map, prefix, &mut Vec::new(), file);
+    if validate_mapping_once(map).is_err() {
+        _filter_invalid_leaves(map, &mut prefix, &mut Vec::new(), file);
+    }
 }
 
 fn _filter_invalid_leaves(

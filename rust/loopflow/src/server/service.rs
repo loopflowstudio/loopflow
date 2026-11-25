@@ -318,6 +318,12 @@ struct CustomHomeSchedule {
     execution_check_every: Duration,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct IdleWindow {
+    since: SystemTime,
+    store_stamp: (Option<FileStamp>, Option<FileStamp>),
+}
+
 async fn watch_custom_home(
     home: std::path::PathBuf,
     initial_identity: Option<(u64, u64)>,
@@ -337,8 +343,7 @@ async fn watch_custom_home(
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     let home_watcher: Option<()> = None;
 
-    let mut idle_since: Option<SystemTime> = None;
-    let mut idle_store_stamp = None;
+    let mut idle: Option<IdleWindow> = None;
     let mut store_busy = false;
 
     loop {
@@ -350,74 +355,52 @@ async fn watch_custom_home(
         let has_terminals = terminals
             .as_deref()
             .is_some_and(Registry::has_active_terminals);
-        let wait = if has_clients {
-            idle_since = None;
-            idle_store_stamp = None;
+        let wait = if has_clients || has_terminals {
+            idle = None;
             store_busy = false;
             // With the kernel watch active and client connect/disconnect notifying
-            // `client_activity`, an active server needs no timer at all.
-            home_watcher.is_none().then_some(schedule.check_every)
-        } else if has_terminals {
-            idle_since = None;
-            idle_store_stamp = None;
-            store_busy = false;
-            Some(if home_watcher.is_some() {
-                schedule.execution_check_every
-            } else {
-                schedule.check_every.min(schedule.execution_check_every)
-            })
+            // `client_activity`, an active server with clients needs no timer at all.
+            has_terminals.then_some(schedule.execution_check_every)
         } else {
             let now = SystemTime::now();
-            let current_stamp = store_activity_stamp(&home);
-            let stamp_changed = idle_store_stamp.is_some_and(|prev| prev != current_stamp);
-            if stamp_changed {
-                idle_since = None;
-                idle_store_stamp = None;
+            if idle.is_some_and(|w| store_activity_stamp(&home) != w.store_stamp) {
+                idle = None;
             }
-            let elapsed = idle_since
-                .and_then(|started| now.duration_since(started).ok())
+            let elapsed = idle
+                .and_then(|w| now.duration_since(w.since).ok())
                 .unwrap_or_default();
             // Query SQLite only on idle entry, while execution was busy, or at
             // the idle deadline — never on a periodic timer while truly idle.
-            let should_check_store =
-                idle_since.is_none() || store_busy || elapsed >= schedule.idle_timeout;
-            if should_check_store {
+            if idle.is_none() || store_busy || elapsed >= schedule.idle_timeout {
                 let check = has_unfinished_execution.clone();
                 let check_home = home.clone();
-                let busy = tokio::task::spawn_blocking(move || check(&check_home))
+                store_busy = tokio::task::spawn_blocking(move || check(&check_home))
                     .await
                     .unwrap_or(false);
-                store_busy = busy;
-                if busy {
-                    idle_since = None;
-                    idle_store_stamp = None;
-                    Some(if home_watcher.is_some() {
-                        schedule.execution_check_every
-                    } else {
-                        schedule.check_every.min(schedule.execution_check_every)
-                    })
-                } else if idle_since.is_some() && elapsed >= schedule.idle_timeout {
+                if store_busy {
+                    idle = None;
+                    Some(schedule.execution_check_every)
+                } else if idle.is_some() && elapsed >= schedule.idle_timeout {
                     return ShutdownReason::Idle;
                 } else {
-                    let started = *idle_since.get_or_insert(now);
-                    idle_store_stamp = Some(store_activity_stamp(&home));
-                    let remaining = schedule
-                        .idle_timeout
-                        .saturating_sub(now.duration_since(started).unwrap_or_default());
-                    Some(if home_watcher.is_some() {
-                        remaining
-                    } else {
-                        remaining.min(schedule.check_every)
-                    })
+                    let window = idle.get_or_insert_with(|| IdleWindow {
+                        since: now,
+                        store_stamp: store_activity_stamp(&home),
+                    });
+                    Some(
+                        schedule
+                            .idle_timeout
+                            .saturating_sub(now.duration_since(window.since).unwrap_or_default()),
+                    )
                 }
             } else {
-                let remaining = schedule.idle_timeout.saturating_sub(elapsed);
-                Some(if home_watcher.is_some() {
-                    remaining
-                } else {
-                    remaining.min(schedule.check_every)
-                })
+                Some(schedule.idle_timeout.saturating_sub(elapsed))
             }
+        };
+        let wait = if home_watcher.is_some() {
+            wait
+        } else {
+            Some(wait.map_or(schedule.check_every, |d| d.min(schedule.check_every)))
         };
 
         let wait_home = async {

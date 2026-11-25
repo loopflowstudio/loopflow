@@ -267,6 +267,21 @@ th {
   margin-top: 8px;
 }
 
+/* A control's `data-label` is its question; a decision card shows its title instead. */
+[data-choice][data-label]::before,
+[data-multiselect][data-label]::before,
+[data-question][data-label]::before {
+  content: attr(data-label);
+  display: block;
+  flex-basis: 100%;
+  margin: 10px 0 2px;
+  font-weight: 600;
+}
+
+.lf-decision [data-choice]::before {
+  content: none;
+}
+
 button {
   appearance: none;
   font-family: var(--lf-font-sans);

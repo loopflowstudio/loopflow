@@ -934,8 +934,21 @@ final class ReviewComments {
         guard !items.isEmpty else { return }
         guard conversation(ReviewComment.message(items, receipts: pageReceipts())) else { return }
         items.removeAll()
-        pageStates.removeAll()
+        pageStates = pageStates.compactMapValues(Self.sentPageState)
         pageClearGeneration += 1
+    }
+
+    /// What a page keeps once its items are sent: its receipts, marked reported, so a
+    /// remounted page still shows "Filed …" in place of the button.
+    private static func sentPageState(_ state: JSONValue) -> JSONValue? {
+        guard case .object(let fields) = state, case .array(let receipts) = fields["receipts"],
+              !receipts.isEmpty else { return nil }
+        let reported = receipts.map { entry -> JSONValue in
+            guard case .object(var receipt) = entry else { return entry }
+            receipt["reported"] = .bool(true)
+            return .object(receipt)
+        }
+        return .object(["receipts": .array(reported)])
     }
 
     private func pageReceipts() -> [String] {
@@ -945,7 +958,8 @@ final class ReviewComments {
                   case .array(let receipts) = fields["receipts"] else { continue }
             for entry in receipts {
                 guard case .object(let receipt) = entry,
-                      case .string(let kind) = receipt["kind"] else { continue }
+                      case .string(let kind) = receipt["kind"],
+                      receipt["reported"] != .bool(true) else { continue }
                 if case .string(let summary) = receipt["summary"], !summary.isEmpty {
                     ran.append("\(kind) → \(summary)")
                 } else {

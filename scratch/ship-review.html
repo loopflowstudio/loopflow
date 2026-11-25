@@ -328,6 +328,21 @@ th {
   margin-top: 8px;
 }
 
+/* A control's `data-label` is its question; a decision card shows its title instead. */
+[data-choice][data-label]::before,
+[data-multiselect][data-label]::before,
+[data-question][data-label]::before {
+  content: attr(data-label);
+  display: block;
+  flex-basis: 100%;
+  margin: 10px 0 2px;
+  font-weight: 600;
+}
+
+.lf-decision [data-choice]::before {
+  content: none;
+}
+
 button {
   appearance: none;
   font-family: var(--lf-font-sans);
@@ -789,7 +804,7 @@ button.lf-btn-quiet {
 <tr class="lf-ctx"><td class="lf-ln">814</td><td class="lf-ln">916</td><td class="lf-sign"> </td><td>        }</td></tr>
 <tr class="lf-ctx"><td class="lf-ln">815</td><td class="lf-ln">917</td><td class="lf-sign"> </td><td>        guard !indices.isEmpty else { return }</td></tr>
 <tr class="lf-ctx"><td class="lf-ln">816</td><td class="lf-ln">918</td><td class="lf-sign"> </td><td>        let lines = document.text.utf8.split(separator: 10, omittingEmptySubsequences: false).enumerated().map {</td></tr>
-<tr class="lf-hunk"><td colspan="4">@@ -822,14 +924,36 @@ final class ReviewComments {</td></tr>
+<tr class="lf-hunk"><td colspan="4">@@ -822,14 +924,50 @@ final class ReviewComments {</td></tr>
 <tr class="lf-ctx"><td class="lf-ln">822</td><td class="lf-ln">924</td><td class="lf-sign"> </td><td></td></tr>
 <tr class="lf-ctx"><td class="lf-ln">823</td><td class="lf-ln">925</td><td class="lf-sign"> </td><td>    func reconcile(path: String, revision: String, file: ReviewFile?) {</td></tr>
 <tr class="lf-ctx"><td class="lf-ln">824</td><td class="lf-ln">926</td><td class="lf-sign"> </td><td>        for index in items.indices {</td></tr>
@@ -803,28 +818,28 @@ button.lf-btn-quiet {
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">934</td><td class="lf-sign">+</td><td>        guard !items.isEmpty else { return }</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">935</td><td class="lf-sign">+</td><td>        guard conversation(ReviewComment.message(items, receipts: pageReceipts())) else { return }</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">936</td><td class="lf-sign">+</td><td>        items.removeAll()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">937</td><td class="lf-sign">+</td><td>        pageStates.removeAll()</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">937</td><td class="lf-sign">+</td><td>        pageStates = pageStates.compactMapValues(Self.sentPageState)</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Clearing pageStates and bumping pageClearGeneration prevents notes from resurrecting if the person sent comments while viewing a source file.</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">938</td><td class="lf-sign">+</td><td>        pageClearGeneration += 1</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">939</td><td class="lf-sign">+</td><td>    }</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">940</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">941</td><td class="lf-sign">+</td><td>    private func pageReceipts() -&gt; [String] {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">942</td><td class="lf-sign">+</td><td>        var ran: [String] = []</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">943</td><td class="lf-sign">+</td><td>        for key in pageStates.keys.sorted(by: { $0.path &lt; $1.path }) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">944</td><td class="lf-sign">+</td><td>            guard case .object(let fields) = pageStates[key],</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">945</td><td class="lf-sign">+</td><td>                  case .array(let receipts) = fields[&quot;receipts&quot;] else { continue }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">946</td><td class="lf-sign">+</td><td>            for entry in receipts {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">947</td><td class="lf-sign">+</td><td>                guard case .object(let receipt) = entry,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">948</td><td class="lf-sign">+</td><td>                      case .string(let kind) = receipt[&quot;kind&quot;] else { continue }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">949</td><td class="lf-sign">+</td><td>                if case .string(let summary) = receipt[&quot;summary&quot;], !summary.isEmpty {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">950</td><td class="lf-sign">+</td><td>                    ran.append(&quot;\(kind) → \(summary)&quot;)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">951</td><td class="lf-sign">+</td><td>                } else {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">952</td><td class="lf-sign">+</td><td>                    ran.append(kind)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">953</td><td class="lf-sign">+</td><td>                }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">954</td><td class="lf-sign">+</td><td>            }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">955</td><td class="lf-sign">+</td><td>        }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">956</td><td class="lf-sign">+</td><td>        return ran</td></tr>
-<tr class="lf-ctx"><td class="lf-ln">833</td><td class="lf-ln">957</td><td class="lf-sign"> </td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">941</td><td class="lf-sign">+</td><td>    /// What a page keeps once its items are sent: its receipts, marked reported, so a</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">942</td><td class="lf-sign">+</td><td>    /// remounted page still shows &quot;Filed …&quot; in place of the button.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">943</td><td class="lf-sign">+</td><td>    private static func sentPageState(_ state: JSONValue) -&gt; JSONValue? {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">944</td><td class="lf-sign">+</td><td>        guard case .object(let fields) = state, case .array(let receipts) = fields[&quot;receipts&quot;],</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">945</td><td class="lf-sign">+</td><td>              !receipts.isEmpty else { return nil }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">946</td><td class="lf-sign">+</td><td>        let reported = receipts.map { entry -&gt; JSONValue in</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">947</td><td class="lf-sign">+</td><td>            guard case .object(var receipt) = entry else { return entry }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">948</td><td class="lf-sign">+</td><td>            receipt[&quot;reported&quot;] = .bool(true)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">949</td><td class="lf-sign">+</td><td>            return .object(receipt)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">950</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">951</td><td class="lf-sign">+</td><td>        return .object([&quot;receipts&quot;: .array(reported)])</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">952</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">953</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">954</td><td class="lf-sign">+</td><td>    private func pageReceipts() -&gt; [String] {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">955</td><td class="lf-sign">+</td><td>        var ran: [String] = []</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">956</td><td class="lf-sign">+</td><td>        for key in pageStates.keys.sorted(by: { $0.path &lt; $1.path }) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">957</td><td class="lf-sign">+</td><td>            guard case .object(let fields) = pageStates[key],</td></tr>
 </tbody></table></div></div>
 
 <h2>Key data structures and APIs</h2>
@@ -915,7 +930,7 @@ button.lf-btn-quiet {
   <textarea rows="3" placeholder="Optional notes…"></textarea>
 </div>
 </main>
-<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1109"},"directory":"/Users/jack/src/loopflow.loo-1109-human-comprehension-review","base":"6d617de68638439a144601b3cb8cbaf6ec678630","head":"884a2d10c8","path":"scratch/ship-review.html","build_id":"46c7424f14f1e23a"}</script>
+<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1109"},"directory":"/Users/jack/src/loopflow.loo-1109-human-comprehension-review","base":"6d617de68638439a144601b3cb8cbaf6ec678630","head":"6018fc1488","path":"scratch/ship-review.html","build_id":"635ddf1701c1e012"}</script>
 <script>
 (function () {
   "use strict";
@@ -1043,8 +1058,9 @@ button.lf-btn-quiet {
     if (!items.length) return "";
     const parts = items.map((item, idx) => "(" + (idx + 1) + ") " + oneLine(item.reference));
     let message = parts.join(" ");
-    if (state.receipts.length > 0) {
-      const ran = state.receipts
+    const unreported = state.receipts.filter((r) => !r.reported);
+    if (unreported.length > 0) {
+      const ran = unreported
         .map((r) => oneLine(r.kind + (r.summary ? " → " + r.summary : "")))
         .join("; ");
       message += " [already ran: " + ran + "]";
@@ -1108,9 +1124,10 @@ button.lf-btn-quiet {
     refresh(false);
   }
 
-  // Desktop Swift bridge calls this on `ready` reply or after `ReviewComments.insert(into:)` clears.
+  // Desktop calls this with `null` after `ReviewComments.insert(into:)` sends the page's items.
   window.__lfDesktopApplyState = function (loaded) {
-    applyState(loaded);
+    if (loaded) applyState(loaded);
+    else clearDrafts();
   };
 
   // --- Loopback WebSocket carrier ---
@@ -1317,20 +1334,50 @@ button.lf-btn-quiet {
 
     // Direct actions (`data-lf`)
     document.querySelectorAll("[data-lf]").forEach((btn, idx) => {
-      const actionKey = btn.getAttribute("data-lf-id") || "action-" + idx;
-      let operationTemplate;
+      let template;
       try {
-        operationTemplate = JSON.parse(btn.getAttribute("data-lf") || "{}");
+        template = JSON.parse(btn.getAttribute("data-lf") || "{}");
       } catch (_) {
         return;
       }
+      const action = { key: btn.getAttribute("data-lf-id") || "action-" + idx, btn, template, slot: btn };
+      actions.push(action);
       btn.addEventListener("click", () => {
-        openActionConfirm(btn, actionKey, operationTemplate);
+        openActionConfirm(action);
       });
     });
   }
 
+  // Each `data-lf` button and the element now standing in its place.
+  const actions = [];
+
+  function showInSlot(action, el) {
+    if (action.slot !== el) action.slot.replaceWith(el);
+    action.slot = el;
+  }
+
+  function actionNote(className, text) {
+    const el = document.createElement("span");
+    el.className = className;
+    el.textContent = text;
+    return el;
+  }
+
+  // Receipts and offline-queued actions outlive reloads; an action with neither shows its button.
+  function syncActionsFromState() {
+    for (const action of actions) {
+      const receipt = state.receipts.find((r) => r.key === action.key);
+      const offline = state.offlineActions.find((a) => a.key === action.key);
+      if (receipt) showInSlot(action, actionNote("lf-action-receipt", receipt.text || receipt.summary));
+      else if (offline) showInSlot(action, actionNote("lf-action-summary", "Offline — added to reply"));
+      else if (action.slot.classList.contains("lf-action-receipt") || action.slot.classList.contains("lf-action-summary")) {
+        showInSlot(action, action.btn);
+      }
+    }
+  }
+
   function syncControlsFromState() {
+    syncActionsFromState();
     document.querySelectorAll("[data-choice]").forEach((groupEl) => {
       const group = groupEl.getAttribute("data-choice");
       const selected = state.choices[group] && state.choices[group].value;
@@ -1391,16 +1438,11 @@ button.lf-btn-quiet {
     return "Ran " + kind;
   }
 
-  function openActionConfirm(btn, actionKey, template) {
+  function openActionConfirm(action) {
+    const template = action.template;
     if (hostMode === "clipboard") {
-      const summary = summarizeOperation(template);
-      state.offlineActions.push({ id: randomId(), summary });
-      const note = document.createElement("span");
-      note.className = "lf-action-summary";
-      note.textContent = "Offline — added to reply";
-      btn.replaceWith(note);
-      saveState();
-      renderStrip();
+      state.offlineActions.push({ id: randomId(), key: action.key, summary: summarizeOperation(template) });
+      refresh(true);
       return;
     }
 
@@ -1408,9 +1450,7 @@ button.lf-btn-quiet {
     const wrap = document.createElement("span");
     wrap.className = "lf-action-confirm";
 
-    const summary = document.createElement("span");
-    summary.className = "lf-action-summary";
-    summary.textContent = summarizeOperation(template);
+    const summary = actionNote("lf-action-summary", summarizeOperation(template));
 
     const runBtn = document.createElement("button");
     runBtn.type = "button";
@@ -1422,41 +1462,32 @@ button.lf-btn-quiet {
     cancelBtn.textContent = "Cancel";
 
     wrap.append(summary, runBtn, cancelBtn);
-    btn.replaceWith(wrap);
+    showInSlot(action, wrap);
 
     cancelBtn.addEventListener("click", () => {
-      wrap.replaceWith(btn);
+      showInSlot(action, action.btn);
     });
 
     function execute() {
+      showInSlot(action, wrap);
       runBtn.disabled = true;
       runBtn.textContent = "Running…";
       const op = materializeOperation(template, requestId);
       sendOperation(op, requestId).then(
         (result) => {
           const text = formatReceipt(op.kind, result);
-          const idSummary = resultTaskId(result) || text;
-          state.receipts.push({ key: actionKey, kind: op.kind, summary: idSummary });
-          const receipt = document.createElement("span");
-          receipt.className = "lf-action-receipt";
-          receipt.textContent = text;
-          wrap.replaceWith(receipt);
-          saveState();
+          state.receipts.push({ key: action.key, kind: op.kind, summary: resultTaskId(result) || text, text });
+          refresh(true);
         },
         (err) => {
           const errWrap = document.createElement("span");
           errWrap.className = "lf-action-error";
-          const msg = document.createElement("span");
-          msg.textContent = String(err && err.message ? err.message : err);
           const retryBtn = document.createElement("button");
           retryBtn.type = "button";
           retryBtn.textContent = "Retry";
-          retryBtn.addEventListener("click", () => {
-            errWrap.replaceWith(wrap);
-            execute();
-          });
-          errWrap.append(msg, retryBtn);
-          wrap.replaceWith(errWrap);
+          retryBtn.addEventListener("click", execute);
+          errWrap.append(actionNote("", String(err && err.message ? err.message : err)), retryBtn);
+          showInSlot(action, errWrap);
         }
       );
     }
@@ -1679,8 +1710,9 @@ button.lf-btn-quiet {
     });
   }
 
+  // After a reply is sent: drafts go, receipts stay drawn and stop riding on replies.
   function clearDrafts() {
-    const receipts = state.receipts;
+    const receipts = state.receipts.map((r) => Object.assign({}, r, { reported: true }));
     state = emptyState();
     state.receipts = receipts;
     refresh(true);

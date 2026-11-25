@@ -503,9 +503,10 @@ button).
   along its numbered steps; `builtins::tests::review_page_skills_use_lf_page_kit`
   asserts prompt substrings (including a negative `"visual language"` check) and
   would not fail if a page broke — keep only what guards a real regression.
-- **qa:** the runtime in Chrome against branch `lf server` and in Dev Desktop:
-  highlight note + choice + `⌘↩` steer, switching files before sending, a
-  `data-lf` `task.create` receipt, `file://` copy. No JS runs in CI.
+- **qa (Chrome done, `scratch/qa.html`):** fixed missing `data-label` questions,
+  `data-lf` receipts lost on reload/send (browser and Desktop), and opaque
+  `data-lf` field errors. Still open: Dev Desktop live (switch files before
+  sending, `data-lf` click, receipt after remount).
 - Open questions 1–8 in `scratch/questions.md` stay for review (notably which
   browser "an agent-browser split" meant).
 

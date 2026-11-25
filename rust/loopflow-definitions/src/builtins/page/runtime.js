@@ -124,8 +124,9 @@
     if (!items.length) return "";
     const parts = items.map((item, idx) => "(" + (idx + 1) + ") " + oneLine(item.reference));
     let message = parts.join(" ");
-    if (state.receipts.length > 0) {
-      const ran = state.receipts
+    const unreported = state.receipts.filter((r) => !r.reported);
+    if (unreported.length > 0) {
+      const ran = unreported
         .map((r) => oneLine(r.kind + (r.summary ? " → " + r.summary : "")))
         .join("; ");
       message += " [already ran: " + ran + "]";
@@ -189,9 +190,10 @@
     refresh(false);
   }
 
-  // Desktop Swift bridge calls this on `ready` reply or after `ReviewComments.insert(into:)` clears.
+  // Desktop calls this with `null` after `ReviewComments.insert(into:)` sends the page's items.
   window.__lfDesktopApplyState = function (loaded) {
-    applyState(loaded);
+    if (loaded) applyState(loaded);
+    else clearDrafts();
   };
 
   // --- Loopback WebSocket carrier ---
@@ -398,20 +400,50 @@
 
     // Direct actions (`data-lf`)
     document.querySelectorAll("[data-lf]").forEach((btn, idx) => {
-      const actionKey = btn.getAttribute("data-lf-id") || "action-" + idx;
-      let operationTemplate;
+      let template;
       try {
-        operationTemplate = JSON.parse(btn.getAttribute("data-lf") || "{}");
+        template = JSON.parse(btn.getAttribute("data-lf") || "{}");
       } catch (_) {
         return;
       }
+      const action = { key: btn.getAttribute("data-lf-id") || "action-" + idx, btn, template, slot: btn };
+      actions.push(action);
       btn.addEventListener("click", () => {
-        openActionConfirm(btn, actionKey, operationTemplate);
+        openActionConfirm(action);
       });
     });
   }
 
+  // Each `data-lf` button and the element now standing in its place.
+  const actions = [];
+
+  function showInSlot(action, el) {
+    if (action.slot !== el) action.slot.replaceWith(el);
+    action.slot = el;
+  }
+
+  function actionNote(className, text) {
+    const el = document.createElement("span");
+    el.className = className;
+    el.textContent = text;
+    return el;
+  }
+
+  // Receipts and offline-queued actions outlive reloads; an action with neither shows its button.
+  function syncActionsFromState() {
+    for (const action of actions) {
+      const receipt = state.receipts.find((r) => r.key === action.key);
+      const offline = state.offlineActions.find((a) => a.key === action.key);
+      if (receipt) showInSlot(action, actionNote("lf-action-receipt", receipt.text || receipt.summary));
+      else if (offline) showInSlot(action, actionNote("lf-action-summary", "Offline — added to reply"));
+      else if (action.slot.classList.contains("lf-action-receipt") || action.slot.classList.contains("lf-action-summary")) {
+        showInSlot(action, action.btn);
+      }
+    }
+  }
+
   function syncControlsFromState() {
+    syncActionsFromState();
     document.querySelectorAll("[data-choice]").forEach((groupEl) => {
       const group = groupEl.getAttribute("data-choice");
       const selected = state.choices[group] && state.choices[group].value;
@@ -472,16 +504,11 @@
     return "Ran " + kind;
   }
 
-  function openActionConfirm(btn, actionKey, template) {
+  function openActionConfirm(action) {
+    const template = action.template;
     if (hostMode === "clipboard") {
-      const summary = summarizeOperation(template);
-      state.offlineActions.push({ id: randomId(), summary });
-      const note = document.createElement("span");
-      note.className = "lf-action-summary";
-      note.textContent = "Offline — added to reply";
-      btn.replaceWith(note);
-      saveState();
-      renderStrip();
+      state.offlineActions.push({ id: randomId(), key: action.key, summary: summarizeOperation(template) });
+      refresh(true);
       return;
     }
 
@@ -489,9 +516,7 @@
     const wrap = document.createElement("span");
     wrap.className = "lf-action-confirm";
 
-    const summary = document.createElement("span");
-    summary.className = "lf-action-summary";
-    summary.textContent = summarizeOperation(template);
+    const summary = actionNote("lf-action-summary", summarizeOperation(template));
 
     const runBtn = document.createElement("button");
     runBtn.type = "button";
@@ -503,41 +528,32 @@
     cancelBtn.textContent = "Cancel";
 
     wrap.append(summary, runBtn, cancelBtn);
-    btn.replaceWith(wrap);
+    showInSlot(action, wrap);
 
     cancelBtn.addEventListener("click", () => {
-      wrap.replaceWith(btn);
+      showInSlot(action, action.btn);
     });
 
     function execute() {
+      showInSlot(action, wrap);
       runBtn.disabled = true;
       runBtn.textContent = "Running…";
       const op = materializeOperation(template, requestId);
       sendOperation(op, requestId).then(
         (result) => {
           const text = formatReceipt(op.kind, result);
-          const idSummary = resultTaskId(result) || text;
-          state.receipts.push({ key: actionKey, kind: op.kind, summary: idSummary });
-          const receipt = document.createElement("span");
-          receipt.className = "lf-action-receipt";
-          receipt.textContent = text;
-          wrap.replaceWith(receipt);
-          saveState();
+          state.receipts.push({ key: action.key, kind: op.kind, summary: resultTaskId(result) || text, text });
+          refresh(true);
         },
         (err) => {
           const errWrap = document.createElement("span");
           errWrap.className = "lf-action-error";
-          const msg = document.createElement("span");
-          msg.textContent = String(err && err.message ? err.message : err);
           const retryBtn = document.createElement("button");
           retryBtn.type = "button";
           retryBtn.textContent = "Retry";
-          retryBtn.addEventListener("click", () => {
-            errWrap.replaceWith(wrap);
-            execute();
-          });
-          errWrap.append(msg, retryBtn);
-          wrap.replaceWith(errWrap);
+          retryBtn.addEventListener("click", execute);
+          errWrap.append(actionNote("", String(err && err.message ? err.message : err)), retryBtn);
+          showInSlot(action, errWrap);
         }
       );
     }
@@ -760,8 +776,9 @@
     });
   }
 
+  // After a reply is sent: drafts go, receipts stay drawn and stop riding on replies.
   function clearDrafts() {
-    const receipts = state.receipts;
+    const receipts = state.receipts.map((r) => Object.assign({}, r, { reported: true }));
     state = emptyState();
     state.receipts = receipts;
     refresh(true);

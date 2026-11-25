@@ -100,27 +100,52 @@ fn compile_operation_json(
         })
         .unwrap_or_default();
 
-    for field in required {
-        if object.contains_key(&field) {
+    if let Some(props) = properties {
+        let unknown: Vec<&str> = object
+            .keys()
+            .filter(|key| !props.contains_key(*key))
+            .map(String::as_str)
+            .collect();
+        if !unknown.is_empty() {
+            bail!(
+                "line {line}: <{elem} data-lf=…> `{kind}` has no field {}",
+                quoted_list(&unknown)
+            );
+        }
+    }
+
+    for field in &required {
+        if object.contains_key(field) {
             continue;
         }
         if field == "directory" {
             object.insert(
-                field,
+                field.clone(),
                 Value::String(repo_root.to_string_lossy().into_owned()),
             );
             continue;
         }
         if field == "request_id" {
-            object.insert(field, Value::String(REQUEST_ID_SENTINEL.to_owned()));
+            object.insert(field.clone(), Value::String(REQUEST_ID_SENTINEL.to_owned()));
             continue;
         }
         if let Some(default_value) = properties
-            .and_then(|props| props.get(&field))
+            .and_then(|props| props.get(field))
             .and_then(default_for_schema)
         {
-            object.insert(field, default_value);
+            object.insert(field.clone(), default_value);
         }
+    }
+    let missing: Vec<&str> = required
+        .iter()
+        .filter(|field| !object.contains_key(*field))
+        .map(String::as_str)
+        .collect();
+    if !missing.is_empty() {
+        bail!(
+            "line {line}: <{elem} data-lf=…> `{kind}` requires {}",
+            quoted_list(&missing)
+        );
     }
 
     // Strict wire validation via deserializing `Operation` (enforces `deny_unknown_fields`).
@@ -128,6 +153,14 @@ fn compile_operation_json(
         anyhow::anyhow!("line {line}: <{elem} data-lf=…> invalid `{kind}` operation: {err}")
     })?;
     serde_json::to_string(&validated).context("serialize validated Operation JSON")
+}
+
+fn quoted_list(fields: &[&str]) -> String {
+    fields
+        .iter()
+        .map(|field| format!("`{field}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn default_for_schema(schema: &Value) -> Option<Value> {
@@ -194,6 +227,21 @@ mod tests {
         .to_string();
         assert!(unknown_field.contains("line 14"), "{unknown_field}");
         assert!(unknown_field.contains("<button"), "{unknown_field}");
+        assert!(
+            unknown_field.contains("no field `bogus`"),
+            "{unknown_field}"
+        );
+
+        let misspelled = compile_operation_json(
+            Path::new("/tmp/repo"),
+            &mut schemas,
+            r#"{"kind":"task.create","titel":"Ok"}"#,
+            "button",
+            15,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(misspelled.contains("no field `titel`"), "{misspelled}");
 
         let unknown_kind = compile_operation_json(
             Path::new("/tmp/repo"),

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>LOO-1109 QA: review pages</title>
+<style>
+body{font:15px/1.55 -apple-system,system-ui,sans-serif;max-width:900px;margin:40px auto;padding:0 20px;color:#222;background:#faf9f6}
+h1{font-family:Georgia,serif;font-weight:400}h2{margin-top:2.2em;border-top:1px solid #ddd;padding-top:1em}
+code,pre{font:13px ui-monospace,Menlo,monospace;background:#f0eee9;border-radius:3px;padding:1px 4px}pre{padding:10px;overflow-x:auto;white-space:pre-wrap}
+img{max-width:100%;border:1px solid #ddd;border-radius:4px;margin:8px 0}.fix{border-left:3px solid #6b2c34;padding-left:12px}
+table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:4px 8px;text-align:left;vertical-align:top}
+@media (prefers-color-scheme:dark){body{background:#1c1a19;color:#ddd}code,pre{background:#2a2725}td,th,h2,img{border-color:#444}}
+</style></head><body>
+<h1>LOO-1109 QA: review pages in Chrome against the branch <code>lf server</code></h1>
+<p>A private Machine (<code>/tmp/lfqa-pg</code>) ran the branch <code>lf server</code>. It had a disposable repository and a Task, <code>c56843</code>, whose checkout changed <code>src/lib.rs</code> and added an untracked <code>src/extra.rs</code>. A page fragment used every kit tag: two <code>&lt;lf-diff&gt;</code>, an <code>&lt;lf-file&gt;</code>, a <code>decision</code>, the three control kinds and a <code>data-lf</code> <code>task.create</code>. I built it with <code>lf page build</code>, opened it at the <code>lf page open --print</code> URL in Chrome through the <code>browse</code> extension, and used it as a reviewer would.</p>
+
+<h2>1. First open</h2>
+<p>The diffs are real: the added doc comment, the <code>bye</code>→<code>goodbye,</code> hunk with its line note, and the untracked file as <code>@@ -0,0 +1,3 @@</code>. <strong>Bug:</strong> the Questions section showed bare <code>Yes</code>/<code>No</code> and <code>lib</code>/<code>extra</code> buttons and an empty textarea. None of the <code>data-label</code> questions ("1. Keep the comma?") was drawn, so a person couldn't tell what they were answering.</p>
+<img src="qa/1-first-open.png" alt="first open">
+
+<h2>2. Note, choices, answer, reload</h2>
+<p>Dragging across "The farewell now says goodbye" opened <em>Note</em>. Saving it put the note under "Your notes". I picked <em>File Task</em>, <em>Yes</em> and <em>extra</em> and typed "ship it". The strip read <code>5 items · Clear · Steer c56843 ⌘↩</code>, so the page found the loopback host and the readable Task ID. After a reload all five were still there.</p>
+<img src="qa/2-queued.png" alt="queued">
+
+<h2>3. <code>data-lf</code> direct action</h2>
+<p>The inline confirm read <code>task.create title=Wire extra() into greet · Run · Cancel</code>. <em>Run</em> turned the button into <code>Filed e1f864</code>, and <code>lf task list</code> showed <code>e1f864 · Wire extra() into greet</code>. The queue stayed at 5.</p>
+<img src="qa/3-filed.png" alt="filed">
+<p class="fix"><strong>Bug:</strong> after a reload, and after any send, the receipt was gone and <em>File Task now</em> was back, inviting a second Task. Receipts were saved to <code>localStorage</code> but never drawn again on load. Desktop had the same hole: <code>ReviewComments.insert(into:)</code> dropped every page state, receipts included.</p>
+
+<h2>4. <code>⌘↩</code> steers the Task</h2>
+<p>The strip showed the server's <code>delivery.sentence</code> ("Saved …; nothing reads it until c56843 runs") and the queue cleared. The <code>steers</code> row, verbatim:</p>
+<pre>(1) `scratch/ship-review.html` § What was built › "The farewell now says goodbye" is it goodbye or farewell? (2) `scratch/ship-review.html` § extra() is unused: File Task (3) `scratch/ship-review.html` § 1. Keep the comma?: yes (4) `scratch/ship-review.html` § 2. Which modules need docs?: extra (5) `scratch/ship-review.html` § 3. Anything else?: ship it [already ran: task.create → e1f864]</pre>
+<img src="qa/4-steered.png" alt="steered">
+
+<h2>5. Offline (no Machine socket)</h2>
+<p><code>browse</code> refuses <code>file:</code> URLs, so a static <code>http.server</code> on another port stood in. Its WebSocket fails the same way. The strip became <code>Copy reply ⌘↩</code>; <em>File Task now</em> turned into "Offline — added to reply". The copied text was:</p>
+<pre>(1) `scratch/ship-review.html` § extra() is unused: Drop (2) `scratch/ship-review.html` Run: task.create title=Wire extra() into greet</pre>
+<img src="qa/5-offline.png" alt="offline">
+
+<h2>6. Server stopped under an open page</h2>
+<p>I killed the server by PID with a choice queued. A banner appeared, "lf server restarted; run lf page open scratch/ship-review.html", the strip switched to <code>Copy reply ⌘↩</code>, and the queued item stayed.</p>
+<img src="qa/6-server-stopped.png" alt="server stopped">
+
+<h2>7. Admission over curl</h2>
+<table><tr><th>Request</th><th>Answer</th></tr>
+<tr><td>page GET</td><td>200 with CSP, <code>no-referrer</code>, <code>no-store</code>, <code>nosniff</code></td></tr>
+<tr><td>wrong token / wrong <code>Host</code></td><td>404 / 404</td></tr>
+<tr><td>upgrade without <code>Origin</code> / with a foreign one</td><td>404 / 404</td></tr>
+<tr><td>upgrade with the right token, <code>Host</code> and <code>Origin</code></td><td>101</td></tr>
+<tr><td><code>/&lt;token&gt;/f/etc/hosts</code></td><td>200: any absolute path, as designed (questions.md 3)</td></tr></table>
+
+<h2>8. Build errors</h2>
+<p>An unknown SHA, a <code>&lt;script&gt;</code>, and <code>lf page open</code> on a <code>.page.html</code> each fail and name the line or the build command. <strong>Bug:</strong> a misspelled <code>data-lf</code> field (<code>titel</code>) failed with "data did not match any variant of untagged enum Operation", which names neither the field nor the cause.</p>
+
+<h2>Fixes</h2>
+<ul class="fix">
+<li><code>base.css</code>: a control's <code>data-label</code> is drawn as its question above the buttons or textarea. Decision cards skip it because their title already says it.</li>
+<li><code>runtime.js</code>: each <code>data-lf</code> button keeps its slot. <code>syncControlsFromState</code> redraws receipts and offline-queued actions from state, so reloads, Desktop remounts and sends keep <code>Filed …</code> in place. A sent receipt is marked <code>reported</code>, and <code>[already ran: …]</code> rides on one reply only. <code>__lfDesktopApplyState(null)</code> now means "sent": drafts are cleared and receipts kept.</li>
+<li><code>ReviewDiff.swift</code>: <code>insert(into:)</code> keeps each page's receipts, marked reported, instead of dropping the whole state. <code>pageReceipts</code> skips reported ones. <code>TaskFilesTests/reviewPageCommentsSendOnOneLineWithDiffCommentsAndDoNotResurrect</code> now checks both: the receipt is kept after send, and a second send carries no suffix.</li>
+<li><code>page/operations.rs</code>: before strict deserialization, an unknown <code>data-lf</code> field fails with <code>`task.create` has no field `titel`</code> and a missing one with <code>requires `…`</code>.</li>
+<li>Rebuilt this Task's <code>scratch/ship-review.html</code> with the fixed kit.</li>
+</ul>
+<p>Second pass on the rebuilt <code>lf</code> and a restarted server: the labels show (light and dark). <code>Filed b4ea4b</code> survives a reload and a send. The two steers were <code>… 1. Keep the comma?: yes [already ran: task.create → b4ea4b]</code> and then <code>… 1. Keep the comma?: no</code> with no suffix.</p>
+<img src="qa/7-fixed-light.png" alt="fixed light"><img src="qa/8-fixed-dark.png" alt="fixed dark">
+<p>Checks run: <code>cargo test -p loopflow --lib page::operations</code> 1/1; <code>cargo test -p loopflow --test integration page_tests::</code> 2/2; <code>scripts/test_desktop.sh --filter 'TaskFilesTests/reviewPage|ReviewDiffTests'</code> 19/19. All were run here; gate runs the suites.</p>
+
+<h2>What works now</h2>
+<p>Build with real and untracked diffs, a note, choices and answers, <code>⌘↩</code> → <code>task.steer</code> with <code>delivery.sentence</code>, a confirmed <code>data-lf</code> with a lasting receipt, the offline copy, the server-gone banner, loopback admission, and light and dark themes.</p>
+
+<h2>Not reached</h2>
+<ul>
+<li><strong>Dev Desktop, live.</strong> This was a headless run on a Machine in use, so the Desktop checks are still open: notes in <code>ReviewCommentsStrip</code>, switching files before sending, a <code>data-lf</code> click, and the receipt after a remount. The bridge logic ran only in the headless Swift tests above.</li>
+<li><strong>Headless <code>lf page open</code> from a real <code>lf -b</code>.</strong> The QA <code>claude</code> stand-in can't answer <code>-p</code> batches. <code>page_tests</code> covers that route.</li>
+<li><strong>A real <code>file://</code> double-click.</strong> The extension refuses file URLs; a static server reached the same clipboard host instead.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li>The steer's <code>delivery.sentence</code> shows a raw UUID ("Saved e3fa0d2f-…; nothing reads it until c56843 runs"). That sentence comes from the server, so it isn't this page's to change, but it's the one line the person reads after <code>⌘↩</code>.</li>
+<li>The banner says "lf server restarted" when the server has only stopped. Accurate after a restart, misleading before one.</li>
+<li>After the offline reply is copied, the offline action leaves the queue and <em>File Task now</em> comes back. That's right for a page that may later go online, but nothing records that the action was copied.</li>
+</ol>
+</body></html>

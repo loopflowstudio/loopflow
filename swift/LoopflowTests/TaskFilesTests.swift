@@ -2771,9 +2771,18 @@ struct TaskFilesTests {
         #expect(sent.contains("(3) `a.swift:L1` (after, \(files.diffReview.revision)) · lines since changed Explain this line"))
         #expect(sent.contains("[already ran: task.create → LOO-1200]"))
 
-        // Returning to the page after an unmounted send does not resurrect sent state.
+        // Returning to the page after an unmounted send resurrects no drafts; its receipt stays
+        // drawn, reported, and rides on no later reply.
         let afterSend = await bridge.handle(["type": "ready", "path": pagePath, "build_id": "b1"])
-        #expect(afterSend.0 is NSNull)
+        let kept = try #require(afterSend.0 as? [String: Any])
+        #expect(kept["notes"] == nil && kept["choices"] == nil)
+        let receipts = try #require(kept["receipts"] as? [[String: Any]])
+        #expect(receipts.first?["summary"] as? String == "LOO-1200" && receipts.first?["reported"] as? Bool == true)
+        files.comments.select(path: "a.swift", source: .diff(side: .new, revision: files.diffReview.revision), line: 1, extend: false)
+        files.comments.draft = "again"
+        files.comments.add(anchor: ["uno"])
+        try send(available: true)
+        #expect(delivered.count == 2 && !delivered[1].contains("already ran"))
     }
 
     @Test func reviewPageBridgeForwardsOperationsAndSubstitutesPeerDirectory() async throws {

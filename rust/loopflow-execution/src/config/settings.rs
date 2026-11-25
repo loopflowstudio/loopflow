@@ -212,6 +212,9 @@ fn validate_parsed_config(
             "choose machine.tasks or machine.capacity in one declaration",
         ));
     }
+    if parsed.machine.jobs == Some(0) {
+        return Err(invalid("machine.jobs must be a positive integer"));
+    }
     for (provider, approver) in &parsed.approvers {
         provider
             .parse::<crate::provider_auth::Provider>()

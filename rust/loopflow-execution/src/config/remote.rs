@@ -38,6 +38,12 @@ pub struct Retention {
 pub fn project(value: &Value) -> Value {
     let mut normalized = value.clone();
     super::normalize_context(&mut normalized);
+    if let Some(machine) = normalized
+        .as_mapping_mut()
+        .and_then(|map| map.get_mut("machine"))
+    {
+        let _ = super::placement::expand_shorthand(machine);
+    }
     let value = &normalized;
     fn setting(value: &Value, key: &str) -> Option<Value> {
         let definition = super::catalog::definition(key)?;
@@ -102,6 +108,12 @@ pub fn project(value: &Value) -> Value {
 
 fn replace_projection(document: &mut Value, incoming: &Value) {
     super::normalize_context(document);
+    if let Some(machine) = document
+        .as_mapping_mut()
+        .and_then(|map| map.get_mut("machine"))
+    {
+        let _ = super::placement::expand_shorthand(machine);
+    }
     let previous = project(document);
     remove_projection(document, &previous);
     super::files::overlay(document, incoming);
@@ -851,6 +863,31 @@ mod tests {
         assert!(saved.get("agent").is_none());
         assert_eq!(saved["theme"], "custom");
         assert_eq!(saved["logs"]["linear_requests"], true);
+    }
+
+    #[test]
+    fn machine_jobs_stays_host_local_across_shorthand_projection() {
+        let outgoing = serde_yaml_ng::from_str::<Value>(
+            "machine:\n  tasks: mini\n  session: mini\n  jobs: 12\n",
+        )
+        .unwrap();
+        let projected = project(&outgoing);
+        assert_eq!(projected["machine"]["tasks"], "mini");
+        assert_eq!(projected["machine"]["session"], "mini");
+        assert!(projected["machine"].get("jobs").is_none());
+
+        // Shorthand `machine: mini` projects portable fields and never clobbers destination's `machine.jobs`.
+        let shorthand = serde_yaml_ng::from_str::<Value>("machine: mini\n").unwrap();
+        let projected_shorthand = project(&shorthand);
+        assert_eq!(projected_shorthand["machine"]["tasks"], "mini");
+        assert_eq!(projected_shorthand["machine"]["session"], "mini");
+        assert!(projected_shorthand["machine"].get("jobs").is_none());
+
+        let mut destination = serde_yaml_ng::from_str::<Value>("machine:\n  jobs: 4\n").unwrap();
+        super::replace_projection(&mut destination, &projected_shorthand);
+        assert_eq!(destination["machine"]["tasks"], "mini");
+        assert_eq!(destination["machine"]["session"], "mini");
+        assert_eq!(destination["machine"]["jobs"], 4);
     }
 }
 

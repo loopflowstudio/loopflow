@@ -37,7 +37,7 @@ mod planning_sync;
 pub mod planning_write;
 mod pr_landings;
 mod processes;
-pub use processes::{PreviousAgentDisposition, SessionTransfer};
+pub use processes::{ActiveFileOwners, PreviousAgentDisposition, SessionTransfer};
 mod program_status;
 #[cfg(test)]
 mod project_content_tests;

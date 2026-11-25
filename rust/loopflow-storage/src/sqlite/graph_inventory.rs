@@ -563,6 +563,15 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Count Graph steps currently running on this Machine (reserved or active, not ended).
+    pub fn running_graph_step_count(&self) -> StoreResult<usize> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query =
+            conn.prepare_cached("SELECT COUNT(*) FROM graph_process_steps WHERE ended_at IS NULL")?;
+        let count: i64 = query.query_row([], |row| row.get(0))?;
+        Ok(usize::try_from(count).unwrap_or(0))
+    }
+
     /// Whether the Graph run `id` has recorded itself.
     pub fn graph_run_recorded(&self, id: &LfProcessId) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");

@@ -52,6 +52,7 @@ mod pr_landings;
 mod task_started;
 pub use loopflow_storage::recording_gap;
 pub use loopflow_storage::records;
+pub mod file_retention;
 pub mod rentals;
 mod repositories;
 pub mod retention;
@@ -145,6 +146,154 @@ pub fn home_removed(home: &Path, initial: Option<(u64, u64)>) -> bool {
         Ok(meta) => initial.is_some_and(|(dev, ino)| (meta.dev(), meta.ino()) != (dev, ino)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
         Err(_) => false,
+    }
+}
+
+/// Kernel watch for removal or rename of a home directory (`kqueue` `EVFILT_VNODE`
+/// on macOS, `inotify` on Linux). Uses zero background threads and zero timers;
+/// its descriptor plugs directly into `poll(2)` or `tokio::io::unix::AsyncFd`.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[derive(Debug)]
+pub struct HomeRemovalWatcher {
+    watch_fd: std::os::fd::OwnedFd,
+    #[cfg(target_os = "macos")]
+    _dir_fd: std::os::fd::OwnedFd,
+}
+
+#[cfg(target_os = "macos")]
+impl HomeRemovalWatcher {
+    pub fn new(home: &Path) -> std::io::Result<Self> {
+        use std::ffi::CString;
+        use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+        use std::os::unix::ffi::OsStrExt;
+
+        let path = CString::new(home.as_os_str().as_bytes())
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "nul in path"))?;
+        // SAFETY: `path` is a NUL-terminated string; O_EVTONLY does not block unmounts.
+        let raw_dir = unsafe { libc::open(path.as_ptr(), libc::O_EVTONLY | libc::O_CLOEXEC) };
+        if raw_dir < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // SAFETY: `raw_dir` is a valid, newly opened file descriptor.
+        let dir_fd = unsafe { OwnedFd::from_raw_fd(raw_dir) };
+
+        // SAFETY: kqueue takes no preconditions.
+        let raw_kq = unsafe { libc::kqueue() };
+        if raw_kq < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // SAFETY: `raw_kq` is a valid kqueue descriptor.
+        let watch_fd = unsafe { OwnedFd::from_raw_fd(raw_kq) };
+        // SAFETY: setting FD_CLOEXEC on a live descriptor.
+        unsafe {
+            libc::fcntl(watch_fd.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC);
+        }
+
+        let event = libc::kevent {
+            ident: dir_fd.as_raw_fd() as usize,
+            filter: libc::EVFILT_VNODE,
+            flags: libc::EV_ADD | libc::EV_CLEAR,
+            fflags: libc::NOTE_DELETE | libc::NOTE_RENAME | libc::NOTE_REVOKE,
+            data: 0,
+            udata: std::ptr::null_mut(),
+        };
+        // SAFETY: registering one stack-allocated kevent on `watch_fd`.
+        let rc = unsafe {
+            libc::kevent(
+                watch_fd.as_raw_fd(),
+                &event,
+                1,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null(),
+            )
+        };
+        if rc < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(Self {
+            watch_fd,
+            _dir_fd: dir_fd,
+        })
+    }
+
+    pub fn drain(&self) {
+        use std::os::fd::AsRawFd;
+        let mut events = [libc::kevent {
+            ident: 0,
+            filter: 0,
+            flags: 0,
+            fflags: 0,
+            data: 0,
+            udata: std::ptr::null_mut(),
+        }; 8];
+        let zero = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: non-blocking drain of pending kevents into stack buffer.
+        unsafe {
+            let _ = libc::kevent(
+                self.watch_fd.as_raw_fd(),
+                std::ptr::null(),
+                0,
+                events.as_mut_ptr(),
+                events.len() as libc::c_int,
+                &zero,
+            );
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl HomeRemovalWatcher {
+    pub fn new(home: &Path) -> std::io::Result<Self> {
+        use std::ffi::CString;
+        use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+        use std::os::unix::ffi::OsStrExt;
+
+        let path = CString::new(home.as_os_str().as_bytes())
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "nul in path"))?;
+        // SAFETY: inotify_init1 with standard flags.
+        let raw_fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
+        if raw_fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // SAFETY: `raw_fd` is a valid inotify descriptor.
+        let watch_fd = unsafe { OwnedFd::from_raw_fd(raw_fd) };
+        // SAFETY: `path` is a valid NUL-terminated string and `watch_fd` is open.
+        let wd = unsafe {
+            libc::inotify_add_watch(
+                watch_fd.as_raw_fd(),
+                path.as_ptr(),
+                libc::IN_DELETE_SELF | libc::IN_MOVE_SELF,
+            )
+        };
+        if wd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(Self { watch_fd })
+    }
+
+    pub fn drain(&self) {
+        use std::os::fd::AsRawFd;
+        let mut buf = [0u8; 256];
+        // SAFETY: non-blocking read on inotify descriptor.
+        unsafe {
+            while libc::read(
+                self.watch_fd.as_raw_fd(),
+                buf.as_mut_ptr().cast(),
+                buf.len(),
+            ) > 0
+            {}
+        }
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+impl std::os::fd::AsRawFd for HomeRemovalWatcher {
+    fn as_raw_fd(&self) -> std::os::fd::RawFd {
+        self.watch_fd.as_raw_fd()
     }
 }
 

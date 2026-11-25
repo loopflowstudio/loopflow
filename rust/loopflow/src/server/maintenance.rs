@@ -71,12 +71,20 @@ fn maintain() {
 }
 
 fn retain(path: &Path) -> anyhow::Result<()> {
-    if !path.exists() {
-        return Ok(());
-    }
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let report = loopflow_execution::store::retention::prune(path, now)?;
-    tracing::info!(?report, "store retention");
+    if path.exists() {
+        let report = loopflow_execution::store::retention::prune(path, now)?;
+        tracing::info!(?report, "store retention");
+    }
+    let files = loopflow_execution::store::file_retention::prune(path, now)?;
+    if files.log_rotated
+        || files.process_logs_removed > 0
+        || files.deliveries_removed > 0
+        || files.backups_removed > 0
+        || files.lock_files_removed > 0
+    {
+        tracing::info!(?files, "file retention");
+    }
     Ok(())
 }
 

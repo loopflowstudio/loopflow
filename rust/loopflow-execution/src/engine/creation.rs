@@ -1,11 +1,10 @@
 //! Task creation's receipt is shared by CLI and served callers.
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -58,14 +57,8 @@ pub fn identity(
 pub fn lock(id: &str) -> Result<File> {
     let root = crate::store::lf_home_dir().join("creation-locks");
     std::fs::create_dir_all(&root)?;
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(root.join(hex::encode(Sha256::digest(id.as_bytes()))))?;
-    file.lock_exclusive()?;
-    Ok(file)
+    let path = root.join(hex::encode(Sha256::digest(id.as_bytes())));
+    Ok(loopflow_storage::lock_file::lock_exclusive_verified(&path)?)
 }
 
 pub fn lookup(id: &str) -> Result<Option<CreationReceipt>> {

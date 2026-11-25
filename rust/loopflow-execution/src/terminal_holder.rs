@@ -336,6 +336,10 @@ pub(crate) fn serve_for_home(
     if home.is_some_and(|dir| crate::store::home_removed(dir, initial_home)) {
         return Ok(Served::Finished);
     }
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    let home_watcher = home.and_then(|dir| crate::store::HomeRemovalWatcher::new(dir).ok());
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let home_watcher: Option<()> = None;
     let lock = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -375,7 +379,15 @@ pub(crate) fn serve_for_home(
     let IDLE = TEST_IDLE.get();
     let mut connections: Vec<Connection> = Vec::new();
     let mut idle_since = Some(Instant::now());
-    let mut next_home_check = home.map(|_| Instant::now() + HOME_CHECK);
+    // When the kernel home-removal watch is active, poll sleeps with no timer
+    // while children run; fall back to HOME_CHECK only if the watch failed.
+    let mut next_home_check = home
+        .filter(|_| home_watcher.is_none())
+        .map(|_| Instant::now() + HOME_CHECK);
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    let home_watch_fd = home_watcher.as_ref().map(AsRawFd::as_raw_fd);
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let home_watch_fd: Option<RawFd> = None;
     loop {
         let now = Instant::now();
         let idle_timeout = idle_since.map(|since| (since + IDLE).saturating_duration_since(now));
@@ -384,7 +396,14 @@ pub(crate) fn serve_for_home(
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
         };
-        let ready = poll(&listener, &wake, &connections, &holder.terminals, timeout);
+        let ready = poll(
+            &listener,
+            &wake,
+            home_watch_fd,
+            &connections,
+            &holder.terminals,
+            timeout,
+        );
         if ready.listener {
             while let Ok((socket, _)) = listener.accept() {
                 if socket.set_nonblocking(true).is_ok() {
@@ -434,9 +453,17 @@ pub(crate) fn serve_for_home(
             }
             !connection.closed
         });
-        if let (Some(home), Some(due)) = (home, next_home_check) {
-            let now = Instant::now();
-            if now >= due {
+        let check_home = if ready.home_watch {
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            if let Some(watcher) = &home_watcher {
+                watcher.drain();
+            }
+            true
+        } else {
+            next_home_check.is_some_and(|due| Instant::now() >= due)
+        };
+        if check_home {
+            if let Some(home) = home {
                 if crate::store::home_removed(home, initial_home) {
                     // Closing each master PTY hangs up its foreground process group (SIGHUP).
                     for terminal in holder.terminals.values_mut() {
@@ -446,7 +473,9 @@ pub(crate) fn serve_for_home(
                     let _ = std::fs::remove_file(&place.socket);
                     return Ok(Served::Finished);
                 }
-                next_home_check = Some(now + HOME_CHECK);
+                if next_home_check.is_some() {
+                    next_home_check = Some(Instant::now() + HOME_CHECK);
+                }
             }
         }
         // A reader still on its way to an exit keeps the holder too.
@@ -788,12 +817,14 @@ pub fn recorded_exit(place: &Place, terminal: &str) -> Result<Option<Exit>> {
 struct Ready {
     listener: bool,
     wake: bool,
+    home_watch: bool,
     readable: Vec<RawFd>,
 }
 
 fn poll(
     listener: &UnixListener,
     wake: &UnixStream,
+    home_watch: Option<RawFd>,
     connections: &[Connection],
     terminals: &BTreeMap<String, Terminal>,
     timeout: Option<Duration>,
@@ -807,6 +838,12 @@ fn poll(
         pollfd(listener.as_raw_fd(), libc::POLLIN),
         pollfd(wake.as_raw_fd(), libc::POLLIN),
     ];
+    let home_watch_index = home_watch.map(|fd| {
+        let idx = fds.len();
+        fds.push(pollfd(fd, libc::POLLIN));
+        idx
+    });
+    let dynamic_start = fds.len();
     for connection in connections {
         let mut events = 0;
         // A writer ahead of its child waits; everything else is read at once.
@@ -849,7 +886,8 @@ fn poll(
     Ready {
         listener: fds[0].revents != 0,
         wake: fds[1].revents != 0,
-        readable: fds[2..]
+        home_watch: home_watch_index.is_some_and(|idx| fds[idx].revents != 0),
+        readable: fds[dynamic_start..]
             .iter()
             .filter(|fd| fd.revents & !libc::POLLOUT != 0)
             .map(|fd| fd.fd)

@@ -445,9 +445,12 @@ competing for all 16 cores.
 
 Each step receives `CARGO_BUILD_JOBS`, `NEXTEST_TEST_THREADS`, `MAKEFLAGS=-jN`,
 and `LF_JOBS` set to that budget; any variable already set in the environment is
-left untouched. Set `machine.jobs` to override the automatic count with a fixed
-positive integer. Interactive conversations opened in a terminal or Desktop are
-not throttled.
+left untouched. Set `machine.jobs` in `~/.lf/config.yaml` to override the
+automatic count with a fixed positive integer on this Machine. `machine.jobs` is
+host-local (it never forwards to remote Machines or rentals) and sits beside
+`machine` placement settings (`lf set --global machine.jobs 4` preserves an
+existing `machine: mini` shorthand by expanding it to `tasks` and `session`).
+Interactive conversations opened in a terminal or Desktop are not throttled.
 
 ## Remote work
 

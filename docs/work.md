@@ -388,7 +388,7 @@ Coworkers do not need to install `lf`: they keep working in Linear or Asana,
 and changes stay synchronized both ways:
 
 ```bash
-lf account connect linear                       # or: lf account connect asana
+lf machine login linear                         # or: lf machine login asana
 lf wave plan connect --all --team-key LOO       # Linear: one Team per repo; Tasks become LOO-12
 ```
 
@@ -418,6 +418,21 @@ tracker:
 
 In Linear, a Wave maps to an Initiative and its current Project maps to a
 Linear Project. In Asana, it maps to a team project.
+
+Cloning a repository with existing `.lf/wave/` files onto a new Machine (or
+rental) registers those Waves read-only without editing `.lf/wave/` or
+committing to `main`. When a Wave's Linear Initiative has one In Progress
+Project, Loopflow binds it automatically. If the Initiative has none or
+several, or Linear is unreachable, the Wave stays unbound and lists its
+available Projects so you can pick one explicitly:
+
+```bash
+lf wave plan bind coverage <project-uuid>            # bind an unbound Wave to a Linear Project
+lf wave plan bind coverage <project-uuid> --replace  # switch a misselected Wave without losing prior work or history
+```
+
+Re-running `lf wave plan connect` on an already-bound Team and Initiative is a
+no-op that leaves `.lf/config.yaml`, `.lf/wave/`, and `main` untouched.
 
 ### Offline queue and conflict resolution
 

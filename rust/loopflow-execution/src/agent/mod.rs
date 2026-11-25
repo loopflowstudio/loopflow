@@ -3,6 +3,9 @@
 //! This module handles building commands and spawning subprocesses for each
 //! supported coding agent. Output can be captured or streamed.
 
+mod availability;
+pub use availability::MachineAgents;
+
 mod session;
 pub use session::resolve_session_config;
 
@@ -336,12 +339,33 @@ fn _record_stop(provider: &str, reason: &str, advice: &str) {
     );
 }
 
-/// The provider revoked the login: no model of it can go on until someone
-/// signs in again.
+/// A provider whose client says it has no login is refused before its agent
+/// starts, as a revoked login would be after.
+fn _run_signed_in(
+    launch: &AgentConfig,
+    process: &ProcessConfig,
+    kind: crate::harness::LaunchKind,
+    retry: bool,
+) -> Result<AgentProcessResult, CoreError> {
+    let provider = launch.agent.harness.as_str();
+    if let Some(missing) = crate::machine::login::missing_login(provider, &launch.env) {
+        return Ok(AgentProcessResult {
+            exit_code: 1,
+            stderr: missing,
+            failure: Some(AgentFailure::CredentialInvalidated),
+            ..Default::default()
+        });
+    }
+    _run_harness_once(launch, process, kind, retry)
+}
+
+/// What signs this Machine in again: `lf machine login` for a provider it
+/// knows, else the harness's own client.
 fn _sign_in_advice(kind: loopflow_harness::HarnessKind) -> String {
-    let provider = kind.as_str();
-    let sign_in = kind.harness().sign_in_advice();
-    format!("The {provider} login was revoked; sign in again on this Machine: {sign_in}")
+    match kind.as_str().parse::<crate::provider_auth::Provider>() {
+        Ok(provider) => crate::machine::login::sign_in_advice(provider),
+        Err(_) => kind.harness().sign_in_advice().to_owned(),
+    }
 }
 
 /// `rungs` is the whole order the step could walk; it stops after the last.
@@ -749,7 +773,7 @@ fn run_admitted_agent(
         &launch,
         &process,
         &TRANSIENT_RETRY_DELAYS,
-        |attempt, retry| _run_harness_once(attempt, &process, kind, retry),
+        |attempt, retry| _run_signed_in(attempt, &process, kind, retry),
         _sleep_wall_clock,
     );
     if let Err(error) = crate::ops::planning_sync::check_directory(&directory) {
@@ -842,7 +866,11 @@ fn _run_with_retries(
                         _limit_stop_advice(provider, launch, &rungs)
                     };
                     _record_stop(provider, &reason, &advice);
-                    result.stderr = format!("{reason}\n{advice}");
+                    result.stderr = if revoked {
+                        format!("{}; {advice}", reason.trim_end_matches('.'))
+                    } else {
+                        format!("{reason}\n{advice}")
+                    };
                     return Ok(result);
                 }
             }
@@ -1173,103 +1201,12 @@ fn _run_harness_once(
 /// What to tell someone whose agent CLI is missing.
 pub fn missing_agent_message(kind: loopflow_harness::HarnessKind) -> String {
     let hint = crate::harness::launcher(kind).capabilities().install_hint;
-    format!("{}. {hint}", _not_installed(kind))
-}
-
-fn _not_installed(kind: loopflow_harness::HarnessKind) -> String {
-    format!("'{}' is not installed", kind.as_str())
-}
-
-/// Put a headless launch on the first agent of its order whose CLI is
-/// installed, and take the missing ones out of the order. A Graph step passes
-/// over a missing first choice and records the move where a limit move is
-/// recorded; a chat or batch has no order to move through. With none
-/// installed, the error is the first choice's install hint. Call it before the
-/// launch opens its conversation, so a refused launch leaves no agent behind.
-///
-/// # Errors
-///
-/// [`missing_agent_message`] for the first choice when no agent the launch may
-/// use is installed.
-pub fn start_on_installed_agent(
-    launch: &mut AgentConfig,
-    process: &ProcessConfig,
-) -> Result<(), String> {
-    let first = _pass_over_missing_agents(launch, process, |kind| {
-        crate::harness::launcher(kind).installed()
-    })
-    .map_err(missing_agent_message)?;
-    if first != launch.agent {
-        let reason = _not_installed(first.harness);
-        _record_agent_move(&first, "not installed", &reason, &launch.agent);
-    }
-    Ok(())
-}
-
-/// Returns the agent the launch asked for first; `launch.agent` is where it starts.
-fn _pass_over_missing_agents(
-    launch: &mut AgentConfig,
-    process: &ProcessConfig,
-    is_installed: impl Fn(loopflow_harness::HarnessKind) -> bool,
-) -> Result<Agent, loopflow_harness::HarnessKind> {
-    let first = launch.agent.clone();
-    let order = if process.wait_for_capacity {
-        _agent_order(launch)
-    } else {
-        vec![first.clone()]
-    };
-    let start = order
-        .into_iter()
-        .find(|rung| is_installed(rung.harness))
-        .ok_or(first.harness)?;
-    launch.agent = start;
-    // The order stays as written: a list keeps being a list, minus what is missing.
-    launch
-        .fallback_agents
-        .retain(|agent| is_installed(agent.harness));
-    Ok(first)
+    format!("'{}' is not installed. {hint}", kind.as_str())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn only_a_graph_step_passes_over_an_agent_that_is_not_installed() {
-        use loopflow_harness::HarnessKind;
-        let agent = |text: &str| Agent::parse(text).unwrap();
-        let launch = AgentConfig {
-            agent: agent("opencode:opencode/fixture"),
-            fallback_agents: vec![agent("pi:fixture/model"), agent("codex"), agent("claude")],
-            ..Default::default()
-        };
-        let step = ProcessConfig {
-            wait_for_capacity: true,
-            ..Default::default()
-        };
-        let installed =
-            |kind: HarnessKind| matches!(kind, HarnessKind::Codex | HarnessKind::Claude);
-
-        let mut moved = launch.clone();
-        let first = _pass_over_missing_agents(&mut moved, &step, installed).unwrap();
-        assert_eq!(first, launch.agent);
-        assert_eq!(moved.agent, agent("codex"));
-        assert_eq!(_agent_order(&moved), [agent("codex"), agent("claude")]);
-
-        // Nothing installed in the order: the first choice is the one named.
-        let mut pinned = launch.clone();
-        assert_eq!(
-            _pass_over_missing_agents(&mut pinned, &step, |_| false),
-            Err(HarnessKind::OpenCode)
-        );
-
-        // A chat or batch stays on its choice.
-        let mut batch = launch.clone();
-        assert_eq!(
-            _pass_over_missing_agents(&mut batch, &ProcessConfig::default(), installed),
-            Err(HarnessKind::OpenCode)
-        );
-    }
 
     fn default_launch() -> AgentConfig {
         AgentConfig {
@@ -2132,7 +2069,7 @@ mod tests {
         assert!(
             result
                 .stderr
-                .ends_with("The claude login was revoked; sign in again on this Machine: run `claude`, then /login"),
+                .ends_with("Please log in again; run `lf machine login claude`"),
             "{}",
             result.stderr
         );

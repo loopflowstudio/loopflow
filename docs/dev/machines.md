@@ -52,10 +52,19 @@ preparation. `--context`/`--explain` skip both, and neither side admits a Proces
 Names and paths resolve at the destination. Missing or changed identity fails without
 initialization, repair or local fallback.
 
-`lf machine connect mini <provider>` installs supported service credentials
-through SSH stdin. Claude and Codex instead use native authentication established
-on the destination. Personal `forward` settings can send named variables and home
-files; native clients interpret them. Launch does not select or refresh logins. See [native authentication](../subscriptions.md#remote-machines-and-rentals).
+`lf machine login <provider> mini` signs a Machine in. For Codex it runs
+`codex login --device-auth` on the destination as one SSH exchange with no PTY
+(`BROWSER=true`, so the destination opens no window of its own), reads the
+approval URL and code from its output, hands them to the approver here and then
+reads `codex login status` there. Claude never signs in remotely: the
+`CLAUDE_CODE_OAUTH_TOKEN` named in `forward.env` rides each launch, and the
+launch's login probe (`claude auth status --json`, run with the launch's
+environment) sees it. Nothing else in that
+output is shown or logged. Services install their credentials through SSH stdin
+into `lf machine credentials receive`. `lf machine logins --json` on the
+destination is the one remote read of what is signed in. Personal `forward`
+settings send per-run variables and home files; native clients interpret them.
+See [Sign in on any Machine](../subscriptions.md#sign-in-on-any-machine).
 
 Remove forgets the connection without contacting the remote. Historical machine
 identity and routes remain in SQLite, and ownership entries keep naming the Machine. Previously observed routes
@@ -245,14 +254,15 @@ Peer observation routes nothing; the ownership log alone selects the Machine.
 Added peers are not a complete global inventory, and an observation reserves
 nothing. No execution-location cache exists.
 
-Task-run, checkout and Desktop opening explanations share one location
-projection, including local/peer provenance and unavailable checkout paths for
-retained execution. Desktop opens recorded remote Tasks in the existing local
-repository window through the owner's Session/Files transport. Shells recheck the
-recorded Task/Machine/checkout before launch; file invalidations use the same
-owned-line transport and retain drafts on disconnect. Missing or stale ownership
-prepares nothing and never falls back to local paths. Headless fixtures cover
-these paths; configured SSH and mounted native usability remain unproved.
+`lf task location` is a diagnostic; no client routes by it. Desktop, the phone
+and `lf open` name a Task, and the local `lf server` sends its reads, saves,
+shells and Session attachments to the Machine `task_execution_route` names,
+over pooled `lf server connect` connections
+([Tasks on another Machine](../../rust/loopflow/src/server/README.md#tasks-on-another-machine)).
+No client runs `ssh` or holds an owner of its own. A `task_checkouts` row on a
+Machine that no longer owns the Task is history: `task.get` and `task.status`
+there report no workspace. An unreachable owner is `unavailable` naming it, and
+nothing falls back to a local path.
 
 An entry another Machine wrote never ends this Machine's own open claim; only a
 later entry this Machine wrote does. If another Machine claims later, every other Machine shows the
@@ -500,10 +510,13 @@ Task here even when its Wave names a Machine for its next run.
 A **pool** names machines you own (`pool_machines`: pool, Machine, `cost_usd`
 and `expires_at`); it knows no provider. A `machines` row is only identity: id,
 public name and the person it belongs to. An **on-demand** declaration in personal configuration is a
-provider (Daytona, Modal, RunPod or AWS), hardware with at most one GPU
-(RunPod, AWS and Modal rent them; `--vcpus`/`--memory-gb` are floors its machine
-meets) and optionally spot (AWS and RunPod), and a budget: machines at once and the
-most per hour. They share one namespace. A **rental** (`rentals`, `rent_…` ids)
+provider, hardware and a budget limiting machines at once and dollars per hour.
+Pools and on-demand declarations share one namespace.
+RunPod, AWS and Modal offer a single GPU. RunPod and AWS also sell spot capacity.
+Modal treats `--vcpus` and `--memory-gb` as limits. `--reserved` requests the full
+limits for the sandbox’s lifetime.
+
+A **rental** (`rentals`, `rent_…` ids)
 is one paid window: hardware, price, cap, deadline, state and cost, separate
 from the Machine it becomes once reachable. Task execution never learns a
 Machine is rented.
@@ -518,9 +531,14 @@ access token, clones and binds the
 repository, then hands off. A sandbox that never answers SSH is deleted at once.
 An unanswered create is `unconfirmed` until its name finds it (then deleted,
 since it has no route) or the create's window passes (`lost`); it is never
-resent. With `LF_RENT_LINUX_BIN` naming a Linux build, the laptop uploads that
-binary instead of the published `lf`, so a development build rents sandboxes
-running its own code.
+resent. The caller asks the sandbox for its architecture. For a release, it
+downloads the Linux package at the caller's tag and checks its SHA-256. For
+a packaged dev build, it downloads the Linux artifact from the same CI run
+using its own GitHub login. The sandbox promotes the uploaded executable.
+The caller checks its revision and waits for the selected server to report ready
+before recording the Machine. For an unpublished build, set `LF_RENT_LINUX_BIN`
+to the Linux executable. A `~/.local/bin/lf` wrapper runs it with its own
+disposable Machine home (`~/.lf-dev`); Modal sandboxes allow no `sudo`.
 
 `lf [--repo REPO] [--wave WAVE] set machine.capacity R`, naming a pool or on-demand, sets the
 scope's personal Tasks capacity preference in place of a Tasks
@@ -534,7 +552,7 @@ Providers are reached through one embedded bridge
 (`rust/loopflow-execution/src/rental/sandbox.py`) under `uv`, with the provider's pinned
 SDK where it has one (RunPod speaks plain HTTP). It creates, finds and
 deletes machines by the name lf gave them. Daytona and Modal build an image (an
-`lf` user, git, gh, Node and Claude Code, Rust, uv); RunPod and AWS boot
+`lf` user, git, gh, Node, Claude Code, Codex, Rust, uv); RunPod and AWS boot
 stock Ubuntu 24.04 and install the same tools before admitting `lf`. Modal runs
 key-only sshd behind a TCP tunnel; Daytona's SSH gateway takes a token valid for
 the sandbox's life, which rides in the Machine route; RunPod maps port 22 on a
@@ -556,17 +574,24 @@ the soft deadline (15 minutes before the hard one), or on `lf machine end`; any
 of them refuses while the sandbox holds uncommitted or unpushed work. Owned
 machines are never deleted.
 
-Before it deletes, the laptop pulls `lf session history export --since <rental start>`:
-the worker's Process, Session, session-event and Graph rows as JSON lines, origin
-first, plus capture files. They land in `machine_records` keyed by origin and
-row, and captures under `~/.lf/machines/<origin>/runs`, never in this Machine's
-own tables, so no reconciler, attachment or Task judgment acts on a copy. An
-export from any Machine but the one expected is refused; a failed copy deletes
-nothing. `lf session list` and `lf task status` name copies "from <machine>"
-after the sandbox is gone, and `lf session history show <session>` opens one. The give-back
-pass runs at the end of a forwarded `lf task run` for its rented Machine and in
-the Machine server's recovery pass for every rental; `lf ondemand list` only
-refreshes provider state and never ends a machine.
+The renting Machine’s server collects Session history over SSH on its recovery
+pass, including when the server has no provider API credentials. The first
+export covers the rental’s lifetime. Subsequent exports revisit Sessions
+changed in either the state or history database and check open provider
+transcripts. A clean give-back reads the full window once more to catch late
+file writes.
+
+Copied Session events, history observations, provider text and recorded turns
+live in `machine_records`, keyed by origin Machine and source identity. Capture
+files live under `~/.lf/machines/<origin>/runs`. A successful SSH export and
+import advances the checkpoint. An interrupted exchange leaves the previous
+checkpoint available after restart. Giving back a Machine requires a
+successful copy unless forced.
+
+`lf session list` and `lf task status` identify copies by origin. Read a
+Session with `lf session history show <session> --json`, its saved text with
+`--transcript`, and its totals with `lf session usage --session <session>`.
+The collection time shows how far the laptop saw before losing contact.
 
 ## Process topology
 

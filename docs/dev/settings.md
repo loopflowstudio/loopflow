@@ -152,11 +152,13 @@ its originating profile while retaining neither it nor its changes because the
 remote file was independently edited. Subsequent direct work uses the saved
 remote file. Inspection exposes both outcomes and the profile actually used.
 
-Retention refreshes only an unchanged last-applied portable projection or an
-already equal one. Local deletions count as edits. Initial differing preferences
-need explicit adoption. File writers check versions atomically; old deliveries
-and competing origins cannot silently overwrite newer or independent changes.
-Do not auto-merge ordered account lists or related configuration fields.
+On first delivery, config files take missing settings and record matching
+settings as retained. A differing local declaration stays on disk while the
+rest of the profile is applied. Each refresh compares the same origin’s last
+applied value at each setting, skill, Wave or Graph step. An independent edit
+or deletion stays local and appears in `lf config retained`. Ordered lists
+travel as one setting. Definition files compare their full portable projection.
+The installation stream belongs to the receiving Machine.
 
 Host-local bindings are outside the portable projection. Partial payloads carry
 coverage so an omitted field is not confused with a deletion. Saved delivery

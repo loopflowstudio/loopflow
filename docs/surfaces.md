@@ -70,6 +70,23 @@ The native macOS app reads the same local store as `lf`; it keeps no copy of its
 - **⌘,:** [Settings](#settings) for appearance, shortcuts, phone access,
   Machines, and scoped configuration files.
 
+### A Task on another Machine
+
+Open a Task that runs on mini, a pool Machine or a rental, and its workspace
+is mini's: **Files** browses and saves mini's working copy, **Changes** and
+**Diff** show mini's uncommitted work, **Shell** starts in mini's checkout, and
+**Session** attaches to the conversation running there. The workspace header
+and each terminal name the Machine. Desktop asks your local Loopflow server,
+which reaches mini over SSH; Desktop itself runs no `ssh`. A checkout of the
+Task left on your Mac from before it moved is never shown in its place.
+
+| When | Desktop shows |
+|---|---|
+| The Task has no checkout yet | **Not started** in Files, Changes and Shell |
+| mini doesn't answer | An error naming mini, with **Retry**; never an empty diff or a shell on your Mac |
+| The Task moves to code-1 | The header names code-1 and Files and Changes reload from it. Shells and Sessions already open stay on mini, labelled, until they end; **New shell** starts one on code-1 |
+| You have unsaved edits when it moves | Save writes them to code-1 if the file there is unchanged since you opened it; otherwise Desktop shows both versions and keeps your edit |
+
 Save and open Dashboards from the CLI too:
 
 ```bash

@@ -1,4 +1,4 @@
-//! Carrier-independent server protocol, revision 9: one connection per client,
+//! Carrier-independent server protocol, revision 10: one connection per client,
 //! negotiated revision, requests multiplexed by id. Local admission is
 //! same-user only; the remote carrier admits the Machine owner's other
 //! Tailscale devices. Each carrier delimits messages its own way: the Unix
@@ -11,13 +11,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The newest revision this build speaks.
-pub const REVISION: u32 = 9;
-/// The first revision that holds a plan for other Machines (`plan.apply`,
-/// `plan.changes`).
-pub const PLAN_REVISION: u32 = 9;
-/// The oldest revision this build speaks. Revision 8 requires `sender` on
-/// `request` and `subscribe`; it keeps 7's write revisions and request IDs.
-pub const MIN_REVISION: u32 = 8;
+pub const REVISION: u32 = 10;
+/// Revision 10 requires Task and Machine selectors on Session attach and continue.
+pub const MIN_REVISION: u32 = 10;
 /// The largest message a control connection carries, so a reading never waits
 /// behind a large body. Larger messages travel on a ticketed connection.
 pub const MAX_MESSAGE: usize = 1024 * 1024;
@@ -140,6 +136,17 @@ pub struct Selection {
 #[derive(Clone, Default)]
 pub struct Secrets(pub Vec<(String, secrecy::SecretString)>);
 
+impl Secrets {
+    /// Tell the launch the name this Machine gives its destination, which
+    /// the sign-in advice printed there uses.
+    pub fn carry_launcher_name(&mut self, name: String) {
+        self.0.push((
+            crate::machine::login::MACHINE_NAME_ENV.into(),
+            secrecy::SecretString::new(name),
+        ));
+    }
+}
+
 impl std::fmt::Debug for Secrets {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("Secrets")
@@ -196,13 +203,20 @@ pub enum ServerOperation {
     /// JSON `{reason: replaced|finished|retired}` (see `x-terminal-close`).
     /// After `replaced`, attaching by the same Session reaches its next terminal.
     /// Bare EOF leaves the reason unknown. A Session no terminal
-    /// runs is `not_found`; attaching never starts a provider.
+    /// runs is `not_found`; attaching never starts a provider. A Session
+    /// another Machine runs is attached there and bridged through here.
     #[serde(rename = "session.attach")]
     #[schemars(extend("x-result" = generator.subschema_for::<SessionAttached>()))]
     SessionAttach {
         session: loopflow_model::id::LfSessionId,
         /// Attach only to this held terminal.
         terminal_id: Option<loopflow_model::id::TerminalId>,
+        /// The Session's Task: the server attaches wherever the Task runs.
+        #[serde(deserialize_with = "Option::deserialize")]
+        task: Option<String>,
+        /// For a Session with no Task here, the Machine that runs it.
+        #[serde(deserialize_with = "Option::deserialize")]
+        machine: Option<loopflow_model::durable::MachineId>,
     },
     /// Start the Session's agent in this build's holder and answer
     /// `{terminal_id}`. `env` is the caller's whole environment; the server's
@@ -227,7 +241,8 @@ pub enum ServerOperation {
     /// Continue an existing Session in a held terminal: `lf session resume`
     /// of exactly `session`, in its directory, with the server's environment.
     /// Answers `{terminal_id}`; repeating `request` answers the terminal it
-    /// started. For a client with no environment of its own to send.
+    /// started. For a client with no environment of its own to send. A
+    /// Session another Machine runs continues there.
     #[serde(rename = "session.continue")]
     #[schemars(extend("x-result" = generator.subschema_for::<SessionStarted>()))]
     SessionContinue {
@@ -235,6 +250,50 @@ pub enum ServerOperation {
         request: String,
         rows: u16,
         cols: u16,
+        /// The Session's Task: the server attaches wherever the Task runs.
+        #[serde(deserialize_with = "Option::deserialize")]
+        task: Option<String>,
+        /// For a Session with no Task here, the Machine that runs it.
+        #[serde(deserialize_with = "Option::deserialize")]
+        machine: Option<loopflow_model::durable::MachineId>,
+        /// The caller's `--agent` (`harness[:model]`): the Session continues on
+        /// it, importing its history when the harness differs. Null keeps the
+        /// Session's own.
+        #[serde(deserialize_with = "Option::deserialize")]
+        agent: Option<String>,
+    },
+    /// Start a Task shell in the checkout of the Machine that runs the Task
+    /// and answer `{terminal_id}`. `shell_id` names it there: repeating it
+    /// answers the same terminal and starts nothing. `command` runs first
+    /// after login startup; `bootstrap` is Desktop's Ghostty startup JSON.
+    /// A Task with no checkout is `not_found {reason: "not_started"}`.
+    #[serde(rename = "task.shell.start")]
+    #[schemars(extend("x-result" = generator.subschema_for::<SessionStarted>()))]
+    TaskShellStart {
+        issue: String,
+        shell_id: String,
+        rows: u16,
+        cols: u16,
+        #[serde(deserialize_with = "Option::deserialize")]
+        bootstrap: Option<String>,
+        command: Vec<String>,
+    },
+    /// A ticket for a Task shell's running terminal, like `session.attach`.
+    /// It never starts one: an ended or unknown shell is `not_found`. A shell
+    /// is named only on the Machine that started it.
+    #[serde(rename = "task.shell.attach")]
+    #[schemars(extend("x-result" = generator.subschema_for::<SessionAttached>()))]
+    TaskShellAttach { issue: String, shell_id: String },
+    /// Close a Task shell and end its terminal; answers `{}`.
+    #[serde(rename = "task.shell.close")]
+    #[schemars(extend("x-result" = schemars::json_schema!({"type": "object", "additionalProperties": false})))]
+    TaskShellClose {
+        issue: String,
+        shell_id: String,
+        /// The Machine that started the shell, which keeps it after the
+        /// Task moves; null closes it where the Task runs.
+        #[serde(deserialize_with = "Option::deserialize")]
+        machine: Option<loopflow_model::durable::MachineId>,
     },
     /// Mobile access readiness; same-user local socket only.
     #[serde(rename = "mobile.status")]
@@ -575,8 +634,6 @@ mod tests {
             include_str!("../../tests/fixtures/dto/server/checkout_sync_planned.json"),
             include_str!("../../tests/fixtures/dto/server/checkout_syncing.json"),
             include_str!("../../tests/fixtures/dto/server/checkout_created.json"),
-            include_str!("../../tests/fixtures/dto/server/account_report.json"),
-            include_str!("../../tests/fixtures/dto/server/account.json"),
             include_str!("../../tests/fixtures/dto/server/skill_entries.json"),
             include_str!("../../tests/fixtures/dto/server/pr_published.json"),
             include_str!("../../tests/fixtures/dto/server/pr_prepared.json"),

@@ -64,7 +64,7 @@ fn laptop(home: &Path, origin: &MachineId) -> SqliteStore {
 
 fn exported(store: &SqliteStore, home: &Path) -> Vec<u8> {
     let mut out = Vec::new();
-    export(store, home, 50, &mut out).unwrap();
+    export(store, home, 50, None, &mut out).unwrap();
     out
 }
 
@@ -255,4 +255,34 @@ fn an_export_from_another_machine_is_refused() {
     assert!(crate::store::machines::copied_sessions(&here, None, None)
         .unwrap()
         .is_empty());
+}
+
+#[test]
+fn resuming_an_export_reads_late_usage_without_resending_closed_sessions() {
+    let home = tempfile::tempdir().unwrap();
+    let pod = worker(home.path());
+    let old = "ee47b779adc741ca89d6c3ae288cc68c";
+    pod.test_session(old, "75f34281b74d4594ac53ec251cb05619");
+    pod.conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET completed_at=100 WHERE id=?1",
+            [old],
+        )
+        .unwrap();
+    let before = pod.export_cursor().unwrap();
+    pod.record_turn_start(SESSION, &"thread".into(), "late", 10);
+    assert!(pod.record_turn_usage(
+        SESSION,
+        &"thread".into(),
+        "late",
+        11,
+        &serde_json::json!({"usage":{"input_tokens":42}})
+    ));
+    let mut delta = Vec::new();
+    export(&pod, home.path(), 50, Some(before), &mut delta).unwrap();
+    let delta = String::from_utf8(delta).unwrap();
+    assert!(delta.contains(SESSION) && delta.contains("\"input_tokens\":42"));
+    assert!(!delta.contains(old));
 }

@@ -93,7 +93,7 @@ pub(crate) fn render(selector: &str, view: SessionView, json: bool) -> Result<St
         return Ok(output);
     }
     let input = loopflow_execution::session_record::parse_artifact_key(snapshot.selector())?;
-    let dir = loopflow_execution::session_record::record_dir(&home, &input)
+    let dir = loopflow_execution::session_record::history_record_dir(&home, &snapshot)
         .ok_or_else(|| anyhow!("Input {} has no artifact path", snapshot.selector()))?;
     if view == SessionView::Final {
         let answer =

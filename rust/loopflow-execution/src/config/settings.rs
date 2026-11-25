@@ -243,18 +243,14 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             "choose machine.tasks or machine.capacity in one declaration",
         ));
     }
-    for (provider, browsers) in &parsed.auth_browsers {
+    for (provider, approver) in &parsed.approvers {
         provider
             .parse::<crate::provider_auth::Provider>()
             .map_err(|error| invalid(error.to_string()))?;
-        for profiles in std::iter::once(&browsers.default).chain(browsers.accounts.values()) {
-            let mut seen = std::collections::HashSet::new();
-            for profile in profiles {
-                crate::profile::ProfileId::parse(profile).map_err(invalid)?;
-                if !seen.insert(profile) {
-                    return Err(invalid("browser profiles must be unique"));
-                }
-            }
+        let (crate::config::placement::Approver::Chrome { chrome: value }
+        | crate::config::placement::Approver::Command { command: value }) = approver;
+        if value.trim().is_empty() {
+            return Err(invalid(format!("approvers.{provider} cannot be empty")));
         }
     }
     for (name, template) in &parsed.ondemands {
@@ -1062,6 +1058,24 @@ pub(super) fn explicit_agent() -> Result<Option<String>, LoadError> {
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
         .map(str::to_owned))
+}
+
+/// A separately launched helper resolves its own agent. Other invocation
+/// settings (for example `yolo`) still reach its process.
+pub fn independent_agent(command: &mut std::process::Command) -> Result<(), LoadError> {
+    command.env_remove(super::AGENT_OVERRIDE_ENV);
+    if let Ok(text) = std::env::var("LF_SETTINGS") {
+        let mut values: Value =
+            serde_yaml_ng::from_str(&text).map_err(|e| invalid(format!("LF_SETTINGS: {e}")))?;
+        if let Some(map) = values.as_mapping_mut() {
+            map.remove("agent");
+        }
+        command.env(
+            "LF_SETTINGS",
+            serde_yaml_ng::to_string(&values).expect("settings serialize"),
+        );
+    }
+    Ok(())
 }
 
 fn environment() -> Result<Value, LoadError> {

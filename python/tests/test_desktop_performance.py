@@ -58,7 +58,8 @@ def test_interruption_stops_owned_benchmark_and_returns_outcome(
     ready = tmp_path / "ready"
     child = (
         "import os, time; from pathlib import Path; "
-        f"Path({str(ready)!r}).write_text(str(os.getpid())); time.sleep(60)"
+        f"staged = Path({str(ready)!r} + '.tmp'); staged.write_text(str(os.getpid())); "
+        f"staged.rename({str(ready)!r}); time.sleep(60)"
     )
     script = (
         "import json, os, sys; from scripts import desktop_performance as p; "

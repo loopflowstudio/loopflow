@@ -184,6 +184,10 @@ pub fn machine_invocation(args: &[String]) -> Result<Option<(Cli, Vec<String>)>,
         }
         index += 1;
     }
+    // Open always presents on the caller. Its Machine selects the Session.
+    if path.first().is_some_and(|command| command == "open") {
+        return Ok(None);
+    }
     let cli = Cli::try_parse_from(transport)?;
     Ok(cli.machine.is_some().then_some((cli, remote)))
 }
@@ -204,7 +208,6 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
     let mut boundary = false;
     // Whether `path` ends in a word the tree does not know.
     let mut unknown = false;
-    let mut values_before_subcommand = Vec::new();
     let mut help = false;
     while index < args.len() {
         let value = &args[index];
@@ -242,12 +245,7 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
             continue;
         }
         if !boundary {
-            let child = if values_before_subcommand.is_empty() {
-                resolve_child(current, value, &path)?
-            } else {
-                None
-            };
-            if let Some(expansion) = child {
+            if let Some(expansion) = resolve_child(current, value, &path)? {
                 for owner in &expansion {
                     current = current
                         .find_subcommand(owner)
@@ -261,12 +259,6 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
                 {
                     boundary = true;
                 }
-            } else if leading_value(current, &values_before_subcommand, value) {
-                // `lf account linear --json`: the provider is a value, not an owner.
-                values_before_subcommand.push(value.clone());
-                positions.push(output.len());
-                path.push(value.clone());
-                output.push(value.clone());
             } else {
                 // Keep unknown owner children in help requests too: they must
                 // fail identically instead of becoming the owner's help page.
@@ -425,39 +417,11 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
     })())
 }
 
-/// Whether `word` is the next positional value of a command that also has
-/// subcommands, as the provider in `lf account linear --json`. No subcommand
-/// follows a value. The root's skill name is not one, and a value the
-/// positional rejects is an unknown child.
-fn leading_value(command: &Command, taken: &[String], word: &str) -> bool {
-    if command.get_name() == "lf"
-        || command.is_args_conflicts_with_subcommands_set()
-        || command.get_subcommands().next().is_none()
-        || command.get_positionals().nth(taken.len()).is_none()
-    {
-        return false;
-    }
-    let args = std::iter::once(command.get_name())
-        .chain(taken.iter().map(String::as_str))
-        .chain([word]);
-    command.clone().try_get_matches_from(args).is_ok()
-}
-
 pub fn resolve_path<'a>(tree: &'a Command, path: &[String]) -> Result<(&'a Command, Vec<String>)> {
     let mut current = tree;
     let mut canonical: Vec<String> = Vec::new();
-    let mut values_before_subcommand = Vec::new();
     for (index, name) in path.iter().enumerate() {
-        let expansion = if values_before_subcommand.is_empty() {
-            resolve_child(current, name, &canonical)?
-        } else {
-            None
-        };
-        if expansion.is_none() && leading_value(current, &values_before_subcommand, name) {
-            values_before_subcommand.push(name.clone());
-            continue;
-        }
-        let Some(expansion) = expansion else {
+        let Some(expansion) = resolve_child(current, name, &canonical)? else {
             // `lf help <old path>` explains the command it moved to: the old
             // spelling is the canonical path so far plus the words after it.
             for split in index..=path.len() {
@@ -485,13 +449,9 @@ pub fn resolve_path<'a>(tree: &'a Command, path: &[String]) -> Result<(&'a Comma
                 clap::error::ErrorKind::InvalidSubcommand,
                 format!(
                     "unknown command: lf {}",
-                    [
-                        canonical.as_slice(),
-                        values_before_subcommand.as_slice(),
-                        std::slice::from_ref(name)
-                    ]
-                    .concat()
-                    .join(" ")
+                    [canonical.as_slice(), std::slice::from_ref(name)]
+                        .concat()
+                        .join(" ")
                 ),
             )
             .into());

@@ -2,12 +2,10 @@
 use clap::Args;
 use std::path::PathBuf;
 
-/// Private Desktop launch inputs, also carried verbatim across Machine routing.
+/// Private Desktop shell inputs; the server routes them to the Task's Machine.
 #[derive(Args, Debug)]
 pub struct ShellArgs {
     pub issue: String,
-    #[arg(long)]
-    pub checkout: std::path::PathBuf,
     #[arg(long)]
     pub id: String,
     /// Create once; retrying the identity never replays startup.
@@ -15,25 +13,14 @@ pub struct ShellArgs {
     pub create: bool,
     #[arg(long)]
     pub close: bool,
+    /// The Machine that started the shell, which keeps it after the Task moves.
+    #[arg(long, requires = "close", value_name = "MACHINE_ID")]
+    pub started_on: Option<loopflow_model::durable::MachineId>,
     /// Desktop startup script and relative UTF-8 resources, only for creation.
     #[arg(long, requires = "create")]
     pub bootstrap: Option<String>,
     #[arg(last = true)]
     pub command: Vec<String>,
-}
-
-impl ShellArgs {
-    pub fn to_request(&self) -> loopflow_execution::desktop::shells::ShellRequest {
-        loopflow_execution::desktop::shells::ShellRequest {
-            issue: self.issue.clone(),
-            checkout: self.checkout.clone(),
-            id: self.id.clone(),
-            create: self.create,
-            close: self.close,
-            bootstrap: self.bootstrap.clone(),
-            command: self.command.clone(),
-        }
-    }
 }
 
 /// Desktop portfolio command arguments.

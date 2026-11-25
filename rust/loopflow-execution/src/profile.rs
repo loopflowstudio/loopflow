@@ -1,4 +1,4 @@
-//! Chrome access venues and service browser preferences.
+//! Chrome profiles an approval page can open in.
 
 use std::collections::HashMap;
 use std::fs;
@@ -112,17 +112,7 @@ fn chrome_local_state_path() -> Result<PathBuf, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{select_chrome_profile, EmailAddress, LocalChromeProfile, ProfileId};
-
-    #[test]
-    fn profile_ids_are_safe_printable_slugs() {
-        assert_eq!(
-            ProfileId::parse(" Profile 3 ").unwrap().as_str(),
-            "Profile 3"
-        );
-        assert!(ProfileId::parse("Loopflow").is_ok());
-        assert!(ProfileId::parse("../loopflow").is_err());
-    }
+    use super::{select_chrome_profile, EmailAddress, LocalChromeProfile};
 
     #[test]
     fn email_addresses_are_normalized() {

@@ -56,8 +56,11 @@ moves to the next entry in `agents` and logs why:
 codex: provider usage limit; continuing on claude:fable
 ```
 
-- **Graph steps** also skip entries whose CLI isn't installed on this Machine.
-  If every entry hits a usage limit, a Graph step waits 5, 15, 30, then 60
+- A new Session or worker walks the Skill’s model order on its execution Machine.
+  It checks the launcher and, for Claude and Codex, the native login. The first
+  usable entry keeps its configured model. If the whole list is unavailable,
+  Loopflow checks the other installed harnesses.
+- **Graph steps** that exhaust the order on a usage limit wait 5, 15, 30, then 60
   minutes, retrying from the first entry after each wait before stopping.
 - **Other headless commands** stop once the list is exhausted (commit message
   generation falls back to a default title).
@@ -430,7 +433,24 @@ Work launched from your laptop onto a remote Machine carries your laptop's
 personal preferences; work started directly on the remote uses the remote's
 saved preferences. Credentials never forward automatically; opt in per
 variable or home file with `forward.env` and `forward.files`
-([Remote Machines and rentals](subscriptions.md#remote-machines-and-rentals)).
+([Per-run secrets](subscriptions.md#per-run-secrets)). Sign a Machine in with
+`lf machine login <provider> <machine>`.
+
+### Sign-in approvers
+
+```yaml
+# personal global configuration
+approvers:
+  codex: {chrome: Work}
+  github: {command: "my-approver"}
+```
+
+`approvers.<provider>` says where `lf machine login` sends a provider's
+approval page: unset opens the default browser, `chrome` a Chrome profile,
+`command` a program that approves on its own. It applies to Codex, GitHub,
+Linear, Asana and OpenCode, and is personal to this Machine.
+See [Choose who approves](subscriptions.md#choose-who-approves) for the
+command's environment.
 
 ## Releases
 

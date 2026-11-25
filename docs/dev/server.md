@@ -127,7 +127,7 @@ An operation's API kind, its `lf` spelling and any setting for it share one
 name (`task.create` is `lf task create`); the nouns are Loopflow's primitives.
 Old spellings live in `lf/aliases.rs` for one release.
 
-The [operation reference](../../rust/loopflow/src/server/README.md#local-protocol-revision-7)
+The [operation reference](../../rust/loopflow/src/server/README.md#local-protocol)
 lists the served kinds and their CLI equivalents. `lf server describe --json`
 generates their schemas and result types from this build. App automation remains
 CLI-only; a served operation calls the same Rust owner as its CLI equivalent.

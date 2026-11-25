@@ -10,6 +10,11 @@ use axum::routing::get;
 use loopflow_execution::machine::mobile::{Configuration, TailscaleIdentity};
 use serde_json::{json, Value};
 use tokio::sync::watch;
+use tokio_rustls::rustls::{
+    self,
+    pki_types::{pem::PemObject, CertificateDer, ServerName},
+};
+use tokio_tungstenite::tungstenite::{Message, WebSocket};
 
 pub fn status(user: u64) -> Value {
     json!({
@@ -122,5 +127,38 @@ impl Daemon {
             .unwrap_or_else(|_| panic!("missing LocalAPI request {path}"))
             != path
         {}
+    }
+}
+
+pub type PhoneSocket =
+    WebSocket<rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream>>;
+
+pub fn connect(port: u16, pem: &str, path: &str) -> Result<PhoneSocket, String> {
+    let mut roots = rustls::RootCertStore::empty();
+    roots
+        .add(CertificateDer::from_pem_slice(pem.as_bytes()).unwrap())
+        .unwrap();
+    let config = rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    let client = rustls::ClientConnection::new(
+        std::sync::Arc::new(config),
+        ServerName::try_from("fixture.tail.ts.net").unwrap(),
+    )
+    .unwrap();
+    let socket = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(15)))
+        .unwrap();
+    let tls = rustls::StreamOwned::new(client, socket);
+    tokio_tungstenite::tungstenite::client(format!("wss://fixture.tail.ts.net{path}"), tls)
+        .map(|(socket, _)| socket)
+        .map_err(|error| error.to_string())
+}
+
+pub fn text(reader: &mut PhoneSocket) -> Value {
+    match reader.read().unwrap() {
+        Message::Text(text) => serde_json::from_str(text.as_str()).unwrap(),
+        other => panic!("expected a text frame: {other:?}"),
     }
 }

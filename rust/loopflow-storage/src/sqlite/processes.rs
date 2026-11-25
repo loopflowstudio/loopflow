@@ -603,7 +603,13 @@ impl SqliteStore {
     /// unended runs, carriers and CI repairs, and the lf attached to each
     /// Session.
     pub fn recorded_lfs(&self) -> StoreResult<Vec<RecordedLf>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut connection = self.conn.lock().expect("store mutex poisoned");
+        let conn = connection.savepoint()?;
+        // Before promotion a released store may still record every live lf in
+        // processes. Only the migrated schema also records them on their owners.
+        if !crate::migration_runner::migration_is_applied(&conn, "process_rows_on_owners")? {
+            return Ok(Vec::new());
+        }
         let mut query = conn.prepare(
             "SELECT 'Graph run',lf_process_id,pid,os_started_at,started_at FROM graph_processes
                  WHERE ended_at IS NULL AND pid IS NOT NULL

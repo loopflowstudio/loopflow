@@ -59,89 +59,24 @@ struct TaskFilesTests {
         #expect(throws: RegistryQueryError.self) {
             try workspace.files(for: .browser(taskId: "task-files", tabs: [.files], selected: "files"), task: nil, query: query)
         }
-        #expect(throws: RegistryQueryError.self) {
-            try workspace.files(for: .browser(taskId: "task-files", tabs: [.files], selected: "files", location: .init(machineId: "local", worktree: "/replacement")),
-                task: nil, query: query)
-        }
-        #expect(throws: RegistryQueryError.self) {
-            try workspace.files(for: content, task: nil, query: query.onMachine("peer", repository: "plan"))
-        }
+        // A newer reading moves the same store, drafts and all.
+        let moved = try workspace.files(for: .browser(taskId: "task-files", tabs: [.files], selected: "files",
+            location: .init(machineId: "local", worktree: "/replacement")), task: nil, query: query)
+        #expect(moved === files)
+        #expect(files.cwd == "/replacement")
         #expect(files.document("note.txt") === document)
         #expect(document.text == draft)
     }
 
-    @Test func filePaneRoutesWithoutLinkedSessionPrimingAndRetainsDrafts() async throws {
+    @Test func anotherMachinesFilesReadByTaskAndFollowItsMoves() async throws {
         let peer = RemoteFilesFixture()
-        let query = RegistryQuery { args, cwd in try await peer.read(args, cwd: cwd) }
-        let location = TaskLocationObservation(request: "opened", repositoryID: "plan", taskID: "portable",
-            machineID: "peer", observedAt: 1, location: .recorded(taskID: "remote-task", checkout: "/peer/checkout"))
-        // The enclosing checkout is deliberately unrelated to the pane's content.
-        let workspace = fixtureWork(.init(machineId: "local", worktree: "/local/other"))
-        let content = PaneContent.browser(taskId: "portable", tabs: [.files], selected: "files", execution: location)
-        #expect(throws: RegistryQueryError.self) {
-            try workspace.files(for: .browser(taskId: "another-task", tabs: [.files], selected: "files", execution: location), task: nil, query: query)
-        }
+        let query = RegistryQuery(subscribeRead: { peer.subscribe($0) }) { args, cwd in try peer.read(args, cwd: cwd) }
+        let workspace = fixtureWork(.init(machineId: "local", worktree: "/local/stale"))
+        workspace.localMachineId = "local"
+        let content = PaneContent.browser(taskId: "remote-task", tabs: [.files], selected: "files",
+            location: .init(machineId: "peer", worktree: "/peer/checkout"))
         let store = try workspace.files(for: content, task: nil, query: query)
-        store.autosave = false
-        store.selection = "note.txt"
-        await store.loadFile()
-        let document = try #require(store.selectedDocument)
-        #expect(document.text == "one\ntwo\n")
-        document.editor.insertText("draft", replacementRange: NSRange(location: 0, length: 3))
-        #expect(try workspace.files(for: content, task: nil, query: query) === store)
-        let refreshed = TaskLocationObservation(request: "refreshed", repositoryID: location.repositoryID,
-            taskID: location.taskID, machineID: location.machineID, observedAt: 2, location: location.location)
-        #expect(try workspace.files(for: .browser(taskId: "portable", tabs: [.files], selected: "files", execution: refreshed), task: nil, query: query) === store)
-        #expect(document.text == "draft\ntwo\n")
-        #expect(document.dirty)
-
-        let changed = TaskLocationObservation(request: "changed", repositoryID: "other-plan", taskID: "portable",
-            machineID: "peer", observedAt: 2, location: location.location)
-        #expect(throws: RegistryQueryError.self) {
-            try workspace.files(for: .browser(taskId: "portable", tabs: [.files], selected: "files", execution: changed), task: nil, query: query)
-        }
-        #expect(throws: RegistryQueryError.self) {
-            try workspace.files(for: .browser(taskId: "portable", tabs: [.files], selected: "files"), task: nil, query: query)
-        }
-        #expect(store.document("note.txt") === document)
-        #expect(document.text == "draft\ntwo\n")
-        // A stale owner reply must not replace this draft with another checkout's bytes.
-        await peer.change("WRONG OWNER", changeOwnerDuringRead: true)
-        await store.loadFile()
-        #expect(store.error != nil)
-        #expect(document.text == "draft\ntwo\n")
-    }
-
-    @Test func releasingFilesStoreEndsRemoteObservation() async throws {
-        let state = OSAllocatedUnfairLock(initialState: (started: false, ended: false))
-        let stream = AsyncThrowingStream<TaskFilesFrame, any Error>.makeStream()
-        stream.continuation.onTermination = { _ in state.withLock { $0.ended = true } }
-        let query = RegistryQuery(watchFiles: { _, _ in
-            state.withLock { $0.started = true }
-            return TaskFilesObservation(frames: stream.stream, cancel: { stream.continuation.finish() })
-        }, run: { _, _ in throw RegistryQueryError("No file read expected") })
-            .onMachine("peer", repository: "plan")
-        var store: TaskFilesStore? = TaskFilesStore(issue: "remote-task", cwd: "/peer/checkout", query: query)
-        weak var retained = store
-        store?.observeFiles()
-        try await eventually { state.withLock { $0.started } }
-        #expect(!state.withLock { $0.ended })
-        store = nil
-        #expect(retained == nil)
-        try await eventually { state.withLock { $0.ended } }
-    }
-
-    @Test(arguments: ["disconnect", "stale", "changed-owner"])
-    func remoteEventsReconcileRetainedDraftsAndRejectLostOrStaleOwners(ending: String) async throws {
-        let peer = RemoteFilesFixture()
-        let location = TaskLocationObservation(request: "opened", repositoryID: "plan", taskID: "portable",
-            machineID: "peer", observedAt: 1, location: .recorded(taskID: "remote-task", checkout: "/peer/checkout"))
-        let query = RegistryQuery(watchFiles: { args, cwd in
-            try await peer.watch(args, cwd: cwd)
-        }, run: { args, cwd in
-            try await peer.read(args, cwd: cwd)
-        }).onMachine("peer", repository: "plan").pinTaskLocation(to: location)
-        let store = TaskFilesStore(issue: "remote-task", cwd: "/peer/checkout", query: query)
+        #expect(store.machine == "peer")
         store.autosave = false
         store.selection = "note.txt"
         await store.loadFile()
@@ -150,23 +85,79 @@ struct TaskFilesTests {
         document.editor.setSelectedRange(NSRange(location: 2, length: 0))
         store.selection = "other.txt" // Retained hidden documents still receive changes.
         store.observeFiles()
-        await peer.change("one\nPEER\n")
+        try await eventually { peer.watching }
+        // A revision on the Task's Machine re-reads the open document under its draft.
+        peer.change("one\nPEER\n")
         try await eventually { document.text == "local\nPEER\n" }
-        #expect(store.document("note.txt") === document)
         #expect(document.dirty)
         #expect(document.editor.selectedRange().location == 2)
-        #expect(store.selection == "other.txt")
-        if ending == "changed-owner" {
-            await peer.change("WRONG OWNER", changeOwnerDuringRead: true)
-        } else {
-            await peer.end(stale: ending == "stale")
-        }
-        try await eventually { store.error != nil }
+        // The Task moves: the same store watches and reads there. Mini's file is
+        // at another revision, so the draft stays whole beside it, unmerged.
+        peer.move(to: "mini", checkout: "/mini/checkout", content: "one\nMINI\n")
+        try await eventually { document.external?.content == "one\nMINI\n" }
         #expect(document.text == "local\nPEER\n")
-        #expect(document.snapshot?.content == "one\nPEER\n")
+        #expect(!document.canSave)
+        #expect(store.machine == "mini")
+        #expect(store.cwd == "/mini/checkout")
+        #expect(store.document("note.txt") === document)
+        // An outage names the Machine and keeps the draft.
+        peer.unavailable("mini did not answer; run `ssh mini lf server status`")
+        try await eventually { store.error?.contains("mini did not answer") == true }
+        #expect(document.text == "local\nPEER\n")
         #expect(document.dirty)
-        #expect(store.selection == "other.txt")
-        await peer.end(stale: false)
+        // No read ever named a Machine or a checkout path; the server routes by Task.
+        let reads = peer.reads
+        #expect(!reads.isEmpty)
+        #expect(reads.allSatisfy { !$0.contains("--machine") && !$0.joined().contains("/peer/checkout") })
+    }
+
+    @Test func aTaskMovingBackToThisMacWatchesItsCheckoutDirectly() async throws {
+        let peer = RemoteFilesFixture()
+        let query = RegistryQuery(subscribeRead: { peer.subscribe($0) }) { args, cwd in try peer.read(args, cwd: cwd) }
+        let here = FileManager.default.temporaryDirectory.appendingPathComponent("lf-back-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: here, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: here) }
+        let store = TaskFilesStore(issue: "remote-task", cwd: "/peer/checkout", machine: "peer",
+                                   localMachineID: "laptop", query: query)
+        store.observeFiles()
+        try await eventually { store.machineName == "peer label" }
+        peer.move(to: "laptop", checkout: here.path, content: "one\n")
+        // This Mac's own checkout: no remote Machine, FSEvents instead of the served watch.
+        try await eventually { store.machine == nil && store.cwd == here.path }
+        #expect(store.machineName == nil)
+        try await eventually { peer.cancelled }
+    }
+
+    @Test func releasingFilesStoreEndsRemoteObservation() async throws {
+        let peer = RemoteFilesFixture()
+        let query = RegistryQuery(subscribeRead: { peer.subscribe($0) }) { _, _ in
+            throw RegistryQueryError("No file read expected")
+        }
+        var store: TaskFilesStore? = TaskFilesStore(issue: "remote-task", cwd: "/peer/checkout", machine: "peer", query: query)
+        weak var retained = store
+        store?.observeFiles()
+        try await eventually { peer.watching }
+        store = nil
+        #expect(retained == nil)
+        try await eventually { peer.cancelled }
+    }
+
+    @Test func anUnstartedTaskSaysNotStarted() async throws {
+        let peer = RemoteFilesFixture()
+        let query = RegistryQuery(subscribeRead: { peer.subscribe($0) }) { _, _ in
+            throw RegistryQueryError("No file read expected")
+        }
+        let store = TaskFilesStore(issue: "remote-task", cwd: "", machine: "peer", query: query)
+        store.observeFiles()
+        try await eventually { peer.watching }
+        peer.unstarted()
+        try await eventually { store.notStarted }
+        #expect(store.error == nil)
+        #expect(store.machineName == "peer label")
+        // The checkout appears: the same watch clears Not started.
+        peer.start(checkout: "/peer/checkout")
+        try await eventually { !store.notStarted && store.cwd == "/peer/checkout" }
+        #expect(!peer.cancelled)
     }
 
     @Test func chooserFiltersScratchAndParentChangesAndPreservesDrafts() async throws {
@@ -607,16 +598,16 @@ struct TaskFilesTests {
         #expect(paths(store.treeRows).suffix(2) == ["a.txt", "b.txt"])
     }
 
-    @Test func aRemoteTreeReadsThroughItsMachineNeverALocalPath() async throws {
+    @Test func aRemoteTreeReadsByTaskNeverALocalPath() async throws {
         let checkout = CheckoutFixture(Self.checkout)
-        let query = RegistryQuery { args, cwd in try checkout.read(args, cwd: cwd) }.onMachine("peer", repository: "plan")
-        let store = TaskFilesStore(issue: "remote-task", cwd: "/peer/checkout", query: query)
+        let query = RegistryQuery { args, cwd in try checkout.read(args, cwd: cwd) }
+        let store = TaskFilesStore(issue: "remote-task", cwd: "/peer/checkout", machine: "peer", query: query)
         await store.openTree()
         await store.setDirectory("src", expanded: true)
         #expect(paths(store.treeRows).prefix(3) == ["src", "  src/lib", "  src/main.rs"])
         let reads = checkout.lock.withLock { $0 }
         #expect(reads.reads.count == 2)
-        #expect(reads.reads.allSatisfy { Array($0.prefix(4)) == ["--machine", "peer", "--repo-id", "plan"] })
+        #expect(reads.reads.allSatisfy { Array($0.prefix(3)) == ["task", "files", "remote-task"] })
         #expect(reads.cwds.allSatisfy { $0 == nil })
         #expect(!reads.reads.joined().contains("/peer/checkout"))
     }
@@ -1783,7 +1774,7 @@ struct TaskFilesTests {
         let picker = ReviewLayoutPicker(store: store, width: 800)
         for layout in ["New code", "Unified", "Side by side"] { _ = try picker.inspect().find(text: layout) }
         let url = try #require(URL(string: "https://github.com/loopflow/loopflow/pull/1949"))
-        let card = DeliveryCard(store: store.pullRequest, record: nil, taskOpen: true, url: url, localHead: nil)
+        let card = DeliveryCard(store: store.pullRequest, record: nil, taskOpen: true, url: url, localHead: nil, runsOn: nil)
         #expect(try card.inspect().find(viewWithAccessibilityIdentifier: "changes-open-github").button().labelView().text().string()
             == "Open on GitHub")
         _ = try card.inspect().find(button: "Read again")
@@ -1859,47 +1850,69 @@ private actor HeldTaskSave {
     func release() { pending?.resume(); pending = nil }
 }
 
-private actor RemoteFilesFixture {
-    private let stream = AsyncThrowingStream<TaskFilesFrame, any Error>.makeStream()
-    private var request: String?
-    private var content = "one\ntwo\n"
-    private var checkout = "/peer/checkout"
-    private var changeOwnerDuringRead = false
+/// Another Machine's checkout as the local server serves it: Task reads by
+/// issue, and `task.files.watch` readings that name the Machine and checkout.
+private final class RemoteFilesFixture: Sendable {
+    private struct State {
+        var content = "one\ntwo\n"
+        var machine = "peer"
+        var checkout: String? = "/peer/checkout"
+        var revision = 0
+        var reads: [[String]] = []
+        var watching = false
+        var cancelled = false
+    }
+    private let state = OSAllocatedUnfairLock(initialState: State())
+    private let stream = AsyncThrowingStream<Data, any Error>.makeStream()
 
-    func watch(_ args: [String], cwd: String?) throws -> TaskFilesObservation {
-        guard cwd == nil, args.starts(with: ["--machine", "peer", "--repo-id", "plan", "task", "watch-files", "remote-task"]),
-              let flag = args.firstIndex(of: "--request") else { throw RegistryQueryError("Not the pinned peer") }
-        request = args[flag + 1]
+    var watching: Bool { state.withLock { $0.watching } }
+    var cancelled: Bool { state.withLock { $0.cancelled } }
+    var reads: [[String]] { state.withLock { $0.reads } }
+
+    func subscribe(_ read: ServedRead) -> LineSubscription {
+        #expect(read == .taskFilesWatch(issue: "remote-task"))
+        state.withLock { $0.watching = true }
         emit()
-        return TaskFilesObservation(frames: stream.stream, cancel: { [stream] in stream.continuation.finish() })
+        return LineSubscription(lines: stream.stream, checkpoint: { _ in }, cancel: { [state, stream] in
+            state.withLock { $0.cancelled = true }
+            stream.continuation.finish()
+        }, unreadable: { nil })
     }
-    func change(_ text: String, changeOwnerDuringRead: Bool = false) {
-        content = text
-        self.changeOwnerDuringRead = changeOwnerDuringRead
+    func change(_ text: String) {
+        state.withLock { $0.content = text; $0.revision += 1 }
         emit()
     }
-    func end(stale: Bool) {
-        if stale { request = "stale"; emit() }
-        else { stream.continuation.finish(throwing: RegistryQueryError("Peer disconnected")) }
+    func move(to machine: String, checkout: String, content: String) {
+        state.withLock { $0.machine = machine; $0.checkout = checkout; $0.content = content; $0.revision += 1 }
+        emit()
+    }
+    func unavailable(_ reason: String) {
+        let frame: [String: Any] = ["answers": NSNull(), "unavailable": reason, "body": NSNull(), "read_at": NSNull()]
+        stream.continuation.yield(try! JSONSerialization.data(withJSONObject: frame))
+    }
+    /// The Task has no checkout on its Machine yet; the same watch stays open.
+    func unstarted() {
+        state.withLock { $0.checkout = nil }
+        emit()
+    }
+    func start(checkout: String) {
+        state.withLock { $0.checkout = checkout; $0.revision += 1 }
+        emit()
     }
     private func emit() {
-        guard let request else { return }
-        stream.continuation.yield(TaskFilesFrame(request: request, taskID: "remote-task", machineID: "peer",
-            checkout: "/peer/checkout", paths: ["note.txt"]))
+        let (machine, checkout, revision) = state.withLock { ($0.machine, $0.checkout, $0.revision) }
+        let body: [String: Any] = ["task_id": "remote-task", "machine_id": machine, "machine_label": "\(machine) label",
+                                   "checkout": checkout ?? NSNull(),
+                                   "revision": checkout == nil ? NSNull() : "r\(revision)"]
+        let frame: [String: Any] = ["answers": NSNull(), "unavailable": NSNull(), "body": body, "read_at": NSNull()]
+        stream.continuation.yield(try! JSONSerialization.data(withJSONObject: frame))
     }
     func read(_ args: [String], cwd: String?) throws -> String {
-        guard cwd == nil, args.starts(with: ["--machine", "peer", "--repo-id", "plan"]) else {
-            throw RegistryQueryError("Peer paths must not reach local reads")
+        state.withLock { $0.reads.append(args) }
+        guard cwd == nil, args.starts(with: ["task", "file", "remote-task"]) else {
+            throw RegistryQueryError("Task reads name the Task, never a Machine or path")
         }
-        let command = Array(args.dropFirst(4))
-        if command.starts(with: ["task", "location"]) {
-            let flag = try #require(command.firstIndex(of: "--request"))
-            let location = TaskLocationObservation(request: command[flag + 1], repositoryID: "plan", taskID: "portable",
-                machineID: "peer", observedAt: 1, location: .recorded(taskID: "remote-task", checkout: checkout))
-            return String(decoding: try JSONEncoder().encode([location]), as: UTF8.self)
-        }
-        guard command.starts(with: ["task", "file", "remote-task"]) else { throw RegistryQueryError("Unexpected operation") }
-        if changeOwnerDuringRead { checkout = "/changed-owner" }
+        let content = state.withLock { $0.content }
         return String(decoding: try JSONSerialization.data(withJSONObject: [
             "recoveries": [], "issue_identifier": "TEST-1", "task_id": "remote-task", "path": "note.txt",
             "content": content, "state": "text", "revision": content, "read_only_reason": NSNull(), "size_bytes": content.utf8.count

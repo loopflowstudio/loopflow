@@ -57,9 +57,6 @@ impl Harness for Claude {
     fn model_rungs(&self) -> &'static [&'static str] {
         &["opus", "sonnet", "haiku"]
     }
-    fn sign_in_advice(&self) -> &'static str {
-        "run `claude`, then /login"
-    }
     fn provider_env(&self) -> &'static [&'static str] {
         &["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
     }

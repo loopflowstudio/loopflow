@@ -682,7 +682,7 @@ pub(crate) fn subscribe_task_pane(
     transport: Transport,
 ) -> Result<Option<Subscription>> {
     let repo = loopflow_execution::ops::task::task_repository(directory, Some(issue))?;
-    let identifier = tokio::runtime::Runtime::new()?.block_on(async {
+    let task_id = tokio::runtime::Runtime::new()?.block_on(async {
         let store = loopflow_execution::store::read_existing_registry()?
             .map(std::sync::Arc::new)
             .context("no Loopflow store exists on this Machine")?;
@@ -691,10 +691,11 @@ pub(crate) fn subscribe_task_pane(
             status
                 .task
                 .context("only a registered Task can be subscribed")?
-                .identifier,
+                .id
+                .to_string(),
         )
     })?;
-    super::waves::subscribe_task_pane(&repo, identifier, transport)
+    super::waves::subscribe_task_pane(&repo, task_id, transport)
 }
 
 /// `lf desktop view list`: every plan a repository window shows, the default
@@ -865,6 +866,7 @@ fn view_plan(
         let args = super::open::OpenArgs::overview(super::open::OpenSelection {
             url: None,
             host: super::open::OpenHost::Desktop,
+            machine: None,
             session: None,
             link: false,
             format: None,
@@ -1320,6 +1322,55 @@ pub(super) fn present_files(
         )?;
     }
     Ok(true)
+}
+
+/// View, start or close a Task shell through this Machine's server, which
+/// runs it wherever the Task runs. Close names the Machine that started it.
+pub fn shell(args: &crate::lf::desktop_inputs::ShellArgs) -> Result<()> {
+    use loopflow_execution::engine::{Error, ErrorCode};
+    use loopflow_execution::machine::{client, wire::ServerOperation};
+
+    let socket = loopflow_execution::machine::socket_path()?;
+    let mut server = client::Connection::open_at(&socket)?;
+    if args.close {
+        server.request(ServerOperation::TaskShellClose {
+            issue: args.issue.clone(),
+            shell_id: args.id.clone(),
+            machine: args.started_on.clone(),
+        })?;
+        return Ok(());
+    }
+    if args.create {
+        let (rows, cols) = loopflow_execution::transport::size();
+        server.request(ServerOperation::TaskShellStart {
+            issue: args.issue.clone(),
+            shell_id: args.id.clone(),
+            rows,
+            cols,
+            bootstrap: args.bootstrap.clone(),
+            command: args.command.clone(),
+        })?;
+    }
+    let attached = server.query(ServerOperation::TaskShellAttach {
+        issue: args.issue.clone(),
+        shell_id: args.id.clone(),
+    });
+    let issued = match attached {
+        Ok(answer) => serde_json::from_value(answer.result)
+            .context("Loopflow server answered task.shell.attach without a ticket")?,
+        Err(error) => {
+            // An ended shell here still paints its last screen.
+            let ended = error
+                .downcast_ref::<Error>()
+                .filter(|e| e.code == ErrorCode::NotFound)
+                .and_then(|e| serde_json::from_value(e.data.as_ref()?["terminal_id"].clone()).ok());
+            if let Some(terminal) = ended {
+                loopflow_execution::transport::shell_history(&terminal)?;
+            }
+            return Err(error);
+        }
+    };
+    loopflow_execution::transport::relay_socket(client::redeem_terminal(&socket, issued)?, None)
 }
 
 fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {

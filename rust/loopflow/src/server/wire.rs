@@ -115,6 +115,12 @@ mod tests {
                 "../../../loopflow-execution/tests/fixtures/dto/server/session_continue.json"
             ),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_page.json"),
+            include_str!(
+                "../../../loopflow-execution/tests/fixtures/dto/server/task_shell_start.json"
+            ),
+            include_str!(
+                "../../../loopflow-execution/tests/fixtures/dto/server/task_shell_attach.json"
+            ),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/view_select.json"),
             include_str!(
                 "../../../loopflow-execution/tests/fixtures/dto/server/configure_remote.json"
@@ -163,13 +169,6 @@ mod tests {
             ),
             include_str!(
                 "../../../loopflow-execution/tests/fixtures/dto/server/checkout_create.json"
-            ),
-            include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_list.json"),
-            include_str!(
-                "../../../loopflow-execution/tests/fixtures/dto/server/account_disconnect.json"
-            ),
-            include_str!(
-                "../../../loopflow-execution/tests/fixtures/dto/server/account_connect.json"
             ),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/graph_run.json"),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/skill_run.json"),

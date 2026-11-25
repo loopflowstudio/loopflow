@@ -336,7 +336,7 @@ definitions! {
     machines: BTreeMap<String, placement::MachineDeclaration> = "{}", Personal, Merge, Portable, NextRead, Machines, "Aliases for durable Machine identities";
     connections: HashMap<loopflow_model::durable::MachineId, String> = "{}", Personal, Merge, HostLocal, NextRead, Machines, "This host's connection address for each durable Machine ID";
     hub: Option<loopflow_model::durable::MachineId> = "null", Personal, Replace, HostLocal, NextRead, Machines, "The Machine holding the plan of every repository without Linear or Asana; unset keeps it here", unset "This Machine";
-    auth_browsers: BTreeMap<String, placement::AuthBrowsers> = "{}", Personal, Merge, HostLocal, DomainAction, Accounts, "Ordered local browser profiles for authentication; discovered browser identities stay local";
+    approvers: BTreeMap<String, placement::Approver> = "{}", Personal, Merge, HostLocal, DomainAction, Accounts, "Where `lf machine login` sends each provider's approval page: a Chrome profile or a command; unset opens the default browser";
     repo_root: Option<PathBuf> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Local repository discovery directory", unset "~/src";
     theme: Option<String> = "null", Personal, Replace, ReferencedAssets, NextRead, Desktop, "Appearance theme or light:name,dark:name pair";
     portfolio: Option<crate::portfolio::Selection> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Repository navigation selection";
@@ -349,7 +349,7 @@ definitions! {
     pr: bool = "false", Repository, Replace, Portable, DomainAction, Release, "Create a pull request after pushing";
     user: UserConfig = "{}", Personal, Merge, Portable, NextRead, Loopflow, "Display name; never an ownership credential", unset "Git's user.name";
     session: SessionConfig = "{}", Personal, Merge, HostLocal, NextRead, Loopflow, "Terminal and detached Session lifetime";
-    stream: Option<String> = "null", Personal, Replace, Portable, DomainAction, Loopflow, "Installation release stream", unset "stable";
+    stream: Option<String> = "null", Personal, Replace, HostLocal, DomainAction, Loopflow, "This Machine’s installation release stream", unset "stable";
     logs: LogConfig = "{linear_requests: false}", Personal, Merge, HostLocal, NextRead, Loopflow, "Local diagnostic logging";
 }
 
@@ -360,6 +360,15 @@ fn all_definitions() -> impl Iterator<Item = &'static Definition> {
         .chain(FORWARD_DEFINITIONS)
         .chain(CODEX_DEFINITIONS)
         .chain(CLAUDE_DEFINITIONS)
+}
+
+pub(super) fn has_child_settings(key: &str) -> bool {
+    all_definitions().any(|child| {
+        child
+            .key
+            .strip_prefix(key)
+            .is_some_and(|rest| rest.starts_with('.'))
+    })
 }
 
 /// The definition owning `key`, in any spelling `config::keys` accepts.

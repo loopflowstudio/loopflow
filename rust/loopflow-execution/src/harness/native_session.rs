@@ -1517,7 +1517,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(capture).unwrap(), "stored-key");
 
         // The native CLI rejects an ordinary OAuth token in this agent-identity
-        // variable. A prior `lf account` must not poison a working login.
+        // variable. A stored service token must not poison a working login.
         let codex = temp.path().join("bin/codex");
         std::fs::write(
             &codex,

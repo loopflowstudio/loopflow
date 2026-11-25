@@ -1,4 +1,6 @@
 //! Machine declarations and presentation compose above saved Machine rows.
+use std::collections::HashMap;
+
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::durable::{Machine, MachineId, MachineRef};
 use loopflow_storage::sqlite::{durable::SavedMachine, SqliteStore};
@@ -63,7 +65,7 @@ pub fn local_machine(store: &SqliteStore) -> StoreResult<Machine> {
 }
 
 pub fn machines(store: &SqliteStore) -> StoreResult<Vec<Machine>> {
-    let saved: std::collections::HashMap<_, _> = store
+    let saved: HashMap<_, _> = store
         .saved_machines()?
         .into_iter()
         .map(|row| (row.id.clone(), row))
@@ -169,19 +171,23 @@ pub fn pool_machines(
         .collect()
 }
 
+pub fn origin_labels(store: &SqliteStore) -> StoreResult<HashMap<MachineId, String>> {
+    let mut labels = HashMap::new();
+    for (label, machine) in config(store)?.machines {
+        labels.entry(machine.id).or_insert(label);
+    }
+    Ok(labels)
+}
+
 pub fn copied_sessions(
     store: &SqliteStore,
     task: Option<&loopflow_model::durable::TaskId>,
     repository: Option<&loopflow_model::durable::RepositoryId>,
 ) -> StoreResult<Vec<crate::machine_records::CopiedSession>> {
     let mut saved = store.saved_copied_sessions(task, repository)?;
-    let config = config(store)?;
+    let labels = origin_labels(store)?;
     for session in &mut saved {
-        session.origin_label = config
-            .machines
-            .iter()
-            .find(|(_, declaration)| declaration.id == session.origin)
-            .map(|(name, _)| name.clone());
+        session.origin_label = labels.get(&session.origin).cloned();
     }
     Ok(saved)
 }
@@ -193,12 +199,7 @@ pub fn copied_history(
     let Some(mut saved) = store.saved_copied_history(session)? else {
         return Ok(None);
     };
-    let config = config(store)?;
-    saved.session.origin_label = config
-        .machines
-        .iter()
-        .find(|(_, declaration)| declaration.id == saved.session.origin)
-        .map(|(name, _)| name.clone());
+    saved.session.origin_label = origin_labels(store)?.remove(&saved.session.origin);
     Ok(Some(saved))
 }
 

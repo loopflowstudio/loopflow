@@ -236,6 +236,14 @@ impl Provider {
                 "{self} sells no interruptible capacity; --spot works on aws and runpod"
             ));
         }
+        if hardware.modal_sizing.is_some() && self != Self::Modal {
+            return Err(format!(
+                "{self} does not support Modal sizing; --reserved works only on modal"
+            ));
+        }
+        if self == Self::Modal && (vcpus == 0 || memory == 0) {
+            return Err("modal needs positive --vcpus and --memory-gb limits".into());
+        }
         match (self, hardware.gpu.as_deref()) {
             (Self::Daytona, Some(_)) => Err(format!(
                 "{self} rents no GPUs; --gpu works on runpod, aws and modal"
@@ -416,6 +424,14 @@ impl fmt::Display for Provider {
     }
 }
 
+/// Explicit request and limit pairs for a Modal sandbox.
+#[derive(schemars::JsonSchema, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModalSizing {
+    Burst,
+    Reserved,
+}
+
 /// What an on-demand rents and a rental was granted.
 #[derive(schemars::JsonSchema, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -428,6 +444,19 @@ pub struct Hardware {
     /// Interruptible capacity (AWS spot, RunPod interruptible pods), bid at
     /// the admitted price; the provider may end it before its deadline.
     pub spot: bool,
+    /// Absent on historical rentals, which had no explicit limits.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modal_sizing: Option<ModalSizing>,
+}
+
+impl Hardware {
+    pub fn format_hourly_rate(&self, rate: Usd) -> String {
+        if self.modal_sizing.is_some() {
+            format!("{rate}/h ceiling")
+        } else {
+            format!("{rate}/h")
+        }
+    }
 }
 
 impl fmt::Display for Hardware {
@@ -438,6 +467,11 @@ impl fmt::Display for Hardware {
         }
         if self.spot {
             f.write_str(" spot")?;
+        }
+        match self.modal_sizing {
+            Some(ModalSizing::Burst) => f.write_str(" burst")?,
+            Some(ModalSizing::Reserved) => f.write_str(" reserved")?,
+            None => {}
         }
         Ok(())
     }
@@ -462,9 +496,20 @@ pub struct OnDemand {
     pub max_machines: u32,
     pub max_usd_per_hour: Usd,
     pub hours: f64,
+    /// Providers each rental is signed in to as it starts; empty, every
+    /// provider signed in on the Machine that rents it.
+    pub logins: Vec<crate::provider::Provider>,
 }
 
 impl OnDemand {
+    pub fn rental_hardware(&self) -> Hardware {
+        let mut hardware = self.hardware.clone();
+        if self.provider == Provider::Modal {
+            hardware.modal_sizing.get_or_insert(ModalSizing::Burst);
+        }
+        hardware
+    }
+
     pub fn usd_per_hour(&self) -> Result<Usd, String> {
         self.provider.usd_per_hour(&self.hardware)
     }
@@ -537,6 +582,25 @@ impl fmt::Display for RentalState {
     }
 }
 
+/// Uptime at the recorded hourly rate. Only an explicitly limited sandbox
+/// has a compute ceiling; older Modal sandboxes could exceed the request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RentalCost {
+    CostUsd(Option<Usd>),
+    CeilingEstimateUsd(Option<Usd>),
+}
+
+impl fmt::Display for RentalCost {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CostUsd(Some(cost)) => write!(f, "uptime estimate {cost}"),
+            Self::CeilingEstimateUsd(Some(cost)) => write!(f, "ceiling estimate {cost}"),
+            Self::CostUsd(None) | Self::CeilingEstimateUsd(None) => f.write_str("cost unknown"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Rental {
     pub id: RentalId,
@@ -558,7 +622,8 @@ pub struct Rental {
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339::option")]
     pub ended_at: Option<OffsetDateTime>,
-    pub cost_usd: Option<Usd>,
+    #[serde(flatten)]
+    pub cost: RentalCost,
 }
 
 impl Rental {
@@ -567,8 +632,13 @@ impl Rental {
         format!("lf-{id}")
     }
 
-    /// Billed by the second: the hourly price from admission until `end`.
+    /// Uptime estimate at the admitted hourly price.
     pub fn cost_until(&self, end: OffsetDateTime) -> Usd {
+        let end = if self.hardware.modal_sizing.is_some() {
+            end.min(self.deadline)
+        } else {
+            end
+        };
         let seconds = (end - self.created_at).whole_seconds().max(0);
         self.usd_per_hour.over_hours(seconds as f64 / 3600.0)
     }
@@ -653,7 +723,7 @@ pub fn admit(
     let cap_usd = max_usd.map_or(window, |max| max.min(window));
     let paid = cap_usd.hours_at(usd_per_hour).unwrap_or(hours).min(hours);
     Ok(Admission {
-        hardware: ondemand.hardware.clone(),
+        hardware: ondemand.rental_hardware(),
         usd_per_hour,
         cap_usd,
         deadline: now + time::Duration::seconds((paid * 3600.0) as i64),

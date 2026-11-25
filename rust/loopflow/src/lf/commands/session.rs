@@ -479,7 +479,11 @@ impl SessionFacts {
 
 /// `lf session list`.
 pub fn list_sessions(args: &SessionListArgs) -> anyhow::Result<()> {
-    let filter = list_filter(args, &std::env::current_dir()?)?;
+    let directory = std::env::current_dir()?;
+    if !args.subscribe && list_remote_task(args, &directory)? {
+        return Ok(());
+    }
+    let filter = list_filter(args, &directory)?;
     if args.subscribe {
         // This process reads the subscription itself, so it watches
         // transcripts the way the Machine server does.
@@ -742,6 +746,45 @@ async fn list(
     } else {
         copied_sessions(store, filter)?
     };
+    print_sessions(sessions, copied);
+    Ok(())
+}
+
+/// `lf session list --task <task>` for a Task another Machine runs, from that
+/// Machine's server, opening with this Machine's `lf open`. `false` when the
+/// Task runs here.
+fn list_remote_task(args: &SessionListArgs, directory: &std::path::Path) -> anyhow::Result<bool> {
+    let Some(task) = &args.task else {
+        return Ok(false);
+    };
+    let mut read = super::read::Read::SessionList {
+        directory: directory.to_owned(),
+        headless: args.headless,
+        after: args.page.then(|| args.after.clone().unwrap_or_default()),
+        limit: args.page.then_some(u32::try_from(args.limit)?),
+        task: Some(task.clone()),
+    };
+    if read.peer_route()?.is_none() {
+        return Ok(false);
+    }
+    let reading = read.read()?;
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&loopflow_execution::read_stream::selected_answer(
+                &reading
+            )?)?
+        );
+    } else {
+        print_sessions(serde_json::from_value(reading)?, Vec::new());
+    }
+    Ok(true)
+}
+
+fn print_sessions(
+    sessions: Vec<loopflow_execution::ops::human_session::SessionRecord>,
+    copied: Vec<loopflow_execution::machine_records::CopiedSession>,
+) {
     if sessions.is_empty() && copied.is_empty() {
         println!("No Sessions.");
     } else {
@@ -774,6 +817,14 @@ async fn list(
                 line.push_str(&format!("  {}", turn.describe(now)));
             }
             println!("{line}");
+            // A stopped Session says why it is down and what brings it back.
+            if let Some(status) = session
+                .status_line
+                .as_ref()
+                .filter(|_| session.outlook.is_some())
+            {
+                println!("  {status}");
+            }
             if let Some(action) = session.action {
                 println!("  {} — {}", action.label, action.help);
             }
@@ -790,9 +841,18 @@ async fn list(
                 session.title,
                 session.origin_name()
             );
+            if let Some(failure) = session
+                .start_failure
+                .as_deref()
+                .filter(|_| session.completed_at.is_none())
+            {
+                println!(
+                    "  could not start: {}",
+                    loopflow_execution::ops::recovery::start_failure_reason(failure)
+                );
+            }
         }
     }
-    Ok(())
 }
 
 /// Copied Sessions the filter's Task or repository selects; none when it names
@@ -924,6 +984,9 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
     let Some(crate::lf::Commands::Session { cmd }) = &cli.command else {
         bail!("not a Session command");
     };
+    // A served request carries its `--agent` here; a new conversation
+    // resolves its harness from the invocation's settings.
+    let _settings = loopflow_execution::config::settings::select_invocation(cli.setting_values()?);
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
         match cmd {

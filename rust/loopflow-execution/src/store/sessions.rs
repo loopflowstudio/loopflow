@@ -2,7 +2,8 @@ use crate::session::{LfSession, PrimaryScope, TitleSource};
 use crate::store::session_projection;
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::LfProcessId;
-use loopflow_storage::sqlite::sessions::{PendingHistory, PendingInput};
+use loopflow_storage::session_record::{SessionHistory, SessionOrigin};
+use loopflow_storage::sqlite::sessions::{HistorySelection, PendingHistory, PendingInput};
 use loopflow_storage::sqlite::{SessionCaller, SqliteStore};
 
 use super::{run_sqlite, Store, StoreError, StoreResult};
@@ -270,7 +271,7 @@ pub fn conversation_history(
     caller: Option<&str>,
     since: i64,
     include_finished: bool,
-) -> StoreResult<Vec<loopflow_storage::session_record::SessionHistory>> {
+) -> StoreResult<Vec<SessionHistory>> {
     conversation_inputs(
         store,
         wave,
@@ -278,7 +279,7 @@ pub fn conversation_history(
         task,
         caller,
         (since, include_finished, None),
-        None,
+        HistorySelection::All,
     )
     .map(|(rows, _)| rows)
 }
@@ -292,24 +293,24 @@ pub fn recent_conversation_history(
     task: Option<&str>,
     since: i64,
     limit: usize,
-) -> StoreResult<(Vec<loopflow_storage::session_record::SessionHistory>, bool)> {
-    let (rows, truncated) = conversation_inputs(
+) -> StoreResult<(Vec<SessionHistory>, bool)> {
+    conversation_inputs(
         store,
         wave,
         project,
         task,
         None,
         (since, false, Some(limit)),
-        None,
-    )?;
-    Ok((rows, truncated))
+        HistorySelection::All,
+    )
 }
 
-pub fn input_history(
-    store: &SqliteStore,
-    selector: &str,
-) -> StoreResult<loopflow_storage::session_record::SessionHistory> {
-    let selected = store.resolve_history_input(selector)?;
+pub fn input_history(store: &SqliteStore, selector: &str) -> StoreResult<SessionHistory> {
+    // A copied input's key resolves only among copies, which select it whole.
+    let selected = match store.resolve_history_input(selector) {
+        Err(StoreError::NotFound) => selector.to_owned(),
+        selected => selected?,
+    };
     let input = store
         .session(&selected)?
         .and_then(|session| session.artifact_key)
@@ -321,7 +322,7 @@ pub fn input_history(
         None,
         None,
         (0, false, None),
-        Some(&input),
+        HistorySelection::Input(&input),
     )?
     .0
     .pop()
@@ -335,14 +336,40 @@ fn conversation_inputs(
     task: Option<&str>,
     caller: Option<&str>,
     window: (i64, bool, Option<usize>),
-    input: Option<&str>,
-) -> StoreResult<(Vec<loopflow_storage::session_record::SessionHistory>, bool)> {
-    let pending = store.pending_inputs(wave, project, task, caller, window, input)?;
-    let histories = pending
+    selection: HistorySelection<'_>,
+) -> StoreResult<(Vec<SessionHistory>, bool)> {
+    let pending = store.pending_inputs(wave, project, task, caller, window, selection)?;
+    let mut histories = pending
         .inputs
         .iter()
         .map(|input| project_history_input(store, &pending, input))
         .collect::<StoreResult<Vec<_>>>()?;
+    if histories.iter().any(|history| history.origin.is_some()) {
+        let labels = super::machines::origin_labels(store)?;
+        for history in &mut histories {
+            let Some(origin) = history.origin.as_mut() else {
+                continue;
+            };
+            origin.label = labels.get(&origin.machine_id).cloned();
+            // The origin's `repo` is a path there; Work kept here names this
+            // Machine's checkout so reports group it with local runs. An
+            // input's turns can carry Work the Session joined later.
+            let work = std::iter::once((history.task_id.as_ref(), history.wave_id.as_ref()))
+                .chain(
+                    history
+                        .providers
+                        .iter()
+                        .map(|turn| (turn.task_id.as_ref(), turn.wave_id.as_ref())),
+                )
+                .filter(|(task, wave)| task.is_some() || wave.is_some());
+            for (task, wave) in work {
+                if let Some(repo) = store.work_repository_path(task, wave)? {
+                    history.repo = Some(repo);
+                    break;
+                }
+            }
+        }
+    }
     Ok((histories, pending.truncated))
 }
 
@@ -350,14 +377,19 @@ pub fn project_history_input(
     store: &SqliteStore,
     pending: &PendingHistory,
     input: &PendingInput,
-) -> StoreResult<loopflow_storage::session_record::SessionHistory> {
+) -> StoreResult<SessionHistory> {
     let saved = store.read_history_input(pending, input)?;
+    let origin = input.origin().cloned().map(|machine_id| SessionOrigin {
+        machine_id,
+        label: None,
+    });
     crate::session_record::project_input_history(
         &saved.session,
         saved.artifact_key.as_deref(),
         &saved.events,
         &saved.turns,
         saved.names,
+        origin,
     )
     .map_err(|error| super::StoreError::InvalidData(error.to_string()))
 }

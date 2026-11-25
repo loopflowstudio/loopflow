@@ -393,6 +393,15 @@ impl From<TaskOwner> for Person {
 }
 
 impl OwnershipFacts {
+    fn claimant(&self) -> StoreResult<&Person> {
+        if self.person.key.is_none() {
+            return Err(StoreError::InvalidData(
+                "claiming needs your Git user.email, which identifies you to teammates; run `git config --global user.email you@example.com`".into(),
+            ));
+        }
+        Ok(&self.person)
+    }
+
     pub fn planning_connected(&self) -> bool {
         self.planning_connected
     }
@@ -473,21 +482,26 @@ fn move_in(
     target: &MachineId,
     me: &OwnershipFacts,
 ) -> StoreResult<TaskOwnershipEntry> {
-    let Some((local, holder)) = my_claim_in(conn, task, me)? else {
-        return Err(StoreError::InvalidAuthority(format!(
-            "Task {task} is unowned"
-        )));
+    let (local, person) = match my_claim_in(conn, task, me)? {
+        Some((local, holder)) => (local, holder.into()),
+        None => {
+            let person = me.claimant()?.clone();
+            if me.planning_connected {
+                start_claimed_task(conn, task)?;
+            }
+            (me.scope.placement.local_machine.clone(), person)
+        }
     };
     if *target == local {
         return Err(StoreError::InvalidData(format!(
-            "Task {task} is already owned on this Machine"
+            "Task {task} is already on this Machine"
         )));
     }
     append_in(
         conn,
         task,
         OwnershipKind::Claim,
-        holder.into(),
+        person,
         target,
         me.planning_connected,
     )
@@ -601,17 +615,7 @@ fn append_in(
     if planning_connected {
         match kind {
             OwnershipKind::Claim if *machine == local => {
-                let state: Option<String> = conn.query_row(
-                    "SELECT planning_state FROM tasks WHERE id=?1",
-                    [task.as_str()],
-                    |row| row.get(0),
-                )?;
-                if matches!(
-                    state.as_deref(),
-                    None | Some("unstarted" | "backlog" | "triage")
-                ) {
-                    super::task_state::decide_in(conn, task, "started")?;
-                }
+                start_claimed_task(conn, task)?;
             }
             OwnershipKind::Unassign => {
                 super::planning_write::local(
@@ -629,6 +633,21 @@ fn append_in(
     Ok(entry)
 }
 
+fn start_claimed_task(conn: &Connection, task: &TaskId) -> StoreResult<()> {
+    let state: Option<String> = conn.query_row(
+        "SELECT planning_state FROM tasks WHERE id=?1",
+        [task.as_str()],
+        |row| row.get(0),
+    )?;
+    if matches!(
+        state.as_deref(),
+        None | Some("unstarted" | "backlog" | "triage")
+    ) {
+        super::task_state::decide_in(conn, task, "started")?;
+    }
+    Ok(())
+}
+
 /// Claim for this Machine when the Task is unowned or its owner's Machine is
 /// unknown. Returns the new entry, or None when this Machine already owns it.
 pub(super) fn claim_in(
@@ -640,21 +659,11 @@ pub(super) fn claim_in(
     if claimed_here_in(conn, task)? {
         return Ok(None);
     }
-    let key = me.person.key.clone().ok_or_else(|| {
-        StoreError::InvalidData(
-            "claiming needs your Git user.email, which identifies you to teammates; \
-             run `git config --global user.email you@example.com`"
-                .into(),
-        )
-    })?;
     append_in(
         conn,
         task,
         OwnershipKind::Claim,
-        Person {
-            key: Some(key),
-            ..me.person.clone()
-        },
+        me.claimant()?.clone(),
         &local,
         me.planning_connected,
     )
@@ -982,8 +991,8 @@ impl SqliteStore {
         Ok(Some(entry))
     }
 
-    /// Begin moving the Task to `target`: claim it here when unowned, write
-    /// the move's claim naming `target` and record the move as leaving, in one
+    /// Begin moving the Task to `target`: write its claim naming the target
+    /// and record the move as leaving, in one
     /// transaction. Written before the move stops anything, so nothing here
     /// starts the Task again; its conversation travels with it, and the move
     /// completes it once taken.
@@ -997,9 +1006,6 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if !me.matches_task_in(&tx, task)? {
             return Ok(None);
-        }
-        if reading_in(&tx, task)?.owner.is_none() {
-            claim_in(&tx, task, me)?;
         }
         let entry = move_in(&tx, task, target, me)?;
         tx.execute(

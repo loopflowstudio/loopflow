@@ -79,9 +79,6 @@ const REQUESTS: &[&str] = &[
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/performance_write.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/performance_read.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/performance_read.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_connect.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_disconnect.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_list.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/attach.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_start.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/checkout_commit.json"),
@@ -125,22 +122,14 @@ const REQUESTS: &[&str] = &[
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_page.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_continue.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_create.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_shell_start.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_shell_attach.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/upload.json"),
 ];
 
 /// Recorded answers and the operation each answers. A new `response`
 /// fixture must be named here; subscriptions answer null.
 const RESPONSES: &[(&str, &str, &str)] = &[
-    (
-        "account",
-        "account.disconnect",
-        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account.json"),
-    ),
-    (
-        "account_report",
-        "account.list",
-        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_report.json"),
-    ),
     (
         "checkout_committed",
         "checkout.commit",

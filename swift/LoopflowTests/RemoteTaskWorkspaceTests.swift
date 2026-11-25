@@ -103,8 +103,10 @@ struct RemoteTaskWorkspaceTests {
             _ = try await viewer.finish()
 
             // Mini goes away: the open watch and a new read both name it.
-            await world.miniServer.stop()
+            // Keep ssh offline whenever mini's server is stopped so a watch retry
+            // cannot run `lf server connect` into `ensure()` / `launchctl`.
             try world.disconnect(true)
+            await world.miniServer.stop()
             let reopened = TaskFilesStore(issue: task, cwd: "", machine: world.miniID, query: query)
             await reopened.tree.readDirectory("", more: false)
             let failure = try #require(reopened.tree.listings[""]?.error)
@@ -113,10 +115,10 @@ struct RemoteTaskWorkspaceTests {
             try await eventually("the watch reports mini's outage", showing: { "\(String(describing: files.error))" }) { files.error?.contains("mini") == true }
 
             // Mini returns: Retry reads again, and a reopened Files reads the same checkout.
-            try world.disconnect(false)
             _ = try await world.miniServer.status()
+            try world.disconnect(false)
             await files.retry()
-            try await eventually("Files recovers") { files.error == nil }
+            try await eventually("Files recovers", showing: { "\(String(describing: files.error))" }) { files.error == nil }
             await reopened.retry()
             #expect(reopened.tree.listings[""]?.entries.map(\.path).contains("document.txt") == true)
             await files.loadFile()

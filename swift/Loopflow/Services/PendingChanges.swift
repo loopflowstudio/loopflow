@@ -110,8 +110,8 @@ public final class PendingChanges {
         let change: (command: PendingCommand, write: ServedWrite, verb: String) = switch action {
         case .pause:
             (.pause(task: issue), .taskPause(directory: directory, issue: issue), "paused")
-        case .unpause:
-            (.unpause(task: issue), .taskUnpause(directory: directory, issue: issue, run: false), "unpaused")
+        case .unpause, .resume:
+            (.unpause(task: issue), .taskUnpause(directory: directory, issue: issue, run: action == .resume), "unpaused")
         }
         make(change.command, subject: issue, verb: change.verb, write: change.write,
              notices: notices, show: show, answered: answered)

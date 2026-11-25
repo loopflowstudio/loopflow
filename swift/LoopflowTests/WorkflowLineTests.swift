@@ -15,7 +15,7 @@ struct WorkflowLineTests {
     ]
 
     private func graph(_ position: TaskGraph.Position, current: Int?, sentence: String) -> TaskGraph {
-        TaskGraph(name: "code", interactiveSteps: [], position: position,
+        TaskGraph(name: "code", control: .init(action: .run, label: "Run: implement"), interactiveSteps: [], position: position,
                   steps: Self.code, currentStep: current, sentence: sentence)
     }
 
@@ -49,7 +49,7 @@ struct WorkflowLineTests {
     func sentenceOnly() throws {
         let sentence = "build is running implement. You are next needed at ship-review."
         let line = WorkflowLine(graph: graph(run(running: true), current: 1, sentence: sentence), auto: false,
-                                sentenceOnly: true)
+                                style: .sentence)
         #expect(try line.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-live").text().string() == sentence)
         #expect(throws: (any Error).self) { try line.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-name") }
         #expect(throws: (any Error).self) { try line.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-step-0") }
@@ -81,7 +81,7 @@ struct WorkflowLineTests {
 
     @Test("An outline: every step ahead, where you take part under the steps; a Task's bar shows the name and no sentence")
     func outline() throws {
-        let outline = WorkflowOutline(steps: Self.code, interactiveSteps: [],
+        let outline = WorkflowOutline(start: .init(action: .run, label: "Run: plan"), steps: Self.code, interactiveSteps: [],
                                       sentence: "You take part at ship-review.")
         let sheet = WorkflowLine(outline: outline)
         #expect(sheet.tones == Array(repeating: .ahead, count: 5))
@@ -99,19 +99,6 @@ struct WorkflowLineTests {
         let line = WorkflowLine(graph: graph(.at(step: "end"), current: nil, sentence: "At its end."), auto: false)
         #expect(line.tones == Array(repeating: .done, count: 5))
         #expect(line.sentence == "At its end.")
-    }
-
-    @Test("The step that moves a Task is named from where its Graph stands")
-    func runAction() {
-        func action(_ position: TaskGraph.Position) -> TaskActions.Run? {
-            graph(position, current: nil, sentence: "").runAction(issue: "LOO-5")
-        }
-        #expect(action(.at(step: "start")) == .init(label: "Start", help: "lf task run LOO-5"))
-        #expect(action(.at(step: "ship-review")) == .init(label: "Run", help: "lf task run LOO-5: continue after ship-review"))
-        #expect(action(run(running: false)) == .init(label: "Run", help: "lf task run LOO-5: run again at implement"))
-        // A run carries the Task, or it is finished: nothing to press.
-        #expect(action(run(running: true)) == nil)
-        #expect(action(.at(step: "end")) == nil)
     }
 
     @Test("Alone, the sentence sets no line limit, so a phone shows all of it")

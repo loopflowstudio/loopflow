@@ -257,6 +257,7 @@ public enum GraphSubject: String, Decodable, Sendable, Hashable {
 
 /// A Graph as the workflow line shows it before any Task stands on it.
 public struct WorkflowOutline: Decodable, Sendable, Hashable {
+    public let start: WorkflowControl
     /// The Graph's top-level steps in order, as `TaskGraph.steps` carries them.
     public let steps: [TaskGraph.Step]
     /// Every step where a person takes part, XOR paths included.
@@ -265,7 +266,7 @@ public struct WorkflowOutline: Decodable, Sendable, Hashable {
     public let sentence: String
 
     enum CodingKeys: String, CodingKey {
-        case steps, sentence
+        case start, steps, sentence
         case interactiveSteps = "interactive_steps"
     }
 }

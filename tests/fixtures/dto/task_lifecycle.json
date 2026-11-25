@@ -433,6 +433,10 @@
         "work": {
           "graph": {
             "current_step": null,
+            "control": {
+              "action": "done",
+              "label": "Done"
+            },
             "interactive_steps": [],
             "name": "delivery",
             "position": {
@@ -555,6 +559,10 @@
       "overview": {
         "graph": {
           "current_step": null,
+          "control": {
+            "action": "done",
+            "label": "Done"
+          },
           "interactive_steps": [],
           "name": "delivery",
           "position": {
@@ -1432,6 +1440,10 @@
         "work": {
           "graph": {
             "current_step": 1,
+            "control": {
+              "action": "pause",
+              "label": "Running: task complete FIX-1"
+            },
             "interactive_steps": [],
             "name": "delivery",
             "position": {
@@ -1541,6 +1553,10 @@
       "overview": {
         "graph": {
           "current_step": 1,
+          "control": {
+            "action": "pause",
+            "label": "Running: task complete FIX-1"
+          },
           "interactive_steps": [],
           "name": "delivery",
           "position": {
@@ -2363,6 +2379,10 @@
         "work": {
           "graph": {
             "current_step": 1,
+            "control": {
+              "action": "pause",
+              "label": "Running: task complete FIX-1"
+            },
             "interactive_steps": [],
             "name": "delivery",
             "position": {
@@ -2472,6 +2492,10 @@
       "overview": {
         "graph": {
           "current_step": 1,
+          "control": {
+            "action": "pause",
+            "label": "Running: task complete FIX-1"
+          },
           "interactive_steps": [],
           "name": "delivery",
           "position": {

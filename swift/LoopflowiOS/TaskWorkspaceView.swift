@@ -8,8 +8,13 @@ struct TaskWorkspaceView: View {
     let feed: TaskFeed
     let task: MobileTask
     @Environment(\.theme) private var theme
+    @Environment(\.dismiss) private var dismiss
     @Binding var draft: String
     @State private var showsChanges = false
+    @State private var confirmingAbandon = false
+    @State private var selectedSession: String?
+    @State private var sessionDrafts: [String: String] = [:]
+    @State private var outline: WorkflowOutline?
     /// The Task as the Machine last read it.
     @State private var reading = Loaded<Reading>.loading
     /// The conversation that began while the screen was showing.
@@ -18,34 +23,36 @@ struct TaskWorkspaceView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // While the Machine is away the sentence would be an old one.
-            if case .value(let reading) = reading, feed.pendingChanges.acceptsChanges {
-                let refusal = reading.actions?.refusal
-                if reading.work.graph != nil || refusal != nil {
-                    VStack(alignment: .leading, spacing: Spacing.xs) {
-                        if let graph = reading.work.graph {
-                            WorkflowLine(graph: graph, auto: reading.actions?.auto == .on)
-                        }
-                        // A menu item holds two lines; Rust's reason says what to restore, so it is set in full.
-                        if let refusal {
-                            Text(refusal)
-                                .font(Typography.meta)
-                                .foregroundStyle(theme.palette.warning)
-                                .accessibilityIdentifier("task-actions-refusal")
-                        }
+            if case .value(let reading) = reading, let row = reading.row, feed.pendingChanges.acceptsChanges {
+                let actions = reading.actions(for: row, outline: outline)
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    if let graph = reading.work.graph {
+                        WorkflowLine(graph: graph, auto: actions.auto == .on, style: .steps)
+                            .accessibilityHint(graph.sentence)
                     }
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Spacing.lg)
-                    .padding(.vertical, Spacing.sm)
-                    .background(theme.palette.background)
-                    .overlay(alignment: .bottom) { Rectangle().fill(theme.palette.border).frame(height: 1) }
+                    HStack {
+                        Spacer(minLength: 0)
+                        controls(row, actions)
+                        metadata(row, sessions: reading.work.sessions)
+                    }
+                    if let reason = actions.primaryRefusal ?? (row.lifecycle == .paused ? nil : actions.autoRefusal) {
+                        Text(reason).font(Typography.meta).foregroundStyle(theme.palette.warning)
+                            .accessibilityIdentifier("task-actions-refusal")
+                    }
+                }
+                .font(Typography.text)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.xs)
+                .overlay(alignment: .bottom) { Rectangle().fill(theme.palette.border).frame(height: 1) }
+                .task(id: reading.work.graph == nil ? row.graphName : nil) {
+                    outline = nil
+                    if reading.work.graph == nil, let name = row.graphName {
+                        let catalog = try? await client.query.graphCatalog(cwd: row.task.repo)
+                        if !Task.isCancelled { outline = catalog?.first { $0.name == name }?.workflow }
+                    }
                 }
             }
             content
-        }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { actions.disabled(!feed.pendingChanges.acceptsChanges) }
         }
         .overlay { NoticeView(center: feed.notices) }
         .task(id: scenePhase == .active) { await watchTask() }
@@ -58,7 +65,10 @@ struct TaskWorkspaceView: View {
         let row: RoadmapTask?
         let execution: TaskExecution?
 
-        var actions: TaskActions? { row.map { TaskActions(work: work, row: $0, execution: execution) } }
+        func actions(for row: RoadmapTask, outline: WorkflowOutline? = nil) -> TaskActions {
+            TaskActions(work: work, row: row, execution: execution, outline: outline)
+        }
+
         /// Nil until the Task starts.
         var checkout: String? { row?.reference.workspace?.worktree }
     }
@@ -119,47 +129,76 @@ struct TaskWorkspaceView: View {
         }
     }
 
-    /// "Task actions": what `TaskActions` offers, each sending its write from
-    /// the Task's repository. A refused action is disabled; the reason is under the sentence.
-    @ViewBuilder private var actions: some View {
-        if case .value(let reading) = reading, let row = reading.row, let actions = reading.actions,
-           actions.run != nil || actions.pause != nil || actions.auto != nil {
-            let (issue, directory) = (row.task.identifier, row.task.repo)
-            let requesting = feed.pendingChanges.pauseRequest(for: issue) != nil
-            Menu("Task actions", systemImage: "ellipsis.circle") {
-                if let run = actions.run {
-                    item(run.label, symbol: "play.fill", disabled: requesting || actions.runRefusal != nil, issue: issue,
-                         write: .taskRun(directory: directory, issue: issue, graph: nil, from: nil, agent: nil, approve: false))
+    private func controls(_ row: RoadmapTask, _ actions: TaskActions) -> some View {
+        let (issue, directory) = (row.task.identifier, row.task.repo)
+        func send(_ name: String, _ write: ServedWrite) { feed.request(name, issue: issue, write: write) }
+        return TaskWorkflowControls(task: row, actions: actions, pending: feed.pendingChanges.pauseRequest(for: issue),
+            run: { step in
+                send("Run", .taskRun(directory: directory, issue: issue, graph: nil, from: step, agent: nil, approve: false))
+            }, pause: { action in
+                feed.pendingChanges.setPause(action, issue: issue, directory: directory, notices: feed.notices, show: nil) {
+                    await feed.refresh()
                 }
-                if let pause = actions.pause {
-                    Button(pause.rawValue, systemImage: pause == .pause ? "pause" : "play") {
-                        feed.pendingChanges.setPause(pause, issue: issue, directory: directory, notices: feed.notices, show: nil) {
-                            await feed.refresh()
-                        }
+            }, interrupt: { send("Interrupt step", .taskInterrupt(directory: directory, issue: issue)) },
+            toggleAuto: {
+                guard let auto = actions.auto else { return }
+                send(auto.offer, auto == .on ? .taskAutoOff(directory: directory, issue: issue) : .taskAutoOn(directory: directory, issue: issue))
+            }, complete: { send("Complete", .taskComplete(directory: directory, issue: issue)) }) {
+                if row.isCompleted {
+                    Button("Reopen Task") { send("Reopen", .taskReopen(directory: directory, issue: issue)) }
+                } else {
+                    if row.isUnassigned {
+                        Button("Claim Task") { send("Claim", .taskClaim(directory: directory, issue: issue)) }
+                    } else {
+                        Button("Unassign Task") { send("Unassign", .taskUnassign(directory: directory, issue: issue)) }
                     }
-                    .disabled(requesting || actions.pauseRefusal != nil)
-                }
-                if let auto = actions.auto {
-                    item(auto.offer, symbol: auto == .on ? "pause.circle" : "paperplane", disabled: (requesting && auto == .off) || actions.autoRefusal != nil, issue: issue,
-                         write: auto == .on ? .taskAutoOff(directory: directory, issue: issue)
-                             : .taskAutoOn(directory: directory, issue: issue))
+                    Button("Abandon…", role: .destructive) { confirmingAbandon = true }
                 }
             }
-        }
+            .confirmationDialog("Abandon \(issue)?", isPresented: $confirmingAbandon) {
+                Button("Abandon Task", role: .destructive) { send("Abandon", .taskAbandon(directory: directory, issue: issue)) }
+            } message: {
+                Text("Cancels the Task, closes its PRs and deletes its branches.")
+            }
     }
 
-    private func item(_ name: String, symbol: String, disabled: Bool, issue: String, write: ServedWrite) -> some View {
-        Button {
-            feed.request(name, issue: issue, write: write)
-        } label: {
-            Label(name, systemImage: symbol)
+    private func metadata(_ row: RoadmapTask, sessions: [TaskSession]) -> some View {
+        Menu("Task actions", systemImage: "ellipsis") {
+            Menu("Move to Wave") {
+                Button("No Wave") {
+                    feed.request("Move", issue: row.task.identifier, write: .taskMove(directory: row.task.repo, issue: row.task.identifier, wave: nil, machine: nil))
+                }.disabled(row.task.waveId == nil)
+                ForEach(feed.waves.filter { $0.repo == row.task.repo }) { wave in
+                    Button(wave.displayName) {
+                        feed.request("Move", issue: row.task.identifier, write: .taskMove(directory: row.task.repo, issue: row.task.identifier, wave: wave.id, machine: nil))
+                    }.disabled(wave.id == row.task.waveId)
+                }
+            }
+            if let wave = row.task.waveId {
+                Button("Open owning Wave") { feed.wave = wave; dismiss() }
+            }
+            Button("Copy Task ID") { UIPasteboard.general.string = row.task.identifier }
+            if let link = row.reference.issueUrl {
+                Button("Copy Task link") { UIPasteboard.general.url = link }
+            }
+            if let branch = row.reference.workspace?.branch {
+                Button("Copy branch") { UIPasteboard.general.string = branch }
+            }
+            if let pr = row.pr?.publication?.github { Link("Open PR #\(pr.number)", destination: pr.url) }
+            ForEach(sessions.filter(\.interactive)) { session in
+                Button("Open \(session.title)") { selectedSession = session.id }
+            }
         }
-        .disabled(disabled)
+        .labelStyle(.iconOnly)
+        .frame(width: 44, height: 44)
     }
 
     @ViewBuilder private var content: some View {
-        if let session = task.primarySession ?? begun {
-            SessionView(client: client, task: task, session: session, draft: $draft) { showsChanges = true }
+        if let session = selectedSession ?? task.primarySession ?? begun {
+            let sessionDraft = session == (task.primarySession ?? begun) ? $draft : Binding(
+                get: { sessionDrafts[session] ?? "" }, set: { sessionDrafts[session] = $0 })
+            SessionView(client: client, task: task, session: session, draft: sessionDraft) { showsChanges = true }
+                .id(session)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Changes", systemImage: "plusminus") { showsChanges = true }

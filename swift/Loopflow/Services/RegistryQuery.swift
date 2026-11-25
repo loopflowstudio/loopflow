@@ -1127,6 +1127,10 @@ public struct RegistryQuery: Sendable {
         try await serve(.sessionHistoryGet(id: id)).decode(String.self)
     }
 
+    public func taskPane(issue: String, directory: String) async throws -> WorkFrame.TaskStatusReading {
+        try await serve(.taskGet(directory: directory, issue: issue)).decode(WorkFrame.TaskStatusReading.self)
+    }
+
     /// One store-driven reading keeps position, readiness and run history together.
     public func subscribeTask(task: String) async throws -> LineSubscription {
         guard let observeRead else { throw RegistryQueryError("Live Task observation is unavailable on this transport") }

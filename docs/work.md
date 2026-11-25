@@ -114,7 +114,8 @@ Find held Tasks with `lf task list --state paused`. Plain `lf task unpause LOO-1
 lifts the hold. An interrupted step stays idle and ready for Run. If a step
 failed before pause, its failure stays in the execution history and shows
 in the Task’s condition again on unpause.
-To run from the saved step immediately, use `lf task unpause LOO-12 --run`.
+The Mac and iPhone play button resumes an interrupted step and leaves a human stop waiting.
+To run from the saved step immediately in the CLI, use `lf task unpause LOO-12 --run`.
 
 Unassign clears the hold once cleanup settles. Complete, abandon, and reopen
 also clear it. A move carries the hold to the destination, including a pause
@@ -142,8 +143,8 @@ lf task list --closed --wave infra --since 7d  # closed in the last week
 lf task list --subscribe --json                # stream a JSON line on every change
 ```
 
-`lf task status` says where the Task stands on its Graph in one sentence, the
-same words Desktop's workflow bar shows:
+`lf task status` says where the Task stands on its Graph in one sentence, also
+available in Desktop’s workflow tooltip:
 
 ```text
 LOO-12  moving
@@ -157,7 +158,7 @@ again." During cleanup the Task reads "Pausing at …". A paused run reads
 it reads "Paused at ship-review. `lf task unpause` lifts the hold." `--json` carries the parts: `graph.steps` (each top-level step's
 `name` and `interactive`, true when a person takes part anywhere inside the
 step), `graph.current_step` (its index, null before the start and at the end)
-and `graph.sentence`. Before a Task starts, Desktop draws the same steps from
+and `graph.sentence`. Both apps use `graph.control` for the button’s label and action. Before a Task starts, Desktop draws the same steps from
 [`lf graph list --json`](orchestration.md#describe-a-graph).
 
 Every read queries this machine's local store, so it answers instantly and

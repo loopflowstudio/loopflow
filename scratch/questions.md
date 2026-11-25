@@ -16,8 +16,6 @@ Carry the original pause time and author in a move. Keep the source hold until t
 
 Use the CLI pause receipt as the served answer. A plain unpause answers null. With `--run` it answers the same run receipt as `task.run`.
 
-Both app controls send plain unpause. The Mac subscribes to the selected section. The server looks up checkout and Session details for each matching Task, so including held Tasks in every Working read would do unnecessary work.
-
 Use a real local Git merge to exercise a draining land. Its pre-merge-commit hook can run pause while the command is inside the mutation.
 
 Leave separate-session Codex jobs outside signal authority until the spawn can identify the tool session. On 0.171.0 the live terminal exposed no OS PID. The zsh startup experiment missed an explicit sh tool. The plan records the two orphans and the provider replies.
@@ -55,3 +53,11 @@ recovery takes the same admission lock as pause through its restart count and
 launch, closing the gap between checking the hold and spawning the carrier.
 
 On unpause the action and lifecycle update immediately. The list keeps the row in place until the Machine returns the group for its saved cursor.
+
+## V4c
+
+Keep the fixed checkmark from the V4c prototype. A merged PR accents Complete immediately. A post-merge step that is still running or paused keeps its own control.
+
+Bare CLI unpause still lifts the hold. The apps choose the existing served write from the saved Graph. If a sidebar row has no cursor reading, fetch it when Unpause is clicked.
+
+The phone’s metadata menu opens recorded conversations. The Mac’s independent New conversation starts a local Task shell. The phone’s held-terminal API can continue a recorded Session, but it has no matching independent-chat preparation operation.

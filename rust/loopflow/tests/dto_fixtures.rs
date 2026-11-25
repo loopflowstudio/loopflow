@@ -372,6 +372,11 @@ fn task_detail_says_each_fact_once() {
     );
     let graph = detail.graph.as_ref().unwrap();
     assert_eq!(graph.current_step, Some(2));
+    assert_eq!(graph.control.label, "Run: end");
+    assert_eq!(
+        graph.control.action,
+        loopflow_execution::task_graph::WorkflowAction::Run
+    );
     assert_eq!(graph.sentence, "Waiting for you at demo.");
     let conversation = detail
         .sessions
@@ -617,6 +622,11 @@ fn task_work_preserves_sessions_graph_runs_and_graph() {
         ]
     );
     assert_eq!(graph.current_step, Some(2));
+    assert_eq!(graph.control.label, "Running: implement");
+    assert_eq!(
+        graph.control.action,
+        loopflow_execution::task_graph::WorkflowAction::Pause
+    );
     assert_eq!(
         graph.sentence,
         "build is running implement. You are next needed at demo."

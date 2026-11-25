@@ -2714,8 +2714,20 @@ if (home / 'hold-turn').exists():
     );
     assert_eq!(task.state(), "paused");
     assert!(!sqlite.local_task_runs().unwrap().contains(id));
+    assert_eq!(
+        task.graph()["control"],
+        serde_json::json!({"action": "resume", "label": "Paused: implement"})
+    );
     task.task_run_ok(&["task", "unpause", "INF-123", "--run", "-a", "claude"]);
     assert_eq!(task.graph()["position"], at("review"));
+    task.ok(&["task", "pause", "INF-123"]);
+    let review = task.graph();
+    assert_eq!(
+        review["control"],
+        serde_json::json!({"action": "unpause", "label": "Paused: review"})
+    );
+    task.ok(&["task", "unpause", "INF-123"]);
+    assert_eq!(task.graph()["position"], review["position"]);
 }
 
 /// `lf task interrupt` ends a worker's turn while it runs: the turn is recorded

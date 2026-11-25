@@ -1,4 +1,6 @@
 import Foundation
+import SwiftUI
+import ViewInspector
 import Testing
 @testable import Loopflow
 
@@ -15,12 +17,11 @@ struct TaskActionsTests {
         return try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
     }
 
-    /// The Task's reading with its Graph at `position`, or with none taken up.
-    private func work(_ position: [String: Any]?) throws -> TaskOverview {
+    private func work(_ control: WorkflowControl?) throws -> TaskOverview {
         var wire = try #require(JSONSerialization.jsonObject(with: loadFixtureData("task_work.json")) as? [String: Any])
-        if let position {
+        if let control {
             var graph = try #require(wire["graph"] as? [String: Any])
-            graph["position"] = position
+            graph["control"] = ["action": control.action.rawValue, "label": control.label]
             wire["graph"] = graph
         } else {
             wire["graph"] = NSNull()
@@ -28,78 +29,57 @@ struct TaskActionsTests {
         return try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: wire))
     }
 
-    private func actions(_ position: [String: Any]?, _ row: RoadmapTask) throws -> TaskActions {
-        TaskActions(work: try work(position), row: row, execution: nil)
-    }
-
-    @Test func pausedTaskOffersUnpauseAfterCleanupAndKeepsAutoOffAvailable() throws {
-        let held = try actions(nil, row(lifecycle: "paused", refusal: "Task is paused"))
-        #expect(held.run == nil)
-        #expect(held.pause == .unpause && held.pauseRefusal == nil)
-        #expect(held.autoRefusal == "Task is paused")
-        let draining = try actions(nil, row(lifecycle: "paused", auto: true, refusal: "land is finishing", pausing: true))
-        #expect(draining.pause == .unpause && draining.pauseRefusal == "land is finishing")
-        #expect(draining.refusal == draining.pauseRefusal)
-        #expect(draining.auto == .on && draining.autoRefusal == nil)
-        #expect(try actions(nil, row()).pause == .pause)
-        for lifecycle in ["unstarted", "done", "abandoned"] {
-            #expect(try actions(nil, row(lifecycle: lifecycle)).pause == nil)
+    @MainActor @Test func unpauseSendsTheRunChoiceFromTheCapturedGraph() async throws {
+        for (action, label, menu, runs) in [(WorkflowControl.Action.resume, "Paused: implement", false, true),
+                                             (.resume, "Paused: implement", true, false),
+                                             (.unpause, "Paused: ship-review", false, false),
+                                             (.unpause, "Paused: end", false, false)] {
+            let control = WorkflowControl(action: action, label: label)
+            let row = try row(lifecycle: "paused", refusal: "Task is paused")
+            let actions = TaskActions(work: try work(control), row: row, execution: nil)
+            let machine = HeldMachine()
+            let changes = PendingChanges { write, id in
+                #expect(write == .taskUnpause(directory: "/repo", issue: "W2-144", run: runs))
+                return try await machine.send(write, id)
+            }
+            var requested: TaskActions.Pause?
+            let bar = TaskWorkflowControls(task: row, actions: actions, pending: nil,
+                run: { _ in Issue.record("Unpause must lift the hold in the same write") },
+                pause: { requested = $0 },
+                interrupt: {}, toggleAuto: {}, complete: {}) { EmptyView() }
+            _ = try bar.inspect().find(text: label)
+            if menu {
+                try bar.inspect().find(button: "Unpause without running").tap()
+            } else {
+                try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-primary").button().tap()
+            }
+            changes.setPause(try #require(requested), issue: row.task.identifier, directory: "/repo", notices: NoticeCenter(), show: nil) {}
+            await machine.answer(nil)
         }
     }
 
-    @Test("Waiting at a step offers Run and Auto-Ship")
-    func waiting() throws {
-        let actions = try actions(["kind": "at", "step": "demo"], row())
-        #expect(actions.run?.label == "Run")
-        #expect(actions.auto == .off)
-        #expect(actions.auto?.offer == "Auto-Ship")
-        #expect(actions.autoRefusal == nil)
+    @Test func cleanupBlocksUnpauseAndAnArmedSwitchCanStillTurnOff() throws {
+        let actions = TaskActions(work: try work(.init(action: .resume, label: "Paused: land")),
+                                  row: try row(lifecycle: "paused", auto: true, refusal: "land is finishing", pausing: true), execution: nil)
+        #expect(actions.primaryRefusal == "land is finishing")
+        #expect(actions.auto == .on && actions.autoRefusal == nil)
     }
 
-    @Test("A run carrying the Task offers no Run, and auto on offers Stop Auto-Ship")
-    func carried() throws {
-        let running: [String: Any] = ["kind": "run", "step": "plan", "at": "implement", "lf_process_id": "p", "running": true]
-        let actions = try actions(running, row(lifecycle: "active", auto: true))
-        #expect(actions.run == nil)
-        #expect(actions.auto?.offer == "Stop Auto-Ship")
-    }
-
-    @Test("A reading with no Graph offers Start; no reading offers no run")
-    func noGraph() throws {
+    @Test func defaultGraphSuppliesItsFirstStepBeforeTheTaskTakesItUp() throws {
+        let catalog = try JSONDecoder().decode([GraphCatalogEntry].self, from: loadFixtureData("graph_catalog.json"))
         let unstarted = try row(lifecycle: "unstarted")
-        #expect(try actions(nil, unstarted).run == TaskActions.Run(label: "Start", help: "lf task run W2-144"))
-        #expect(TaskActions(work: nil, row: unstarted, execution: nil).run == nil)
+        let actions = TaskActions(work: try work(nil), row: unstarted, execution: nil, outline: catalog[0].workflow)
+        #expect(actions.control?.label == "Run: design")
+        #expect(actions.pause == nil)
+        #expect(TaskActions(work: nil, row: unstarted, execution: nil).control == nil)
     }
 
-    @Test("Rust's refusal disables Run and Auto-Ship, never Stop Auto-Ship")
-    func refused() throws {
-        let waiting: [String: Any] = ["kind": "at", "step": "demo"]
-        let off = try actions(waiting, row(refusal: "Task checkout is on another Machine"))
-        #expect(off.run != nil)
-        #expect(off.runRefusal == "Task checkout is on another Machine")
-        #expect(off.autoRefusal == "Task checkout is on another Machine")
-        let on = try actions(waiting, row(auto: true, refusal: "Task checkout is on another Machine"))
-        #expect(on.auto == .on)
+    @Test func aRunRefusalStillAllowsTurningAutoOff() throws {
+        let work = try work(.init(action: .run, label: "Run: gate"))
+        let off = TaskActions(work: work, row: try row(refusal: "checkout missing"), execution: nil)
+        #expect(off.primaryRefusal == "checkout missing" && off.autoRefusal == "checkout missing")
+        let on = TaskActions(work: work, row: try row(auto: true, refusal: "checkout missing"), execution: nil)
         #expect(on.autoRefusal == nil)
-    }
-
-    @Test("The reason is given only while an offered action is disabled")
-    func refusalShown() throws {
-        let waiting: [String: Any] = ["kind": "at", "step": "demo"]
-        let running: [String: Any] = ["kind": "run", "step": "plan", "at": "implement", "lf_process_id": "p", "running": true]
-        let ended: [String: Any] = ["kind": "at", "step": "end"]
-        #expect(try actions(waiting, row(refusal: "worktree is missing")).refusal == "worktree is missing")
-        #expect(try actions(running, row(lifecycle: "active", refusal: "worktree is missing")).refusal == "worktree is missing")
-        #expect(try actions(running, row(lifecycle: "active", auto: true, refusal: "worktree is missing")).refusal == nil)
-        #expect(try actions(ended, row(lifecycle: "done", refusal: "Task is complete")).refusal == nil)
-        #expect(try actions(waiting, row()).refusal == nil)
-    }
-
-    @Test("A completed Task offers Auto-Ship only to stop it")
-    func completed() throws {
-        let ended: [String: Any] = ["kind": "at", "step": "end"]
-        #expect(try actions(ended, row(lifecycle: "done")).auto == nil)
-        #expect(try actions(ended, row(lifecycle: "done", auto: true)).auto == .on)
     }
 
     @Test("The Task reading's auto mark outranks the state its row carries")

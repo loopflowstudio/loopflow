@@ -1,5 +1,6 @@
 import Foundation
 import Loopflow
+import SwiftUI
 import XCTest
 @testable import LoopflowiOS
 
@@ -22,6 +23,9 @@ final class TaskActionsTests: XCTestCase {
         let roadmap = try fixture("roadmap_snapshot.json")
         var row = try XCTUnwrap(((roadmap["tasks"] as? [String: Any])?["items"] as? [[String: Any]])?.first)
         if paused {
+            var graph = try XCTUnwrap(work["graph"] as? [String: Any])
+            graph["control"] = ["action": "resume", "label": "Paused: implement"]
+            work["graph"] = graph
             row["lifecycle"] = "paused"
             row["section"] = "working"
             row["working_group"] = "paused"
@@ -35,9 +39,26 @@ final class TaskActionsTests: XCTestCase {
 
     func testPausedTaskOffersUnpauseInWorking() throws {
         guard case .value(let held) = try reading(sessions: true, paused: true) else { return XCTFail("missing Task") }
-        XCTAssertEqual(held.actions?.pause, .unpause)
-        XCTAssertNil(held.actions?.run)
-        XCTAssertNil(held.actions?.pauseRefusal)
+        let actions = held.actions(for: try XCTUnwrap(held.row))
+        XCTAssertEqual(actions.pause, .resume)
+        XCTAssertEqual(actions.control?.label, "Paused: implement")
+        XCTAssertNil(actions.pauseRefusal)
+    }
+
+    func testPausingKeepsTheWorkflowControlsTheSameWidth() throws {
+        func width(paused: Bool) throws -> CGFloat {
+            guard case .value(let reading) = try reading(sessions: true, paused: paused) else {
+                XCTFail("Task fixture is unavailable")
+                return 0
+            }
+            let row = try XCTUnwrap(reading.row)
+            let controls = TaskWorkflowControls(task: row, actions: reading.actions(for: row), pending: nil,
+                run: { _ in }, pause: { _ in }, interrupt: {}, toggleAuto: {}, complete: {}) { EmptyView() }
+            return UIHostingController(rootView: controls.fixedSize()).sizeThatFits(in: CGSize(width: 400, height: 80)).width
+        }
+        let running = try width(paused: false)
+        XCTAssertGreaterThan(running, 200)
+        XCTAssertEqual(try width(paused: true), running)
     }
 
     func testAReadingTheMachineCouldNotMakeShowsNoGraph() throws {

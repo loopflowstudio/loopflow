@@ -1209,7 +1209,7 @@ struct WorkNavigationTests {
         await model.loadGraphCatalog()
         #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-name").text().string() == "feature")
         #expect(try ["design", "pursue", "xor-route", "queue"].map { try bar.inspect().find(text: $0).string() }.count == 4)
-        _ = try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start")
+        _ = try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-primary")
     }
 
     @Test("Workflow loading, absent and failed readings: a failure shows the last good one or nothing")

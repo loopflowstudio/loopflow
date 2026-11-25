@@ -72,37 +72,20 @@ the filter is empty, **Clear search** when the search matches nothing.
 
 ## Task
 
-Opening a Task with a conversation fits its terminal to the phone, even while
-the Graph is paused. Above it, one sentence says where the Task stands:
+Opening a Task fits its conversation to the phone. The workflow bar above it
+shows the Graph and a split button. Tap ⏸ beside **Running: implement** to
+pause the worker while keeping the conversation open. Tap ▶ to resume the
+interrupted step. At a human step such as ship-review, ▶ lifts the hold and
+waits for you. The next tap runs the step named on the button.
 
-```text
-build is running implement. You are next needed at ship-review.
-```
-
-It is the sentence `lf task status` prints and the Mac's workflow bar shows,
-in full: it wraps rather than cuts, and it changes as the Task moves. Turned
-sideways, or on an iPad, the Graph's steps stand before it as they do on the
-Mac. A Task that has not taken up a Graph shows no sentence.
-
-**Task actions** in the toolbar holds what the Mac's workflow bar offers:
-
-- **Start** before the Task has run, **Run** once its Graph has stopped or is
-  waiting at a step. While a run carries the Task, neither is there.
-- **Pause** stops a started Task's Graph and keeps your ownership and
-  conversation. **Unpause** lifts the hold without running the Graph. While
-  cleanup finishes, Unpause is disabled.
-- **Auto-Ship** turns the Task's auto setting on and runs it, as
-  `lf task auto on` does; **Stop Auto-Ship** turns it off. Every Task that is
-  not completed has one of them.
-
-Run and auto requests show a line like "LOO-5 Auto-Ship requested" at the bottom of the
-screen. An action the Machine already knows it would refuse is greyed, and
-the reason stands in full under the workflow sentence; any other refusal shows
-in that line.
+Tap the step label to pick a starting point, pause at review, interrupt the worker,
+or **Unpause without running**. Cleanup disables unpause until the worker stops.
+The **Auto** switch stays armed during a hold and can be switched off.
+Tap ✓ to complete the Task. **…** opens its PR, Sessions, Wave moves and copy actions.
 
 **Changes** lists the files the Task changed; each opens its diff, and the diff
 opens the whole file. A Task with no conversation opens on its Changes; one
-that has not started says "No changes yet" and offers **Start**. Once it
+that has not started says "No changes yet" and offers its first step. Once it
 starts, its conversation opens in place, without going back to the list. Task
 actions follow the Task itself, so they stay when the list's filter no longer
 shows it.

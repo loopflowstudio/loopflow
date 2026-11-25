@@ -393,32 +393,23 @@ your Ghostty configuration at launch, ignores its `theme =` setting and leaves
 the file untouched.
 Source and license notices ship offline with the catalogue.
 
-Under the jump bar, the workflow bar reads where the Task stands:
+Under the jump bar, the Graph shows the Task’s current stage. The split button names the step.
 
 ```text
-code  plan  build  👤ship-review  deliver  verify   build is running implement. You are next needed at ship-review.   [Auto-Ship]  …
+code  plan  build  👤ship-review  deliver  verify    [⏸ | Running: implement ▾]  Auto ◉  ✓  …
 ```
 
-The Graph's name, then its top-level steps in order, a person before each step
-that waits for you. Steps already passed are quieter; the step the Task stands
-in is strong, in the working colour while it runs and in the waiting colour
-when it has stopped or is waiting for you. A step that appears in more than one
-part of the Graph (`concept-review` runs in both `plan` and `build`) marks the
-part it is running in. The sentence is the one `lf task status` prints. In a
-narrow window the steps go and the sentence stays.
+Click ⏸ to pause the worker and keep talking in the Task conversation. Click ▶ to resume
+the interrupted step. At a human stop, ▶ first lifts the hold. Once you finish the
+review, **Run** names the step that will follow it. A failed or interrupted run
+offers its saved step again.
 
-When the Task can move, one button says how: **Start** before it has run,
-**Run** once its Graph has stopped. **Auto-Ship** turns the Task's auto setting
-on and runs it, as `lf task auto on` does: its run stands in at each
-interactive step and lands the PR. Turning it on raises the Notice "LOO-5
-Auto-Ship requested · Undo"; Undo is Stop Auto-Ship (`lf task auto off`), and
-so is the button, which reads **Stop Auto-Ship** while auto is on. While auto is on,
-the sentence names auto instead of you, and the Task's board card and sidebar
-row carry an Auto badge. Open a Dashboard with `state:auto` to watch those Tasks.
-
-Everything else is in **…**, the same list as the sidebar row's context menu:
-**Start from…** (or **Start with…** before the Task has a Graph), Complete or
-Reopen, Claim or Unassign, Move, Copy ID and link, and **Abandon…**.
+Click the step label to pick a starting point, interrupt a running step, pause at
+review, or **Unpause without running**. The same menu has Claim or Unassign and
+**Abandon…**. The Auto switch runs through the remaining human steps when armed.
+You can switch it off while paused. The checkmark completes the Task and lights
+up when its PR merges or its Graph reaches the end. **…** holds conversations,
+Wave moves, links and copy actions.
 
 ```text
 ⌘T          new shell tab in the Task’s Shell tool
@@ -749,14 +740,14 @@ When the selected Task's lifecycle becomes completed or abandoned, it stays
 visible with a green **Done** or red **Abandoned** header. Navigating away restores the ordinary
 sidebar filters. **Back** (⌘[) returns to the retained workspace and its sidebar
 row, preserving conversations, files and drafts without starting execution.
-**Start from…** in **…** lists `start` and the Task's interactive steps; picking
-one runs `lf task run ISSUE --from STEP` as a child of the app. **Complete** changes Task status independently: the row leaves the list in the
+Open the step label to pick a stage or human step. Each pick runs
+`lf task run ISSUE --from STEP`. **Complete** changes Task status independently: the row leaves the list in the
 click and the next Task opens. A refused completion brings the row back with a
 Notice saying why; completing again never replays the Graph.
 Linear completion leaves the displayed Workflow and live Processes intact.
 Loading or unavailable Workflow readings remain explicit; a failed refresh keeps
 the last recorded graph with its actions disabled. Only a successful Task reading
-with no captured Workflow offers **Start**, which runs `lf -b task run ISSUE`.
+with no captured Workflow offers its first step, which runs `lf task run ISSUE`.
 
 Use **⌘T** for a new shell tab and **View → Toggle Files** for Files.
 Choose **Graph processes** in **⌘K** to open the Graph process log. It lists every Graph process in the

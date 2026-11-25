@@ -473,6 +473,7 @@ struct DTOFixtureTests {
         #expect(graph.steps.map(\.name) == ["plan", "review-design", "build", "demo"])
         #expect(graph.steps.map(\.interactive) == [false, true, false, true])
         #expect(graph.currentStep == 2)
+        #expect(graph.control == WorkflowControl(action: .pause, label: "Running: implement"))
         #expect(graph.sentence == "build is running implement. You are next needed at demo.")
         #expect(try JSONDecoder().decode(TaskWork.self, from: JSONEncoder().encode(work)) == work)
         // `current_step` is required even when null.

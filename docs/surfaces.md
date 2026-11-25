@@ -52,8 +52,8 @@ The native macOS app reads the same local store as `lf`; it keeps no copy of its
 - **Sidebar (⌘1–9):** your [Working Tasks](#working-tasks-in-the-sidebar) in
   shared order (dragging reorders them for Wave views and CLI lists too).
 - **Paused Tasks:** opening a paused Task on Mac or iPhone opens its conversation.
-  **Unpause** lifts the Graph hold. **Stop Auto-Ship** remains available when auto is on.
-  On Mac, the workflow bar and the sidebar row’s context menu offer **Pause** on any open, started Task.
+  Tap ▶ to resume the interrupted step. At review or the end, ▶ only lifts the hold.
+  Open the step label for **Unpause without running**. The Auto switch can be turned off during a hold.
 - **Task workspace:** three resizable panes: `session` (conversation), `shell`
   (at the Task's worktree), and `browser` (Files, Graph log, local dev URLs).
 - **Dashboards:** saved side-by-side grids of Tasks selected by query. Each

@@ -27,7 +27,7 @@ Stacked on `LOO-1063` (Working sidebar order + status sort). Keep the `stopping_
    - The candidate CLI rejected the old outer loop: `loop at verify returns across interactive step "ship-review"; a person decides there`. Keep the build/review loop and end both Graphs with deliver, then automatic verify. A failed merged claim gets a linked fix-forward Task.
    - Rewrite the builtin `verify` skill (`rust/loopflow-definitions/src/builtins/task/skill/verify.md`) so it runs whatever verification it can **quickly** after merge and never blocks indefinitely (e.g. waiting for a production release/deploy).
    - With `verify` automatic, the existing "no interactive step left ahead" rule cleanly aligns with **Shipping** once a Task passes `ship-review`.
-4. **Next — Task bar redesign (V4c) + smart Unpause (from Working-groups demo, see `scratch/demo-notes.md`).**
+4. **Implemented — Task bar redesign (V4c) + smart Unpause (from Working-groups demo, see `scratch/demo-notes.md`).**
    - **Eliminate `Run | Pause` ambiguity and `idle` limbo after unpause:**
      - If a started Task is not paused and not at a human step, it should be running (not sitting in `idle` showing both `Run` and `Pause`).
      - **Smart Unpause:** clicking Unpause / `▶` on a Task paused mid-step (not at an interactive step and not at `end`) lifts the hold **and** resumes running (`run: true` / `unpause --run`). Clicking Unpause on a Task paused at an interactive step (e.g. `ship-review`) lifts the hold and returns it to waiting at that human step. Keep an explicit "Unpause without running" option inside the pill dropdown for cases where someone wants to stay idle.
@@ -57,7 +57,7 @@ During a build, `lf task pause INF-123` stops the worker, every subprocess in th
 - **Hold.** `task_pauses(task_id PK, paused_at, paused_by, stopping_sessions)` on the execution Machine; `TaskState::Paused` derived in `sqlite/durable.rs::task_state_sql`. Pause applies only to open, started Tasks. Unpause, complete, abandon, reopen and unassign clear it; unassign refuses while `stopping_sessions` has live members. `lf task move` carries the hold in `MovedTask`; the source keeps it until arrival.
 - **Stop.** Headless workers get their own OS session; pause, interrupt and the reaper stop its verified members, including reparented jobs. Pause records the hold, the session members and a Graph stop in one transaction, then signals outside the admission and SQLite locks; a separate per-Task cleanup lock serializes cleanup with unpause and move send. In-flight mutations (`lf land`) drain; the receipt and `TaskGraph.sentence` name them.
 - **Gates.** `lf task run`, `lf task auto on`, carrier and limit recovery, and operator recommendations (`TaskActionModel` NoAction) respect the hold. Conversations do not: steers, child-Task updates and primary recovery reach the open Task Session as usual.
-- **Surfaces.** `lf task pause`, `lf task unpause [--run]`, `lf task list --state paused`, served `task.pause` / `task.unpause` routed to the execution Machine, `TaskRunControl` refusal and `pausing` flag, Swift DTOs and `TaskActions.pause` (Unpause on Mac's Workflow bar and iPhone's action menu). Docs: `docs/work.md`, `surfaces.md`, `orchestration.md`, `sessions.md`, `troubleshooting.md`, `agent-api.md`.
+- **Surfaces.** `lf task pause`, `lf task unpause [--run]`, `lf task list --state paused`, served `task.pause` / `task.unpause` routed to the execution Machine, `TaskRunControl` refusal and `pausing` flag, Swift DTOs and the split workflow control on Mac and iPhone. Docs: `docs/work.md`, `surfaces.md`, `orchestration.md`, `sessions.md`, `troubleshooting.md`, `agent-api.md`.
 - **Working.** Owned held Tasks stay in Working. Roadmap rows and view contents carry the same `working_group` from Rust. Active, Shipping and Paused keep their saved order, with the Mac status sort inside each group. The CLI prints the group; the iPhone Working feed shows it within the repository.
 - **Verify.** New code and feature Graphs end with automatic verify after deliver. Previously captured Graphs keep their own steps. A post-merge check that fails gets a linked fix-forward Task.
 
@@ -90,9 +90,18 @@ With auto off, a landing ahead counts as a human stop for both a running cursor 
 
 On macOS, 12 focused Rust tests passed. The two-Machine CLI returned `clear` with the unpause command for a held Working Task. The selection reader moved a running row from Shipping to Active on auto off and back to Shipping at verify. Two headless Swift tests covered removing a dirty Task from Now before the next reading and keeping all five conversation reports visible.
 
+## V4c Task controls
+
+The captured Graph supplies the label and primary action. Continuing from ship-review names deliver; a stopped worker names its saved inner step. Mac and iPhone send one unpause write, with running requested only when work should resume. Both have a separate plain lift in the step menu. A running verify keeps its pause control after merge, with Complete accented beside it.
+
+- The private Machine test paused an active worker, resumed `implement`, then lifted a pause at `review`. The Task stayed at review with its original conversation open.
+- The headless Mac filter passed 22 tests, including clicks on both halves of the split control and the write each click sent.
+- The iPhone Simulator passed all six `TaskActionsTests`. The rendered controls took the same width before and after pause.
+- Seventeen focused Rust checks passed across the private worker, Graph, DTO, schema and documented commands. The architecture and Swift module checks passed.
+
 ## Remaining, in order
 
-1. **Task bar (V4c) + smart Unpause (revision 4 above).** Build the unified split status-action pill (`▶ | Run: <step after human> ▾` · `⏸ | Running: <active step> ▾` · `▶ | Paused: <step> ▾`), physical `Auto` toggle switch, first-class `Complete` (`✓`), 0px-jump fixed slots, smart Unpause (`run: true` when paused mid-step; plain lift when paused at an interactive step), and non-duplicative `WorkflowLine`, with Rust owning the shared wire labels/predicates and clean iPhone parity.
+1. **V4c walkthrough.** Try the split control on a paused worker, at ship-review, and after merge. The Mac retains its independent New conversation action. The phone can open recorded Sessions from the metadata menu; starting an independent chat from the phone would need Machine-side preparation.
 2. **Named gaps for the PR.** Separate-session Codex 0.171.0 tool jobs can survive. A pause after a move’s payload is sent can require a retry on arrival.
 3. **Gate / CI.** Five-harness worker matrix, Linux session enumeration, lifeline/attachment/hosted-terminal suites.
 

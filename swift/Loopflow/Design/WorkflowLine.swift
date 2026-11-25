@@ -14,7 +14,8 @@ public struct WorkflowLine: View {
     public let sentence: String?
     /// The Task's auto setting is on: its run takes the interactive steps.
     let auto: Bool
-    let sentenceOnly: Bool
+    public enum Style { case steps, sentence, full }
+    let style: Style
     @Environment(\.palette) private var palette
 
     /// How a step reads against where the Task stands.
@@ -28,13 +29,19 @@ public struct WorkflowLine: View {
 
     /// A Task's Graph. `setup` stands in for the sentence before the run has
     /// started, such as setup's reason for not starting it yet.
-    public init(graph: TaskGraph, auto: Bool, setup: String? = nil, sentenceOnly: Bool = false) {
+    public init(graph: TaskGraph, auto: Bool, setup: String? = nil, style: Style = .full) {
         name = graph.name
         steps = graph.steps
         tones = Self.tones(graph)
-        sentence = if graph.position == .at(step: TaskGraph.start), let setup { setup } else { graph.sentence }
+        sentence = if graph.position == .at(step: TaskGraph.start), let setup {
+            setup
+        } else if style == .steps {
+            nil
+        } else {
+            graph.sentence
+        }
         self.auto = auto
-        self.sentenceOnly = sentenceOnly
+        self.style = style
     }
 
     /// The workflow an unstarted Task takes up, in its bar: the name, and the
@@ -45,7 +52,7 @@ public struct WorkflowLine: View {
         tones = Array(repeating: .ahead, count: steps.count)
         sentence = nil
         auto = false
-        sentenceOnly = false
+        style = .full
     }
 
     /// A workflow where its name is already said: the steps, wrapping, and
@@ -56,7 +63,7 @@ public struct WorkflowLine: View {
         tones = Array(repeating: .ahead, count: outline.steps.count)
         sentence = outline.sentence
         auto = false
-        sentenceOnly = false
+        style = .full
     }
 
     public static func tones(_ graph: TaskGraph) -> [Tone] {
@@ -72,7 +79,7 @@ public struct WorkflowLine: View {
 
     public var body: some View {
         Group {
-            if sentenceOnly, let sentence {
+            if style == .sentence, let sentence {
                 sentenceText(sentence)
             } else if let name {
                 ViewThatFits(in: .horizontal) {
@@ -81,7 +88,6 @@ public struct WorkflowLine: View {
                         HStack(spacing: Spacing.sm) { stepViews }
                         if let sentence { sentenceText(sentence).fixedSize() }
                     }
-                    // When the steps do not fit, only the sentence stays.
                     if let sentence {
                         sentenceText(sentence)
                     } else {

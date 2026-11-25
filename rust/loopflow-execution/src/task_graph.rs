@@ -405,12 +405,7 @@ fn workflow(steps: &[ConcreteStep]) -> (Vec<WorkflowStep>, Vec<u32>) {
     let mut line: Vec<WorkflowStep> = Vec::new();
     let mut indices = Vec::with_capacity(steps.len());
     for step in steps {
-        let sources = match step {
-            ConcreteStep::Skill(skill) => &skill.sources,
-            ConcreteStep::Command(command) => &command.sources,
-            ConcreteStep::Xor(branch) => &branch.sources,
-        };
-        let name = sources.get(1).cloned().unwrap_or_else(|| step_name(step));
+        let name = workflow_step_name(step);
         let interactive = !interactive_steps(std::slice::from_ref(step)).is_empty();
         match line.last_mut() {
             Some(last) if last.name == name => last.interactive |= interactive,
@@ -419,6 +414,15 @@ fn workflow(steps: &[ConcreteStep]) -> (Vec<WorkflowStep>, Vec<u32>) {
         indices.push(u32::try_from(line.len() - 1).expect("a graph has few steps"));
     }
     (line, indices)
+}
+
+fn workflow_step_name(step: &ConcreteStep) -> String {
+    let sources = match step {
+        ConcreteStep::Skill(skill) => &skill.sources,
+        ConcreteStep::Command(command) => &command.sources,
+        ConcreteStep::Xor(branch) => &branch.sources,
+    };
+    sources.get(1).cloned().unwrap_or_else(|| step_name(step))
 }
 
 /// What a person calls `step`; an operation by the display name its Graph
@@ -430,9 +434,55 @@ pub fn step_name(step: &ConcreteStep) -> String {
     }
 }
 
+/// The left button and visible label of the Task's split workflow control.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorkflowControl {
+    pub action: WorkflowAction,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowAction {
+    Run,
+    Pause,
+    Unpause,
+    Resume,
+    Done,
+}
+
+impl WorkflowControl {
+    fn run(step: &str) -> Self {
+        Self {
+            action: WorkflowAction::Run,
+            label: format!("Run: {step}"),
+        }
+    }
+
+    fn paused(step: &str, resume: bool) -> Self {
+        Self {
+            action: if resume {
+                WorkflowAction::Resume
+            } else {
+                WorkflowAction::Unpause
+            },
+            label: format!("Paused: {step}"),
+        }
+    }
+
+    fn start(steps: &[ConcreteStep]) -> Self {
+        Self::run(
+            &steps
+                .first()
+                .map_or_else(|| END.to_owned(), workflow_step_name),
+        )
+    }
+}
+
 /// A Graph as the workflow line shows it before any Task stands on it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkflowOutline {
+    pub start: WorkflowControl,
     /// The Graph's top-level steps in order, as `TaskGraph.steps` carries them.
     pub steps: Vec<WorkflowStep>,
     /// Every step where a person takes part, as `TaskGraph` carries them.
@@ -456,6 +506,7 @@ impl WorkflowOutline {
             [rest @ .., last] => format!("You take part at {} and {last}.", rest.join(", ")),
         };
         Self {
+            start: WorkflowControl::start(steps),
             steps: workflow(steps).0,
             interactive_steps,
             sentence,
@@ -475,6 +526,7 @@ pub struct InteractiveStep {
 /// One Task's Graph as `lf task status --json` carries it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskGraph {
+    pub control: WorkflowControl,
     pub name: String,
     pub interactive_steps: Vec<InteractiveStep>,
     pub position: TaskGraphPosition,
@@ -547,15 +599,51 @@ impl TaskGraph {
             let index = place.path.first().map_or(place.index, |(index, _)| *index);
             indices[index]
         };
-        let (position, current_step, sentence) = match run {
+        let (position, current_step, sentence, control) = match run {
             None => {
-                let (place, sentence) = match step.as_str() {
-                    START => (None, "Not started.".to_owned()),
-                    END => (None, "At its end.".to_owned()),
+                let (place, sentence, control) = match step.as_str() {
+                    START => (
+                        None,
+                        "Not started.".to_owned(),
+                        WorkflowControl::start(&graph.steps),
+                    ),
+                    END => (
+                        None,
+                        "At its end.".to_owned(),
+                        WorkflowControl {
+                            action: WorkflowAction::Done,
+                            label: "Done".into(),
+                        },
+                    ),
                     step => match graph.interactive_step(step) {
-                        Some(place) => (Some(place), format!("Waiting for you at {step}.")),
-                        None => (graph.find(step), format!("Waiting at {step}.")),
+                        Some(place) => {
+                            let next = graph.after(&place).map(|next| {
+                                if top(&place) == top(&next) {
+                                    graph.step_name(&next)
+                                } else {
+                                    steps[top(&next) as usize].name.clone()
+                                }
+                            });
+                            (
+                                Some(place),
+                                format!("Waiting for you at {step}."),
+                                WorkflowControl::run(next.as_deref().unwrap_or(END)),
+                            )
+                        }
+                        None => (
+                            graph.find(step),
+                            format!("Waiting at {step}."),
+                            WorkflowControl::run(step),
+                        ),
                     },
+                };
+                let control = if pause.is_some() {
+                    let human = place
+                        .as_ref()
+                        .is_some_and(|place| graph.interactive_at(place).is_some());
+                    WorkflowControl::paused(&step, step != END && !human)
+                } else {
+                    control
                 };
                 let sentence = match pause {
                     Some(PauseStage::Stopping) => format!("Pausing at {step}."),
@@ -568,6 +656,7 @@ impl TaskGraph {
                     TaskGraphPosition::At { step },
                     place.as_ref().map(top),
                     sentence,
+                    control,
                 )
             }
             Some(run) => {
@@ -611,6 +700,16 @@ impl TaskGraph {
                         (Some(next), _) => format!("{running} You are next needed at {next}."),
                     }
                 };
+                let control = if pause.is_some() {
+                    WorkflowControl::paused(&at, place.is_some())
+                } else if run.running {
+                    WorkflowControl {
+                        action: WorkflowAction::Pause,
+                        label: format!("Running: {at}"),
+                    }
+                } else {
+                    WorkflowControl::run(&at)
+                };
                 (
                     TaskGraphPosition::Run {
                         step,
@@ -620,10 +719,12 @@ impl TaskGraph {
                     },
                     current,
                     sentence,
+                    control,
                 )
             }
         };
         Self {
+            control,
             name: graph.name.clone(),
             interactive_steps: interactive_summary(&graph.steps),
             position,
@@ -795,6 +896,43 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn workflow_control_resumes_interrupted_work_and_releases_human_stops() {
+        use super::PauseStage;
+        use super::WorkflowAction::{Done, Pause, Resume, Run, Unpause};
+        let repo = tempfile::tempdir().unwrap();
+        write(repo.path(), ".lf/graphs/test.yaml",
+            "- implement\n- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - interactive: demo\n      skip:\n        description: Skip it\n- gate\n- interactive: verify\n");
+        let graph = CapturedGraph::load("test", repo.path()).unwrap().unwrap();
+        for (step, run, held, action, label) in [
+            ("start", None, false, Run, "Run: implement"),
+            ("start", Some(true), false, Pause, "Running: implement"),
+            ("start", Some(false), false, Run, "Run: implement"),
+            ("start", Some(false), true, Resume, "Paused: implement"),
+            ("demo", None, true, Unpause, "Paused: demo"),
+            ("demo", None, false, Run, "Run: gate"),
+            ("verify", None, false, Run, "Run: end"),
+            ("end", None, true, Unpause, "Paused: end"),
+            ("end", None, false, Done, "Done"),
+        ] {
+            let cursor = graph.find("implement").unwrap().cursor();
+            let run = run.map(|running| TaskGraphRun {
+                cursor: &cursor,
+                lf_process_id: "worker".into(),
+                running,
+            });
+            let control = TaskGraph::read(
+                &graph,
+                step.into(),
+                run,
+                None,
+                held.then_some(PauseStage::Held),
+            )
+            .control;
+            assert_eq!((control.action, control.label.as_str()), (action, label));
+        }
+    }
+
+    #[test]
     fn the_workflow_line_names_top_level_steps_and_where_the_task_stands() {
         let repo = tempfile::tempdir().unwrap();
         let graph = CapturedGraph::load("code", repo.path()).unwrap().unwrap();
@@ -816,6 +954,11 @@ pub(crate) mod tests {
             )
         };
         let start = read("start", None, None);
+        assert_eq!(start.control.label, "Run: plan");
+        assert_eq!(
+            read("ship-review", None, None).control.label,
+            "Run: deliver"
+        );
         let steps: Vec<_> = start
             .steps
             .iter()

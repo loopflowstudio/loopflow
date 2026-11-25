@@ -215,6 +215,10 @@
           "interactive": false
         }
       ],
+      "start": {
+        "action": "run",
+        "label": "Run: design"
+      },
       "interactive_steps": [
         {
           "name": "demo",

@@ -14294,6 +14294,9 @@
     "TaskGraph": {
       "description": "One Task's Graph as `lf task status --json` carries it.",
       "properties": {
+        "control": {
+          "$ref": "#/$defs/WorkflowControl"
+        },
         "current_step": {
           "description": "The index in `steps` of the step the Task stands in; null at `start`\nand at `end`.",
           "format": "uint32",
@@ -14328,6 +14331,7 @@
         }
       },
       "required": [
+        "control",
         "name",
         "interactive_steps",
         "position",
@@ -17157,6 +17161,32 @@
       ],
       "type": "string"
     },
+    "WorkflowAction": {
+      "enum": [
+        "run",
+        "pause",
+        "unpause",
+        "resume",
+        "done"
+      ],
+      "type": "string"
+    },
+    "WorkflowControl": {
+      "description": "The left button and visible label of the Task's split workflow control.",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/WorkflowAction"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "label"
+      ],
+      "type": "object"
+    },
     "WorkflowOutline": {
       "description": "A Graph as the workflow line shows it before any Task stands on it.",
       "properties": {
@@ -17171,6 +17201,9 @@
           "description": "\"You take part at explore and ship-review.\" or \"Runs on its own.\"",
           "type": "string"
         },
+        "start": {
+          "$ref": "#/$defs/WorkflowControl"
+        },
         "steps": {
           "description": "The Graph's top-level steps in order, as `TaskGraph.steps` carries them.",
           "items": {
@@ -17180,6 +17213,7 @@
         }
       },
       "required": [
+        "start",
         "steps",
         "interactive_steps",
         "sentence"

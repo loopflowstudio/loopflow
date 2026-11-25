@@ -215,7 +215,7 @@ struct DashboardTile: View {
     /// what a program asks, which the row above already prints; a condition's
     /// reason on the row does not hide it.
     static func workflow(_ graph: TaskGraph, status: SessionProgramStatus, auto: Bool, setup: String?) -> WorkflowLine? {
-        status.ask == nil ? WorkflowLine(graph: graph, auto: auto, setup: setup, sentenceOnly: true) : nil
+        status.ask == nil ? WorkflowLine(graph: graph, auto: auto, setup: setup, style: .sentence) : nil
     }
 
     var body: some View {

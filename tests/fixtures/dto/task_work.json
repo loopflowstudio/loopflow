@@ -17,6 +17,10 @@
   ],
   "graph": {
     "name": "feature",
+    "control": {
+      "action": "pause",
+      "label": "Running: implement"
+    },
     "interactive_steps": [
       {
         "name": "review-design",

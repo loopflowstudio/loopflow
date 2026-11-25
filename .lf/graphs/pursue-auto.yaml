@@ -1,14 +1,11 @@
 - kickoff
 - loop:
     - loop:
-        - loop:
-            - implement
-            - compress
-            - graph: refresh
-            - loop-or-next
-        - concept-review
+        - implement
+        - compress
+        - graph: refresh
         - loop-or-next
-    - gate
+    - concept-review
     - loop-or-next
 - pr-publish
 - cmd: task pr land

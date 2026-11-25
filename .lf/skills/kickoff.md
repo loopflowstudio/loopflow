@@ -14,3 +14,9 @@ and cover it or note why it doesn't apply.
 
 **A replacement keeps what the old code covered.** When swapping an engine,
 list its languages, formats and cases and keep each one.
+
+**Name the sensitive boundary when you touch one.** Changes touching credential
+forwarding to Modal or Daytona, telemetry fields or outbound data, mobile or
+Tailscale server auth, or install and release publisher boundaries need a
+**Trust & data boundary** section and a note on whether a focused review should
+run before delivery.

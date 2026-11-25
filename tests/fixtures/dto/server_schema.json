@@ -7582,7 +7582,7 @@
             },
             {
               "builtin": null,
-              "description": "design, implement, gate, land",
+              "description": "design, implement, land",
               "invocation": "lf code [message]",
               "kind": "graph",
               "name": "code",

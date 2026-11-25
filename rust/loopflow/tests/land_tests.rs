@@ -903,46 +903,6 @@ fn land_creates_missing_pr_without_an_extra_flag() {
 }
 
 #[test]
-fn land_uses_cached_pr_copy_when_available() {
-    let repo = TestRepo::new();
-    repo.create_branch("feature");
-    repo.create_file("feature.txt", "feature");
-    repo.stage_all();
-    repo.commit("feature work");
-    push_branch(&repo, "feature");
-
-    let scratch = repo.path().join("scratch");
-    fs::create_dir_all(&scratch).expect("create scratch");
-    fs::write(scratch.join("pr-title.txt"), "cached title").expect("write title");
-    fs::write(scratch.join("pr-body.md"), "cached body").expect("write body");
-    fs::write(scratch.join(".pr-copy-ref"), repo.head_sha()).expect("write ref");
-
-    let log_path = repo.bare_path().join("gh.log");
-    let script = gh_land_script(log_path.to_string_lossy().as_ref());
-    let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
-
-    land(
-        repo.path(),
-        &LandOptions {
-            strict: false,
-            local: false,
-            wait_and_fix: false,
-            worktree: None,
-            commit_message: None,
-            pr_title: None,
-            pr_body: None,
-            agent: None,
-        },
-        &NullProgress,
-    )
-    .expect("land with cached copy");
-
-    let log = fs::read_to_string(&log_path).expect("read gh log");
-    assert!(log.contains("--title cached title"));
-    assert!(log.contains("--body cached body"));
-}
-
-#[test]
 fn submit_and_land_make_no_presentation_attempt() {
     let marker_dir = tempfile::TempDir::new().expect("marker dir");
     let marker = marker_dir.path().join("present.log");
@@ -1570,66 +1530,6 @@ fn submit_does_not_rotate_worktree() {
 
     // The worktree stays put — no preserve, no next-item rotation.
     assert!(worktree.path.exists());
-}
-
-#[test]
-fn land_generates_copy_when_cached_pr_copy_is_stale() {
-    let home = tempfile::TempDir::new().expect("temp home");
-    let _env = EnvGuard::with_home(
-        &[
-            ("gh", &gh_no_pr_script()),
-            ("codex", &agent_script()),
-            ("open", noop_open_script()),
-        ],
-        Some(home.path()),
-    );
-    fs::create_dir_all(home.path().join(".lf")).unwrap();
-    support::seed_store(&home.path().join(".lf"));
-    let repo = TestRepo::new();
-    repo.create_branch("feature");
-    repo.create_file("feature.txt", "feature");
-    repo.stage_all();
-    repo.commit("feature work");
-    push_branch(&repo, "feature");
-
-    let scratch = repo.path().join("scratch");
-    fs::create_dir_all(&scratch).expect("create scratch");
-    fs::write(scratch.join("pr-title.txt"), "stale title").expect("write title");
-    fs::write(scratch.join("pr-body.md"), "stale body").expect("write body");
-    fs::write(
-        scratch.join(".pr-copy-ref"),
-        "0000000000000000000000000000000000000000",
-    )
-    .expect("write stale ref");
-    let status = Command::new("git")
-        .args(["add", "scratch"])
-        .current_dir(repo.path())
-        .status()
-        .expect("git add scratch");
-    assert!(status.success(), "git add scratch should succeed");
-    let status = Command::new("git")
-        .args(["commit", "-m", "add stale gate copy"])
-        .current_dir(repo.path())
-        .status()
-        .expect("git commit scratch");
-    assert!(status.success(), "git commit scratch should succeed");
-
-    let _directory = support::InDirectory::enter(repo.path());
-    let result = land(
-        repo.path(),
-        &LandOptions {
-            strict: true,
-            local: false,
-            wait_and_fix: false,
-            worktree: None,
-            commit_message: None,
-            pr_title: None,
-            pr_body: None,
-            agent: Some("codex".to_string()),
-        },
-        &NullProgress,
-    );
-    result.expect("land with stale cached copy should regenerate");
 }
 
 #[test]

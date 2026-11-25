@@ -8,8 +8,7 @@ use crate::command::run_command;
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::pr::{
-    generate_pr_copy, normalize_task_pr_copy, read_cached_pr_copy, PrCopy, PrInfo,
-    TaskPrCopyLifecycle,
+    generate_pr_copy, normalize_task_pr_copy, PrCopy, PrInfo, TaskPrCopyLifecycle,
 };
 
 use crate::ops::progress::Progress;
@@ -346,18 +345,12 @@ fn resolve_pr_copy(
         });
     }
 
-    let mut copy = match read_cached_pr_copy(repo_root, progress)? {
+    let mut copy = match crate::ops::pr::published_pr_copy(repo_root, head)? {
         Some(copy) => {
-            progress.status("Using cached PR copy from scratch/");
+            progress.status("Keeping published PR copy for this head");
             copy
         }
-        None => match crate::ops::pr::published_pr_copy(repo_root, head)? {
-            Some(copy) => {
-                progress.status("Keeping published PR copy for this head");
-                copy
-            }
-            None => generate_pr_copy(repo_root, progress, options.agent.as_deref())?,
-        },
+        None => generate_pr_copy(repo_root, progress, options.agent.as_deref())?,
     };
     if let Some(body) = &options.pr_body {
         copy.body = body.clone();

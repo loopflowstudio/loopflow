@@ -182,13 +182,13 @@ what changed and why. Whatever you leave is committed when the step ends.
 
 Test the behavior you changed, with the narrowest test that names it, never a
 whole package. That is your share. The usual mistake is running too many
-tests, not too few. Gate and CI come after you and run the suites, including
+tests, not too few. CI comes after you and runs the suites, including
 the ones named in "Done when", so a full run here only makes everything wait.
 Maximize the throughput of the whole software factory, not the certainty of
 this step.
 
 One build at a time. Skip builds for prose-only edits, and don't rerun a
-passing command without a change. A check that can't run here goes to gate; a
+passing command without a change. A check that can't run here goes to CI; a
 real failure still gets fixed.
 
 Run the slice the way a person would and reread the docs against what you

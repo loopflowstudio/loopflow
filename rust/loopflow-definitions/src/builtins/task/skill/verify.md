@@ -22,9 +22,9 @@ Skip rebuilding `main` when all three hold:
 - No claim depends on something that only exists after merge (a release
   install, a deployment, production state).
 
-When all three hold, verify from the `qa` and `gate` records and the CI run,
+When all three hold, verify from the `qa` record and the CI run,
 and cite them. Any missing—or any diff outside `scratch/`, including edits by
-`gate` or `land` or synced upstream commits—means the full check below.
+`land` or synced upstream commits—means the full check below.
 
 Check headless first; most claims need no person. Build main and run it
 isolated from real work. Seed the state a claim needs and drive the real

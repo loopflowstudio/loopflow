@@ -26,7 +26,7 @@ Don't stop after one small win, and don't wander into unrelated cleanup.
    line count.
 
 5. **Check.** Build the changed code and run its focused test when behavior
-   changed. No edits, no rerun. Suites belong to gate and CI.
+   changed. No edits, no rerun. Suites belong to CI.
 
 6. **Rewrite the reading order** when `scratch/tour.yaml` exists, as
    `lf help tour` describes: your cuts moved what a reader should open first.

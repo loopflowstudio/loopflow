@@ -451,7 +451,7 @@ mod tests {
         let repo = TempDir::new().unwrap();
         write(
             repo.path(),
-            ".lf/skills/gate.md",
+            ".lf/skills/compress.md",
             "---\nextends: builtin\n---\n## Here\n\nRun the local suite first.\n",
         );
         write(
@@ -462,11 +462,11 @@ mod tests {
         let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
         let builtin = SkillCatalog::load(None, None, false)
             .unwrap()
-            .load_skill("gate")
+            .load_skill("compress")
             .unwrap()
             .content
             .unwrap();
-        let extended = catalog.load_skill("gate").unwrap().content.unwrap();
+        let extended = catalog.load_skill("compress").unwrap().content.unwrap();
         assert_eq!(
             extended,
             format!(
@@ -484,7 +484,7 @@ mod tests {
         let repo = TempDir::new().unwrap();
         write(
             repo.path(),
-            ".lf/skills/gate.md",
+            ".lf/skills/compress.md",
             "---\nextends: builtin\n---\n## Here\n",
         );
         write(repo.path(), ".lf/skills/qa.md", "Our own QA.\n");
@@ -496,7 +496,7 @@ mod tests {
         write(repo.path(), ".lf/skills/mine.md", "Ours alone.\n");
         let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
         let relation = |name: &str| catalog.resolve(name).unwrap().unwrap().builtin_relation();
-        assert_eq!(relation("gate"), Some(BuiltinRelation::Extends));
+        assert_eq!(relation("compress"), Some(BuiltinRelation::Extends));
         assert_eq!(relation("qa"), Some(BuiltinRelation::Replaces));
         assert_eq!(relation("debug"), Some(BuiltinRelation::Copies));
         assert_eq!(relation("mine"), None);

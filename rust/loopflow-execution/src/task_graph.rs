@@ -645,7 +645,7 @@ mod tests {
         write(
             repo.path(),
             ".lf/graphs/conditional.yaml",
-            "- implement\n- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - interactive: demo\n      skip:\n        description: Nothing to review\n- gate\n",
+            "- implement\n- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - interactive: demo\n      skip:\n        description: Nothing to review\n- qa\n",
         );
         let graph = CapturedGraph::load("conditional", repo.path())
             .unwrap()

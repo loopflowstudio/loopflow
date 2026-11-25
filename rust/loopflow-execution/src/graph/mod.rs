@@ -1364,11 +1364,11 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("cycle detected"));
-        fs::write(repo.path().join(".lf/graphs/team-ship.yml"), "- gate\n").unwrap();
+        fs::write(repo.path().join(".lf/graphs/team-ship.yml"), "- qa\n").unwrap();
         let graph = super::load_authored_graph("team/ship", repo.path()).unwrap();
         assert_eq!(graph.name, "team/ship");
         let steps = compile_graph(&graph, repo.path()).unwrap();
-        assert!(matches!(&steps[..], [ConcreteStep::Skill(skill)] if skill.skill.name == "gate"));
+        assert!(matches!(&steps[..], [ConcreteStep::Skill(skill)] if skill.skill.name == "qa"));
         assert_eq!(
             super::load_authored_graph("team-ship", repo.path())
                 .unwrap()
@@ -2245,7 +2245,7 @@ Design the feature.
             name: "test-or".to_string(),
             description: None,
             items: vec![
-                Step::new(Target::Skill(Skill::named("gate"))),
+                Step::new(Target::Skill(Skill::named("qa"))),
                 Step::new(Target::Xor(XorDef {
                     router: None,
                     paths: {
@@ -2487,15 +2487,16 @@ Design the feature.
     }
 
     #[test]
-    fn deliver_graph_gates_then_lands_and_waits() {
+    fn deliver_graph_reflects_then_lands_and_waits() {
         let tmp = TempDir::new().unwrap();
         let graph = load_graph("deliver", tmp.path()).unwrap();
         let items = compile_graph(&graph, tmp.path()).unwrap();
-        assert_eq!(items.len(), 3);
+        assert_eq!(items.len(), 2);
         assert!(
-            matches!(&items[2], ConcreteStep::Command(command) if command.item.display_name() == "land --wait-and-fix")
+            matches!(&items[1], ConcreteStep::Command(command) if command.item.display_name() == "land --wait-and-fix")
         );
         assert!(load_graph("deploy", tmp.path()).is_err());
         assert!(load_graph("ship", tmp.path()).is_err());
+        assert!(load_graph("queue", tmp.path()).is_err());
     }
 }

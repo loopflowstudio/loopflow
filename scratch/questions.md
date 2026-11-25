@@ -1,16 +1,36 @@
 # Open choices (made for review)
 
-- **Wake `agy` by typing into its held terminal.** The alternative is a
-  provider inbox, and agy 1.5.16 has none an outside process can reach (see
-  plan). The steer appears in the TUI as a pasted prompt, not as a `[Message]`
-  from a sender. If agy later loads workspace sidecars or gives hooks
-  `ANTIGRAVITY_CSRF_TOKEN`, an inbox through `agentapi send-message` would
-  replace this.
-- **Draft guard is "no view input since the conversation yielded"**, not
-  reading the prompt line off the screen. A person who types and then clears
-  their draft goes without a wake until their next Enter.
-- **Viewer handoff (LOO-1097) and the unanswered question (48edb9)** go into
-  the parity table as typed gaps with those owners. This Task doesn't fix them.
+- **Wake `agy` by typing sanitized bracketed paste into its held terminal.**
+  The alternative is a provider inbox, and `agy` 1.5.16 exposes none an outside
+  process can reach (see `scratch/plan.md`). The steer appears in the TUI as a
+  pasted prompt, not as a `[Message]` from a sender. If `agy` later loads
+  workspace sidecars or gives hooks `ANTIGRAVITY_CSRF_TOKEN`, an inbox through
+  `agentapi send-message` replaces `IdleWake::Terminal` with no wire or schema
+  change.
+- **Draft guard tracks actual user keystrokes (ignoring focus, terminal replies,
+  and mouse events), unsubmitted input, and an in-server `yielded_at` `Instant`**
+  rather than reading the prompt line off the VT screen or comparing `SystemTime`
+  against SQLite's whole-second `observed_at`. A person who types characters and
+  manually backspaces them all out without pressing Enter, Ctrl-C, or Ctrl-U
+  waits until their next Enter (which delivers steers via `PreInvocation`).
+- **Move all idle-wake reach dispatch out of SQL into `Capabilities.idle_wake`**
+  and return plain columns (`provider`, `endpoint`, `inbox`, `socket`,
+  `held_terminal_id`) from `idle_conversation_candidates`, with flat
+  `IdleReach::Terminal(TerminalId)`. Keeps SQL harness-agnostic and avoids
+  guessing terminals by session ID.
+- **Separate `Verification::Automated` from `Verification::RealProvider` in
+  `harness::parity`.** The 12 behaviors stand-ins can exercise run over
+  `HarnessKind::ALL` and assert `Support::Yes` and `Support::Gap` both ways.
+  `ViewerHandoff` (Antigravity `Gap`, owner LOO-1097) is a real-provider TUI
+  issue that stand-ins cannot honestly reproduce, so it is tracked as
+  `RealProvider` instead of mocking a fake failure. `UnansweredQuestion`
+  (Claude, Codex, Antigravity `Gap`, owner Task 48edb9) stays tracked and
+  checked both ways across `HarnessKind::ALL`.
+- **Reopen `agy --conversation <id> -i <prompt>` verified live in Pass 2.**
+  If `agy` ignores `-i` when `--conversation` is passed, `take_steers_to_start`
+  leaves waiting steers unread for `IdleWake::Terminal` so terminal wake
+  delivers them once on `?2004h` instead of marking them delivered and dropping
+  them.
 
 # Probe side effect (2026-11-24)
 

@@ -1,196 +1,354 @@
 # LOO-1098: wake idle Antigravity, and make harness parity typed
 
-History and 5 Whys: [5whys.md](5whys.md). In one line: idle wake was picked
-from whichever store columns a harness filled in, gaps were README cells, and
-no test looped over every harness. So `agy` fell through without any error.
+History and 5 Whys: [5whys.md](5whys.md). Concept review: [concept-review.html](concept-review.html).
+In one line: idle wake was inferred in SQL from whichever columns a harness filled
+in, parity gaps were hand-written README cells, and feature tests hardcoded subsets
+of harnesses. So `agy` fell through without any error.
 
 ## What people see
 
 - Leave an `agy` Task work session idle and run `lf steer LOO-12 'Reply with only the word OK.'`.
-  The steer shows up in the TUI as a pasted prompt and a turn runs. No typing needed.
-- Quit, steer, then `lf resume --task LOO-12`: the waiting steer runs once,
-  as soon as `agy` is ready for input.
-- Add a `HarnessKind` variant, or switch a harness's idle wake off, and the
-  build or the parity suite fails, naming the harness and the behavior.
-- The parity table in `harness/README.md` is generated from code, so the
-  stale `Task 540073` cell goes away.
+  The steer appears in the TUI as a pasted prompt and a turn runs. No typing needed.
+- Quit, steer, then `lf resume --task LOO-12`: waiting steers (direct steers, Task
+  updates, and wave/repo steers) run once as soon as `agy` is ready for input.
+- Typing a draft — while `agy` is idle or mid-turn — is never clobbered: focusing
+  the terminal or scrolling with the mouse still allows wakes, while unsubmitted
+  keystrokes hold the wake off until Enter delivers the steers through `PreInvocation`.
+- Add a `HarnessKind` variant, drop a harness's idle wake, or break an automated
+  behavior on any harness, and the build or parity suite fails naming the harness
+  and the behavior.
+- The parity table in `harness/README.md` is generated from code and checked in CI,
+  removing the stale `Task 540073` cell and keeping `server/README.md` in sync.
 
 ## How `agy` gets woken (probed on agy 1.5.16, 2026-11-24)
 
-The other harnesses are woken through a provider inbox. `agy` has none an
-outside process can reach:
+The other harnesses are woken through a provider inbox or socket. `agy` has none
+an outside process can reach:
 
-- `agy agentapi send-message <conv> <text>` talks to one running server's
-  gRPC port (`ANTIGRAVITY_LS_ADDRESS`) and needs that server's own
-  `ANTIGRAVITY_CSRF_TOKEN`. agy makes the token itself; one set in the
-  environment at launch is refused ("invalid CSRF token").
-- Only tool commands and sidecars get that token. Hooks (`PreInvocation`, `Stop`) get
-  only `ANTIGRAVITY_CONVERSATION_ID`. Workspace `.agents/mcp_config.json`
-  servers start but get no `ANTIGRAVITY_*` at all. A sidecar in a workspace
-  plugin is never started; sidecars load from `~/.gemini/config` only, which
-  lf doesn't write. agy writes no discovery file. No `SessionStart` hook fires
-  at TUI start.
+- `agy agentapi send-message <conv> <text>` talks to one running server's gRPC
+  port (`ANTIGRAVITY_LS_ADDRESS`) and requires that server's own
+  `ANTIGRAVITY_CSRF_TOKEN`. `agy` generates the token itself; one passed at launch
+  is refused ("invalid CSRF token").
+- Only tool commands and sidecars receive that token. Hooks (`PreInvocation`,
+  `Stop`) receive only `ANTIGRAVITY_CONVERSATION_ID`. Workspace
+  `.agents/mcp_config.json` servers receive no `ANTIGRAVITY_*` variables. Workspace
+  plugin sidecars are not started; sidecars load only from `~/.gemini/config`,
+  which lf does not write. `agy` writes no discovery file and fires no
+  `SessionStart` hook at TUI start.
 - `--remote-control` goes through Google's relay. Ruled out.
 
-**Route chosen: the held terminal.** Every work session already runs in a
-held terminal on the Machine server, which keeps a libghostty-vt model of
-the screen and the input queue. The server types the claimed steers in as
-one bracketed paste, `ESC[200~ <text> ESC[201~`, then `\r`. Probed: a multi-line paste plus Enter
-runs one turn, and the TUI shows it like a typed prompt. Typed input is
-lost if sent before agy is ready. agy turns on bracketed-paste mode
-(`ESC[?2004h`) when it starts reading input: input sent 0.3 s after spawn,
-before that point, was lost; input sent 50 ms after it ran.
+**Route chosen: the held terminal.** Every work session runs in a held terminal
+hosted by the Machine server (`Registry` / `Hosted`), which already owns the
+`libghostty-vt` screen model and `PendingInput` queue. The server sends claimed
+steers as one sanitized bracketed paste, `ESC[200~ <text> ESC[201~\r`. Probed on
+`agy` 1.5.16: a multi-line paste plus `\r` runs one turn, shown in the TUI like a
+typed prompt. Input sent before `agy` is ready is lost; `agy` enables bracketed
+paste mode (`ESC[?2004h`) when it begins reading input (0.3 s after spawn, before
+`?2004h`, was lost; 50 ms after `?2004h` ran).
 
-The terminal wake types only when all three hold:
+### Safe terminal wake & draft guard
 
-1. the store says the conversation yielded (Stop hook, or a first boundary
-   reported at launch);
-2. the VT says the child has bracketed paste on;
-3. no view has typed into that terminal since the conversation yielded. That
-   leaves a person's draft alone, and their next Enter delivers the steer
-   through the `PreInvocation` hook anyway.
+Expose `Terminal::bracketed_paste(&self) -> bool` on `loopflow-terminal`'s
+`ghostty_vt::Terminal` using the existing `DATA_MODE` + `ModeConfig` FFI call with
+`MODE_BRACKETED_PASTE: u16 = 2004`.
 
-If any check fails, the wake leaves the steers unclaimed and they wait for
-the next boundary, the same fallback every harness has today. A store or
-server that is down changes nothing: typed input to the held terminal still
-passes straight through, and the wake doesn't run at all.
+In `loopflow-execution/src/transport/`:
 
-Passed over: running `agentapi` with an inherited token (it routes through
-whichever agy launched lf; see below); keystroke heuristics over the VT
-screen (fragile); writing a sidecar into `~/.gemini` (lf writes no global
-provider settings).
+1. **Distinguish user keystrokes from terminal traffic** (`input.rs`): extend
+   `input::keys` (or add a sibling predicate) to ignore terminal query replies
+   (already handled by `report_length`: DA, CPR, theme, focus `\x1b[I`/`\x1b[O`)
+   **and** SGR/X10 mouse events (`\x1b[<...M`/`m`), so focusing a window, attaching
+   a viewer, or scrolling with the mouse wheel never counts as a typed draft.
+2. **Track exact draft and yield state per `Hosted` terminal** (`hosted.rs`):
+   - `last_user_key: Option<Instant>` — updated on actual user keystrokes only.
+   - `unsubmitted_input: bool` — set `true` on user keystrokes; cleared `false`
+     when keystrokes end with bare `\r` (outside a paste), `\x03` (Ctrl-C), or
+     `\x15` (Ctrl-U). This protects type-ahead drafts typed *before* `Stop` as
+     well as drafts typed after.
+   - `yielded_at: Option<Instant>` — updated by `Registry::note_yielded(session)`
+     when `boundary::answer` records a turn end or first-boundary idle state.
+     Using `Instant` inside the server avoids 1-second truncation races against
+     SQLite's integer-second `observed_at`. After a server restart, adopted
+     terminals start with `last_user_key: None` and `unsubmitted_input: false`,
+     so idle sessions wake immediately.
+3. **Readiness predicate** (one check on `Hosted`, run both *before* `steer::claim`
+   and atomically right before pushing to `PendingInput`):
+   - VT has `bracketed_paste() == true` (`?2004h` is on),
+   - `!pending_input.in_paste()` (no viewer is mid-paste),
+   - `!unsubmitted_input`, and
+   - `last_user_key.is_none_or(|at| yielded_at.is_some_and(|y| at <= y))` (holds
+     off during the window between Enter and `PreInvocation`, and whenever the
+     person typed after the last yield).
+   Checking readiness *before* `steer::claim` mirrors `wake.rs`'s existing
+   "connect before claiming" rule: if the person is typing, steers are never
+   held under a 15-second `CLAIM_SECS` lock that would hide them from the person's
+   own Enter.
+4. **Sanitize before framing**: strip `\x1b` and control bytes `< 0x20` other than
+   `\n` and `\t` (plus `\x7f`) from the rendered steer text before wrapping in
+   `\x1b[200~ <text> \x1b[201~\r`, so steer content (e.g. a comment or terminal
+   excerpt) can never break out of bracketed paste and inject raw keystrokes.
+5. **Paste-ready wakeup off the terminal loop**: when live (non-replay) output
+   transitions `bracketed_paste()` from `false -> true` on a terminal bound to a
+   `Session` (initial startup readiness, or returning from a `/` menu or
+   `$EDITOR`), `Hosted` sends the `LfSessionId` on a channel to `wake.rs`, which
+   runs `wake::after_turn` off the `held-terminals` thread so SQLite never blocks
+   terminal I/O.
 
-**Found while probing (fixed here).** `agent::CALLER_SESSION_ENV` drops
-Claude, Codex and OpenCode markers but no `ANTIGRAVITY_*`. An `agy` that lf
-launches from inside another agy's tool shell inherits the parent's
-`ANTIGRAVITY_LS_ADDRESS`, `ANTIGRAVITY_CSRF_TOKEN` and
-`ANTIGRAVITY_SOURCE_METADATA`, and agy doesn't overwrite them for its hooks.
-Every `agentapi` call from the child then goes to the parent's server. Seen
-live: messages sent that way were attributed to the parent conversation and
-ran in a second backend ("server restart" notice), so the receiving TUI never
-showed them. Add the ten `ANTIGRAVITY_*` names agy sets: `AGENT`, `AGENTAPI_EXE`,
-`APP_DATA_DIR`, `CONVERSATION_ID`, `CSRF_TOKEN`, `LS_ADDRESS`, `LS_VERSION`,
-`PROJECT_ID`, `SOURCE_METADATA`, `TRAJECTORY_ID`.
+If any check fails, the wake leaves the steers unclaimed and they wait for the
+next boundary or next `?2004h` transition. A store or server that is down changes
+nothing: typed input still passes straight through, and the wake does not run.
+
+Passed over: `agentapi` with an inherited token (routes through whichever `agy`
+launched `lf`; fixed below); screen-scraping the prompt line (fragile); writing a
+global sidecar into `~/.gemini` (`lf` writes no global provider settings).
+
+**Found while probing (fixed here).** `agent::CALLER_SESSION_ENV` strips Claude,
+Codex and OpenCode markers but no `ANTIGRAVITY_*`. A nested `agy` launched from
+inside another `agy`'s tool shell inherits `ANTIGRAVITY_LS_ADDRESS`,
+`ANTIGRAVITY_CSRF_TOKEN` and `ANTIGRAVITY_SOURCE_METADATA`, routing child
+`agentapi` calls to the parent server. Add all ten `ANTIGRAVITY_*` markers `agy`
+sets: `ANTIGRAVITY_AGENT`, `ANTIGRAVITY_AGENTAPI_EXE`, `ANTIGRAVITY_APP_DATA_DIR`,
+`ANTIGRAVITY_CONVERSATION_ID`, `ANTIGRAVITY_CSRF_TOKEN`, `ANTIGRAVITY_LS_ADDRESS`,
+`ANTIGRAVITY_LS_VERSION`, `ANTIGRAVITY_PROJECT_ID`, `ANTIGRAVITY_SOURCE_METADATA`,
+`ANTIGRAVITY_TRAJECTORY_ID`.
 
 ## Reopening
 
-`agy` reports no boundary until its first model call. Like Codex in LOO-1068,
-the `agy` open path sends the first `session.boundary` through `hook_request`
-once its argv is built: `SessionStart` (`source: resume|startup`) when it has
-no opening input, `UserPromptSubmit` when it opens with `-i`. Move Codex's
-`report_first_boundary` (`harness/codex.rs:1244`) somewhere both can use it,
-not into a second copy. A new `agy` conversation has no thread until its first hook names one, so
-only a resumed one reports at launch. A new one always opens with `-i`, and
-its first `PreInvocation` reports it.
-`record_first_boundary` then marks the reopened process idle.
-The wake runs, finds the terminal not ready yet, and leaves the steers. When
-the host's VT first sees `?2004h` on a managed terminal, the server runs
-`wake::after_turn(session)`. That event covers both reopen with waiting steers
-and a steer that arrives before the first turn.
+`agy` runs no hook until its first model call. Like Codex in LOO-1068, a managed
+reopened `agy` work session reports its first `session.boundary` at launch:
+`SessionStart` (`source: "resume"`) when it opens without `-i`, and
+`UserPromptSubmit` when it opens with `-i`.
+
+- Move Codex's `report_first_boundary` (`harness/codex.rs`) into a shared helper
+  (`harness::common::report_first_boundary`), not a second copy.
+- **Timing:** do **not** send `report_first_boundary` inside `antigravity.rs::open()`
+  (which runs before `which_command`, before `context_environment` reserves
+  `SteerAdapter` and identifies the delivery file, and before `exec_native`
+  records `agent_pid` / `agent_os_started_at`). Instead, attach the planned first
+  boundary to `NativeClient` (only when `launch.kind.is_managed()` and a resumed
+  `thread` is known) and send it inside `agent_process::exec_native` /
+  `spawn_native` right after `record_agent_process_identity` and before
+  `command.exec()`.
+- A brand-new `agy` work session has no conversation ID until its first hook; it
+  opens with `-i` and its first `PreInvocation` reports it.
+- In `lf/commands/context.rs::read_news`, replace the direct
+  `store.idle_conversation_candidates` call with `loopflow_execution::steer`'s
+  shared reach check, and never defer steers to an idle wake when `prompt == true`
+  (because `agy`'s `PreInvocation` only fires when a turn is already starting).
+- **Live check in Pass 2:** verify whether real `agy 1.5.16` executes `-i <prompt>`
+  when combined with `--conversation <id>` (used by `take_steers_to_start` on
+  `lf resume --task`). If `agy` ignores `-i` on `--conversation`, skip
+  `take_steers_to_start` for harnesses with `idle_wake == IdleWake::Terminal` (or
+  a capability flag) so waiting steers stay unread and are delivered once by
+  terminal wake on `?2004h` instead of being marked delivered and dropped.
 
 ## Source of truth
 
-- `harness::Capabilities.idle_wake: IdleWake`, a required field with no
-  `Option`: `Inbox` (Claude), `AppServer` (Codex), `Socket` (OpenCode, Pi),
-  `Terminal` (Antigravity). `steer::idle_conversations` passes the providers
-  whose `idle_wake == Terminal` to `idle_conversation_candidates`. The store
-  then returns `IdleReach::Terminal` for them, with no column. SQL no longer
-  hard-codes which provider is reached how. Codex is the exception and stays
-  keyed by its endpoint.
-- `harness::parity`: `Behavior` (exhaustive, with `ALL`) and
-  `fn support(HarnessKind, Behavior) -> Support`, where `Support` is
-  `Yes` or `Gap { why, owner }`. Matches are exhaustive with no wildcard
-  arms, so a new harness or behavior doesn't compile until it's filled in.
+### 1. Runtime idle wake (`Capabilities.idle_wake`)
 
-Behaviors, as the README names them: worker step runs and advances; records
-usage; receives step context; hears a mid-turn steer; never asks permission;
-passed over when not installed; unanswered question fails the turn; stops on
-interrupt; refusal falls through; idle work session hears a steer; reopened
-work session takes waiting steers; installed skills listed; viewer handoff
-keeps the conversation (LOO-1097). The cells start as today's README
-answers. Known gaps: unanswered question on Claude, Codex and Antigravity
-(owner Task 48edb9); viewer handoff on Antigravity (owner LOO-1097).
+- Add required field `pub idle_wake: IdleWake` (no `Option`, no `None`) to
+  `harness::Capabilities`:
+  - `IdleWake::Inbox` (Claude)
+  - `IdleWake::AppServer` (Codex)
+  - `IdleWake::Socket` (OpenCode, Pi)
+  - `IdleWake::Terminal` (Antigravity)
+- **Remove reach dispatch from SQL completely.**
+  `SqliteStore::idle_conversation_candidates(&self, session: Option<&str>)`
+  returns raw stored facts (`IdleCandidate`: `adapter`, `provider`, `thread`,
+  `cwd`, `endpoint`, `inbox`, `socket`, `terminal: Option<TerminalId>`, `identity`)
+  for every unfinished, interactive, yielded `AgentProcess` with a
+  `provider_thread` and `steer_adapter`. No provider names, no `CASE`, no
+  `terminal_providers` parameter in SQL; keeps `INDEXED BY agent_sessions_unended_agent`.
+- `loopflow_execution::steer::idle_conversations` is the single owner of reach
+  resolution: it parses `provider -> HarnessKind`, reads
+  `launcher(kind).capabilities().idle_wake`, and maps the matching column into
+  a flat `IdleReach`:
+  - `IdleReach::Claude(PathBuf)`
+  - `IdleReach::Codex(PathBuf)`
+  - `IdleReach::Socket(PathBuf)`
+  - `IdleReach::Terminal(TerminalId)`
+  An `agy` session with `held_terminal_id = NULL` (bare terminal / chat) yields
+  no `IdleConversation`.
+- `server/service.rs` passes `terminals: Option<Arc<Registry>>` into
+  `boundary::answer` (for `note_yielded`), `boundary::after`, and `wake`.
+  `Registry` exposes:
+  - `note_yielded(&self, session: &LfSessionId)`
+  - `terminal_wake_ready(&self, terminal: &TerminalId) -> bool`
+  - `type_steers(&self, terminal: &TerminalId, text: &str) -> Result<bool>`
+
+### 2. Executable UX parity contract (`harness::parity`)
+
+Create `rust/loopflow-execution/src/harness/parity.rs`:
+
+- `pub enum Behavior` (exhaustive, with `Behavior::ALL`)
+- `pub enum Support { Yes, Gap { why: &'static str, owner: &'static str } }`
+- `pub enum Verification { Automated(&'static str), RealProvider(&'static str) }`
+- `pub fn support(harness: HarnessKind, behavior: Behavior) -> Support` — exhaustive
+  match over `(HarnessKind, Behavior)` with no wildcard arms.
+- `pub fn verification(behavior: Behavior) -> Verification` — distinguishes the 12
+  behaviors verified across `HarnessKind::ALL` by automated tests from behaviors
+  whose real-provider failure cannot be reproduced honestly by a stand-in script
+  (currently `ViewerHandoff` / LOO-1097).
+
+| Behavior | Verification | Current gaps |
+|---|---|---|
+| `WorkerStep` (runs, settles, records answer & thread, Graph advances) | Automated (`a_task_step_runs_as_a_worker_on_every_harness`) | none |
+| `UsageRecording` (records usage in Task history) | Automated (same test) | none |
+| `StepContext` (receives step context) | Automated (same test) | none |
+| `MidTurnSteer` (hears steer after next tool) | Automated (same test) | none |
+| `HeadlessPermissions` (never asks permission whatever `yolo` says) | Automated (`harness::launch_matrix`) | none |
+| `MissingCli` (passed over when uninstalled, or named once when sole choice) | Automated (`a_step_that_cannot_launch_is_not_started_again`) | none |
+| `UnansweredQuestion` (fails turn with question when nobody is there) | Automated (`a_question_with_nobody_there_ends_the_step`) | Claude, Codex, Antigravity (Task 48edb9) |
+| `Interrupt` (stops on `lf task interrupt`, next run retries step) | Automated (`a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again`) | none |
+| `RefusalFallthrough` (classifies quota, revoked login, unserved model) | Automated (`conformance_tests::each_harness_classifies_its_own_refusals`) | none |
+| `IdleWorkSessionWake` (idle work session hears a steer) | Automated (`server::wake::tests::every_harness_wakes_its_idle_work_session`) | none |
+| `ReopenWaitingSteers` (reopened work session takes waiting steers) | Automated (`server::wake::tests::every_harness_takes_waiting_steers_on_reopen`) | none |
+| `InstalledSkills` (synced skills & Graphs listed) | Automated (`conformance_tests::every_harness_reads_a_synced_skill`) | none |
+| `ViewerHandoff` (opening in another viewer keeps the conversation) | RealProvider (`transport_tests` proves held-terminal sharing; provider TUI checked live) | Antigravity (LOO-1097) |
 
 ## Conformance
 
-- Each behavior's test loops over `HarnessKind::ALL` and asserts
-  `support(h, b)` both ways: `Yes` must pass, and `Gap` must still fail, so
-  fixing a gap fails the test until the table changes. The message names
-  `{harness:?}` and the behavior.
-- `server::wake::tests::every_harness_wakes_its_idle_work_session` replaces
-  the per-reach tests where it can. For each harness it builds the idle
-  conversation through that harness's `idle_wake` (inbox key, endpoint stand-in,
-  socket stand-in, held-terminal stand-in), saves a steer, and asserts
-  exactly one turn start. Antigravity's stand-in is a held-terminal program
-  that enables `?2004h` and echoes the paste it reads.
-- The three interrupt tests split by harness (`…_on_claude_and_codex`,
-  `…_on_opencode_and_pi`, `…_on_antigravity`) become one loop over `ALL`.
-- `parity::tests::readme_table_matches_support` renders the table from
-  `support()` and compares it with the README section between markers.
-  `cargo test … -- --ignored regenerate` writes it.
+Every `Verification::Automated` behavior test loops over `HarnessKind::ALL` with
+an exhaustive `match` (never a hardcoded subset or string array) and checks
+`parity::support(harness, behavior)` both ways: `Support::Yes` must pass, and
+`Support::Gap` must still exhibit the gap, so fixing a gap fails the test until
+`parity.rs` and the README are updated. Failure messages name `{harness:?}` and
+the behavior.
+
+Specifically:
+- `server::wake::tests::every_harness_wakes_its_idle_work_session`: loops
+  `HarnessKind::ALL`, sets up each harness's idle reach from
+  `Capabilities.idle_wake` (Claude inbox, Codex app-server stand-in, OpenCode/Pi
+  socket stand-in, Antigravity held-terminal stand-in that enables `?2004h` and
+  echoes the paste), saves a steer, and asserts one turn start. Also unit-tests
+  terminal draft guard (focus/mouse allowed, mid-turn and post-yield drafts held
+  off, no 15s claim lock when held off, bracketed-paste sanitization).
+- `server::wake::tests::every_harness_takes_waiting_steers_on_reopen`: loops
+  `HarnessKind::ALL` and verifies a reopened work session starts a turn on waiting
+  steers once before anyone types (for Antigravity, via launch first-boundary +
+  `?2004h` paste-ready wakeup).
+- `task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness`: switch
+  the hardcoded 5-tuple array to `for harness in HarnessKind::ALL`.
+- `task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again`: check
+  missing-CLI install hint and pass-over across `HarnessKind::ALL`.
+- `task_graph_launch_tests::a_question_with_nobody_there_ends_the_step`: loop
+  `HarnessKind::ALL`, asserting `Support::Yes` fails with `unanswered_question`
+  and `Support::Gap` does not.
+- Unify the three split interrupt tests (`…_on_claude_and_codex`,
+  `…_on_opencode_and_pi`, `…_on_antigravity`) into one loop over `HarnessKind::ALL`.
+- `harness::conformance_tests::each_harness_classifies_its_own_refusals`: loop
+  `HarnessKind::ALL` with an exhaustive `match` so every harness has refusal
+  classification fixtures.
+- `parity::tests::readme_table_matches_support`: renders the parity table between
+  markers (`<!-- parity:start -->` / `<!-- parity:end -->`) in
+  `rust/loopflow-execution/src/harness/README.md` and asserts exact match.
+  `cargo test -p loopflow-execution --lib harness::parity::tests::regenerate_readme_table -- --ignored`
+  rewrites it. Update `rust/loopflow/src/server/README.md` ("Waking an idle
+  conversation") to describe Antigravity's held-terminal wake alongside the other
+  four.
 
 ## Absent and error states
 
-- Terminal gone, child exited, VT unreadable: the wake leaves steers unclaimed
-  and logs once per changed reason. The next boundary delivers.
-- Paste mode off: a `/` menu, an auth screen, or the TUI not up yet. Same as
-  above. The `?2004h` event wakes it later.
-- Person typing: left alone; their Enter delivers through the hook.
-- `agy` mid-turn: not yielded, no wake. The hook delivers between tools.
-- A worker or chat `agy`: not interactive, no held terminal, never a candidate.
+- Terminal gone, child exited, `held_terminal_id` is `NULL`, or VT unreadable:
+  readiness check returns `false` before claiming; steers remain unclaimed and
+  wait for the next boundary.
+- Paste mode off (`?2004l` — `/` menu, auth screen, `$EDITOR`, or TUI booting):
+  readiness check returns `false` before claiming; the next `?2004h` transition
+  triggers `wake::after_turn`.
+- Person typing (idle draft or mid-turn type-ahead, or Enter before
+  `PreInvocation`): readiness check returns `false` before claiming; their Enter
+  delivers waiting steers through `PreInvocation` without a 15-second claim lock.
+- Focus events, terminal query replies, mouse wheel scrolling: ignored by draft
+  tracking; never disable idle wake.
+- `agy` mid-turn (`yielded = 0`): not an idle candidate; `PreInvocation` delivers
+  between tools.
+- Worker or chat `agy`: not interactive or no held terminal; never a candidate.
+- Store or server unavailable: held terminal stays a pure pass-through; wake does
+  not run.
 
 ## Operational boundary
 
-No new process or poll per Session. The `?2004h` check reads state the VT
-already keeps. The "typed since yield" check is one `SystemTime` per terminal
-in the registry. The candidate query keeps `INDEXED BY agent_sessions_unended_agent`;
-the provider list adds one `IN` term. Check it with `EXPLAIN QUERY PLAN`
-against the 10k-Task store.
+No new process or poll per Session. `bracketed_paste()` reads state `libghostty-vt`
+already tracks. Draft tracking adds two fields (`Option<Instant>`, `bool`) and one
+`Option<Instant>` (`yielded_at`) per `Hosted` terminal. `?2004h` wakeup sends on
+an in-process channel and runs off the `held-terminals` loop. `idle_conversation_candidates`
+keeps `INDEXED BY agent_sessions_unended_agent` with fewer predicates than before;
+verify with `query_plans.rs` (`EXPLAIN QUERY PLAN` against the 10k-Task fixture).
 
 ## Exclusions
 
-- Real-provider viewer handoff for `agy` (LOO-1097). It gets a typed `Gap`
-  owned by LOO-1097, not a fix.
-- Reading a headless question on Claude, Codex or agy (Task 48edb9 stays the owner).
-- A gate check that a `Gap`'s owner Task is still open.
+- Real-provider viewer handoff for `agy` (LOO-1097): tracked as a typed
+  `RealProvider` `Gap` owned by LOO-1097, not fixed here.
+- Reading a headless question on Claude, Codex, or Antigravity: tracked as a
+  typed `Automated` `Gap` owned by Task 48edb9.
+- Offline gate check verifying that a `Gap`'s owner Task is still open.
 
 ## What goes
 
-- README hand-written parity table and the stale `Task 540073` cell. The
-  "Antigravity takes queued steers on its next turn" and "any of the four" sentences.
-- The SQL `CASE`/`OR` that infers reach from filled-in columns, replaced by
-  `idle_wake`.
-- Codex-only `report_first_boundary` (moved, not copied).
-- Per-harness interrupt test split.
+- Hand-written parity table in `harness/README.md`, the stale `Task 540073` cell,
+  and the "Antigravity takes queued steers on its next turn" / "any of the four"
+  prose in `harness/README.md` and `server/README.md`.
+- SQL `CASE` / `OR` provider-reach dispatch in `sqlite/steers.rs::idle_conversation_candidates`
+  and `context.rs`'s direct `idle_conversation_candidates` call.
+- Codex-only `report_first_boundary` (moved to `harness::common`, not copied).
+- Three-way split interrupt tests and hardcoded harness arrays in behavior tests.
 
 ## Passes
 
-1. **Terminal wake on a live idle `agy`** (could prove the plan wrong).
-   `IdleWake` in `Capabilities`; `IdleReach::Terminal`; registry
-   `type_steers(session, text) -> Result<bool>` gated on paste mode and
-   typing since yield; `Reach::Terminal` in `wake.rs` (the Registry reaches
-   `wake_idle` and `boundary::after`); `ANTIGRAVITY_*` in `CALLER_SESSION_ENV`.
-   The held-terminal stand-in test. Then real `agy` in a held terminal on this
-   Machine: `lf resume --task`, let it settle, `lf steer`. Shows: a turn
-   starts once, it shows in the TUI, `lf session steers` marks it delivered, and the
-   `PreInvocation` hook records the turn without delivering the steer twice.
-2. **Reopen.** Shared first-boundary report on `agy` open; the `?2004h`
-   event triggers `wake::after_turn`. Real `agy`: quit, steer, `lf resume --task`,
-   and it runs once before anyone types.
-3. **Parity contract.** `harness/parity.rs`, behavior tests switched to loops
-   over `ALL` that check both ways, README generated and checked, dead text
-   and split tests removed. Demo 2: setting
-   Antigravity's `idle_wake` to a `Gap`, or deleting `IdleReach::Terminal`,
-   fails `server::wake::tests::every_harness_wakes_its_idle_work_session`
-   and the README check, each naming Antigravity.
+1. **Terminal wake on a live idle `agy`** (first slice — proves the core mechanism
+   end to end).
+   - `Terminal::bracketed_paste()` (`MODE_BRACKETED_PASTE = 2004`) in
+     `loopflow-terminal`.
+   - `IdleWake` on `Capabilities`; remove SQL reach dispatch from
+     `idle_conversation_candidates`; flat `IdleReach` (including
+     `Terminal(TerminalId)`) resolved in `loopflow_execution::steer::idle_conversations`;
+     `context.rs::read_news` switched to the shared helper with `!prompt` guard.
+   - `Hosted` user-keystroke draft guard (filtering reports + mouse, tracking
+     `last_user_key`, `unsubmitted_input`, `yielded_at`), paste sanitization, and
+     `Registry::{note_yielded, terminal_wake_ready, type_steers}`; wire `terminals`
+     through `service.rs` -> `boundary` -> `wake`.
+   - Add the 10 `ANTIGRAVITY_*` markers to `CALLER_SESSION_ENV`.
+   - Unit tests for VT mode, draft guard, paste sanitization, `query_plans`, and
+     the held-terminal stand-in wake test.
+   - Live check on real `agy` in a held terminal on this Machine: let it settle,
+     `lf steer` -> one turn starts, visible in the TUI, `lf session steers` marks
+     it delivered once, `PreInvocation` does not duplicate it.
+2. **Reopen on `agy`.**
+   - Move `report_first_boundary` to `harness::common`; wire `NativeClient` first
+     boundary into `agent_process::exec_native` / `spawn_native` after
+     `record_agent_process_identity`.
+   - Emit `?2004h` `false -> true` paste-ready events off the `held-terminals`
+     loop into `wake.rs`.
+   - Live check on real `agy`: verify both `agy --conversation <id> -i <prompt>`
+     (for `take_steers_to_start`) and quit -> Task update / steer -> `lf resume --task`
+     -> waiting steer runs once before anyone types. If `agy` ignores `-i` with
+     `--conversation`, keep waiting steers for terminal wake instead of
+     consuming them in `take_steers_to_start`.
+3. **Typed parity contract & full `HarnessKind::ALL` conformance.**
+   - `harness/parity.rs` (`Behavior`, `Support`, `Verification`, `support`,
+     README renderer & check).
+   - Switch `server::wake::tests::` (idle wake + reopen), `task_graph_launch_tests`
+     (worker, missing CLI, unanswered question, unified interrupt), and
+     `conformance_tests::each_harness_classifies_its_own_refusals` to exhaustive
+     `HarnessKind::ALL` loops checking `parity::support` both ways.
+   - Regenerate `harness/README.md` table and update `server/README.md`.
+   - Demo 2 check: flipping Antigravity's `IdleWorkSessionWake` to a `Gap` or
+     removing `IdleReach::Terminal` fails `server::wake::tests::` and the README
+     check, each naming Antigravity.
 
 ## Acceptance at gate
 
 ```sh
-cargo test -p loopflow --lib server::wake::tests::
+cargo test -p loopflow-terminal --lib ghostty_vt::
+cargo test -p loopflow-storage --lib query_plans::
 cargo test -p loopflow-execution --lib harness::parity::
 cargo test -p loopflow-execution --lib harness::conformance_tests::
+cargo test -p loopflow-execution --lib transport::
+cargo test -p loopflow --lib server::wake::tests::
+cargo test -p loopflow --lib server::boundary::tests::
+cargo test -p loopflow --lib task_graph_launch_tests::
 ```
 
-Each runs every harness. A real `agy` check runs at demo: steps 1 and 2 in a
-held terminal, with the turn visible in the TUI and one `delivered_at` per steer.
+Plus real `agy` demo verification: Pass 1 (idle steer) and Pass 2 (quit, steer,
+reopen) in a held terminal, with one turn visible in the TUI and one
+`delivered_at` per steer.

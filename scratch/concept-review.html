@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1098 Concept Review — Harness Parity &amp; Waking Work Sessions</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-subtle: #f6f8fa;
+    --bg-proposed: #eef6ff;
+    --bg-existing: #f8f5f0;
+    --bg-warn: #fff8e6;
+    --border: #d0d7de;
+    --border-proposed: #54aeff;
+    --border-existing: #c8b8a6;
+    --border-warn: #d4a72c;
+    --fg: #1f2328;
+    --fg-muted: #59636e;
+    --yes-bg: #dafbe1;
+    --yes-fg: #116329;
+    --no-bg: #ffebe9;
+    --no-fg: #a40e26;
+    --prop-bg: #ddf4ff;
+    --prop-fg: #0969da;
+    --exist-bg: #eaeef2;
+    --exist-fg: #424a53;
+    --code-bg: #f0f3f6;
+    --accent: #0969da;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --bg-subtle: #161b22;
+      --bg-proposed: #0d1f36;
+      --bg-existing: #1c1917;
+      --bg-warn: #261f0d;
+      --border: #30363d;
+      --border-proposed: #388bfd;
+      --border-existing: #575049;
+      --border-warn: #9e6a03;
+      --fg: #e6edf3;
+      --fg-muted: #8b949e;
+      --yes-bg: #122d1b;
+      --yes-fg: #56d364;
+      --no-bg: #361318;
+      --no-fg: #ff7b72;
+      --prop-bg: #13294b;
+      --prop-fg: #79c0ff;
+      --exist-bg: #21262d;
+      --exist-fg: #b1bac4;
+      --code-bg: #1f242c;
+      --accent: #58a6ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2rem 1.25rem 4rem;
+    background: var(--bg);
+    color: var(--fg);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 1020px; margin: 0 auto; }
+  header { border-bottom: 1px solid var(--border); padding-bottom: 1.25rem; margin-bottom: 2rem; }
+  h1 { font-size: 1.65rem; margin: 0 0 0.4rem; letter-spacing: -0.015em; }
+  h2 { font-size: 1.25rem; margin: 2.25rem 0 0.75rem; padding-bottom: 0.35rem; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 1.02rem; margin: 1.35rem 0 0.5rem; }
+  p { margin: 0.5rem 0 0.85rem; }
+  .lead { font-size: 1.02rem; color: var(--fg); margin: 0.35rem 0; }
+  .meta { font-size: 0.86rem; color: var(--fg-muted); display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; margin-top: 0.65rem; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.86em;
+    background: var(--code-bg);
+    padding: 0.12em 0.36em;
+    border-radius: 4px;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    overflow-x: auto;
+    font: 12.8px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    margin: 0.6rem 0 1rem;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 0.74rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.14rem 0.48rem;
+    border-radius: 999px;
+    vertical-align: middle;
+  }
+  .badge-yes { background: var(--yes-bg); color: var(--yes-fg); }
+  .badge-no { background: var(--no-bg); color: var(--no-fg); }
+  .badge-existing { background: var(--exist-bg); color: var(--exist-fg); }
+  .badge-proposed { background: var(--prop-bg); color: var(--prop-fg); }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.9rem 0 1.4rem;
+    font-size: 0.92rem;
+  }
+  th, td {
+    text-align: left;
+    vertical-align: top;
+    padding: 0.6rem 0.7rem;
+    border: 1px solid var(--border);
+  }
+  th { background: var(--bg-subtle); font-weight: 600; }
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+    gap: 1rem;
+    margin: 0.9rem 0 1.25rem;
+  }
+  .card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.1rem;
+    background: var(--bg-subtle);
+  }
+  .card.existing { background: var(--bg-existing); border-color: var(--border-existing); }
+  .card.proposed { background: var(--bg-proposed); border-color: var(--border-proposed); }
+  .card.warn { background: var(--bg-warn); border-color: var(--border-warn); }
+  .card h3 { margin-top: 0; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+  .flow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0.7rem 0;
+    font-size: 0.87rem;
+  }
+  .node {
+    padding: 0.35rem 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--bg);
+  }
+  .node.proposed { border-color: var(--border-proposed); background: var(--bg-proposed); }
+  .node.broken { border-color: var(--no-fg); background: var(--no-bg); color: var(--no-fg); }
+  .arrow { color: var(--fg-muted); font-weight: 700; }
+  ul, ol { padding-left: 1.3rem; margin: 0.4rem 0 0.85rem; }
+  li { margin: 0.32rem 0; }
+  .q-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.95rem 1.1rem;
+    margin: 0.85rem 0;
+    background: var(--bg-subtle);
+  }
+  .q-card strong.q-title { display: block; margin-bottom: 0.45rem; font-size: 0.98rem; }
+  .opts { list-style: none; padding-left: 0; margin: 0.45rem 0 0; }
+  .opts li {
+    padding: 0.4rem 0.6rem;
+    border-radius: 6px;
+    margin: 0.35rem 0;
+    background: var(--bg);
+    border: 1px solid var(--border);
+  }
+  .opts li.chosen { border-color: var(--border-proposed); background: var(--bg-proposed); }
+  .small { font-size: 0.85rem; color: var(--fg-muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Concept Review: Harness Parity &amp; Waking Work Sessions</h1>
+    <p class="lead">
+      <strong>Area reviewed:</strong> How Loopflow declares, wakes, and verifies its five harnesses
+      (<code>Claude</code>, <code>Codex</code>, <code>OpenCode</code>, <code>Pi</code>, <code>Antigravity</code>)
+      across work-session wake, reopen, capabilities, tests, and docs — widened from LOO-1098's idle-<code>agy</code>
+      bug because four recent parity Tasks missed harnesses for the same structural reason.
+    </p>
+    <div class="meta">
+      <span><strong>Task:</strong> LOO-1098</span>
+      <span><strong>Stage:</strong> Pre-implementation (HEAD <code>be3c363df4</code> — plan only, no code changed yet)</span>
+      <span><strong>Status:</strong> <span class="badge badge-existing">Existing</span> vs <span class="badge badge-proposed">Proposed in updated plan</span></span>
+    </div>
+  </header>
+
+  <h2>1. Do the product's concepts and the code's concepts line up?</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:24%">Product concept<br><span class="small">What a person knows &amp; does</span></th>
+        <th style="width:31%">Code concept <span class="badge badge-existing">Existing</span><br><span class="small">Types, records, and APIs today</span></th>
+        <th style="width:9%">Lines up?</th>
+        <th style="width:36%">What is wrong</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Every harness behaves the same</strong> for top-level actions, or names an explicit gap with an owner.</td>
+        <td>Split across 5 owners: <code>Capabilities</code> (<code>harness/mod.rs</code>), SQL reach filters (<code>sqlite/steers.rs</code>), hand-written prose (<code>harness/README.md</code>), hardcoded test subsets, and 3 split interrupt tests.</td>
+        <td><span class="badge badge-no">No</span></td>
+        <td><strong>No single owner.</strong> Prose drifted (<code>Task 540073</code> stayed on Antigravity after closing). Adding a harness compiles quietly while omitting features and tests.</td>
+      </tr>
+      <tr>
+        <td><strong>Waking an idle work session</strong> — a steer, Task update, or interactive-step handoff starts a turn without typing.</td>
+        <td><code>idle_conversation_candidates</code> infers <code>IdleReach</code> in SQL from whichever column is non-NULL (<code>agent_endpoint</code> for hardcoded <code>'codex'</code>, <code>agent_inbox</code>, <code>agent_socket</code>).</td>
+        <td><span class="badge badge-no">No</span></td>
+        <td><strong>Storage owns harness dispatch.</strong> <code>agy</code> fills none of those columns, so SQL silently drops it. Kickoff's first draft left Codex/Claude/Socket in SQL and passed a <code>terminal_providers</code> slice only for <code>agy</code>.</td>
+      </tr>
+      <tr>
+        <td><strong>Reopening a work session</strong> — quit, steer, <code>lf resume</code> runs waiting steers once before anyone types.</td>
+        <td>Two paths: <code>take_steers_to_start</code> (direct/Task steers into opening prompt) + <code>record_first_boundary</code> / <code>After::Reachable</code> (Task updates, wave/repo steers). Only Codex calls <code>report_first_boundary</code>.</td>
+        <td><span class="badge badge-no">No</span></td>
+        <td><strong>Wrong launch slot in initial plan.</strong> Sending <code>report_first_boundary</code> inside <code>antigravity.rs::open()</code> runs before <code>which_command</code>, before <code>SteerAdapter</code> reservation, before <code>agent_pid</code> exists, and even for bare chats.</td>
+      </tr>
+      <tr>
+        <td><strong>Draft safety on terminal wake</strong> — a wake never clobbers what a person is typing, while focusing or scrolling never breaks wake.</td>
+        <td>Not built yet. Initial plan proposed one <code>SystemTime</code> on any <code>Tag::Input</code> compared to SQLite's whole-second <code>observed_at</code>.</td>
+        <td><span class="badge badge-no">No</span></td>
+        <td><strong>Three subtle races:</strong> (1) sizing viewer <code>Tag::Input</code> carries focus/DA/CPR replies, so focusing disables wake; (2) integer-second <code>observed_at</code> vs sub-second clock flakes on fast turns; (3) mid-turn type-ahead gets clobbered, and claiming before readiness locks steers for 15 s.</td>
+      </tr>
+      <tr>
+        <td><strong>Typing a steer safely into a held terminal</strong> — steer text cannot inject raw keystrokes or hit the wrong terminal.</td>
+        <td>Not built yet. Initial plan proposed raw <code>ESC[200~ text ESC[201~\r</code> addressed by <code>session_id</code>.</td>
+        <td><span class="badge badge-no">No</span></td>
+        <td><strong>Escape breakout &amp; weak addressing.</strong> Any steer containing <code>ESC[201~</code> breaks out of bracketed paste. Addressing by <code>TerminalId</code> from <code>agent_sessions.held_terminal_id</code> targets the exact held terminal.</td>
+      </tr>
+      <tr>
+        <td><strong>Executable parity suite</strong> — every behavior is tested across every harness, and gaps stay honest.</td>
+        <td><code>launch_matrix</code> and <code>installed_skills</code> loop <code>HarnessKind::ALL</code>; worker, missing-CLI, question, interrupt, refusal, wake, and reopen tests use hardcoded subsets or per-reach tests.</td>
+        <td><span class="badge badge-no">No</span></td>
+        <td><strong>Overclaimed symmetry in initial plan.</strong> <code>ViewerHandoff</code> (LOO-1097) is a real-provider TUI bug that stand-ins cannot honestly fail without testing mock wiring. Meanwhile <code>ReopenWaitingSteers</code>, <code>MissingCli</code>, and <code>RefusalFallthrough</code> lacked <code>ALL</code> loops.</td>
+      </tr>
+      <tr>
+        <td><strong>Nested <code>agy</code> isolation</strong> — an <code>agy</code> launched by <code>lf</code> never talks to its caller's <code>agy</code> server.</td>
+        <td><code>CALLER_SESSION_ENV</code> strips Claude, Codex, and OpenCode markers, but zero <code>ANTIGRAVITY_*</code> variables.</td>
+        <td><span class="badge badge-no">No</span></td>
+        <td>Child inherits parent <code>ANTIGRAVITY_LS_ADDRESS</code> / <code>CSRF_TOKEN</code>, misrouting <code>agentapi</code> calls to the parent conversation.</td>
+      </tr>
+      <tr>
+        <td><strong>Pass-through resilience</strong> — a down server or locked store never blocks typing or breaks a conversation.</td>
+        <td>Held terminals forward viewer bytes independently of SQLite; hooks are best-effort with <code>RecordingGap</code>.</td>
+        <td><span class="badge badge-yes">Yes</span></td>
+        <td>Holds in the redesign: VT checks and paste wake stay off the SQLite path, and terminal I/O never waits on the store.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>2. Biggest mismatches — Before &amp; After</h2>
+
+  <div class="grid-2">
+    <div class="card existing">
+      <h3><span class="badge badge-existing">Before</span> SQL guesses reach; README guesses parity</h3>
+      <div class="flow">
+        <span class="node">agent_sessions</span>
+        <span class="arrow">&rarr;</span>
+        <span class="node broken">SQL CASE/OR (hardcoded 'codex' + 3 columns)</span>
+        <span class="arrow">&rarr;</span>
+        <span class="node">wake.rs</span>
+      </div>
+      <ul>
+        <li><code>agy</code> fills no inbox/endpoint/socket column &rarr; silently filtered out by SQL.</li>
+        <li><code>context.rs::read_news</code> calls raw <code>store.idle_conversation_candidates</code>, duplicating reach logic.</li>
+        <li><code>harness/README.md</code> is hand-edited prose; <code>Task 540073</code> outlived its own PR by days.</li>
+        <li>Tests pick harnesses by hand (<code>[opencode, pi]</code>, 3 split interrupt tests, per-reach wake tests).</li>
+      </ul>
+    </div>
+    <div class="card proposed">
+      <h3><span class="badge badge-proposed">After</span> Capabilities owns wake; <code>parity.rs</code> owns the contract</h3>
+      <div class="flow">
+        <span class="node">SQL raw facts (+ held_terminal_id)</span>
+        <span class="arrow">&rarr;</span>
+        <span class="node proposed">Capabilities.idle_wake &rarr; IdleReach</span>
+        <span class="arrow">&rarr;</span>
+        <span class="node proposed">wake.rs / Registry</span>
+      </div>
+      <ul>
+        <li><strong>Zero provider names in SQL.</strong> Storage returns plain columns for live yielded interactive sessions; <code>steer::idle_conversations</code> resolves flat <code>IdleReach::{Claude, Codex, Socket, Terminal(TerminalId)}</code> from required <code>Capabilities.idle_wake</code>.</li>
+        <li><strong><code>harness::parity</code></strong> holds one exhaustive <code>(HarnessKind, Behavior) &rarr; Support</code> matrix plus <code>Verification::{Automated, RealProvider}</code>.</li>
+        <li>All 12 <code>Automated</code> tests loop <code>HarnessKind::ALL</code> and assert both <code>Yes</code> and <code>Gap</code>; <code>harness/README.md</code> is generated and diff-checked.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card existing">
+      <h3><span class="badge badge-existing">Before (kickoff draft)</span> Terminal wake races &amp; wrong reopen hook point</h3>
+      <pre>antigravity.rs::open()
+  └─ report_first_boundary()   // TOO EARLY: before exec_native,
+                               // before agent_pid, before adapter!
+
+wake()
+  ├─ claim steers (15s lock!)  // BLOCKS person's own Enter if draft!
+  └─ type_steers(session, raw) // raw text can contain ESC[201~
+       ├─ Tag::Input = any byte (focus/DA/mouse trips draft guard!)
+       └─ SystemTime vs SQLite integer observed_at (1s flake!)</pre>
+    </div>
+    <div class="card proposed">
+      <h3><span class="badge badge-proposed">After (updated plan)</span> Exact lifecycle &amp; race-free terminal wake</h3>
+      <pre>agent_process::exec_native()
+  ├─ context_environment()      // reserves SteerAdapter, checks server
+  ├─ record_agent_process_identity() // agent_pid + os_started_at live
+  └─ report_first_boundary()    // managed + resumed thread only, before exec()
+
+Hosted (held terminal)
+  ├─ input::keys (strips focus, DA/CPR/theme, mouse)
+  │    └─ updates last_user_key: Instant &amp; unsubmitted_input: bool
+  ├─ Registry::note_yielded(session) sets yielded_at: Instant (sub-sec)
+  └─ ?2004h false&rarr;true sends LfSessionId off-loop to wake.rs
+
+wake()
+  ├─ 1. terminal_wake_ready(tid) BEFORE claim (no 15s lock on draft!)
+  ├─ 2. steer::claim()
+  └─ 3. type_steers(tid, sanitized_paste) re-checks atomically on loop</pre>
+    </div>
+  </div>
+
+  <h2>3. Concrete interaction walk &amp; counterexamples</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:22%">Scenario</th>
+        <th style="width:42%">What happens under the updated design</th>
+        <th style="width:36%">Counterexample caught &amp; resolved</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Normal idle steer</strong><br><span class="small"><code>agy</code> idle in held terminal; <code>lf steer</code> arrives</span></td>
+        <td><code>idle_conversations</code> resolves <code>IdleWake::Terminal</code> &rarr; <code>IdleReach::Terminal(tid)</code>. <code>wake</code> checks <code>terminal_wake_ready(tid)</code> (<code>?2004h</code> on, no draft, <code>last_user_key &lt;= yielded_at</code>), claims steer, sanitizes control/ESC bytes, pushes <code>ESC[200~…ESC[201~\r</code>, calls <code>record_woken</code> &amp; stamps <code>delivered_at</code>. <code>PreInvocation</code> runs and sees 0 unread steers.</td>
+        <td><em>Escape breakout:</em> a steer quoting terminal output containing <code>ESC[201~</code> could exit paste mode and inject keystrokes. Resolved by stripping <code>\x1b</code> and control bytes (keeping <code>\n</code>, <code>\t</code>).</td>
+      </tr>
+      <tr>
+        <td><strong>Person typing (idle or mid-turn)</strong><br><span class="small">User starts a draft before steer arrives</span></td>
+        <td><code>unsubmitted_input == true</code> (or <code>last_user_key &gt; yielded_at</code>). <code>terminal_wake_ready(tid)</code> returns <code>false</code> <em>before</em> <code>steer::claim</code>. Draft stays untouched; steers remain unclaimed; person's Enter fires <code>PreInvocation</code>, which delivers them cleanly.</td>
+        <td><em>15 s claim lockout &amp; focus false positive:</em> claiming before checking readiness hid steers from Enter for <code>CLAIM_SECS</code>; counting raw <code>Tag::Input</code> made window focus (<code>\x1b[I</code>) disable wake; mid-turn type-ahead before <code>Stop</code> had <code>last_key &lt; yielded_at</code>. All three resolved.</td>
+      </tr>
+      <tr>
+        <td><strong>Reopen with waiting steers</strong><br><span class="small">Quit, steer / Task update, <code>lf resume --task</code></span></td>
+        <td><code>exec_native</code> records identity and reports <code>SessionStart</code> (no <code>-i</code>) or <code>UserPromptSubmit</code> (with <code>-i</code>). <code>boundary::answer</code> marks idle and calls <code>note_yielded</code>. When <code>agy</code> boots and emits <code>?2004h</code>, <code>Hosted</code> notifies <code>wake.rs</code> off-loop and delivers waiting steers once.</td>
+        <td><em><code>agy --conversation -i</code> ambiguity:</em> if <code>agy</code> ignores <code>-i</code> when resuming a conversation, <code>take_steers_to_start</code> would stamp steers delivered and drop them. Pass 2 verifies this live on <code>agy 1.5.16</code> and adjusts if needed.</td>
+      </tr>
+      <tr>
+        <td><strong>Failure: terminal gone / menu open / server restart</strong></td>
+        <td>Gone terminal or <code>?2004l</code> menu: readiness returns <code>false</code> before claim; steers wait for next <code>?2004h</code> or boundary. Server restart: <code>Registry::open</code> re-adopts the holder's terminal under the same <code>TerminalId</code> with clean draft state; <code>Watcher</code>'s first read wakes it. Down store/server: held terminal stays a pure pass-through.</td>
+        <td><em>Fast-turn 1 s clock race:</em> comparing sub-second <code>SystemTime</code> against SQLite whole-second <code>observed_at</code> falsely blocked wake whenever a turn finished within the same second as Enter. Resolved by in-server <code>Instant</code> <code>yielded_at</code>.</td>
+      </tr>
+      <tr>
+        <td><strong>Parity gap: <code>ViewerHandoff</code> (LOO-1097)</strong></td>
+        <td>Declared in <code>harness::parity</code> as <code>Verification::RealProvider</code> with Antigravity <code>Gap { owner: "LOO-1097" }</code>. Generated into <code>harness/README.md</code> alongside the 12 <code>Verification::Automated</code> rows.</td>
+        <td><em>Mock-wiring trap:</em> asserting "every <code>Gap</code> must fail an automated test" fails for real-provider TUI bugs that stand-ins cannot reproduce. Splitting <code>Automated</code> vs <code>RealProvider</code> keeps tests honest.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>4. Choices made for review (reversible)</h2>
+  <div class="card warn">
+    <p>All choices below are reversible without schema or wire migrations; they are written into <code>scratch/plan.md</code> so implementation proceeds directly and you can review the result live.</p>
+    <ol>
+      <li><strong>Wake <code>agy</code> by typing sanitized bracketed paste into its held terminal</strong> — passed over global <code>~/.gemini</code> sidecar injection (lf writes no global provider config) and screen-scraping. Swaps cleanly to an inbox if <code>agy</code> later exposes one.</li>
+      <li><strong>Move all idle-wake reach dispatch out of SQL into <code>Capabilities.idle_wake</code></strong> — passed over passing a <code>terminal_providers</code> list into SQL while leaving Codex/Claude/Socket hardcoded in SQL.</li>
+      <li><strong>Draft guard uses filtered user keystrokes + <code>unsubmitted_input</code> + in-server <code>yielded_at: Instant</code></strong> — passed over screen-scraping the prompt line and over integer-second SQLite timestamps.</li>
+      <li><strong>Split <code>Verification::Automated</code> vs <code>Verification::RealProvider</code> in <code>harness::parity</code></strong> — passed over faking a stand-in failure for <code>ViewerHandoff</code> (LOO-1097).</li>
+    </ol>
+  </div>
+
+  <h2>5. Open questions for review</h2>
+  <p class="small">Reply with a number and letter (e.g. <code>1b</code>) if you want any choice reversed before landing.</p>
+
+  <div class="q-card">
+    <strong class="q-title">1. How should a woken steer appear inside an idle Antigravity terminal?</strong>
+    <p class="small">Antigravity 1.5.16 does not give hooks or local callers a way to inject background messages into a running TUI without installing a global sidecar into <code>~/.gemini/config</code>.</p>
+    <ul class="opts">
+      <li class="chosen"><strong>1a (chosen for build):</strong> Paste the steer directly into Antigravity's held terminal and press Enter — it looks like a pasted prompt in the TUI, starts one turn, and touches no global <code>~/.gemini</code> config.</li>
+      <li><strong>1b:</strong> Install a Loopflow sidecar into <code>~/.gemini/config</code> so wakes arrive through Antigravity's own agent API instead of typing into the terminal (means <code>lf</code> edits global Antigravity config).</li>
+    </ul>
+  </div>
+
+  <div class="q-card">
+    <strong class="q-title">2. If you start typing a draft in Antigravity and then backspace it all away, should an arriving steer wait for your next Enter?</strong>
+    <p class="small">Without screen-scraping Antigravity's TUI prompt box, Loopflow knows you pressed keys but cannot tell whether you backspaced all the way back to an empty line.</p>
+    <ul class="opts">
+      <li class="chosen"><strong>2a (chosen for build):</strong> Yes — hold off automatic wakes after any typing until you press Enter, Ctrl-C, or Ctrl-U. Never risks submitting a half-typed prompt; your next Enter still delivers the waiting steer.</li>
+      <li><strong>2b:</strong> Try to read Antigravity's prompt line from the virtual terminal screen to detect an empty box (allows waking after backspace, but breaks whenever Antigravity's TUI layout changes).</li>
+    </ul>
+  </div>
+
+  <div class="q-card">
+    <strong class="q-title">3. Should the parity table track real-provider-only interactive gaps like viewer handoff (LOO-1097) alongside automated behaviors?</strong>
+    <p class="small">Automated tests run stand-in scripts and can prove 12 of the 13 behaviors on every harness, but cannot reproduce a bug inside the real <code>agy</code> binary's TUI.</p>
+    <ul class="opts">
+      <li class="chosen"><strong>3a (chosen for build):</strong> Keep all 13 in one generated parity table, clearly marking 12 as automatically verified across every harness and 1 (<code>ViewerHandoff</code>) as real-provider-verified with owner <code>LOO-1097</code>.</li>
+      <li><strong>3b:</strong> Limit the generated parity table strictly to the 12 behaviors automated tests can prove, and track real-provider TUI bugs only in Linear.</li>
+    </ul>
+  </div>
+</main>
+</body>
+</html>

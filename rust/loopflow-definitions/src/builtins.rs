@@ -18,6 +18,27 @@ pub const SURFACE_HUMAN_PRESENT: &str = include_str!("builtins/surfaces/human-pr
 /// plain, deliberate, addressed message — never a working transcript.
 pub const SURFACE_CHAT: &str = include_str!("builtins/surfaces/chat.md");
 
+/// Review page kit: shared interactive runtime, base stylesheet, default theme,
+/// and built-in `<lf-component>` templates.
+pub const PAGE_RUNTIME_JS: &str = include_str!("builtins/page/runtime.js");
+pub const PAGE_BASE_CSS: &str = include_str!("builtins/page/base.css");
+pub const PAGE_DEFAULT_THEME_CSS: &str = include_str!("builtins/page/theme.css");
+
+/// Built-in `<lf-component>` template HTML (and optional stylesheet) by name.
+pub fn get_builtin_page_component(name: &str) -> Option<(&'static str, Option<&'static str>)> {
+    match name {
+        "decision" => Some((
+            include_str!("builtins/page/components/decision/template.html"),
+            None,
+        )),
+        "before-after" => Some((
+            include_str!("builtins/page/components/before-after/template.html"),
+            None,
+        )),
+        _ => None,
+    }
+}
+
 /// Returns the content of a built-in skill, if it exists.
 pub fn get_builtin_skill(name: &str) -> Option<&'static str> {
     BUILTIN_SKILLS.get(portable_name(name).as_str()).copied()

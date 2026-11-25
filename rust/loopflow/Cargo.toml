@@ -134,6 +134,9 @@ tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-
 tokio-util = { version = "0.7", features = ["codec", "rt"] }
 tokio-tungstenite = "0.30"
 tokio-rustls = "0.26"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
 tempfile = "3.27"
 
 # ARM file-selection latency includes hashing the executable for install authority.

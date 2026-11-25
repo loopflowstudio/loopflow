@@ -5065,6 +5065,19 @@
         }
       ]
     },
+    "PageUrl": {
+      "additionalProperties": false,
+      "description": "What `page.url` answers.",
+      "properties": {
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
     "PlacementStrategy": {
       "enum": [
         "create",
@@ -9793,6 +9806,27 @@
                 "user": 1
               }
             }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "A capability URL for a local review page served over loopback; same-user\nlocal socket only.",
+          "properties": {
+            "kind": {
+              "const": "page.url",
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/PageUrl"
           }
         },
         {

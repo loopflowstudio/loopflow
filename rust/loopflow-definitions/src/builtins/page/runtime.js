@@ -1,0 +1,915 @@
+(function () {
+  "use strict";
+
+  const stampEl = document.getElementById("lf-page");
+  if (!stampEl) return;
+  let stamp;
+  try {
+    stamp = JSON.parse(stampEl.textContent || "{}");
+  } catch (_) {
+    return;
+  }
+
+  const pagePath = String(stamp.path || "scratch/page.html");
+  const buildId = String(stamp.build_id || "0");
+  const work = stamp.work || { kind: "repository" };
+  const directory = String(stamp.directory || "");
+  const storageKey = "lf-page:" + pagePath + ":" + buildId;
+
+  const desktopHandler =
+    window.webkit &&
+    window.webkit.messageHandlers &&
+    window.webkit.messageHandlers.loopflow;
+
+  let hostMode = desktopHandler ? "desktop" : "clipboard";
+  let socket = null;
+  let nextReqId = 1;
+  const pending = new Map();
+  let serverRestarted = false;
+
+  // Draft & receipt state.
+  // Notes, choices, multiselects, questions, and offline actions enter the reply queue.
+  // Executed direct `data-lf` receipts stay separate and only ride as a suffix on ⌘↩.
+  let state = {
+    notes: [],
+    choices: {},
+    multiselects: {},
+    questions: {},
+    offlineActions: [],
+    receipts: [],
+  };
+
+  function oneLine(text) {
+    return String(text || "")
+      .replace(/[\r\n\t\x00-\x1f]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function randomId() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return window.crypto.randomUUID();
+    }
+    return "lf-" + Math.random().toString(16).slice(2) + "-" + Date.now().toString(16);
+  }
+
+  function nearestSection(node) {
+    let el = node && node.nodeType === 1 ? node : node && node.parentElement;
+    while (el && el !== document.body) {
+      let prev = el.previousElementSibling;
+      while (prev) {
+        if (/^H[1-4]$/.test(prev.tagName)) return oneLine(prev.textContent);
+        prev = prev.previousElementSibling;
+      }
+      el = el.parentElement;
+    }
+    const h1 = document.querySelector("h1");
+    return h1 ? oneLine(h1.textContent) : "Top";
+  }
+
+  function queueItems() {
+    const items = [];
+    for (const note of state.notes) {
+      const ref =
+        "`" +
+        pagePath +
+        "` § " +
+        oneLine(note.section) +
+        ' › "' +
+        oneLine(note.quote) +
+        '" ' +
+        oneLine(note.text);
+      items.push({ id: "note:" + note.id, reference: ref, text: oneLine(note.text) });
+    }
+    for (const [group, entry] of Object.entries(state.choices)) {
+      if (!entry || !entry.value) continue;
+      const label = oneLine(entry.label || group);
+      const ref = "`" + pagePath + "` § " + label + ": " + oneLine(entry.value);
+      items.push({ id: "choice:" + group, reference: ref, text: oneLine(entry.value) });
+    }
+    for (const [group, entry] of Object.entries(state.multiselects)) {
+      if (!entry || !Array.isArray(entry.values) || entry.values.length === 0) continue;
+      const label = oneLine(entry.label || group);
+      const joined = entry.values.map(oneLine).join(", ");
+      const ref = "`" + pagePath + "` § " + label + ": " + joined;
+      items.push({ id: "multi:" + group, reference: ref, text: joined });
+    }
+    for (const [qid, entry] of Object.entries(state.questions)) {
+      if (!entry || !oneLine(entry.answer)) continue;
+      const label = oneLine(entry.label || qid);
+      const ans = oneLine(entry.answer);
+      const ref = "`" + pagePath + "` § " + label + ": " + ans;
+      items.push({ id: "question:" + qid, reference: ref, text: ans });
+    }
+    for (const act of state.offlineActions) {
+      const ref = "`" + pagePath + "` Run: " + oneLine(act.summary);
+      items.push({ id: "offline:" + act.id, reference: ref, text: oneLine(act.summary) });
+    }
+    return items;
+  }
+
+  function formatReplyMessage(items) {
+    if (!items.length) return "";
+    const parts = items.map((item, idx) => "(" + (idx + 1) + ") " + oneLine(item.reference));
+    let message = parts.join(" ");
+    if (state.receipts.length > 0) {
+      const ran = state.receipts
+        .map((r) => oneLine(r.kind + (r.summary ? " → " + r.summary : "")))
+        .join("; ");
+      message += " [already ran: " + ran + "]";
+    }
+    return oneLine(message);
+  }
+
+  function saveState() {
+    if (desktopHandler) {
+      const items = queueItems();
+      try {
+        desktopHandler.postMessage({
+          type: "sync",
+          path: pagePath,
+          build_id: buildId,
+          state: state,
+          items: items,
+        });
+      } catch (_) {}
+      return;
+    }
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(state));
+    } catch (_) {}
+  }
+
+  function loadBrowserState() {
+    if (desktopHandler) return;
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        applyState(parsed);
+      }
+    } catch (_) {}
+  }
+
+  function applyState(loaded) {
+    if (!loaded || typeof loaded !== "object") {
+      state = {
+        notes: [],
+        choices: {},
+        multiselects: {},
+        questions: {},
+        offlineActions: [],
+        receipts: [],
+      };
+    } else {
+      state = {
+        notes: Array.isArray(loaded.notes) ? loaded.notes : [],
+        choices: loaded.choices && typeof loaded.choices === "object" ? loaded.choices : {},
+        multiselects:
+          loaded.multiselects && typeof loaded.multiselects === "object" ? loaded.multiselects : {},
+        questions: loaded.questions && typeof loaded.questions === "object" ? loaded.questions : {},
+        offlineActions: Array.isArray(loaded.offlineActions) ? loaded.offlineActions : [],
+        receipts: Array.isArray(loaded.receipts) ? loaded.receipts : [],
+      };
+    }
+    syncControlsFromState();
+    renderNotesTray();
+    renderHighlights();
+    renderStrip();
+  }
+
+  // Desktop Swift bridge calls this on `ready` reply or after `ReviewComments.insert(into:)` clears.
+  window.__lfDesktopApplyState = function (loaded) {
+    applyState(loaded);
+  };
+
+  // --- Loopback WebSocket carrier ---
+
+  function loopbackWsUrl() {
+    if (window.location.protocol !== "http:" && window.location.protocol !== "https:") {
+      return null;
+    }
+    const parts = window.location.pathname.split("/").filter(Boolean);
+    if (parts.length < 3 || parts[1] !== "f") return null;
+    const token = parts[0];
+    const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return wsProto + "//" + window.location.host + "/" + token + "/machine";
+  }
+
+  function connectLoopback() {
+    if (desktopHandler) return;
+    const url = loopbackWsUrl();
+    if (!url) return;
+    let ws;
+    try {
+      ws = new WebSocket(url);
+    } catch (_) {
+      return;
+    }
+    let welcomed = false;
+    ws.addEventListener("open", () => {
+      ws.send(
+        JSON.stringify({
+          type: "hello",
+          revision: 10,
+          min_revision: 10,
+          client: {
+            kind: "page",
+            platform: "browser",
+            name: "review-page",
+            version: "1",
+          },
+        })
+      );
+    });
+    ws.addEventListener("message", (event) => {
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch (_) {
+        return;
+      }
+      if (msg.type === "welcome") {
+        welcomed = true;
+        socket = ws;
+        hostMode = "loopback";
+        serverRestarted = false;
+        hideBanner();
+        renderStrip();
+        return;
+      }
+      if ((msg.type === "response" || msg.type === "error") && msg.id && pending.has(msg.id)) {
+        const entry = pending.get(msg.id);
+        pending.delete(msg.id);
+        if (msg.type === "response") entry.resolve(msg.result);
+        else entry.reject(new Error(msg.message || msg.code || "Server error"));
+      }
+    });
+    ws.addEventListener("close", () => {
+      if (socket === ws) socket = null;
+      for (const [, entry] of pending) {
+        entry.reject(new Error("Connection closed"));
+      }
+      pending.clear();
+      if (welcomed) {
+        hostMode = "clipboard";
+        serverRestarted = true;
+        showBanner("lf server restarted; run lf page open " + pagePath);
+        renderStrip();
+      }
+    });
+    window.addEventListener("pagehide", () => {
+      try {
+        ws.close();
+      } catch (_) {}
+    });
+  }
+
+  function sendOperation(operation, requestId) {
+    if (desktopHandler) {
+      return new Promise((resolve, reject) => {
+        try {
+          const id = "op-" + nextReqId++;
+          window.__lfDesktopOpCallbacks = window.__lfDesktopOpCallbacks || {};
+          window.__lfDesktopOpCallbacks[id] = { resolve, reject };
+          const reply = desktopHandler.postMessage({
+            type: "operation",
+            id: id,
+            operation: operation,
+            request_id: requestId || null,
+          });
+          if (reply && typeof reply.then === "function") {
+            reply.then(
+              (result) => {
+                delete window.__lfDesktopOpCallbacks[id];
+                if (result && result.error) reject(new Error(result.error));
+                else resolve(result && result.result !== undefined ? result.result : result);
+              },
+              (err) => {
+                delete window.__lfDesktopOpCallbacks[id];
+                reject(err);
+              }
+            );
+          }
+        } catch (err) {
+          reject(err);
+        }
+      });
+    }
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error("Loopflow server is not connected"));
+    }
+    return new Promise((resolve, reject) => {
+      const id = "req-" + nextReqId++;
+      pending.set(id, { resolve, reject });
+      socket.send(
+        JSON.stringify({
+          type: "request",
+          id: id,
+          operation: operation,
+          select: null,
+          sender: null,
+          request_id: requestId || null,
+        })
+      );
+    });
+  }
+
+  // --- Banner ---
+
+  let bannerEl = null;
+  function showBanner(text) {
+    if (!bannerEl) {
+      bannerEl = document.createElement("div");
+      bannerEl.className = "lf-banner";
+      const main = document.querySelector("main") || document.body;
+      main.insertBefore(bannerEl, main.firstChild);
+    }
+    bannerEl.textContent = text;
+    bannerEl.hidden = false;
+  }
+
+  function hideBanner() {
+    if (bannerEl) bannerEl.hidden = true;
+  }
+
+  // --- Controls ---
+
+  function wireControls() {
+    // Toggle line notes
+    document.querySelectorAll("[data-notes-toggle]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const block = btn.closest(".lf-codeblock");
+        if (!block) return;
+        const hidden = block.classList.toggle("lf-notes-hidden");
+        btn.textContent = hidden ? "Show line notes" : "Hide line notes";
+      });
+    });
+
+    // Single select (`data-choice`)
+    document.querySelectorAll("[data-choice]").forEach((groupEl) => {
+      const group = groupEl.getAttribute("data-choice");
+      const label = groupEl.getAttribute("data-label") || group;
+      groupEl.querySelectorAll("button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const value = btn.getAttribute("data-value") || oneLine(btn.textContent);
+          if (state.choices[group] && state.choices[group].value === value) {
+            delete state.choices[group];
+          } else {
+            state.choices[group] = { label, value };
+          }
+          syncControlsFromState();
+          saveState();
+          renderStrip();
+        });
+      });
+    });
+
+    // Multi select (`data-multiselect`)
+    document.querySelectorAll("[data-multiselect]").forEach((groupEl) => {
+      const group = groupEl.getAttribute("data-multiselect");
+      const label = groupEl.getAttribute("data-label") || group;
+      groupEl.querySelectorAll("button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const value = btn.getAttribute("data-value") || oneLine(btn.textContent);
+          const current = (state.multiselects[group] && state.multiselects[group].values) || [];
+          const idx = current.indexOf(value);
+          const next = idx >= 0 ? current.filter((v) => v !== value) : current.concat([value]);
+          if (next.length === 0) delete state.multiselects[group];
+          else state.multiselects[group] = { label, values: next };
+          syncControlsFromState();
+          saveState();
+          renderStrip();
+        });
+      });
+    });
+
+    // Questions (`data-question`)
+    document.querySelectorAll("[data-question]").forEach((box) => {
+      const qid = box.getAttribute("data-question");
+      const label = box.getAttribute("data-label") || qid;
+      const input = box.querySelector("textarea, input");
+      if (!input) return;
+      input.addEventListener("input", () => {
+        const answer = input.value;
+        if (!oneLine(answer)) delete state.questions[qid];
+        else state.questions[qid] = { label, answer };
+        saveState();
+        renderStrip();
+      });
+    });
+
+    // Direct actions (`data-lf`)
+    document.querySelectorAll("[data-lf]").forEach((btn, idx) => {
+      const actionKey = btn.getAttribute("data-lf-id") || "action-" + idx;
+      let operationTemplate;
+      try {
+        operationTemplate = JSON.parse(btn.getAttribute("data-lf") || "{}");
+      } catch (_) {
+        return;
+      }
+      btn.addEventListener("click", () => {
+        openActionConfirm(btn, actionKey, operationTemplate);
+      });
+    });
+  }
+
+  function syncControlsFromState() {
+    document.querySelectorAll("[data-choice]").forEach((groupEl) => {
+      const group = groupEl.getAttribute("data-choice");
+      const selected = state.choices[group] && state.choices[group].value;
+      groupEl.querySelectorAll("button").forEach((btn) => {
+        const value = btn.getAttribute("data-value") || oneLine(btn.textContent);
+        const active = selected === value;
+        btn.classList.toggle("is-selected", active);
+        btn.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+    });
+    document.querySelectorAll("[data-multiselect]").forEach((groupEl) => {
+      const group = groupEl.getAttribute("data-multiselect");
+      const values = (state.multiselects[group] && state.multiselects[group].values) || [];
+      groupEl.querySelectorAll("button").forEach((btn) => {
+        const value = btn.getAttribute("data-value") || oneLine(btn.textContent);
+        const active = values.includes(value);
+        btn.classList.toggle("is-selected", active);
+        btn.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+    });
+    document.querySelectorAll("[data-question]").forEach((box) => {
+      const qid = box.getAttribute("data-question");
+      const input = box.querySelector("textarea, input");
+      if (!input) return;
+      const saved = state.questions[qid] ? state.questions[qid].answer : "";
+      if (input.value !== saved) input.value = saved;
+    });
+  }
+
+  // --- Direct `data-lf` actions ---
+
+  function summarizeOperation(op) {
+    const parts = [op.kind || "operation"];
+    for (const [k, v] of Object.entries(op)) {
+      if (k === "kind" || k === "directory" || k === "request_id" || v === null || v === false || v === "") {
+        continue;
+      }
+      if (Array.isArray(v) && v.length === 0) continue;
+      parts.push(k + "=" + (typeof v === "string" ? v : JSON.stringify(v)));
+    }
+    return parts.join(" ");
+  }
+
+  function materializeOperation(template, requestId) {
+    const copy = JSON.parse(JSON.stringify(template));
+    if (copy.request_id === "__LF_REQUEST_ID__") {
+      copy.request_id = requestId;
+    }
+    return copy;
+  }
+
+  function formatReceipt(kind, result) {
+    if (result && typeof result === "object") {
+      const taskId = (result.task && result.task.identifier) || result.identifier;
+      if (kind === "task.create" && taskId) return "Filed " + taskId;
+      if (result.delivery && result.delivery.sentence) return result.delivery.sentence;
+      if (taskId) return kind + " → " + taskId;
+      if (result.sentence) return result.sentence;
+    }
+    return "Ran " + kind;
+  }
+
+  function openActionConfirm(btn, actionKey, template) {
+    if (hostMode === "clipboard") {
+      const summary = summarizeOperation(template);
+      state.offlineActions.push({ id: randomId(), summary });
+      const note = document.createElement("span");
+      note.className = "lf-action-summary";
+      note.textContent = "Offline — added to reply";
+      btn.replaceWith(note);
+      saveState();
+      renderStrip();
+      return;
+    }
+
+    const requestId = randomId();
+    const wrap = document.createElement("span");
+    wrap.className = "lf-action-confirm";
+
+    const summary = document.createElement("span");
+    summary.className = "lf-action-summary";
+    summary.textContent = summarizeOperation(template);
+
+    const runBtn = document.createElement("button");
+    runBtn.type = "button";
+    runBtn.className = "lf-btn-accent";
+    runBtn.textContent = "Run";
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.textContent = "Cancel";
+
+    wrap.append(summary, runBtn, cancelBtn);
+    btn.replaceWith(wrap);
+
+    cancelBtn.addEventListener("click", () => {
+      wrap.replaceWith(btn);
+    });
+
+    function execute() {
+      runBtn.disabled = true;
+      runBtn.textContent = "Running…";
+      const op = materializeOperation(template, requestId);
+      sendOperation(op, requestId).then(
+        (result) => {
+          const text = formatReceipt(op.kind, result);
+          const idSummary =
+            (result && ((result.task && result.task.identifier) || result.identifier)) || text;
+          state.receipts.push({ key: actionKey, kind: op.kind, summary: idSummary });
+          const receipt = document.createElement("span");
+          receipt.className = "lf-action-receipt";
+          receipt.textContent = text;
+          wrap.replaceWith(receipt);
+          saveState();
+        },
+        (err) => {
+          const errWrap = document.createElement("span");
+          errWrap.className = "lf-action-error";
+          const msg = document.createElement("span");
+          msg.textContent = String(err && err.message ? err.message : err);
+          const retryBtn = document.createElement("button");
+          retryBtn.type = "button";
+          retryBtn.textContent = "Retry";
+          retryBtn.addEventListener("click", () => {
+            errWrap.replaceWith(wrap);
+            execute();
+          });
+          errWrap.append(msg, retryBtn);
+          wrap.replaceWith(errWrap);
+        }
+      );
+    }
+
+    runBtn.addEventListener("click", execute);
+  }
+
+  // --- Highlight-to-comment ---
+
+  let popover = null;
+
+  function dismissPopover() {
+    if (popover) {
+      popover.remove();
+      popover = null;
+    }
+  }
+
+  function wireSelectionNotes() {
+    document.addEventListener("mouseup", (event) => {
+      if (popover && popover.contains(event.target)) return;
+      if (stripEl && stripEl.contains(event.target)) return;
+      if (event.target.closest("button, textarea, input, .lf-action-confirm")) return;
+
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) {
+        dismissPopover();
+        return;
+      }
+      const quote = oneLine(sel.toString());
+      if (!quote) {
+        dismissPopover();
+        return;
+      }
+      const range = sel.getRangeAt(0).cloneRange();
+      const rect = range.getBoundingClientRect();
+      const section = nearestSection(range.commonAncestorContainer);
+      showNoteTrigger(rect, section, quote);
+    });
+  }
+
+  function showNoteTrigger(rect, section, quote) {
+    dismissPopover();
+    popover = document.createElement("div");
+    popover.className = "lf-note-popover";
+    popover.style.top = Math.max(8, Math.min(window.innerHeight - 120, rect.bottom + 8)) + "px";
+    popover.style.left = Math.max(8, Math.min(window.innerWidth - 280, rect.left)) + "px";
+
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "lf-btn-accent";
+    trigger.textContent = "Note";
+    trigger.addEventListener("click", () => {
+      popover.innerHTML = "";
+      const ta = document.createElement("textarea");
+      ta.placeholder = "Add note…";
+      const actions = document.createElement("div");
+      actions.className = "lf-note-popover-actions";
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", dismissPopover);
+      const save = document.createElement("button");
+      save.type = "button";
+      save.className = "lf-btn-accent";
+      save.textContent = "Save note";
+      function commit() {
+        const text = oneLine(ta.value);
+        if (!text) return;
+        state.notes.push({ id: randomId(), section, quote: quote.slice(0, 140), text });
+        dismissPopover();
+        try {
+          window.getSelection().removeAllRanges();
+        } catch (_) {}
+        renderNotesTray();
+        renderHighlights();
+        saveState();
+        renderStrip();
+      }
+      save.addEventListener("click", commit);
+      ta.addEventListener("keydown", (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+          e.preventDefault();
+          commit();
+        } else if (e.key === "Escape") {
+          dismissPopover();
+        }
+      });
+      actions.append(cancel, save);
+      popover.append(ta, actions);
+      ta.focus();
+    });
+    popover.append(trigger);
+    document.body.append(popover);
+  }
+
+  let trayEl = null;
+  function renderNotesTray() {
+    if (!state.notes.length) {
+      if (trayEl) trayEl.remove();
+      trayEl = null;
+      return;
+    }
+    if (!trayEl) {
+      trayEl = document.createElement("section");
+      trayEl.className = "lf-notes-tray";
+      const main = document.querySelector("main") || document.body;
+      main.append(trayEl);
+    }
+    trayEl.innerHTML = "";
+    const heading = document.createElement("h3");
+    heading.textContent = "Your notes";
+    trayEl.append(heading);
+    for (const note of state.notes) {
+      const chip = document.createElement("div");
+      chip.className = "lf-note-chip";
+      const body = document.createElement("span");
+      body.textContent = note.section + ' › "' + note.quote + '" — ' + note.text;
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "lf-btn-quiet";
+      del.textContent = "Remove";
+      del.addEventListener("click", () => {
+        state.notes = state.notes.filter((n) => n.id !== note.id);
+        renderNotesTray();
+        renderHighlights();
+        saveState();
+        renderStrip();
+      });
+      chip.append(body, del);
+      trayEl.append(chip);
+    }
+  }
+
+  function renderHighlights() {
+    if (typeof Highlight === "undefined" || !CSS || !CSS.highlights) return;
+    if (!state.notes.length) {
+      CSS.highlights.delete("lf-note");
+      return;
+    }
+    const ranges = [];
+    const main = document.querySelector("main") || document.body;
+    const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
+    let n;
+    while ((n = walker.nextNode())) {
+      if (n.parentElement && n.parentElement.closest(".lf-notes-tray, .lf-strip, .lf-note-popover")) {
+        continue;
+      }
+      textNodes.push(n);
+    }
+    for (const note of state.notes) {
+      const needle = note.quote;
+      if (!needle) continue;
+      for (const node of textNodes) {
+        const idx = node.nodeValue.indexOf(needle);
+        if (idx >= 0) {
+          const r = document.createRange();
+          r.setStart(node, idx);
+          r.setEnd(node, idx + needle.length);
+          ranges.push(r);
+          break;
+        }
+      }
+    }
+    if (ranges.length) CSS.highlights.set("lf-note", new Highlight(...ranges));
+    else CSS.highlights.delete("lf-note");
+  }
+
+  // --- Bottom reply strip ---
+
+  let stripEl = null;
+  let stripStatusText = "";
+  let stripStatusKind = "";
+
+  function steerTargetLabel() {
+    if (work.kind === "task" && work.issue) return work.issue;
+    if (work.kind === "wave" && work.wave) return "wave " + work.wave;
+    if (work.kind === "session" && work.session) return "session";
+    return "repository";
+  }
+
+  function buildSteerOperation(message) {
+    if (work.kind === "task" && work.issue) {
+      return {
+        kind: "task.steer",
+        directory: directory,
+        issue: work.issue,
+        message: message,
+      };
+    }
+    return {
+      kind: "session.steer",
+      directory: directory,
+      session: work.kind === "session" ? work.session || null : null,
+      wave: work.kind === "wave" ? work.wave || null : null,
+      message: message,
+    };
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise((resolve, reject) => {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.append(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+        resolve();
+      } catch (err) {
+        reject(err);
+      } finally {
+        ta.remove();
+      }
+    });
+  }
+
+  function clearDrafts() {
+    state.notes = [];
+    state.choices = {};
+    state.multiselects = {};
+    state.questions = {};
+    state.offlineActions = [];
+    syncControlsFromState();
+    renderNotesTray();
+    renderHighlights();
+    saveState();
+    renderStrip();
+  }
+
+  function submitReply() {
+    if (desktopHandler) return;
+    const items = queueItems();
+    if (!items.length) return;
+    const message = formatReplyMessage(items);
+
+    if (hostMode === "loopback") {
+      stripStatusText = "Sending…";
+      stripStatusKind = "";
+      renderStrip();
+      const op = buildSteerOperation(message);
+      sendOperation(op, randomId()).then(
+        (result) => {
+          const sentence =
+            (result && result.delivery && result.delivery.sentence) ||
+            "Steer saved.";
+          stripStatusText = sentence;
+          stripStatusKind = "ok";
+          clearDrafts();
+        },
+        (err) => {
+          stripStatusText = String(err && err.message ? err.message : err);
+          stripStatusKind = "error";
+          renderStrip();
+        }
+      );
+      return;
+    }
+
+    copyText(message).then(
+      () => {
+        stripStatusText = serverRestarted
+          ? "Copied reply (server restarted)"
+          : "Copied reply";
+        stripStatusKind = "ok";
+        renderStrip();
+      },
+      (err) => {
+        stripStatusText = "Copy failed: " + String(err && err.message ? err.message : err);
+        stripStatusKind = "error";
+        renderStrip();
+      }
+    );
+  }
+
+  function renderStrip() {
+    if (desktopHandler) {
+      if (stripEl) stripEl.hidden = true;
+      return;
+    }
+    const items = queueItems();
+    if (!items.length && !stripStatusText) {
+      if (stripEl) stripEl.hidden = true;
+      return;
+    }
+    if (!stripEl) {
+      stripEl = document.createElement("div");
+      stripEl.className = "lf-strip";
+      document.body.append(stripEl);
+    }
+    stripEl.hidden = false;
+    stripEl.innerHTML = "";
+
+    const count = document.createElement("span");
+    count.textContent =
+      items.length === 1 ? "1 item" : items.length + " items";
+    if (items.length > 0) stripEl.append(count);
+
+    if (stripStatusText) {
+      const status = document.createElement("span");
+      status.className =
+        "lf-strip-status" +
+        (stripStatusKind === "error"
+          ? " is-error"
+          : stripStatusKind === "ok"
+          ? " is-ok"
+          : "");
+      status.textContent = stripStatusText;
+      stripEl.append(status);
+    }
+
+    if (items.length > 0) {
+      const clearBtn = document.createElement("button");
+      clearBtn.type = "button";
+      clearBtn.className = "lf-btn-quiet";
+      clearBtn.textContent = "Clear";
+      clearBtn.addEventListener("click", () => {
+        stripStatusText = "";
+        stripStatusKind = "";
+        clearDrafts();
+      });
+
+      const sendBtn = document.createElement("button");
+      sendBtn.type = "button";
+      sendBtn.className = "lf-btn-accent";
+      sendBtn.textContent =
+        hostMode === "loopback"
+          ? "Steer " + steerTargetLabel() + " ⌘↩"
+          : "Copy reply ⌘↩";
+      sendBtn.addEventListener("click", submitReply);
+      stripEl.append(clearBtn, sendBtn);
+    }
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      if (popover && popover.contains(document.activeElement)) return;
+      if (!desktopHandler && queueItems().length > 0) {
+        event.preventDefault();
+        submitReply();
+      }
+    }
+  });
+
+  wireControls();
+  wireSelectionNotes();
+
+  if (desktopHandler) {
+    try {
+      const reply = desktopHandler.postMessage({
+        type: "ready",
+        path: pagePath,
+        build_id: buildId,
+      });
+      if (reply && typeof reply.then === "function") {
+        reply.then((loaded) => applyState(loaded), () => {});
+      }
+    } catch (_) {}
+  } else {
+    loadBrowserState();
+    connectLoopback();
+  }
+})();

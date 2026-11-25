@@ -1,8 +1,7 @@
 // Remove Wave: renders `lf wave remove --preview --json` verbatim, then removes.
 // A failure keeps the sheet open with the error and Retry; removal is idempotent,
 // so Retry finishes whatever the interrupted run left. A receipt with leftovers
-// (an Initiative still live or uncommitted files) stays open with
-// the same lines the CLI prints.
+// (uncommitted files) stays open with the same lines the CLI prints.
 
 import SwiftUI
 import Loopflow

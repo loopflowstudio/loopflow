@@ -615,11 +615,6 @@ impl SqliteStore {
                  WHERE ended_at IS NULL AND pid IS NOT NULL
              UNION ALL SELECT 'Graph step',lf_process_id,pid,os_started_at,started_at
                  FROM graph_process_steps WHERE ended_at IS NULL AND pid IS NOT NULL
-             UNION ALL SELECT 'Project activation',project_activation_lf_process_id,
-                 project_activation_pid,project_activation_os_started_at,
-                 project_activation_started_at FROM waves
-                 WHERE project_activation_lf_process_id IS NOT NULL AND project_activation_ended_at IS NULL
-                     AND project_activation_pid IS NOT NULL
              UNION ALL SELECT 'Task run',lf_process_id,run_pid,run_os_started_at,NULL
                  FROM task_graphs WHERE lf_process_id IS NOT NULL AND run_pid IS NOT NULL
              UNION ALL SELECT 'CI repair',repair_lf_process_id,repair_pid,repair_os_started_at,

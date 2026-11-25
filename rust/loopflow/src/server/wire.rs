@@ -151,9 +151,6 @@ mod tests {
                 "../../../loopflow-execution/tests/fixtures/dto/server/session_status.json"
             ),
             include_str!(
-                "../../../loopflow-execution/tests/fixtures/dto/server/wave_plan_bind.json"
-            ),
-            include_str!(
                 "../../../loopflow-execution/tests/fixtures/dto/server/wave_plan_connect.json"
             ),
             include_str!(

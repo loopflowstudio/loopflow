@@ -6,7 +6,6 @@
 //! then proves the shared Wave status projection honors the original reproduction
 //! end to end from a Wave agent's environment.
 
-use crate::test_linear_input::{InventoryFixture, SeedLinearSqlite};
 use std::path::Path;
 use std::process::Command;
 
@@ -148,8 +147,7 @@ async fn resolver_matrix_agrees_across_every_environment() {
     ));
 }
 
-/// Seed a machine home with one PM-linked wave and a fresh cache-only snapshot,
-/// plus a separate repo directory the commands run inside.
+/// Register the Wave in the repository the commands run inside.
 fn seed(home: &Path, repo: &Path, wave_name: &str) -> Wave {
     std::fs::create_dir_all(home).expect("home");
     std::fs::create_dir_all(repo).expect("repo");
@@ -161,17 +159,6 @@ fn seed(home: &Path, repo: &Path, wave_name: &str) -> Wave {
         repo.display().to_string(),
     );
     loopflow_execution::work::wave::bootstrap::upsert_wave(&store, &wave).expect("register wave");
-    store
-        .seed_inventory(&InventoryFixture {
-            wave_id: wave.id().clone(),
-            initiative: "initiative-1".to_string(),
-            synced_at: chrono::Utc::now().timestamp(),
-            snapshot: crate::test_linear_input::Inventory {
-                projects: vec![],
-                items: vec![],
-            },
-        })
-        .expect("seed pm snapshot");
     wave
 }
 

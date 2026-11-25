@@ -195,10 +195,12 @@ pub fn place_task(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // These effects share the promotion transaction.
 pub(crate) fn promote_task(
     store: &SqliteStore,
     task_id: &TaskId,
     creation: Option<&NewTask>,
+    creation_wave: Option<&loopflow_model::id::WaveId>,
     placement: Option<&(PathBuf, TaskPr)>,
     session: Option<&crate::session::LfSession>,
     destination: Option<&Path>,
@@ -214,13 +216,14 @@ pub(crate) fn promote_task(
     };
     loop {
         let scope = match creation {
-            Some(input) => store.new_task_scope(&input.repository_id, input.project_id.as_ref())?,
+            Some(input) => store.promotion_scope(input, creation_wave)?,
             None => store.task_scope(task_id)?,
         };
         let facts = acquire(store, scope)?;
         if let Some(result) = store.promote_task_prepared(
             task_id,
             creation,
+            creation_wave,
             placement,
             session,
             destination,

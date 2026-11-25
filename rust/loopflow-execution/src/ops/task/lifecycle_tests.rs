@@ -178,9 +178,9 @@ fi
     }, || {
         let planning = runtime.block_on(crate::ops::linear::test_fixture::refresh_task_input(repo.path(), "FIX-1", LinearRefresh::Force)).unwrap();
         store.sqlite.seed_inventory(&crate::test_linear_input::InventoryFixture {
-            wave_id: wave.id().clone(), initiative: "initiative-1".into(),
+            wave_id: wave.id().clone(),
             synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-            snapshot: serde_json::from_value(json!({"projects": [planning.project], "items": [planning.item]})).unwrap(),
+            snapshot: loopflow_storage::planning::ProjectInventory { project: planning.project.unwrap(), items: vec![planning.item] },
         }).unwrap();
         let log_path = home.path().join("graph.log");
         let log = fs::File::create(&log_path).unwrap();
@@ -318,7 +318,7 @@ fn fixture(
         repo.path().canonicalize().unwrap().display().to_string(),
     );
     let project = Project {
-        id: ProjectId::new(),
+        id: ProjectId::for_wave(wave.id()),
 
         tracker_id: Some(LinearProjectId::new("project-1").unwrap()),
         summary: String::new(),
@@ -326,8 +326,6 @@ fn fixture(
         name: "Project".into(),
         status: loopflow_storage::work::project::ProjectStatus::Started,
         description: String::new(),
-        krs: Vec::new(),
-        metric_targets: Vec::new(),
         tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
@@ -395,14 +393,6 @@ fn fixture(
     runtime.block_on(async {
         store.create_wave(&wave).await.unwrap();
         store.create_project(&project).await.unwrap();
-        loopflow_storage::sqlite::project_selection::write_project_binding(
-            &store.sqlite,
-            wave.id(),
-            None,
-            project.tracker_id.as_ref().unwrap().as_str(),
-            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
-        )
-        .unwrap();
         store.seed_task(&task, &pr).await.unwrap();
         store
             .upsert_provider_token(&ProviderToken {

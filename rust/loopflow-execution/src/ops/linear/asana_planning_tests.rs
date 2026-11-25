@@ -264,7 +264,7 @@ async fn serve(state: Shared) -> (String, tokio::task::JoinHandle<()>) {
 }
 
 async fn asana_repo(fixture: &Fixture) -> PathBuf {
-    let (repo, _) = fixture.planning_repo().await;
+    let (repo, _) = fixture.local_planning_repo().await;
     std::fs::write(
         repo.join(".lf/config.yaml"),
         format!("planning:\n  provider: asana\n  team: \"https://app.asana.com/0/team/{TEAM}/overview\"\n"),
@@ -323,10 +323,13 @@ fn asana_task_create_mirrors_task_under_its_loopflow_identity() {
         assert_eq!(task["name"], "Ship the Asana provider");
         // The Task lives in the team project Loopflow made for the repository.
         let projects = runtime.block_on(state.lock()).projects.clone();
-        assert_eq!(projects.len(), 1);
-        assert_eq!(projects[0]["gid"], PROJECT);
-        assert_eq!(projects[0]["name"], "fixture");
-        assert_eq!(task["memberships"], json!([{"project": {"gid": PROJECT}}]));
+        let team: Vec<_> = projects.iter().filter(|p| p["name"] == "fixture").collect();
+        assert_eq!(team.len(), 1);
+
+        assert_eq!(
+            task["memberships"],
+            json!([{"project": {"gid": team[0]["gid"]}}])
+        );
         // Asana renders rich text, so markdown arrives formatted.
         assert_eq!(
             task["html_notes"],
@@ -557,7 +560,17 @@ fn asana_tasks_coworkers_create_become_tasks() {
         let asana = runtime.block_on(state.lock());
         let id = task.tracker_id.as_ref().unwrap().as_str();
         assert_eq!(asana.tasks[id]["external"]["gid"], id);
-        assert_eq!(asana.projects.len(), 2, "the existing project was reused");
+        // The existing team project was reused. The fixture Wave's Project is
+        // made only by a command on that Wave or a Task sent into it.
+        assert_eq!(asana.projects.len(), 2);
+        assert_eq!(
+            asana
+                .projects
+                .iter()
+                .filter(|p| p["name"] == "fixture")
+                .count(),
+            1
+        );
     });
 }
 
@@ -652,16 +665,82 @@ fn asana_wave_projects_become_team_projects_holding_their_tasks() {
             .collect();
         assert_eq!(members, [&repository["gid"], &wave_project["gid"]]);
 
-        // Read back, the Task keeps its Project.
-        runtime.block_on(crate::ops::tracker_events::sync_repository(
-            &fixture.store,
-            repo.to_str().unwrap(),
-        ));
+        {
+            let mut asana = runtime.block_on(state.lock());
+            let modified = asana.tick();
+            let task = asana.tasks.get_mut(id.as_str()).unwrap();
+            task["name"] = json!("Updated in Asana");
+            task["modified_at"] = json!(modified);
+        }
+        let wave = runtime
+            .block_on(fixture.store.get_wave(&project.wave_id))
+            .unwrap()
+            .unwrap();
+        runtime
+            .block_on(crate::ops::planning_sync::refresh_wave(
+                &wave,
+                crate::ops::tracker::queued_tracker(repo).unwrap(),
+            ))
+            .unwrap();
         let local = runtime
             .block_on(fixture.store.get_task(&saved.id))
             .unwrap()
             .unwrap();
+        assert_eq!(local.title, "Updated in Asana");
         assert_eq!(local.project_id, saved.project_id);
+    });
+}
+
+#[test]
+fn adding_the_wave_again_binds_the_asana_project_a_lost_create_reply_left() {
+    with_asana(|runtime, fixture, repo, state| {
+        let wave = fixture
+            .store
+            .sqlite
+            .list_waves(None)
+            .unwrap()
+            .into_iter()
+            .find(|wave| wave.slug() == "product")
+            .unwrap();
+        let project = fixture.store.sqlite.wave_project(wave.id()).unwrap();
+        let id = crate::ops::tracker::creation_id(project.as_str()).unwrap();
+        // Asana takes no caller id; a create whose reply was lost left a
+        // project carrying it in its footer.
+        runtime.block_on(state.lock()).projects.push(json!({
+            "gid": "1200000000000099", "name": "Product",
+            "html_notes": format!("<body>Loopflow ID: {id}</body>"),
+            "modified_at": "2026-10-19T11:00:00.000Z",
+        }));
+        runtime
+            .block_on(crate::ops::wave_lifecycle::add(repo, "product", None))
+            .unwrap();
+        let saved = crate::ops::task::task_create(
+            repo,
+            Some("product"),
+            Some("Filed on this Machine".into()),
+            None,
+            crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
+            None,
+        )
+        .unwrap();
+        let bound = runtime
+            .block_on(fixture.store.get_project(&project))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            bound.tracker_id.as_ref().map(|id| id.as_str()),
+            Some(id.as_str())
+        );
+        let asana = runtime.block_on(state.lock());
+        // Only the repository's team project was made beside the existing one.
+        assert_eq!(asana.projects.len(), 2);
+        let task = &asana.tasks[saved.tracker_id.as_ref().unwrap().as_str()];
+        assert!(task["memberships"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|member| member["project"]["gid"] == "1200000000000099"));
     });
 }
 
@@ -746,7 +825,12 @@ fn owned_asana_projects_in_one_team_receive_their_own_direction() {
                 imported["memberships"] = json!([{"project":{"gid":replacement}}]);
                 asana.tasks.insert("replacement-task".into(), imported);
             }
-            crate::ops::tracker_events::refresh_repository(store, repo.to_str().unwrap()).await;
+            crate::ops::tracker_events::refresh_repository(
+                store,
+                repo.to_str().unwrap(),
+                crate::ops::tracker::drain::Scope::All,
+            )
+            .await;
             assert!(store
                 .list_tasks(None)
                 .await

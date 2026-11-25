@@ -1,22 +1,15 @@
 {
-  "projects": [
-    {
-      "id": "current",
-      "revision": null,
-      "slug": "current",
-      "name": "Current",
-      "summary": "",
-      "metric_targets": [],
-      "status": "started",
-      "krs": [],
-      "initiative_ids": [
-        "initiative"
-      ],
-      "team_ids": [
-        "team"
-      ]
-    }
-  ],
+  "project": {
+    "id": "current",
+    "revision": null,
+    "slug": "current",
+    "name": "Current",
+    "summary": "",
+    "status": "started",
+    "team_ids": [
+      "team"
+    ]
+  },
   "items": [
     {
       "id": "LOO-318",

@@ -14,7 +14,7 @@ use futures_util::{stream, StreamExt};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
-use super::tracker::message;
+use super::tracker::{drain::Scope, message};
 use super::OpsResult;
 use crate::store::{SharedStore, Store};
 use loopflow_model::durable::TaskId;
@@ -196,20 +196,23 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
                     .to_string(),
             )
         } else {
-            // Ingestion resolves the returned Project against authored Wave mappings.
-            waves
-                .iter()
-                .find(|wave| {
-                    super::linear::read_initiative(std::path::Path::new(wave.repo()), wave.slug())
-                        .is_some_and(|initiative| {
-                            project
-                                .as_ref()
-                                .is_some_and(|project| project.initiative_ids.contains(&initiative))
-                        })
-                })
-                .map(|wave| wave.repo().to_owned())
-                // An item in no Wave Project is a standalone Task of this repository.
-                .or_else(|| Some(repository.to_owned()))
+            // An issue in the Project a Wave links is that Wave's; any other
+            // issue is this repository's, and ingestion imports it only when
+            // it is in no Project at all.
+            let linked = match &project {
+                Some(project) => store
+                    .project_by_tracker_id(&project.id)
+                    .await
+                    .map_err(message)?,
+                None => None,
+            };
+            match linked {
+                Some(linked) => waves
+                    .iter()
+                    .find(|wave| wave.id() == &linked.wave_id)
+                    .map(|wave| wave.repo().to_owned()),
+                None => Some(repository.to_owned()),
+            }
         };
         let Some(owner) = owner else { continue };
         super::tracker::ingest_task(
@@ -381,23 +384,23 @@ async fn check_repository_bounded(store: &Store, repository: &str, fresh_for: i6
 
 /// Bound on-demand work and retain local planning when Linear is unavailable.
 pub async fn sync_repository(store: &Store, repository: &str) -> bool {
-    sync_scope(store, repository, fresh_for(repository)).await
+    sync_scope(store, repository, fresh_for(repository), Scope::All).await
 }
 
 /// An explicit planning refresh: the scope delta, however recently a check
 /// started, then pending deliveries. It runs before the Wave inventory, which
 /// would otherwise learn a remote completion first and leave the delta skipping
 /// that finished Task's other changes, such as a comment made alongside it.
-pub(crate) async fn refresh_repository(store: &Store, repository: &str) -> bool {
-    sync_scope(store, repository, 0).await
+pub(crate) async fn refresh_repository(store: &Store, repository: &str, scope: Scope<'_>) -> bool {
+    sync_scope(store, repository, 0, scope).await
 }
 
-async fn sync_scope(store: &Store, repository: &str, fresh_for: i64) -> bool {
+async fn sync_scope(store: &Store, repository: &str, fresh_for: i64, scope: Scope<'_>) -> bool {
     let changed = check_repository_bounded(store, repository, fresh_for).await;
     if let Err(error) = super::tracker::drain::drain_repository(
         store,
         repository,
-        super::tracker::drain::Scope::All,
+        scope,
         super::tracker::drain::Bound::PASS,
     )
     .await

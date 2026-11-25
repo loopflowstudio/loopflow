@@ -63,7 +63,6 @@ pub const MOVED: &[Moved] = &[
     moved(&["desktop", "sessions"], &[], &["session", "list"]),
     moved(&["desktop", "wave"], &[], &["wave", "plan"]),
     moved(&["wave", "status"], &["--sync"], &["wave", "sync"]),
-    moved(&["wave", "bind-project"], &[], &["wave", "plan", "bind"]),
     moved(&["wave", "connect"], &[], &["wave", "plan", "connect"]),
     moved(&["wave", "reteam"], &[], &["wave", "plan", "reteam"]),
     moved(&["desktop", "plan"], &[], &["plan", "list"]),

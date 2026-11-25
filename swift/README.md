@@ -204,8 +204,9 @@ open only a Task's conversation and never read Desktop's layouts.
 Repository and Wave
 entry shows their conversation, opened on load or on selection.
 Waves pair that conversation with their objective, status, planning and
-full Task inventory, followed by their metrics. **Project history** and **Workflow**
-open the existing planning inspectors. The sidebar starts at 240 points wide;
+full Task inventory. The Wave header names its Project, linked to the tracker
+when the tracker gave a URL. With a default Graph, the Wave backlog menu's
+**Workflow** opens it in the catalogue inspector. The sidebar starts at 240 points wide;
 drag its edge to resize or use the title-bar button or **⌘\** to toggle it.
 Its scroll position survives Wave and Task navigation. Ordinary launch restores
 the selected Work.
@@ -907,7 +908,7 @@ Add `session` to open an existing Task conversation in its terminal pane. A
 missing or unrelated Session leaves the current workspace intact and offers Retry.
 Opening a conversation does not complete a review or start a Task Graph.
 
-Wave details show the objective, the plan and its KRs, the Wave's Workflow,
+Wave details show the objective, the Wave's Project and its status, its Workflow,
 current Tasks and plan history. Completed Tasks start hidden.
 **Completed** adds the last 7 days. Click **7 Days** to edit the number inline;
 Enter or clicking away applies it, Escape cancels. Enter **0** for **All Tasks**
@@ -923,7 +924,7 @@ Task previews use the same template view until an invocation exists, including
 Tasks with independent conversations. Captured invocations keep their expanded
 graph. Changing a template resets its disclosure; it does not change a capture.
 A Wave's planning adds no navigation tier. Task
-details include the directive, recorded condition, current KRs, Activity, PR and
+details include the directive, recorded condition, Activity, PR and
 worktree references. Choose **Edit directive**, then
 **Save directive** to write through the shared planning API. Failed saves retain your
 text; an accepted write with unavailable readback retains the draft and explains
@@ -1017,9 +1018,7 @@ Portfolio retains the Wave inspectors. A click on a Task's row there, on the
 roadmap, the Now list or a Wave's page, opens it in its
 repository window rather than creating another Task workspace in a sheet.
 A Wave on the roadmap is a section under its name, divided from the next by a
-line. A Wave's page shows its name, objective and key results, every Task, then
-its metric table. A metric whose contract has an issue shows a notice above the
-table with the count and each issue's summary; **Copy** copies the summaries.
+line. A Wave's page shows its name and objective, followed by its Project and Tasks.
 Wave Chat loads the active backing's bounded history before SSE, keeps it visible
 through reconnects, and rolls equivalent operational failures into one
 disclosed notice. Cold launch does not start a chat transcript read.
@@ -1080,7 +1079,7 @@ Session or explicit zoom without acquiring a provider.
 - `LoopflowMac/WorkModel.swift` — shared readings, stable selection, and local scope
 - `LoopflowMac/Views/WavesView.swift` — Portfolio membership and Wave inspectors
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave planning list and lifecycle controls
-- `LoopflowMac/Views/WaveDetailPane.swift` — streamed Wave plan, Tasks and metrics
+- `LoopflowMac/Views/WaveDetailPane.swift` — streamed Wave plan and Tasks
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
 - `LoopflowMac/Services/RegistryQueryLocal.swift` — shared Work through the local server, which routes each Task to its Machine; terminal launches through the CLI
@@ -1279,14 +1278,10 @@ launching a window. Display/terminal integration is opt-in with
 `LOOPFLOW_NATIVE_TESTS=1`; use it for configured-host diagnostics or demo.
 See [Testing](#testing) for the full commands and CLI prerequisite.
 
-Wave opening and Retry call `WorkModel.activateProject` from both WorkSurface and
-Portfolio. The command outlives the opened view; it never refreshes a view directly.
-Both surfaces show “Preparing Project…” while that Wave's planning command is pending,
-retaining cached planning. Retry appears after failure. An unfinished persisted
-Process without a pending local command remains an unknown outcome.
-The Work stream supplies `project_readiness`: the selected plan, dated accepted
-facts, unresolved transition and the exact activation Process's outcome. Empty default
-Graphs render no template section. Command transport errors remain scoped to the Wave.
+Opening a Wave reads its Project and Tasks from the Work stream without running
+a planning command.
+Empty default Graphs render no template section. Command transport errors remain
+scoped to the Wave.
 
 Work observation and navigation project durable Waves, their planning and Tasks with
 associated Sessions and Processes; they introduce no additional Work kinds.

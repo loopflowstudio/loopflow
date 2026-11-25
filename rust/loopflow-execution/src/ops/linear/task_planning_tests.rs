@@ -9,6 +9,7 @@ use serde_json::json;
 
 use super::test_fixture::{now, Fixture, PlanningEnvironment};
 use super::LINEAR_TEST_CONTEXT;
+use crate::ops::wave_lifecycle;
 use crate::ops::NullProgress;
 use loopflow_model::durable::WorkStatus;
 use loopflow_storage::sqlite::tracker_actions::ActionPhase;
@@ -17,6 +18,388 @@ use loopflow_storage::work::task::{
 };
 
 use crate::test_support::planning_tasks::*;
+
+#[test]
+fn connect_links_a_new_wave_without_creating_a_linear_project() {
+    with_planning_task(|runtime, _, repo, _, state| {
+        super::test_fixture::commit_planning_repo(repo);
+        let existing = json!({
+            "id": "refunds-project", "name": "Refunds", "description": "", "content": "",
+            "status": {"type": "started"}, "teams": {"nodes": [{"id": "team-1"}]}
+        });
+        {
+            let mut provider = runtime.block_on(state.lock());
+            provider.export_mode = true;
+            provider.extra_projects.push(existing.clone());
+        }
+        let result = super::connect(
+            repo,
+            &super::LinearInitOptions {
+                wave: Some("ops".into()),
+                project: Some("Refunds".into()),
+                ..Default::default()
+            },
+            &NullProgress,
+        )
+        .unwrap();
+
+        assert_eq!(result.project_id.as_deref(), existing["id"].as_str());
+        assert!(!result.created);
+        let provider = runtime.block_on(state.lock());
+        assert!(!provider.operations.contains_key("DeliverProjectCreation"));
+        assert_eq!(provider.extra_projects, [existing]);
+    });
+}
+
+#[test]
+fn connect_adopts_an_authored_wave_with_one_project() {
+    with_planning_task(|runtime, fixture, repo, _, state| {
+        let id = loopflow_model::id::WaveId::new();
+        let tracker_id = "f5c48a68-d77e-4d73-a02a-c72bb536bf97";
+        let directory = repo.join(".lf/wave/refunds");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("config.yaml"), format!("id: {id}\n")).unwrap();
+        super::test_fixture::commit_planning_repo(repo);
+        let head = crate::git::git_stdout(repo, &["rev-parse", "HEAD"]).unwrap();
+        runtime.block_on(async {
+            let mut provider = state.lock().await;
+            provider.export_mode = true;
+            provider.extra_projects.push(json!({
+                "id": tracker_id, "name": "Refunds", "description": "", "content": "",
+                "status": {"type": "started"}, "teams": {"nodes": [{"id": "team-1"}]}
+            }));
+            let mut issue = provider.issues[0].clone();
+            issue["id"] = json!("refunds-issue");
+            issue["identifier"] = json!("FIX-2");
+            issue["project"] = json!({"id": tracker_id, "name": "Refunds"});
+            provider.issues.push(issue);
+        });
+
+        let connected = super::connect(
+            repo,
+            &super::LinearInitOptions {
+                wave: Some("refunds".into()),
+                project: Some(tracker_id.into()),
+                ..Default::default()
+            },
+            &NullProgress,
+        )
+        .unwrap();
+        assert_eq!(connected.project_id.as_deref(), Some(tracker_id));
+        let project = fixture.store.sqlite.project_of_wave(&id).unwrap().unwrap();
+        assert_eq!(
+            project.id,
+            loopflow_model::durable::ProjectId::for_wave(&id)
+        );
+        assert_eq!(project.tracker_id.unwrap().as_str(), tracker_id);
+        let task = runtime
+            .block_on(fixture.store.get_task_by_issue("refunds-issue"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.project_id.as_ref(), Some(&project.id));
+        assert!(!runtime
+            .block_on(state.lock())
+            .operations
+            .contains_key("DeliverProjectCreation"));
+        assert_eq!(
+            crate::git::git_stdout(repo, &["rev-parse", "HEAD"]).unwrap(),
+            head
+        );
+        assert_eq!(
+            crate::git::git_stdout(repo, &["status", "--porcelain"]).unwrap(),
+            ""
+        );
+    });
+}
+
+#[test]
+fn connect_naming_a_missing_project_adds_no_wave() {
+    with_planning_task(|runtime, fixture, repo, _, state| {
+        super::test_fixture::commit_planning_repo(repo);
+        runtime.block_on(state.lock()).export_mode = true;
+        let error = super::connect(
+            repo,
+            &super::LinearInitOptions {
+                wave: Some("ops".into()),
+                project: Some("Refunds".into()),
+                ..Default::default()
+            },
+            &NullProgress,
+        )
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("no Linear Project matches `Refunds`"));
+        let locator = crate::work::wave::discover(repo, "ops").unwrap();
+        assert!(runtime
+            .block_on(fixture.store.get_wave_at(&locator))
+            .unwrap()
+            .is_none());
+        assert!(!repo.join(".lf/wave/ops").exists());
+    });
+}
+
+#[test]
+fn connect_can_claim_another_waves_project_only_after_removal() {
+    with_planning_task(|runtime, fixture, repo, _, state| {
+        super::test_fixture::commit_planning_repo(repo);
+        let head = || crate::git::git_stdout(repo, &["rev-parse", "HEAD"]).unwrap();
+        let before = head();
+        runtime.block_on(state.lock()).extra_projects.push(json!({
+            "id": "project-1", "name": "Billing", "description": "", "content": "",
+            "status": {"type": "started"},
+            "teams": {"nodes": [{"id": "team-1"}]}
+        }));
+
+        let options = |wave: &str| super::LinearInitOptions {
+            wave: Some(wave.into()),
+            project: Some("Billing".into()),
+            ..Default::default()
+        };
+        let error = super::connect(repo, &options("payments"), &NullProgress).unwrap_err();
+        assert!(
+            error.to_string().contains("already linked to wave/product"),
+            "{error}"
+        );
+        let locator = crate::work::wave::discover(repo, "payments").unwrap();
+        assert!(runtime
+            .block_on(fixture.store.get_wave_at(&locator))
+            .unwrap()
+            .is_none());
+        assert!(!repo.join(".lf/wave/payments").exists());
+        assert_eq!(head(), before);
+
+        let mut issue = runtime.block_on(state.lock()).issues[0].clone();
+        wave_lifecycle::remove(repo, "product", false, false).unwrap();
+        issue["id"] = json!("issue-99");
+        issue["identifier"] = json!("FIX-99");
+        {
+            let mut provider = runtime.block_on(state.lock());
+            provider.export_mode = true;
+            provider.issues.push(issue);
+        }
+        let error = runtime
+            .block_on(super::fetch_task(
+                repo,
+                "FIX-99",
+                super::LinearRefresh::Force,
+            ))
+            .unwrap_err();
+        assert!(error.to_string().contains("linked by no Wave"), "{error}");
+        assert!(runtime
+            .block_on(fixture.store.get_task_by_issue("issue-99"))
+            .unwrap()
+            .is_none());
+
+        runtime.block_on(async {
+            let payments = options("payments");
+            let refunds = options("refunds");
+            let (one, two) = tokio::join!(
+                super::connect_async(repo, &payments, &NullProgress),
+                super::connect_async(repo, &refunds, &NullProgress),
+            );
+            let (winner, loser, error) = match (one, two) {
+                (Ok(result), Err(error)) => (result, "refunds", error),
+                (Err(error), Ok(result)) => (result, "payments", error),
+                outcomes => panic!("expected one Wave to claim Billing: {outcomes:?}"),
+            };
+            assert_eq!(winner.project_id.as_deref(), Some("project-1"));
+            assert!(
+                error.to_string().contains(&format!("wave/{}", winner.wave)),
+                "{error}"
+            );
+            assert!(!repo.join(".lf/wave").join(loser).exists());
+            let loser = crate::work::wave::discover(repo, loser).unwrap();
+            assert!(fixture.store.get_wave_at(&loser).await.unwrap().is_none());
+            let imported = fixture
+                .store
+                .get_task_by_issue("issue-99")
+                .await
+                .unwrap()
+                .unwrap();
+            let wave = fixture
+                .store
+                .get_wave(imported.wave_id.as_ref().unwrap())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(wave.slug(), winner.wave);
+        });
+    });
+}
+
+#[test]
+fn connecting_after_an_offline_rename_keeps_the_linear_projects_name() {
+    with_planning_task(|runtime, fixture, repo, _, state| {
+        super::test_fixture::commit_planning_repo(repo);
+        runtime.block_on(async {
+            fixture.store.delete_provider_token("linear").await.unwrap();
+            // Offline, the Wave is added without its Linear Project.
+            wave_lifecycle::add(repo, "sales", None).await.unwrap_err();
+            wave_lifecycle::rename(repo, "sales", Some("payments"), None)
+                .await
+                .unwrap();
+            fixture.seed(now() + 3600).await;
+            let mut provider = state.lock().await;
+            provider.export_mode = true;
+            provider.extra_projects.push(json!({
+                "id": "billing-project", "name": "Billing", "description": "", "content": "",
+                "status": {"type": "started"}, "teams": {"nodes": [{"id": "team-1"}]}
+            }));
+        });
+
+        let result = super::connect(
+            repo,
+            &super::LinearInitOptions {
+                wave: Some("payments".into()),
+                project: Some("Billing".into()),
+                ..Default::default()
+            },
+            &NullProgress,
+        )
+        .unwrap();
+        assert_eq!(result.project_name, "Billing");
+        runtime.block_on(crate::ops::planning_sync::sync_after_save(
+            &fixture.store,
+            repo.to_str().unwrap(),
+            None,
+        ));
+        let provider = runtime.block_on(state.lock());
+        assert!(!provider.operations.contains_key("DeliverProjectField"));
+        assert!(!provider.operations.contains_key("DeliverProjectCreation"));
+    });
+}
+
+#[test]
+fn a_lost_reply_distinguishes_retired_and_unlinked_projects_from_no_project() {
+    use loopflow_storage::work::edit::WorkValue;
+
+    with_planning_task(|runtime, fixture, repo, task, _| {
+        let mut item = fixture.retained_task(repo, "FIX-1").item;
+        fixture
+            .store
+            .sqlite
+            .retire_waves(
+                std::slice::from_ref(task.wave_id.as_ref().unwrap()),
+                "removed",
+            )
+            .unwrap();
+        runtime.block_on(async {
+            for (external, expected) in [
+                (
+                    Some("project-1"),
+                    Some(task.project_id.as_ref().unwrap().to_string()),
+                ),
+                (Some("unlinked"), Some("unlinked".into())),
+                (None, None),
+            ] {
+                item.project_id = external.map(str::to_owned);
+                let observed = crate::ops::tracker::observed_task(&fixture.store, &item)
+                    .await
+                    .unwrap();
+                assert!(observed.values.contains(&WorkValue::TaskProject(expected)));
+            }
+        });
+    });
+}
+
+#[test]
+fn adding_a_wave_makes_its_linear_project_before_it_returns() {
+    with_planning_task(|runtime, fixture, repo, _, state| {
+        super::test_fixture::commit_planning_repo(repo);
+        runtime.block_on(async {
+            state.lock().await.export_mode = true;
+            let added = wave_lifecycle::add(repo, "billing", None).await.unwrap();
+            let project = fixture
+                .store
+                .project_of_wave(&added.id)
+                .await
+                .unwrap()
+                .unwrap();
+            let linked = project
+                .tracker_id
+                .expect("the Wave records its Linear Project");
+            assert!(state
+                .lock()
+                .await
+                .extra_projects
+                .iter()
+                .any(|p| p["name"] == "billing" && p["id"] == linked.as_str()));
+            // Nothing waits in the queue for a Project.
+            assert!(fixture
+                .store
+                .sqlite
+                .tracker_actions_for(
+                    &loopflow_storage::sqlite::tracker_actions::ActionOwner::Project(project.id)
+                )
+                .unwrap()
+                .is_empty());
+
+            wave_lifecycle::rename(repo, "product", Some("payments"), None)
+                .await
+                .unwrap();
+            let provider = state.lock().await;
+            let renamed = provider.project_fields.as_ref().unwrap();
+            assert_eq!(renamed["id"], "project-1");
+            assert_eq!(renamed["name"], "payments");
+        });
+    });
+}
+
+#[test]
+fn adding_a_wave_offline_fails_and_a_second_add_makes_its_project() {
+    with_planning_task(|runtime, fixture, repo, _, state| {
+        super::test_fixture::commit_planning_repo(repo);
+        runtime.block_on(async {
+            state.lock().await.export_mode = true;
+            fixture.store.delete_provider_token("linear").await.unwrap();
+            let error = wave_lifecycle::add(repo, "billing", None)
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("Run `lf wave create billing` to make it"),
+                "{error}"
+            );
+            let wave = fixture
+                .store
+                .sqlite
+                .list_waves(None)
+                .unwrap()
+                .into_iter()
+                .find(|wave| wave.slug() == "billing")
+                .unwrap();
+            let project = fixture
+                .store
+                .project_of_wave(wave.id())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(project.tracker_id.is_none());
+            assert!(fixture
+                .store
+                .sqlite
+                .tracker_actions_for(
+                    &loopflow_storage::sqlite::tracker_actions::ActionOwner::Project(
+                        project.id.clone()
+                    )
+                )
+                .unwrap()
+                .is_empty());
+
+            fixture.seed(now() + 3600).await;
+            wave_lifecycle::add(repo, "billing", None).await.unwrap();
+            let project = fixture
+                .store
+                .project_of_wave(wave.id())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(project.tracker_id.is_some());
+        });
+    });
+}
 
 #[test]
 fn native_runner_is_quiet_until_its_turn_ends_codex_task_headless() {
@@ -216,11 +599,10 @@ esac
                 seed_provider_task(&runtime, &state, &repo, "Cancel me", "Keep history").unwrap();
             let timestamp = time::OffsetDateTime::now_utc();
             let project = runtime
-                .block_on(fixture.store.list_projects(Some(wave.id())))
+                .block_on(fixture.store.project_of_wave(wave.id()))
                 .unwrap()
-                .into_iter()
-                .find(|project| project.tracker_id.as_ref().unwrap().as_str() == "project-1")
                 .unwrap();
+            assert_eq!(project.tracker_id.as_ref().unwrap().as_str(), "project-1");
             let task = Task {
                 parent_task_id: None,
                 repository_id: crate::repository::location::ensure_repository(
@@ -461,14 +843,6 @@ fn foreign_projects_do_not_block_refresh() {
             &NullProgress,
         )
         .unwrap();
-        assert_eq!(
-            result
-                .diagnostics
-                .iter()
-                .filter(|message| message.contains("foreign-project"))
-                .count(),
-            1
-        );
         assert!(!result
             .actions
             .iter()
@@ -476,13 +850,14 @@ fn foreign_projects_do_not_block_refresh() {
         runtime.block_on(async {
             let provider = state.lock().await;
             assert_eq!(provider.extra_projects, vec![foreign.clone()]);
-            let projects = fixture.store.list_projects(Some(wave.id())).await.unwrap();
-            assert_eq!(projects.len(), 1);
-            assert_eq!(
-                projects[0].tracker_id.as_ref().unwrap().as_str(),
-                "project-1"
-            );
-            assert_eq!(projects[0].name, "Project");
+            let project = fixture
+                .store
+                .project_of_wave(wave.id())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(project.tracker_id.as_ref().unwrap().as_str(), "project-1");
+            assert_eq!(project.name, "Project");
         });
     });
     server.abort();
@@ -517,12 +892,8 @@ fn with_export_plan(
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let fixture = runtime.block_on(Fixture::new());
     std::env::set_var("LF_HOME", fixture.directory.path());
-    let (repo, wave) = runtime.block_on(fixture.planning_repo());
-    let project = fixture
-        .store
-        .sqlite
-        .ensure_project(wave.id(), "Local project")
-        .unwrap();
+    let (repo, wave) = runtime.block_on(fixture.local_planning_repo());
+    let project = fixture.store.sqlite.seed_project(wave.id()).unwrap().id;
     let task = fixture
         .store
         .sqlite
@@ -831,8 +1202,8 @@ async fn seed_finished_tasks(
     }
     // Bulk fixture setup is not an opportunistic foreground refresh. Its disk
     // writes must finish before measuring on-demand requests on slower CI hosts.
-    let (context, initiative) = super::resolve_context(repo, "product").await.unwrap();
-    super::refresh_inventory(repo, "product", &context, &initiative)
+    let context = super::resolve_repository_context(repo).await.unwrap();
+    super::refresh_inventory(repo, "product", &context)
         .await
         .unwrap();
     rusqlite::Connection::open(&fixture.database)
@@ -1133,8 +1504,7 @@ fn linear_on_demand_adopts_new_open_issues_without_allocating_execution() {
             let mut issue = state.lock().await.issues[0].clone();
             issue["id"] = json!("new-open-issue");
             issue["identifier"] = json!("FIX-352");
-            issue["title"] = json!("New work in another Project");
-            issue["project"]["id"] = json!("new-project");
+            issue["title"] = json!("New work in the Wave's Project");
             mark_issue_updated(&mut issue);
             state.lock().await.issues.push(issue);
             rusqlite::Connection::open(&fixture.database)
@@ -1151,8 +1521,8 @@ fn linear_on_demand_adopts_new_open_issues_without_allocating_execution() {
                 .unwrap()
                 .unwrap();
             assert_eq!(adopted.wave_id, task.wave_id);
-            assert_eq!(adopted.title, "New work in another Project");
-            assert_ne!(adopted.project_id, task.project_id);
+            assert_eq!(adopted.title, "New work in the Wave's Project");
+            assert_eq!(adopted.project_id, task.project_id);
             assert!(adopted.worktree.is_none());
             assert!(
                 crate::store::task_work::task_graph(&fixture.store.sqlite, &adopted.id)
@@ -1166,5 +1536,62 @@ fn linear_on_demand_adopts_new_open_issues_without_allocating_execution() {
                 .unwrap()
                 .is_empty());
         });
+    });
+}
+
+#[test]
+fn connect_binds_the_linear_project_a_lost_create_reply_left() {
+    with_export_plan(|runtime, fixture, repo, task, state| {
+        super::test_fixture::commit_planning_repo(repo);
+        let project = task.project_id.clone().unwrap();
+        let id = crate::ops::tracker::creation_id(project.as_str()).unwrap();
+        // A create whose reply was lost landed under the Project's own UUID;
+        // Linear refuses that id again, so connect finds it instead.
+        let mut landed = planning_project(&id);
+        landed["name"] = json!("Product");
+        runtime.block_on(state.lock()).extra_projects.push(landed);
+        let wave = runtime
+            .block_on(fixture.store.get_wave(task.wave_id.as_ref().unwrap()))
+            .unwrap()
+            .unwrap();
+        let connected = super::connect(
+            repo,
+            &super::LinearInitOptions {
+                wave: Some(wave.slug().into()),
+                ..Default::default()
+            },
+            &NullProgress,
+        )
+        .unwrap();
+        assert_eq!(connected.project_id.as_deref(), Some(id.as_str()));
+        let saved = crate::ops::task::task_create(
+            repo,
+            Some(wave.slug()),
+            Some("Filed on this Machine".into()),
+            None,
+            crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
+            None,
+        )
+        .unwrap();
+        let bound = runtime
+            .block_on(fixture.store.get_project(&project))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            bound.tracker_id.as_ref().map(|id| id.as_str()),
+            Some(id.as_str())
+        );
+        let provider = runtime.block_on(state.lock());
+        assert_eq!(provider.extra_projects.len(), 1);
+        let issue = provider
+            .issues
+            .iter()
+            .find(|issue| {
+                Some(issue["id"].as_str().unwrap())
+                    == saved.tracker_id.as_ref().map(|id| id.as_str())
+            })
+            .expect("the Task reached Linear");
+        assert_eq!(issue["project"]["id"], id.as_str());
     });
 }

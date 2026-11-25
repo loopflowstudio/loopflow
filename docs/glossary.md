@@ -14,9 +14,9 @@ Every term the docs use, in one plain sentence.
 | **Deciding step** | The final Skill of a `loop:` block, returning `advance`, `iterate`, or `blocked`. |
 | **Task** | One unit of work with its own worktree, branch, persistent conversation, workflow, and pull request. |
 | **Parent** / **child** | A Task linked under another Task (`--parent <ID>`); the parent's conversation hears when a direct child stops, fails or lands. Separate from a stack, which says whose branch a Task starts from. |
-| **Wave** | An ongoing area of work with a `GOAL.md`, curated `MEMORY.md`, KRs, and shared defaults for its Tasks. |
+| **Wave** | An ongoing area of work with a `GOAL.md`, curated `MEMORY.md`, its Project, and shared defaults for its Tasks. |
 | **Plan** | Shared Waves, Projects, and Tasks (`lf wave plan`, `lf plan list`). |
-| **KR** | Key result: an observable outcome stated for a Wave's Project. |
+| **Project** | A Wave's Tasks as one thing that starts and ends, with a name and a status; each Wave is exactly one, a Linear Project when Linear is connected. |
 | **Memory** | `MEMORY.md`, where a Wave keeps decisions and context across Tasks. |
 | **Session** (**LfSession**) | A continuable agent conversation (interactive or headless) with identity, steers, and native provider history. |
 | **Work session** | A Task, Wave, or repository conversation running in a held terminal; survives window close and `lf install`, and wakes on steers. |

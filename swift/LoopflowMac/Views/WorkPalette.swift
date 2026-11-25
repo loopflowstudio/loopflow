@@ -12,7 +12,7 @@ struct WorkPaletteRow: Identifiable, Equatable {
 extension WorkModel {
     var paletteIsStale: Bool {
         roadmap.failure != nil || sessions.failure != nil || graphCatalog.failure != nil
-            || visibleRoadmaps.contains { $0.tasks.unavailableReason != nil || !$0.unavailableTasks.isEmpty }
+            || visibleRoadmaps.contains { $0.tasks.unavailableReason != nil }
     }
 
     var paletteRows: [WorkPaletteRow] {

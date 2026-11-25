@@ -13,11 +13,13 @@ use crate::asana::AsanaClient;
 use crate::config::TrackerConfig;
 use crate::linear::LinearClient;
 use crate::store::Store;
+use loopflow_model::id::WaveId;
 use loopflow_storage::planning::rules::Observed;
 use loopflow_storage::planning::{TrackerEvent, TrackerItem, TrackerProject};
 use loopflow_storage::planning_sync::TrackerKind;
 use loopflow_storage::sqlite::tracker_actions::{ActionKind, TrackerAction};
 use loopflow_storage::work::edit::{Disposition, WorkValue};
+use loopflow_storage::work::project::Project;
 
 use super::{OpsError, OpsResult};
 
@@ -95,6 +97,45 @@ pub fn connected(repo: &str) -> bool {
     queued_tracker(Path::new(repo)).is_some()
 }
 
+/// The command that makes `wave`'s Project in either tracker: adding the
+/// Wave again.
+pub fn make_project_command(wave: &str) -> String {
+    format!("lf wave create {wave}")
+}
+
+/// What a live Wave's Project the tracker does not hold yet says, and the
+/// command that makes it; `None` without a tracker.
+pub fn unbound_project(repo: &Path, wave: &str) -> Option<String> {
+    let tracker = queued_tracker(repo)?;
+    Some(format!(
+        "not in {} yet; `{}` makes it",
+        tracker.display_name(),
+        make_project_command(wave)
+    ))
+}
+
+/// Give `wave`'s Project its tracker id, creating it in the repository's
+/// tracker on this Machine when it has none: the command that makes or
+/// connects a Wave does this before it returns, and so does a drain sending a
+/// Task into it. True when it created one; a tracker error fails the caller
+/// and leaves the Project unbound.
+pub async fn create_wave_project(store: &Store, repo: &Path, wave: &WaveId) -> OpsResult<bool> {
+    if queued_tracker(repo).is_none() {
+        return Ok(false);
+    }
+    let Some(project) = store.project_of_wave(wave).await.map_err(message)? else {
+        return Ok(false);
+    };
+    if project.tracker_id.is_some() {
+        return Ok(false);
+    }
+    Tracker::for_repository(repo)
+        .await?
+        .create_project(store, repo, &project)
+        .await?;
+    Ok(true)
+}
+
 /// The team every repository Task belongs to: a Linear Team or an Asana team.
 pub fn repository_scope(repo: &Path) -> OpsResult<String> {
     match transport(repo) {
@@ -170,22 +211,6 @@ impl Tracker {
         }
     }
 
-    /// Why `action` cannot be sent yet, decided with no request: a Linear
-    /// Project whose Wave has no Initiative. The action stays queued.
-    pub async fn blocked(
-        &self,
-        store: &Store,
-        repo: &Path,
-        action: &TrackerAction,
-    ) -> Option<String> {
-        match self {
-            Self::Linear(client) => client.blocked_action(store, repo, action).await,
-            Self::Asana(_) => None,
-            #[cfg(test)]
-            Self::Fake(fake) => (fake.blocked)(action),
-        }
-    }
-
     pub async fn send(&self, store: &Store, repo: &Path, action: &TrackerAction) -> Sent {
         match self {
             Self::Linear(client) => client.send_action(store, repo, action).await,
@@ -208,6 +233,22 @@ impl Tracker {
             Self::Asana(client) => client.look_action(store, repo, action).await,
             #[cfg(test)]
             Self::Fake(fake) => fake.look(action),
+        }
+    }
+
+    /// Make a Wave's Project in the tracker and bind it, or fail with the
+    /// tracker's error. Project creates are never queued.
+    pub(crate) async fn create_project(
+        &self,
+        store: &Store,
+        repo: &Path,
+        project: &Project,
+    ) -> OpsResult<()> {
+        match self {
+            Self::Linear(client) => client.create_project(store, repo, project).await,
+            Self::Asana(client) => client.create_project(store, repo, project).await,
+            #[cfg(test)]
+            Self::Fake(_) => Err(message("fake tracker creates no Projects")),
         }
     }
 
@@ -336,7 +377,7 @@ pub(crate) fn value(action: &TrackerAction) -> OpsResult<WorkValue> {
 
 /// The values a `create` action starts its tracker object with.
 pub(crate) fn values(action: &TrackerAction) -> OpsResult<Vec<WorkValue>> {
-    serde_json::from_value(action.value.clone()).map_err(message)
+    loopflow_storage::work::edit::known_values(action.value.clone()).map_err(message)
 }
 
 /// The state a `state` action moves its Task to.
@@ -414,14 +455,17 @@ pub(crate) async fn remote_project(
 }
 
 /// What the tracker holds for a Task, as the values a Task action compares.
-pub(crate) async fn observed_task(store: &Store, item: &TrackerItem) -> Observed {
+pub(crate) async fn observed_task(store: &Store, item: &TrackerItem) -> OpsResult<Observed> {
     let project = match &item.project_id {
-        Some(external) => store
-            .get_project_by_project(external)
+        Some(external) => {
+            let external = external.clone();
+            let id = crate::store::run_sqlite(&store.sqlite, move |sqlite| {
+                sqlite.observed_project_id(&external)
+            })
             .await
-            .ok()
-            .flatten()
-            .map(|project| project.id.to_string()),
+            .map_err(message)?;
+            Some(id)
+        }
         None => None,
     };
     let parent = match &item.parent_id {
@@ -447,12 +491,12 @@ pub(crate) async fn observed_task(store: &Store, item: &TrackerItem) -> Observed
     if item.parent_observed {
         values.push(WorkValue::TaskParent(parent));
     }
-    Observed {
+    Ok(Observed {
         remote_id: Some(item.id.clone()),
         revision: item.revision.clone(),
         values,
         ..Observed::default()
-    }
+    })
 }
 
 /// What the tracker holds for a Project.
@@ -465,10 +509,7 @@ pub(crate) fn observed_project(project: &TrackerProject) -> Observed {
             WorkValue::ProjectSummary(project.summary.clone()),
             WorkValue::ProjectDescription(project.description.clone()),
             WorkValue::ProjectStatus(project.status),
-            WorkValue::Krs(project.krs.clone()),
-            WorkValue::MetricTargets(project.metric_targets.clone()),
         ],
-        initiatives: project.initiative_ids.clone(),
         ..Observed::default()
     }
 }
@@ -490,55 +531,12 @@ pub(crate) async fn ingest_task(
             issue.identifier
         )));
     }
-    let mut confirmed = None;
-    if let Some(project) = project {
-        if let Some(local) = store
-            .get_project_by_project(&project.id)
-            .await
-            .map_err(message)?
-            .filter(|p| {
-                p.tracker_id
-                    .as_ref()
-                    .is_some_and(|id| id.as_str() == project.id)
-            })
-        {
-            let wave = store
-                .get_wave(&local.wave_id)
-                .await
-                .map_err(message)?
-                .ok_or_else(|| message("Project Wave is missing"))?;
-            if let Some(initiative) = super::linear::read_initiative(repo, wave.slug()) {
-                confirmed = Some((local.wave_id, initiative));
-            }
-        }
-    }
-    if confirmed.is_none() {
-        if let Some(project) = project {
-            for wave in store
-                .list_waves(Some(&repo.to_string_lossy()))
-                .await
-                .map_err(message)?
-            {
-                if let Some(initiative) = super::linear::read_initiative(repo, wave.slug()) {
-                    if project.initiative_ids.contains(&initiative) {
-                        if confirmed.is_some() {
-                            return Err(message("Project matches multiple Wave Initiatives"));
-                        }
-                        confirmed = Some((wave.id().clone(), initiative));
-                    }
-                }
-            }
-        }
-    }
     loopflow_storage::sqlite::linear_events::accept_linear_issue_in(
         &store.sqlite,
         &repo.to_string_lossy(),
         issue,
         project,
         observed_at,
-        confirmed
-            .as_ref()
-            .map(|(wave, initiative)| (wave, initiative.as_str())),
         queued_tracker(repo).unwrap_or(TrackerKind::Linear),
     )
     .map_err(message)
@@ -564,8 +562,6 @@ pub(crate) mod fake {
         pub idempotent: Vec<ActionKind>,
         pub held: Mutex<Option<Observed>>,
         pub requests: AtomicUsize,
-        /// Blocks these actions before any request, with the reason.
-        pub blocked: fn(&TrackerAction) -> Option<String>,
     }
 
     impl Fake {
@@ -574,7 +570,6 @@ pub(crate) mod fake {
                 idempotent: Vec::new(),
                 held: Mutex::new(None),
                 requests: AtomicUsize::new(0),
-                blocked: |_| None,
             }
         }
 

@@ -29,12 +29,4 @@
 
 > but basically it should either say Run: <step after human> or Running: xxx or something
 
-## Implied design changes (pending confirmation to send back to `implement`)
-
-1. **Keep the Task Session open on pause:**
-   - `lf task pause` stops only the Task's worker / Graph run, any subprocesses in the worker's OS session, and scheduled worker/limit retries; it keeps the primary interactive Task Session running and leaves opening/warming paused Task conversations normal.
-   - Removes `Departure::Paused`, `Left::Paused`, primary-session teardown on pause, and the paused-session skip in Desktop workspace warming / recovery.
-2. **Keep paused Tasks inside `TaskSection::Working`:**
-   - Owned paused Tasks remain in `Working` (with `TaskState::Paused` / `paused` indicator) instead of moving out of the Working list.
-   - Removes `TaskSection::Paused`, `TaskList.paused`, the separate Mac sidebar Paused filter, the separate Wave board / `lf wave show` PAUSED section, and the iPhone Paused filter.
-   - `lf task list --state paused` remains a state filter over `TaskState::Paused`.
+The design changes these quotes asked for are items 1–4 in `plan.md`.

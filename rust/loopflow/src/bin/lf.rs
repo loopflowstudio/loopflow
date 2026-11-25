@@ -3447,8 +3447,11 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
                     | loopflow_execution::error::LoadError::GraphNotFound(_)
             )
         ) {
-            let error =
-                clap::Error::raw(clap::error::ErrorKind::InvalidSubcommand, error.to_string());
+            // Clap prints a raw message verbatim, so it carries its own newline.
+            let error = clap::Error::raw(
+                clap::error::ErrorKind::InvalidSubcommand,
+                format!("{error}\n"),
+            );
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
             let _ = error.print();
             return Err(loopflow_execution::process::CommandExit(code).into());

@@ -19,7 +19,7 @@ waiting at an interactive step continues after it, and `--from <step>` starts
 elsewhere. A finished Graph alone is no reason to run it again.
 
 **A design has no Task.** Continue in its checkout: implement directly or run
-the chosen Graph, such as `lf graph pursue`. No Task, Wave or Linear setup is
+the chosen Graph, such as `lf graph pursue`. No Task, Wave or tracker setup is
 needed, and "keep coding" doesn't ask for one. Only when managed work is asked
 for, use `launch-plan`.
 

@@ -10,12 +10,12 @@ broken on the first click; if they would, this step failed.
 
 ## Use the real thing
 
-Run the real product, not its tests: the built app, the installed CLI, the live
+Run the real thing, not its tests: the built app, the installed CLI, the live
 page in a browser, the API over the network, the simulator or device. Drive it
 the way a person would. Internal setters, test-only endpoints, mocks and
 fixtures do not count.
 
-Earlier runs left notes on reaching each part of the product in `.lf/qa/`, one
+Earlier runs left notes on reaching each surface in `.lf/qa/`, one
 file per surface, whose first line says when to read it. List them with
 `head -n 1 .lf/qa/*.md` and read the ones for the surfaces this change touches
 before you start.
@@ -32,21 +32,21 @@ exactly what that left unchecked.
   and large data, going back, interrupting and resuming, a slow or failed
   network, two things at once.
 - Check what it leaves behind as well as what it shows: files, rows, messages,
-  processes, and what another part of the product now reads.
+  processes, and what another surface now reads.
 - Look at it. Notice what is confusing, slow or ugly, not only what is wrong.
 
 ## Fix and repeat
 
 Repair what breaks within the change's scope, then go through the experience
 again from the start, until it works for the people it is for. A change to
-what the product should be is not yours to make; describe it. Asked for a
+what the behavior should be is not yours to make; describe it. Asked for a
 read-only review, report instead of fixing.
 
 Run tests only where they tell you something the real path can't reach.
 
 ## Keep what you learned
 
-How to launch and drive the product belongs in `.lf/qa/<surface>.md`. When you
+How to launch and drive it belongs in `.lf/qa/<surface>.md`. When you
 had to work out a step no note describes, or one a note describes no longer
 works, write the working version into that surface's file, replacing what was
 wrong. A surface with no file gets one, whose first line says when to read it:
@@ -56,3 +56,5 @@ Show the run in `scratch/qa.html`: each scenario, what you did, what you saw
 with screenshots or transcripts, and what you fixed. Present the finished page
 with `lf desktop files scratch/qa.html`. Finish with what works
 now, what you couldn't reach and why, and what is still wrong, worst first.
+When the repository has a visual language (a design system, the app, its docs,
+internal tools), borrow its palette, type and layout.

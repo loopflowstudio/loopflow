@@ -9,7 +9,7 @@ subsystem, a surface, a directory, recent work. In a Wave with no request, it
 is what the Wave's goal says it owns. Otherwise it is the whole codebase.
 
 "We did a lot of work on accounts lately" names an area, not a diff. Find the
-PRs that did the work, see which part of the product or infrastructure they
+PRs that did the work, see which part of the system or infrastructure they
 kept touching, and widen to the next cohesive whole. Work on that whole: the
 PRs may have been patches on a larger problem. Open the output by naming the
 area you took.

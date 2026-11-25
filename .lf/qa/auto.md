@@ -87,6 +87,15 @@ conversation's `--append-system-prompt-file` is in `ps` under its `lf holder run
 An unknown ID answers `no Task exists for …`
 (served: `not_found`) for `auto off`; `task.auto.on` still answers `outcome_unknown`.
 
+The `merges:` line needs no provider work: `lf task run <id> <graph> --from
+<step>` prints it (or not) at registration. With `hold` in place, `code
+--from reflect` prints it and plain `code` does not; `pursue` never does.
+To reach a builtin Graph's `end` without `gh pr merge`, open the Task's PR
+through the GitHub stand-in, squash it into `main`, mark it `MERGED` with
+`merge_commit` and `merged_head`, then `lf task run <id> code --from 'land
+--wait-and-fix'`: land reports it merged and the Task reads `done`. Two Task
+branches adding the same file conflict in that squash; give each its own file.
+
 Before a first run: `lf task auto off <id>` on a fresh `lf task create`, then
 `lf config set auto on` and a bare `lf task run <id> <graph>` stops at the
 interactive step with no `merges:` line. `lf task complete` then `lf task
@@ -129,7 +138,11 @@ start the branch's on the same home. The branch migrates it in place on the
 first read; copy the home first to repeat the check. The released lf has no
 `ship-review` skill: name the upgrade graph's interactive step `human-review`.
 A Task left waiting there ships after the upgrade (the captured Graph carries
-its skill). A released `lf task hold` on a Task that never took a Graph comes through as
+its skill). The same goes for a step the branch deleted: a 0.16.0 Task on
+`code` waiting at `verify` reads "Waiting for you at verify" under a build
+without that skill, and `lf task run` steps past it to `end` and `done`. To
+switch binaries on one home, kill the server by PID and start the other's
+`lf server run`; each binary's wrapper sets its own `LF_BIN`. A released `lf task hold` on a Task that never took a Graph comes through as
 `auto: off by <person>`; with no checkout, `lf task status` shows it on the
 `Not checked out on <machine> · auto: off by …` line. A repository graph that
 still names `human-review` then fails a branch run with "skill not found:

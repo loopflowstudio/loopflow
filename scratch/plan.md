@@ -1,4 +1,4 @@
-# LOO-1101: a bound conversation stays in the worktree it runs in
+# LOO-1101: a conversation stays in the directory it runs in
 
 ## The report
 
@@ -29,58 +29,96 @@
 
 ## Cause
 
-`lf session bind` to a Task that already has a worktree sets the Session's
-directory to the Task's worktree. It is the only path that moves a
-conversation's directory: `adoption::save(.., continue_in_task = true, ..)`
-computes `destination`, and `promote_task_prepared` runs
-`UPDATE agent_sessions SET cwd=?2`
-(`rust/loopflow-execution/src/ops/task/adoption.rs:191`,
-`rust/loopflow-storage/src/sqlite/children.rs:429`). It shipped in #1807
-(LOO-582), which recorded the cost as "the accepted limitation: the live
-provider continued in its original directory."
+Two code paths can rewrite `agent_sessions.cwd` for a conversation that already
+ran in another directory:
 
-Everything else already keeps a bound conversation in place:
-`lf task create --session` (`creation_from_a_conversation_keeps_its_directory`),
-`admit_scope_workspace` (returns early for `WorkSource::Bound`),
-`admit_session_workspace` (`CASE WHEN work_source='bound' THEN cwd`), and a done
-Task without a checkout.
+1. **`lf session bind` to a Task with an existing worktree.**
+   `adoption::save(.., continue_in_task = true, ..)` computes `destination`,
+   and `promote_task_prepared` runs `UPDATE agent_sessions SET cwd=?2`
+   (`rust/loopflow-execution/src/ops/task/adoption.rs:191`,
+   `rust/loopflow-storage/src/sqlite/children.rs:429`). Shipped in #1807
+   (LOO-582), which left `lf task create --session` in place while making
+   `lf session bind` rewrite `cwd`. No local transcript relocation exists (the
+   test's `native-locations.json` is written only by the `opencode_cli.py` test
+   stub on launch), so on directory-keyed providers like Claude Code
+   (`~/.claude/projects/<encoded-cwd>/`), rewriting `cwd` also breaks native
+   `--resume`.
+2. **`admit_scope_workspace` / `admit_session_workspace` guarding on leaving
+   `work_source='bound'`.**
+   `rust/loopflow-execution/src/ops/human_session/primary.rs:338` and
+   `rust/loopflow-storage/src/sqlite/sessions.rs:1756` keep a Task primary in
+   its directory only when `work_source == 'bound'` — a column already marked
+   `-- leaving` (`LOO-836`). If a conversation already belonged to a Task
+   (`task_id = Some(T)`, `work_source = 'declared'`, `bound_at = None`, started
+   from another checkout or `main`) and is made primary via `lf session bind` /
+   **Make primary Task conversation**, `bind_session_in` leaves `work_source`
+   and `bound_at` untouched, and the next idle `lf resume` silently rewrites
+   `agent_sessions.cwd` to `task.worktree`.
 
-## Design: binding changes what a conversation belongs to, never where it runs
+## Design: once a conversation has started or been bound, its directory stays put
 
-Delete the directory move. After `lf session bind`, the Session has its Task and
-is the Task's primary; its `cwd` is the directory its provider runs in, as
-before the bind.
+Two clean rules replace the `continue_in_task` split and the `work_source='bound'`
+special case:
 
-What follows with no further code:
+1. **Binding changes what a conversation belongs to, never where it runs.**
+   Delete `continue_in_task` and `destination` from `adoption::save`,
+   `store::ownership::promote_task`, and `promote_task_prepared`. After
+   `lf session bind` (and `lf task create --session`), the Session has its Task
+   and is the Task's primary; its `cwd` is the directory its provider runs in,
+   unchanged. When the Task already owns a different worktree, `lf session bind`
+   prints one factual diagnostic noting both paths:
+   `Conversation stays in <session_root>; <TASK>'s checkout is <task_worktree>.`
+2. **Workspace admission places only unstarted, unbound primary placeholders.**
+   In `admit_scope_workspace` (`primary.rs`) and `admit_session_workspace`
+   (`sessions.rs`), gate placement on `session.captured.is_none() &&
+   session.bound_at.is_none()` (SQL: `CASE WHEN current_capture IS NOT NULL OR
+   bound_at IS NOT NULL THEN cwd ELSE ?3 END`). Fresh primaries created before
+   their checkout exists (`ensure`, `ensure_task`, `lf task create --run` /
+   `setup::checkout`) have `captured == None` and `bound_at == None`, so they
+   still land in their scope's worktree before their first launch. Any
+   conversation that has already launched (`current_capture IS NOT NULL`) or
+   been bound (`bound_at IS NOT NULL`) keeps its directory — unless the
+   directory itself is gone from disk (`leave_gone_directory`) or it moves to
+   another Machine (`reopen_moved_session`).
+
+What follows across layers:
 
 - `lf resume -a claude:fable` in the conversation's worktree finds it through
   `checkout_conversation` and starts the new thread there, seeded from the agy
   log (`invocation_intent` → `NewThread` → `new_thread`).
-- `lf resume MTG-388` / `--task` from anywhere opens the same conversation, in
+- `lf resume MTG-388` / `--task` from anywhere opens the same conversation in
   the directory it runs in.
-- A restart (recovery pass, take over, another harness) launches where the
-  files are.
-- Session `cwd` and the `processes` launch directory agree again.
+- A restart (recovery pass, take over, another harness, or making an
+  already-assigned conversation primary and resuming it idle) launches where
+  the files and provider transcript actually are.
+- `agent_sessions.cwd` and `processes.cwd` agree again.
+- Two production reads of leaving column `agent_sessions.work_source` disappear
+  (`primary.rs:338`, `sessions.rs:1756`).
 
-Choice made for review. Passed over:
+Choices made for review (recorded in `scratch/concept-review.html`):
 
-- **Keep the move; have `lf resume` also match a Session's live process
-  directory.** A second resolver beside `agent_sessions.cwd`, and it stops
-  working at the first restart, which lands the new thread in the Task's
-  worktree without the files. That is the state the recovery pass produced here.
-- **Move only out of shared checkouts (main, Wave), stay in an unowned linked
-  one.** Keeps one more rule than the system has today: creation from a
-  conversation on main already leaves it on main.
+- **Never move on bind (including out of `main` and Wave checkouts).**
+  Passed over: *keep the move and match live process cwd on resume* (adds a
+  second resolver and still breaks on first restart / Claude `--resume`), and
+  *move only out of shared checkouts* (adds a special rule that diverges from
+  `lf task create --session`, still splits live process from `cwd`, and breaks
+  Claude `--resume`).
+- **Print one factual line on `lf session bind` only when the Task already owns
+  a different checkout.** Passed over: *say nothing about directories* — a
+  split between conversation directory `Y` and Task checkout `X` means Graph
+  workers and `lf task changes` act on `X`, so naming both paths when they
+  differ prevents surprise without adding state.
 
-The cost: a Task whose worktree is X can have its primary conversation in Y.
-The Graph's workers still run in X; `lf task status` shows the conversation's
-real directory.
+The trade-off: a Task whose checkout is `X` can have its primary conversation
+in `Y`. Graph workers, `lf task changes`, PR delivery, and `lf task move` still
+operate on `X`; `lf task status` and `lf session bind` report the real paths.
 
 ## User-visible outcome
 
 In a worktree where a conversation runs, `lf resume` and `lf resume -a <agent>`
 open that conversation whether or not it was bound to a Task that has another
-worktree. Binding prints the Task it bound to and nothing about directories.
+worktree. Binding reports the Task it bound to, and when the Task already has a
+different checkout, notes both paths without moving the conversation.
 
 ## Demo
 
@@ -90,92 +128,145 @@ lf session bind <session> --task LOO-12     # LOO-12 already has ../repo.loo-12
 lf resume -a claude:fable                   # same Session, new thread, still in ../repo.research
 ```
 
-## Acceptance check at gate
-
-`rust/loopflow/tests/session_lifecycle_tests.rs`,
-`promotion_sets_directory_immediately_and_resumes_same_native_conversation`,
-rewritten and renamed (`binding_keeps_the_conversation_in_its_worktree`):
-
-- after `session bind`, the Session's `cwd`, `task status … sessions[0].cwd`
-  and `resume --task … --prepare --json` all report `origin`;
-- `resume --prepare --json` run from `origin` with no ID returns the bound
-  Session (today: "no associated work conversation");
-- the continued launch receives `cwd == origin`; native conversation identity
-  and messages are unchanged; `draft.txt` is intact.
-
-```bash
-env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test -p loopflow --test session_lifecycle_tests binding_keeps < /dev/null
-env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test -p loopflow-execution --lib ops::task::adoption:: < /dev/null
-```
-
 ## Source of truth
 
-`agent_sessions.cwd` is where the conversation runs. `task_checkouts.worktree`
-is where the Task's branch lives. Binding writes `task_id`, `work_source`,
-`bound_at` and `task_primary_sessions`; it stops writing `cwd`.
+- `agent_sessions.cwd` is where the conversation runs.
+- `task_checkouts.worktree` is where the Task's branch, PR, and Graph workers live.
+- Binding writes `task_id`, `work_source`, `bound_at`, and `task_primary_sessions`;
+  it stops writing `cwd`.
+- `current_capture IS NULL AND bound_at IS NULL` identifies an unplaced primary
+  placeholder that `admit_scope_workspace` / `admit_session_workspace` may
+  place before first launch.
 
 ## Affected surfaces
 
-- `lf session bind` (CLI, served mutation, remote Machine routing): same wire
-  shape, `cwd` unchanged in the answer. No DTO field changes.
-- `lf resume` with no ID in an unowned linked worktree: now finds a bound
-  conversation that runs there.
-- Desktop **Bind to Task** / **Make primary Task conversation**: copy at
-  `swift/LoopflowMac/Views/SessionActionSheet.swift:75` loses its two sentences
-  about the directory. Check that the Task workspace opens the conversation
-  when its directory is not the Task's worktree (the done-Task-without-checkout
-  case already does this).
-- Every harness: the directory is harness-independent. The test's
-  `native-locations.json` assertion shows a resume currently relocates the
-  provider's saved conversation to the new directory; find what does that, and
-  delete it if binding was its only caller (Machine moves may still use it).
+- **Storage (`rust/loopflow-storage/src/sqlite/`):**
+  - `children.rs`: remove `destination` parameter from `promote_task_prepared`,
+    its `UPDATE agent_sessions SET cwd=?2`, and its `"Task workspace changed
+    before promotion; retry"` check.
+  - `sessions.rs:1746`: `admit_session_workspace` guards with
+    `CASE WHEN current_capture IS NOT NULL OR bound_at IS NOT NULL THEN cwd ELSE ?3 END`
+    (dropping its `work_source='bound'` read).
+- **Execution (`rust/loopflow-execution/src/`):**
+  - `store/ownership.rs`, `store/children.rs`: drop `destination` from
+    `promote_task`.
+  - `ops/task/adoption.rs`: drop `continue_in_task` and `destination` from
+    `adoption::save`; when an existing Task has a `worktree` whose canonical
+    root differs from `source.checkout` (or `session.cwd`'s worktree root), emit
+    the one-line factual diagnostic:
+    `Conversation stays in <session_cwd>; <TASK>'s checkout is <task_worktree>.`
+  - `ops/human_session/primary.rs:322`: in `admit_scope_workspace`, return
+    early when `session.captured.is_some() || session.bound_at.is_some()`
+    (dropping its `work_source == Some(WorkSource::Bound)` read).
+- **CLI & docs:**
+  - `lf session bind` (CLI, served mutation, remote Machine routing): same wire
+    shape, `cwd` unchanged in the answer. No DTO field changes.
+  - `lf session bind` `after_help` (`rust/loopflow/src/lf/mod.rs:1829`): remove
+    the directory-switch sentences; state that the conversation stays in its
+    current directory.
+  - `docs/work.md:156-162`: fix both the false `lf task checkout` claim (lines
+    156-158) and the bind directory-switch claim (lines 159-161) so the doc
+    states one rule: binding and creation both keep the conversation in its
+    directory, while an open Task without a worktree adopts an unowned linked
+    checkout.
+  - `docs/dev/reference-models.md:478-484`: update binding rules to state that
+    binding leaves `cwd` unchanged.
+- **Desktop (`swift/`):**
+  - `swift/LoopflowMac/Views/SessionActionSheet.swift:75`: replace the
+    four-sentence split copy with `"This conversation and its files stay in their current directory."`
+  - `swift/LoopflowTests/SessionControlsTests.swift`: update `ControlsSource`
+    (line 210: stop rewriting `record["cwd"] = "/src/delivery"`) and assertions
+    in `createOrBindConversation` (line 98) and `bindAssignedConversation`
+    (line 128) to expect `cwd == session.cwd`.
+  - Desktop already launches conversation terminals from
+    `record.workspace.worktree` (derived from `session.cwd` via
+    `SessionsView.swift:1257` `presentationDirectory`), so a Task whose primary
+    conversation runs in another checkout opens in the conversation's directory.
+- **Harnesses:**
+  - Harness-independent. Keeping `cwd` unchanged also preserves directory-keyed
+    transcripts (Claude Code's `~/.claude/projects/<encoded-cwd>/`). No local
+    relocation code exists to delete (`native-locations.json` is only written
+    by `rust/loopflow-execution/tests/support/opencode_cli.py`).
 
 ## Absent and error states
 
-- A worktree with no conversation still answers "This worktree has no
-  associated work conversation." Unchanged; see `scratch/questions.md`.
-- The conversation's worktree was removed: launch reports the missing
-  directory, as for any Session today.
-- Sessions already moved by a bind keep the rewritten `cwd`. No repair code:
-  `lf resume <session>` reaches them from anywhere. The live one is
+- A worktree with no conversation still answers `"This worktree has no
+  associated work conversation."` Unchanged; see `scratch/questions.md`.
+- The conversation's worktree was removed from disk (`!session.cwd.is_dir()`):
+  `leave_gone_directory` (`primary.rs:288`) falls back to the repository's main
+  checkout when a repository is recorded on the Task, Wave, or Session; with no
+  repository on record, launch reports the missing directory.
+- Sessions already moved by a past bind keep their recorded `cwd`. No repair
+  code: `lf resume <session>` reaches them from anywhere. The live one is
   `session_94d9963b7fd74dacbe01b65c99f7deb5`; nothing in this Task edits the
   store by hand.
 
 ## Exclusions
 
 - Giving a Task a second checkout, or moving files between worktrees.
-- `lf task checkout`, Machine moves (`lf session move`, `lf task move`).
+- `lf task checkout`, Machine moves (`lf session move`, `lf task move` — note
+  that `moves::send_task` still checkpoints `task.worktree`, separate follow-up
+  if split-checkout moves need warning/refusal).
+- Changing `lf resume` in an empty unowned linked worktree.
+- Removing `agent_sessions.work_source` completely (`LOO-836`) or merging
+  test-only `bind_session_prepared`.
 - Why the agy process ended at 00:29.
 
-## What goes
+## Implementation order & verification
 
-- `continue_in_task` parameter and `destination` in `adoption::save`, with the
-  "Conversation directory set to …" diagnostic.
-- `destination` parameter of `promote_task_prepared` / `store::ownership::promote_task`
-  and the `UPDATE agent_sessions SET cwd` with its "Task workspace changed before
-  promotion" check; callers in `children.rs`, `children_tests.rs`,
-  `admission_lifecycle_tests.rs`, `ownership/tests.rs`.
-- The directory sentences in `lf session bind`'s `after_help`
-  (`rust/loopflow/src/lf/mod.rs:1829`), `docs/work.md:159-161`,
-  `docs/dev/reference-models.md:478-484`, and the Swift copy above.
-- In `adoption/tests.rs`: the "sets the conversation's directory there" half of
-  `binding_selects_the_task_conversation` becomes "stays in `origin`";
-  `binding_a_done_task_keeps_it_done` expects `origin` in all four cases.
-- Comments that say binding selected a directory (`primary.rs:337`,
-  `sqlite/sessions.rs:1754`) say what is true now: a bound conversation keeps
-  its directory.
+Start with the tests that prove the whole invariant fails today, then remove
+the moves cleanly in one pass:
 
-Stays: `resolve_checkout`'s "Session workspace changed before promotion"
-re-read, the `work_source='bound'` guard in `admit_session_workspace`, an open
-Task without a worktree adopting the Session's unowned linked checkout.
+1. **First slice (proves the model holds soonest):**
+   - Rewrite and rename
+     `promotion_sets_directory_immediately_and_resumes_same_native_conversation`
+     → `binding_keeps_the_conversation_in_its_worktree` in
+     `rust/loopflow/tests/session_lifecycle_tests.rs`:
+     - after `session bind`, `sessions`, `task status … sessions[0].cwd`, and
+       `resume --task … --prepare --json` all report `origin`;
+     - `resume --prepare --json` run from `origin` with no ID returns the bound
+       Session (fails today with `"no associated work conversation"`);
+     - the continued launch receives `cwd == origin`; `native-locations.json`
+       reports `origin`; native conversation identity and messages are
+       unchanged; `draft.txt` is intact.
+   - Add a unit test in `adoption/tests.rs` (or `primary.rs`) covering an
+     already-assigned, already-started Session (`task_id = Some(T)`,
+     `work_source = Declared`, `bound_at = None`, `captured = Some(_)`) in a
+     different checkout made primary via `bind` and then passed through
+     `admit_workspace`: asserts `cwd` stays in `origin` (fails today).
+2. **Delete the bind move and fix `admit_scope_workspace` / `admit_session_workspace`:**
+   - Remove `continue_in_task` and `destination` across `adoption.rs`,
+     `store/ownership.rs`, `store/children.rs`, `sqlite/children.rs`, and
+     update callers/tests in `children_tests.rs`, `admission_lifecycle_tests.rs`,
+     `ownership/tests.rs`, `adoption/tests.rs` (`binding_selects_the_task_conversation`
+     and `binding_a_done_task_keeps_it_done`).
+   - Update `admit_scope_workspace` (`primary.rs:322`) and
+     `admit_session_workspace` (`sessions.rs:1746`) to check
+     `captured` / `bound_at` instead of `work_source='bound'`, updating
+     `promotion_directory_survives_an_opening_prepared_before_binding`
+     (`admission_lifecycle_tests.rs:427`) to expect `origin` (and verifying
+     `idle_primary_adopts_persistent_workspace_without_losing_identity` and
+     `a_closed_tasks_conversations_reopen_in_the_main_checkout` still pass).
+   - Emit the one-line factual split-directory diagnostic in `adoption::save`
+     when `existing.worktree` differs from the Session's checkout root.
+3. **Update CLI help, docs, and Swift copy/tests:**
+   - `rust/loopflow/src/lf/mod.rs:1829`
+   - `docs/work.md:156-162`, `docs/dev/reference-models.md:478-484`
+   - `swift/LoopflowMac/Views/SessionActionSheet.swift:75`
+   - `swift/LoopflowTests/SessionControlsTests.swift` (lines 98, 128, 210)
+4. **Verify:**
 
-## Passes
+```bash
+env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test -p loopflow --test session_lifecycle_tests binding_keeps < /dev/null
+env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test -p loopflow-execution --lib ops::task::adoption:: < /dev/null
+env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test -p loopflow-execution --lib ops::human_session::primary:: < /dev/null
+env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test -p loopflow-execution --lib store::admission_lifecycle_tests:: < /dev/null
+cargo fmt
+cargo clippy --all-targets -- -D warnings
+```
 
-One pass. Start with the CLI test rewritten to the new expectations and watch
-it fail on `cwd` and on the no-ID resume; delete the move through storage,
-execution, help, docs and Swift copy; run the two commands above, `cargo fmt`,
-`cargo clippy --all-targets -- -D warnings`. The Desktop build and view tests
-go to gate/CI.
+Desktop build and `SessionControlsTests` run at gate/CI.
 
 Done when: the demo above continues the agy conversation on Claude in the
-worktree it started in.
+worktree it started in, and making an already-assigned conversation in another
+directory primary keeps it there across idle resume.

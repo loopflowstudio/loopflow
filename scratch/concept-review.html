@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1101 · Concept Review — Conversation Location &amp; Task Binding</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-subtle: #f6f7f9;
+    --bg-card: #ffffff;
+    --text: #151922;
+    --text-muted: #546070;
+    --border: #dfe4ec;
+    --border-strong: #c2ccd9;
+    --yes-bg: #e7f6ec;
+    --yes-fg: #136434;
+    --yes-border: #a7dfb9;
+    --no-bg: #fdecec;
+    --no-fg: #a11e24;
+    --no-border: #f5b8bc;
+    --existing-bg: #eef2f7;
+    --existing-fg: #3b4758;
+    --proposed-bg: #e8f0fe;
+    --proposed-fg: #1a4db3;
+    --proposed-border: #b3cdfa;
+    --warn-bg: #fef7e6;
+    --warn-fg: #7a4b00;
+    --warn-border: #f2d28b;
+    --code-bg: #f1f3f7;
+    --term-bg: #161b22;
+    --term-fg: #e6edf3;
+    --term-dim: #8b949e;
+    --term-err: #ff7b72;
+    --term-ok: #7ee787;
+    --term-accent: #79c0ff;
+    --shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f131a;
+      --bg-subtle: #161c26;
+      --bg-card: #141922;
+      --text: #e7ecf3;
+      --text-muted: #98a4b5;
+      --border: #263040;
+      --border-strong: #39475e;
+      --yes-bg: #102a1c;
+      --yes-fg: #6ee7a0;
+      --yes-border: #1e5635;
+      --no-bg: #321519;
+      --no-fg: #ff8e94;
+      --no-border: #6b242c;
+      --existing-bg: #202836;
+      --existing-fg: #b8c4d6;
+      --proposed-bg: #142647;
+      --proposed-fg: #8bb8ff;
+      --proposed-border: #284c8a;
+      --warn-bg: #2d220e;
+      --warn-fg: #f8c86a;
+      --warn-border: #664a17;
+      --code-bg: #1c2432;
+      --term-bg: #0b0e14;
+      --term-fg: #e6edf3;
+      --term-dim: #8b949e;
+      --term-err: #ff7b72;
+      --term-ok: #7ee787;
+      --term-accent: #79c0ff;
+      --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 1020px;
+    margin: 0 auto;
+    padding: 36px 24px 80px;
+  }
+  header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 20px;
+    margin-bottom: 28px;
+  }
+  .eyebrow {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+  h1 {
+    font-size: 28px;
+    line-height: 1.25;
+    margin: 0 0 10px;
+    letter-spacing: -0.02em;
+  }
+  .lead {
+    font-size: 16px;
+    color: var(--text-muted);
+    margin: 0;
+  }
+  h2 {
+    font-size: 20px;
+    line-height: 1.3;
+    margin: 40px 0 14px;
+    letter-spacing: -0.01em;
+  }
+  h3 {
+    font-size: 15px;
+    line-height: 1.4;
+    margin: 0 0 8px;
+  }
+  p { margin: 0 0 12px; }
+  ul, ol { margin: 0 0 14px; padding-left: 20px; }
+  li { margin-bottom: 6px; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.88em;
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 999px;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+  .badge-yes { background: var(--yes-bg); color: var(--yes-fg); border: 1px solid var(--yes-border); }
+  .badge-no { background: var(--no-bg); color: var(--no-fg); border: 1px solid var(--no-border); }
+  .badge-existing { background: var(--existing-bg); color: var(--existing-fg); border: 1px solid var(--border); }
+  .badge-proposed { background: var(--proposed-bg); color: var(--proposed-fg); border: 1px solid var(--proposed-border); }
+  .badge-status { background: var(--warn-bg); color: var(--warn-fg); border: 1px solid var(--warn-border); }
+
+  .meta-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+  }
+  .callout {
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin: 18px 0;
+    border: 1px solid var(--border);
+    background: var(--bg-subtle);
+  }
+  .callout-mismatch {
+    border-color: var(--no-border);
+    background: var(--no-bg);
+  }
+  .callout-proposed {
+    border-color: var(--proposed-border);
+    background: var(--proposed-bg);
+  }
+  .callout-warn {
+    border-color: var(--warn-border);
+    background: var(--warn-bg);
+  }
+  .callout-title {
+    font-weight: 700;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0 24px;
+    font-size: 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  th, td {
+    text-align: left;
+    vertical-align: top;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  tr:last-child td { border-bottom: none; }
+  th {
+    background: var(--bg-subtle);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    font-weight: 700;
+  }
+  .col-align { width: 78px; text-align: center; }
+  .col-concept { width: 22%; }
+  .col-code { width: 28%; }
+
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 16px 0 24px;
+  }
+  @media (max-width: 780px) {
+    .compare { grid-template-columns: 1fr; }
+  }
+  .panel {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-card);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  .panel-proposed {
+    border-color: var(--proposed-border);
+  }
+  .panel-head {
+    padding: 10px 14px;
+    background: var(--bg-subtle);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 13px;
+  }
+  .panel-proposed .panel-head {
+    background: var(--proposed-bg);
+    border-bottom-color: var(--proposed-border);
+  }
+  .panel-body {
+    padding: 14px;
+  }
+  .terminal {
+    background: var(--term-bg);
+    color: var(--term-fg);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12.5px;
+    line-height: 1.55;
+    padding: 13px 14px;
+    border-radius: 8px;
+    overflow-x: auto;
+    white-space: pre;
+    margin: 0 0 12px;
+  }
+  .t-dim { color: var(--term-dim); }
+  .t-err { color: var(--term-err); font-weight: 600; }
+  .t-ok { color: var(--term-ok); font-weight: 600; }
+  .t-accent { color: var(--term-accent); }
+
+  .state-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    font-size: 12.5px;
+  }
+  .state-box {
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 9px 10px;
+    background: var(--bg-subtle);
+  }
+  .state-box strong {
+    display: block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+  .state-bad {
+    border-color: var(--no-border);
+    background: var(--no-bg);
+  }
+  .state-good {
+    border-color: var(--yes-border);
+    background: var(--yes-bg);
+  }
+
+  .flow-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    background: var(--bg-card);
+  }
+  .flow-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin: 14px 0 22px;
+  }
+  @media (max-width: 780px) {
+    .flow-grid { grid-template-columns: 1fr; }
+  }
+  .matrix-label {
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 4px;
+  }
+  .question {
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin: 14px 0;
+    background: var(--bg-card);
+  }
+  .question-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+  .question-num {
+    font-weight: 700;
+    font-size: 15px;
+  }
+  .options {
+    list-style: none;
+    padding: 0;
+    margin: 10px 0 0;
+  }
+  .options li {
+    padding: 8px 10px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    margin-bottom: 8px;
+    background: var(--bg-subtle);
+  }
+  .options li.chosen {
+    border-color: var(--proposed-border);
+    background: var(--proposed-bg);
+  }
+  .opt-key {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-weight: 700;
+    margin-right: 6px;
+  }
+  .muted { color: var(--text-muted); font-size: 13.5px; }
+  blockquote {
+    margin: 0 0 14px;
+    padding: 10px 14px;
+    border-left: 3px solid var(--border-strong);
+    background: var(--bg-subtle);
+    border-radius: 0 8px 8px 0;
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Concept Review · LOO-1101</div>
+    <h1>Conversation Location &amp; Task Binding</h1>
+    <p class="lead">
+      <strong>Area reviewed:</strong> How a conversation's directory relates to its checkout, Task ownership, binding, resuming, and workspace admission — widened from the `lf resume -a` failure in `manabot.academy-test-drive` because the failure lives at the boundary between `agent_sessions.cwd` and `task_checkouts.worktree`.
+    </p>
+    <div class="meta-bar">
+      <span class="badge badge-status">Pre-implementation review (HEAD has kickoff plan only)</span>
+      <span class="badge badge-existing">Existing = current HEAD (origin/main)</span>
+      <span class="badge badge-proposed">Proposed = updated scratch/plan.md</span>
+    </div>
+  </header>
+
+  <blockquote>
+    “in a worktree i started w/o a task initially (manabot.academy-test-drive), i had an agy lf session going. then i wanted to move to fable, so i did <code>lf resume -a claude:fable</code> but it sai there was no work in this worktree”
+  </blockquote>
+
+  <h2>1. Do the product's concepts and the code's concepts line up?</h2>
+
+  <table>
+    <thead>
+      <tr>
+        <th class="col-concept">Product concept</th>
+        <th class="col-code">Code concept</th>
+        <th class="col-align">Lines up?</th>
+        <th>Diagnosis</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>
+          <strong>Where a conversation runs</strong><br>
+          <span class="muted">The checkout where the agent process lives, where its edits sit, and where <code>lf resume</code> / <code>-a</code> / crash recovery continue it.</span>
+        </td>
+        <td>
+          <code>agent_sessions.cwd</code><br>
+          <code>processes.cwd</code><br>
+          <code>SessionWorkspace</code>
+        </td>
+        <td class="col-align"><span class="badge badge-no">No</span></td>
+        <td>
+          <strong>One concept split into a lie and reality.</strong>
+          <code>lf session bind</code> overwrites <code>agent_sessions.cwd</code> to <code>task.worktree</code> while the running provider stays in its original directory and files never move. <code>lf resume</code> in the real directory loses the conversation, server recovery restarts it in the wrong worktree, and directory-keyed providers (Claude Code's <code>~/.claude/projects/&lt;cwd&gt;/</code>) lose their transcript on resume.
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <strong>Attaching an existing conversation to a Task</strong><br>
+          <span class="muted">Creating a Task from a conversation, binding an unbound conversation, or making an already-assigned conversation primary.</span>
+        </td>
+        <td>
+          <code>adoption::save(…, continue_in_task: bool)</code><br>
+          <code>promote_task_prepared(…, destination)</code>
+        </td>
+        <td class="col-align"><span class="badge badge-no">No</span></td>
+        <td>
+          <strong>One action split by an invisible flag.</strong>
+          <code>lf task create --session</code> passes <code>continue_in_task = false</code> (keeps <code>cwd</code>); <code>lf session bind</code> passes <code>continue_in_task = true</code> (rewrites <code>cwd</code>). Desktop's sheet even had to explain the split in prose: <em>“Creation keeps this conversation in place. Binding sets its directory to the Task worktree immediately.”</em>
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <strong>Placing a brand-new primary vs. keeping a started conversation in place</strong><br>
+          <span class="muted">An unstarted primary placeholder moves into its Task/Wave/repo checkout when opened; a conversation that already ran stays where it ran.</span>
+        </td>
+        <td>
+          <code>admit_scope_workspace</code> (<code>primary.rs:322</code>)<br>
+          <code>admit_session_workspace</code> (<code>sessions.rs:1746</code>)<br>
+          guard: <code>work_source == 'bound'</code>
+        </td>
+        <td class="col-align"><span class="badge badge-no">No</span></td>
+        <td>
+          <strong>Wrong predicate &amp; leaving column (missed by kickoff).</strong>
+          Guarding on <code>work_source = 'bound'</code> (marked <code>-- leaving</code> in <code>LOO-836</code>) leaves a hole: a conversation already assigned to a Task from another directory (e.g. <code>lf --task LOO-12</code> in <code>main</code> or another worktree → <code>work_source = 'declared'</code>, <code>bound_at = NULL</code>) that is later made primary gets silently moved to <code>task.worktree</code> on its next idle <code>lf resume</code>. The real rule is lifecycle: only an unstarted, unbound placeholder (<code>current_capture IS NULL AND bound_at IS NULL</code>) gets placed.
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <strong>Task checkout vs. conversation directory</strong><br>
+          <span class="muted">A Task owns at most one worktree for its branch, diff, PR, and workers. A conversation has its own directory — usually the same, sometimes another checkout.</span>
+        </td>
+        <td>
+          <code>task_checkouts.worktree</code><br>
+          <code>agent_sessions.cwd</code><br>
+          Desktop <code>presentationDirectory</code>
+        </td>
+        <td class="col-align"><span class="badge badge-yes">Yes</span></td>
+        <td>
+          Already separate in storage and Desktop (<code>SessionsView.swift:1257</code> launches terminals from <code>record.workspace.worktree</code>, derived from <code>session.cwd</code>). One doc lie needs fixing: <code>docs/work.md:156-158</code> claims <code>lf task checkout</code> moves a bound Session out of main/Wave, which it never did.
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <strong>Reopening after a checkout is deleted</strong><br>
+          <span class="muted">After a Task closes and its worktree is retired, opening the conversation falls back to the repo's main checkout.</span>
+        </td>
+        <td>
+          <code>leave_gone_directory</code> (<code>primary.rs:288</code>)<br>
+          <code>relocate_session</code>
+        </td>
+        <td class="col-align"><span class="badge badge-yes">Yes</span></td>
+        <td>
+          Honest fallback when <code>!session.cwd.is_dir()</code>: the recorded directory genuinely no longer exists on disk. Distinct from moving a conversation out of a live checkout.
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <strong>Resuming in an unowned linked worktree</strong><br>
+          <span class="muted"><code>lf resume</code> / <code>lf resume -a</code> in a worktree with no Task opens the conversation running there.</span>
+        </td>
+        <td>
+          <code>checkout_scope</code> → <code>None</code><br>
+          <code>checkout_conversation</code> (matches <code>agent_sessions.cwd</code>)
+        </td>
+        <td class="col-align"><span class="badge badge-yes">Yes</span></td>
+        <td>
+          Works automatically once <code>agent_sessions.cwd</code> stops lying. When an unowned worktree has <em>no</em> open conversation at all, <code>lf resume</code> still refuses and points to <code>lf</code> (separate from this Task).
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <strong>Provider transcript location on local resume</strong><br>
+          <span class="muted">Resuming a conversation opens the same provider thread in the directory where it was saved.</span>
+        </td>
+        <td>
+          <code>native_session::resume_session_with_env</code><br>
+          (fixture stub: <code>opencode_cli.py</code>)
+        </td>
+        <td class="col-align"><span class="badge badge-yes">Yes</span></td>
+        <td>
+          Kickoff suspected local resume had a transcript-relocation layer because of <code>native-locations.json</code> in tests. Verified: no such layer exists — <code>opencode_cli.py</code> simply writes <code>os.getcwd()</code> on launch. Real Claude Code transcripts are directory-keyed and only resume reliably when <code>cwd</code> stays put.
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <strong>Storage bind writers</strong><br>
+          <span class="muted">One action: bind a conversation to a Task.</span>
+        </td>
+        <td>
+          <code>promote_task_prepared</code> (production)<br>
+          <code>bind_session_prepared</code> (tests only)
+        </td>
+        <td class="col-align"><span class="badge badge-no">No</span></td>
+        <td>
+          Minor internal duplication: <code>bind_session_prepared</code> has zero production callers (only unit/integration tests). Neither moves <code>cwd</code> once the fix lands; cleaning up test callers is separate from LOO-1101.
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>2. Biggest mismatch &amp; the fix (Before vs. After)</h2>
+
+  <div class="callout callout-mismatch">
+    <div class="callout-title"><span class="badge badge-no">Biggest mismatch</span> Pretending a conversation moved to another directory</div>
+    <p style="margin-bottom:0">
+      <code>lf session bind</code> rewrote <code>agent_sessions.cwd</code> to the Task's worktree without moving the running process, the files on disk, or directory-keyed provider transcripts — and <code>admit_scope_workspace</code> kept a second path that could do the same thing whenever an already-assigned conversation was made primary. Every downstream failure (missing conversation on <code>lf resume -a</code>, recovery restarting in the wrong worktree, broken Claude <code>--resume</code>) came from that single fiction.
+    </p>
+  </div>
+
+  <div class="callout callout-proposed">
+    <div class="callout-title"><span class="badge badge-proposed">Proposed model</span> One invariant for conversation location</div>
+    <p style="margin-bottom:0">
+      <strong>Binding changes what a conversation belongs to, never where it runs.</strong>
+      And <code>admit_scope_workspace</code> / <code>admit_session_workspace</code> only places an <em>unstarted, unbound primary placeholder</em> (<code>current_capture IS NULL AND bound_at IS NULL</code>) into its scope's checkout. Once a conversation has started or been bound, its directory is settled — only a missing directory on disk (<code>leave_gone_directory</code>) or an explicit Machine move (<code>lf session receive</code>) changes it.
+    </p>
+  </div>
+
+  <div class="compare">
+    <div class="panel">
+      <div class="panel-head">
+        <span>Before · Current behavior</span>
+        <span class="badge badge-existing">Existing</span>
+      </div>
+      <div class="panel-body">
+<div class="terminal"><span class="t-dim"># 1. Start agy in an unowned linked worktree</span>
+$ cd ../manabot.academy-test-drive
+$ lf -a agy
+<span class="t-dim">session_94d9963b running in manabot.academy-test-drive</span>
+
+<span class="t-dim"># 2. Bind to MTG-388 (which already owns manabot.mtg-388-getting-into-a)</span>
+$ lf session bind session_94d9963b --task MTG-388
+Binding session_94d9963b to MTG-388. Permanent.
+<span class="t-err">Conversation directory set to …/manabot.mtg-388-getting-into-a.</span>
+
+<span class="t-dim"># 3. Switch to claude:fable from the worktree you're actually in</span>
+$ lf resume -a claude:fable
+<span class="t-err">Error: This worktree has no associated work conversation.</span>
+
+<span class="t-dim"># 4. Later: agy exits → server recovery restarts it</span>
+<span class="t-err">Task conversation started in …/manabot.mtg-388-getting-into-a</span>
+<span class="t-dim"># Wrong checkout; none of academy-test-drive's edits are there</span></div>
+        <div class="state-grid">
+          <div class="state-box state-bad">
+            <strong>agent_sessions.cwd</strong>
+            <code>…/manabot.mtg-388-getting-into-a</code>
+          </div>
+          <div class="state-box">
+            <strong>Live process &amp; files</strong>
+            <code>…/manabot.academy-test-drive</code>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel panel-proposed">
+      <div class="panel-head">
+        <span>After · Unified location invariant</span>
+        <span class="badge badge-proposed">Proposed</span>
+      </div>
+      <div class="panel-body">
+<div class="terminal"><span class="t-dim"># 1. Start agy in an unowned linked worktree</span>
+$ cd ../manabot.academy-test-drive
+$ lf -a agy
+<span class="t-dim">session_94d9963b running in manabot.academy-test-drive</span>
+
+<span class="t-dim"># 2. Bind to MTG-388 (which already owns manabot.mtg-388-getting-into-a)</span>
+$ lf session bind session_94d9963b --task MTG-388
+Binding session_94d9963b to MTG-388. Permanent.
+<span class="t-accent">Conversation stays in …/manabot.academy-test-drive; MTG-388's checkout is …/manabot.mtg-388-getting-into-a.</span>
+
+<span class="t-dim"># 3. Switch to claude:fable from academy-test-drive</span>
+$ lf resume -a claude:fable
+<span class="t-ok">Started a new claude thread for session_94d9963b, seeded with what the agy thread knew.</span>
+<span class="t-dim"># Running in manabot.academy-test-drive, still MTG-388's primary</span>
+
+<span class="t-dim"># 4. Crash / recovery pass</span>
+<span class="t-ok">Task conversation started in …/manabot.academy-test-drive</span></div>
+        <div class="state-grid">
+          <div class="state-box state-good">
+            <strong>agent_sessions.cwd &amp; process</strong>
+            <code>…/manabot.academy-test-drive</code>
+          </div>
+          <div class="state-box">
+            <strong>task_checkouts.worktree</strong>
+            <code>…/manabot.mtg-388-getting-into-a</code>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3>Desktop sheet copy (<code>SessionActionSheet.swift</code>)</h3>
+  <div class="compare">
+    <div class="panel">
+      <div class="panel-head"><span>Before</span><span class="badge badge-existing">Existing</span></div>
+      <div class="panel-body">
+        <p style="margin:0; font-size:13.5px;">“Creation keeps this conversation in place. <strong>Binding sets its directory to the Task worktree immediately. Already-running clients may keep their original directory.</strong> Files stay where they are.”</p>
+      </div>
+    </div>
+    <div class="panel panel-proposed">
+      <div class="panel-head"><span>After</span><span class="badge badge-proposed">Proposed</span></div>
+      <div class="panel-body">
+        <p style="margin:0; font-size:13.5px;">“This conversation and its files stay in their current directory.”</p>
+      </div>
+    </div>
+  </div>
+
+  <h2>3. Stress-testing the model: normal path, failure, recovery &amp; counterexamples</h2>
+
+  <div class="flow-grid">
+    <div class="flow-card">
+      <h3>Normal path</h3>
+      <p class="muted">Unowned worktree <code>Y</code> has a live <code>agy</code> conversation. Bound to Task <code>T</code> (which owns worktree <code>X</code>). <code>lf resume -a claude:fable</code> in <code>Y</code> finds the Session via <code>checkout_conversation</code>, seeds the Claude thread from <code>agy</code>'s log, and runs in <code>Y</code>. <code>lf resume T</code> from anywhere opens the same Session in <code>Y</code>.</p>
+    </div>
+    <div class="flow-card">
+      <h3>Failure &amp; recovery</h3>
+      <p class="muted">Provider exits or crashes → server recovery pass restarts it in <code>Y</code> (its actual files). If <code>Y</code> itself is later deleted on disk (e.g. a retired Task checkout), <code>leave_gone_directory</code> falls back to the repo's main checkout on next open so history remains reachable.</p>
+    </div>
+    <div class="flow-card">
+      <h3>Brand-new Task / Wave / Repo primary</h3>
+      <p class="muted"><code>lf task create --run</code> or <code>lf resume LOO-12</code> creates a placeholder with <code>captured = NULL</code> and <code>bound_at = NULL</code>. <code>admit_workspace</code> still places it into <code>task.worktree</code> (or the persistent Wave/repo worktree) before its first launch. Once launched, <code>cwd</code> never drifts.</p>
+    </div>
+  </div>
+
+  <div class="callout callout-warn">
+    <div class="callout-title">Counterexamples kept visible (what this design trades off)</div>
+    <ol style="margin-bottom:0">
+      <li>
+        <strong>Already-assigned conversation made primary from another directory (fixed in this plan):</strong>
+        Someone runs <code>lf --task LOO-12</code> from <code>main</code> or <code>repo.research</code> (<code>task_id = LOO-12</code>, <code>work_source = 'declared'</code>, <code>bound_at = NULL</code>, <code>current_capture IS NOT NULL</code>), then clicks <em>Make primary Task conversation</em>. Under kickoff's plan (which kept the <code>work_source = 'bound'</code> guard), the next idle <code>lf resume</code> would still overwrite <code>cwd</code> to <code>task.worktree</code>. Replacing that guard with <code>current_capture IS NULL AND bound_at IS NULL</code> closes the hole and drops two production reads of leaving <code>work_source</code>.
+      </li>
+      <li>
+        <strong>Split checkout between conversation (<code>Y</code>) and Task workers (<code>X</code>):</strong>
+        When you bind a conversation in <code>Y</code> to a Task that already owns <code>X</code>, the Task's Graph workers, <code>lf task changes</code>, and PR commands run in <code>X</code>, while the primary conversation runs in <code>Y</code>. Printing the one-line factual note on bind (<em>“Conversation stays in Y; TASK's checkout is X.”</em>) makes the split visible immediately instead of hiding it.
+      </li>
+      <li>
+        <strong>Machine move of a split Task (<code>lf task move</code> / <code>lf --machine M resume &lt;session&gt;</code>):</strong>
+        <code>moves::send_task</code> checkpoints <code>task.worktree</code> (<code>X</code>) and moves the conversation's transcript from <code>Y</code>. Uncommitted edits sitting in <code>Y</code> do not travel with <code>X</code>. Noted as a separate outcome below — rare enough not to block LOO-1101, but real.
+      </li>
+      <li>
+        <strong>Conversations moved by an earlier bind:</strong>
+        Already-rewritten rows in <code>~/.lf/loopflow.db</code> (like <code>session_94d9963b…</code> → <code>manabot.mtg-388-getting-into-a</code>) stay as stored; <code>lf resume &lt;session&gt;</code> still reaches them. No automatic DB rewrite is planned.
+      </li>
+    </ol>
+  </div>
+
+  <h2>4. What changed in <code>scratch/plan.md</code></h2>
+  <ul>
+    <li><strong>Added the <code>admit_scope_workspace</code> / <code>admit_session_workspace</code> fix:</strong> replace the leaving <code>work_source = 'bound'</code> guard with <code>captured.is_none() &amp;&amp; bound_at.is_none()</code> (SQL: <code>current_capture IS NOT NULL OR bound_at IS NOT NULL</code>) so an already-started conversation made primary never silently moves on idle resume, and two reads of leaving <code>work_source</code> disappear.</li>
+    <li><strong>Removed the false lead on <code>native-locations.json</code>:</strong> it is written only by the test stub <code>opencode_cli.py</code>, not by any local relocation layer in <code>lf</code>.</li>
+    <li><strong>Added missed affected surfaces:</strong> <code>swift/LoopflowTests/SessionControlsTests.swift</code> (mock and assertions expecting <code>/src/delivery</code>), <code>docs/work.md:156-158</code> (false claim that <code>lf task checkout</code> moves a bound Session), and accurate <code>leave_gone_directory</code> behavior in Absent &amp; error states.</li>
+    <li><strong>Added factual split-directory note on <code>lf session bind</code>:</strong> when <code>task.worktree</code> exists and differs from the Session's checkout root, print where the conversation stays and where the Task's checkout is.</li>
+  </ul>
+
+  <h2>5. Outside this Task (separate outcomes)</h2>
+  <ul>
+    <li><strong><code>lf resume</code> in an empty unowned linked worktree:</strong> currently refuses with <em>“This worktree has no associated work conversation”</em> (explicitly tested in <code>adoption/tests.rs</code> and <code>session_launch_contract.rs</code>). Starting a conversation there instead would be a separate behavioral change.</li>
+    <li><strong><code>lf task move</code> when a primary conversation sits outside <code>task.worktree</code>:</strong> warning or refusing if <code>session.cwd</code> has uncommitted work outside the Task checkout (touches <code>ops/human_session/moves.rs</code>).</li>
+    <li><strong>Retiring <code>agent_sessions.work_source</code> and test-only <code>bind_session_prepared</code>:</strong> tracked under <code>LOO-836</code>; this Task only removes the two reads it directly touches.</li>
+  </ul>
+
+  <h2>6. Open questions for review</h2>
+  <p class="muted">Choices marked <span class="badge badge-proposed">Chosen for build</span> are written into <code>scratch/plan.md</code> and built for review; reply with e.g. <code>1b</code> or <code>2b</code> to flip any of them.</p>
+
+  <div class="question">
+    <div class="question-head">
+      <span class="question-num">1. When you bind a conversation to a Task that already has a different worktree, where should the conversation run?</span>
+    </div>
+    <p class="muted">Applies both when binding from another linked worktree (like <code>manabot.academy-test-drive</code>) and when binding from <code>main</code> or a Wave checkout.</p>
+    <ul class="options">
+      <li class="chosen">
+        <span class="opt-key">1a.</span> <span class="badge badge-proposed">Chosen for build</span>
+        <strong>Always stay where it started.</strong> The conversation, its edits, <code>lf resume</code> in that worktree, and crash recovery all agree. The Task's own worktree stays where Graph workers and PRs run; <code>lf session bind</code> prints one line noting the two paths when they differ.
+      </li>
+      <li>
+        <span class="opt-key">1b.</span>
+        <strong>Stay in linked worktrees, but move out of <code>main</code> and Wave checkouts.</strong> Keeps a shared checkout cleaner after binding, at the cost of a second rule and the same live-process vs. stored-directory split whenever you bind a running chat from <code>main</code> (plus breaking Claude Code resume until a new thread starts).
+      </li>
+    </ul>
+  </div>
+
+  <div class="question">
+    <div class="question-head">
+      <span class="question-num">2. When you bind a conversation in directory Y to a Task whose checkout is X, should <code>lf session bind</code> mention the two directories?</span>
+    </div>
+    <p class="muted">Matters because Graph workers and <code>lf task changes</code> will look at X while your bound chat edits Y.</p>
+    <ul class="options">
+      <li class="chosen">
+        <span class="opt-key">2a.</span> <span class="badge badge-proposed">Chosen for build</span>
+        <strong>Print one factual line only when they differ:</strong> <em>“Conversation stays in &lt;Y&gt;; &lt;TASK&gt;'s checkout is &lt;X&gt;.”</em> Silent when they match or the Task has no checkout.
+      </li>
+      <li>
+        <span class="opt-key">2b.</span>
+        <strong>Say nothing about directories.</strong> Print only the Task it bound to; rely on <code>lf task status</code> if someone checks where the conversation runs.
+      </li>
+    </ul>
+  </div>
+
+  <div class="question">
+    <div class="question-head">
+      <span class="question-num">3. What about <code>lf resume</code> with no arguments in an unowned linked worktree that has no conversation yet?</span>
+    </div>
+    <p class="muted">Today it refuses and tells you to run <code>lf</code> to start a new conversation there, even though <code>lf resume --help</code> says “With none for this scope, it starts one and says so.”</p>
+    <ul class="options">
+      <li class="chosen">
+        <span class="opt-key">3a.</span> <span class="badge badge-proposed">Chosen for build</span>
+        <strong>Keep the refusal out of this Task.</strong> An unowned worktree has no primary scope; <code>lf</code> starts a chat there and <code>lf resume</code> continues one once it exists.
+      </li>
+      <li>
+        <span class="opt-key">3b.</span>
+        <strong>Have <code>lf resume</code> start a conversation in an empty unowned worktree too.</strong> Drops the refusal so <code>lf resume</code> works in every worktree; would be a small follow-up Task.
+      </li>
+    </ul>
+  </div>
+
+  <div class="question">
+    <div class="question-head">
+      <span class="question-num">4. Should we leave previously moved conversations alone in your local store?</span>
+    </div>
+    <p class="muted"><code>session_94d9963b7fd74dacbe01b65c99f7deb5</code> already had its directory rewritten to <code>manabot.mtg-388-getting-into-a</code> by the old bind.</p>
+    <ul class="options">
+      <li class="chosen">
+        <span class="opt-key">4a.</span> <span class="badge badge-proposed">Chosen for build</span>
+        <strong>No automatic repair.</strong> Leave existing rows as recorded; <code>lf resume &lt;session&gt;</code> reaches them from anywhere.
+      </li>
+      <li>
+        <span class="opt-key">4b.</span>
+        <strong>Repair that row by hand afterwards</strong> so <code>session_94d9963b…</code> points back to <code>manabot.academy-test-drive</code>.
+      </li>
+    </ul>
+  </div>
+</main>
+</body>
+</html>

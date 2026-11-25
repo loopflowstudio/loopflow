@@ -1458,10 +1458,8 @@ mod tests {
     fn unheld_derived_caches_without_reading_and_sees_external_edit_immediately() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
-        let _guard = crate::config::environment::EnvVarGuard::set(
-            "LF_HOME",
-            home.path().to_str().unwrap(),
-        );
+        let _guard =
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let config_path = home.path().join("config.yaml");
         std::fs::write(&config_path, "agent: claude\n").unwrap();
 

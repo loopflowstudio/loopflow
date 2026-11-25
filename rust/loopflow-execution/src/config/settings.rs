@@ -181,13 +181,13 @@ fn _list_agents(value: &mut Value) {
 }
 
 #[cfg(test)]
-static CONFIG_DESERIALIZATIONS: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
+static CONFIG_DESERIALIZATIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn deserialize_config_for_validation(value: Value, context: &str) -> Result<Config, LoadError> {
     #[cfg(test)]
     CONFIG_DESERIALIZATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    serde_yaml_ng::from_value::<Config>(value).map_err(|error| invalid(format!("{context}: {error}")))
+    serde_yaml_ng::from_value::<Config>(value)
+        .map_err(|error| invalid(format!("{context}: {error}")))
 }
 
 fn validate_parsed_config(

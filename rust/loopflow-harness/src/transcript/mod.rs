@@ -139,11 +139,12 @@ impl Source {
     }
 }
 
+type TranscriptCache = HashMap<(String, PathBuf), Option<PathBuf>>;
+
 /// Where each conversation's transcript was found; a transcript never moves,
 /// though its provider may delete it. `None` records a miss under a watched
 /// transcript root until the watcher reports a create under that home.
-static FOUND: LazyLock<Mutex<HashMap<(String, PathBuf), Option<PathBuf>>>> =
-    LazyLock::new(Mutex::default);
+static FOUND: LazyLock<Mutex<TranscriptCache>> = LazyLock::new(Mutex::default);
 static WATCHED_ROOTS: LazyLock<Mutex<Vec<PathBuf>>> = LazyLock::new(Mutex::default);
 
 /// Register a transcript root that has a live filesystem watcher so misses
@@ -224,7 +225,10 @@ pub fn find(harness: HarnessKind, home: &Path, id: &str, cwd: &Path) -> Option<P
         None => {
             let (root, _) = transcript_root(harness, home);
             if is_root_watched(&root) {
-                FOUND.lock().expect("transcript locations").insert(key, None);
+                FOUND
+                    .lock()
+                    .expect("transcript locations")
+                    .insert(key, None);
             }
             None
         }

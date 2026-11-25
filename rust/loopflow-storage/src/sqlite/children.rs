@@ -1814,8 +1814,8 @@ pub(super) fn short_task_id(conn: &Connection, id: &TaskId) -> StoreResult<Optio
     }
     // Task IDs are canonical lowercase hex, so the six-character prefix is a
     // primary-key range rather than a scan of every Task.
-    let mut query =
-        conn.prepare_cached("SELECT substr(id,6) FROM tasks WHERE id!=?1 AND id>=?2 AND id<?2||'~'")?;
+    let mut query = conn
+        .prepare_cached("SELECT substr(id,6) FROM tasks WHERE id!=?1 AND id>=?2 AND id<?2||'~'")?;
     let others = query
         .query_map(params![id.as_str(), format!("task_{}", &hex[..6])], |row| {
             row.get::<_, String>(0)

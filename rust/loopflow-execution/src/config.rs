@@ -176,8 +176,8 @@ fn cached_harness_installed(kind: HarnessKind) -> bool {
     use std::ffi::OsString;
     use std::sync::{LazyLock, Mutex};
 
-    static CACHE: LazyLock<Mutex<HashMap<(Option<OsString>, HarnessKind), bool>>> =
-        LazyLock::new(Mutex::default);
+    type HarnessPathCache = HashMap<(Option<OsString>, HarnessKind), bool>;
+    static CACHE: LazyLock<Mutex<HarnessPathCache>> = LazyLock::new(Mutex::default);
     let key = (std::env::var_os("PATH"), kind);
     if let Some(&installed) = CACHE.lock().expect("harness PATH cache").get(&key) {
         return installed;

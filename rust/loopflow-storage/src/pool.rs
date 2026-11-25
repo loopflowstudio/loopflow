@@ -354,12 +354,7 @@ mod tests {
         assert_eq!(idle_count(&path, PoolMode::Write), 1);
 
         let ro_first = SqliteStore::open_read_only_validated(
-            &path,
-            false,
-            true,
-            &build,
-            &observers,
-            fixed_key,
+            &path, false, true, &build, &observers, fixed_key,
         )
         .unwrap();
         let ro_handle = conn_handle(&ro_first);
@@ -368,12 +363,7 @@ mod tests {
         assert_eq!(idle_count(&path, PoolMode::ReadOnly), 1);
 
         let ro_second = SqliteStore::open_read_only_validated(
-            &path,
-            false,
-            true,
-            &build,
-            &observers,
-            fixed_key,
+            &path, false, true, &build, &observers, fixed_key,
         )
         .unwrap();
         assert_eq!(

@@ -171,8 +171,9 @@ fn current_members(
     project: &ProjectId,
     mut desired: Vec<String>,
 ) -> StoreResult<Vec<String>> {
-    let mut query =
-        conn.prepare_cached("SELECT id FROM tasks WHERE project_id=?1 AND planning_deleted_at IS NULL")?;
+    let mut query = conn.prepare_cached(
+        "SELECT id FROM tasks WHERE project_id=?1 AND planning_deleted_at IS NULL",
+    )?;
     let members = query
         .query_map([project.as_str()], |row| row.get(0))?
         .collect::<rusqlite::Result<std::collections::HashSet<String>>>()?;

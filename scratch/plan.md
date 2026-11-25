@@ -500,18 +500,38 @@ threads, `spawns` unchanged across two calls a minute apart. Then
 
 ## Passes
 
-1. **Measure, then prove the store pool, settings cache, and non-blocking relay.**
-   `server.diagnostics` + `lf server diagnostics --json` (with protocol
-   revision bump, fixtures, and Swift mirror), `server_idle.py`, base numbers
-   recorded. Process-wide SQLite connection pool (§3), one-shot settings
-   validation + always-on `derived()` with inline stat check + PATH/transcript
-   miss caches (§1 last three bullets, §2), held-terminal thread completely off
-   SQLite and transcript files (§6). This first slice proves the riskiest bets
-   immediately: pooled connections hold across `TestLedgerGuard` homes,
-   per-caller `token_key`s, and schema changes; quiet store opens drop to 0;
-   `Hosted::pass` and `validate_value` vanish from `sample`; and typing echoes
-   under a 5 s write lock.
-2. **Event-driven observation, one watcher, one runtime, quiet subscriptions.**
+1. **Measure, then prove the store pool, settings cache, and non-blocking relay.** *(done)*
+   - Built `server.diagnostics` + `lf server diagnostics --json` (protocol
+     revision 10 → 11, keeping `min_revision: 10`), fixtures, regenerated
+     `tests/fixtures/dto/server_schema.json`, and Swift `ServerProtocol.swift` /
+     `ServerProtocolTests` mirror.
+   - Built `scripts/benchmarks/server_idle.py` with budgets in
+     `scripts/performance-budgets.json`.
+   - Built process-wide SQLite connection pool (`rust/loopflow-storage/src/pool.rs`)
+     keyed by `(canonical path, dev, ino, mode)` with per-caller `token_key`,
+     `PRAGMA data_version` + `(schema_version, schema_migrations count & max rowid)`
+     checkout validation, statement cache capacity 256, 78 static `prepare_cached`
+     conversions, single-open `open_read_only_validated`, and per-step connection
+     borrowing in `read_stream::Reader`.
+   - Built one-shot settings validation in `config/settings.rs` (1 `Config`
+     deserialization on valid files, bottom-up per-key fallback on invalid
+     blocks), always-on `observe::derived()` sharing `PROCESS_CACHE` with inline
+     `stat(mtime, ctime, size, dev, ino)` freshness checks, stat-before-read in
+     `observe::Cache::refresh`, `(PATH, harness)` cache for `default_agent()`,
+     and watched-root transcript miss caching + create invalidation in
+     `loopflow-harness::transcript` / `transcript::watch`.
+   - Moved **every** SQLite and filesystem call off the `held-terminals` relay
+     thread (`Hosted::pass` directory confirmation at most once per terminal,
+     `end_jobs`, `release_viewer_hold`, pre-encoded `snapshot::leave`, and
+     `settle(exit)`) onto the `held-status` worker; `held.sock` answers
+     `Answered::Waiting` while exit settlement is in flight.
+   - **What it taught:** `resolve_with` was also calling `validate_preferences`
+     immediately after `filter_file_preferences` (double work), and `Hosted::pass`
+     had three additional hidden SQLite calls (`end_jobs`, `release_viewer_hold`,
+     `snapshot::leave`) besides `agent_state` — all removed from the relay loop.
+     In `server_idle.py` (`target/debug/lf --seconds 10`), `store_opens` dropped
+     to `0` across all three phases (`quiet`, `file_edits`, `db_writes`).
+2. **Event-driven observation, one watcher, one runtime, quiet subscriptions.** *(next)*
    Held-only refresh rule and single shared filesystem watcher (§1), one
    bounded runtime + merged background threads (§4), domain-filtered + pushed
    subscription wakeups with 30 s fallback reconcile (§5), scoped minute Git
@@ -520,7 +540,7 @@ threads, `spawns` unchanged across two calls a minute apart. Then
    idle/missing-home exit, holder exit on deleted home, bootout of legacy
    hashed jobs, docs in `docs/dev/server.md`, `machines.md`, `.lf/qa/`).
 4. **Job budget and bounded files.** §9 (`RunningGraph::spawn` env budget +
-   `nice 5` + `machine.jobs` in `docs/config.md`) and §10 (log rotation,
+   `nice 5` + host-local `machine.jobs` in `docs/config.md`) and §10 (log rotation,
    delivery/log/backup/lock-file pruning).
 
 Each pass deletes what it replaces and leaves the benchmark passing its
@@ -529,7 +549,11 @@ then-current budgets.
 ## Checks
 
 - `scratch/concept-review.html` — pre-implementation concept review written and reconciled into this plan.
-- `uv run python scripts/benchmarks/server_idle.py target/release/lf --seconds 60` — not run yet; implement runs it on base and branch.
+- `uv run python scripts/benchmarks/server_idle.py target/debug/lf --seconds 10 --no-fail`:
+  - Baseline (before Pass 1 pool/settings/relay): `quiet` 0.60% CPU / 69 th / 36 spawns / 0 opens; `file_edits` 1.00% CPU / 69 th / 36 spawns / 0 opens; `db_writes` 0.60% CPU / 69 th / 48 spawns / 1 open.
+  - After Pass 1: `quiet` 0.50% CPU / 69 th / 36 spawns / 0 opens; `file_edits` 1.00% CPU / 69 th / 36 spawns / 0 opens; `db_writes` 0.60% CPU / 69 th / 37 spawns / 0 opens.
+  - Release 60 s acceptance run (`target/release/lf --seconds 60`) runs at gate after Pass 2–4.
+- Focused tests passed in Pass 1: `server::schema::tests::` (8), `server::wire::tests::` (2), `machine::wire::tests::` (2), Swift `ServerProtocolTests` (25), `loopflow-storage::pool::tests::` (4), `store::opening::` (12), `read_stream::tests::` (11), `loopflow-harness::transcript::tests::misses_under_watched_root_cache_until_invalidated` (1), `config::settings::tests::` (24), `observe::tests::` (17), `transport::registry::tests::` (16), `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`.
 - `sample 77346 3` on the live server, 2026-11-25 — run at kickoff, results above.
 
 ## User docs written before implementation
@@ -539,6 +563,6 @@ then-current budgets.
 - `docs/troubleshooting.md` — `lf server diagnostics --json`, automatic hourly log rotation and file retention, and custom `LF_HOME` auto-exit.
 - `docs/ops.md` — `lf server diagnostics` in the reference table.
 
-Open question surfaced while writing `docs/config.md`:
+Resolved for Pass 4:
 
-- **`machine.jobs` vs `Placement` portability and string shorthand:** `machine` in `config/catalog.rs` is currently `Placement` (`PersonalScoped`, `Merge`, `Portable`) and accepts string shorthand (`machine: mini`) as well as `{tasks, session, capacity}`. Should `machine.jobs` be host-local (so a laptop's cap does not forward to a 64-core remote Machine or rental), and should `lf set --global machine.jobs 4` expand an existing `machine: mini` shorthand to `{tasks: mini, session: mini, jobs: 4}` or use a separate host-local key?
+- **`machine.jobs` stays host-local:** Jack Heart answered `"per-Machine build job cap should stay host-local"` / `"yes"` (comment `afd2c15d-e136-4cfa-b43d-221294060f07`). Keep the build job cap host-local (not forwarded from a laptop to remote Machines or rentals) when implementing Pass 4 and updating `docs/config.md`.

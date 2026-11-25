@@ -786,7 +786,8 @@ impl SqliteStore {
         conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
         crate::history::attach(&conn, path);
         let history = crate::history::HistoryFile::beside(Some(path));
-        let key = key.or_else(|| crate::pool::PoolKey::for_path(path, crate::pool::PoolMode::ReadOnly));
+        let key =
+            key.or_else(|| crate::pool::PoolKey::for_path(path, crate::pool::PoolMode::ReadOnly));
         Ok(Self::with_pooled(conn, token_key, history, key, None))
     }
 
@@ -868,8 +869,8 @@ impl SqliteStore {
             )?);
             let conn = open_fresh_read_only(path)?;
             let stamp = crate::pool::stamp_for(&conn, true, false);
-            let key =
-                key.or_else(|| crate::pool::PoolKey::for_path(path, crate::pool::PoolMode::ReadOnly));
+            let key = key
+                .or_else(|| crate::pool::PoolKey::for_path(path, crate::pool::PoolMode::ReadOnly));
             return Ok(Self::with_pooled(conn, token_key, history, key, stamp));
         }
 

@@ -871,8 +871,9 @@ fn attaching_during_in_flight_exit_settlement_waits_then_sees_exit_code() {
     drop(blocker);
 
     let mut exit_code = None;
-    wait_until("terminal to report Ended with exit_code 42", || {
-        match connect(&terminal) {
+    wait_until(
+        "terminal to report Ended with exit_code 42",
+        || match connect(&terminal) {
             Err(err) => {
                 if let Some(engine) = err.downcast_ref::<crate::engine::Error>() {
                     exit_code = engine
@@ -886,8 +887,8 @@ fn attaching_during_in_flight_exit_settlement_waits_then_sees_exit_code() {
                 }
             }
             Ok(_) => false,
-        }
-    });
+        },
+    );
     assert_eq!(exit_code, Some(42));
     registry.close();
 }

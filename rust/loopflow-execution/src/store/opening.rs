@@ -18,11 +18,14 @@ pub fn open_sqlite(path: &Path) -> StoreResult<SqliteStore> {
 /// Open for reading only with the same frontier checks as [`open_sqlite`].
 pub fn open_read_only_validated(path: &Path) -> StoreResult<SqliteStore> {
     let home = super::machine_home_dir();
-    let may_apply = super::may_apply_migrations(path, &home, FrontierAdvance::Forbidden)
-        .map_err(|error| StoreError::InvalidData(format!("resolve migration authority: {error}")))?;
-    let shared = super::same_database_file(path, &home.join(".lf/loopflow.db")).map_err(|error| {
-        StoreError::InvalidData(format!("resolve shared store identity: {error}"))
-    })?;
+    let may_apply =
+        super::may_apply_migrations(path, &home, FrontierAdvance::Forbidden).map_err(|error| {
+            StoreError::InvalidData(format!("resolve migration authority: {error}"))
+        })?;
+    let shared =
+        super::same_database_file(path, &home.join(".lf/loopflow.db")).map_err(|error| {
+            StoreError::InvalidData(format!("resolve shared store identity: {error}"))
+        })?;
     SqliteStore::open_read_only_validated(
         path,
         shared,

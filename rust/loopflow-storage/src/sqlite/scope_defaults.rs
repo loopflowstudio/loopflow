@@ -203,8 +203,8 @@ impl SqliteStore {
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
-        let mut query =
-            snapshot.prepare_cached("SELECT id,repo,slug FROM wave_addresses WHERE retired_at IS NULL")?;
+        let mut query = snapshot
+            .prepare_cached("SELECT id,repo,slug FROM wave_addresses WHERE retired_at IS NULL")?;
         for row in query.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,

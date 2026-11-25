@@ -23,13 +23,16 @@ asking; `executable_sha256` names the server's own executable.
 | Focus a Desktop window or script its panes | `lf desktop` |
 
 Machine commands choose **where work runs**. The client server lets local
-clients (Desktop, `lf open`, `lf resume`) reach Work and held conversations on
-this Machine. When the server is running, interactive `lf` launches (`lf`,
-`lf -a agy`, `lf <skill>`, and bare `lf resume`) also run in a holder so
-Desktop and other terminals can attach live without restarting the agent. When
-the server is stopped, direct interactive launches fall back to running straight
-in your terminal without error; only Task, Wave, and repository conversations
-require the server.
+clients (Desktop, `lf open`, `lf resume`, the phone) reach Work and held
+conversations on this Machine and open a Task's files, changes, shells and
+Sessions on the Machine that owns it. The server keeps its SSH connections open
+for a minute after use. Lists and the board read only this Machine.
+
+With the server running, direct terminal chats (`lf`, `lf -a agy`, and
+standalone `lf resume`) run in a holder so Desktop and other terminals can
+attach to the same agent. Without the server, these chats run directly in your
+terminal. Opening a Task, Wave, or repository conversation requires the server
+to start its held agent.
 
 Connected views share the server's live observations of processes, Git state,
 PR/CI status, and repository files, updating automatically as things change on
@@ -92,7 +95,15 @@ lf server mobile --status   # show the saved approval and current readiness
 lf server mobile --off      # close phone connections
 ```
 
-A phone signed into the same Tailscale account can attach to running Sessions.
+A phone signed into the same Tailscale account opens your Tasks with four
+views: **Session**, **Files** (the whole tree, changed or not), **Changes** and
+**Shell**. One pairing covers every Machine: a Task running on mini or a rental
+opens through this server, with **Not started** before it has a checkout and
+an error naming the Machine, with **Try again**, when that Machine doesn't
+answer. When a Task moves, its views reload from the new Machine. A Shell
+already open keeps running on the old one; reopened after the move, it shows
+ended and offers **New shell**.
+
 In Desktop, open **Settings → Mobile** (**⌘,**) to toggle phone access, check
 readiness, or scan the pairing QR code with your phone. The green sidebar dot
 and pairing code follow the same status while Settings is open.

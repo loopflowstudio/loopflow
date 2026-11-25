@@ -320,6 +320,25 @@ impl Cli {
     /// Reject argument combinations the derive cannot express, as the usage
     /// errors they are, before anything runs.
     pub fn checked(mut self) -> Result<Self, clap::Error> {
+        if let Some(Commands::Open(open)) = &mut self.command {
+            if let Some(machine) = self.machine.take() {
+                if open.selection.machine.replace(machine).is_some() {
+                    return Err(clap::Error::raw(
+                        clap::error::ErrorKind::ArgumentConflict,
+                        "select a Machine only once",
+                    ));
+                }
+            }
+            if open.selection.machine.is_some()
+                && (open.selection.session.is_none()
+                    || self.task.is_some()
+                    || self.wave.is_some()
+                    || open.selection.url.is_some())
+            {
+                return Err(clap::Error::raw(clap::error::ErrorKind::ArgumentConflict,
+                    "use --machine with --session for a Session on that Machine; a Task selects its own Machine"));
+            }
+        }
         if let Some(Commands::Session { cmd }) = &self.command {
             let selected = match cmd {
                 SessionCommand::Resume { id, connection, .. }
@@ -728,7 +747,7 @@ pub enum RepoCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum DesktopCommand {
-    /// Desktop shell runtime on the recorded Machine; does not contact the GUI.
+    /// Desktop's Task shell viewer: the local server runs the shell wherever the Task runs; does not contact the GUI.
     #[command(hide = true)]
     Shell {
         #[command(flatten)]
@@ -1173,7 +1192,6 @@ impl TaskCommand {
             | Self::List { .. }
             | Self::Show { .. }
             | Self::Location { .. }
-            | Self::WatchFiles { .. }
             | Self::Status { .. }
             | Self::Diff { .. }
             | Self::Changes { .. }
@@ -1388,6 +1406,9 @@ pub enum ServerCommand {
     /// Look up a submitted creation without retrying it
     Receipt {
         request_id: String,
+        /// The Task the creation was for, read where that Task runs
+        #[arg(long)]
+        task: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -2367,14 +2388,6 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     /// Run one cleanup pass for a Task, or all pending Tasks on this Machine
     #[command(hide = true)]
     Retire { issue: Option<String> },
-    /// Stream invalidations from an existing Task checkout (JSON lines)
-    WatchFiles {
-        issue: String,
-        #[arg(long)]
-        checkout: std::path::PathBuf,
-        #[arg(long)]
-        request: String,
-    },
     /// Show durable Task facts and its recorded work
     Status {
         /// Task issue; defaults to the Task in this checkout
@@ -2564,7 +2577,6 @@ impl TaskCommand {
             Self::Auto { cmd } => cmd.issue().as_deref(),
             Self::Detail { issue, .. }
             | Self::Show { issue, .. }
-            | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
             | Self::Unassign { issue, .. }
@@ -2598,7 +2610,6 @@ impl TaskCommand {
             Self::Auto { cmd } => cmd.issue_mut().as_mut(),
             Self::Detail { issue, .. }
             | Self::Show { issue, .. }
-            | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
             | Self::Unassign { issue, .. }
@@ -3488,17 +3499,21 @@ mod tests {
     fn desktop_shell_runtime_needs_no_gui_and_task_shell_is_removed() {
         assert!(Cli::try_parse_from(["lf", "task", "shell", "task-id"]).is_err());
         let cli = Cli::try_parse_from([
+            "lf", "desktop", "shell", "task-id", "--id", "shell-id", "--create",
+        ])
+        .unwrap();
+        // Only Close names the Machine that started the shell.
+        assert!(Cli::try_parse_from([
             "lf",
             "desktop",
             "shell",
             "task-id",
-            "--checkout",
-            "/checkout",
             "--id",
-            "shell-id",
-            "--create",
+            "s",
+            "--started-on",
+            "home_1",
         ])
-        .unwrap();
+        .is_err());
         let Some(Commands::Desktop { cmd }) = cli.command else {
             panic!("Desktop runtime command");
         };

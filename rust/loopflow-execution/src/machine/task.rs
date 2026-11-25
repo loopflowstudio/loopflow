@@ -163,30 +163,70 @@ impl crate::machine::wire::Selection {
 
 /// The route of the Task `selector` names, when its Work lives on another
 /// Machine. Reads records only.
-pub fn remote_task(selector: &str) -> Result<Option<TaskExecutionRoute>> {
+pub fn remote_task(selector: &str, directory: Option<&Path>) -> Result<Option<TaskExecutionRoute>> {
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    remote_task_in(&store, selector)
+    remote_task_in(&store, selector, directory)
 }
 
-fn remote_task_in(store: &SqliteStore, selector: &str) -> Result<Option<TaskExecutionRoute>> {
-    let Some(task) = resolve_task_id(store, selector, None)? else {
-        return Ok(None);
+fn remote_task_in(
+    store: &SqliteStore,
+    selector: &str,
+    directory: Option<&Path>,
+) -> Result<Option<TaskExecutionRoute>> {
+    // Short IDs and tracker labels can name different Tasks in different
+    // repositories. A client outside a repository can still address a Task.
+    let scoped = match directory.filter(|_| TaskId::parse(selector).is_err()) {
+        Some(path) => {
+            crate::store::children::resolve_task_id(store, selector, Some(&path.to_string_lossy()))?
+        }
+        None => None,
+    };
+    let task = match scoped {
+        Some(task) => task,
+        None => match resolve_task_id(store, selector, None)? {
+            Some(task) => task,
+            None => return Ok(None),
+        },
     };
     let route = crate::store::ownership::task_execution_route(store, &task)?;
     Ok((route.machine_id != crate::store::machines::local_machine(store)?.id).then_some(route))
+}
+
+/// The Task's route to `machine`, wherever the Task runs now; `None` when
+/// `machine` is this one or the Task is unknown here. A shell stays on the
+/// Machine that started it.
+pub fn task_on(
+    selector: &str,
+    machine: &loopflow_model::durable::MachineId,
+) -> Result<Option<TaskExecutionRoute>> {
+    let Some(store) = read_registry()? else {
+        return Ok(None);
+    };
+    if *machine == crate::store::machines::local_machine(&store)?.id {
+        return Ok(None);
+    }
+    let Some(task) = resolve_task_id(&store, selector, None)? else {
+        return Ok(None);
+    };
+    let mut route = crate::store::ownership::task_execution_route(&store, &task)?;
+    route.machine_id = machine.clone();
+    Ok(Some(route))
 }
 
 /// The other Machine that writes the Task's ownership: where it runs, unless
 /// a move from here has not arrived, which leaves the next entry here. A sent
 /// move's target is asked first: one that took the Task in, its answer lost,
 /// writes it like any Task that runs there.
-pub fn remote_ownership_writer(selector: &str) -> Result<Option<TaskExecutionRoute>> {
+pub fn remote_ownership_writer(
+    selector: &str,
+    directory: Option<&Path>,
+) -> Result<Option<TaskExecutionRoute>> {
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    let Some(route) = remote_task_in(&store, selector)? else {
+    let Some(route) = remote_task_in(&store, selector, directory)? else {
         return Ok(None);
     };
     Ok((!move_awaiting_arrival(&store, &route.task_id)?).then_some(route))

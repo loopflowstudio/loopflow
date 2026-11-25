@@ -1159,7 +1159,7 @@ fn deliver(
     place_events(output, viewers, false);
 }
 
-fn size() -> (u16, u16) {
+pub fn size() -> (u16, u16) {
     let mut size = libc::winsize {
         ws_row: 24,
         ws_col: 80,
@@ -1509,7 +1509,7 @@ pub fn relay_args(args: &[String]) -> Option<Relay> {
 }
 
 /// Paint an ended Desktop shell's retained screen without starting execution.
-pub(crate) fn shell_history(terminal: &TerminalId) -> Result<()> {
+pub fn shell_history(terminal: &TerminalId) -> Result<()> {
     if let Some(screen) = snapshot::last_screen(terminal.as_str()) {
         if std::env::var_os(STREAM_ENV).is_some() {
             io::stdout().write_all(&wire::frame(Tag::Snapshot, &screen))?;
@@ -1773,7 +1773,80 @@ fn attach_with_terminal(
         terminal,
         ATTACH_TIMEOUT,
         input,
+        None,
     )
+}
+
+/// View a terminal ticket redeemed on this Machine's server. A viewer on
+/// another Machine (`LF_VIEWER_STREAM`) receives the protocol itself.
+/// `returns` names how to come back from here when the terminal runs on
+/// another Machine, whose own lines name its local command.
+pub fn relay_socket(socket: UnixStream, returns: Option<&ReturnCommand>) -> Result<()> {
+    if std::env::var_os(STREAM_ENV).is_some() {
+        return stream::bridge_socket(socket);
+    }
+    // A Desktop pane on a terminal of another Machine reads its readiness
+    // here, as it does from a local viewer; only the reconnect route differs.
+    view(
+        stream::Stream::socket(socket)?,
+        None,
+        Some(RelayRoute {
+            session: None,
+            status: connection::Status::from_env(),
+            recovering: false,
+        }),
+        None,
+        COMMAND_ATTACH_TIMEOUT,
+        &mut RelayInput::new(initial_focus(false)),
+        returns,
+    )
+}
+
+/// A terminal on another Machine says how to return there (`lf resume <id>`);
+/// its viewer here shows the command that works from here instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReturnCommand {
+    pub owner: String,
+    pub here: String,
+}
+
+impl ReturnCommand {
+    /// The Session's own return command, as its Machine prints it.
+    pub fn for_session(session: &str, here: String) -> Self {
+        Self {
+            owner: format!("lf resume {session}"),
+            here,
+        }
+    }
+
+    fn rewrite(returns: Option<&Self>, text: &str) -> String {
+        returns.map_or_else(
+            || text.to_owned(),
+            |returns| text.replace(&returns.owner, &returns.here),
+        )
+    }
+
+    /// The owner's native client prints its leave line ("Continue with: lf
+    /// resume <id>") into the terminal as one write, so it arrives in one chunk.
+    fn rewrite_bytes<'a>(returns: Option<&Self>, bytes: &'a [u8]) -> std::borrow::Cow<'a, [u8]> {
+        let Some(returns) = returns else {
+            return std::borrow::Cow::Borrowed(bytes);
+        };
+        let from = returns.owner.as_bytes();
+        let find = |rest: &[u8]| rest.windows(from.len()).position(|window| window == from);
+        if find(bytes).is_none() {
+            return std::borrow::Cow::Borrowed(bytes);
+        }
+        let mut out = Vec::with_capacity(bytes.len());
+        let mut rest = bytes;
+        while let Some(at) = find(rest) {
+            out.extend_from_slice(&rest[..at]);
+            out.extend_from_slice(returns.here.as_bytes());
+            rest = &rest[at + from.len()..];
+        }
+        out.extend_from_slice(rest);
+        std::borrow::Cow::Owned(out)
+    }
 }
 
 /// View the existing protocol over a command's stdin/stdout, such as SSH.
@@ -1804,6 +1877,7 @@ pub fn relay_over(argv: &[String], unfocused: bool) -> Result<()> {
             None,
             COMMAND_ATTACH_TIMEOUT,
             &mut RelayInput::new(initial_focus(unfocused)),
+            None,
         )
     })();
     // Leave is already written, but SSH must forward it before we stop its
@@ -1816,8 +1890,9 @@ pub fn relay_over(argv: &[String], unfocused: bool) -> Result<()> {
     result
 }
 
-/// A viewer of one known held terminal, which reconnects through the server.
-/// Command pipes (including SSH) have no local route to reconnect.
+/// How a viewer reports to Desktop and recovers. Only a known held terminal
+/// reconnects through the server; a redeemed ticket and a command pipe
+/// (including SSH) have no local route back.
 struct RelayRoute<'a> {
     session: Option<&'a LfSessionId>,
     status: Option<connection::Status>,
@@ -1832,8 +1907,9 @@ fn view(
     mut terminal: Option<ViewerTerminal>,
     attach_timeout: Duration,
     input: &mut RelayInput,
+    returns: Option<&ReturnCommand>,
 ) -> Result<()> {
-    let server = route.is_some();
+    let server = id.is_some();
     let (session, mut status, mut recovering) = match route {
         Some(route) => (route.session, route.status, route.recovering),
         None => (None, None, false),
@@ -2108,6 +2184,7 @@ fn view(
                 for piece in pieces {
                     let event = match piece {
                         wire::Piece::Bytes(bytes) => {
+                            let bytes = ReturnCommand::rewrite_bytes(returns, &bytes);
                             write_output(&mut terminal, stream, &bytes)?;
                             continue;
                         }
@@ -2145,7 +2222,8 @@ fn view(
                             )
                             .inspect_err(|error| tracing::debug!(%error, "viewer readiness was not delivered"))
                             .is_ok();
-                            returning = Some(detach);
+                            // The terminal matches its own text; only the shown line is rewritten.
+                            returning = Some(ReturnCommand::rewrite(returns, &detach));
                             // A tab launch succeeds only when this view is attached
                             // and its Session's native client is ready.
                             if attached && acknowledged {
@@ -2173,6 +2251,7 @@ fn view(
                             }
                         }
                         Event::Hint { text } => {
+                            let text = ReturnCommand::rewrite(returns, &text);
                             if let Some(terminal) = &mut terminal {
                                 output.drew();
                                 terminal.write(2, format!("\r\n{text}\r\n").as_bytes())?;
@@ -2405,7 +2484,7 @@ fn answer_open(answer: &str) {
 /// Answer an opening this command failed without attaching, with its own
 /// error. The pane waits; the receipt says why. A viewer whose conversation
 /// exited leaves the answer to the launcher, or to the pane's status line.
-pub fn end_open(result: &Result<()>) {
+pub fn end_open<T>(result: &Result<T>) {
     let (Err(error), Some(_)) = (result, open_receipt()) else {
         return;
     };
@@ -2785,6 +2864,18 @@ mod tests {
         Replay, Sizing, Viewer, CONTROL_ENV, HELD_ENV, LIMIT, PARENT_ENV,
     };
     use loopflow_model::id::TerminalId;
+
+    /// A remote Session's leave line names the command that works on this Machine.
+    #[test]
+    fn a_remote_leave_line_names_this_machines_command() {
+        let returns = super::ReturnCommand::for_session("abc", "lf open --task t1".into());
+        let line = "\r\nLeft “t1”. Continue with: lf resume abc\r\n".as_bytes();
+        assert_eq!(
+            &*super::ReturnCommand::rewrite_bytes(Some(&returns), line),
+            "\r\nLeft “t1”. Continue with: lf open --task t1\r\n".as_bytes()
+        );
+        assert_eq!(&*super::ReturnCommand::rewrite_bytes(None, line), line);
+    }
 
     /// A start that gets no PTY names the shortage, not the OS error alone.
     #[test]

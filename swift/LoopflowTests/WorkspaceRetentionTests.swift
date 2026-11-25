@@ -112,7 +112,6 @@ struct WorkspaceRetentionTests {
         #expect(tile.presented)
         registry.prefetch(tiled, title: "Tiled", location: location, completed: false)
         #expect(registry.recentTasks == [tiled])
-        #expect(!tile.requiresLocationValidation)
         registry.open(WorkWorkspaceKey(repository: "repo", kind: .task, id: "visited"), title: "Visited", location: location)
         #expect(tile.presented)
     }
@@ -227,7 +226,7 @@ struct WorkspaceRetentionTests {
         registry.prefetch(saved, title: "Saved", location: location, completed: false)
         #expect(registry.recentTasks == working + (full ? [] : [saved]))
         #expect(registry.restoreCandidates.isEmpty)
-        #expect(registry.retained(saved)?.requiresLocationValidation == (full ? nil : true))
+        #expect((registry.retained(saved) != nil) == !full)
     }
 
     @Test("Known repository entry presents its scene before admitting a new link",

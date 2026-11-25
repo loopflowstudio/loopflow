@@ -8,6 +8,11 @@ public struct SubmittedCreation: Codable, Sendable, Identifiable {
     public let version: Int
     public let submittedAt: Date
     public var id: String { requestID }
+    /// The Task the saved request names (`session.new` for a Task), whose
+    /// Machine keeps the receipt.
+    public var task: String? {
+        (try? JSONSerialization.jsonObject(with: payload) as? [String: Any])?["task"] as? String
+    }
 }
 
 
@@ -29,13 +34,15 @@ public actor CreationSubmissions {
     private let directory: URL
     private var active: Set<String> = []
     private let currentMachine: @Sendable () async throws -> String
-    private let lookup: @Sendable (String) async throws -> ReadOutput
+    private let lookup: @Sendable (_ requestID: String, _ task: String?) async throws -> ReadOutput
     private let send: @Sendable (Data) async throws -> String
 
-    /// `lookup` prints `creation.get` for a request ID; `send` makes a submitted creation.
+    /// `lookup` prints `creation.get` for a request ID and the Task the
+    /// creation was for, which keeps it on the Machine that runs that Task;
+    /// `send` makes a submitted creation.
     public init(directory: URL,
                 machine: @escaping @Sendable () async throws -> String,
-                lookup: @escaping @Sendable (String) async throws -> ReadOutput,
+                lookup: @escaping @Sendable (_ requestID: String, _ task: String?) async throws -> ReadOutput,
                 send: @escaping @Sendable (Data) async throws -> String) {
         self.directory = directory
         self.currentMachine = machine
@@ -108,21 +115,21 @@ public actor CreationSubmissions {
         }
         // A receipt reads the same on every revision; only sending the saved
         // payload again needs the revision it was written for.
-        var receipt = try await receipt(record.id)
+        var receipt = try await receipt(record)
         if receipt == nil || receipt?.disposition == .continue {
             guard record.version == ServerProtocol.revision else {
                 throw RegistryQueryError("This submitted creation requires protocol revision \(record.version); its request is retained")
             }
             _ = try await send(record.payload)
-            receipt = try await self.receipt(record.id)
+            receipt = try await self.receipt(record)
             guard receipt != nil else { throw RegistryQueryError("The Machine has no receipt for creation \(record.id)") }
         }
         return receipt
     }
 
-    private func receipt(_ id: String) async throws -> CreationLookup? {
-        let receipt = try await lookup(id).decode(CreationLookup?.self)
-        guard receipt == nil || receipt?.requestId == id else {
+    private func receipt(_ record: SubmittedCreation) async throws -> CreationLookup? {
+        let receipt = try await lookup(record.id, record.task).decode(CreationLookup?.self)
+        guard receipt == nil || receipt?.requestId == record.id else {
             throw RegistryQueryError("The Machine returned the receipt for another creation")
         }
         return receipt

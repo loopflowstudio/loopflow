@@ -1117,6 +1117,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::TaskDiff { .. }
         | Read::TaskFile { .. }
         | Read::TaskFiles { .. }
+        | Read::TaskFilesWatch { .. }
         | Read::WaveList
         | Read::MachineSelf
         | Read::DesktopPortfolio
@@ -1249,6 +1250,7 @@ fn server_operations_match_their_lf_commands() {
                 },
                 Read::CreationGet {
                     request_id: "absent-creation".into(),
+                    task: None,
                 },
                 Read::GraphRunGet { id: graph },
                 Read::SessionUsage {
@@ -1598,6 +1600,7 @@ fn server_operations_match_their_lf_commands() {
                     request_id: "new-thread-parity".into(),
                     directory: directory.clone(),
                     id: session.clone(),
+                    task: None,
                     agent: None,
                 },
                 // No fixture Session uses Pi, so this selection moves nothing.
@@ -2553,6 +2556,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             id,
             agent,
             request_id,
+            task: _,
         } => {
             let mut spelled = Vec::new();
             if let Some(agent) = agent {
@@ -3265,6 +3269,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     let found = connection
         .request(Operation::Read(Read::CreationGet {
             request_id: "lost-answer".into(),
+            task: None,
         }))
         .unwrap()
         .result;
@@ -3309,6 +3314,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     let continuation = connection
         .request(Operation::Read(Read::CreationGet {
             request_id: "lost-answer".into(),
+            task: None,
         }))
         .unwrap()
         .result;
@@ -3321,6 +3327,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     let interrupted = connection
         .request(Operation::Read(Read::CreationGet {
             request_id: "lost-answer".into(),
+            task: None,
         }))
         .unwrap()
         .result;
@@ -3367,6 +3374,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     let removed = connection
         .request(Operation::Read(Read::CreationGet {
             request_id: "lost-answer".into(),
+            task: None,
         }))
         .unwrap()
         .result;
@@ -3420,6 +3428,7 @@ fn served_session_new_recovers_its_input_after_a_lost_reply_and_restart() {
         directory: repo.path().into(),
         id: id.into(),
         request_id: "lost-thread".into(),
+        task: None,
         agent: None,
     };
     let mut socket = UnixStream::connect(loopflow::server::socket_path().unwrap()).unwrap();

@@ -163,7 +163,7 @@ fn hold(terminals: &Registry, session: &LfSessionId, request: String) -> Result<
     if terminals.session_terminal(session).is_some() {
         return Ok(());
     }
-    let start = super::service::continuing(session.clone(), request, 0, 0)
+    let start = super::service::continuing(session.clone(), request, 0, 0, None)
         .map_err(|error| anyhow!("{}", error.message))?;
     terminals.start(start)?;
     Ok(())

@@ -1010,7 +1010,7 @@ fn task_without_a_local_checkout_never_reads_a_local_path() {
             graphql_url: "http://127.0.0.1:1".into(),
         },
         || {
-            let expected = "not checked out on this Machine";
+            let expected = "is not started";
             assert!(super::task_file("LOCATION-1", "note.md", None, false)
                 .unwrap_err()
                 .to_string()

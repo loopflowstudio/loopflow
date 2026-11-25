@@ -79,12 +79,11 @@ public final class MultiplexerStore {
 
     /// A fresh record changes the captured location without selecting a pane.
     /// Renew the occurrence so targets captured before a move cannot send input.
-    public func updateSessionLocation(_ sessionId: String, location: WorkspaceIdentity?, execution: TaskLocationObservation? = nil) {
+    public func updateSessionLocation(_ sessionId: String, location: WorkspaceIdentity?) {
         let sessionId = StructuredIdentity.session(sessionId)
         func update(_ node: LayoutNode) -> LayoutNode {
             guard let pane = node.allPanes.first(where: { $0.sessionId == sessionId }) else { return node }
-            let retained = pane.content.location == location ? pane.executionLocation : nil
-            let content = PaneContent.session(id: sessionId, location: location, execution: execution ?? retained)
+            let content = PaneContent.session(id: sessionId, location: location)
             guard pane.content != content else { return node }
             return node.replacingContent(of: pane.id, with: content)
         }
@@ -152,10 +151,10 @@ public final class MultiplexerStore {
             setFocusedPane(pane.id)
         case .browserTab(let tab, let index):
             guard let pane = browserPane,
-                  case .browser(let taskId, var tabs, _, let place, let observed) = pane.content else { return }
+                  case .browser(let taskId, var tabs, _, let place) = pane.content else { return }
             if !tabs.contains(where: { $0.id == tab.id }) { tabs.insert(tab, at: min(index, tabs.count)) }
             layout = layout.replacingBrowser(of: pane.id, with: .browser(taskId: taskId, tabs: tabs, selected: tab.id,
-                location: place, execution: observed), retainingOccurrence: true)
+                location: place), retainingOccurrence: true)
             setFocusedPane(pane.id)
         }
     }
@@ -191,9 +190,9 @@ public final class MultiplexerStore {
     /// Add a shell tab and select it. Focus moves only when asked; scripts keep theirs.
     @discardableResult
     public func newShell(command: [String] = [], location: WorkspaceIdentity? = nil,
-                         execution: TaskLocationObservation? = nil, focus: Bool = true) -> PaneState? {
+                         focus: Bool = true) -> PaneState? {
         guard let pane = shellPane, case .shell(let tabs, _) = pane.content else { return nil }
-        let tab = ShellTab(location: location, execution: execution, command: command)
+        let tab = ShellTab(location: location, command: command)
         layout = layout.updatingShellTabs(of: pane.id, tabs: tabs + [tab], selected: tab.id)
         if focus { setFocusedPane(pane.id) } else { setCollapsed(paneId: pane.id, collapsed: false) }
         return layout.pane(for: pane.id)
@@ -239,17 +238,16 @@ public final class MultiplexerStore {
         return (remaining, remaining.isEmpty ? nil : remaining[min(index, remaining.count - 1)].id)
     }
 
-    /// Select a browser tab, adding it when absent. A fresh owner observation
-    /// replaces the recorded one; missing evidence never discards it.
+    /// Select a browser tab, adding it when absent. A known location replaces
+    /// the recorded one; an unknown one never discards it.
     @discardableResult
     public func showBrowser(_ tab: BrowserTab, location: WorkspaceIdentity? = nil,
-                            execution: TaskLocationObservation? = nil, focus: Bool = true) -> PaneState? {
+                            focus: Bool = true) -> PaneState? {
         guard let pane = browserPane,
-              case .browser(let taskId, var tabs, _, let place, let observed) = pane.content else { return nil }
+              case .browser(let taskId, var tabs, _, let place) = pane.content else { return nil }
         if !tabs.contains(where: { $0.id == tab.id }) { tabs.append(tab) }
-        let fresh = execution != nil || location != nil
         let content = PaneContent.browser(taskId: taskId, tabs: tabs, selected: tab.id,
-            location: fresh ? location : place, execution: fresh ? execution : observed)
+            location: location ?? place)
         if content != pane.content {
             layout = layout.replacingBrowser(of: pane.id, with: content, retainingOccurrence: content.location == pane.content.location)
         }
@@ -257,16 +255,26 @@ public final class MultiplexerStore {
         return layout.pane(for: pane.id)
     }
 
+    /// The Task left the Machine the browser was placed on; its tabs stay and
+    /// its next reading names the new one. Renews the occurrence, as any new
+    /// owner location does.
+    public func clearBrowserLocation() {
+        guard let pane = browserPane,
+              case .browser(let taskId, let tabs, let selected, _?) = pane.content else { return }
+        layout = layout.replacingBrowser(of: pane.id,
+            with: .browser(taskId: taskId, tabs: tabs, selected: selected, location: nil), retainingOccurrence: false)
+    }
+
     /// Close a browser tab, keeping it for Undo; the last one leaving hides the browser pane.
     /// Returns the close this one replaced, whose retained views the caller frees.
     @discardableResult
     public func closeBrowserTab(_ id: String) -> ClosedOccurrence? {
         guard let pane = browserPane,
-              case .browser(let taskId, let tabs, let selected, let place, let observed) = pane.content,
+              case .browser(let taskId, let tabs, let selected, let place) = pane.content,
               let index = tabs.firstIndex(where: { $0.id == id }),
               let (remaining, next) = Self._closing(id, in: tabs, selected: selected) else { return nil }
         layout = layout.replacingBrowser(of: pane.id, with: .browser(taskId: taskId, tabs: remaining, selected: next,
-            location: place, execution: observed), retainingOccurrence: true)
+            location: place), retainingOccurrence: true)
         if remaining.isEmpty { setCollapsed(paneId: pane.id, collapsed: true) }
         return _record(.browserTab(tabs[index], index: index))
     }
@@ -283,12 +291,12 @@ public final class MultiplexerStore {
             case .leaf(let pane):
                 let intent: WorkPaneIntent
                 switch pane.content {
-                case .session(let id, let location, _): intent = .session(id: id, location: place(location))
+                case .session(let id, let location): intent = .session(id: id, location: place(location))
                 case .shell(let tabs, let selected):
                     intent = .shell(tabs: tabs.map { tab in
                         WorkShellTab(id: tab.id, location: place(tab.location), lfProcessID: tab.lfProcessID)
                     }, selected: selected)
-                case .browser(_, let tabs, let selected, _, _):
+                case .browser(_, let tabs, let selected, _):
                     intent = .browser(location: place(pane.content.location), tabs: tabs.map { tab in
                         switch tab {
                         case .files: files ?? .files(id: tab.id, tabs: [], selected: nil)

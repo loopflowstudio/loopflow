@@ -9,6 +9,7 @@ use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
 use loopflow::lf::commands::mutation::{selected_task_repository, task_edit_update};
+use loopflow::lf::commands::read::Read;
 use loopflow::lf::{
     Cli, Commands, GraphCommand, InstallCommand, SkillCommand, TaskCommand, WaveCommand,
 };
@@ -994,6 +995,11 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     }
 }
 
+/// A Task read, answered by the Machine that runs the Task.
+fn task_read<T: serde::de::DeserializeOwned>(read: Read) -> anyhow::Result<T> {
+    Ok(serde_json::from_value(read.read()?)?)
+}
+
 fn read_task_draft() -> anyhow::Result<String> {
     loopflow::lf::commands::mutation::read_task_draft(&mut std::io::stdin().lock())
 }
@@ -1003,9 +1009,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         TaskCommand::Claim { .. } | TaskCommand::Unassign { .. } => {
             unreachable!("shared mutation dispatch precedes this command")
         }
-        TaskCommand::Retire { .. }
-        | TaskCommand::WatchFiles { .. }
-        | TaskCommand::Location { .. } => {
+        TaskCommand::Retire { .. } | TaskCommand::Location { .. } => {
             unreachable!("workspace commands dispatch before repository binding")
         }
         TaskCommand::Checkout { .. } => unreachable!("checkout is dispatched before Work binding"),
@@ -1071,7 +1075,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             unreachable!("auto on and shared mutation dispatch precede this command")
         }
         TaskCommand::Detail { issue, .. } => {
-            loopflow::lf::commands::screens::print(loopflow::lf::commands::read::Read::TaskDetail {
+            loopflow::lf::commands::screens::print(Read::TaskDetail {
                 directory: repo.to_owned(),
                 issue: issue.clone(),
             })
@@ -1276,8 +1280,12 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             head,
             json,
         } => {
-            let snapshot =
-                loopflow_execution::ops::task::task_changes(issue, base, head.as_deref())?;
+            let snapshot: loopflow_execution::ops::task::TaskChangesSnapshot =
+                task_read(Read::TaskChanges {
+                    issue: issue.clone(),
+                    base: base.clone(),
+                    head: head.clone(),
+                })?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
             } else if snapshot.files.is_empty() {
@@ -1329,12 +1337,13 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             show_ignored,
             json,
         } => {
-            let snapshot = loopflow_execution::ops::task::task_files(
-                issue,
-                directory,
-                cursor.as_deref(),
-                *show_ignored,
-            )?;
+            let snapshot: loopflow_execution::ops::task::TaskDirectory =
+                task_read(Read::TaskFiles {
+                    issue: issue.clone(),
+                    path: directory.clone(),
+                    cursor: cursor.clone(),
+                    show_ignored: *show_ignored,
+                })?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
             } else {
@@ -1354,8 +1363,16 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             recoveries,
             json,
         } => {
-            let snapshot =
-                loopflow_execution::ops::task::task_file(issue, path, at.as_deref(), *recoveries)?;
+            // Recovery copies are files beside this Machine's checkout.
+            let snapshot: loopflow_execution::ops::task::TaskFileSnapshot = if *recoveries {
+                loopflow_execution::ops::task::task_file(issue, path, at.as_deref(), true)?
+            } else {
+                task_read(Read::TaskFile {
+                    issue: issue.clone(),
+                    path: path.clone(),
+                    at: at.clone(),
+                })?
+            };
             if *json {
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
             } else if snapshot.state != loopflow_execution::ops::task::TaskFileState::Text {
@@ -1775,7 +1792,7 @@ fn run() -> anyhow::Result<()> {
                 || matches!(
                     cli.command,
                     Some(Commands::Task {
-                        cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
+                        cmd: TaskCommand::Location { .. }
                     })
                 );
             // The target owns command flags, including --verbose; RUST_LOG controls transport logs.
@@ -1868,7 +1885,7 @@ fn run() -> anyhow::Result<()> {
     let location_read = matches!(
         cli.command,
         Some(Commands::Task {
-            cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
+            cmd: TaskCommand::Location { .. }
         })
     );
     let desktop_read = desktop_intent_read(&cli);
@@ -1976,20 +1993,7 @@ fn run() -> anyhow::Result<()> {
         Some(Commands::Desktop {
             cmd: loopflow::lf::DesktopCommand::Shell { args: shell },
         }) => {
-            ctrlc::set_handler(|| loopflow_execution::agent::exit_on_interrupt())
-                .expect("failed to set Ctrl+C handler");
-            journal::admit_process(&std::env::current_dir()?, &args);
-            return loopflow_execution::desktop::shells::run(&shell.to_request());
-        }
-        Some(Commands::Task {
-            cmd:
-                TaskCommand::WatchFiles {
-                    issue,
-                    checkout,
-                    request,
-                },
-        }) => {
-            return loopflow_execution::ops::task::watch_task_files(issue, checkout, request);
+            return loopflow::lf::commands::desktop::shell(shell);
         }
         _ => {}
     }
@@ -3272,14 +3276,12 @@ fn execute_command(
                 loopflow::lf::PlanCommand::Board {
                     wave, task, all, ..
                 },
-        }) => {
-            loopflow::lf::commands::screens::print(loopflow::lf::commands::read::Read::PlanBoard {
-                directory: std::env::current_dir()?,
-                wave: wave.clone(),
-                task: task.clone(),
-                all: *all,
-            })
-        }
+        }) => loopflow::lf::commands::screens::print(Read::PlanBoard {
+            directory: std::env::current_dir()?,
+            wave: wave.clone(),
+            task: task.clone(),
+            all: *all,
+        }),
         Some(Commands::Plan {
             cmd:
                 loopflow::lf::PlanCommand::List {

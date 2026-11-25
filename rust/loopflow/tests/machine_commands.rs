@@ -1,5 +1,8 @@
 //! Public commands with isolated stores and a simulated SSH endpoint.
 use crate::support;
+#[allow(dead_code)] // The transport suite also drives the daemon's failure controls.
+#[path = "support/tailscale.rs"]
+mod tailscale;
 use std::fs;
 use std::io::{self, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
@@ -23,7 +26,7 @@ impl Machines {
     }
 
     fn uninitialized() -> Self {
-        let root = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir_in("/tmp").unwrap();
         let home = root.path().join("local");
         let remote = root.path().join("remote");
         fs::create_dir_all(&home).unwrap();
@@ -37,6 +40,7 @@ impl Machines {
             &root.path().join("bin/ssh"),
             &format!(
                 r#"#!/bin/sh
+[ -e "$0.offline" ] && exit 255
 for arg in "$@"; do remote_command="$arg"; done
 cd '{remote}' || exit 1
 exec env -i HOME='{remote}' PATH='{remote}/bin:/usr/bin:/bin' bash -c "$remote_command"
@@ -557,7 +561,7 @@ fn remote_file_input_reaches_the_command_without_replacing_the_transport_script(
 }
 
 #[test]
-fn remote_session_open_returns_an_owner_pinned_terminal_command() {
+fn remote_session_open_returns_a_local_viewer_of_the_owners_session() {
     let fixture = Machines::new();
     let machine = fixture.json(&["machine", "add", "mini", "--json"]);
     let mut record: Value = serde_json::from_str::<Vec<Value>>(include_str!(
@@ -596,8 +600,19 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         .iter()
         .map(|v| v.as_str().unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(argv[0], env!("CARGO_BIN_EXE_lf"));
-    assert!(argv.contains(&"-T"));
+    // The viewer opens here; this Machine's server attaches it on mini.
+    assert_eq!(
+        argv,
+        [
+            env!("CARGO_BIN_EXE_lf"),
+            "open",
+            "--machine",
+            machine["id"].as_str().unwrap(),
+            "--session",
+            id.as_str(),
+            "--here",
+        ]
+    );
     for target in [
         vec!["session", "resume", id.as_str()],
         vec!["session", "resume"],
@@ -614,11 +629,6 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         arguments.push("--json");
         assert_eq!(fixture.json(&arguments)["open_argv"], opened["open_argv"]);
     }
-    assert_eq!(&argv[1..4], &["session", "attach", "--"]);
-    let script = argv.last().unwrap();
-    assert!(script.contains("LF_VIEWER_STREAM='1'"), "{script}");
-    assert!(script.contains("/remote/private home"), "{script}");
-    assert!(!script.contains("session remote"), "{script}");
     assert_eq!(opened["workspace"], record["workspace"]);
 }
 
@@ -2289,109 +2299,6 @@ fn set_machine_changes_local_preferences_without_copying_or_moving_work() {
     );
 }
 
-#[test]
-fn remote_file_observer_keeps_the_recorded_owner_and_streams_changes() {
-    use loopflow_execution::durable::RepositoryId;
-    use loopflow_execution::ops::task::TaskFilesFrame;
-
-    use std::io::{BufRead, BufReader};
-    use std::sync::mpsc;
-    use std::time::Duration;
-
-    let fixture = preview_machines();
-    let repo = loopflow_test_support::TestRepo::new();
-    let path = repo.path().canonicalize().unwrap();
-    let remote_home = fixture.root.path().join("remote/store");
-    let registered =
-        support::register_task_with_pr(&remote_home, &path, "companions", &repo.head_sha());
-    let store = loopflow_execution::store::open_sqlite(&remote_home.join("loopflow.db")).unwrap();
-    let repository = RepositoryId::new();
-    loopflow_execution::repository::location::bind_repository(
-        &store,
-        path.to_str().unwrap(),
-        &repository,
-    )
-    .unwrap();
-    let owner = loopflow_execution::store::machines::local_machine(&store)
-        .unwrap()
-        .id;
-    fs::write(path.join(".gitignore"), "target/\n").unwrap();
-    fs::create_dir(path.join("target")).unwrap();
-    let rejected = fixture.run(&[
-        "--machine",
-        "mini",
-        "--repo-id",
-        repository.as_str(),
-        "task",
-        "watch-files",
-        registered.task.id.as_str(),
-        "--checkout",
-        "/different-checkout",
-        "--request",
-        "stale-request",
-    ]);
-    assert!(!rejected.status.success());
-    assert!(String::from_utf8_lossy(&rejected.stderr).contains("checkout changed"));
-    assert!(rejected.stdout.is_empty());
-
-    let mut child = fixture
-        .command(&[
-            "--machine",
-            "mini",
-            "--repo-id",
-            repository.as_str(),
-            "task",
-            "watch-files",
-            registered.task.id.as_str(),
-            "--checkout",
-            path.to_str().unwrap(),
-            "--request",
-            "owned-request",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let stdout = child.stdout.take().unwrap();
-    let (send, receive) = mpsc::channel();
-    std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines() {
-            if send.send(line.unwrap()).is_err() {
-                break;
-            }
-        }
-    });
-    let read = || -> TaskFilesFrame {
-        serde_json::from_str(&receive.recv_timeout(Duration::from_secs(10)).unwrap()).unwrap()
-    };
-    let first = read();
-    assert_eq!(first.request, "owned-request");
-    assert_eq!(first.task_id, registered.task.id);
-    assert_eq!(first.machine_id, owner);
-    assert_eq!(first.checkout, path.to_str().unwrap());
-    assert_eq!(first.paths, [""]);
-    // Ignored build output never invalidates; an atomic replacement must, even
-    // when dirty status stays dirty.
-    fs::write(path.join("target/out"), "build\n").unwrap();
-    repo.create_file("replacement", "new peer contents\n");
-    fs::rename(path.join("replacement"), path.join("note.txt")).unwrap();
-    let mut changed = Vec::new();
-    for _ in 0..5 {
-        changed.extend(read().paths);
-        if changed.iter().any(|path| path == "note.txt") {
-            break;
-        }
-    }
-    // Closing the reader's stdin must drain the remote observer, not leave it resident.
-    drop(child.stdin.take());
-    let output = child.wait_with_output().unwrap();
-    assert_success(&output);
-    assert!(changed.iter().any(|path| path == "note.txt"));
-    assert!(!changed.iter().any(|path| path.starts_with("target")));
-    assert!(!fixture.root.path().join("forbidden-effect").exists());
-}
-
 /// Claude's project directory for a checkout.
 fn claude_project(path: &Path) -> String {
     path.to_string_lossy()
@@ -2671,11 +2578,21 @@ fn place(
 
 /// A Claude conversation in `cwd`, admitted the way connecting admits it.
 fn claude_conversation(fixture: &Machines, cwd: &Path, conversation: &str) -> String {
-    let project = fixture
-        .root
-        .path()
-        .join("local/.claude/projects")
-        .join(claude_project(cwd));
+    import_claude_conversation(
+        &fixture.root.path().join("local"),
+        cwd,
+        conversation,
+        fixture.command(&[]),
+    )
+}
+
+fn import_claude_conversation(
+    home: &Path,
+    cwd: &Path,
+    conversation: &str,
+    mut lf: Command,
+) -> String {
+    let project = home.join(".claude/projects").join(claude_project(cwd));
     fs::create_dir_all(&project).unwrap();
     fs::write(
         project.join(format!("{conversation}.jsonl")),
@@ -2685,8 +2602,8 @@ fn claude_conversation(fixture: &Machines, cwd: &Path, conversation: &str) -> St
         ),
     )
     .unwrap();
-    let admitted = fixture
-        .command(&["session", "resume", conversation, "--prepare", "--json"])
+    let admitted = lf
+        .args(["session", "resume", conversation, "--prepare", "--json"])
         .current_dir(cwd)
         .output()
         .unwrap();
@@ -4555,7 +4472,16 @@ impl Drop for Child {
 /// The laptop's server, ready, and its socket.
 fn served(fixture: &Machines) -> (Child, String) {
     use std::time::{Duration, Instant};
-    let server = Child(fixture.command(&["server", "run"]).spawn().unwrap());
+    let server = Child(
+        fixture
+            .command(&["server", "run"])
+            .env(
+                "TS_SOCKET",
+                fixture.root.path().join("local/tailscaled.sock"),
+            )
+            .spawn()
+            .unwrap(),
+    );
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         let output = fixture.run(&["server", "status"]);
@@ -4569,6 +4495,1176 @@ fn served(fixture: &Machines) -> (Child, String) {
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+/// Open a held terminal through a ticket the laptop's server issued: its
+/// `bridged` answer, then the viewer protocol until the terminal shows `expected`.
+fn bridged_terminal(socket: &Path, ticket: &str, expected: &str) {
+    use std::io::Read as _;
+    let mut stream = std::os::unix::net::UnixStream::connect(socket).unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+        .unwrap();
+    stream
+        .write_all(format!("{}\n", serde_json::json!({"type":"attach","ticket":ticket})).as_bytes())
+        .unwrap();
+    let mut answer = Vec::new();
+    let mut byte = [0];
+    while {
+        stream.read_exact(&mut byte).unwrap();
+        byte[0] != b'\n'
+    } {
+        answer.push(byte[0]);
+    }
+    let answer: Value = serde_json::from_slice(&answer).unwrap();
+    assert_eq!(answer["type"], "bridged", "{answer}");
+    stream.write_all(&viewer_attach()).unwrap();
+    terminal_shows(expected, |buffer| stream.read_exact(buffer));
+}
+
+fn viewer_attach() -> Vec<u8> {
+    use loopflow_execution::transport::wire::{frame, Tag};
+    let request = serde_json::json!({"kind":"attach","rows":24,"cols":400,"id":1});
+    frame(Tag::Request, &serde_json::to_vec(&request).unwrap())
+}
+
+fn terminal_shows(expected: &str, mut read_exact: impl FnMut(&mut [u8]) -> std::io::Result<()>) {
+    use loopflow_execution::transport::wire::Tag;
+    let mut shown = String::new();
+    while !shown.contains(expected) {
+        let mut header = [0; 5];
+        read_exact(&mut header)
+            .unwrap_or_else(|error| panic!("waiting for {expected}: {error}; saw {shown}"));
+        let mut payload = vec![0; u32::from_be_bytes(header[1..].try_into().unwrap()) as usize];
+        read_exact(&mut payload).unwrap();
+        if header[0] == Tag::Snapshot as u8 || header[0] == Tag::Out as u8 {
+            shown.push_str(&String::from_utf8_lossy(&payload));
+        }
+        assert_ne!(
+            header[0],
+            Tag::Close as u8,
+            "closed before {expected}: {shown}"
+        );
+    }
+}
+
+struct PairedPhone {
+    _daemon: tailscale::Daemon,
+    pem: String,
+    port: u16,
+    control: tailscale::PhoneSocket,
+}
+
+impl PairedPhone {
+    fn pair(
+        fixture: &Machines,
+        client: &mut loopflow_execution::machine::client::Connection,
+    ) -> Self {
+        use loopflow::server::wire::{Hello, ServerOperation, MIN_REVISION, REVISION};
+        let cert = rcgen::generate_simple_self_signed(vec!["fixture.tail.ts.net".into()]).unwrap();
+        let pem = cert.cert.pem();
+        let daemon = tailscale::Daemon::start(
+            &fixture.root.path().join("local"),
+            &tailscale::status(1),
+            format!("{}{pem}", cert.signing_key.serialize_pem()),
+        );
+        let answer = client
+            .request(ServerOperation::MobileConfigure {
+                configuration: Some(tailscale::approval(0)),
+            })
+            .unwrap()
+            .result;
+        let port = reqwest::Url::parse(answer["configuration"]["endpoint"].as_str().unwrap())
+            .unwrap()
+            .port()
+            .unwrap();
+        let mut control = tailscale::connect(port, &pem, "/v1/machine").unwrap();
+        Self::send(
+            &mut control,
+            loopflow::server::wire::ClientMessage::Hello(Hello {
+                revision: REVISION,
+                min_revision: MIN_REVISION,
+                client: loopflow_execution::machine::client::identity("mobile", "phone"),
+            }),
+        );
+        assert_eq!(tailscale::text(&mut control)["type"], "welcome");
+        Self {
+            _daemon: daemon,
+            pem,
+            port,
+            control,
+        }
+    }
+
+    fn send(socket: &mut tailscale::PhoneSocket, request: loopflow::server::wire::ClientMessage) {
+        use tokio_tungstenite::tungstenite::Message;
+        socket
+            .send(Message::text(serde_json::to_string(&request).unwrap()))
+            .unwrap();
+    }
+
+    fn request(&mut self, operation: loopflow::server::wire::ServerOperation) -> Value {
+        use loopflow::server::wire::{ClientMessage, Operation};
+        Self::send(
+            &mut self.control,
+            ClientMessage::Request {
+                id: "phone".into(),
+                operation: Operation::Server(operation),
+                sender: None,
+                select: None,
+                request_id: None,
+            },
+        );
+        let mut answer = tailscale::text(&mut self.control);
+        assert_eq!(answer["type"], "response", "{answer}");
+        answer["result"].take()
+    }
+
+    fn attach(
+        &mut self,
+        operation: loopflow::server::wire::ServerOperation,
+        terminal: &Value,
+    ) -> tailscale::PhoneSocket {
+        use tokio_tungstenite::tungstenite::Message;
+        let issued = self.request(operation);
+        assert_eq!(&issued["terminal_id"], terminal);
+        let mut socket = tailscale::connect(self.port, &self.pem, "/v1/ticket").unwrap();
+        Self::send(
+            &mut socket,
+            loopflow::server::wire::ClientMessage::Attach {
+                ticket: issued["ticket"].as_str().unwrap().into(),
+            },
+        );
+        let bridge = tailscale::text(&mut socket);
+        assert_eq!(bridge["type"], "bridged", "{bridge}");
+        assert_eq!(&bridge["terminal_id"], terminal);
+        socket.send(Message::binary(viewer_attach())).unwrap();
+        socket
+    }
+}
+
+fn phone_terminal_shows(mut socket: tailscale::PhoneSocket, expected: &str) {
+    use tokio_tungstenite::tungstenite::Message;
+    // A WebSocket message can hold any part of a viewer frame.
+    let mut bytes = std::iter::from_fn(|| match socket.read().unwrap() {
+        Message::Binary(chunk) => Some(chunk),
+        other => panic!("expected terminal bytes: {other:?}"),
+    })
+    .flatten();
+    terminal_shows(expected, |buffer| {
+        for byte in buffer {
+            *byte = bytes.next().unwrap();
+        }
+        Ok(())
+    });
+}
+
+fn available_reading(
+    watches: &mut loopflow_execution::machine::client::Connection,
+    id: &str,
+) -> Value {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let frame = watches
+            .reading(id)
+            .unwrap()
+            .expect("subscription stays open");
+        let Some(reason) = frame["unavailable"].as_str() else {
+            break frame;
+        };
+        assert!(
+            reason.contains("mini") && std::time::Instant::now() < deadline,
+            "{frame}"
+        );
+    }
+}
+
+/// The local host runs the pane command and keeps its stdin open. Only the
+/// peer has the provider threads whose output and input we see in those tabs.
+#[test]
+fn open_remote_workspace() {
+    let fixture = preview_machines();
+    let (plan, task) = task_on_mini(&fixture);
+    let local = fixture.root.path().join("local");
+    let remote = fixture.root.path().join("remote");
+    let peer = rusqlite::Connection::open(remote.join("store/loopflow.db")).unwrap();
+    let laptop = rusqlite::Connection::open(local.join("loopflow.db")).unwrap();
+    let stale = local.join("former checkout");
+    fs::create_dir(&stale).unwrap();
+    for (db, path) in [(&peer, &plan.remote_path), (&laptop, &stale)] {
+        db.execute(
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+            [task.as_str(), path.to_str().unwrap()],
+        )
+        .unwrap();
+    }
+    let _peer = served_mini(&fixture);
+    let (_server, _) = served(&fixture);
+    let _ended = EndRecorded(vec![local.clone(), remote.join("store")]);
+
+    let threads = [
+        "0199a213-81c0-7800-8aa1-bbab2a035a61",
+        "0199a213-81c0-7800-8aa1-bbab2a035a62",
+        "0199a213-81c0-7800-8aa1-bbab2a035a63",
+    ];
+    let unrelated = loopflow_test_support::TestRepo::new();
+    let sessions = threads.map(|thread| {
+        let cwd = if thread == threads[2] {
+            unrelated.path()
+        } else {
+            &plan.remote_path
+        };
+        import_claude_conversation(&remote, cwd, thread, mini_command(&fixture, &[]))
+    });
+    for session in &sessions[..2] {
+        peer.execute(
+            "UPDATE agent_sessions SET task_id=?1,wave_id=?2 WHERE id=?3",
+            rusqlite::params![
+                task.as_str(),
+                plan.remote.task(&task).unwrap().unwrap().wave_id,
+                session
+            ],
+        )
+        .unwrap();
+    }
+    fs::write(
+        remote.join(".claude.json"),
+        r#"{"projects":{"/":{"hasTrustDialogAccepted":true}}}"#,
+    )
+    .unwrap();
+    executable(
+        &remote.join(".local/bin/claude"),
+        r#"#!/bin/bash
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+while [ "$#" -ge 2 ]; do
+  if [ "$1" = --resume ]; then
+    printf 'mini %s\n' "$2"
+    if read -r -t 60 answer < /dev/tty; then printf 'mini %s received %s\n' "$2" "$answer"; fi
+    exit
+  fi
+  shift
+done
+printf 'mini fresh\n'
+if read -r -t 60 answer < /dev/tty; then printf 'mini fresh received %s\n' "$answer"; fi
+"#,
+    );
+    // Start before marking it primary so the recovery watcher sees a running
+    // conversation. The other Sessions have only saved history.
+    let peer_socket = server_socket(&remote.join("store"), "machine");
+    let mut client =
+        loopflow_execution::machine::client::Connection::open_at(&peer_socket).unwrap();
+    let primary: loopflow_model::id::LfSessionId = sessions[0].as_str().into();
+    let started = client
+        .request(loopflow::server::wire::ServerOperation::SessionContinue {
+            session: primary.clone(),
+            task: None,
+            machine: None,
+            agent: None,
+            request: "existing-primary".into(),
+            rows: 24,
+            cols: 80,
+        })
+        .unwrap();
+    let started: loopflow::server::wire::SessionStarted =
+        serde_json::from_value(started.result).unwrap();
+    let attached = client
+        .session_ticket(&primary, Some(started.terminal_id), None, None)
+        .unwrap();
+    bridged_terminal(
+        &peer_socket,
+        &attached.ticket,
+        &format!("mini {}", threads[0]),
+    );
+    peer.execute(
+        "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+        [task.as_str(), &sessions[0]],
+    )
+    .unwrap();
+    executable(
+        &fixture.root.path().join("bin/tmux"),
+        r#"#!/bin/sh
+[ "$1" = new-window ] || exit 1
+while [ "$1" != -c ]; do shift; done
+cd "$2" || exit 1
+(pwd -P; /bin/sh -c "$3"; touch "$HOME/tab-closed") < "$HOME/tab-input" > "$HOME/tab-output" 2>&1 &
+echo %local-tab
+"#,
+    );
+    let fifo = local.join("tab-input");
+    assert!(Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .unwrap()
+        .success());
+    let mut input = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(fifo)
+        .unwrap();
+    // A Task with no conversation yet starts one on mini with the caller's agent.
+    let (fresh_plan, fresh) = task_on_mini(&fixture);
+    peer.execute(
+        "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+        [fresh.as_str(), fresh_plan.remote_path.to_str().unwrap()],
+    )
+    .unwrap();
+    for (index, mut args) in [
+        vec!["open", "--task", task.as_str()],
+        vec!["open", "--task", task.as_str(), "--session", &sessions[1]],
+        vec!["open", "--machine", "mini", "--session", &sessions[2]],
+        vec!["--machine", "mini", "open", "--session", &sessions[2]],
+        vec!["-a", "claude", "open", "--task", fresh.as_str()],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        args.extend(["--host", "tmux", "--tab", "--json"]);
+        let cwd = match index {
+            0 | 1 => &plan.local_path,
+            4 => &fresh_plan.local_path,
+            _ => &local,
+        };
+        let opened = fixture.command(&args).current_dir(cwd).output().unwrap();
+        let tab = || fs::read_to_string(local.join("tab-output")).unwrap_or_default();
+        assert!(
+            opened.status.success(),
+            "{args:?}: {opened:?}, tab: {}",
+            tab()
+        );
+        let report: Value = serde_json::from_slice(&opened.stdout).unwrap();
+        let receipt = &report["receipts"][0];
+        assert_eq!(receipt["status"], "usable", "{receipt}");
+        assert_eq!(receipt["destination"], "%local-tab");
+        let expected_retry = if index == 4 {
+            serde_json::json!(["lf", "open", "--task", fresh.as_str()])
+        } else if index < 2 {
+            let mut retry = vec!["lf", "open", "--task", task.as_str()];
+            if index == 1 {
+                retry.extend(["--session", &sessions[1]]);
+            }
+            serde_json::json!(retry)
+        } else {
+            let mini = loopflow_execution::store::machines::local_machine(&plan.remote).unwrap();
+            serde_json::json!(["lf", "open", "--machine", mini.id, "--session", sessions[2]])
+        };
+        assert_eq!(receipt["fallback_argv"], expected_retry);
+        writeln!(input, "tab-{index}").unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !local.join("tab-closed").exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "tab did not close: {}",
+                tab()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let text = tab();
+        assert_eq!(text.lines().next(), cwd.canonicalize().unwrap().to_str());
+        let answer = match index {
+            4 => "mini fresh".to_owned(),
+            _ => format!("mini {}", threads[index.min(2)]),
+        };
+        assert!(
+            text.contains(&format!("{answer} received tab-{index}")),
+            "{text}"
+        );
+        // Leaving names the command that returns from this Machine.
+        let retry: Vec<String> = serde_json::from_value(expected_retry).unwrap();
+        assert!(text.contains(&retry.join(" ")), "{text}");
+        assert!(!text.contains("lf resume"), "{text}");
+        fs::remove_file(local.join("tab-closed")).unwrap();
+    }
+
+    // A Desktop pane on mini's terminal reads its readiness from the bridged
+    // viewer, as it does from a local one; without it the pane takes no input.
+    let short = tempfile::tempdir_in("/tmp").unwrap();
+    let status = short.path().join("status.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&status).unwrap();
+    let (ready, readings) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::BufRead as _;
+        let (stream, _) = listener.accept().unwrap();
+        for line in std::io::BufReader::new(stream).lines() {
+            let reading: Value = serde_json::from_str(&line.unwrap()).unwrap();
+            let usable = reading["state"] == "connected" && reading["native_ready"] == true;
+            if usable && ready.send(reading).is_err() {
+                return;
+            }
+        }
+    });
+    let mut pane = fixture
+        .command(&["open", "--task", task.as_str(), "--here"])
+        .current_dir(&plan.local_path)
+        .env("LF_SERVER_STATUS", &status)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let reading = readings.recv_timeout(std::time::Duration::from_secs(30));
+    pane.kill().unwrap();
+    pane.wait().unwrap();
+    reading.expect("the bridged viewer reports a connected, ready terminal");
+}
+
+#[test]
+fn server_routed_task_workspace() {
+    use loopflow::lf::commands::{read::Read, write::Write};
+    use loopflow_execution::engine::{Error, ErrorCode};
+    use loopflow_execution::machine::client::Connection;
+
+    let fixture = preview_machines();
+    let offline = fixture.root.path().join("bin/ssh.offline");
+    let plan = SharedPlan::new(&fixture);
+    // Both Machines imported the same tracker issue under their own Task ID.
+    let task = plan.local_task();
+    let peer_task = plan.task();
+    let mini = loopflow_execution::store::machines::local_machine(&plan.remote).unwrap();
+    loopflow_execution::store::ownership::claim_task(&plan.remote, &peer_task).unwrap();
+    loopflow_execution::store::ownership::claim_task(&plan.local, &task).unwrap();
+    let database = |path| rusqlite::Connection::open(fixture.root.path().join(path)).unwrap();
+    let local = database("local/loopflow.db");
+    let peer = database("remote/store/loopflow.db");
+    for (db, id) in [(&local, &task), (&peer, &peer_task)] {
+        db.execute(
+            "UPDATE tasks SET external_issue_id='shared-tracker-key', issue_identifier='WORK-42' WHERE id=?1",
+            [id.as_str()],
+        ).unwrap();
+    }
+    let checkout = |db: &rusqlite::Connection, id: &str, path: &Path| {
+        db.execute(
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+            [id, path.to_str().unwrap()],
+        )
+        .unwrap();
+    };
+    checkout(&local, task.as_str(), &plan.local_path);
+    let file = "document.txt";
+    fs::write(plan.local_path.join(file), "old laptop copy").unwrap();
+    let server_on_mini = served_mini(&fixture);
+    let (_server, socket) = served(&fixture);
+    let mut client = Connection::open_at(Path::new(&socket)).unwrap();
+    let read_file = Read::TaskFile {
+        issue: task.to_string(),
+        path: file.into(),
+        at: None,
+    };
+    let before_move = client.request(&read_file).unwrap().result;
+    assert_eq!(before_move["content"], "old laptop copy");
+    loopflow_execution::store::ownership::begin_task_move(&plan.local, &task, &mini.id).unwrap();
+    let absent = client
+        .request(&read_file)
+        .unwrap_err()
+        .downcast::<Error>()
+        .unwrap();
+    assert_eq!(absent.code, ErrorCode::NotFound);
+    assert_eq!(
+        absent.data.as_ref().unwrap(),
+        &serde_json::json!({"reason":"not_started","task_id":peer_task})
+    );
+
+    // The file watch follows the Task, not a checkout: it waits on mini.
+    let mut unstarted = Connection::open_at(Path::new(&socket)).unwrap();
+    unstarted
+        .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+        .unwrap();
+    let unstarted_id = unstarted
+        .subscribe(
+            Read::TaskFilesWatch {
+                issue: task.to_string(),
+            },
+            None,
+        )
+        .unwrap();
+    let waiting = available_reading(&mut unstarted, &unstarted_id);
+    assert_eq!(
+        waiting["body"],
+        serde_json::json!({
+            "task_id": task,
+            "machine_id": mini.id,
+            "machine_label": "mini",
+            "checkout": null,
+            "revision": null,
+        })
+    );
+
+    let board = client
+        .request(Read::PlanList {
+            directory: plan.local_path.clone(),
+            wave: None,
+            task: Some(task.to_string()),
+            all: false,
+        })
+        .unwrap()
+        .result;
+    let row = &board["tasks"]["items"][0];
+    assert_eq!(row["task"]["id"], task.as_str(), "{board}");
+    assert_eq!(row["runtime"]["owner"]["machine"]["id"], mini.id.as_str());
+    assert_eq!(row["reference"].get("workspace"), Some(&Value::Null));
+    let waited = client
+        .request(Read::TaskWait {
+            issue: task.to_string(),
+            until: loopflow_execution::ops::task::TaskWaitUntil::Terminal,
+        })
+        .unwrap()
+        .result;
+    assert_eq!(waited["task"]["task_id"], task.as_str());
+    for field in ["machine_id", "worktree", "branch", "base_commit"] {
+        assert_eq!(waited["task"].get(field), Some(&Value::Null), "{field}");
+    }
+
+    checkout(&peer, peer_task.as_str(), &plan.remote_path);
+    let mut live = available_reading(&mut unstarted, &unstarted_id);
+    while live["body"]["checkout"].is_null() {
+        live = available_reading(&mut unstarted, &unstarted_id);
+    }
+    assert_eq!(live["body"]["checkout"], plan.remote_path.to_str().unwrap());
+    assert!(live["body"]["revision"].is_string(), "{live}");
+    drop(unstarted);
+    fs::write(plan.remote_path.join(file), "from mini\n").unwrap();
+    git(&plan.remote_path, &["add", file]);
+    git(&plan.remote_path, &["commit", "-qm", "File on mini"]);
+    let tree = client
+        .request(Read::TaskFiles {
+            issue: task.to_string(),
+            path: String::new(),
+            cursor: None,
+            show_ignored: false,
+        })
+        .unwrap()
+        .result;
+    assert!(tree["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["path"] == file));
+    let original = client.request(&read_file).unwrap().result;
+    assert_eq!(original["content"], "from mini\n");
+    let graph = support::record_graph(
+        &fixture.root.path().join("remote/store"),
+        &plan.remote_path,
+        "remote-run",
+        "inspect",
+        "succeeded",
+    );
+    let remote = fixture.root.path().join("remote");
+    let thread = "0199a213-81c0-7800-8aa1-bbab2a035a65";
+    let session = import_claude_conversation(
+        &remote,
+        &plan.remote_path,
+        thread,
+        mini_command(&fixture, &[]),
+    );
+    let session = session.as_str();
+    peer.execute(
+        "UPDATE agent_sessions SET cwd=?2,repo=?2,task_id=?3,wave_id=?4 WHERE id=?1",
+        rusqlite::params![
+            session,
+            plan.remote_path.to_str().unwrap(),
+            peer_task.as_str(),
+            plan.remote.task(&peer_task).unwrap().unwrap().wave_id,
+        ],
+    )
+    .unwrap();
+    let peer_client = || {
+        let output = mini_command(&fixture, &["server", "status"])
+            .output()
+            .unwrap();
+        assert_success(&output);
+        let status: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let clients: Vec<_> = status["clients"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| {
+                row["client"]["kind"] == loopflow_execution::machine::wire::MACHINE_CLIENT
+            })
+            .collect();
+        assert_eq!(clients.len(), 1, "{status}");
+        (
+            clients[0]["id"].clone(),
+            clients[0]["requests"].as_u64().unwrap(),
+        )
+    };
+    let (connection_id, requests) = peer_client();
+    let directory = plan.local_path.clone();
+    let pane = client
+        .request(Read::TaskGet {
+            directory: directory.clone(),
+            issue: task.to_string(),
+        })
+        .unwrap()
+        .result;
+    // Mini answers; the reading names the Task, its repository and mini as
+    // this Machine does. The files stay in mini's checkout.
+    let workspace = &pane["row"]["reference"]["workspace"];
+    assert_eq!(workspace["machine_id"], mini.id.as_str());
+    assert_eq!(workspace["machine_label"], "mini");
+    assert_eq!(workspace["worktree"], plan.remote_path.to_str().unwrap());
+    assert_eq!(pane["row"]["task"]["id"], task.as_str());
+    assert_eq!(
+        pane["row"]["task"]["repo"],
+        plan.local_path.to_str().unwrap()
+    );
+    let detail = client
+        .request(Read::TaskDetail {
+            directory: directory.clone(),
+            issue: task.to_string(),
+        })
+        .unwrap()
+        .result;
+    assert_eq!(detail["task"]["id"], task.as_str());
+    let runs = client
+        .request(Read::TaskRuns {
+            directory: directory.clone(),
+            task: task.to_string(),
+            after: None,
+        })
+        .unwrap()
+        .result;
+    assert_eq!(runs["entries"][0]["id"], graph);
+    let sessions = |task| Read::SessionList {
+        directory: directory.clone(),
+        task,
+        headless: true,
+        after: None,
+        limit: Some(1),
+    };
+    let scoped = client
+        .request(sessions(Some(task.to_string())))
+        .unwrap()
+        .result;
+    assert_eq!(scoped["entries"][0]["id"], session);
+    // Read here, mini's record names this Machine's Task and opens with `lf open`.
+    let record = &scoped["entries"][0];
+    assert_eq!(record["task_ids"][0], task.as_str(), "{record}");
+    assert_eq!(record["work"]["id"], task.as_str(), "{record}");
+    assert!(!record.to_string().contains("lf resume"), "{record}");
+    let argv = record["open_argv"].as_array().unwrap();
+    assert_eq!(argv[1..3], ["open", "--task"], "{record}");
+    // `lf session list --task` here lists what mini runs, not this store's none.
+    let listed = fixture
+        .command(&["session", "list", "--headless", "--task", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    let listed = String::from_utf8_lossy(&listed.stdout);
+    assert!(listed.contains(session), "{listed}");
+    assert!(!listed.contains("lf resume"), "{listed}");
+    let local_sessions = client.request(sessions(None)).unwrap().result;
+    assert!(local_sessions["entries"].as_array().unwrap().is_empty());
+    // Both repositories use WORK-42. The next request on this same pipe
+    // resolves the label in its own repository on each Machine.
+    let (other, other_task) = task_on_mini(&fixture);
+    for db in [&local, &peer] {
+        db.execute(
+            "UPDATE tasks SET issue_identifier='WORK-42' WHERE id=?1",
+            [other_task.as_str()],
+        )
+        .unwrap();
+    }
+    let detail = client
+        .request(Read::TaskDetail {
+            directory: other.local_path.clone(),
+            issue: "WORK-42".into(),
+        })
+        .unwrap()
+        .result;
+    assert_eq!(detail["task"]["repo"], other.local_path.to_str().unwrap());
+    // A Reset sent to mini keeps its receipt there; naming the Task reads it.
+    peer.execute(
+        "INSERT INTO creation_receipts
+            (request_id,kind,fingerprint,task_id,session_id,artifact_key,milestone,result,created_at,updated_at,run)
+            VALUES ('reset-on-mini','session.new','fingerprint',NULL,'session_1',NULL,'stopping',NULL,1,1,0)",
+        [],
+    )
+    .unwrap();
+    let mut receipt = |task: Option<String>| {
+        client
+            .request(Read::CreationGet {
+                request_id: "reset-on-mini".into(),
+                task,
+            })
+            .unwrap()
+            .result
+    };
+    assert_eq!(receipt(None), Value::Null);
+    let routed = receipt(Some(task.to_string()));
+    assert_eq!(routed["request_id"], "reset-on-mini", "{routed}");
+    assert_eq!(routed["session_id"], "session_1");
+    assert_eq!(peer_client(), (connection_id.clone(), requests + 6));
+
+    let save = |base: &Value| Write::TaskSave {
+        directory: plan.local_path.clone(),
+        issue: task.to_string(),
+        path: file.into(),
+        revision: base["revision"].as_str().unwrap().into(),
+        content: "edited on mini\n".into(),
+    };
+    let conflict = client.request(save(&before_move)).unwrap().result;
+    assert_eq!(conflict["published"], false);
+    assert_eq!(conflict["file"]["content"], "from mini\n");
+    assert_eq!(
+        client
+            .request_as(
+                save(&original),
+                None,
+                Some("save-on-mini".into()),
+                ErrorCode::OutcomeUnknown
+            )
+            .unwrap()
+            .result["published"],
+        true
+    );
+    assert_eq!(
+        fs::read_to_string(plan.remote_path.join(file)).unwrap(),
+        "edited on mini\n"
+    );
+    assert_eq!(
+        fs::read_to_string(plan.local_path.join(file)).unwrap(),
+        "old laptop copy"
+    );
+    assert_eq!(peer_client(), (connection_id, requests + 8));
+    assert!(plan
+        .remote
+        .command_answer("save-on-mini")
+        .unwrap()
+        .is_some());
+    let changes = client
+        .request(Read::TaskChanges {
+            issue: task.to_string(),
+            base: "head".into(),
+            head: None,
+        })
+        .unwrap()
+        .result;
+    assert!(changes["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["path"] == file));
+    let diff = client
+        .request(Read::TaskDiff {
+            issue: task.to_string(),
+            path: Some(file.into()),
+            base: "head".into(),
+            head: None,
+            draft: None,
+        })
+        .unwrap()
+        .result;
+    assert!(diff["patch"].as_str().unwrap().contains("+edited on mini"));
+
+    // The draft fits the file limit, but its JSON escapes need an upload ticket.
+    let draft = "\"".repeat(loopflow_execution::machine::wire::MAX_MESSAGE / 2);
+    let preview = client
+        .request(Read::TaskDiff {
+            issue: task.to_string(),
+            path: Some(file.into()),
+            base: "head".into(),
+            head: None,
+            draft: Some(draft),
+        })
+        .unwrap()
+        .result;
+    assert!(preview["patch"].as_str().unwrap().contains("-from mini"));
+    // Subscribe once on the laptop. Mini's checkout changes without any
+    // laptop write, then the same streams follow the claim back home.
+    checkout(&local, other_task.as_str(), &other.local_path);
+    checkout(&peer, other_task.as_str(), &other.remote_path);
+    let laptop = loopflow_execution::store::machines::local_machine(&other.local).unwrap();
+    {
+        let mut watches = Connection::open_at(Path::new(&socket)).unwrap();
+        watches
+            .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+            .unwrap();
+        let pane_id = watches
+            .subscribe(
+                Read::TaskGet {
+                    directory: other.local_path.clone(),
+                    issue: other_task.to_string(),
+                },
+                Some(vec!["row.reference.workspace.machine_id".into()]),
+            )
+            .unwrap();
+        let workspace_machine =
+            |frame: Value| frame["body"]["row"]["reference"]["workspace"]["machine_id"].clone();
+        assert_eq!(
+            workspace_machine(available_reading(&mut watches, &pane_id)),
+            mini.id.as_str()
+        );
+        let files_id = watches
+            .subscribe(
+                Read::TaskFilesWatch {
+                    issue: other_task.to_string(),
+                },
+                None,
+            )
+            .unwrap();
+        let initial = available_reading(&mut watches, &files_id);
+        assert_eq!(
+            initial["body"]["checkout"],
+            other.remote_path.to_str().unwrap()
+        );
+        fs::write(other.remote_path.join("from-mini.txt"), "hello").unwrap();
+        let modified = available_reading(&mut watches, &files_id);
+        assert_ne!(modified["body"]["revision"], initial["body"]["revision"]);
+
+        let status_id = watches
+            .subscribe(
+                Read::TaskStatus {
+                    directory: other.local_path.clone(),
+                    issue: other_task.to_string(),
+                },
+                Some(vec!["task.title".into()]),
+            )
+            .unwrap();
+        let _ = available_reading(&mut watches, &status_id);
+        peer.execute(
+            "UPDATE tasks SET issue_title='An edit on mini' WHERE id=?1",
+            [other_task.as_str()],
+        )
+        .unwrap();
+        assert_eq!(
+            available_reading(&mut watches, &status_id)["body"]["task"]["title"],
+            "An edit on mini"
+        );
+        watches.checkpoint(&pane_id, 17).unwrap();
+        assert_eq!(available_reading(&mut watches, &pane_id)["answers"], 17);
+
+        // A shell stays on the Machine that started it. Attach follows the
+        // Task; Close names the starting Machine.
+        let moving_shell = || TaskShellAttach {
+            issue: other_task.to_string(),
+            shell_id: "moving-shell".into(),
+        };
+        let moving = client
+            .request(TaskShellStart {
+                issue: other_task.to_string(),
+                shell_id: "moving-shell".into(),
+                rows: 24,
+                cols: 80,
+                bootstrap: None,
+                command: Vec::new(),
+            })
+            .unwrap()
+            .result;
+        client.request(moving_shell()).unwrap();
+
+        loopflow_execution::store::ownership::move_claim(&other.remote, &other_task, &laptop.id)
+            .unwrap();
+        // Mini has released the checkout. The laptop still subscribes there
+        // until its plan learns the move.
+        assert!(workspace_machine(available_reading(&mut watches, &pane_id)).is_null());
+        other.to_local();
+        assert_eq!(
+            workspace_machine(available_reading(&mut watches, &pane_id)),
+            laptop.id.as_str()
+        );
+        let elsewhere = client
+            .request(moving_shell())
+            .unwrap_err()
+            .downcast::<Error>()
+            .unwrap();
+        assert_eq!(elsewhere.code, ErrorCode::NotFound, "{elsewhere:?}");
+        assert_eq!(elsewhere.data.unwrap()["shell_id"], "moving-shell");
+        client
+            .request(TaskShellClose {
+                issue: other_task.to_string(),
+                shell_id: "moving-shell".into(),
+                machine: Some(mini.id.clone()),
+            })
+            .unwrap();
+        held_ended(&peer, &moving["terminal_id"]);
+        // The laptop may read the Task before its checkout there is recorded.
+        let mut frame = available_reading(&mut watches, &files_id);
+        while frame["body"]["machine_id"] == mini.id.as_str() || frame["body"]["checkout"].is_null()
+        {
+            frame = available_reading(&mut watches, &files_id);
+        }
+        assert_eq!(
+            frame["body"]["machine_label"],
+            laptop.label.clone().map_or(Value::Null, Value::from)
+        );
+        assert_eq!(
+            frame["body"]["checkout"],
+            other.local_path.to_str().unwrap()
+        );
+        local
+            .execute(
+                "UPDATE tasks SET issue_title='An edit on laptop' WHERE id=?1",
+                [other_task.as_str()],
+            )
+            .unwrap();
+        while available_reading(&mut watches, &status_id)["body"]["task"]["title"]
+            != "An edit on laptop"
+        {}
+        // The fresh SSH handshake on re-route fails until mini is reachable.
+        fs::write(&offline, "").unwrap();
+        loopflow_execution::store::ownership::move_claim(&other.local, &other_task, &mini.id)
+            .unwrap();
+        for id in [&pane_id, &files_id] {
+            // Drain readings from before the move until each stream has tried mini.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            loop {
+                let frame = watches
+                    .reading(id)
+                    .unwrap()
+                    .expect("subscription stays open");
+                if let Some(reason) = frame["unavailable"].as_str() {
+                    assert!(
+                        reason.contains("mini") && frame["body"].is_null(),
+                        "{frame}"
+                    );
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "missing peer outage: {frame}"
+                );
+            }
+        }
+        other.to_remote();
+        fs::remove_file(&offline).unwrap();
+        assert_eq!(
+            workspace_machine(available_reading(&mut watches, &pane_id)),
+            mini.id.as_str()
+        );
+        let mut frame = available_reading(&mut watches, &files_id);
+        while frame["body"]["checkout"].is_null() {
+            frame = available_reading(&mut watches, &files_id);
+        }
+        assert_eq!(
+            frame["body"]["checkout"],
+            other.remote_path.to_str().unwrap()
+        );
+        // Back on mini, the shell Close ended there has ended.
+        let ended = client
+            .request(moving_shell())
+            .unwrap_err()
+            .downcast::<Error>()
+            .unwrap();
+        assert!(
+            ended.data.as_ref().unwrap()["terminal_id"].is_string(),
+            "{ended:?}"
+        );
+    }
+    // Only mini has this provider thread. It prints its cwd only when lf resumes it.
+    fs::write(
+        remote.join(".claude.json"),
+        r#"{"projects":{"/":{"hasTrustDialogAccepted":true}}}"#,
+    )
+    .unwrap();
+    executable(
+        &remote.join(".local/bin/claude"),
+        &format!(
+            r#"#!/bin/bash
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+while [ "$#" -ge 2 ]; do
+    if [ "$1" = --resume ] && [ "$2" = "{thread}" ]; then
+        printf 'on mini: %s\n' "$(pwd -P)"
+        if read -r -t 60 answer < /dev/tty; then
+            printf 'received %s on mini: %s\n' "$answer" "$(pwd -P)"
+        fi
+        exit
+    fi
+    shift
+done
+exit 1
+"#
+        ),
+    );
+    let _ended = EndRecorded(vec![remote.join("store")]);
+    let resume = loopflow::server::wire::ServerOperation::SessionContinue {
+        session: session.into(),
+        task: Some(task.to_string()),
+        machine: None,
+        agent: None,
+        request: "resume-on-mini".into(),
+        rows: 24,
+        cols: 400,
+    };
+    let mut phone = PairedPhone::pair(&fixture, &mut client);
+    let held = client.request(&resume).unwrap().result["terminal_id"].clone();
+    assert!(held.is_string());
+    assert_eq!(phone.request(resume)["terminal_id"], held);
+    let attach = |task| loopflow::server::wire::ServerOperation::SessionAttach {
+        session: session.into(),
+        terminal_id: None,
+        task,
+        machine: None,
+    };
+    let unrouted = client
+        .request(attach(None))
+        .unwrap_err()
+        .downcast::<Error>()
+        .unwrap();
+    assert_eq!(unrouted.code, ErrorCode::NotFound, "{unrouted:?}");
+    let issued = client
+        .request(attach(Some(task.to_string())))
+        .unwrap()
+        .result;
+    assert_eq!(issued["terminal_id"], held);
+    let expected = format!(
+        "on mini: {}",
+        plan.remote_path.canonicalize().unwrap().display()
+    );
+    bridged_terminal(
+        Path::new(&socket),
+        issued["ticket"].as_str().unwrap(),
+        &expected,
+    );
+
+    let mut viewer = phone.attach(attach(Some(task.to_string())), &held);
+    use loopflow_execution::transport::wire::{frame, Tag};
+    viewer
+        .send(tokio_tungstenite::tungstenite::Message::binary(frame(
+            Tag::Input,
+            b"hello\r",
+        )))
+        .unwrap();
+    phone_terminal_shows(viewer, &format!("received hello {expected}"));
+
+    // A Task shell starts in mini's checkout, once, and attaches the same way.
+    use loopflow::server::wire::ServerOperation::{
+        TaskShellAttach, TaskShellClose, TaskShellStart,
+    };
+    let start = TaskShellStart {
+        issue: task.to_string(),
+        shell_id: "laptop-shell".into(),
+        rows: 24,
+        cols: 400,
+        bootstrap: None,
+        command: [
+            "/bin/sh",
+            "-c",
+            "printf 'shell on mini: %s\\n' \"$(pwd -P)\"",
+        ]
+        .map(str::to_owned)
+        .to_vec(),
+    };
+    let started = client.request(&start).unwrap().result;
+    assert_eq!(client.request(&start).unwrap().result, started);
+    let shell_attach = || TaskShellAttach {
+        issue: task.to_string(),
+        shell_id: "laptop-shell".into(),
+    };
+    let issued = client.request(shell_attach()).unwrap().result;
+    assert_eq!(issued["terminal_id"], started["terminal_id"]);
+    let expected = format!(
+        "shell on mini: {}",
+        plan.remote_path.canonicalize().unwrap().display()
+    );
+    bridged_terminal(
+        Path::new(&socket),
+        issued["ticket"].as_str().unwrap(),
+        &expected,
+    );
+    phone_terminal_shows(
+        phone.attach(shell_attach(), &started["terminal_id"]),
+        &expected,
+    );
+    client
+        .request(TaskShellClose {
+            issue: task.to_string(),
+            shell_id: "laptop-shell".into(),
+            machine: None,
+        })
+        .unwrap();
+    held_ended(&peer, &started["terminal_id"]);
+    let ended = client
+        .request(shell_attach())
+        .unwrap_err()
+        .downcast::<Error>()
+        .unwrap();
+    assert_eq!(ended.code, ErrorCode::NotFound, "{ended:?}");
+
+    // Losing an established stream also leaves its subscription alive. A
+    // checkpoint during the outage must receive a reading from a fresh attempt.
+    let mut watches = Connection::open_at(Path::new(&socket)).unwrap();
+    watches
+        .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+        .unwrap();
+    let files = watches
+        .subscribe(
+            Read::TaskFilesWatch {
+                issue: task.to_string(),
+            },
+            None,
+        )
+        .unwrap();
+    let initial = available_reading(&mut watches, &files);
+    watches.checkpoint(&files, 41).unwrap();
+    while available_reading(&mut watches, &files)["answers"] != 41 {}
+    fs::write(&offline, "").unwrap();
+    drop(server_on_mini);
+    loop {
+        let frame = watches.reading(&files).unwrap().unwrap();
+        if let Some(reason) = frame["unavailable"].as_str() {
+            assert!(
+                reason.contains("mini") && frame["body"].is_null(),
+                "{frame}"
+            );
+            break;
+        }
+        assert_eq!(frame["body"]["checkout"], initial["body"]["checkout"]);
+    }
+    watches.checkpoint(&files, 42).unwrap();
+    loop {
+        let retry = watches.reading(&files).unwrap().unwrap();
+        assert!(
+            retry["unavailable"].as_str().unwrap().contains("mini"),
+            "{retry}"
+        );
+        if retry["answers"] == 42 {
+            break;
+        }
+    }
+    let restarted = served_mini(&fixture);
+    fs::remove_file(&offline).unwrap();
+    let recovered = available_reading(&mut watches, &files);
+    assert_eq!(recovered["body"]["checkout"], initial["body"]["checkout"]);
+    assert_ne!(recovered["body"]["revision"], initial["body"]["revision"]);
+    drop(watches);
+    // Restarting under the idle request pipe also reconnects the next read.
+    assert_eq!(
+        client.request(&read_file).unwrap().result["content"],
+        "edited on mini\n"
+    );
+    drop(restarted);
+    let restarted = served_mini(&fixture);
+    let saved = client
+        .request_as(
+            save(&original),
+            None,
+            Some("save-after-restart".into()),
+            ErrorCode::OutcomeUnknown,
+        )
+        .unwrap();
+    assert_eq!(saved.result["published"], false);
+    assert!(plan
+        .remote
+        .command_answer("save-after-restart")
+        .unwrap()
+        .is_some());
+    fs::write(offline, "").unwrap();
+    drop(restarted);
+    let unknown = client
+        .request(save(&original))
+        .unwrap_err()
+        .downcast::<Error>()
+        .unwrap();
+    assert_eq!(unknown.code, ErrorCode::OutcomeUnknown);
+    let offline = client
+        .request(&read_file)
+        .unwrap_err()
+        .downcast::<Error>()
+        .unwrap();
+    assert_eq!(offline.code, ErrorCode::Unavailable);
+    let data = offline.data.unwrap();
+    assert_eq!(data["resource"], "machine");
+    assert_eq!(data["machine_label"], "mini");
+    assert!(offline.message.contains("mini"));
 }
 
 #[test]
@@ -4670,6 +5766,25 @@ fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
     drop(server);
 }
 
+/// Wait until the Machine whose store `sql` opens records that `terminal` ended.
+fn held_ended(sql: &rusqlite::Connection, terminal: &Value) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while sql
+        .query_row(
+            "SELECT ended_at IS NULL FROM held_terminals WHERE id=?1",
+            [terminal.as_str().unwrap()],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap()
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{terminal} kept running"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 /// A Task mini runs and mini's records claim, read back to the laptop.
 fn task_on_mini(fixture: &Machines) -> (SharedPlan, loopflow_execution::durable::TaskId) {
     let plan = SharedPlan::new(fixture);
@@ -4681,25 +5796,31 @@ fn task_on_mini(fixture: &Machines) -> (SharedPlan, loopflow_execution::durable:
     (plan, task)
 }
 
+fn mini_command(fixture: &Machines, args: &[&str]) -> Command {
+    let remote = fixture.root.path().join("remote");
+    let mut command = Command::new(remote.join(".local/bin/lf"));
+    command
+        .env_clear()
+        .env("HOME", &remote)
+        .env("PATH", "/usr/bin:/bin")
+        .current_dir(&remote)
+        .args(args);
+    command
+}
+
 /// Mini's own server, ready, as `lf server connect` there finds it.
 fn served_mini(fixture: &Machines) -> Child {
     use std::time::{Duration, Instant};
-    let remote = fixture.root.path().join("remote");
-    let lf = |args: &[&str]| {
-        let mut command = Command::new(remote.join(".local/bin/lf"));
-        command
-            .env_clear()
-            .env("HOME", &remote)
-            .env("PATH", "/usr/bin:/bin")
-            .current_dir(&remote)
-            .args(args);
-        command
-    };
-    let server = Child(lf(&["server", "run"]).spawn().unwrap());
+    let server = Child(mini_command(fixture, &["server", "run"]).spawn().unwrap());
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
-        let status: Value =
-            serde_json::from_slice(&lf(&["server", "status"]).output().unwrap().stdout).unwrap();
+        let status: Value = serde_json::from_slice(
+            &mini_command(fixture, &["server", "status"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap();
         if status["ready"] == true {
             return server;
         }
@@ -5525,6 +6646,77 @@ fn an_lf_that_dies_before_answering_says_so_and_what_it_printed() {
     );
 }
 
+/// `lf task file`, `files` and `save` on the laptop reach mini's checkout,
+/// never the one left on the laptop.
+#[test]
+fn task_file_commands_read_and_save_on_the_owning_machine() {
+    let fixture = preview_machines();
+    let (plan, task) = task_on_mini(&fixture);
+    let local = fixture.root.path().join("local");
+    let stale = local.join("former checkout");
+    fs::create_dir(&stale).unwrap();
+    fs::write(stale.join("notes.txt"), "stale on the laptop\n").unwrap();
+    fs::write(plan.remote_path.join("notes.txt"), "written on mini\n").unwrap();
+    for (db, path) in [
+        (
+            &fixture.root.path().join("remote/store/loopflow.db"),
+            &plan.remote_path,
+        ),
+        (&local.join("loopflow.db"), &stale),
+    ] {
+        rusqlite::Connection::open(db)
+            .unwrap()
+            .execute(
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+                [task.as_str(), path.to_str().unwrap()],
+            )
+            .unwrap();
+    }
+    let _peer = served_mini(&fixture);
+    let _ended = EndRecorded(vec![fixture.root.path().join("remote/store")]);
+
+    let listed = fixture.run(&["task", "files", task.as_str()]);
+    assert!(listed.status.success(), "{listed:?}");
+    assert!(String::from_utf8_lossy(&listed.stdout)
+        .lines()
+        .any(|path| path == "notes.txt"));
+    let read = fixture.run(&["task", "file", task.as_str(), "notes.txt", "--json"]);
+    assert!(read.status.success(), "{read:?}");
+    let read: Value = serde_json::from_slice(&read.stdout).unwrap();
+    assert_eq!(read["content"], "written on mini\n");
+
+    let mut save = fixture.command(&[
+        "task",
+        "save",
+        task.as_str(),
+        "notes.txt",
+        "--revision",
+        read["revision"].as_str().unwrap(),
+    ]);
+    let mut child = save
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"saved from the laptop\n")
+        .unwrap();
+    let saved = child.wait_with_output().unwrap();
+    assert!(saved.status.success(), "{saved:?}");
+    assert_eq!(
+        fs::read_to_string(plan.remote_path.join("notes.txt")).unwrap(),
+        "saved from the laptop\n"
+    );
+    assert_eq!(
+        fs::read_to_string(stale.join("notes.txt")).unwrap(),
+        "stale on the laptop\n"
+    );
+}
+
 #[test]
 fn an_unreachable_destination_names_the_ssh_check_not_its_server() {
     let fixture = preview_machines();
@@ -5611,10 +6803,107 @@ fn a_served_resume_opens_the_session_on_your_session_machine_as_a_typed_operatio
         .iter()
         .map(|arg| arg.as_str().unwrap())
         .collect();
-    assert_eq!(argv[0], env!("CARGO_BIN_EXE_lf"));
-    assert_eq!(&argv[1..4], &["session", "attach", "--"]);
-    assert!(argv.last().unwrap().contains("LF_VIEWER_STREAM='1'"));
+    assert_eq!(
+        argv,
+        [
+            env!("CARGO_BIN_EXE_lf"),
+            "open",
+            "--machine",
+            machine["id"].as_str().unwrap(),
+            "--session",
+            record["id"].as_str().unwrap(),
+            "--here",
+        ]
+    );
     assert_eq!(opened["workspace"], record["workspace"]);
+}
+
+/// A served `session.new` or a resume naming a Session and its Task, for a
+/// Task mini runs, is prepared on mini and read here under this Machine's Task.
+#[test]
+fn a_served_task_conversation_write_is_prepared_where_the_task_runs() {
+    use loopflow::lf::commands::write::Write as Mutation;
+    use loopflow::server::wire::Operation;
+    use loopflow_execution::machine::client::Connection;
+
+    let mut answer: Value = serde_json::from_str::<Vec<Value>>(include_str!(
+        "../../../tests/fixtures/dto/sessions.json"
+    ))
+    .unwrap()
+    .remove(0);
+    let session = answer["id"].as_str().unwrap().to_owned();
+    // Mini knows the Task under its own ID.
+    let peer_task = loopflow_execution::durable::TaskId::new().to_string();
+    answer["task_ids"] = serde_json::json!([peer_task]);
+    answer["work"]["id"] = peer_task.as_str().into();
+    answer["workspace"]["task_id"] = peer_task.as_str().into();
+    for (kind, write) in [
+        (
+            "session.new",
+            (|directory, task, id| Mutation::SessionNew {
+                directory,
+                request_id: "reset-on-mini".into(),
+                id,
+                task: Some(task),
+                agent: None,
+            }) as fn(std::path::PathBuf, String, String) -> Mutation,
+        ),
+        ("session.resume", |directory, task, id| {
+            Mutation::SessionResume {
+                directory,
+                id: Some(id),
+                task: Some(task),
+                wave: None,
+                agent: None,
+            }
+        }),
+    ] {
+        let fixture = preview_machines();
+        let (plan, task) = task_on_mini(&fixture);
+        let mut answer = answer.clone();
+        answer["workspace"]["machine_id"] =
+            loopflow_execution::store::machines::local_machine(&plan.remote)
+                .unwrap()
+                .id
+                .as_str()
+                .into();
+        let record = fixture.root.path().join("entry");
+        fs::create_dir_all(&record).unwrap();
+        answering_entry(&fixture, &record, &answer);
+        let (server, socket) = served(&fixture);
+        let mut connection = Connection::open_at(Path::new(&socket)).unwrap();
+        connection
+            .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+            .unwrap();
+        let opened = connection
+            .request(Operation::Write(write(
+                plan.local_path.clone(),
+                task.to_string(),
+                session.clone(),
+            )))
+            .unwrap()
+            .result;
+        drop(server);
+
+        let (_, request) = entry_input(&record);
+        assert_eq!(request["operation"]["kind"], kind);
+        assert!(request["operation"]["task"].is_string(), "{request}");
+        assert_eq!(opened["task_ids"][0], task.as_str(), "{kind}: {opened}");
+        assert_eq!(opened["work"]["id"], task.as_str(), "{kind}");
+        assert_eq!(opened["workspace"]["task_id"], task.as_str(), "{kind}");
+        let argv: Vec<&str> = opened["open_argv"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|arg| arg.as_str().unwrap())
+            .collect();
+        assert_eq!(argv[1..3], ["open", "--task"], "{kind}: {opened}");
+        assert_eq!(
+            argv[4..],
+            ["--session", session.as_str(), "--here"],
+            "{kind}"
+        );
+    }
 }
 
 /// The held terminal of `owner` under `home`, as the owner names its socket.

@@ -15,12 +15,12 @@ public enum SplitAxis: String, Codable, Sendable, Equatable {
 /// created or destroyed: closing hides one, and content changes inside it.
 public enum PaneContent: Codable, Sendable, Equatable {
     /// One conversation at a time; nil shows the start state.
-    case session(id: String?, location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
+    case session(id: String?, location: WorkspaceIdentity? = nil)
     /// Unknown locations remain unavailable, never a local-shell fallback.
     case shell(tabs: [ShellTab], selected: String?)
-    /// The Task's Files, Graph process log and web pages, following its recorded owner.
+    /// The Task's Files, Graph process log and web pages, wherever the Task runs.
     case browser(taskId: String, tabs: [BrowserTab], selected: String?,
-                 location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
+                 location: WorkspaceIdentity? = nil)
 
     public enum Kind: String, Codable, Sendable, CaseIterable {
         case session, shell, browser
@@ -36,11 +36,11 @@ public enum PaneContent: Codable, Sendable, Equatable {
 
     var canonicalized: PaneContent {
         switch self {
-        case .session(let id, let location, let execution):
-            .session(id: id.map(StructuredIdentity.session), location: location, execution: execution)
-        case .browser(let id, let tabs, let selected, let location, let execution):
+        case .session(let id, let location):
+            .session(id: id.map(StructuredIdentity.session), location: location)
+        case .browser(let id, let tabs, let selected, let location):
             .browser(taskId: StructuredIdentity.prefixed(id, "task_"), tabs: tabs, selected: selected,
-                     location: location, execution: execution)
+                     location: location)
         case .shell: self
         }
     }
@@ -51,28 +51,17 @@ public enum PaneContent: Codable, Sendable, Equatable {
     }
 
     public var selectedBrowserTab: BrowserTab? {
-        guard case .browser(_, let tabs, let selected, _, _) = self else { return nil }
+        guard case .browser(_, let tabs, let selected, _) = self else { return nil }
         return tabs.first { $0.id == selected }
     }
 
-    /// Terminals retain their captured location; the browser follows its
-    /// recorded owner. Unavailable owner evidence never falls back to a path.
+    /// Terminals retain the Machine and checkout they started in; the browser
+    /// shows the Task's latest reading.
     public var location: WorkspaceIdentity? {
         switch self {
-        case .session(_, let location, _): return location
+        case .session(_, let location): return location
         case .shell: return selectedShell?.location
-        case .browser(_, _, _, let location, let execution):
-            guard let execution else { return location }
-            guard case .recorded(_, let checkout?) = execution.location else { return nil }
-            return WorkspaceIdentity(machineId: execution.machineID, worktree: checkout)
-        }
-    }
-
-    /// The exact observed owner travels with the content, never the enclosing workspace.
-    public var executionLocation: TaskLocationObservation? {
-        switch self {
-        case .shell: return selectedShell?.execution
-        case .session(_, _, let execution), .browser(_, _, _, _, let execution): return execution
+        case .browser(_, _, _, let location): return location
         }
     }
 }
@@ -116,13 +105,13 @@ public enum BrowserTab: Codable, Sendable, Equatable, Identifiable {
 public struct ShellTab: Codable, Sendable, Identifiable, Equatable {
     public let id: String
     public let incarnation: String
+    /// The Machine and checkout the shell started in; a Task move leaves it there.
     public let location: WorkspaceIdentity?
-    public let execution: TaskLocationObservation?
     public let command: [String]?
     public let lfProcessID: String?
-    public init(id: String = UUID().uuidString, location: WorkspaceIdentity?, execution: TaskLocationObservation? = nil, command: [String]? = [], lfProcessID: String? = nil) {
+    public init(id: String = UUID().uuidString, location: WorkspaceIdentity?, command: [String]? = [], lfProcessID: String? = nil) {
         self.id = id; incarnation = UUID().uuidString; self.location = location
-        self.execution = execution; self.command = command; self.lfProcessID = lfProcessID
+        self.command = command; self.lfProcessID = lfProcessID
     }
 }
 
@@ -132,12 +121,11 @@ public struct PaneState: Codable, Sendable, Identifiable, Equatable {
     /// The content occurrence, distinct from the reusable pane slot.
     public let incarnation: String
     public var sessionId: String? {
-        guard case .session(let id, _, _) = content else { return nil }
+        guard case .session(let id, _) = content else { return nil }
         return id
     }
     public var kind: PaneContent.Kind { content.kind }
 
-    public var executionLocation: TaskLocationObservation? { content.executionLocation }
 
     fileprivate init(id: String, content: PaneContent, incarnation: String) {
         self.id = id; self.content = content; self.incarnation = incarnation

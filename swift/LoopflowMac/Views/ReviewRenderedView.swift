@@ -60,7 +60,7 @@ struct ReviewRendered: View {
             page(sides.old, absent: "Added")
             // Relative references resolve in the working tree only when the new
             // side is the working tree of a checkout on this Machine.
-            page(sides.new, absent: "Deleted", baseURL: sides.commits.head == nil && store.query.remoteMachine == nil
+            page(sides.new, absent: "Deleted", baseURL: sides.commits.head == nil && store.machine == nil
                  ? URL(fileURLWithPath: store.cwd).appendingPathComponent(file.path) : nil)
         } else {
             // No ideal width: a picture's natural size must not decide whether the

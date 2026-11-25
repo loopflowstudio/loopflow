@@ -36,7 +36,7 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 /// `--subscribe` is also served as that subscription.
 public enum ServedRead: Equatable, Sendable, Encodable {
     case sessionHistoryGet(id: String)
-    case creationGet(requestID: String)
+    case creationGet(requestID: String, task: String?)
     case desktopViewList(directory: String)
     case sessionList(directory: String, headless: Bool, after: String?, limit: Int?, task: String?)
     case taskGet(directory: String, issue: String)
@@ -84,6 +84,9 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     /// The Task now and whether it reached `until` (`submitted` or
     /// `terminal`); subscribed, it ends after the reading that reached it.
     case taskWait(issue: String, until: String)
+    /// A whole-tree revision of the Task's checkout after each change there,
+    /// wherever the Task runs; subscribed only.
+    case taskFilesWatch(issue: String)
 
     /// `lf plan list --all`: every repository's Waves and Tasks.
     public static let allPlans = ServedRead.planList(directory: "/", wave: nil, task: nil, all: true)
@@ -92,7 +95,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     public var argv: [String] {
         switch self {
         case .sessionHistoryGet(let id): return ["session", "history", "show", id]
-        case .creationGet(let requestID): return ["server", "receipt", requestID, "--json"]
+        case .creationGet(let requestID, let task):
+            return ["server", "receipt", requestID] + (task.map { ["--task", $0] } ?? []) + ["--json"]
         case .desktopViewList:
             return ["desktop", "view", "list", "--json"]
         case .sessionList(_, let headless, let after, let limit, let task):
@@ -185,6 +189,9 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["pr", "reviews"] + argument(nil, pr) + ["--json"]
         case .taskWait(let issue, let until):
             return ["task", "wait", issue, "--until", until, "--timeout", "0s", "--json"]
+        case .taskFilesWatch(let issue):
+            // No command streams it; this is the read each revision repeats.
+            return ["task", "files", issue, ".", "--json"]
         }
     }
 
@@ -206,7 +213,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     private var tagged: TaggedFields {
         switch self {
         case .sessionHistoryGet(let id): TaggedFields("session.history.get", ["id": id])
-        case .creationGet(let requestID): TaggedFields("creation.get", ["request_id": requestID])
+        case .creationGet(let requestID, let task): TaggedFields("creation.get", ["request_id": requestID, "task": task])
         case .desktopViewList(let directory): TaggedFields("desktop.view.list", ["directory": directory])
         case .sessionList(let directory, let headless, let after, let limit, let task):
             TaggedFields("session.list", ["directory": directory, "headless": headless, "after": after, "limit": limit, "task": task])
@@ -270,6 +277,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("pr.checks", ["directory": directory, "required": required])
         case .prReviews(let directory, let pr): TaggedFields("pr.reviews", ["directory": directory, "pr": pr])
         case .taskWait(let issue, let until): TaggedFields("task.wait", ["issue": issue, "until": until])
+        case .taskFilesWatch(let issue): TaggedFields("task.files.watch", ["issue": issue])
         }
     }
 
@@ -315,7 +323,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     /// Start the Session's provider process as its own `lf` process, assigning nothing.
     /// The repository's conversation when it names no Session, Task or Wave.
     case sessionResume(directory: String, id: String?, task: String?, wave: String?, agent: String?)
-    case sessionNew(directory: String, requestID: String, id: String, agent: String?)
+    /// `task` names the Task the conversation belongs to; it is prepared where that Task runs.
+    case sessionNew(directory: String, requestID: String, id: String, task: String?, agent: String?)
     case waveRename(directory: String, wave: String, name: String)
     case waveRemove(directory: String, wave: String, preview: Bool)
     case waveMachine(directory: String, wave: String, machine: String)
@@ -418,7 +427,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             return Self.prepared(agent, ["session", "resume"] + [id].compactMap { $0 }
                 + argument("--task", task) + argument("--wave", wave),
                 repo: id == nil && task == nil && wave == nil ? directory : nil)
-        case .sessionNew(_, let requestID, let id, let agent):
+        case .sessionNew(_, let requestID, let id, _, let agent):
             return Self.prepared(agent, ["session", "new", id, "--request-id", requestID], repo: nil)
         case .waveRename(_, let wave, let name): return ["wave", "rename", wave, name, "--json"]
         case .waveRemove(_, let wave, let preview): return ["wave", "remove", wave, "--json"] + (preview ? ["--preview"] : [])
@@ -596,8 +605,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .sessionResume(let directory, let id, let task, let wave, let agent):
             TaggedFields("session.resume", ["directory": directory, "id": id, "task": task, "wave": wave,
                                             "agent": agent])
-        case .sessionNew(let directory, let requestID, let id, let agent):
-            TaggedFields("session.new", ["directory": directory, "request_id": requestID, "id": id, "agent": agent])
+        case .sessionNew(let directory, let requestID, let id, let task, let agent):
+            TaggedFields("session.new", ["directory": directory, "request_id": requestID, "id": id, "task": task, "agent": agent])
         case .waveRename(let directory, let wave, let name):
             TaggedFields("wave.rename", ["directory": directory, "wave": wave, "name": name])
         case .waveRemove(let directory, let wave, let preview):
@@ -742,7 +751,6 @@ public struct ReadOutput: Sendable {
 }
 
 public struct RegistryQuery: Sendable {
-    public private(set) var remoteMachine: String?
     private var run: RegistryRunner
     private var runWithInput: @Sendable ([String], String?, String) async throws -> String
     /// What a `ServedRead`'s `argv` prints: served in the app when the
@@ -754,8 +762,8 @@ public struct RegistryQuery: Sendable {
     /// A change under its request ID, answered with the revisions it advanced;
     /// nil where the transport cannot say (the CLI).
     private var change: @Sendable (ServedWrite, String) async throws -> Revisions?
-    private let observeFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)?
-    private var observeRead: (@Sendable ([String], String?) async throws -> LineSubscription)?
+    /// A served subscription; nil where the transport has none (the CLI).
+    private let observeRead: (@Sendable (ServedRead) -> LineSubscription)?
     private let observeWork: (@Sendable () async throws -> WorkObservation)?
 
     public init(
@@ -765,8 +773,7 @@ public struct RegistryQuery: Sendable {
         serve: (@Sendable (ServedRead) async throws -> ReadOutput)? = nil,
         write: (@Sendable (ServedWrite) async throws -> String)? = nil,
         change: (@Sendable (ServedWrite, String) async throws -> Revisions?)? = nil,
-        watchFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)? = nil,
-        subscribeRead: (@Sendable ([String], String?) async throws -> LineSubscription)? = nil,
+        subscribeRead: (@Sendable (ServedRead) -> LineSubscription)? = nil,
         subscribeWork: (@Sendable () async throws -> WorkObservation)? = nil,
         run: @escaping RegistryRunner
     ) {
@@ -792,7 +799,6 @@ public struct RegistryQuery: Sendable {
             return nil
         }
         self.run = run
-        self.observeFiles = watchFiles
         self.observeWork = subscribeWork
         self.observeRead = subscribeRead
     }
@@ -847,108 +853,6 @@ public struct RegistryQuery: Sendable {
     public func portfolio(_ arguments: [String] = []) async throws -> Portfolio {
         if arguments.isEmpty { return try await serve(.desktopPortfolio).decode(Portfolio.self) }
         return try Self.decode(Portfolio.self, from: await write(.desktopPortfolioSet(change: arguments)))
-    }
-
-    /// Keep execution selectors off local filesystem paths. The existing CLI owns
-    /// connection identity, repository lookup and every operation on that Machine.
-    public func onMachine(_ machine: String, repository: String) -> RegistryQuery {
-        let prefix = ["--machine", machine, "--repo-id", repository]
-        var query = RegistryQuery(runWithInput: { [runWithInput] args, _, input in
-            try await runWithInput(prefix + args, nil, input)
-        }, watchFiles: { [observeFiles] args, _ in
-            guard let observeFiles else { throw RegistryQueryError("Live file observation is unavailable on this transport") }
-            return try await observeFiles(prefix + args, nil)
-        }, subscribeRead: { [observeRead] args, _ in
-            guard let observeRead else { throw RegistryQueryError("Live Task observation is unavailable on this transport") }
-            return try await observeRead(prefix + args, nil)
-        }) { [run] args, _ in
-            try await run(prefix + args, nil)
-        }
-        query.remoteMachine = machine
-        return query
-    }
-
-    public func watchTaskFiles(issue: String, checkout: String, request: String) async throws -> TaskFilesObservation {
-        guard let observeFiles else { throw RegistryQueryError("Live file observation is unavailable on this transport") }
-        return try await observeFiles(["task", "watch-files", issue, "--checkout", checkout, "--request", request], nil)
-    }
-
-    /// Reject delayed reads after a recorded owner changes. Neither observation
-    /// prepares a checkout or falls back to a path on the displaying Machine.
-    public func pinTaskLocation(to location: TaskLocationObservation) -> RegistryQuery {
-        let original = self
-        let validate: @Sendable () async throws -> Void = {
-            let current = try await original.taskLocation(task: location.taskID,
-                repository: location.repositoryID, machine: location.machineID)
-            guard current.location == location.location else {
-                throw RegistryQueryError("The Task checkout changed; reopen the Task. Drafts were retained.")
-            }
-        }
-        var query = self
-        query.run = { [run] args, cwd in
-            try await validate()
-            let output = try await run(args, cwd)
-            try await validate()
-            return output
-        }
-        query.runWithInput = { [runWithInput] args, cwd, input in
-            try await validate()
-            let output = try await runWithInput(args, cwd, input)
-            try await validate()
-            return output
-        }
-        query.serve = { [serve] read in
-            try await validate()
-            let output = try await serve(read)
-            try await validate()
-            return output
-        }
-        query.write = { [write] change in
-            try await validate()
-            let output = try await write(change)
-            try await validate()
-            return output
-        }
-        if let observeRead {
-            query.observeRead = { args, cwd in
-                try await validate()
-                let subscription = try await observeRead(args, cwd)
-                let lines = AsyncThrowingStream<Data, any Error> { continuation in
-                    let reader = Task {
-                        do {
-                            for try await line in subscription.lines {
-                                try await validate()
-                                try Task.checkCancellation()
-                                continuation.yield(line)
-                            }
-                            continuation.finish()
-                        } catch { continuation.finish(throwing: error) }
-                        await subscription.cancel()
-                    }
-                    continuation.onTermination = { _ in reader.cancel() }
-                }
-                return LineSubscription(lines: lines, checkpoint: subscription.checkpoint, cancel: subscription.cancel,
-                                        unreadable: subscription.unreadable)
-            }
-        }
-        return query
-    }
-
-    /// A request-bound observation, not admission or checkout preparation.
-    public func taskLocation(task: String, repository: String, machine: String) async throws -> TaskLocationObservation {
-        // The request token is opaque and returns byte-exact; identities compare canonically.
-        let request = UUID().uuidString
-        let scope = remoteMachine == nil ? ["--repo-id", repository] : []
-        let readings = try Self.decode([TaskLocationObservation].self, from: await run(
-            scope + ["task", "location", task, "--request", request, "--json"], nil))
-        guard readings.count == 1, let reading = readings.first,
-              reading.request == request,
-              reading.repositoryID == StructuredIdentity.prefixed(repository, "repo_"),
-              reading.taskID == StructuredIdentity.prefixed(task, "task_"),
-              reading.machineID == StructuredIdentity.prefixed(machine, "home_") else {
-            throw RegistryQueryError("Stale or mismatched execution-location observation; nothing was opened.")
-        }
-        return reading
     }
 
     /// A copy that also reports each successful read's wire text, so a caller
@@ -1094,15 +998,30 @@ public struct RegistryQuery: Sendable {
         try await serve(.taskChanges(issue: issue, base: base, head: head)).decode(TaskChangesSnapshot.self)
     }
 
+    /// One Task's screen, from wherever the Task runs: there its current
+    /// Session is the Task's saved primary.
+    public func taskDetail(issue: String) async throws -> TaskDetail {
+        try await serve(.taskDetail(directory: "/", issue: issue)).decode(TaskDetail.self)
+    }
+
     public func sessionHistoryText(id: String) async throws -> String {
         try await serve(.sessionHistoryGet(id: id)).decode(String.self)
     }
 
-    /// One store-driven reading keeps position, readiness and run history together.
-    public func subscribeTask(task: String) async throws -> LineSubscription {
+    /// One store-driven reading keeps position, readiness and run history
+    /// together, from wherever the Task runs.
+    public func subscribeTask(task: String) throws -> LineSubscription {
+        try subscribe(.taskGet(directory: "/", issue: task))
+    }
+
+    /// The Task's checkout revision after each change, wherever the Task runs.
+    public func watchTaskFiles(issue: String) throws -> LineSubscription {
+        try subscribe(.taskFilesWatch(issue: issue))
+    }
+
+    private func subscribe(_ read: ServedRead) throws -> LineSubscription {
         guard let observeRead else { throw RegistryQueryError("Live Task observation is unavailable on this transport") }
-        let read = ServedRead.taskGet(directory: "/", issue: task)
-        return try await observeRead(read.argv + ["--subscribe"], read.cwd)
+        return observeRead(read)
     }
 
     /// Every selectable Graph with the topology it would capture, via the shared loader.
@@ -1226,11 +1145,12 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskFileSave.self, from: stdout)
     }
 
-    /// One bounded page, ordered by stable Session identity.
+    /// One bounded page, ordered by stable Session identity; naming a Task
+    /// reads its Sessions wherever it runs.
     public func sessionPage(includingHeadless: Bool = false, after: String? = nil,
-                            cwd: String? = nil) async throws -> SessionPage {
+                            cwd: String? = nil, task: String? = nil) async throws -> SessionPage {
         try await serve(
-            .sessionList(directory: cwd ?? "/", headless: includingHeadless, after: after, limit: 100, task: nil)).decode(SessionPage.self)
+            .sessionList(directory: cwd ?? "/", headless: includingHeadless, after: after, limit: 100, task: task)).decode(SessionPage.self)
     }
 
     /// The repository or Wave's retained conversation, created when missing.
@@ -1273,10 +1193,18 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Restart the conversation on a fresh provider thread seeded with what the
-    /// last thread knew; the same Session keeps its history.
-    public func resetSession(_ session: SessionRecord, agent: String?, cwd: String?, requestID: String = UUID().uuidString) async throws -> SessionRecord {
+    /// last thread knew; the same Session keeps its history. A Task as `work`
+    /// restarts it where that Task runs.
+    public func resetSession(
+        _ session: SessionRecord,
+        work: WorkReference?,
+        agent: String?,
+        cwd: String?,
+        requestID: String = UUID().uuidString
+    ) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
-            .sessionNew(directory: cwd ?? "/", requestID: requestID, id: session.id, agent: agent)))
+            .sessionNew(directory: cwd ?? "/", requestID: requestID, id: session.id,
+                        task: work?.kind == .task ? work?.id : nil, agent: agent)))
     }
 
     /// Create a Task around the selected conversation without launching work.

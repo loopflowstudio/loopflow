@@ -17333,6 +17333,7 @@
       "enum": [
         "run",
         "pause",
+        "pausing",
         "unpause",
         "resume",
         "wait",
@@ -17341,7 +17342,7 @@
       "type": "string"
     },
     "WorkflowControl": {
-      "description": "The left button and visible label of the Task's split workflow control.",
+      "description": "The workflow track's primary action and current-step chip label.",
       "properties": {
         "action": {
           "$ref": "#/$defs/WorkflowAction"

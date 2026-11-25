@@ -220,6 +220,33 @@ struct PendingChangesTests {
         #expect(changes.changes.isEmpty)
     }
 
+    @Test func aPendingWorkflowChangeStaysUntilTheTaskStreamCoversItsAnswer() async throws {
+        let changes = changes()
+        changes.read("planning", Reading.available("plan", readAt: Revisions(["planning": 4, "processes": 4])))
+        changes.read("task", Reading.available("work", readAt: Revisions(["planning": 4, "processes": 4])))
+        changes.make(.pause(task: "LOO-1"), subject: "LOO-1", verb: "paused",
+                     write: .taskPause(directory: "/repo", issue: "LOO-1"), notices: notices, show: nil)
+        await machine.answer(Revisions(["planning": 5, "processes": 5]))
+        // Planning catches up first; the task stream is still at 4, so the chip keeps "Pausing…" instead of flashing.
+        changes.read("planning", Reading.available("plan", readAt: Revisions(["planning": 5, "processes": 5])))
+        #expect(changes.controlRequest(for: "LOO-1") == PendingChanges.pausing)
+        // Once the task stream covers the answer, the pending change drops.
+        changes.read("task", Reading.available("work", readAt: Revisions(["planning": 5, "processes": 5])))
+        #expect(changes.controlRequest(for: "LOO-1") == nil)
+        #expect(changes.changes.isEmpty)
+
+        // Ending the task stream (switching away from the Task) releases any change held only by it.
+        changes.read("task", Reading.available("work", readAt: Revisions(["planning": 5])))
+        changes.make(.run(task: "LOO-1"), subject: "LOO-1", verb: "started",
+                     write: .taskRun(directory: "/repo", issue: "LOO-1", graph: nil, from: nil, agent: nil, approve: false),
+                     notices: notices, show: nil)
+        await machine.answer(Revisions(["planning": 6]))
+        changes.read("planning", Reading.available("plan", readAt: Revisions(["planning": 6])))
+        #expect(changes.controlRequest(for: "LOO-1") == PendingChanges.starting)
+        changes.ended("task")
+        #expect(changes.changes.isEmpty)
+    }
+
     @Test func sectionChangesFollowTheTableAndMoveLeavesOtherWaves() async throws {
         let changes = changes()
         for (command, issue) in [(PendingCommand.unassign(task: "LOO-1"), "LOO-1"), (.reopen(task: "LOO-2"), "LOO-2"),

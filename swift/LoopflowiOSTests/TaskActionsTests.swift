@@ -80,6 +80,34 @@ final class TaskActionsTests: XCTestCase {
         XCTAssertEqual(reason, "store is busy")
     }
 
+    func testPausingDrawsDisabledPauseGlyphAndPendingCompleteDisablesCheckmarkImmediately() async throws {
+        guard case .value(let pausing) = try reading(sessions: true, pausedAt: (.pausing, "Pausing: deliver · land")) else {
+            return XCTFail("missing Task")
+        }
+        let pausingRow = try XCTUnwrap(pausing.row)
+        let pausingBar = try TaskWorkflowControls(task: pausingRow, actions: pausing.actions(for: pausingRow), pending: nil,
+            run: { _ in }, pause: { _ in }, interrupt: {}, toggleAuto: {}, complete: {}) { EmptyView() }.inspect()
+        let primary = try pausingBar.find(viewWithAccessibilityIdentifier: "task-workflow-primary")
+        XCTAssertEqual(try primary.find(ViewType.Image.self).actualImage().name(), "pause.fill")
+        XCTAssertTrue(try primary.isDisabled())
+
+        // Pending Complete patches the TaskWorkspaceView row immediately, disabling ✓ before the Machine answers.
+        guard case .value(let open) = try reading(sessions: true) else { return XCTFail("missing Task") }
+        let rawRow = try XCTUnwrap(open.row)
+        let changes = PendingChanges { _, _ in
+            try await Task.sleep(for: .seconds(60))
+            return nil
+        }
+        changes.make(.complete(task: rawRow.task.identifier), subject: rawRow.task.identifier, verb: "completed",
+                     write: .taskComplete(directory: rawRow.task.repo, issue: rawRow.task.identifier),
+                     notices: NoticeCenter(), show: nil)
+        let patched = changes.apply(to: [rawRow], readAt: open.readAt).first ?? rawRow
+        let bar = try TaskWorkflowControls(task: patched, actions: open.actions(for: patched), pending: nil,
+            run: { _ in }, pause: { _ in }, interrupt: {}, toggleAuto: {}, complete: {}) { EmptyView() }.inspect()
+        XCTAssertTrue(try bar.find(viewWithAccessibilityIdentifier: "task-complete").isDisabled())
+        _ = try bar.find(text: "Done")
+    }
+
     func testATaskStartedFromItsScreenOpensTheConversationTheMachineNames() async throws {
         var asked = 0
         let begun = try await TaskWorkspaceView.conversation(after: try reading(sessions: true)) {

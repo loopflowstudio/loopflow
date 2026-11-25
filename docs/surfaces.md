@@ -110,8 +110,8 @@ Queries support `wave:`, `task:`, `kind:task|wave`, and
 Actions in Desktop (Complete, Abandon, Reopen, Claim, Unassign, Pause, Unpause, Move, Rename)
 update the UI on the click, including for remote Machines and the phone. If the
 Machine refuses, the row returns and a single bottom Notice explains why
-(auto-dismissing after 6 seconds; the **Auto** toggle's Notice carries **Undo**,
-which turns auto off).
+(auto-dismissing after 6 seconds; **Complete** posts a Notice with **Undo**,
+which reopens the Task).
 
 If the Machine pauses briefly, edits still show immediately and flush once it
 reconnects. After ~10 seconds offline, mutation controls disable until the
@@ -266,7 +266,7 @@ request stays on screen with "Not started.", the error, **Try again** and
 Open a filed Task and it says what Start will do, in the sheet's words:
 
 ```text
-feature   ☺ explore   plan   build   ☺ ship-review   deliver   verify   [▶ | Run: explore ▾]
+[▶]   [Run: explore ▾]   plan   build   ☺ ship-review   deliver   verify       Auto ◯   ✓
 
 Not started
 

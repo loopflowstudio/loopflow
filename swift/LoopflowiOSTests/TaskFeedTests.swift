@@ -170,8 +170,12 @@ final class TaskFeedTests: XCTestCase {
         try await until { identifiers(feed) == ["LOO-1", "LOO-2", "LOO-3"] }
         feed.complete(feed.shownRepositories[0].tasks[1]) {}
         XCTAssertEqual(identifiers(feed), ["LOO-1", "LOO-3"], "gone in the swipe")
+        XCTAssertEqual(feed.notices.current?.text, "LOO-2 completed")
+        XCTAssertEqual(feed.notices.current?.action?.title, "Undo")
         try await until { await server.writes.count == 1 }
         XCTAssertEqual(identifiers(feed), ["LOO-1", "LOO-3"], "still gone while the Machine holds its answer")
+        feed.notices.current?.action?.perform()
+        try await until { await server.writes.count == 2 }
     }
 
     func testARefusedCompleteReturnsTheRowAndItsNoticeShowsTheTask() async throws {
@@ -184,7 +188,7 @@ final class TaskFeedTests: XCTestCase {
         try await until { identifiers(feed).count == 3 }
         var shown = false
         feed.complete(feed.shownRepositories[0].tasks[1]) { shown = true }
-        try await until { feed.notices.current != nil }
+        try await until { feed.notices.current?.text.contains("couldn't be completed") == true }
         XCTAssertEqual(identifiers(feed), ["LOO-1", "LOO-2", "LOO-3"])
         XCTAssertEqual(feed.notices.current?.text, "LOO-2 couldn't be completed: its PR #12 is open")
         XCTAssertEqual(feed.notices.current?.action?.title, "Show")

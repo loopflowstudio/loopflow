@@ -56,6 +56,13 @@ struct TaskWorkspaceView: View {
         .background(theme.palette.background)
         .navigationTitle(task.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let (reading, row) = patchedReading {
+                ToolbarItem(placement: .topBarTrailing) {
+                    metadata(row, sessions: reading.work.sessions)
+                }
+            }
+        }
         .overlay { NoticeView(center: feed.notices) }
         .task(id: scenePhase == .active) {
             guard scenePhase == .active else { return }
@@ -65,8 +72,14 @@ struct TaskWorkspaceView: View {
         }
     }
 
+    private var patchedReading: (reading: Reading, row: RoadmapTask)? {
+        guard case .value(let reading) = reading, let rawRow = reading.row else { return nil }
+        let row = feed.pendingChanges.apply(to: [rawRow], readAt: reading.readAt).first ?? rawRow
+        return (reading, row)
+    }
+
     @ViewBuilder private var header: some View {
-        if case .value(let reading) = reading, let row = reading.row, feed.pendingChanges.acceptsChanges {
+        if let (reading, row) = patchedReading, feed.pendingChanges.acceptsChanges {
             let actions = reading.actions(for: row, outline: outline,
                                           autoPending: feed.pendingChanges.autoRequest(for: row.task.identifier))
             VStack(alignment: .leading, spacing: Spacing.xs) {
@@ -76,10 +89,7 @@ struct TaskWorkspaceView: View {
                         .foregroundStyle(theme.palette.textSecondary)
                         .accessibilityIdentifier("task-machine")
                 }
-                HStack(spacing: Spacing.sm) {
-                    controls(row, actions)
-                    metadata(row, sessions: reading.work.sessions)
-                }
+                controls(row, actions)
                 if let reason = actions.primaryRefusal ?? (row.lifecycle == .paused ? nil : actions.autoRefusal) {
                     Text(reason).font(Typography.meta).foregroundStyle(theme.palette.warning)
                         .accessibilityIdentifier("task-actions-refusal")
@@ -105,6 +115,14 @@ struct TaskWorkspaceView: View {
         let work: TaskOverview
         let row: RoadmapTask?
         let execution: TaskExecution?
+        let readAt: Revisions?
+
+        init(work: TaskOverview, row: RoadmapTask?, execution: TaskExecution?, readAt: Revisions? = nil) {
+            self.work = work
+            self.row = row
+            self.execution = execution
+            self.readAt = readAt
+        }
 
         func actions(for row: RoadmapTask, outline: WorkflowOutline? = nil, autoPending: Bool? = nil) -> TaskActions {
             TaskActions(work: work, row: row, execution: execution, outline: outline, autoPending: autoPending)
@@ -124,10 +142,18 @@ struct TaskWorkspaceView: View {
     private func watchTask() async {
         guard scenePhase == .active else { return }
         let watch = client.observeTask(issue: task.id)
-        defer { watch.cancel() }
+        let key = "task-\(task.id)"
+        defer {
+            watch.cancel()
+            feed.pendingChanges.ended(key)
+        }
         do {
             for try await frame in watch.updates {
-                reading = Self.reading(in: frame, task: task.id)
+                let next = Self.reading(in: frame, task: task.id)
+                reading = next
+                if case .value(let value) = next {
+                    feed.pendingChanges.read(key, Loopflow.Reading.available(value.work, readAt: value.readAt))
+                }
                 await openConversation()
             }
         } catch is CancellationError {
@@ -167,7 +193,7 @@ struct TaskWorkspaceView: View {
             guard case .task(let part?) = frame.content else {
                 return .failed(frame.unavailable ?? "Task reading is unavailable")
             }
-            return .value(Reading(work: part.work, row: part.row, execution: part.execution))
+            return .value(Reading(work: part.work, row: part.row, execution: part.execution, readAt: frame.readAt))
         } catch {
             return .failed(error.localizedDescription)
         }
@@ -219,7 +245,7 @@ struct TaskWorkspaceView: View {
     }
 
     private func metadata(_ row: RoadmapTask, sessions: [TaskSession]) -> some View {
-        Menu("Task actions", systemImage: "ellipsis") {
+        Menu {
             Menu("Move to Wave") {
                 Button("No Wave") { move(row, to: nil) }.disabled(row.task.waveId == nil)
                 ForEach(feed.waves.filter { $0.repo == row.task.repo }) { wave in
@@ -243,9 +269,11 @@ struct TaskWorkspaceView: View {
                     chosen = .session
                 }
             }
+        } label: {
+            Image(systemName: "ellipsis")
         }
-        .labelStyle(.iconOnly)
-        .frame(width: 44, height: 44)
+        .accessibilityLabel("Task actions")
+        .accessibilityIdentifier("task-metadata-menu")
     }
 
     private func move(_ row: RoadmapTask, to wave: String?) {

@@ -45,12 +45,12 @@ public struct TaskActions: Equatable {
             control = WorkflowControl(action: .done, label: row.lifecycle == .abandoned ? "Abandoned" : "Done")
         } else if let graph {
             // A pending lifecycle edit can reach the row before its new Graph reading.
-            let graphHeld = graph.control.action == .unpause || graph.control.action == .resume
+            let graphHeld = graph.control.action == .pausing || graph.control.action == .unpause || graph.control.action == .resume
             control = graphHeld == held ? graph.control : nil
         } else if work == nil {
             control = nil
         } else if held {
-            control = WorkflowControl(action: .resume, label: "Paused: start")
+            control = WorkflowControl(action: .resume, label: "Paused: \(outline?.steps.first?.name ?? "start")")
         } else if completeReady {
             control = WorkflowControl(action: .done, label: "Done")
         } else {

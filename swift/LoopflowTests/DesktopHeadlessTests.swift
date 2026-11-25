@@ -490,14 +490,17 @@ struct DesktopHeadlessTests {
         for _ in 0..<200 where model.pendingChanges.controlRequest(for: task.task.identifier) != nil { try await Task.sleep(for: .milliseconds(5)) }
 
         // Completion has its own operation and does not move the Workflow.
+        model.select(.task(id: task.id))
         model.completeTask(task)
-        // Completing says so in the click, with Undo, which reopens the Task.
+        #expect(model.selection != .task(id: task.id))
+        // Completing says so in the click, with Undo, which reopens and reselects the Task.
         let completed = try #require(model.navigation.notices.current)
         #expect(completed.text == "\(task.task.identifier) completed")
         for _ in 0..<200 where await started.calls.last?.contains("complete") != true { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls.last == ["task", "complete", task.task.identifier, "--json"])
         let sent = await started.calls.count
         try #require(completed.action).perform()
+        #expect(model.selection == .task(id: task.id))
         for _ in 0..<200 where await started.calls.count == sent { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls.last == ["task", "reopen", task.task.identifier, "--json"])
 

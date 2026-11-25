@@ -401,7 +401,7 @@ grows into a chip that says what is happening there.
 ```
 
 Click ⏸ to pause the worker and keep talking in the Task conversation; the chip reads
-**Paused: implement**. Click ▶ to resume the interrupted step. At a human stop, ▶ lifts
+**Paused: build · implement**. Click ▶ to resume the interrupted step. At a human stop, ▶ lifts
 the hold and the Task waits there for you. Once you finish the review, the chip reads
 **ship-review · next: deliver** and ▶ runs deliver. A failed or interrupted run offers
 its saved step again.

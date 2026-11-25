@@ -1624,7 +1624,7 @@ final class WorkModel {
                     workUnavailable(error.localizedDescription)
                 }
             }
-            for part in [WorkPart.planning, .taskList, .selections, .sessions] { pendingChanges.ended(readingKey(part.rawValue)) }
+            for part in [WorkPart.planning, .taskList, .selections, .sessions, .task] { pendingChanges.ended(readingKey(part.rawValue)) }
             let delay = retry.failed(at: .now)
             workObservation = nil
             await observation?.cancel()
@@ -1653,6 +1653,9 @@ final class WorkModel {
         }
         let scope = workScope
         guard scope != sentScope else { return }
+        if scope.task != sentScope?.task {
+            pendingChanges.ended(readingKey(WorkPart.task.rawValue))
+        }
         sentScope = scope
         scopeFloor = send { .scope(id: $0, scope) }
     }
@@ -1807,8 +1810,8 @@ final class WorkModel {
             guard answers >= max(taskFloor, scopeFloor) else { return }
             // A frame about its own Task stays true after the selection moves on.
             if let body, let row = body.row, row.task.identifier == body.task {
-                if subscribedTaskRow != .available(row) {
-                    subscribedTaskRow = .available(row)
+                if subscribedTaskRow != .available(row, readAt: frame.readAt) {
+                    subscribedTaskRow = .available(row, readAt: frame.readAt)
                     // The owner's standing can be what starts a Task only a
                     // peer has run; its Session opens now, not at the next list.
                     openWarmConversations()
@@ -1826,7 +1829,7 @@ final class WorkModel {
             }
             guard body.task == task.task.identifier else { return }
             if comments[task.id] != .available(body.comments) { comments.values[task.id] = .available(body.comments) }
-            let next = Reading.available(body.work)
+            let next = Reading.available(body.work, readAt: frame.readAt)
             if taskWork[task.id] != next { taskWork.values[task.id] = next }
             let runs = Dictionary(body.graphProcesses.map { ($0.entry.id, $0) }) { _, newer in newer }
             if graphProcesses != runs { graphProcesses = runs }
@@ -1851,6 +1854,10 @@ final class WorkModel {
         case .taskList: pendingChanges.read(readingKey(part), taskListReading)
         case .selections: pendingChanges.read(readingKey(part), selectionPlans)
         case .sessions: pendingChanges.read(readingKey(part), sessionsRead)
+        case .task:
+            if let shown = selection, shown.kind == .task, let task = task(id: shown.id)?.task {
+                pendingChanges.read(readingKey(part), taskWork[task.id])
+            }
         default: break
         }
         appliedSequence[part] = frame.sequence
@@ -2909,7 +2916,10 @@ final class WorkModel {
         let issue = task.task.identifier
         moveSelection(past: task)
         navigation.notices.post(Notice("\(issue) completed", key: "complete-\(issue)",
-                                       action: Notice.Action("Undo") { [weak self] in self?.reopenTask(task) }))
+                                       action: Notice.Action("Undo") { [weak self] in
+                                           self?.reopenTask(task)
+                                           self?.select(.task(id: task.id))
+                                       }))
         change(task, .complete(task: issue), .taskComplete(directory: directory(task), issue: issue), "completed") {
             Perf.completionAccepted(id: task.id, owner: owner)
         }

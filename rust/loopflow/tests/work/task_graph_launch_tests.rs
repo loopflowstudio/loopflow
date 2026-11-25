@@ -2407,7 +2407,7 @@ assert 'pausing' in paused.stdout and 'finishing' in paused.stdout, paused.stdou
 status = task('status', '--json')
 assert status.returncode == 0, status.stderr
 graph = json.loads(status.stdout)['graph']
-assert graph['control']['label'] == 'Pausing: pr land --local', graph
+assert graph['control'] == {'action': 'pausing', 'label': 'Pausing: pr land --local'}, graph
 sentence = graph['sentence']
 assert 'pr land --local is finishing' in sentence, sentence
 unpause = task('unpause', '--run')
@@ -2426,7 +2426,21 @@ assert unpause.returncode != 0 and 'still finishing' in unpause.stderr, unpause"
     assert_eq!(graphs.len(), 1);
     assert_eq!(graphs[0].1.len(), 1, "the next command started");
     assert_eq!(task.state(), "paused");
-    task.ok(&["task", "unpause", "INF-123"]);
+    let paused = task.graph();
+    assert_eq!(paused["position"]["at"], "sync --plan");
+    assert_eq!(
+        paused["control"],
+        serde_json::json!({"action": "resume", "label": "Paused: sync --plan"})
+    );
+    task.task_run_ok(&["task", "unpause", "INF-123", "--run"]);
+    assert_eq!(task.graph()["position"], at("end"));
+    let graphs = support::recorded_graphs(task.home.path());
+    assert_eq!(graphs.len(), 2);
+    assert_eq!(
+        graphs[1].1.len(),
+        1,
+        "unpause --run must run only task sync --plan, not rerun pr land --local"
+    );
 }
 
 #[test]

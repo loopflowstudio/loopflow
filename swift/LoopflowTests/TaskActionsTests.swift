@@ -107,8 +107,27 @@ struct TaskActionsTests {
         #expect(try !view.find(viewWithAccessibilityIdentifier: "task-auto").isDisabled())
     }
 
+    @MainActor @Test func pausingDrawsADisabledPauseGlyphAndHidesStopMenuItems() throws {
+        // Even before roadmap.runControl.pausing catches up, WorkflowAction.pausing disables primary directly.
+        let row = try row(lifecycle: "paused", refusal: nil, pausing: false)
+        let actions = TaskActions(work: try work(.init(action: .pausing, label: "Pausing: build · implement")),
+                                  row: row, execution: nil)
+        #expect(actions.control?.action == .pausing)
+        let bar = try TaskWorkflowControls(task: row, actions: actions, pending: nil, run: { _ in },
+            pause: { _ in Issue.record("Pausing must not trigger pause or unpause") },
+            interrupt: {}, toggleAuto: {}, complete: {}) { EmptyView() }.inspect()
+        let primary = try bar.find(viewWithAccessibilityIdentifier: "task-workflow-primary")
+        #expect(try primary.find(ViewType.Image.self).actualImage().name() == "pause.fill")
+        #expect(try primary.isDisabled())
+        _ = try bar.find(text: "Pausing: build · implement")
+        #expect(try bar.find(viewWithAccessibilityIdentifier: "task-workflow-step-0").isDisabled())
+        let menu = try bar.find(viewWithAccessibilityIdentifier: "task-workflow-move")
+        #expect(throws: (any Error).self) { try menu.find(button: "Interrupt step") }
+        #expect(throws: (any Error).self) { try menu.find(button: "Pause") }
+    }
+
     @Test func cleanupBlocksUnpauseAndAnArmedSwitchCanStillTurnOff() throws {
-        let actions = TaskActions(work: try work(.init(action: .resume, label: "Paused: land")),
+        let actions = TaskActions(work: try work(.init(action: .pausing, label: "Pausing: deliver · land")),
                                   row: try row(lifecycle: "paused", auto: true, refusal: "land is finishing", pausing: true), execution: nil)
         #expect(actions.primaryRefusal == "land is finishing")
         #expect(actions.auto == .on && actions.autoRefusal == nil)
@@ -120,6 +139,8 @@ struct TaskActionsTests {
         let actions = TaskActions(work: try work(nil), row: unstarted, execution: nil, outline: catalog[0].workflow)
         #expect(actions.control?.label == "Run: design")
         #expect(actions.pause == nil)
+        let held = TaskActions(work: try work(nil), row: try row(lifecycle: "paused"), execution: nil, outline: catalog[0].workflow)
+        #expect(held.control == WorkflowControl(action: .resume, label: "Paused: design"))
         #expect(TaskActions(work: nil, row: unstarted, execution: nil).control == nil)
     }
 

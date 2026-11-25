@@ -76,10 +76,12 @@ One component for each of these, on every surface that shows it:
 - **Status.** One dot and a phrase in sans, in the role's color, with the
   next step beside it as a button ("Blocked, a dialog is open", "Go to
   dialog").
-- **Workflow line.** The Graph's name in mono, every step as a word, a person
-  icon before the steps that stop for someone, the running step strong in the
-  working color, and a sentence: "build is running. You are next needed at
-  human-review." Where the line does not fit, the sentence stands alone.
+- **Workflow line.** In a Task header (`TaskWorkflowControls`), a fixed ▶/⏸
+  button, the top-level steps with a person icon before steps that stop for
+  someone and the current step grown into the menu chip (`WorkflowControl` from
+  Rust), then Auto and ✓ at the far end; on narrow panes only ▶ and the chip
+  stay, and hovering the track shows Rust's sentence. In Dashboard tiles and New
+  Task (`WorkflowLine`), the sentence or catalog outline stands alone.
 - **Button.** 24 pt high, 13 pt text, radius 4, neutral. One accent button
   per surface, for what the surface is for.
 - **Empty or failed state.** Left-aligned: a serif title saying what

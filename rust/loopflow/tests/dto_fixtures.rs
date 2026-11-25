@@ -1268,6 +1268,14 @@ fn task_overview_excludes_diagnostic_process_history() {
         loopflow_execution::task_graph::WorkflowAction::Wait
     );
     assert_eq!(
+        serde_json::to_value(loopflow_execution::task_graph::WorkflowControl {
+            action: loopflow_execution::task_graph::WorkflowAction::Pausing,
+            label: "Pausing: deliver · land".into(),
+        })
+        .unwrap(),
+        serde_json::json!({"action": "pausing", "label": "Pausing: deliver · land"})
+    );
+    assert_eq!(
         serde_json::to_value(overview).unwrap(),
         serde_json::from_str::<serde_json::Value>(input).unwrap()
     );

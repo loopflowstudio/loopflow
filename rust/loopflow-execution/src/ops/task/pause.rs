@@ -209,9 +209,10 @@ pub fn parked(issue: &str) -> OpsResult<Option<String>> {
             WorkflowAction::Run => format!("`lf task run {id}` continues past it."),
             WorkflowAction::Wait => format!("`lf task auto on {id}` lands it."),
             WorkflowAction::Done => format!("`lf task complete {id}` finishes it."),
-            WorkflowAction::Pause | WorkflowAction::Unpause | WorkflowAction::Resume => {
-                return Ok(None)
-            }
+            WorkflowAction::Pause
+            | WorkflowAction::Pausing
+            | WorkflowAction::Unpause
+            | WorkflowAction::Resume => return Ok(None),
         };
         Ok(Some(format!("{} {next}", graph.sentence)))
     })
@@ -234,4 +235,139 @@ pub(super) fn release(issue: &str, resume: bool) -> OpsResult<Option<(TaskId, Fi
         store.sqlite.release_task_pause(&task.id).map_err(refused)?;
         Ok(start.then_some((task.id, admission)))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parked;
+    use crate::store::{open_ephemeral_store, StorageConfig};
+    use crate::task_graph::CapturedGraph;
+    use loopflow_storage::process::Starter;
+    use loopflow_storage::sqlite::{Auto, AutoState};
+    use loopflow_storage::work::task::{
+        LinearWritebackState, Observation, Task, TaskId, TaskPr, TaskPrId,
+    };
+
+    #[test]
+    fn parked_names_the_command_for_human_stops_landing_waits_and_end() {
+        let _lock = crate::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
+        let home = tempfile::tempdir().unwrap();
+        let repo = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let store = runtime
+            .block_on(open_ephemeral_store(&StorageConfig::sqlite(
+                home.path().join("loopflow.db"),
+            )))
+            .unwrap();
+        let now = time::OffsetDateTime::now_utc();
+        let task = Task {
+            parent_task_id: None,
+            repository_id: crate::repository::location::ensure_repository(
+                &store.sqlite,
+                &repo.path().display().to_string(),
+            )
+            .unwrap(),
+            id: TaskId::new(),
+            tracker_id: None,
+            revision: 0,
+            identifier: "INF-42".into(),
+            title: "Parked check".into(),
+            description: String::new(),
+            tracker_synced_at: None,
+            tracker_writeback: LinearWritebackState::Current,
+            wave_id: None,
+            project_id: None,
+            worktree: Some(repo.path().to_path_buf()),
+            workspace_slug: "parked".into(),
+            branch: "main".into(),
+            base_commit: "deadbeef".into(),
+            parent_pr_id: None,
+            created_at: now,
+            updated_at: now,
+            rank: 0,
+            assignee: None,
+            due_date: None,
+            state: None,
+            completed_at: None,
+            observation: Observation::NotRequired,
+        };
+        let pr = TaskPr {
+            id: TaskPrId::new(),
+            task_id: task.id.clone(),
+            sequence: 1,
+            slug: "parked".into(),
+            branch: "main".into(),
+            base_commit: "deadbeef".into(),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: now,
+            updated_at: now,
+        };
+        runtime.block_on(store.seed_task(&task, &pr)).unwrap();
+
+        let graph = CapturedGraph::load("code", repo.path()).unwrap().unwrap();
+        let graph_json = serde_json::to_string(&graph).unwrap();
+        store
+            .sqlite
+            .take_up_task_graph(&task.id, &graph_json)
+            .unwrap();
+
+        store
+            .sqlite
+            .set_task_graph_step(&task.id, "ship-review")
+            .unwrap();
+        assert_eq!(
+            parked("INF-42").unwrap().as_deref(),
+            Some("Waiting for you at ship-review. `lf task run INF-42` continues past it.")
+        );
+
+        let person = Starter::Person {
+            name: Some("Maya".into()),
+        };
+        store
+            .sqlite
+            .set_task_auto(
+                &task.id,
+                &Auto {
+                    state: AutoState::Off,
+                    at: 0,
+                    by: person.clone(),
+                },
+                false,
+            )
+            .unwrap();
+        store
+            .sqlite
+            .set_task_graph_step(&task.id, "land --wait-and-fix")
+            .unwrap();
+        assert_eq!(
+            parked("INF-42").unwrap().as_deref(),
+            Some("Waiting at land --wait-and-fix: auto is off. `lf task auto on INF-42` lands it.")
+        );
+
+        store.sqlite.set_task_graph_step(&task.id, "end").unwrap();
+        assert_eq!(
+            parked("INF-42").unwrap().as_deref(),
+            Some("At its end. `lf task complete INF-42` finishes it.")
+        );
+
+        // Still paused -> parked returns None.
+        store
+            .sqlite
+            .begin_task_pause(&task.id, &person, Vec::new())
+            .unwrap();
+        assert_eq!(parked("INF-42").unwrap(), None);
+        store.sqlite.settle_task_pause(&task.id, false).unwrap();
+        assert_eq!(parked("INF-42").unwrap(), None);
+    }
 }

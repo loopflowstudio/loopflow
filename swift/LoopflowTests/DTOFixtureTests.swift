@@ -438,6 +438,10 @@ struct DTOFixtureTests {
         #expect(overview.graph?.control == WorkflowControl(action: .wait, label: "Waiting: land"))
         #expect(overview.sessions.count == 2)
         #expect(overview.graphProcesses.count == 1)
+        let pausing = try JSONDecoder().decode(
+            WorkflowControl.self,
+            from: Data(#"{"action":"pausing","label":"Pausing: deliver · land"}"#.utf8))
+        #expect(pausing == WorkflowControl(action: .pausing, label: "Pausing: deliver · land"))
     }
 
     @Test("Task work retains conversations and Graphs")

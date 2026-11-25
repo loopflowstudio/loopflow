@@ -65,7 +65,8 @@ public struct TaskWorkflowControls<Items: View>: View {
     }
 
     private var jumpDisabled: Bool {
-        task.isCompleted || pending != nil || actions.runRefusal != nil || actions.control?.action == .pause
+        task.isCompleted || pending != nil || actions.runRefusal != nil
+            || actions.control?.action == .pause || actions.control?.action == .pausing
     }
 
     private func stepButton(_ step: TaskGraph.Step, index: Int) -> some View {
@@ -103,7 +104,7 @@ public struct TaskWorkflowControls<Items: View>: View {
                 }
                 if actions.control?.action == .pause {
                     Button("Interrupt step") { interrupt() }.disabled(pending != nil)
-                } else if actions.pause == .pause {
+                } else if actions.control?.action != .pausing, actions.pause == .pause {
                     Button("Pause") { pause(.pause) }.disabled(pending != nil)
                 }
             }
@@ -134,7 +135,7 @@ public struct TaskWorkflowControls<Items: View>: View {
     private var ink: Color {
         switch actions.control?.action {
         case .pause: actions.auto == .on ? palette.success : palette.working
-        case .resume, .unpause: palette.warning
+        case .pausing, .resume, .unpause: palette.warning
         case .done: palette.success
         default: palette.text
         }
@@ -142,7 +143,7 @@ public struct TaskWorkflowControls<Items: View>: View {
 
     private var filled: Bool {
         switch actions.control?.action {
-        case .pause, .resume, .unpause, .done: true
+        case .pause, .pausing, .resume, .unpause, .done: true
         default: false
         }
     }
@@ -159,6 +160,7 @@ public struct TaskWorkflowControls<Items: View>: View {
         let control = actions.control
         let title: String = switch control?.action {
         case .pause: "Pause"
+        case .pausing: "Pausing"
         case .unpause: "Unpause"
         case .resume: "Unpause and run"
         case .wait: "Turn on Auto to land"
@@ -167,7 +169,7 @@ public struct TaskWorkflowControls<Items: View>: View {
         // A pending pause already shows the held glyph; a pending unpause the running one.
         let glyph = switch (control?.action, pending) {
         case (.done, _): "checkmark"
-        case (_, PendingChanges.pausing?), (.pause, nil): "pause.fill"
+        case (_, PendingChanges.pausing?), (.pause, nil), (.pausing, _): "pause.fill"
         default: "play.fill"
         }
         return Button {
@@ -175,7 +177,7 @@ public struct TaskWorkflowControls<Items: View>: View {
             case .run: run(nil)
             case .pause: pause(.pause)
             case .unpause, .resume: pause(.unpause)
-            case .done, .wait, nil: break
+            case .done, .wait, .pausing, nil: break
             }
         } label: {
             Image(systemName: glyph)
@@ -186,7 +188,7 @@ public struct TaskWorkflowControls<Items: View>: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(control == nil || control?.action == .done || control?.action == .wait || pending != nil || actions.primaryRefusal != nil)
+        .disabled(control == nil || control?.action == .done || control?.action == .wait || control?.action == .pausing || pending != nil || actions.primaryRefusal != nil)
         .help(pending ?? actions.primaryRefusal ?? title)
         .accessibilityLabel(pending ?? title)
         .accessibilityIdentifier("task-workflow-primary")

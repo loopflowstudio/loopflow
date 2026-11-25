@@ -458,10 +458,18 @@ pub struct WorkflowControl {
 pub enum WorkflowAction {
     Run,
     Pause,
+    Pausing,
     Unpause,
     Resume,
     Wait,
     Done,
+}
+
+fn chip_step(top: Option<&str>, at: &str) -> String {
+    match top {
+        Some(top) if top != at => format!("{top} · {at}"),
+        _ => at.to_owned(),
+    }
 }
 
 impl WorkflowControl {
@@ -473,14 +481,19 @@ impl WorkflowControl {
     }
 
     fn paused(step: &str, resume: bool, stopping: bool) -> Self {
-        let status = if stopping { "Pausing" } else { "Paused" };
+        if stopping {
+            return Self {
+                action: WorkflowAction::Pausing,
+                label: format!("Pausing: {step}"),
+            };
+        }
         Self {
             action: if resume {
                 WorkflowAction::Resume
             } else {
                 WorkflowAction::Unpause
             },
-            label: format!("{status}: {step}"),
+            label: format!("Paused: {step}"),
         }
     }
 
@@ -619,14 +632,18 @@ impl TaskGraph {
         } else {
             "`lf task unpause` lifts the hold."
         };
-        let (position, current_step, sentence, control) = match run {
+        let (position, current_step, sentence, control, chip) = match run {
             None => {
-                let (place, sentence, control) = match step.as_str() {
-                    START => (
-                        None,
-                        "Not started.".to_owned(),
-                        WorkflowControl::start(&steps),
-                    ),
+                let (place, sentence, control, chip) = match step.as_str() {
+                    START => {
+                        let first = steps.first().map_or(END, |step| step.name.as_str());
+                        (
+                            None,
+                            "Not started.".to_owned(),
+                            WorkflowControl::start(&steps),
+                            first.to_owned(),
+                        )
+                    }
                     END => (
                         None,
                         "At its end.".to_owned(),
@@ -634,9 +651,11 @@ impl TaskGraph {
                             action: WorkflowAction::Done,
                             label: "Done".into(),
                         },
+                        END.to_owned(),
                     ),
                     step => match graph.interactive_step(step) {
                         Some(place) => {
+                            let top_name = steps[top(&place) as usize].name.as_str();
                             let next = graph.after(&place).map(|next| {
                                 if top(&place) == top(&next) {
                                     graph.step_name(&next)
@@ -654,21 +673,38 @@ impl TaskGraph {
                                         next.as_deref().unwrap_or(END)
                                     ),
                                 },
+                                chip_step(Some(top_name), step),
                             )
                         }
-                        None if auto == Some(AutoState::Off) => (
-                            graph.find(step),
-                            format!("Waiting at {step}: auto is off."),
-                            WorkflowControl {
-                                action: WorkflowAction::Wait,
-                                label: format!("Waiting: {step}"),
-                            },
-                        ),
-                        None => (
-                            graph.find(step),
-                            format!("Waiting at {step}."),
-                            WorkflowControl::run(step),
-                        ),
+                        None if auto == Some(AutoState::Off) => {
+                            let place = graph.find(step);
+                            let top_name = place
+                                .as_ref()
+                                .map(|place| steps[top(place) as usize].name.as_str());
+                            let chip = chip_step(top_name, step);
+                            (
+                                place,
+                                format!("Waiting at {step}: auto is off."),
+                                WorkflowControl {
+                                    action: WorkflowAction::Wait,
+                                    label: format!("Waiting: {chip}"),
+                                },
+                                chip,
+                            )
+                        }
+                        None => {
+                            let place = graph.find(step);
+                            let top_name = place
+                                .as_ref()
+                                .map(|place| steps[top(place) as usize].name.as_str());
+                            let chip = chip_step(top_name, step);
+                            (
+                                place,
+                                format!("Waiting at {step}."),
+                                WorkflowControl::run(&chip),
+                                chip,
+                            )
+                        }
                     },
                 };
                 let sentence = match pause {
@@ -683,6 +719,7 @@ impl TaskGraph {
                     place.as_ref().map(top),
                     sentence,
                     control,
+                    chip,
                 )
             }
             Some(run) => {
@@ -691,7 +728,9 @@ impl TaskGraph {
                     .as_ref()
                     .map_or_else(|| step.clone(), |place| graph.step_name(place));
                 let current = place.as_ref().map(top);
-                let label = current.map_or(at.as_str(), |index| &steps[index as usize].name);
+                let top_name = current.map(|index| steps[index as usize].name.as_str());
+                let label = top_name.unwrap_or(at.as_str());
+                let chip = chip_step(top_name, &at);
                 let location = || {
                     if label == at {
                         format!("at {at}")
@@ -736,14 +775,10 @@ impl TaskGraph {
                 let control = if run.running {
                     WorkflowControl {
                         action: WorkflowAction::Pause,
-                        label: if label == at {
-                            at.clone()
-                        } else {
-                            format!("{label} · {at}")
-                        },
+                        label: chip.clone(),
                     }
                 } else {
-                    WorkflowControl::run(&at)
+                    WorkflowControl::run(&chip)
                 };
                 (
                     TaskGraphPosition::Run {
@@ -755,15 +790,12 @@ impl TaskGraph {
                     current,
                     sentence,
                     control,
+                    chip,
                 )
             }
         };
         let control = if pause.is_some() {
-            let at = match &position {
-                TaskGraphPosition::At { step } => step,
-                TaskGraphPosition::Run { at, .. } => at,
-            };
-            WorkflowControl::paused(at, resumes, pausing)
+            WorkflowControl::paused(&chip, resumes, pausing)
         } else {
             control
         };
@@ -942,19 +974,21 @@ pub(crate) mod tests {
     #[test]
     fn workflow_control_resumes_interrupted_work_and_releases_human_stops() {
         use super::PauseStage;
-        use super::WorkflowAction::{Done, Pause, Resume, Run, Unpause};
+        use super::WorkflowAction::{Done, Pause, Pausing, Resume, Run, Unpause, Wait};
         let repo = tempfile::tempdir().unwrap();
         write(repo.path(), ".lf/graphs/test.yaml",
             "- implement\n- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - interactive: demo\n      skip:\n        description: Skip it\n- gate\n- interactive: verify\n");
         let graph = CapturedGraph::load("test", repo.path()).unwrap().unwrap();
         for (step, run, held, action, label) in [
             ("start", None, false, Run, "Run: implement"),
+            ("start", None, true, Resume, "Paused: implement"),
             ("start", Some(true), false, Pause, "implement"),
             ("start", Some(false), false, Run, "Run: implement"),
             ("start", Some(false), true, Resume, "Paused: implement"),
-            ("demo", None, true, Unpause, "Paused: demo"),
+            ("demo", None, true, Unpause, "Paused: xor-route · demo"),
             ("demo", None, false, Run, "demo · next: gate"),
             ("verify", None, false, Run, "verify · next: end"),
+            ("verify", None, true, Unpause, "Paused: verify"),
             ("end", None, true, Unpause, "Paused: end"),
             ("end", None, false, Done, "Done"),
         ] {
@@ -972,6 +1006,95 @@ pub(crate) mod tests {
                 held.then_some(PauseStage::Held),
             )
             .control;
+            assert_eq!((control.action, control.label.as_str()), (action, label));
+        }
+
+        // Composed top-level steps stay in every non-running chip label.
+        let code = CapturedGraph::load("code", repo.path()).unwrap().unwrap();
+        let implement = code.find("implement").unwrap().cursor();
+        let verify = code.find("verify").unwrap().cursor();
+        let land = code.find("land --wait-and-fix").unwrap().cursor();
+        for (step, cursor, running, auto, pause, action, label) in [
+            (
+                "start",
+                None,
+                false,
+                None,
+                Some(PauseStage::Held),
+                Resume,
+                "Paused: plan",
+            ),
+            (
+                "plan",
+                Some(&implement),
+                false,
+                None,
+                None,
+                Run,
+                "Run: build · implement",
+            ),
+            (
+                "plan",
+                Some(&implement),
+                false,
+                None,
+                Some(PauseStage::Held),
+                Resume,
+                "Paused: build · implement",
+            ),
+            ("plan", Some(&verify), false, None, None, Run, "Run: verify"),
+            (
+                "plan",
+                Some(&verify),
+                true,
+                None,
+                Some(PauseStage::Stopping),
+                Pausing,
+                "Pausing: verify",
+            ),
+            (
+                "plan",
+                Some(&land),
+                true,
+                None,
+                Some(PauseStage::Held),
+                Pausing,
+                "Pausing: deliver · land --wait-and-fix",
+            ),
+            (
+                "land --wait-and-fix",
+                None,
+                false,
+                Some(AutoState::Off),
+                None,
+                Wait,
+                "Waiting: deliver · land --wait-and-fix",
+            ),
+            (
+                "land --wait-and-fix",
+                None,
+                false,
+                Some(AutoState::Off),
+                Some(PauseStage::Held),
+                Unpause,
+                "Paused: deliver · land --wait-and-fix",
+            ),
+            (
+                "ship-review",
+                None,
+                false,
+                None,
+                Some(PauseStage::Held),
+                Unpause,
+                "Paused: ship-review",
+            ),
+        ] {
+            let run = cursor.map(|cursor| TaskGraphRun {
+                cursor,
+                lf_process_id: "worker".into(),
+                running,
+            });
+            let control = TaskGraph::read(&code, step.into(), run, auto, pause).control;
             assert_eq!((control.action, control.label.as_str()), (action, label));
         }
     }
@@ -1051,33 +1174,42 @@ pub(crate) mod tests {
 
     #[test]
     fn a_paused_workflow_names_the_stopping_step_until_cleanup_finishes() {
+        use super::WorkflowAction::{Pausing, Resume};
         use loopflow_storage::sqlite::task_work::PauseStage;
         let repo = tempfile::tempdir().unwrap();
         let graph = CapturedGraph::load("code", repo.path()).unwrap().unwrap();
-        for (step, pause, running, sentence) in [
+        for (step, pause, running, sentence, action, label) in [
             (
                 "implement",
                 PauseStage::Stopping,
                 true,
                 "Pausing at build (implement is stopping).",
+                Pausing,
+                "Pausing: build · implement",
             ),
             (
                 "implement",
                 PauseStage::Stopping,
                 false,
                 "Pausing at build (implement is stopping).",
+                Pausing,
+                "Pausing: build · implement",
             ),
             (
                 "implement",
                 PauseStage::Held,
                 false,
                 "Paused in build at implement. `lf task unpause --run` resumes it.",
+                Resume,
+                "Paused: build · implement",
             ),
             (
                 "land --wait-and-fix",
                 PauseStage::Held,
                 true,
                 "Pausing at deliver (land --wait-and-fix is finishing).",
+                Pausing,
+                "Pausing: deliver · land --wait-and-fix",
             ),
         ] {
             let cursor = graph.find(step).unwrap().cursor();
@@ -1089,12 +1221,10 @@ pub(crate) mod tests {
             };
             let reading = TaskGraph::read(&graph, "start".into(), Some(run), None, Some(pause));
             assert_eq!(reading.sentence, sentence);
-            let status = if pause == PauseStage::Stopping || running {
-                "Pausing"
-            } else {
-                "Paused"
-            };
-            assert_eq!(reading.control.label, format!("{status}: {step}"));
+            assert_eq!(
+                (reading.control.action, reading.control.label.as_str()),
+                (action, label)
+            );
         }
         assert_eq!(
             TaskGraph::read(

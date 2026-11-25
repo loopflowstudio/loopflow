@@ -72,11 +72,15 @@ final class TaskFeed {
         }
     }
 
-    /// The row leaves the list in the swipe; a refusal brings it back and the Notice
-    /// says why, its Show running `show` to open the Task.
+    /// The row leaves the list in the swipe and the Notice offers Undo; a
+    /// refusal brings it back and says why, its Show running `show` to open the Task.
     func complete(_ task: WorkViewPlan.Content, show: @escaping @MainActor () -> Void) {
         guard let directory = directory(of: task) else { return }
         let issue = task.identifier ?? task.work.id
+        notices.post(Notice("\(issue) completed", key: "complete-\(issue)", action: Notice.Action("Undo") { [weak self] in
+            self?.change(.reopen(task: issue), issue: issue, verb: "reopened",
+                         write: .taskReopen(directory: directory, issue: issue))
+        }))
         pendingChanges.make(.complete(task: issue), subject: issue, verb: "completed",
                             write: .taskComplete(directory: directory, issue: issue), notices: notices,
                             show: Notice.Action("Show", perform: show)) { [weak self] in

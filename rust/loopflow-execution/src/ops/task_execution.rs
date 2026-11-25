@@ -618,7 +618,7 @@ mod tests {
         let id = store.test_graph(
             "build",
             "/repo",
-            &[("verify", Some("succeeded"))],
+            &[("gate", Some("succeeded"))],
             Some("failed"),
         );
         let (mut graph, _) = store.graph_process(id.as_str()).unwrap().unwrap();
@@ -647,7 +647,7 @@ mod tests {
         let failed = stopped(Some(1), Some(error));
         assert_eq!(failed.state, TaskExecutionState::Blocked);
         assert!(failed.reason.contains(error), "{}", failed.reason);
-        assert_eq!(failed.step.as_deref(), Some("verify"));
+        assert_eq!(failed.step.as_deref(), Some("gate"));
 
         let failed = stopped(Some(7), None);
         assert_eq!(failed.state, TaskExecutionState::Blocked);

@@ -714,8 +714,8 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskRunStart {
     /// A run of the Task's Graph from this step; the caller starts it as
-    /// `lf --task ISSUE graph run`. With `merges`, the run may merge the PR:
-    /// Auto is on, or no interactive step is left ahead, and nobody turned auto off.
+    /// `lf --task ISSUE graph run`. With `merges`, the run can reach a merging
+    /// step before stopping, and nobody turned auto off.
     /// With `stands_in`, a person asked for auto and the run sets out at that
     /// interactive step.
     Run {
@@ -727,6 +727,7 @@ pub enum TaskRunStart {
     /// that run carries on.
     Live {
         run: String,
+        merges: bool,
         graph_process: loopflow_model::id::LfProcessId,
     },
     /// The Task now waits at this interactive step; nothing runs.
@@ -825,16 +826,6 @@ impl From<crate::task_graph::Place> for RunStart {
             cursor: place.cursor(),
             place,
         }
-    }
-}
-
-impl TaskRunSelection {
-    /// Whether the run reaches `end`: it runs through interactive steps, or
-    /// none lies ahead. Such a run hands the Task off, granting merge authority.
-    pub fn reaches_end(&self, mode: TaskRunMode) -> bool {
-        self.start.as_ref().is_none_or(|start| {
-            mode.runs_through() || self.graph.next_interactive(&start.place).is_none()
-        })
     }
 }
 
@@ -1099,6 +1090,10 @@ async fn try_start_task_run(
                         row.graph.name,
                         at.as_deref().unwrap_or(&row.step)
                     ),
+                    merges: row
+                        .graph
+                        .place_of(cursor)
+                        .is_some_and(|place| row.graph.reaches_landing(&place, true, merges)),
                     graph_process,
                 }));
             }
@@ -1117,7 +1112,6 @@ async fn try_start_task_run(
         auto_on,
         merges,
     )?;
-    let reaches_end = selection.reaches_end(mode);
     let TaskRunSelection {
         graph,
         take_up,
@@ -1152,15 +1146,15 @@ async fn try_start_task_run(
     }
     // Auto on runs through the interactive steps, standing in at each;
     // off, no run merges.
-    let (on, merges) = match store
+    let (on, off) = match store
         .sqlite
         .task_auto(&task.id)
         .map_err(task_error)?
         .map(|mark| mark.state)
     {
-        Some(loopflow_storage::sqlite::AutoState::On) => (true, true),
-        Some(loopflow_storage::sqlite::AutoState::Off) => (false, false),
-        None => (false, reaches_end),
+        Some(loopflow_storage::sqlite::AutoState::On) => (true, false),
+        Some(loopflow_storage::sqlite::AutoState::Off) => (false, true),
+        None => (false, false),
     };
     let through = mode.runs_through() || on;
     let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
@@ -1190,6 +1184,7 @@ async fn try_start_task_run(
             .map_err(task_error)?;
         return Ok(Some(TaskRunStart::Waiting(step.to_owned())));
     }
+    let merges = !off && graph.reaches_landing(&start.place, through, merges);
     let label = if start.place == crate::task_graph::Place::default() {
         format!("{} from start", graph.name)
     } else {

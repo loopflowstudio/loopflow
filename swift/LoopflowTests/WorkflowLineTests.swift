@@ -11,7 +11,6 @@ struct WorkflowLineTests {
     private static let code: [TaskGraph.Step] = [
         .init(name: "plan", interactive: false), .init(name: "build", interactive: false),
         .init(name: "ship-review", interactive: true), .init(name: "deliver", interactive: false),
-        .init(name: "verify", interactive: true),
     ]
 
     private func graph(_ position: TaskGraph.Position, current: Int?, sentence: String) -> TaskGraph {
@@ -27,7 +26,7 @@ struct WorkflowLineTests {
     func start() throws {
         let start = graph(.at(step: "start"), current: nil, sentence: "Not started.")
         let line = WorkflowLine(graph: start, auto: false)
-        #expect(line.tones == Array(repeating: .ahead, count: 5))
+        #expect(line.tones == Array(repeating: .ahead, count: 4))
         #expect(line.sentence == "Not started.")
         let waiting = WorkflowLine(graph: start, auto: false, setup: "Waiting for setup to finish")
         #expect(waiting.sentence == "Waiting for setup to finish")
@@ -38,7 +37,7 @@ struct WorkflowLineTests {
         let sentence = "build is running implement. You are next needed at ship-review."
         let running = graph(run(running: true), current: 1, sentence: sentence)
         let line = WorkflowLine(graph: running, auto: false)
-        #expect(line.tones == [.done, .running, .ahead, .ahead, .ahead])
+        #expect(line.tones == [.done, .running, .ahead, .ahead])
         #expect(line.sentence == sentence)
         // Setup's reason only stands in before the run starts.
         #expect(WorkflowLine(graph: running, auto: false, setup: "setup").sentence == sentence)
@@ -59,7 +58,7 @@ struct WorkflowLineTests {
     func stopped() {
         let line = WorkflowLine(graph: graph(run(running: false), current: 1,
                                              sentence: "Stopped at build. `lf task run` starts it again."), auto: false)
-        #expect(line.tones == [.done, .waiting, .ahead, .ahead, .ahead])
+        #expect(line.tones == [.done, .waiting, .ahead, .ahead])
         #expect(line.sentence == "Stopped at build. `lf task run` starts it again.")
     }
 
@@ -67,7 +66,7 @@ struct WorkflowLineTests {
     func waitingAtYou() {
         let line = WorkflowLine(graph: graph(.at(step: "ship-review"), current: 2,
                                              sentence: "Waiting for you at ship-review."), auto: false)
-        #expect(line.tones == [.done, .done, .waiting, .ahead, .ahead])
+        #expect(line.tones == [.done, .done, .waiting, .ahead])
         #expect(line.sentence == "Waiting for you at ship-review.")
     }
 
@@ -75,18 +74,18 @@ struct WorkflowLineTests {
     func autoOn() {
         let sentence = "build is running implement. Auto stands in next at ship-review."
         let line = WorkflowLine(graph: graph(run(running: true), current: 1, sentence: sentence), auto: true)
-        #expect(line.tones == [.done, .running, .ahead, .ahead, .ahead])
+        #expect(line.tones == [.done, .running, .ahead, .ahead])
         #expect(line.sentence == sentence)
     }
 
     @Test("An outline: every step ahead, where you take part under the steps; a Task's bar shows the name and no sentence")
     func outline() throws {
         let outline = WorkflowOutline(steps: Self.code, interactiveSteps: [],
-                                      sentence: "You take part at ship-review and verify.")
+                                      sentence: "You take part at ship-review.")
         let sheet = WorkflowLine(outline: outline)
-        #expect(sheet.tones == Array(repeating: .ahead, count: 5))
+        #expect(sheet.tones == Array(repeating: .ahead, count: 4))
         _ = try sheet.inspect().find(text: "ship-review")
-        _ = try sheet.inspect().find(text: "You take part at ship-review and verify.")
+        _ = try sheet.inspect().find(text: "You take part at ship-review.")
         #expect(throws: (any Error).self) { try sheet.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-name") }
         let bar = WorkflowLine(name: "code", outline: outline)
         #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-name").text().string() == "code")
@@ -97,7 +96,7 @@ struct WorkflowLineTests {
     @Test("At its end: every step is done")
     func end() {
         let line = WorkflowLine(graph: graph(.at(step: "end"), current: nil, sentence: "At its end."), auto: false)
-        #expect(line.tones == Array(repeating: .done, count: 5))
+        #expect(line.tones == Array(repeating: .done, count: 4))
         #expect(line.sentence == "At its end.")
     }
 

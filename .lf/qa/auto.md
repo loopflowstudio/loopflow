@@ -13,7 +13,7 @@ If the private Machine registers a launchd job, use the label in
 belonging to that private home as described in [resume](resume.md).
 
 Graph: `.lf/graphs/qaship.yaml` with `- implement`, `- interactive:
-ship-review`, `- cmd: land`, `- interactive: verify`; commit, push, then
+ship-review`, `- cmd: land`; commit, push, then
 `git merge origin/main` in each Task checkout (the graph is read from the
 checkout). For a run with no interactive step ahead, `- implement` then
 `- cmd: land`, on a fresh `lf task create '<words>' --json`.

@@ -544,16 +544,17 @@ threads, `spawns` unchanged across two calls a minute apart. Then
      one path. `harness/drive.rs:19` still builds a `current_thread` runtime per
      headless provider turn (agent process, not the server; move it onto
      `runtime::block_on` if it touches that code).
-3. **Disposable custom-home lifetimes.** *(next)* §8 (detached server on macOS + Linux,
-   idle/missing-home exit, holder exit on deleted home, bootout of legacy
-   hashed jobs, docs in `docs/dev/server.md`, `machines.md`, `.lf/qa/`).
-   Delivers: `LF_HOME=$(mktemp -d)` server and holder gone within a minute of
-   deleting the home, `launchctl list | grep com.loopflow.server.` empty. Teaches
-   whether fixtures relying on `MachineServer` + registered jobs (and
-   `scripts/test_server_registration.py`) survive the detached-process model,
-   and whether the old hashed jobs stay in `launchctl print-disabled` after
-   bootout. Focused tests: the `installation` set under "Acceptance check".
-4. **Job budget and bounded files.** §9 (`RunningGraph::spawn` env budget +
+3. **Disposable custom-home lifetimes.** *(done)*
+   - Split detached custom-home server startup and listener replacement into shared `rust/loopflow-execution/src/installation/server/detached.rs` (macOS pins the listener via `LOCAL_PEERPID` + `OsProcess::observe` + `kqueue` `EVFILT_PROC`/`NOTE_EXIT` + `OsProcess::arguments` before `SIGTERM`; Linux keeps `SO_PEERCRED`/`pidfd`). `installation/server.rs` keeps SMAppService and Linux systemd for `~/.lf` only; custom `LF_HOME` never registers a launchd/systemd job and retires any legacy `com.loopflow.{server,machine}.<hash>` job/unit and stale plist on `ensure()`.
+   - Added `retire_self_if_registered()` (boots out `XPC_SERVICE_NAME` on macOS only when it matches a hashed custom-home label, never `com.loopflow.server`) and wired startup + steady-state custom-home lifetime checks into `server/service.rs` (`watch_custom_home`: exits within 2 s when the home is removed or replaced by a new inode, or after 10 idle minutes with no connected clients, no active/pending held terminals via `Registry::has_active_terminals`, and no unfinished Graphs/agents via `SqliteStore::has_unfinished_execution`), plus `runtime.shutdown_timeout(2s)` in `server/mod.rs`.
+   - Updated `terminal_holder.rs` (`serve_for_home`) to check `LF_HOME` every 2 s (`100 ms` in `cfg(test)`), closing master PTYs and exiting when the home is removed or replaced, and restored `SIGHUP` to `SIG_DFL` in `Holder::start`'s `pre_exec`.
+   - Fixed `server/maintenance.rs::refresh` to skip missing stores (`if !path.exists()`) so startup statistics refresh cannot recreate a deleted `LF_HOME`.
+   - Replaced the ignored launchd fixture in `tests/transport_tests.rs` with `custom_home_ensure_starts_replaces_and_exits_on_home_removal`, added holder SIGHUP-on-home-removal, `watch_custom_home`, `is_legacy_custom_label`, and `has_unfinished_execution` unit tests, and updated `docs/dev/server.md`, `docs/dev/machines.md`, `rust/loopflow/src/server/README.md`, `.lf/qa/hooks.md`, and `.lf/qa/held-terminals.md`.
+   - **What it taught:**
+     - `scripts/test_server_registration.py` tests macOS SMAppService bundled-app registration (`registration.m`), not custom-home hashed jobs, and `transport_tests.rs`'s `supervised` proof hits `ensure()`'s already-installed fast path; both and all `MachineServer` fixtures survive unchanged.
+     - On macOS, `launchctl print-disabled gui/<uid>` retains `=> enabled` override lines for past `com.loopflow.{server,machine}.<hash>` jobs even after `bootout` removes them from `launchctl list`. Not registering custom homes stops adding entries.
+     - Two real bugs caught by Pass 3 tests: (1) children spawned by a holder under a parent with `SIGHUP = SIG_IGN` ignored `SIGHUP` on master PTY close until `Holder::start` reset `SIGHUP` to `SIG_DFL` in `pre_exec`; (2) `maintenance::refresh` lacked `path.exists()`, allowing `open_sqlite` to recreate a deleted custom home with a new inode during `remove_dir_all` (prevented by both the guard and `(dev, ino)` tracking).
+4. **Job budget and bounded files.** *(next)* §9 (`RunningGraph::spawn` env budget +
    `nice 5` + host-local `machine.jobs` in `docs/config.md`) and §10 (log rotation,
    delivery/log/backup/lock-file pruning).
 
@@ -570,6 +571,7 @@ then-current budgets.
   - Release 60 s acceptance run (`target/release/lf --seconds 60`) runs at gate after Pass 3–4.
 - Focused tests passed in Pass 1: `server::schema::tests::` (8), `server::wire::tests::` (2), `machine::wire::tests::` (2), Swift `ServerProtocolTests` (25), `loopflow-storage::pool::tests::` (4), `store::opening::` (12), `read_stream::tests::` (11), `loopflow-harness::transcript::tests::misses_under_watched_root_cache_until_invalidated` (1), `config::settings::tests::` (24), `observe::tests::` (17), `transport::registry::tests::` (16), `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`.
 - Focused tests passed in Pass 2: `loopflow-storage::changes::tests::` (3), `loopflow-storage::query_plans::tests::` (17), `loopflow-execution::runtime::tests::` (2), `observe::tests::` (19, including `unheld_git_fact_is_not_rerun_after_its_interval` and `held_git_fact_reruns_after_checkout_write_and_not_before`), `transcript::watch::tests::` (3), `read_stream::tests::` (13, including `idle_subscription_performs_zero_steps_over_five_seconds` and `history_write_does_not_wake_state_subscription`), `ops::plan_git::tests::` (10, including active-work scoping and exponential backoff), `ops::task::workspace::tests::` (1), `transport::output::tests::` (10), `loopflow::server::subscriptions::tests::` (12), `server::maintenance::tests::` (1), `server::recovery::tests::` (10), `server::wake::tests::` (12), `server::service::tests::` (`identical_consumers_share_setup`, `queued_subscription_cancellation_skips_construction`), `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`.
+- Focused tests passed in Pass 3: `loopflow-storage::sqlite::processes::bridge_tests::has_unfinished_execution_tracks_graphs_and_agents` (1), `loopflow-storage::query_plans::tests::` (17), `loopflow-execution::installation::server::tests::` (1), `loopflow-execution::terminal_holder::tests::` (14, including `a_holder_exits_and_hangups_children_when_its_home_is_removed`), `loopflow::server::service::tests::custom_home_watcher_*` (2), `loopflow::server::maintenance::tests::` (1), `transport_tests` (`custom_home_ensure_starts_replaces_and_exits_on_home_removal`, `server_status_does_not_install_or_create_work`, `a_launch_refused_for_a_stopped_server_leaves_nothing_to_resume`), `integration::documented_commands::` (4), `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `server_idle.py target/debug/lf --seconds 10` (`quiet` 0.10% CPU / 18 th / 0 spawns / 0 opens; `file_edits` 0.60% CPU / 16 th / 4 spawns / 0 opens; `db_writes` 0.10% CPU / 18 th / 0 spawns / 0 opens).
 - `sample 77346 3` on the live server, 2026-11-25 — run at kickoff, results above.
 
 ## User docs written before implementation

@@ -42,6 +42,14 @@ const BULK: Duration = Duration::from_secs(120);
 const QUEUE: usize = 64;
 /// How long the listener rests after `accept` fails, as it does out of descriptors.
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
+/// How often a custom-home server checks that its home still exists and whether it is idle.
+const CUSTOM_HOME_CHECK: Duration = Duration::from_secs(2);
+/// How long a custom-home server stays up with no clients, no held terminals,
+/// and no unfinished Graphs or agents.
+const CUSTOM_HOME_IDLE: Duration = Duration::from_secs(10 * 60);
+/// How often an otherwise-idle custom-home server checks SQLite for unfinished
+/// Graphs or agents.
+const CUSTOM_HOME_EXECUTION_CHECK: Duration = Duration::from_secs(30);
 
 type Lines = Framed<UnixStream, LinesCodec>;
 
@@ -154,6 +162,14 @@ fn connected(clients: &Clients) -> Vec<ConnectedClient> {
 }
 
 pub(super) async fn run() -> Result<()> {
+    let home = loopflow_execution::store::lf_home_dir();
+    let custom_home = loopflow_execution::store::custom_home_selected();
+    let home_identity = home_identity(&home);
+    if custom_home && home_removed(&home, home_identity) {
+        loopflow_execution::installation::server::retire_self_if_registered();
+        tracing::info!(home = %home.display(), "Custom home is gone; server exiting");
+        return Ok(());
+    }
     loopflow_storage::instrumentation::enable_request_tracing();
     let observations = loopflow_execution::observe::Cache::shared();
     let _transcripts = loopflow_execution::transcript::watch::watch(&observations);
@@ -213,12 +229,137 @@ pub(super) async fn run() -> Result<()> {
         subscriptions.clone(),
         terminals.clone(),
     );
+    let shutdown_instance = instance.clone();
+    let lifetime = {
+        let slots = slots.clone();
+        let terminals = terminals.clone();
+        async move {
+            if custom_home {
+                watch_custom_home(
+                    home,
+                    home_identity,
+                    slots,
+                    terminals,
+                    CustomHomeSchedule {
+                        check_every: CUSTOM_HOME_CHECK,
+                        idle_timeout: CUSTOM_HOME_IDLE,
+                        execution_check_every: CUSTOM_HOME_EXECUTION_CHECK,
+                    },
+                    store_has_unfinished_execution,
+                )
+                .await
+            } else {
+                std::future::pending::<ShutdownReason>().await
+            }
+        }
+    };
     tracing::info!(%instance, socket = %path.display(), "Loopflow server ready");
     tokio::select! {
         result = remote => result,
         _ = peers.expiring() => unreachable!("peer expiry runs until shutdown"),
         _ = tickets.expiring() => unreachable!("ticket expiry runs until shutdown"),
+        reason = lifetime => {
+            tracing::info!(instance = %shutdown_instance, ?reason, "Custom-home Loopflow server exiting");
+            let _ = std::fs::remove_file(&path);
+            if reason == ShutdownReason::HomeRemoved {
+                loopflow_execution::installation::server::retire_self_if_registered();
+            }
+            Ok(())
+        }
         result = local(listener, instance, executable_sha256, slots, clients, remote_control, tickets.clone(), subscriptions, terminals) => result,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShutdownReason {
+    HomeRemoved,
+    Idle,
+}
+
+fn store_has_unfinished_execution(home: &std::path::Path) -> bool {
+    let db = home.join("loopflow.db");
+    if !db.exists() {
+        return false;
+    }
+    loopflow_execution::store::opening::open_read_only_validated(&db)
+        .ok()
+        .and_then(|store| store.has_unfinished_execution().ok())
+        .unwrap_or(false)
+}
+
+fn home_identity(home: &std::path::Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(home)
+        .ok()
+        .map(|meta| (meta.dev(), meta.ino()))
+}
+
+fn home_removed(home: &std::path::Path, initial: Option<(u64, u64)>) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match std::fs::metadata(home) {
+        Ok(meta) => initial.is_some_and(|(dev, ino)| (meta.dev(), meta.ino()) != (dev, ino)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+        Err(_) => false,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CustomHomeSchedule {
+    check_every: Duration,
+    idle_timeout: Duration,
+    execution_check_every: Duration,
+}
+
+async fn watch_custom_home(
+    home: std::path::PathBuf,
+    initial_identity: Option<(u64, u64)>,
+    slots: Arc<Semaphore>,
+    terminals: Option<Arc<Registry>>,
+    schedule: CustomHomeSchedule,
+    has_unfinished_execution: impl Fn(&std::path::Path) -> bool + Send + Sync + 'static,
+) -> ShutdownReason {
+    let has_unfinished_execution = Arc::new(has_unfinished_execution);
+    let mut idle_since: Option<Instant> = None;
+    let mut last_execution_check: Option<Instant> = None;
+    let mut interval = tokio::time::interval(schedule.check_every);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    interval.tick().await;
+    loop {
+        interval.tick().await;
+        if home_removed(&home, initial_identity) {
+            return ShutdownReason::HomeRemoved;
+        }
+        let has_clients = slots.available_permits() < MAX_CONNECTIONS;
+        let has_terminals = terminals
+            .as_deref()
+            .is_some_and(Registry::has_active_terminals);
+        if has_clients || has_terminals {
+            idle_since = None;
+            last_execution_check = None;
+            continue;
+        }
+        let now = Instant::now();
+        let started = *idle_since.get_or_insert(now);
+        let elapsed = now.saturating_duration_since(started);
+        let check_store = elapsed >= schedule.idle_timeout
+            || last_execution_check.is_none_or(|at| {
+                now.saturating_duration_since(at) >= schedule.execution_check_every
+            });
+        if check_store {
+            last_execution_check = Some(now);
+            let check = has_unfinished_execution.clone();
+            let check_home = home.clone();
+            let busy = tokio::task::spawn_blocking(move || check(&check_home))
+                .await
+                .unwrap_or(false);
+            if busy {
+                idle_since = None;
+                continue;
+            }
+            if elapsed >= schedule.idle_timeout {
+                return ShutdownReason::Idle;
+            }
+        }
     }
 }
 
@@ -4447,6 +4588,88 @@ mod tests {
             let plans = request(&mut once, "once", query).await;
             assert_eq!(plans.as_array().unwrap().len(), 2, "{plans}");
         });
+    }
+
+    #[test]
+    fn custom_home_watcher_exits_when_home_is_removed() {
+        use super::{home_identity, watch_custom_home, CustomHomeSchedule, ShutdownReason};
+
+        let home = tempfile::tempdir().unwrap();
+        let home_path = home.path().to_path_buf();
+        let initial = home_identity(&home_path);
+        let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+        let _connected_client = slots.clone().try_acquire_owned().unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let reason = runtime.block_on(async move {
+            let watcher = tokio::spawn(watch_custom_home(
+                home_path,
+                initial,
+                slots,
+                None,
+                CustomHomeSchedule {
+                    check_every: Duration::from_millis(20),
+                    idle_timeout: Duration::from_secs(60),
+                    execution_check_every: Duration::from_secs(60),
+                },
+                |_| true,
+            ));
+            tokio::time::sleep(Duration::from_millis(60)).await;
+            assert!(!watcher.is_finished());
+            drop(home);
+            tokio::time::timeout(Duration::from_secs(2), watcher)
+                .await
+                .expect("watcher should exit when home is removed")
+                .unwrap()
+        });
+        assert_eq!(reason, ShutdownReason::HomeRemoved);
+    }
+
+    #[test]
+    fn custom_home_watcher_waits_for_clients_and_unfinished_execution_before_idle_exit() {
+        use super::{home_identity, watch_custom_home, CustomHomeSchedule, ShutdownReason};
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let home = tempfile::tempdir().unwrap();
+        let home_path = home.path().to_path_buf();
+        let initial = home_identity(&home_path);
+        let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+        let client = slots.clone().try_acquire_owned().unwrap();
+        let busy = Arc::new(AtomicBool::new(true));
+        let busy_check = busy.clone();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let reason = runtime.block_on(async move {
+            let watcher = tokio::spawn(watch_custom_home(
+                home_path,
+                initial,
+                slots,
+                None,
+                CustomHomeSchedule {
+                    check_every: Duration::from_millis(15),
+                    idle_timeout: Duration::from_millis(80),
+                    execution_check_every: Duration::from_millis(15),
+                },
+                move |_| busy_check.load(Ordering::Relaxed),
+            ));
+            // Connected client keeps the server alive past idle_timeout.
+            tokio::time::sleep(Duration::from_millis(140)).await;
+            assert!(!watcher.is_finished());
+            drop(client);
+            // Unfinished Graph or agent keeps the server alive past idle_timeout.
+            tokio::time::sleep(Duration::from_millis(140)).await;
+            assert!(!watcher.is_finished());
+            busy.store(false, Ordering::Relaxed);
+            tokio::time::timeout(Duration::from_secs(2), watcher)
+                .await
+                .expect("watcher should exit once idle")
+                .unwrap()
+        });
+        assert_eq!(reason, ShutdownReason::Idle);
     }
 }
 

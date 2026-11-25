@@ -14,10 +14,10 @@ the terminal: send Ctrl-D through the view. Emit `ESC]7501;state=blocked:app=cla
 To exercise an install, copy each build aside and point `LF_BIN` at a symlink:
 a relay replaced across a `held.sock` revision execs `LF_BIN`. A copy with a
 few appended bytes, re-signed with `codesign -f -s -`, runs as a distinct build
-(its own holder). A managed launch with the server stopped readies
-`com.loopflow.server.<hash>` under launchd for the private home; `launchctl
-kickstart -k gui/$UID/<label>` then restarts it the way an install does. Boot
-that label out afterwards. A managed launch is held only when a terminal
+(its own holder). A managed launch with the server stopped starts a detached `lf server run` for
+the private home (never a launchd job); running `lf install server` with a
+different build replaces it cleanly, and removing `$LF_HOME` stops both the
+server and its holders. A managed launch is held only when a terminal
 views it: `lf resume --task … | tail` or `< /dev/null > file` runs unheld
 under its own owner. To make server readiness fail without touching launchd,
 point `LF_BIN` at a wrapper that exits 1 for `install server` and execs the
@@ -41,10 +41,10 @@ build: its `lf server status` still reports `ready`, with an
 `executable_sha256` that is not its own. A live holder
 keeps serving new terminals; stop it (the `lf holder run` under your `bin/`
 path) and the next `lf desktop shell <task> --checkout <path> --id <id>
---create` fails naming both builds. `lf install server` from the replaced
-path restarts a launchd-run server; nothing restarts a foreground one. A
-failed `--create` keeps its `--id`: retry with a new one. The holder the
-server started from the new build exits within a minute on its own.
+--create` fails naming both builds. `lf install server` from the replaced path restarts the detached private-home
+server (or the launchd-run server on `~/.lf`). A failed `--create` keeps its
+`--id`: retry with a new one. The holder the server started from the new build
+exits within a minute on its own.
 
 For final bridge reasons, attach through `session.attach` and consume the viewer
 frames described in `transport/README.md`. Check one final `0x07` Close before

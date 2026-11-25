@@ -81,6 +81,9 @@ fn retain(path: &Path) -> anyhow::Result<()> {
 }
 
 fn refresh(path: &Path) -> anyhow::Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
     loopflow_execution::store::open_sqlite(path)?.refresh_statistics()?;
     Ok(())
 }

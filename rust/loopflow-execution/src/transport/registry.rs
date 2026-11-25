@@ -483,6 +483,16 @@ impl Registry {
         .map(|(_, terminal)| terminal.clone())
     }
 
+    /// Whether any terminal is currently hosted or waiting on a pending holder.
+    pub fn has_active_terminals(&self) -> bool {
+        !self.live.lock().expect("registry lock poisoned").is_empty()
+            || !self
+                .pending
+                .lock()
+                .expect("registry lock poisoned")
+                .is_empty()
+    }
+
     /// Start `start`'s command in this build's holder and host it. Repeating a
     /// request answers the terminal it already started.
     pub fn start(&self, start: Start) -> Result<TerminalId> {

@@ -636,6 +636,18 @@ impl SqliteStore {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// Whether any Graph run, Graph step, Task carrier, or Session agent is unfinished.
+    pub fn has_unfinished_execution(&self) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM graph_processes WHERE ended_at IS NULL)
+                 OR EXISTS(SELECT 1 FROM graph_process_steps WHERE ended_at IS NULL)
+                 OR EXISTS(SELECT 1 FROM task_graphs WHERE lf_process_id IS NOT NULL AND run_pid IS NOT NULL)
+                 OR EXISTS(SELECT 1 FROM agent_sessions WHERE agent_process_id IS NOT NULL AND agent_ended_at IS NULL)",
+        )?;
+        Ok(query.query_row([], |row| row.get::<_, bool>(0))?)
+    }
+
     /// Fixtures read what a released lf wrote; this lf writes no Process row.
     #[cfg(any(test, feature = "test-support"))]
     pub fn processes_since(&self, since: i64) -> StoreResult<Vec<ProcessEntry>> {
@@ -2031,5 +2043,53 @@ mod bridge_tests {
             store.agent_endpoint(&attachment.agent_process_id).unwrap(),
             Some("ws://127.0.0.1:4500".into())
         );
+    }
+
+    #[test]
+    fn has_unfinished_execution_tracks_graphs_and_agents() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
+        assert!(!store.has_unfinished_execution().unwrap());
+
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO graph_processes(lf_process_id,graph,compiled,repo,cwd,started_at)
+                 VALUES('gp-1','code','{}','/repo','/repo',1)",
+                [],
+            )
+            .unwrap();
+        }
+        assert!(store.has_unfinished_execution().unwrap());
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE graph_processes SET ended_at=2 WHERE lf_process_id='gp-1'",
+                [],
+            )
+            .unwrap();
+        }
+        assert!(!store.has_unfinished_execution().unwrap());
+
+        store.test_session("sess-1", &crate::session_record::new_artifact_key());
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET agent_process_id='ap-1',agent_pid=4242,agent_started_at=1
+                 WHERE id='sess-1'",
+                [],
+            )
+            .unwrap();
+        }
+        assert!(store.has_unfinished_execution().unwrap());
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET agent_ended_at=2 WHERE id='sess-1'",
+                [],
+            )
+            .unwrap();
+        }
+        assert!(!store.has_unfinished_execution().unwrap());
     }
 }

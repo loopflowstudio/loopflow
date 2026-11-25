@@ -47,5 +47,7 @@ pub fn run() -> anyhow::Result<()> {
         .enable_all()
         .build()?;
     let _installed = loopflow_execution::runtime::install(runtime.handle().clone());
-    runtime.block_on(service::run())
+    let result = runtime.block_on(service::run());
+    runtime.shutdown_timeout(std::time::Duration::from_secs(2));
+    result
 }

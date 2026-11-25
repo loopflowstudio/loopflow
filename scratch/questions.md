@@ -43,8 +43,7 @@ questions in `scratch/concept-review.html`.
   sessions launch via `lf server` → `lf holder`, not `RunningGraph::spawn`, so
   setting the job budget in `RunningGraph::spawn` scopes cleanly to autonomous
   Graph worker steps without throttling a person's interactive terminal.
-- **Still for implement to check**: old `com.loopflow.server.<hash>` jobs
-  marked disabled in `launchctl print-disabled` after bootout.
+- **Checked in Pass 3 (`launchctl print-disabled`):** macOS retains `=> enabled` override entries for past `com.loopflow.{server,machine}.<hash>` labels in `launchctl print-disabled gui/<uid>` even after `bootout` removes them from `launchctl list`. Not registering custom homes with launchd avoids adding new entries.
 
 # Left on the Machine
 

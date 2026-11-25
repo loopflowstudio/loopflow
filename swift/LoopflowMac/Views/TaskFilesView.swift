@@ -50,7 +50,10 @@ struct TaskFilesView: View {
                 TaskChangesView(store: store, task: task, isFocused: isFocused, addToConversation: addToConversation)
             case .files:
                 documentRow
-                if let find = store.find { FileFindBar(find: find, store: store, focused: isFocused && store.filePicker == nil) }
+                if let find = store.find {
+                    Divider()
+                    FileFindBar(find: find, store: store, focused: isFocused && store.filePicker == nil)
+                }
                 Divider()
                 ReviewCommentsStrip(store: store, isFocused: isFocused, addToConversation: addToConversation)
                 filesPage
@@ -216,32 +219,33 @@ struct TaskFilesView: View {
     private var navigator: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: Spacing.xxs) {
-                    Text("Open & Scratch").font(Typography.textStrong)
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    heading("Open & Scratch")
                     ForEach(store.openAndScratch, id: \.openRowID) { path in fileRow(path) }
                     if let error = store.scratchError {
                         FailureLine("Scratch unavailable.", machine: error) {
                             Button("Retry") { Task { await store.refreshScratch() } }
-                        }
+                        }.padding(.horizontal, Spacing.sm)
                     }
-                    Text("Changed in Task").font(Typography.textStrong).padding(.top, Spacing.sm)
+                    heading("Changed in Task")
                     if let changes = store.workingChanges {
                         ForEach(changes.files, id: \.changedRowID) { file in
-                            fileRow(file.path, count: file.lines.map { "+\($0.added) −\($0.removed)" })
+                            fileRow(file.path, lines: file.lines)
                         }
                     } else if let error = store.workingTree.error {
                         FailureLine("Changes unavailable.", machine: error) {
                             Button("Retry") { Task { await store.workingTree.refresh() } }
-                        }
-                    } else { ProgressView().controlSize(.mini) }
-                    HStack {
-                        Text("Checkout").font(Typography.textStrong)
+                        }.padding(.horizontal, Spacing.sm)
+                    } else { ProgressView().controlSize(.mini).padding(.horizontal, Spacing.sm) }
+                    HStack(alignment: .firstTextBaseline) {
+                        heading("Checkout")
                         Spacer()
                         Toggle("Show Ignored", isOn: Bindable(store.tree).showIgnored).toggleStyle(.checkbox)
-                    }.font(Typography.meta).padding(.top, Spacing.sm)
+                            .font(Typography.meta).padding(.trailing, Spacing.sm)
+                    }
                     let badges = store.changeBadges
                     ForEach(store.tree.rows()) { row in treeRow(row, badges: badges) }
-                }.padding(Spacing.sm)
+                }.padding(.bottom, Spacing.md)
             }
             .scrollPosition($treePosition)
             .onScrollGeometryChange(for: CGPoint.self, of: \.contentOffset) { _, offset in store.tree.offset = offset }
@@ -269,8 +273,14 @@ struct TaskFilesView: View {
         .onExitCommand { dismissDrawer() }
     }
 
+    private func heading(_ text: String) -> some View {
+        Text(text).font(Typography.textStrong).foregroundStyle(palette.textSecondary)
+            .padding(.horizontal, Spacing.sm).padding(.top, Spacing.md).padding(.bottom, Spacing.xxs)
+    }
+
     @ViewBuilder private func treeRow(_ row: CheckoutTree.Row, badges: [String: CheckoutChange]) -> some View {
-        let indent = CGFloat(row.depth) * 12
+        // A narrow step keeps nested names readable in the 236-point rail.
+        let indent = Spacing.sm + CGFloat(row.depth) * Spacing.sm
         switch row {
         case .entry(let entry, let label, _):
             Button {
@@ -297,7 +307,7 @@ struct TaskFilesView: View {
                             .help(badge.help)
                     }
                 }
-                .padding(.leading, indent + 2).padding(.trailing, Spacing.xs).padding(.vertical, Spacing.xxs)
+                .padding(.leading, indent).padding(.trailing, Spacing.sm).padding(.vertical, 3)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .workSelection(store.tree.selection == entry.path || store.selection == entry.path)
                 .contentShape(Rectangle())
@@ -306,15 +316,15 @@ struct TaskFilesView: View {
             .accessibilityLabel(entry.path)
             .accessibilityValue(entry.kind == .directory ? (store.tree.isExpanded(entry.path) ? "Expanded" : "Collapsed") : "")
         case .loading:
-            ProgressView().controlSize(.mini).padding(.leading, indent + 16)
+            ProgressView().controlSize(.mini).padding(.leading, indent + 14)
         case .more(let directory, _):
             Button("Load more") { Task { await store.tree.readDirectory(directory, more: true) } }
-                .buttonStyle(LoopflowButtonStyle()).padding(.leading, indent + 16)
+                .buttonStyle(LoopflowButtonStyle()).padding(.leading, indent + 14)
                 .accessibilityIdentifier("files-load-more")
         case .failed(let directory, let reason, _):
             FailureLine("Not read.", machine: reason) {
                 Button("Retry") { Task { await store.tree.retryDirectory(directory) } }
-            }.lineLimit(2).padding(.leading, indent + 16)
+            }.lineLimit(2).padding(.leading, indent + 14)
         }
     }
 
@@ -408,23 +418,32 @@ struct TaskFilesView: View {
         dismissDrawer()
     }
 
-    private func fileRow(_ path: String, count: String? = nil) -> some View {
-        Button { read(path) } label: {
-            HStack {
-                Text(path).font(Typography.mono).lineLimit(1).truncationMode(.middle)
-                if store.documents[path]?.dirty == true { UnsavedDraftMark() }
-                if store.browser.presentations.contains(where: { $0.path == path }) {
-                    Image(systemName: "doc.badge.clock").accessibilityLabel("Presented")
+    private func fileRow(_ path: String, lines: TaskChangedFile.ChangedLines? = nil) -> some View {
+        let place = ChangedFilesSidebar.place(path, under: nil)
+        return Button { read(path) } label: {
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+                    Text(place.name).font(Typography.mono).lineLimit(1).truncationMode(.middle)
+                    if store.documents[path]?.dirty == true { UnsavedDraftMark() }
+                    if store.browser.presentations.contains(where: { $0.path == path }) {
+                        Image(systemName: "doc.badge.clock").accessibilityLabel("Presented")
+                    }
+                    if store.browser.updated.contains(path) {
+                        Image(systemName: "circle.fill").font(Typography.meta).foregroundStyle(palette.actionInk)
+                            .accessibilityLabel("Updated")
+                    }
+                    Spacer(minLength: 4)
+                    if let lines { LineCounts(added: lines.added, removed: lines.removed).fixedSize() }
                 }
-                if store.browser.updated.contains(path) {
-                    Image(systemName: "circle.fill").font(Typography.meta).foregroundStyle(palette.actionInk)
-                        .accessibilityLabel("Updated")
+                if let directory = place.directory {
+                    Text(directory).font(Typography.meta).foregroundStyle(palette.textSecondary)
+                        .lineLimit(1).truncationMode(.head)
                 }
-                Spacer(minLength: 0)
-                if let count { Text(count).font(Typography.mono).foregroundStyle(palette.textSecondary) }
-            }.padding(.horizontal, Spacing.xs).padding(.vertical, Spacing.xxs)
-                .workSelection(store.selection == path).contentShape(Rectangle())
-        }.buttonStyle(.plain).help(path)
+            }
+            .padding(.horizontal, Spacing.sm).padding(.vertical, Spacing.xs)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .workSelection(store.selection == path).contentShape(Rectangle())
+        }.buttonStyle(.plain).help(path).accessibilityLabel(path)
     }
 
     @ViewBuilder private var content: some View {

@@ -197,7 +197,10 @@ struct FileSymbolPeek: View {
                 }.frame(height: CGFloat(min(peek.candidates.count, 8)) * rowHeight)
             }
         }.font(Typography.mono).padding(Spacing.sm)
-            .background(palette.surfaceMuted)
+            .background(palette.surfaceMuted, in: RoundedRectangle(cornerRadius: CornerRadius.control))
+            // Dark themes put surfaceMuted close to the page; the edge keeps the list from reading as code.
+            .overlay(RoundedRectangle(cornerRadius: CornerRadius.control).strokeBorder(palette.borderStrong))
+            .padding(.vertical, Spacing.xxs)
             .onExitCommand { store.jumps.dismiss() }
             .accessibilityIdentifier("files-symbol-peek")
     }

@@ -562,6 +562,21 @@ private extension View {
 /// Type to narrow the stream and click a file to bring it to the top. Below
 /// them, what the tour hid for this change with its reasons, and the path
 /// text you always hide in this repository.
+/// A file's added and removed line counts, colored like the Diff.
+struct LineCounts: View {
+    let added: Int
+    let removed: Int
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: Spacing.xs) {
+            Text("+\(added)").foregroundStyle(palette.successTone.ink)
+            Text("−\(removed)").foregroundStyle(palette.failureTone.ink)
+        }
+        .font(Typography.mono)
+    }
+}
+
 struct ChangedFilesSidebar: View {
     static let width: CGFloat = 236
 
@@ -647,7 +662,7 @@ struct ChangedFilesSidebar: View {
                             .foregroundStyle(palette.accent)
                             .accessibilityLabel(comments == 1 ? "1 comment" : "\(comments) comments")
                     }
-                    if !store.diffReview.isReading(file), file.status != .binary { counts(added: file.additions, removed: file.deletions).fixedSize() }
+                    if !store.diffReview.isReading(file), file.status != .binary { LineCounts(added: file.additions, removed: file.deletions).fixedSize() }
                 }
                 if place.directory != nil || viewed {
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
@@ -676,14 +691,6 @@ struct ChangedFilesSidebar: View {
         let relative = folder.map { String(path.dropFirst($0)) } ?? path
         let directory = (relative as NSString).deletingLastPathComponent
         return ((relative as NSString).lastPathComponent, directory.isEmpty ? nil : directory + "/")
-    }
-
-    private func counts(added: Int, removed: Int) -> some View {
-        HStack(spacing: Spacing.xs) {
-            Text("+\(added)").foregroundStyle(palette.successTone.ink)
-            Text("−\(removed)").foregroundStyle(palette.failureTone.ink)
-        }
-        .font(Typography.mono)
     }
 
     private func fileCount(_ count: Int) -> String { count == 1 ? "1 file" : "\(count) files" }

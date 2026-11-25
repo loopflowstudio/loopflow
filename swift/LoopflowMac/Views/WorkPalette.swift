@@ -456,7 +456,6 @@ struct PaletteSearchField: NSViewRepresentable {
         field.focusRingType = .none
         field.drawsBackground = false
         field.font = NSFont(name: Typography.sansFace, size: Typography.textSize) ?? .systemFont(ofSize: Typography.textSize)
-        field.placeholderString = placeholder
         field.setAccessibilityIdentifier(identifier)
         field.delegate = context.coordinator
         return field
@@ -464,6 +463,10 @@ struct PaletteSearchField: NSViewRepresentable {
     func updateNSView(_ field: SearchField, context: Context) {
         context.coordinator.parent = self
         field.textColor = NSColor(palette.text)
+        // The system placeholder gray disappears on dark theme surfaces.
+        field.placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [
+            .foregroundColor: NSColor(palette.textTertiary), .font: field.font ?? NSFont.systemFont(ofSize: Typography.textSize),
+        ])
         if let editor = field.currentEditor() as? NSTextView { editor.applyPalette(palette) }
         if field.stringValue != text { field.stringValue = text }
     }

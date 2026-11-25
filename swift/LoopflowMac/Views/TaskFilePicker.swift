@@ -195,10 +195,11 @@ struct TaskFilePickerView: View {
             let showsPreview = geometry.size.width >= TaskFileChrome.dockedWidth
             VStack(spacing: 0) {
                 HStack {
-                    Image(systemName: "magnifyingglass")
-                    PaletteSearchField(text: $picker.text, placeholder: picker.mode == .grep ? "Search checkout text" : "Find file",
-                                       identifier: "files-search", move: picker.move,
-                                       submit: { if let result = picker.selection { open(result) } }, cancel: cancel, focusOnMount: isFocused)
+                    SearchBox {
+                        PaletteSearchField(text: $picker.text, placeholder: picker.mode == .grep ? "Search checkout text" : "Find file",
+                                           identifier: "files-search", move: picker.move,
+                                           submit: { if let result = picker.selection { open(result) } }, cancel: cancel, focusOnMount: isFocused)
+                    }
                     Picker("Search mode", selection: Binding(get: { picker.mode }, set: { store.chooseFile($0) })) {
                         ForEach(TaskFilePicker.Mode.allCases, id: \.self) { Text($0.rawValue) }
                     }.pickerStyle(.menu).labelsHidden().fixedSize()

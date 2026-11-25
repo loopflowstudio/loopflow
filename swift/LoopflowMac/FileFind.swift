@@ -102,22 +102,41 @@ struct FileFindBar: View {
     @Bindable var find: FileFind
     let store: TaskFilesStore
     let focused: Bool
+    @Environment(\.palette) private var palette
 
     var body: some View {
         HStack(spacing: Spacing.sm) {
-            Image(systemName: "magnifyingglass")
-            PaletteSearchField(text: $find.query, placeholder: "Find in file", identifier: "files-find-field",
-                               move: find.step, submit: { find.step(1) },
-                               cancel: { store.find = nil }, focusOnMount: focused, submitBackwards: { find.step(-1) })
-                .id(find.focusRequest)
-            Text(find.label).font(Typography.meta).monospacedDigit()
+            SearchBox {
+                PaletteSearchField(text: $find.query, placeholder: "Find in file", identifier: "files-find-field",
+                                   move: find.step, submit: { find.step(1) },
+                                   cancel: { store.find = nil }, focusOnMount: focused, submitBackwards: { find.step(-1) })
+                    .id(find.focusRequest)
+                Text(find.label).font(Typography.meta).monospacedDigit().foregroundStyle(palette.textSecondary)
+            }
             Button { find.step(-1) } label: { Image(systemName: "chevron.up") }.accessibilityLabel("Previous match")
             Button { find.step(1) } label: { Image(systemName: "chevron.down") }.accessibilityLabel("Next match")
             Button { store.chooseFile(.grep) } label: { Image(systemName: "folder.badge.magnifyingglass") }
                 .help("Search checkout for this text (⇧⌘F)").accessibilityLabel("Search checkout")
             Button { store.find = nil } label: { Image(systemName: "xmark") }.accessibilityLabel("Close Find")
         }
-        .buttonStyle(.plain).padding(.horizontal, Spacing.sm).frame(height: TaskFileChrome.headerHeight)
+        .buttonStyle(.plain).foregroundStyle(palette.textSecondary)
+        .padding(.horizontal, Spacing.sm).padding(.vertical, Spacing.xs)
+    }
+}
+
+/// A search input drawn as a field, so it never reads as another header row.
+struct SearchBox<Content: View>: View {
+    @ViewBuilder let content: Content
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: Spacing.xs) {
+            Image(systemName: "magnifyingglass").foregroundStyle(palette.textSecondary)
+            content
+        }
+        .padding(.horizontal, Spacing.sm).padding(.vertical, Spacing.xs)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.control))
+        .overlay(RoundedRectangle(cornerRadius: CornerRadius.control).strokeBorder(palette.borderStrong))
     }
 }
 #endif

@@ -2,10 +2,11 @@ import SwiftUI
 
 /// The one button: as tall as the platform's control (24 pt on the Mac, 44 pt
 /// on iPhone), `text`, radius `control`. Neutral by default; one `.accent` per
-/// surface for what the surface is for; `.destructive` for an action that ends
-/// the work. On iPhone the accent button fills the width it is offered.
+/// surface for what the surface is for; `.success` for completing work;
+/// `.destructive` for an action that ends the work. On iPhone the accent button
+/// fills the width it is offered.
 public struct LoopflowButtonStyle: ButtonStyle {
-    public enum Role: Sendable { case neutral, accent, destructive }
+    public enum Role: Sendable { case neutral, accent, success, destructive }
 
     let role: Role
     @Environment(\.palette) private var palette
@@ -24,7 +25,7 @@ public struct LoopflowButtonStyle: ButtonStyle {
     public func makeBody(configuration: Configuration) -> some View {
         let shape = RoundedRectangle(cornerRadius: CornerRadius.control)
         return configuration.label
-            .font(role == .accent ? Typography.textStrong : Typography.text)
+            .font(role == .accent || role == .success ? Typography.textStrong : Typography.text)
             .foregroundStyle(ink)
             .lineLimit(1)
             // A third of the height: 8 pt on the Mac.
@@ -42,6 +43,7 @@ public struct LoopflowButtonStyle: ButtonStyle {
         return switch role {
         case .neutral: palette.actionInk
         case .accent: palette.accentText
+        case .success: palette.successTone.inkRGB.contrastingText.color
         case .destructive: palette.failure
         }
     }
@@ -51,6 +53,7 @@ public struct LoopflowButtonStyle: ButtonStyle {
         return switch role {
         case .neutral: palette.borderStrong
         case .accent: palette.accent
+        case .success: palette.success
         case .destructive: palette.failure
         }
     }
@@ -58,6 +61,13 @@ public struct LoopflowButtonStyle: ButtonStyle {
     private func fill(pressed: Bool) -> Color {
         guard isEnabled else { return .clear }
         if role == .accent { return pressed ? palette.accentPressed : (hovering ? palette.accentHover : palette.accent) }
+        if role == .success {
+            let base = palette.successTone.inkRGB
+            let shift = ThemeRGB(base.contrastingText.hex ^ 0xFFFFFF)
+            if pressed { return base.mixed(with: shift, amount: 0.16).color }
+            if hovering { return base.mixed(with: shift, amount: 0.08).color }
+            return base.color
+        }
         return pressed ? palette.surfaceMuted : (hovering ? palette.surfaceElement : palette.surface)
     }
 }

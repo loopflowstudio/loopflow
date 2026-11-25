@@ -203,7 +203,7 @@ fi
         let thread = crate::ops::task::task_comment(repo.path(), "FIX-1", None,
             Some(&format!("Installed verification continues in {}.", child.identifier)), false).unwrap();
         assert!(thread.comments.iter().any(|comment| comment.body.contains(&child.identifier)));
-        crate::ops::task::task_complete(repo.path(), "FIX-1", None).unwrap();
+        crate::ops::task::task_complete(repo.path(), "FIX-1", None, None).unwrap();
         let completed = capture(&binary, repo.path(), home.path());
         assert_eq!(completed["status"]["execution"]["status"], "done");
         assert_eq!(completed["status"]["execution"]["work"]["graph"], merged["status"]["execution"]["work"]["graph"]);

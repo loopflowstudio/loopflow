@@ -1142,7 +1142,8 @@ exit 0
             runtime.block_on(task.store.settle_task_pr(&pr)).unwrap();
         }
         if scenario == "completed" {
-            loopflow_execution::ops::task::task_complete(repo.path(), "INF-123", None).unwrap();
+            loopflow_execution::ops::task::task_complete(repo.path(), "INF-123", None, None)
+                .unwrap();
             assert_eq!(
                 runtime
                     .block_on(task.store.task_state(&task.task.id))

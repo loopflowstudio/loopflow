@@ -107,9 +107,12 @@ async fn abandon(repo: &Path, selector: &str, force: bool) -> OpsResult<String> 
                 .1
         }
     };
-    save_abandon(&store, &task).await?;
+    store
+        .abandon(&WorkRef::Task(task.id.clone()), "explicit Task abandonment")
+        .await
+        .map_err(task_error)?;
     // Failed cleanup cannot undo the decision or grant control over live work.
-    let cleanup = cleanup_abandoned(repo, &store, &task, force).await;
+    let cleanup = finish_abandon(&store, &task, force).await;
     if let Err(error) = cleanup {
         crate::journal::request::diagnostic(format_args!(
             "{} is canceled; retained checkout/PR: {error}",
@@ -132,19 +135,22 @@ pub(super) async fn cleanup_abandoned(
     Ok(false)
 }
 
-async fn save_abandon(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    store
-        .abandon(&WorkRef::Task(task.id.clone()), "explicit Task abandonment")
-        .await
-        .map_err(task_error)?;
-    super::retirement::close_conversations(&store.sqlite, &task.id)?;
+/// Reopening and retirement share this lock so cleanup cannot delete a reopened checkout.
+pub(super) async fn finish_abandon(store: &SharedStore, task: &Task, force: bool) -> OpsResult<()> {
+    let _guard = super::retirement::lock(&task.id)?;
+    if super::task_work_status(store, task).await? != WorkStatus::Abandoned {
+        return Ok(());
+    }
+    let close = super::retirement::close_conversations(&store.sqlite, &task.id);
+    let repo = repository_for_task(store, task)?;
     crate::ops::planning_sync::sync_after_save(
         store,
-        &repository_for_task(store, task)?.to_string_lossy(),
+        &repo.to_string_lossy(),
         Some(&ActionOwner::Task(task.id.clone())),
     )
     .await;
-    Ok(())
+    let cleanup = cleanup_abandoned(&repo, store, task, force).await;
+    close.and(cleanup.map(drop))
 }
 
 /// Remove planning immediately, retaining execution and pending tracker

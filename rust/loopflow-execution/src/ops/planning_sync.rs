@@ -178,8 +178,7 @@ pub(crate) fn check_directory(directory: &Path) -> OpsResult<()> {
 
 /// Exchange the repository delta and queued saves, then read the Wave's
 /// Linear inventory. Desktop runs this on a clock, so it makes no tracker
-/// Project of its own accord (`make_project_command` names the command that
-/// does); its drain still makes the one a queued Task is sent into.
+/// Project except one a queued Task is sent into.
 pub async fn refresh_wave(wave: &crate::work::wave::Wave, tracker: TrackerKind) -> OpsResult<()> {
     let store = planning_store().await?;
     let project = store.sqlite.wave_project(wave.id()).map_err(message)?;

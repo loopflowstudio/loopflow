@@ -97,8 +97,8 @@ pub fn connected(repo: &str) -> bool {
     queued_tracker(Path::new(repo)).is_some()
 }
 
-/// The command that makes `wave`'s Project in the repository's tracker,
-/// whichever tracker that is: adding the Wave again.
+/// The command that makes `wave`'s Project in either tracker: adding the
+/// Wave again.
 pub fn make_project_command(wave: &str) -> String {
     format!("lf wave create {wave}")
 }

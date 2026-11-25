@@ -151,7 +151,7 @@ decoding).
 
 ## Remaining, in order
 
-1. **V4c walkthrough.** Try the split control live on a paused worker, at `ship-review`, at a landing stop with auto off, and after merge with an interrupted verify.
+1. **V4c walkthrough on Mac.** The served and CLI halves passed on a private Machine (`scratch/qa.html`): paused worker, human step, landing stop with auto off. Still open: clicking the live Dev bundle's pill, and after merge with an interrupted verify (needs a real GitHub merge).
 2. **Named gaps for the PR.** Separate-session Codex 0.171.0 tool jobs can survive. A pause after a move’s payload is sent can require a retry on arrival.
 3. **Gate / CI.** Five-harness worker matrix, Linux session enumeration, lifeline/attachment/hosted-terminal suites.
 

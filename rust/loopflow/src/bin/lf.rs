@@ -1436,8 +1436,16 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 println!("{}", serde_json::to_string(&receipt)?);
             } else {
                 println!("{issue} unpaused");
-                if let Some(text) = receipt.and_then(|run| run.render()) {
-                    println!("{text}");
+                match receipt {
+                    Some(started) => {
+                        if let Some(text) = started.render() {
+                            println!("{text}");
+                        }
+                    }
+                    None if *run => println!(
+                        "It waits for you at its step; `lf task run {issue}` continues past it."
+                    ),
+                    None => {}
                 }
             }
             Ok(())

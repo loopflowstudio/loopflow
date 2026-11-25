@@ -101,3 +101,19 @@ in a sub-Graph (`- inner`, with `inner.yaml` holding `- compile`,
 A private home last migrated by an earlier branch build refuses a build whose
 merge from main added a migration ("migration history or schema differs").
 Make a new home rather than reusing it.
+
+# Smart unpause by position
+
+A `runfirst` Graph (`- compile`, `- interactive: demo`) started with
+`lf task create '<words>' --run --graph runfirst` shows a resumable pause:
+served `task.unpause {run:true}` answers a run receipt and a new
+`build-script-build` appears in the same checkout. A `hold` Task parks at
+`demo` within seconds, so that's the quick way to see a parked pause:
+`{run:true}` answers `null`, the control goes back to `run · Run: <next>`, and
+no `claude -p` worker starts. For a landing stop, run `lf task auto off <id>`
+right after `create --run --graph landing`. `lf task auto on` at the landing
+stop starts the run at once, and a pause then reads `resume · Paused: land`.
+Without a GitHub PR, `land` fails three times and the Task reads `Run: land`.
+
+To stop the private home from zsh, put the PIDs in an array (`P=(…); kill -STOP $P`).
+A scalar `P="1 2"` is one word in zsh and `kill` answers "illegal pid".

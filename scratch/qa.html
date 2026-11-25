@@ -1,56 +1,43 @@
-<!doctype html>
-<meta charset="utf-8">
-<title>QA · LOO-1078 resume by position at 23be1ead49</title>
-<style>
-body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:960px;margin:2em auto;padding:0 1em;color:#222}
+<!doctype html><meta charset="utf-8"><title>QA · LOO-1078 smart unpause at 4be565d1a1</title>
+<style>body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:960px;margin:2em auto;padding:0 1em;color:#222}
 pre{background:#f5f5f2;padding:.8em;overflow:auto;font-size:12.5px}td,th{padding:.3em .6em;vertical-align:top;border-bottom:1px solid #ddd;text-align:left}
-.ok{color:#1a7f37}.fix{color:#9a6700}.open{color:#b42318}
-</style>
-<h1>QA: resume by position, and pause refusals</h1>
-<p>This run used the branch <code>lf</code> at 23be1ead49 (the compress commit) on a new private Machine
-(<code>LF_HOME=/tmp/lfqp3/home</code>). The repository held <code>hold</code> (<code>- interactive: demo</code>,
-<code>- compile</code>) and <code>nested</code> (<code>- inner</code>, then <code>- cmd: help task</code>, where
-<code>inner</code> is <code>- compile</code>, <code>- interactive: demo</code>). <code>compile</code> was a real Claude
-worker running <code>cargo build</code>, and the crate's <code>build.rs</code> sleeps for 240 s. Every write went over
-the server socket as the Mac and iPhone send it, and every reading came from <code>task.get</code>, the payload behind the bar.</p>
+table{border-collapse:collapse}.ok{color:#1a7f37}.fix{color:#9a6700}.open{color:#b42318}</style>
+<h1>QA: smart unpause by position</h1>
+<p>Branch <code>lf</code> at <code>4be565d1a1</code> on a new private Machine (<code>LF_HOME=/tmp/lfqp4/home</code>, a disposable repository with a bare origin).
+Graphs: <code>runfirst</code> (<code>- compile</code>, <code>- interactive: demo</code>), <code>hold</code> (<code>- interactive: demo</code>, <code>- compile</code>) and
+<code>landing</code> (<code>- compile</code>, <code>- cmd: land</code>, <code>- cmd: help task</code>). <code>compile</code> is a real Claude worker running
+<code>cargo build</code> on a crate whose <code>build.rs</code> sleeps 240 s. Writes went over the server socket as the apps send them, and readings came from <code>task.get</code> (<code>overview.graph.control</code>, the pill).</p>
 
 <h2>Scenarios</h2>
 <table>
-<tr><th>Scenario</th><th>Control (<code>overview.graph.control</code>) and what happened</th></tr>
-<tr><td>Unstarted, nested Graph</td><td class="ok"><code>graph.list</code> gave <code>start: Run: inner</code>, and its steps were <code>[inner, help task]</code>. The start control names the outline's first step.</td></tr>
-<tr><td>Running at compile</td><td class="ok"><code>pause · Running: compile</code>, “inner is running compile. You are next needed at demo.”</td></tr>
-<tr><td>Served <code>task.pause</code> mid-build</td><td class="ok">The answer was “2f40f2 paused”. <code>build-script-build</code> 84557 was gone in under 4 s, and the primary <code>claude --name 2f40f2</code> stayed. The control read <code>resume · Paused: compile</code>, the group was Paused, and run_control named the unpause command.</td></tr>
-<tr><td>Click the pill: <code>task.unpause {run:true}</code></td><td class="ok">The answer had <code>state: running</code>. A new build (87555) started in the same checkout, and the control was back to <code>Running: compile</code> under Active.</td></tr>
-<tr><td>Interrupt, then pause (automatic waiting step)</td><td class="ok">After the interrupt: <code>run · Run: compile</code>, “Stopped at inner.”, idle, Active. After pause: <code>resume · Paused: compile</code>. Position decides resume, so a stopped automatic step still resumes.</td></tr>
-<tr><td>Pause at <code>demo</code> (interactive, inside the group)</td><td class="ok"><code>unpause · Paused: demo</code>, “Paused at demo. `lf task unpause` lifts the hold.” A plain unpause returned <code>Run: help task</code> and “Waiting for you at demo.”</td></tr>
-<tr><td><code>hold</code> Task paused at its first step, <code>demo</code></td><td class="ok"><code>unpause · Paused: demo</code>. A plain unpause gave <code>Run: compile</code>, Active, and the primary kept running.</td></tr>
-<tr><td>Owned Task with no Graph (start)</td><td class="ok">The pause was accepted, and <code>overview.graph</code> was null, so the apps show <code>Paused: start</code>. <code>unpause {run:true}</code> took up the repository Graph and answered <code>waiting · demo</code>.</td></tr>
-<tr><td>Run on to <code>end</code>, then pause</td><td class="fix">The control read <code>done · Done</code> and the lifecycle was done. Pause was refused with code <code>outcome_unknown</code>: “invalid data: Task is closed; nothing to pause; inspect the affected work before retrying”. <b>Fixed</b>, see below.</td></tr>
-<tr><td>Refusals after the fix</td><td class="ok">Served pause of a closed Task, run and <code>auto on</code> of a paused Task, and unpause of an unpaused one all answer <code>conflict</code> with the plain sentence. The CLI prints <code>Error: Task is not paused</code>, with no “invalid data:” in front.</td></tr>
+<tr><th>Scenario</th><th>What happened</th></tr>
+<tr><td>Running at compile</td><td class="ok"><code>pause · Running: compile</code>, “compile is running. You are next needed at demo.”, Active.</td></tr>
+<tr><td>Served <code>task.pause</code> mid-build</td><td class="ok">“87bc49 paused” in 2 s. <code>build-script-build</code> 17803 gone at once, primary <code>claude --name 87bc49</code> (15633) alive. <code>resume · Paused: compile</code>, “Paused at compile. `lf task unpause --run` resumes it.”, group Paused.</td></tr>
+<tr><td>▶: <code>task.unpause {run:true}</code> mid-step</td><td class="ok">Answer <code>state: running</code>. New build 20806 in the same checkout, back to <code>Running: compile</code>, Active. Compile then finished and the Task waited at demo (<code>Run: end</code>).</td></tr>
+<tr><td>Pause at a human step (<code>hold</code> at demo)</td><td class="ok"><code>unpause · Paused: demo</code>, “Paused at demo. `lf task unpause` lifts the hold.”</td></tr>
+<tr><td>▶ at the human step</td><td class="ok">Answer <code>null</code>. The control went back to <code>run · Run: compile</code>, “Waiting for you at demo.”, Active, and no worker started.</td></tr>
+<tr><td>CLI <code>lf task unpause --run</code> at demo</td><td class="fix">Printed only “5f8ad3 unpaused”: someone who asked for a run got no word on why none started. Fixed (below). <code>--json</code> prints <code>null</code>. A second unpause prints “Error: Task is not paused”, exit 1.</td></tr>
+<tr><td>Landing stop, auto off</td><td class="ok">After compile: <code>wait · Waiting: land</code>, “Waiting at land: auto is off.”, Active. Pause: <code>unpause · Paused: land</code>. ▶ answered <code>null</code> and returned it to <code>Waiting: land</code>.</td></tr>
+<tr><td>Auto on at the landing stop, then pause</td><td class="ok"><code>lf task auto on</code> started the land run at once (“this run may merge the PR”). Pausing it read <code>resume · Paused: land</code>, and ▶ resumed land. With no GitHub PR, land failed three times and the Task read <code>Run: land</code>, “Stopped at land.”, Shipping.</td></tr>
+<tr><td>Refusals</td><td class="ok">Served pause of an unstarted Task: <code>conflict</code> “Task has not started; nothing to pause” (CLI the same, exit 1). Unpause of an unpaused Task: <code>conflict</code>. Unknown Task: <code>not_found</code>.</td></tr>
 </table>
 
 <h2>Fixed in this run</h2>
-<ul>
-<li>Pause refusals reached clients as <code>outcome_unknown</code>. This covered pausing an unstarted or closed Task, unpausing one that isn't paused, run or auto on while paused, and unpause while a stop or mutation is finishing. The cause: <code>ops/task/pause.rs</code> turned the store's error into a string, so the served layer couldn't tell it was a refusal. Swift then adds “It may have happened; refresh before retrying.” to the notice, on both Mac and iPhone. A <code>refused</code> helper now maps these refusals to <code>Error::conflict</code>, and the two “still stopping/finishing” refusals use it too. <code>served_pause_holds_the_remote_cursor_and_status_names_unpause</code> asserts that a second unpause through the peer route is a <code>conflict</code> reading “Task is not paused”. That test passed, and so did <code>cargo fmt</code> and <code>cargo clippy --all-targets -p loopflow-execution -p loopflow -- -D warnings</code>.</li>
-<li><code>.lf/qa/task-pause.md</code> now says where the control is in <code>task.get</code>, how to see a grouped step name, and that a home migrated by an earlier branch build needs replacing.</li>
-</ul>
-
-<h2>Checks</h2>
-<ul>
-<li><code>scripts/test_desktop.sh --filter 'DesktopHeadlessTests|TaskActionsTests'</code>: 21 tests passed. They cover the menu slot that Pause and Interrupt share now, and the split control. Run here.</li>
-<li><code>cargo nextest run -p loopflow --test integration -E 'test(served_pause_holds_the_remote_cursor_and_status_names_unpause)'</code>: passed. Run here.</li>
-</ul>
+<p><code>lf task unpause &lt;id&gt; --run</code> at a human or landing stop now prints:</p>
+<pre>5f8ad3 unpaused
+It waits for you at its step; `lf task run 5f8ad3` continues past it.</pre>
+<p>Rerun live on the private Machine at demo and at land. <code>cargo fmt --check</code> and <code>cargo clippy -p loopflow --bin lf -- -D warnings</code> passed. <code>.lf/qa/task-pause.md</code> gained a section on seeing each smart-unpause case quickly and on stopping the home from zsh.</p>
 
 <h2>Not reached</h2>
 <ul>
-<li>The Mac bar and the sidebar context-menu Unpause on the Dev bundle. The display was in use (HID idle 46 s), so no Dev window was opened over it. All of the compress commit's Swift changes are in menus, which the screen-locked hooks can't open anyway. The headless tests above cover the bar.</li>
-<li>Returning data. <code>/tmp/lfqp2</code> was last migrated by e5efb733f, and the merge from main put <code>rental_session_history</code> before this branch's <code>task_pauses</code>. The new build refuses that store, which is expected for a draft migration, so this run used a new home.</li>
-<li>iPhone. It shares <code>TaskActions</code> and the server's control.</li>
+<li class="open">The live Mac pill on the Dev bundle. The display was in use (HID idle 0–2 s), so no Dev window opened over it. The headless Mac and iPhone Simulator tests from the implement step cover the pill's clicks and writes. The Swift code is unchanged since then.</li>
+<li class="open">After merge with an interrupted verify. That needs a real GitHub merge, which a private repository with a bare origin can't record.</li>
+<li>Busy and wrong-Machine conflicts from <code>4be565d1a1</code>. A second Machine needs the two-Machine fixture, and the “still stopping” window is too short to hit by hand. The served-pause integration test covers the peer route.</li>
 </ul>
 
 <h2>Still worth a look, worst first</h2>
 <ul>
-<li>While paused or stopped inside a group, the sentence uses the group (“Paused at inner”) and the pill uses the concrete step (“Paused: compile”). At an interactive step both use the step (“Paused at demo”).</li>
-<li>Status prints “Planning: unstarted · current” for a Task whose Graph has run.</li>
-<li>With <code>LF_HOME</code> pointing at a directory that doesn't exist, <code>lf server run</code> exits with “No such file or directory (os error 2)” and never names the path.</li>
+<li>For a resumable pause, <code>row.run_control.unavailable</code> says “run `lf task unpause 87bc49` to lift the hold” while the sentence says <code>lf task unpause --run</code>. Both are true, but they point at different commands.</li>
+<li>A Graph whose first step is interactive reports “latest Graph: No Task Graph has run” and “Planning: unstarted · current” in <code>lf task status</code> while it waits at that step.</li>
+<li>A land run that fails reads “Stopped at land.”: the sentence doesn't separate a failure from an interrupt. The failure shows in status.</li>
 </ul>

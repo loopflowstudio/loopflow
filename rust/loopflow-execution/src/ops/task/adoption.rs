@@ -31,13 +31,18 @@ pub struct Source {
 
 impl Source {
     /// The conversation adopted work brings: the selected Session, else the
-    /// one last opened in an explicitly adopted checkout.
-    pub(super) fn conversation(&self, store: &SharedStore) -> OpsResult<Option<LfSession>> {
+    /// last eligible one opened in an explicitly adopted checkout.
+    pub(super) fn conversation(
+        &self,
+        store: &SharedStore,
+        task: &TaskId,
+    ) -> OpsResult<Option<LfSession>> {
         match (&self.session, &self.checkout) {
             (Some(session), _) => Ok(Some(session.clone())),
-            (None, Some(root)) if self.explicit_checkout => {
-                store.sqlite.checkout_conversation(root).map_err(task_error)
-            }
+            (None, Some(root)) if self.explicit_checkout => store
+                .sqlite
+                .checkout_conversation(root, Some(task))
+                .map_err(task_error),
             (None, _) => Ok(None),
         }
     }
@@ -152,7 +157,6 @@ async fn resolve_checkout(
     })
 }
 
-#[allow(clippy::too_many_arguments)] // One adoption commits the Task, checkout, conversation and receipt.
 pub async fn save(
     store: &SharedStore,
     main: &Path,
@@ -160,7 +164,6 @@ pub async fn save(
     creation: Option<NewTask>,
     source: Source,
     acquisition: Option<Arc<PlanningLocks>>,
-    continue_in_task: bool,
     receipt: Option<loopflow_storage::sqlite::creation::TaskCreationRecord>,
 ) -> OpsResult<Task> {
     if let Some(task) = source.task.as_ref().filter(|task| task.id != id) {
@@ -188,14 +191,6 @@ pub async fn save(
             )));
         }
     }
-    let destination = if continue_in_task {
-        existing
-            .as_ref()
-            .and_then(|task| task.worktree.clone())
-            .filter(|root| source.session.is_some() && source.checkout.as_ref() != Some(root))
-    } else {
-        None
-    };
     let placement = match (
         &source.checkout,
         existing.as_ref().and_then(|task| task.worktree.as_ref()),
@@ -220,15 +215,11 @@ pub async fn save(
             creation,
             placement,
             source.session,
-            destination.clone(),
             acquisition,
             receipt,
         )
         .await
         .map_err(task_error)?;
-    if let Some(cwd) = destination {
-        crate::journal::request::diagnostic(format_args!("Conversation directory set to {}. Already-running clients may keep their original directory. Files stay in their original checkout.", cwd.display()));
-    }
     drop(source._admission);
     Ok(task)
 }
@@ -266,17 +257,28 @@ pub async fn bind_session(store: &SharedStore, session: &LfSession, task: &Task)
         Some(wave) => Some(crate::ops::planning_sync::lock_wave_planning(&wave).await?),
         None => None,
     };
-    save(
+    let checkout = source.checkout.clone();
+    let task = save(
         store,
         &repo,
         task.id.clone(),
         None,
         source,
         acquisition,
-        true,
         None,
     )
     .await?;
+    if let Some(worktree) = task.worktree.as_ref() {
+        let root = worktree.canonicalize().unwrap_or_else(|_| worktree.clone());
+        if checkout.as_ref() != Some(&root) {
+            crate::journal::request::diagnostic(format_args!(
+                "Conversation stays in {}; {}'s checkout is {}.",
+                session.cwd.display(),
+                task.identifier,
+                worktree.display()
+            ));
+        }
+    }
     Ok(())
 }
 

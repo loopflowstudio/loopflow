@@ -940,7 +940,6 @@ fn an_admitted_creation_commits_task_graph_claim_and_conversation_together() {
             Some(&creation),
             None,
             None,
-            None,
             Some(&record),
         );
         (creation.id, session, result)

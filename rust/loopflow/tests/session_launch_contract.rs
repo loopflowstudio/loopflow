@@ -1315,6 +1315,96 @@ fn live_taskless_provider_switch_preserves_identity_and_accepts_terminal_input()
 }
 
 #[test]
+fn resume_switches_a_bound_agy_conversation_to_claude_in_its_original_worktree() {
+    let fixture = Fixture::new("agy");
+    let agy = fixture.home.path().join("bin/agy");
+    fs::write(
+        &agy,
+        format!(
+            "{}\nsys.stdin.readline()\n",
+            include_str!("../../loopflow-execution/tests/support/agy_cli.py")
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(agy, fs::Permissions::from_mode(0o755)).unwrap();
+    let origin = fixture
+        .repo
+        .create_named_worktree("research")
+        .canonicalize()
+        .unwrap();
+    let delivery = fixture.repo.create_named_worktree("delivery");
+    let created = fixture
+        .command()
+        .args([
+            "task",
+            "create",
+            "--title",
+            "Delivery",
+            "--worktree",
+            delivery.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    success(&created);
+    let created: Value = serde_json::from_slice(&created.stdout).unwrap();
+    let task = created["task"]["id"].as_str().unwrap();
+    let mut first = fixture
+        .command()
+        .current_dir(&origin)
+        .args(["-i", "-a", "agy", ":", "Keep the draft here"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !fixture.home.path().join("tui-heard.json").exists() {
+        assert!(
+            first.try_wait().unwrap().is_none(),
+            "agy exited before its first turn"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "agy did not finish its first turn"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let id = fixture.session();
+    let bound = fixture
+        .command()
+        .args(["session", "bind", &id, "--task", task])
+        .output()
+        .unwrap();
+    success(&bound);
+
+    let switched = fixture
+        .command()
+        .current_dir(&origin)
+        .args(["resume", "-a", "claude:fable"])
+        .output()
+        .unwrap();
+    drop(first.stdin.take());
+    first.wait().unwrap();
+    success(&switched);
+    let received = fixture.received();
+    assert_eq!(received["cwd"], origin.to_str().unwrap());
+    let prompt = received["input"].as_str().unwrap();
+    assert!(prompt.contains("Keep the draft here"), "{prompt}");
+    assert!(prompt.contains("## assistant\n\nanswer to:"), "{prompt}");
+    let card = fixture
+        .command()
+        .args(["session", "card", &id, "--json"])
+        .output()
+        .unwrap();
+    success(&card);
+    let card: Value = serde_json::from_slice(&card.stdout).unwrap();
+    assert_eq!(card["session"]["provider"], "claude");
+    assert_eq!(card["session"]["task_ids"], serde_json::json!([task]));
+}
+
+#[test]
 fn provider_switch_imports_session_history_with_current_policy() {
     let fixture = Fixture::new("claude");
     fixture.create_wave();

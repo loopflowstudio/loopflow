@@ -1826,7 +1826,7 @@ pub enum SessionCommand {
     },
     /// Bind a Session as the Task's primary conversation without starting work
     #[command(
-        after_help = "Select an unfinished interactive Session by its Loopflow ID or recorded provider ID. Binding is permanent; repeating it selects the same conversation again. The Task keeps its existing worktree and binding immediately sets the Session directory to it. Already-running clients may keep their original directory. Files and live input stay intact. An open Task without a worktree adopts the Session's unowned linked checkout; main and Wave checkouts stay shared. Done Tasks remain done; without a checkout, their conversation stays in place. Closed Sessions and headless Sessions cannot become primary. Remote calls use the target Machine's Sessions and paths."
+        after_help = "Select an unfinished interactive Session by its Loopflow ID or recorded provider ID. Binding is permanent; repeating it selects the same conversation again. The conversation and its files stay in their current directory. If the Task owns a different checkout, binding reports both paths. An open Task without a worktree adopts the Session's unowned linked checkout; main and Wave checkouts stay shared. Done Tasks remain done; without a checkout, their conversation stays in place. Closed Sessions and headless Sessions cannot become primary. Remote calls use the target Machine's Sessions and paths."
     )]
     Bind {
         /// Session ID or provider conversation ID

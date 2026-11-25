@@ -1047,17 +1047,23 @@ impl SqliteStore {
     }
 
     /// The unfinished interactive conversation last opened in a checkout.
-    pub fn checkout_conversation(&self, root: &Path) -> StoreResult<Option<LfSession>> {
+    /// For Task adoption, skip conversations that already belong to another Task.
+    pub fn checkout_conversation(
+        &self,
+        root: &Path,
+        for_task: Option<&TaskId>,
+    ) -> StoreResult<Option<LfSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let root = root.to_string_lossy();
         conn.query_row(
             &format!(
                 "{SESSION_SELECT}
                 WHERE s.interactive=1 AND s.completed_at IS NULL
+                AND (?2 IS NULL OR s.task_id IS NULL OR s.task_id=?2)
                 AND (s.cwd=?1 OR substr(s.cwd,1,length(?1)+1)=?1||'/')
                 ORDER BY COALESCE(s.opened_at, s.created_at*1000) DESC, s.id DESC LIMIT 1"
             ),
-            [root.as_ref()],
+            params![root.as_ref(), for_task.map(TaskId::as_str)],
             read_session,
         )
         .optional()?
@@ -1750,10 +1756,14 @@ impl SqliteStore {
     ) -> StoreResult<LfSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        // Binding may have selected a directory while an opening prepared the
-        // old scope's workspace. Its explicit choice wins over that preparation.
+        // Binding can commit after the caller prepares a placeholder's workspace.
         let updated = tx.execute(
-            &format!("UPDATE agent_sessions SET cwd=CASE WHEN work_source='bound' THEN cwd ELSE ?3 END WHERE id=?1 AND current_capture IS ?2 AND completed_at IS NULL AND {} IS NOT NULL", primary_scope_sql("agent_sessions")),
+            &format!(
+                "UPDATE agent_sessions SET cwd=CASE
+                WHEN current_capture IS NULL AND bound_at IS NULL THEN ?3 ELSE cwd END
+                WHERE id=?1 AND current_capture IS ?2 AND completed_at IS NULL AND {} IS NOT NULL",
+                primary_scope_sql("agent_sessions")
+            ),
             params![session.id, session.captured, cwd.to_string_lossy()],
         )?;
         if updated != 1 {
@@ -2464,7 +2474,7 @@ mod metadata_tests {
         }
         let reopened = |store: &crate::sqlite::SqliteStore| {
             store
-                .checkout_conversation(std::path::Path::new("/fixture"))
+                .checkout_conversation(std::path::Path::new("/fixture"), None)
                 .unwrap()
                 .unwrap()
                 .id

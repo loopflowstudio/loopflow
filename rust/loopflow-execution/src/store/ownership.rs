@@ -201,7 +201,6 @@ pub(crate) fn promote_task(
     creation: Option<&NewTask>,
     placement: Option<&(PathBuf, TaskPr)>,
     session: Option<&crate::session::LfSession>,
-    destination: Option<&Path>,
     receipt: Option<&loopflow_storage::sqlite::creation::TaskCreationRecord>,
 ) -> StoreResult<Task> {
     let caller = if session.is_some() {
@@ -219,14 +218,7 @@ pub(crate) fn promote_task(
         };
         let facts = acquire(store, scope)?;
         if let Some(result) = store.promote_task_prepared(
-            task_id,
-            creation,
-            placement,
-            session,
-            destination,
-            receipt,
-            &facts,
-            &caller,
+            task_id, creation, placement, session, receipt, &facts, &caller,
         )? {
             return Ok(result);
         }

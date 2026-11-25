@@ -140,7 +140,6 @@ fn new_task_reacquires_placement_after_wave_ancestry_changes() {
             None,
             None,
             None,
-            None,
             &stale,
             &loopflow_storage::sqlite::SessionCaller {
                 agent: None,
@@ -150,16 +149,7 @@ fn new_task_reacquires_placement_after_wave_ancestry_changes() {
         .unwrap()
         .is_none());
     assert!(store.task(&creation.id).unwrap().is_none());
-    super::promote_task(
-        &store,
-        &creation.id,
-        Some(&creation),
-        None,
-        None,
-        None,
-        None,
-    )
-    .unwrap();
+    super::promote_task(&store, &creation.id, Some(&creation), None, None, None).unwrap();
     let claim = claim_task(&store, &creation.id).unwrap().unwrap();
     assert_eq!(claim.machine_id, Some(local));
 }
@@ -432,7 +422,6 @@ fn promotion_refuses_a_replaced_caller_for_either_title_source() {
             Some(&creation),
             None,
             Some(&before),
-            None,
             None,
             &facts,
             &caller,

@@ -166,7 +166,7 @@ pub(super) async fn checkout_conversation(
     let root = crate::git::worktree_root(cwd)?;
     Ok(store
         .sqlite
-        .checkout_conversation(&root)?
+        .checkout_conversation(&root, None)?
         .map(|session| session.id.into()))
 }
 

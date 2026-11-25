@@ -351,7 +351,6 @@ impl SqliteStore {
         creation: Option<&NewTask>,
         placement: Option<&(PathBuf, TaskPr)>,
         session: Option<&crate::session::LfSession>,
-        destination: Option<&Path>,
         receipt: Option<&super::creation::TaskCreationRecord>,
         me: &super::task_ownership::OwnershipFacts,
         caller: &super::SessionCaller,
@@ -426,18 +425,6 @@ impl SqliteStore {
             }
             super::sessions::bind_session_in(&tx, &current, task_id)?;
             super::sessions::choose_task_primary_in(&tx, task_id, &session.id)?;
-            if let Some(cwd) = destination {
-                let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
-                if task.worktree.as_deref() != Some(cwd) {
-                    return Err(StoreError::InvalidAuthority(
-                        "Task workspace changed before promotion; retry".into(),
-                    ));
-                }
-                tx.execute(
-                    "UPDATE agent_sessions SET cwd=?2 WHERE id=?1",
-                    params![session.id, cwd.to_string_lossy()],
-                )?;
-            }
         }
         let admitted = admission
             .map(|admission| admit_in(&tx, task_id, admission))

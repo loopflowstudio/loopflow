@@ -21,3 +21,6 @@
 - The agy process for that Session ended at 2026-11-25T08:29:39Z with no exit
   code and the recovery pass restarted it in the Task's worktree. Cause of the
   exit not investigated.
+- When adopting a worktree with `--run`, choose the last-opened conversation
+  eligible for that Task. This follows the existing checkout selection rule
+  even when a more recently opened Session stayed there after binding elsewhere.

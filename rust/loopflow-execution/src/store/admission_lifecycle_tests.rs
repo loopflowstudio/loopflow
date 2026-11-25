@@ -424,29 +424,21 @@ fn session_binding_retains_a_task_in_completed_project_history() {
 }
 
 #[test]
-fn promotion_directory_survives_an_opening_prepared_before_binding() {
+fn binding_keeps_its_directory_when_an_earlier_opening_admits_a_workspace() {
     let (dir, store, task_id) = store_with_task();
-    let task = store.task(&task_id).unwrap().unwrap();
     let mut conversation = unpublished_conversation(None, None, 1);
+    conversation.artifact_key = None;
     conversation.interactive = true;
     conversation.cwd = dir.path().to_path_buf();
     let session = crate::store::sessions::create_session(&store, conversation, None).unwrap();
-    crate::store::ownership::promote_task(
-        &store,
-        &task_id,
-        None,
-        None,
-        Some(&session),
-        task.worktree.as_deref(),
-        None,
-    )
-    .unwrap();
+    crate::store::ownership::promote_task(&store, &task_id, None, None, Some(&session), None)
+        .unwrap();
 
     let admitted = store
         .admit_session_workspace(&session, &dir.path().join("old-scope"))
         .unwrap();
     assert_eq!(admitted.id, session.id);
-    assert_eq!(admitted.cwd, task.worktree.unwrap());
+    assert_eq!(admitted.cwd, session.cwd);
     assert_eq!(admitted.task_id.as_ref(), Some(&task_id));
     assert_eq!(store.session(&session.id).unwrap().unwrap(), admitted);
     assert_eq!(
@@ -481,7 +473,6 @@ fn promotion_binding_survives_completion_after_placement_preparation() {
             None,
             Some(&placement),
             Some(&session),
-            None,
             None,
         )
         .unwrap();

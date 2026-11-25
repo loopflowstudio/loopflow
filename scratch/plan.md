@@ -210,61 +210,27 @@ lf resume -a claude:fable                   # same Session, new thread, still in
   test-only `bind_session_prepared`.
 - Why the agy process ended at 00:29.
 
-## Implementation order & verification
+## Checkout adoption alongside resume
 
-Start with the tests that prove the whole invariant fails today, then remove
-the moves cleanly in one pass:
+Keeping a bound conversation in its worktree also leaves it visible to
+`lf task create --worktree … --run`, which shares the last-opened Session
+lookup with resume. A Task adopting this checkout must select the last
+conversation eligible to belong to it, or create its own. Resume still sees
+the bound conversation. Check both readings with two Sessions in one checkout.
 
-1. **First slice (proves the model holds soonest):**
-   - Rewrite and rename
-     `promotion_sets_directory_immediately_and_resumes_same_native_conversation`
-     → `binding_keeps_the_conversation_in_its_worktree` in
-     `rust/loopflow/tests/session_lifecycle_tests.rs`:
-     - after `session bind`, `sessions`, `task status … sessions[0].cwd`, and
-       `resume --task … --prepare --json` all report `origin`;
-     - `resume --prepare --json` run from `origin` with no ID returns the bound
-       Session (fails today with `"no associated work conversation"`);
-     - the continued launch receives `cwd == origin`; `native-locations.json`
-       reports `origin`; native conversation identity and messages are
-       unchanged; `draft.txt` is intact.
-   - Add a unit test in `adoption/tests.rs` (or `primary.rs`) covering an
-     already-assigned, already-started Session (`task_id = Some(T)`,
-     `work_source = Declared`, `bound_at = None`, `captured = Some(_)`) in a
-     different checkout made primary via `bind` and then passed through
-     `admit_workspace`: asserts `cwd` stays in `origin` (fails today).
-2. **Delete the bind move and fix `admit_scope_workspace` / `admit_session_workspace`:**
-   - Remove `continue_in_task` and `destination` across `adoption.rs`,
-     `store/ownership.rs`, `store/children.rs`, `sqlite/children.rs`, and
-     update callers/tests in `children_tests.rs`, `admission_lifecycle_tests.rs`,
-     `ownership/tests.rs`, `adoption/tests.rs` (`binding_selects_the_task_conversation`
-     and `binding_a_done_task_keeps_it_done`).
-   - Update `admit_scope_workspace` (`primary.rs:322`) and
-     `admit_session_workspace` (`sessions.rs:1746`) to check
-     `captured` / `bound_at` instead of `work_source='bound'`, updating
-     `promotion_directory_survives_an_opening_prepared_before_binding`
-     (`admission_lifecycle_tests.rs:427`) to expect `origin` (and verifying
-     `idle_primary_adopts_persistent_workspace_without_losing_identity` and
-     `a_closed_tasks_conversations_reopen_in_the_main_checkout` still pass).
-   - Emit the one-line factual split-directory diagnostic in `adoption::save`
-     when `existing.worktree` differs from the Session's checkout root.
-3. **Update CLI help and Swift copy/tests (docs updated in `write-docs`):**
-   - `rust/loopflow/src/lf/mod.rs:1829`
-   - `swift/LoopflowMac/Views/SessionActionSheet.swift:75`
-   - `swift/LoopflowTests/SessionControlsTests.swift` (lines 98, 128, 210)
-   - Verify implementation matches `docs/work.md`, `docs/sessions.md`, and `docs/dev/reference-models.md`
-4. **Verify:**
+## Implementation and verification
 
-```bash
-env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test -p loopflow --test session_lifecycle_tests binding_keeps < /dev/null
-env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test -p loopflow-execution --lib ops::task::adoption:: < /dev/null
-env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test -p loopflow-execution --lib ops::human_session::primary:: < /dev/null
-env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test -p loopflow-execution --lib store::admission_lifecycle_tests:: < /dev/null
-cargo fmt
-cargo clippy --all-targets -- -D warnings
-```
+- Binding commits Task assignment and primary selection without a directory
+  update. Only unstarted, unbound primary placeholders take their scope’s
+  checkout. CLI help and the Desktop binding sheet describe the same rule.
+- The native resume fixture checks the live attachment, Task selection, lookup
+  from the unowned checkout, provider cwd, native history and the untracked draft.
+  The provider-switch fixture runs `lf resume -a claude:fable` from that
+  checkout using the agy and Claude stand-ins.
+- SQLite query plans and warm in-memory timings on the Machine schema with
+  10,000 synthetic Sessions: workspace admission used the Session primary key
+  and the unique primary mapping (2.9 µs median, excluding commit).
+  With 1,000 unfinished conversations, checkout selection used
+  `session_inventory` (0.41 ms median for resume, 0.44 ms for adoption).
 
 Desktop build and `SessionControlsTests` run at gate/CI.
-
-Done when: the demo above continues the agy conversation on Claude in the
-worktree it started in, and making an already-assigned conversation in another
-directory primary keeps it there across idle resume.

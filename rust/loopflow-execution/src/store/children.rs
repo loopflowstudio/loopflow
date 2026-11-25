@@ -13,14 +13,12 @@ use time::OffsetDateTime;
 use super::{run_planning_write, run_sqlite, Store, StoreResult};
 
 impl Store {
-    #[allow(clippy::too_many_arguments)] // These effects share the promotion transaction.
     pub(crate) async fn promote_task(
         &self,
         task_id: &TaskId,
         creation: Option<loopflow_storage::work::task::NewTask>,
         placement: Option<(std::path::PathBuf, TaskPr)>,
         session: Option<crate::session::LfSession>,
-        destination: Option<std::path::PathBuf>,
         acquisition: Option<Arc<super::PlanningLocks>>,
         receipt: Option<super::sqlite::creation::TaskCreationRecord>,
     ) -> StoreResult<Task> {
@@ -32,7 +30,6 @@ impl Store {
                 creation.as_ref(),
                 placement.as_ref(),
                 session.as_ref(),
-                destination.as_deref(),
                 receipt.as_ref(),
             )
         })

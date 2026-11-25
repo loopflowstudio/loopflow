@@ -164,7 +164,8 @@ that same directory.
   [child Task](#file-follow-ups-from-a-task), or `--worktree` / `--session`
   explicitly to adopt.
 - `--worktree` without `--run` adopts the checkout only; adding `--run` also
-  starts the Task's conversation and Graph.
+  starts the Task's conversation and Graph. When choosing a conversation from
+  that checkout, creation skips Sessions already assigned to another Task.
 - An open Task with no checkout adopts an unowned linked worktree on
   `lf task create --session` or `lf session bind`. Main and Wave checkouts stay
   shared, and done Tasks stay done without adopting a checkout.

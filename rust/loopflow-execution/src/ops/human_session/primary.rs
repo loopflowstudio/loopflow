@@ -324,6 +324,9 @@ async fn admit_scope_workspace(
     session: LfSession,
     scope: PrimaryScope,
 ) -> Result<LfSession> {
+    if session.captured.is_some() || session.bound_at.is_some() {
+        return Ok(session);
+    }
     let cwd = match &scope {
         PrimaryScope::Repository(repo) => ensure_scope_worktree(repo.as_path(), &scope)?.path,
         PrimaryScope::Wave(id) => {
@@ -334,10 +337,6 @@ async fn admit_scope_workspace(
             ensure_scope_worktree(Path::new(wave.repo()), &scope)?.path
         }
         PrimaryScope::Task(task) => {
-            // Explicit adoption and binding already selected this directory.
-            if session.work_source == Some(WorkSource::Bound) {
-                return Ok(session);
-            }
             let task = store
                 .get_task(task)
                 .await?

@@ -42,7 +42,7 @@ cargo nextest run -p loopflow-execution --lib -E 'test(adoption::tests::)'      
 cargo nextest run -p loopflow --lib -E 'test(run::launch_policy_tests::)'   # launch and resume settings
 cargo nextest run -p loopflow-execution --lib -E 'test(ops::task::explain::tests::)'  # Task run and checkout previews
 cargo nextest run -p loopflow -p loopflow-execution --lib -E 'test(ssh::dispatch_tests::) | test(task_ownership::tests::) | test(store::ownership_lifecycle_tests::)'  # Machine dispatch and ownership
-cargo nextest run -p loopflow --test session_lifecycle_tests -E 'test(promotion_)'
+cargo nextest run -p loopflow --test session_lifecycle_tests -E 'test(promotion_) | test(binding_keeps_the_conversation_in_its_worktree)'
 ```
 
 The library filters check every decision as a table row. The last runs the
@@ -90,7 +90,7 @@ Promotion and binding (`session_lifecycle_tests`):
 | Test | Wiring it proves |
 |---|---|
 | `promotion_selects_session_in_owned_and_shared_checkouts` | `LF_AGENT_CALLER` reaches creation from `task create --session` inside the conversation; `resume --task` continues the same native conversation in the recorded cwd |
-| `promotion_sets_directory_immediately_and_resumes_same_native_conversation` | binding leaves the live provider's attachment alone; the bound directory reaches the next provider launch, not the running child |
+| `binding_keeps_the_conversation_in_its_worktree` | resume from the original worktree or by Task finds the bound conversation and continues its native thread there |
 | `promotion_background_run_does_not_claim_primary` | plain `task create` with a background run's `LF_AGENT_CALLER` files new work and claims neither the checkout nor its Task's conversation |
 | `promotion_explicit_sources_with_run_keep_the_selected_work` | `task create --run` opens through ordinary admission into the adopted checkout |
 
@@ -99,6 +99,7 @@ resume per harness:
 
 | Test | Wiring it proves |
 |---|---|
+| `resume_switches_a_bound_agy_conversation_to_claude_in_its_original_worktree` | a bare resume from the research worktree passes agy’s transcript to Claude in the same directory |
 | `terminal_launch_and_resume_use_current_policy_and_preserve_native_identity` | Claude terminal, Codex native and OpenCode: settings reach each provider's argv, thread parameters or config through the owner and PTY; `session resume` continues the same native conversation with current settings |
 | `headless_launch_and_graph_keep_current_options` | Claude stream: a headless skill arrives on stream-json stdin; `--yolo --chrome on` reach a Graph step's launch |
 | `codex_headless_start_receives_current_policy_on_the_wire` | Codex headless: model and sandbox reach `thread/start` |

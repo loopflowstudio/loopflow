@@ -239,6 +239,51 @@ fn creation_adopts_only_the_selected_work() {
 }
 
 #[test]
+fn adopting_a_checkout_skips_a_conversation_bound_to_another_task() {
+    let table = Table::new(false);
+    let research = table.worktree("research");
+    let free = table.conversation(&research, "tui", None);
+    let bound = table.conversation(&research, "tui", None);
+    let delivery = table
+        .create("Delivery", None, Some(&table.worktree("delivery")))
+        .unwrap();
+    table.bind(bound.id.as_str(), &delivery).unwrap();
+    table
+        .store
+        .sqlite
+        .record_session_opened(&bound.id, bound.created_at * 1000 + 1)
+        .unwrap();
+    assert_eq!(
+        table
+            .store
+            .sqlite
+            .checkout_conversation(&research, None)
+            .unwrap()
+            .unwrap()
+            .id,
+        bound.id
+    );
+
+    let task = super::super::admit_task(
+        table.repo.path(),
+        None,
+        Some("Research".into()),
+        None,
+        super::TaskAdoptionOptions {
+            session: None,
+            worktree: Some(research.clone()),
+        },
+        None,
+        None,
+        creation::identity("task.create", "adopt-research", &research, true).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(task.worktree.as_ref(), Some(&research));
+    assert_eq!(table.primary(&task), Some(free.id));
+    assert_eq!(table.primary(&delivery), Some(bound.id));
+}
+
+#[test]
 fn a_worktree_inside_a_tasks_checkout_becomes_its_own_tasks_checkout() {
     let table = Table::new(false);
     let outer_root = table.worktree("outer");
@@ -492,23 +537,34 @@ fn binding_selects_the_task_conversation() {
     let another = table.create("Another", None, None).unwrap();
     assert!(refusal(table.bind(session.id.as_str(), &another)).contains("already belongs"));
 
-    // A Task with its own checkout sets the conversation's directory there.
+    // The Task and its conversation can occupy different checkouts.
     let origin = table.worktree("research");
     let destination = table.worktree("delivery");
     let delivery = table.create("Delivery", None, Some(&destination)).unwrap();
-    let moving = table.conversation(&origin, "tui", None);
+    let research = table.conversation(&origin, "tui", None);
     for _ in 0..2 {
-        table.bind(moving.id.as_str(), &delivery).unwrap();
+        table.bind(research.id.as_str(), &delivery).unwrap();
         let task = table.task(&delivery.id);
         assert_eq!(task.worktree, delivery.worktree);
         assert_eq!(task.branch, delivery.branch);
     }
-    assert_eq!(table.session(&moving).cwd, destination);
+    assert_eq!(table.session(&research).cwd, origin);
     // Selecting another primary leaves this conversation's directory.
-    let later = table.conversation(&destination, "tui", None);
+    let later = table.conversation(&origin, "tui", Some(&delivery));
     table.bind(later.id.as_str(), &delivery).unwrap();
     assert_eq!(table.primary(&delivery), Some(later.id.clone()));
-    assert_eq!(table.session(&moving).cwd, destination);
+    let primary = table.session(&later);
+    assert!(primary.captured.is_some());
+    assert!(primary.bound_at.is_none());
+    let admitted = table
+        .runtime
+        .block_on(crate::ops::human_session::admit_workspace(
+            &table.store,
+            primary,
+        ))
+        .unwrap();
+    assert_eq!(admitted.cwd, origin);
+    assert_eq!(table.session(&research).cwd, origin);
 }
 
 #[test]
@@ -566,11 +622,7 @@ fn binding_a_done_task_keeps_it_done() {
             table.bind(session.id.as_str(), &created).unwrap();
             let bound = table.session(&session);
             assert_eq!(bound.task_id.as_ref(), Some(&created.id));
-            assert_eq!(
-                bound.cwd,
-                destination.clone().unwrap_or_else(|| origin.clone()),
-                "shared={shared}, placed={placed}"
-            );
+            assert_eq!(bound.cwd, origin, "shared={shared}, placed={placed}");
             assert_eq!(table.primary(&created), Some(session.id.clone()));
             let current = table.task(&created.id);
             assert_eq!(current.completed_at, completed.completed_at);

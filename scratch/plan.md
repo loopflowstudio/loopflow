@@ -1,8 +1,8 @@
-# LOO-1104: review before compress and qa; `ui` and `fix` Graphs; tighter builtin skills
+# LOO-1104: review before compress and qa; `quick` Graph; tighter builtin skills
 
 ## Outcome
 
-Status: built (`78bde1d766`), compressed (`c6eab6e222`), QA'd (`73abaa380c`), reviewed (`scratch/concept-review.html`), and post-build review findings applied before publish.
+Status: built (`78bde1d766`), compressed (`c6eab6e222`), QA'd (`73abaa380c`), reviewed (`scratch/concept-review.html`), post-build review findings applied (`02b9cf8f62`), and ship-review revisions applied (`fix` renamed to `quick`; builtin `ui` removed).
 
 
 A Task on `code`, `feature`, `pursue` or `redesign` runs `compress` and `qa`
@@ -12,10 +12,12 @@ measurement behind it (14 days, 5,796 sessions, 154 Tasks): 70.3% of qa spend
 later implement passes; $735+ (82 qa + 76 compress passes) was invalidated by
 the very next concept-review iterating `build`.
 
-Two new Graphs appear wherever Graphs are listed (`lf list graph`, Desktop's
-Start menu and New Task sheet): `ui`, which puts the running UI in front of a
-person every pass (`1 stop`), and `fix`, which takes a bounded bug from brief
-to merged with no planning or review steps (`merges without asking`).
+One new Graph appears wherever Graphs are listed (`lf list graph`, Desktop's
+Start menu and New Task sheet): `quick`, which takes a small, clear change
+from brief to merged with no planning or review steps (`merges without asking`).
+(Ship-review direction: `fix` was renamed to `quick` because it runs `implement`
+rather than `debug`, and `ui` was removed from builtins because UI workflows
+belong in repo-specific `.lf/graphs/`.)
 
 Every builtin skill in the loop has one clean owner:
 - `concept-review` is read-only everywhere (writes `scratch/concept-review.html`).
@@ -36,9 +38,8 @@ pr-publish
 
 $ lf list graph        # among the rest
   build   loop(loop(cmd: sync → implement) → concept-review → realign) → compress → qa → pr-publish
-  fix     loop(cmd: sync → implement) → qa → gate → cmd: land --wait-and-fix
   plan    kickoff → concept-review → realign → write-docs
-  ui      kickoff → loop(cmd: sync → implement → qa → demo (interactive)) → compress → deliver
+  quick   loop(cmd: sync → implement) → qa → gate → cmd: land --wait-and-fix
 ```
 
 `code`, `pursue`, `feature` and `redesign` compose over `plan` and `build`
@@ -49,7 +50,7 @@ pr-publish, ship-review, reflect, gate, land, verify).
 ## The Graphs
 
 Source of truth: `rust/loopflow-definitions/src/builtins/task/graph/*.yaml`.
-`build.rs` registers any file dropped there, so `ui.yaml` and `fix.yaml` need
+`build.rs` registers any file dropped there, so `quick.yaml` needs
 no registration code.
 
 ```yaml
@@ -78,22 +79,8 @@ steps:
 ```
 
 ```yaml
-# ui.yaml
-description: Build a Desktop, mobile or web UI change you try as it takes shape, then deliver it.
-steps:
-- kickoff
-- loop:
-    - cmd: sync
-    - implement
-    - qa
-    - interactive: demo     # you use it; iterate goes back to sync → implement with your words
-- compress
-- graph: deliver
-```
-
-```yaml
-# fix.yaml
-description: Fix a bounded bug or small tweak and land it.
+# quick.yaml
+description: Build a small, clear change and land it.
 steps:
 - loop:
     - cmd: sync
@@ -109,25 +96,21 @@ the comments in docs that summarize `plan` and `build` move.
 ### What the mechanics already give
 
 - A loop's last step must be a skill and it decides
-  (`rust/loopflow-execution/src/graph/mod.rs:1250`); `implement`, `realign`
-  and `interactive: demo` all qualify. A loop may start with `cmd:`
-  (`deep-clean` already does).
+  (`rust/loopflow-execution/src/graph/mod.rs:1250`); `implement` and `realign`
+  both qualify. A loop may start with `cmd:` (`deep-clean` already does).
 - The decider's `iterate` summary becomes the next pass's direction
   (`graph/transitions.rs:84`). So "name the next pass in its summary" is the
   whole handoff from `implement` to the next `implement`, and from `realign`
   back into the inner loop.
-- No autonomous loop may return across an interactive step
-  (`validate_interactive_steps`, `graph/mod.rs:609`). `ui`'s loop is decided by
-  the interactive step itself, like `code`'s `ship-review` loop, so it passes.
 - The decision prompt reads `"Decision pass N. Iterating repeats K steps, back to <first step>"`
   (`rust/loopflow/src/lf/commands/graph.rs:1263`). In `build` the first step is
   now `sync`. `GraphOutput::Decision` (`advance` / `iterate` / `blocked`) is
   attached only when `skill.returns.is_some()` (`graph/output.rs:36`).
 - Desktop's Start menu (`swift/LoopflowMac/Views/BacklogView.swift:128-145`)
-  inspects ops before the first stop and already labels `fix` as
-  **`merges without asking`** under `Run without stopping`, and `ui` as
-  **`1 stop`** under stopping workflows. `lf task auto off` still stops `fix`
-  before `cmd: land --wait-and-fix` (`stopped_landing`, `graph.rs:907`).
+  inspects ops before the first stop and already labels `quick` as
+  **`merges without asking`** under `Run without stopping`. `lf task auto off`
+  still stops `quick` before `cmd: land --wait-and-fix` (`stopped_landing`,
+  `graph.rs:907`).
 
 ## Ownership map
 
@@ -225,7 +208,7 @@ longer than it is now (110 lines) with the new section in it.
     built. When a counterexample breaks the plan, note what broke in
     `scratch/plan.md` and return `advance` so review/realign can replan rather
     than iterating onto a broken plan.
-  - With no `scratch/plan.md` (the brief is the plan, e.g. `fix`): don't
+  - With no `scratch/plan.md` (the brief is the plan, e.g. `quick`): don't
     write one; judge first whether the brief is one bounded change, and if not
     (or contradicted) return `blocked` before building. Otherwise build it in
     one pass and `advance`. (qa: without "judge first" and "don't write one",
@@ -254,17 +237,10 @@ longer than it is now (110 lines) with the new section in it.
   scope… `scratch/questions.md`"; the generic half of "Write the tests"; the
   closing paragraph on staying in this checkout and starting no second Task.
   "Finish the slice by deleting" keeps its test-deletion rule.
-- Runs unchanged as a non-decider in `ui`, `optimize` and `.lf/graphs/*`;
+- Runs unchanged as a non-decider in `optimize` and `.lf/graphs/*`;
   `.lf/skills/implement.md` extends it and needs no edit.
 
-**`task/skill/demo.md`** — align `## Headless` with `ui.yaml` (where `demo` is
-now a loop decider under `auto on` / `lf -b`):
-- Keep "With nobody there, nobody can feel it... Don't act out a person's
-  reactions or invent feedback."
-- Add two lines for when standing in as a loop decider: inspect what `qa`
-  produced (`scratch/qa.html`, screenshots, transcripts); return `iterate` only
-  when promised UI behavior or visual quality is visibly broken, otherwise note
-  that no person tried it and `advance`.
+**`task/skill/demo.md`** — unchanged (reverted after builtin `ui.yaml` was removed).
 
 **`task/skill/verify.md`** — identical-tree fast path, placed before "Check
 headless first":
@@ -304,20 +280,20 @@ Tests (expected values change; no production Rust changes):
   `steps[4].sources == ["pursue", "build"]` still holds (step 4 is still sync).
 - `rust/loopflow-execution/src/graph/mod.rs:1542`: edges become
   `[("implement", 4), ("realign", 4)]`.
-- `rust/loopflow/src/lf/commands/graph.rs:1646`: add `fix` to the list with no
-  interactive step and `ui` to the list with one.
+- `rust/loopflow/src/lf/commands/graph.rs:1646`: add `quick` to the list with no
+  interactive step.
 - `rust/loopflow-execution/src/task_graph.rs:759` (concept-review placed in
   `plan` then `build`) holds unchanged.
 - `tests/goldens/builtin_implement.md`, `builtin_realign.md` (and any golden
-  covering `wave_session` or `demo` if present): regenerate with
+  covering `wave_session` if present): regenerate with
   `uv run python tests/goldens/update_goldens.py`.
 - DTO fixtures under `tests/fixtures/dto/` and Swift tests name no step order
   from these Graphs.
 
-Docs (written in `write-docs`; read before implementation and keep in sync with `ui.yaml` description):
-- `docs/orchestration.md`: updated the `build` listing and prose (`implement` decides inner loop, `realign` decides outer loop, `Decision pass` example says `back to sync`), updated `feature` listing comments, and added `ui` and `fix` to the Built-in Graphs table with examples and notes.
-- `docs/index.md` and `README.md`: replaced stale `auto` in the Built-in Graphs list with `ui`, `fix`; updated `docs/index.md` loop example to `sync → implement` inside `concept-review → realign`.
-- `docs/surfaces.md`: updated Start menu sample with `ui` (`1 stop`) under stopping workflows and `fix` (`merges without asking`) under `Run without stopping`, with a note on `merges without asking` and `lf task auto off`.
+Docs:
+- `docs/orchestration.md`: updated the `build` listing and prose (`implement` decides inner loop, `realign` decides outer loop, `Decision pass` example says `back to sync`), updated `feature` listing comments, and added `quick` to the Built-in Graphs table with example and note.
+- `docs/index.md` and `README.md`: replaced stale `auto` in the Built-in Graphs list with `quick`; updated `docs/index.md` loop example to `sync → implement` inside `concept-review → realign`.
+- `docs/surfaces.md`: updated Start menu sample with `quick` (`merges without asking`) under `Run without stopping`, with a note on `merges without asking` and `lf task auto off`.
 - `docs/work.md`: replaced "`realign` keeps plan, code, and memory in sync" with `wave-session` curating Wave `MEMORY.md`.
 - `swift/README.md:407`: read and kept (still true: `concept-review` runs in both `plan` and `build`).
 
@@ -330,33 +306,22 @@ Docs (written in `write-docs`; read before implementation and keep in sync with 
    change. Passed over: putting `## Wave memory` in `wave_operate.md` as the
    brief drafted, which creates a self-contradiction in `wave-operate` and
    duplicate `MEMORY.md` rules inside `wave-session`.
-2. **`ui.yaml` drops `pr-publish` before `deliver` and puts `cmd: sync` before
-   `implement`.** `deliver`'s `gate` already publishes after `reflect` (avoiding
-   an extra LLM step and a cancelled CI run), and syncing before `implement`
-   matches `build`, `fix`, and `deep-clean` while avoiding mid-loop conflicts
-   after a long human demo pause. Passed over: keeping `pr-publish` and
-   `implement → cmd: sync` as drafted.
-3. **`demo.md` headless mode inspects `scratch/qa.html` when standing in as a
-   loop decider.** Makes `lf task auto on` / Auto-Ship on `ui` deterministic
-   and consistent with `ship-review` and `stand_in_message`. Passed over:
-   leaving `demo.md` unedited (which clashes with `stand_in_message`) or
-   blocking Auto-Ship on `ui`.
-4. **`implement` broken-plan rule keys off `scratch/plan.md` presence.**
+2. **`implement` broken-plan rule keys off `scratch/plan.md` presence.**
    `implement` cannot see what steps follow its loop in the Graph. With
    `scratch/plan.md` (`build`), it notes what broke and advances to
-   review/realign; without `scratch/plan.md` (`fix`), it returns `blocked` so
+   review/realign; without `scratch/plan.md` (`quick`), it returns `blocked` so
    broken work never proceeds to `qa → gate → land`. Passed over: letting
    `implement` rewrite the pass list and iterate, or asking it to guess Graph
    topology.
-5. **`verify` compares `git diff <qa head> <merge SHA> -- . ':!scratch'`.**
+3. **`verify` compares `git diff <qa head> <merge SHA> -- . ':!scratch'`.**
    Comparing `<qa head>` (not `<final PR head>`) catches post-`qa` edits by
    `gate`/`sync`/`land`; comparing `<merge SHA>` (not moving `origin/main`)
    avoids false diffs from later PRs; excluding `scratch/` keeps `lf scratch
    clear` on `land` from breaking the fast path on every PR.
-6. **`fix` merges with no interactive step.** Matches the brief; Desktop's
-   Start menu already warns `merges without asking`, and `lf task auto off`
-   still stops before `land`. Passed over: adding `interactive: verify` at the
-   end.
+4. **`quick` merges with no interactive step.** Matches the brief and
+   ship-review revision; Desktop's Start menu already warns `merges without
+   asking`, and `lf task auto off` still stops before `land`. Passed over:
+   adding `interactive: verify` at the end.
 
 ## Known costs of the new order
 
@@ -364,20 +329,18 @@ Docs (written in `write-docs`; read before implementation and keep in sync with 
   findings. Product-level problems qa finds go to `scratch/qa.html`, which
   `ship-review` gathers; in `pursue` (no `ship-review`) they reach a person
   through the PR.
-- `sync` runs before each `implement` (in `build`, `ui`, `fix`), so the final
+- `sync` runs before each `implement` (in `build` and `quick`), so the final
   pass is not synced before `compress` and `qa`. `gate` and
   `land --wait-and-fix` sync later.
-- In `ui`, `compress` runs after `interactive: demo`, so a refactor in
-  `compress` is checked by `gate` + CI (including headless view tests) rather
-  than re-demoed by a person.
-- `fix` has no interactive step, so `lf task run` merges as soon as checks
+- `quick` has no interactive step, so `lf task run` merges as soon as checks
   pass unless `lf task auto off` is set.
 
 ## Left out
 
-- `loop-or-next`, `qa`, `compress`, `gate`, `reflect`, `wave_operate` text.
+- `loop-or-next`, `qa`, `compress`, `gate`, `reflect`, `demo`, `wave_operate` text.
+- Builtin `ui` Graph (UI workflows belong in repo-specific `.lf/graphs/`).
 - This repository's `.lf/graphs/*` and `.lf/skills/*`.
-- Choosing `ui` or `fix` automatically from a Task's content; a person or Wave
+- Choosing `quick` automatically from a Task's content; a person or Wave
   default picks the Graph.
 - `.lf/wave/intelligence/MEMORY.md` (read-only here; its 2026-09-28 note that
   `realign` owns memory curation waits for a Wave session update).
@@ -392,7 +355,7 @@ Docs (written in `write-docs`; read before implementation and keep in sync with 
 
 Must survive: `concept-review` with a person (the page stands in for code
 review; nothing else changes unless asked); `realign` in `refresh`; `implement`
-as an ordinary step; `demo` interactive; `verify`'s three outcomes.
+as an ordinary step; `verify`'s three outcomes.
 
 ## Acceptance check at gate
 
@@ -403,7 +366,7 @@ env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') sh -c '
   tmp=$(mktemp -d) && git -C "$tmp" init -q &&
   (cd "$tmp" && "$PWD/target/debug/lf" graph show build &&
    "$PWD/target/debug/lf" graph show code &&
-   "$PWD/target/debug/lf" list graph | grep -E "^  (ui|fix) ")
+   "$PWD/target/debug/lf" list graph | grep -E "^  quick ")
 '
 grep -rnE "Linear|Loopflow Desktop|--host desktop" \
   rust/loopflow-definitions/src/builtins/task/skill/{kickoff,advance,write-docs}.md   # no output
@@ -413,14 +376,16 @@ uv run python scripts/test.py --reuse-passing \
 
 ## Passes
 
-One pass; it is prose, four YAML files, docs, and test expectations.
+One pass; it is prose, three YAML files, docs, and test expectations.
 
 - Built in one pass (`78bde1d766`), compressed (`c6eab6e222`), and QA'd (`73abaa380c`):
-  - Reordered `build.yaml` and `plan.yaml`; added `ui.yaml` (two-sentence description so Desktop's Start menu fits on one line, synced with `docs/surfaces.md`) and `fix.yaml`.
-  - Updated `concept-review.md`, `realign.md`, `wave_session.md`, `implement.md` (109 lines after QA tightening), `demo.md`, `verify.md`, `kickoff.md`, `advance.md`, `write-docs.md`, `ship-review.md`; regenerated `tests/goldens/builtin_{implement,realign}.md`.
-  - Updated Rust graph expectations in `compiled.rs` (including `fix` and `ui` cases and pinned return edges), `graph/mod.rs` (`edges()` reports relative offsets `1` and `3`, not absolute indices), `commands/graph.rs`, and `task_graph.rs:631` (`write-docs` shifted by +1 after `realign` joined `plan`).
-  - QA (`scratch/qa.html`) verified `lf graph show`, `lf list graph`, Desktop `StartFlow` labels, `lf help`, and real Claude haiku decider runs for `build`'s inner loop, `fix` bounded brief, read-only `concept-review`, and `fix` oversized brief (caught and fixed in `73abaa380c`: no-plan `implement` now blocks oversized briefs before writing any plan or code).
-- Remaining: none; the two post-build review findings below are applied.
+  - Reordered `build.yaml` and `plan.yaml`; added `quick.yaml` (originally `fix.yaml`).
+  - Updated `concept-review.md`, `realign.md`, `wave_session.md`, `implement.md` (109 lines after QA tightening), `verify.md`, `kickoff.md`, `advance.md`, `write-docs.md`, `ship-review.md`; regenerated `tests/goldens/builtin_{implement,realign}.md`.
+  - Updated Rust graph expectations in `compiled.rs`, `graph/mod.rs` (`edges()` reports relative offsets `1` and `3`, not absolute indices), `commands/graph.rs`, and `task_graph.rs:631` (`write-docs` shifted by +1 after `realign` joined `plan`).
+  - QA (`scratch/qa.html`) verified `lf graph show`, `lf list graph`, Desktop `StartFlow` labels, `lf help`, and real Claude haiku decider runs for `build`'s inner loop, bounded brief, read-only `concept-review`, and oversized brief (caught and fixed in `73abaa380c`: no-plan `implement` now blocks oversized briefs before writing any plan or code).
+- Post-build review (`02b9cf8f62`): clarified `realign.md` reversible-choice handoff and `verify.md` `<qa head>` pointer.
+- Ship-review revision: renamed `fix.yaml` to `quick.yaml` ("Build a small, clear change and land it."), removed builtin `ui.yaml` and reverted `demo.md`, and updated tests, docs, and PR #2047 copy.
+- Remaining: none.
 
 ## Post-build review findings
 
@@ -433,10 +398,11 @@ Recorded by post-build `concept-review` against base `23ce1a69f9` (`scratch/conc
 
 - **Update `.lf/wave/intelligence/MEMORY.md`:** read-only in a Task checkout; replace the 2026-09-28 entry ("`realign` now owns memory curation") with "`wave-session` owns memory curation" in an intelligence Wave session once LOO-1104 lands.
 - **Step-commit `-a` propagation (`scratch/qa.html` #1):** with `-a claude:haiku` and no `default_agent`, `lf commit --step` falls back to `lf <skill>: checkpoint`. Outside LOO-1104's scope; `.lf/qa/skills.md` documents the current behavior.
-- **Repo-local `.lf/graphs/pursue-auto.yaml` & automatic Graph selection:** separate outcomes outside this Task.
+- **Repo-local UI workflows, `.lf/graphs/pursue-auto.yaml` & automatic Graph selection:** separate outcomes outside this Task.
 
-Done when `lf list graph` shows `ui` and `fix` beside the reordered `build`
-and `plan`; `lf graph show code` runs `concept-review` and `realign` before
-`compress` and `qa`; a headless `concept-review` leaves `scratch/plan.md`
-untouched; `wave-session` is the single owner of Wave memory curation; `verify`
-has the `scratch`-excluded identical-tree fast path; and the gate check passes.
+Done when `lf list graph` shows `quick` beside the reordered `build`
+and `plan` (with no builtin `ui` or `fix`); `lf graph show code` runs
+`concept-review` and `realign` before `compress` and `qa`; a headless
+`concept-review` leaves `scratch/plan.md` untouched; `wave-session` is the
+single owner of Wave memory curation; `verify` has the `scratch`-excluded
+identical-tree fast path; and the gate check passes.

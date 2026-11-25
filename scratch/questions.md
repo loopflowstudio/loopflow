@@ -13,15 +13,7 @@ Reversible choices made for review (see `scratch/concept-review.html` for full c
    LOO-1104 ships: "Memory curation lives in builtin `wave-session`; `realign`
    reconciles plan and code and points to it (LOO-1104)."
 
-3. **`ui.yaml` drops `pr-publish` before `deliver` and runs `cmd: sync` before
-   `implement`.** `deliver`'s `gate` already publishes after `reflect`, and
-   syncing before `implement` avoids mid-loop conflicts after a human demo pause.
-
-4. **`ui` with auto on stands in at `demo` using `scratch/qa.html`.** `demo.md`
-   gains a two-line headless decider rule (inspect qa screenshots/transcripts,
-   iterate only if visibly broken, else note no person tried it and advance) so
-   Auto-Ship behaves deterministically rather than clashing with `stand_in_message`.
-
-5. **`fix` merges with no interactive step.** Matches the brief; Desktop's Start
-   menu already labels it `merges without asking`, and `lf task auto off` stops
-   before `land`.
+3. **`quick` merges with no interactive step.** Matches the brief and
+   ship-review revision (`fix` renamed to `quick`; `ui` removed from builtins);
+   Desktop's Start menu labels it `merges without asking`, and `lf task auto off`
+   stops before `land`.

@@ -624,26 +624,10 @@ mod tests {
                 &[(5, 4), (7, 4)],
             ),
             (
-                "fix",
+                "quick",
                 &["sync", "implement", "qa", "gate", "land --wait-and-fix"],
                 &[],
                 &[(1, 0)],
-            ),
-            (
-                "ui",
-                &[
-                    "kickoff",
-                    "sync",
-                    "implement",
-                    "qa",
-                    "demo",
-                    "compress",
-                    "reflect",
-                    "gate",
-                    "land --wait-and-fix",
-                ],
-                &[4],
-                &[(4, 1)],
             ),
             (
                 "deliver",

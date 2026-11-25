@@ -1,4 +1,4 @@
-description: Fix a bounded bug or small tweak and land it.
+description: Build a small, clear change and land it.
 steps:
 - loop:
     - cmd: sync

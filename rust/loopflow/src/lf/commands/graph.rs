@@ -1643,7 +1643,7 @@ mod tests {
     #[test]
     fn builtin_task_graphs_compile_and_name_their_interactive_steps() {
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        for name in ["task-design", "pursue", "queue", "deliver", "fix"] {
+        for name in ["task-design", "pursue", "queue", "deliver", "quick"] {
             let graph = loopflow_execution::graph::load_graph(name, &repo).unwrap();
             let items = loopflow_execution::graph::compile_graph(&graph, &repo).unwrap();
             assert!(
@@ -1653,7 +1653,7 @@ mod tests {
                 "{name} has an interactive step"
             );
         }
-        for name in ["feature", "code", "research", "ui"] {
+        for name in ["feature", "code", "research"] {
             let graph = loopflow_execution::task_graph::CapturedGraph::load(name, &repo)
                 .unwrap()
                 .unwrap_or_else(|| panic!("{name} is a builtin graph"));

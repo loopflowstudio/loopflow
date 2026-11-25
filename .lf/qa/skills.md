@@ -34,7 +34,7 @@ run `lf -b --task <id> graph <name>` from the disposable Task checkout. Three
 rejected turns leave the Graph's diagnostic in `lf task status <id>`.
 
 To check a builtin loop decider's wording (`implement` in `build`'s inner loop
-and in `fix`), copy the loop into the fixture repository as
+and in `quick`), copy the loop into the fixture repository as
 `.lf/graphs/<name>.yaml` (`- loop:` over `- cmd: sync` and `- implement`) and
 run `lf -a claude:haiku graph <name> --batch '<brief>'` from a branch with a
 bare origin: no GitHub, a minute or two per pass. Read each pass's decision

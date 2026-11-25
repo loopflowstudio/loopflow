@@ -78,7 +78,7 @@ lf task run <ID> ship-api       # run a Task through it, pausing at design
 lf -b task run <ID> ship-api    # run every step headless to a merged PR
 ```
 
-Built-in Graphs (`feature`, `code`, `ui`, `fix`, `research`, `optimize`) work out of
+Built-in Graphs (`feature`, `code`, `quick`, `research`, `optimize`) work out of
 the box and are templates you can customize (`lf graph customize feature`).
 Extend built-in Skills with `extends: builtin` instead of forking them.
 

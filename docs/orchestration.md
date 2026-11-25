@@ -251,28 +251,22 @@ move on to `deliver`.
 ### Built-in Graphs
 
 ```bash
-lf task run LOO-12 ui       # builds, runs qa, then stops at demo so you can try the UI
-lf task run LOO-13 fix      # builds from the brief, runs qa and gate, and lands when CI passes
+lf task run LOO-13 quick    # builds from the brief, runs qa and gate, and lands when CI passes
 ```
 
 | Graph | What it does |
 |---|---|
 | `feature` | `explore` (interactive) → `plan` → `build` ↔ `ship-review` (interactive) → `deliver` → `verify` (interactive) |
 | `code` | Same as `feature`, starting at `plan` (default when no Graph is configured) |
-| `ui` | `kickoff` → loop(`sync` → `implement` → `qa` → `demo` (interactive)) → `compress` → `deliver` |
-| `fix` | loop(`sync` → `implement`) → `qa` → `gate` → `land --wait-and-fix` |
+| `quick` | loop(`sync` → `implement`) → `qa` → `gate` → `land --wait-and-fix` |
 | `pursue` | `plan` then `build` with no interactive stops: request to published PR |
 | `research` | Investigate and report findings without opening a PR |
 | `optimize` | Iterative measure → change → keep/revert loop |
 
-`ui` puts a Desktop, mobile, or web UI change in front of you at `demo` after
-each `qa` pass; iterate sends your notes back to `sync` → `implement` (with auto
-on, `demo` inspects `scratch/qa.html` and iterates only if visibly broken).
-`fix` takes a bounded bug or small tweak straight from the brief to a merged PR
-with no interactive step—Desktop's Start menu marks it **merges without
-asking**, and `lf task auto off <ID>` still pauses before `land`. A brief
-bigger than one bounded change stops `fix` at `implement`, blocked, before
-anything is built.
+`quick` takes a small, clear change straight from the brief to a merged PR with
+no interactive step—Desktop's Start menu marks it **merges without asking**, and
+`lf task auto off <ID>` still pauses before `land`. A brief bigger than one
+bounded change stops `quick` at `implement`, blocked, before anything is built.
 
 Copy any builtin to customize it for your team:
 

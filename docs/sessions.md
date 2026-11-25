@@ -67,9 +67,14 @@ from saved history. Binding a running standalone conversation to a Task
 (`lf session bind <session> --task LOO-12`) moves it onto the Task's lifetime
 without restarting it.
 
-After cleanup, `lf session list` shows `closed 12:01 (15 minutes without a viewer)`,
-`closed 12:01 (Task completed)`, or `closed 12:01 (Task abandoned)`, followed by
-the command to reopen it. Quitting the provider yourself shows `quit 12:01`.
+A closed Task, Wave or repository conversation stays in `lf session list` as
+`closed 12:01 (Task completed)` or `closed 12:01 (Task abandoned)`, followed by
+the command to reopen it; quitting its provider yourself shows `quit 12:01`.
+
+A standalone conversation finishes when you `/exit` or when cleanup closes it,
+and leaves `lf session list`. Read it with `lf session card <session>`, find it
+with `lf session history search`, and reopen it with `lf resume <session>`: the saved
+screen ends with `closed 12:01 (15 minutes without a viewer)`.
 
 A standalone Skill keeps running when you detach. When its provider exits
 successfully, the launcher checkpoints any edits it owns and records completion.

@@ -102,31 +102,28 @@ The captured Graph supplies the label and primary action. Continuing from ship-r
 
 ## Concept-review pass (post-V4c, at `06bf0c058d`)
 
-Full review of Task pause, Working groups, automatic `verify`, and V4c workflow controls against stack base `3d57e2cdf1` (`scratch/concept-review.html`). The pause lifecycle, OS-session stop, open primary conversation, Working groups, automatic `verify`, and conflict refusals align. The review identified four mismatches in the V4c controls and smart-unpause contract:
+`scratch/concept-review.html` found four mismatches in the V4c controls. The
+Rust halves landed in `deccc41ce6` (next section): one `resumes_on_unpause`
+predicate in `task_graph.rs` shared by `TaskGraph::read` and `unpause(run: true)`,
+`WorkflowAction::Wait` at an auto-off landing stop, `Pausing: <step>`, and
+`Paused/Stopped in {label} at {at}`. Kept the `task.unpause { run: bool }` wire
+shape rather than a third mode; `lf task unpause && lf task run` stays the
+explicit way past a human step.
 
-1. **Single owner for smart unpause in Rust (`task_graph.rs` + `ops::task::pause::unpause` + `engine::task::unpause`), plus landing-stop honesty.**
-   - *Experience & model:* Unpausing from a play button or sidebar menu lifts the hold and resumes **only** when the Task's saved position is runnable automatic work (`At { start }`, no Graph row yet, or `Run { .. }` with a valid cursor place). At an interactive step (`ship-review`), a landing stop with `auto: off`, or `end`, unpause only lifts the hold — never skipping a human step, never bouncing off `stopped_landing()`, and never erroring at `end`. Bare `lf task unpause` always lifts without running.
-   - *Choice made for review:* Keep the existing `task.unpause { directory, issue, run: bool }` wire shape and make `run: true` (`lf task unpause --run` and app play/sidebar Unpause) position-aware in Rust, rather than adding a third wire mode (`lift | resume | run`) or keeping `WorkModel.unpause`'s client-side `taskPane` pre-fetch. Passed over: letting `lf task unpause --run` skip an interactive step (a trap on stale client state; `lf task unpause && lf task run` remains explicit).
-   - *Across layers:*
-     - `rust/loopflow-execution/src/task_graph.rs`: define one shared position predicate (`resumes_on_unpause`) used by both `TaskGraph::read` and `ops::task::pause::unpause`.
-     - At a landing stop (`At { step }`, non-start, non-end, non-interactive, `auto == Some(AutoState::Off)`):
-       - Paused: `resumes_on_unpause == false`, `WorkflowControl { action: WorkflowAction::Unpause, label: "Paused: <step>" }`, matching `sentence` (`"Paused at <step>. \`lf task unpause\` lifts the hold."`).
-       - Unpaused: `sentence = "Waiting at <step>: auto is off."` and `WorkflowControl { action: WorkflowAction::Wait, label: "Waiting: <step>" }` — disabled primary button with help pointing to `Auto`, while `Start from…` and the `Auto` toggle beside it stay enabled (so clicking `▶` never launches a no-op carrier that bounces off `stopped_landing()`).
-     - `rust/loopflow-execution/src/ops/task/pause.rs` & `rust/loopflow-execution/src/engine/task.rs`: the detached unpause reads the cursor under admission, releases the hold and carries the run only when the saved position resumes. Otherwise it returns null.
-     - `swift/LoopflowMac/WorkModel.swift` & `TaskWorkView.swift`: delete `WorkModel.unpause(_:)`'s async `query.taskPane` pre-fetch; sidebar context menu, Dashboard tile menu, and `⌘/` send `.resume` directly through `PendingChanges` (instant optimistic update, blip retry, zero stale-client skip).
-     - `swift/Loopflow/Design/TaskWorkflowControls.swift`: show `"Unpause without running"` only when `actions.control?.action == .resume` (when `▶` would actually resume running, not when `▶` already only lifts the hold).
-     - Update `docs/work.md`, `docs/surfaces.md`, `tests/fixtures/dto/` (`WorkflowAction::Wait` in schema/fixtures), and Rust/Swift tests.
+The Swift halves remain (Remaining 1):
 
-2. **Rust stays the single owner of `WorkflowControl` after PR merge (never disguise failed/stopped `verify` as `Done`).**
-   - Remove the `else if completeReady && graph.control.action == .run` override in `swift/Loopflow/Design/TaskActions.swift`.
-   - `completeReady` (`row.lifecycle == .done || row.pr?.phase == .merged || graph?.control.action == .done`) owns the accented **Complete (`✓`)** button; Rust's `graph.control` owns the workflow pill. A failed, interrupted, or plain-unpaused post-merge `verify` stays `▶ | Run: verify` so it stays visible and retryable, while `Complete (✓)` stays accented beside it.
-
-3. **Honest in-flight pause/unpause labels (`Pausing: <step>`, `Pausing…`, `Unpausing…`).**
-   - `rust/loopflow-execution/src/task_graph.rs`: when `pause == Some(PauseStage::Stopping)` or (`pause.is_some()` && `run.running`), format `WorkflowControl.label` as `"Pausing: <step>"` instead of `"Paused: <step>"` (matching `sentence` `"Pausing at …"` and `run_control.pausing`).
-   - `swift/Loopflow/Design/TaskActions.swift` & `TaskWorkflowControls.swift`: when `pending` is set (`"Pause requested"` / `"Unpause requested"`) while `graphHeld != held`, show `"Pausing…"` (with pause icon) / `"Unpausing…"` instead of flashing `▶ | Reading…`.
-
-4. **Align `sentence` and `control.label` inside composed Graphs (QA finding #1).**
-   - `rust/loopflow-execution/src/task_graph.rs`: when `label != at` on a paused or stopped `Run`, format `"Paused in {label} at {at}. \`lf task unpause --run\` resumes it."` and `"Stopped in {label} at {at}. \`lf task run\` starts it again."` (matching `"{label} is running {at}."`).
+- `swift/LoopflowMac/WorkModel.swift:2769`: `WorkModel.unpause(_:)` still
+  pre-fetches `query.taskPane`. Delete it; sidebar menu, Dashboard tile menu
+  and `⌘/` send unpause with `run: true` straight through `PendingChanges`.
+  Rust now decides whether it runs.
+- `swift/Loopflow/Design/TaskActions.swift:45`: delete the
+  `completeReady && graph.control.action == .run` override. `completeReady`
+  owns the accented Complete; Rust's `graph.control` owns the pill, so a
+  failed or interrupted post-merge verify stays `▶ | Run: verify`.
+- `swift/Loopflow/Design/TaskWorkflowControls.swift:47`: show
+  "Unpause without running" only when `actions.control?.action == .resume`.
+- `TaskWorkflowControls.swift:58`: while a pause/unpause write is pending,
+  show "Pausing…" / "Unpausing…" instead of `Reading…`.
 
 ## Position-aware unpause
 

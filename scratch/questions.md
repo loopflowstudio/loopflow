@@ -9,3 +9,10 @@
 - A delegated Skill keeps its launcher inside the held PTY to run its ordinary
   completion and checkpoint. The original invocation carries whether it owns
   that checkpoint across the relay, which otherwise looks like a new caller.
+
+- A retired chat reads `died 20:47 (exit 137); lf resume … opens it` in
+  `lf session list`: retirement SIGKILLs the held group (`held.rs` `retire`,
+  shared with shell Close and Task cleanup) and `session_ending` calls every
+  non-0/130 exit a death. Saying "closed after 15 minutes without a viewer"
+  needs the end's reason recorded with the Session; left for a decision, not
+  patched in QA.

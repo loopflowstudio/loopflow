@@ -1,0 +1,25 @@
+<!doctype html><meta charset="utf-8"><title>LOO-1097 QA: held agy chats</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:900px;margin:2em auto;padding:0 1em}pre{background:#111;color:#ddd;padding .8em;overflow-x:auto;font-size:12px}td,th{border-bottom:1px solid #ddd;padding:.3em .6em;text-align:left;vertical-align:top}table{border-collapse:collapse}.ok{color:#176d2c}.bad{color:#a11}</style>
+<h1>LOO-1097 QA: held <code>agy</code> chats across viewers</h1>
+<p>Branch <code>lf 0.16.0+71ec3fe53</code>, real <code>agy</code> 1.5.16 (Gemini 4 Neon), private <code>LF_HOME=/tmp/lf-qa-1097/home</code>, repository under <code>~/lfq-1097</code>. Views are PTYs driven by <code>pty.fork()</code>, rendered with pyte. 2026-11-24, 20:29–20:53.</p>
+<table>
+<tr><th>Scenario</th><th>What I did</th><th>What I saw</th></tr>
+<tr><td>Typed chat is held</td><td>View A: <code>lf -a agy</code> in the main checkout, server running</td><td class=ok><code>agy</code> (PID 41839) is a child of the private <code>lf holder run</code>; A's PTY runs <code>lf session attach --terminal …</code>. <code>lf session list</code>: <b>Open here</b>. The chat runs in <code>repo.agent</code>.</td></tr>
+<tr><td>Draft across viewers</td><td>Typed "Reply with only the word PELICAN" in A, unsent; opened B with <code>lf resume &lt;session&gt;</code></td><td class=ok>B shows the draft. B appended " and nothing else", Enter: both views show <code>PELICAN</code>. Same PID.</td></tr>
+<tr><td>Server restart mid-view</td><td>Killed the private server, started it again, typed "…OSPREY" + Enter in A</td><td class=ok>Both views got <code>OSPREY</code>; PID unchanged.</td></tr>
+<tr><td>Detach / close tab</td><td>Ctrl+] in A; dropped B's PTY master</td><td class=ok>A: "Detached from “repo.agent”; it keeps running. Return with: lf resume …". Both viewers exit, <code>agy</code> stays; action reads <b>Reconnect</b>.</td></tr>
+<tr><td>Reopen as shell history does</td><td><code>lf resume -a agy</code> in <code>repo.agent</code></td><td class=ok>Attaches to PID 41839 with full scrollback.</td></tr>
+<tr><td>Desktop's open path</td><td><code>lf session resume --prepare --json</code></td><td class=ok><code>open_argv</code> = <code>lf session resume &lt;id&gt;</code>, action <b>Open here</b>: the same view a PTY gets. Mounted Desktop pane not opened (headless run).</td></tr>
+<tr><td>Held Skill, viewers swap, commit</td><td>View D: <code>lf default 'Create NOTE.txt … HERON' -a agy</code> in a <code>lf wt create</code> worktree; E joined, D detached, E quit (Esc, Ctrl+C ×2)</td><td class=ok>Holder child is the <code>lf default</code> launcher with <code>agy</code> under it. E prints "Left “Create file NOTE.txt”. Continue with: lf resume …"; <code>124737f lf default: checkpoint</code> holds NOTE.txt.</td></tr>
+<tr><td>Reopen a quit Skill chat</td><td>View G: <code>lf resume &lt;session&gt;</code></td><td class=ok>Holder starts <code>agy --conversation c6f15018…</code>; history on screen.</td></tr>
+<tr><td>No server fallback</td><td>Stopped server; <code>lf default '… EGRET' -a agy</code></td><td class=ok><code>agy</code> is the PTY's own child (unheld); quit commits <code>f002b10</code> and prints agy's own "agy --conversation=…" line.</td></tr>
+<tr><td>Idle retirement</td><td>Left both chats and the seed Task's conversation (<code>lf resume --task … -a agy</code>) unviewed</td><td>Chat 1: last view left 20:32:53, gone 20:47:57. Skill chat: 20:36:07 → 20:51:57. Task conversation still running at 16m52s, <b>Reconnect</b>. Reopening chat 1 restarted <code>agy --conversation</code> with PELICAN/OSPREY on screen. <span class=bad>List reads <code>died 20:47 (exit 137)</code> for the retirement.</span></td></tr>
+<tr><td>Wrong input</td><td><code>lf resume session_doesnotexist</code></td><td class=ok>"Session session_doesnotexist was not found"</td></tr>
+</table>
+<h2>Fixed</h2><p>Nothing in code. Added "Shared terminal chats" to <code>.lf/qa/held-terminals.md</code>.</p>
+<h2>Works now</h2><p>A typed <code>agy</code> chat or Skill opened in a second terminal is a view of the same process: drafts, answers, detach, server restart, reopen and Skill checkpoint all hold.</p>
+<h2>Not reached</h2><ul><li>A mounted Desktop pane and a real Rex pane: no display in this headless run. The wire path (<code>open_argv</code>, <code>session attach</code>) was exercised; the Swift side is unchanged.</li></ul>
+<h2>Still wrong, worst first</h2><ol>
+<li>A retired chat reads <code>died HH:MM (exit 137)</code>: retirement SIGKILLs the group and <code>session_ending</code> calls any exit other than 0/130 a death. Needs the end's reason recorded (in <code>scratch/questions.md</code>).</li>
+<li>Pre-existing, on the direct path too: the Skill checkpoint's message writer prints <code>load error: No agent selected…</code> when the launch passed <code>-a agy</code> and no default agent is set; it still commits with a fallback message.</li>
+</ol>

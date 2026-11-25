@@ -90,3 +90,20 @@ and prefixes the last argument, lf's remote command, with `. <remote env>;`.
 remote-TTY view is `ssh -tt <host> '<env>; lf resume --task <id>'`; read the
 stand-in's log over SSH. Stop the remote server by `lsof -t` on its store,
 then its `lf holder run`, and delete the directory: that disk is nearly full.
+
+# Shared terminal chats
+
+With the private server running, a typed `lf -a agy` (or `lf default '…' -a
+agy`) is held: `pgrep -P <holder>` shows `agy` (a Skill shows its `lf
+<skill>` launcher, with `agy` under it) and the PTY runs `lf session attach
+--terminal …`. From a main checkout the chat runs in a `<repo>.agent`
+worktree. Stop the server first and the same command runs `agy` as the PTY's
+child instead. A second view is `lf resume <session>` in another PTY; a typed,
+unsent draft shows in both, and Enter from either answers in both with the
+same `agy` PID. Detach with Ctrl+] (`\x1d`); closing a tab is dropping the PTY
+master (kill the driver, not the viewer). `lf session list --all` reads
+**Open here** while a view is open and **Reconnect** after. An unviewed
+standalone chat retires about 15 minutes after its last view leaves (the
+minute pass); a Task's conversation stays. Drive views with a `pty.fork()`
+driver reading keys from a FIFO, render with `pyte` at the view's width, and
+grep the raw bytes when two widths garble the render.

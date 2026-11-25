@@ -1,0 +1,8 @@
+description: Build a small, clear change and land it.
+steps:
+- loop:
+    - cmd: sync
+    - implement             # the brief is the plan; decides: more to build, or done
+- qa
+- gate
+- cmd: land --wait-and-fix

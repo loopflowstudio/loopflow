@@ -1302,21 +1302,20 @@ mod tests {
 
     #[tokio::test]
     async fn native_skill_precedes_request_and_clipboard_without_continuation_replay() {
-        use crate::skills::catalog::{SkillDialect, SkillSource};
+        use crate::skills::catalog::SkillCatalog;
         use crate::skills::invocation::SkillInvocation;
 
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("SKILL.md");
+        let skill_dir = directory.path().join(".codex/skills/probe");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let path = skill_dir.join("SKILL.md");
         let source = "---\nname: probe\ndescription: Inspect the supplied asset\n---\nRead ./asset.txt before answering.\n";
         std::fs::write(&path, source).unwrap();
-        std::fs::write(directory.path().join("asset.txt"), "Native asset.").unwrap();
-        let skill = SkillSource {
-            name: "probe".into(),
-            path: Some(path.clone()),
-            dialect: SkillDialect::Codex,
-        }
-        .load()
-        .unwrap();
+        std::fs::write(skill_dir.join("asset.txt"), "Native asset.").unwrap();
+        let skill = SkillCatalog::load(Some(directory.path()), None, false)
+            .unwrap()
+            .load_skill("probe")
+            .unwrap();
         let request = "Find the bug.\n\n<lf:clipboard>\nPasted evidence.\n</lf:clipboard>";
         let (events, _events) = mpsc::unbounded_channel();
         let mut harness = Driver::new(

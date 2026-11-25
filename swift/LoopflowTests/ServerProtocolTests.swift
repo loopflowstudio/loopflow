@@ -376,13 +376,18 @@ struct ServerProtocolTests {
         guard case .response(_, _, .array(let entries)) = try answer("skill_entries") else {
             Issue.record("Missing skill.list result"); return
         }
-        #expect(entries.count == 3)
-        // A repository skill that extends its builtin says so; the others carry no mark.
+        #expect(entries.count == 4)
+        // Repository skills report their builtin relation and any `extends:` target.
         let marks = entries.map { entry -> JSONValue? in
             if case .object(let fields) = entry { return fields["builtin"] }
             return nil
         }
-        #expect(marks == [.null, .string("extends"), .null])
+        #expect(marks == [.null, .string("extends"), .null, .null])
+        let parents = entries.map { entry -> JSONValue? in
+            if case .object(let fields) = entry { return fields["extends"] }
+            return nil
+        }
+        #expect(parents == [.null, .string("lf:qa"), .string("implement"), .null])
 
     }
 

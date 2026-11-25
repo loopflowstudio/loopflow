@@ -13,15 +13,15 @@ subsystem, a surface, a directory, recent work. In a Wave with no request, it
 is what the Wave's goal says it owns. Otherwise it is the whole codebase.
 
 "We did a lot of work on accounts lately" names an area, not a diff. Find the
-PRs that did the work, see which part of the product or infrastructure they
+PRs that did the work, see which part of the system or infrastructure they
 kept touching, and widen to the next cohesive whole. Work on that whole: the
 PRs may have been patches on a larger problem. Open the output by naming the
 area you took.
 
 ## Method
 
-1. **Know what the product values.** Use the list `reduce` wrote if it is
-   here; otherwise write the handful of behaviors this product exists for and
+1. **Know what the project values.** Use the list `reduce` wrote if it is
+   here; otherwise write the handful of behaviors this codebase exists for and
    what is questionable even though it works.
 2. **Build the worklist mechanically.** Every function, method, class, field,
    parameter and command in the area, with its production callers and its
@@ -54,7 +54,7 @@ run. It is done when every flag is deleted or kept with its reason.
 
 "Is this called?" is too weak. Code can be called, tested and documented and
 still produce behavior nobody cares about. The test is whether it serves
-something the product values.
+something the project values.
 
 Keeping carries the burden. A kept item needs one line: a valued behavior, an
 API the docs teach, a framework entry point, a reader for data people already

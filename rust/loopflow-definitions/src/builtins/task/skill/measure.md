@@ -44,4 +44,6 @@ last kept commit, including anything the change motivated. Simplicity counts: an
 equal number with less code is a keep, and a tiny gain that adds real complexity
 is not. Add one row to the table in `scratch/measure.html` either way: commit,
 value, verdict, hypothesis, limiter. Keep it one self-contained page, with the
-latest verdict above the table.
+latest verdict above the table. When the repository has a visual language (a
+design system, the app, its docs, internal tools), borrow its palette, type
+and layout.

@@ -10,9 +10,9 @@ whether the change is right. This is not a code review and not a go/no-go.
 
 **Gather what exists before writing anything.**
 
-- `scratch/plan.md`: what was to be built, what remains, choices agents made.
-- `scratch/concept-review.html`: what the review found, and what it put
-  outside this PR.
+- `scratch/plan.md`: what was to be built, what remains, choices agents made,
+  and `## Deferred findings` written by `realign`.
+- `scratch/concept-review.html`: the review page behind those findings.
 - What `qa` used and saw, and what it says is still wrong.
 - `git log` against the base: each step's commit says what that step changed.
 - `scratch/questions.md`: what was left open.
@@ -22,7 +22,9 @@ whether the change is right. This is not a code review and not a go/no-go.
 write it as `lf help tour` describes.
 
 **Write `scratch/ship-review.html`.** One self-contained file, readable in
-light and dark, in this order:
+light and dark, borrowing the repository's palette, type and layout when it
+has a visual language (a design system, the app, its docs, internal tools), in
+this order:
 
 1. What ships, in the person's terms: what they will do differently and what
    they will see, with real output.

@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Status: built (`78bde1d766`), compressed (`c6eab6e222`), QA'd (`73abaa380c`), reviewed (`scratch/concept-review.html`), post-build review findings applied (`02b9cf8f62`), ship-review revisions applied (`4cb640f3f6`: `fix` renamed to `quick`; builtin `ui` removed), generic design-wording pass applied (`b1d9ac2819`), QA'd again (`684bbae383`), concept-reviewed again (`5ec9a261ef`), named skill inheritance (`extends: <name>` / `extends: lf:<name>`) built (`b51d7711a8`), compressed (`be73184b3b`), QA'd (`00c7f89698`), post-build concept-reviewed (`scratch/concept-review.html`), and review mismatches fixed (`093386a924`). Remaining: none — ready for review/gate.
+Status: built (`78bde1d766`), compressed (`c6eab6e222`), QA'd (`73abaa380c`), reviewed (`scratch/concept-review.html`), post-build review findings applied (`02b9cf8f62`), ship-review revisions applied (`4cb640f3f6`: `fix` renamed to `quick`; builtin `ui` removed), generic design-wording pass applied (`b1d9ac2819`), QA'd again (`684bbae383`), concept-reviewed again (`5ec9a261ef`), named skill inheritance (`extends: <name>` / `extends: lf:<name>`) built (`b51d7711a8`), compressed (`be73184b3b`), QA'd (`00c7f89698`), post-build concept-reviewed (`scratch/concept-review.html`), review mismatches fixed (`093386a924`), and ship-reviewed headless (`scratch/ship-review.html`; headless concept-review reply fixed in `363e38759c`). Remaining: gate (PR #2047 conflicts with main; CI skipped).
 
 
 A Task on `code`, `feature`, `pursue` or `redesign` runs `compress` and `qa`
@@ -415,7 +415,7 @@ One pass; it is prose, three YAML files, docs, and test expectations.
 - **Drop temporary `extends: builtin` alias and migrate `.lf/skills/*.md` (LOO-1107):** filed as `LOO-1107` (`task_ef922f96c6bd42a98d0ffc556c93e554`) to run once LOO-1104 ships past `lf` 0.16.0.
 - **Update `.lf/wave/intelligence/MEMORY.md`:** read-only in a Task checkout; replace the 2026-09-28 entry ("`realign` now owns memory curation") with "`wave-session` owns memory curation" in an intelligence Wave session once LOO-1104 lands.
 - **Step-commit `-a` propagation (`scratch/qa.html` #1):** with `-a claude:haiku` and no `default_agent`, `lf commit --step` falls back to `lf <skill>: checkpoint`. Outside LOO-1104's scope; `.lf/qa/skills.md` documents the current behavior.
-- **Headless `concept-review` closing voice (`scratch/qa.html`):** a headless run ended its chat reply asking a person to answer by number and letter; the page stayed read-only. Wording polish, separate outcome.
+- **Headless `concept-review` closing voice (`scratch/qa.html`):** fixed at ship-review (`363e38759c`).
 - **Repo-local UI workflows, `.lf/graphs/pursue-auto.yaml` & automatic Graph selection:** separate outcomes outside this Task.
 
 Done when `lf list graph` shows `quick` beside the reordered `build`

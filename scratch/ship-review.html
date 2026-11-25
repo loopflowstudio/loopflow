@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LOO-1104 ship review</title>
+<style>
+:root { color-scheme: light dark; --bg:#fbfbf9; --fg:#1c1c1a; --mute:#6a6a64; --line:#deded8; --code:#f1f1ec; --acc:#2b6cb0; --warn:#a15c00; }
+@media (prefers-color-scheme: dark) { :root { --bg:#161615; --fg:#e8e8e3; --mute:#9a9a92; --line:#33332f; --code:#20201e; --acc:#7fb2ec; --warn:#e2a54a; } }
+body { background:var(--bg); color:var(--fg); font:16px/1.55 -apple-system, system-ui, sans-serif; max-width:920px; margin:2.5rem auto; padding:0 1.25rem; }
+h1 { font-size:1.6rem; margin-bottom:.2rem; } h2 { margin-top:2.4rem; border-bottom:1px solid var(--line); padding-bottom:.3rem; }
+.sub { color:var(--mute); }
+pre { background:var(--code); border:1px solid var(--line); border-radius:6px; padding:.9rem 1rem; overflow-x:auto; font:14.5px/1.45 ui-monospace, Menlo, monospace; }
+code { font-family:ui-monospace, Menlo, monospace; font-size:.92em; }
+table { border-collapse:collapse; width:100%; margin:.6rem 0; } td, th { border-top:1px solid var(--line); padding:.5rem .5rem; vertical-align:top; text-align:left; }
+th { font-weight:600; } .tag { font-weight:600; } .fix { color:var(--acc); } .drop { color:var(--mute); } .task { color:var(--warn); }
+ol.q > li { margin-bottom:.9rem; } ol.q ol { list-style:lower-alpha; margin-top:.3rem; }
+.cols { display:grid; grid-template-columns:1fr 1fr; gap:1rem; } @media (max-width:720px){ .cols{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<h1>LOO-1104: review before polish, a <code>quick</code> Graph, one owner per skill</h1>
+<p class="sub">PR <a href="https://github.com/loopflowstudio/loopflow/pull/2047">#2047</a> · branch at <code>363e38759c</code> · written headless; nobody has answered the questions below yet.</p>
+
+<h2>1. What ships</h2>
+<p><code>compress</code> and <code>qa</code> now run once, after <code>concept-review</code> and <code>realign</code> settle the design, instead of every outer pass. Over 14 days, 70% of qa spend and 74% of compress spend was followed by more implement passes. On the branch <code>lf</code>:</p>
+<div class="cols">
+<pre>$ lf graph show build
+cmd: sync
+implement
+concept-review
+realign
+compress
+qa
+pr-publish</pre>
+<pre>$ lf graph show quick
+cmd: sync
+implement
+qa
+gate
+cmd: land --wait-and-fix</pre>
+</div>
+<pre>$ lf list graph
+  build    loop(loop(cmd: sync → implement) → concept-review → realign) → compress → qa → pr-publish
+  plan     kickoff → concept-review → realign → write-docs
+  quick    loop(cmd: sync → implement) → qa → gate → cmd: land --wait-and-fix
+  code     plan → loop(loop(build → ship-review (interactive)) → deliver → verify (interactive))</pre>
+<p>Desktop's Start menu lists it under <em>Run without stopping</em>:</p>
+<pre>quick    Build a small, clear change and land it    merges without asking</pre>
+
+<p>Each builtin skill in the loop now has one job:</p>
+<table>
+<tr><th>Skill</th><th>Now</th></tr>
+<tr><td><code>concept-review</code></td><td>Writes only <code>scratch/concept-review.html</code>, everywhere. Never edits the plan, never decides a loop.</td></tr>
+<tr><td><code>realign</code></td><td>The only step that turns findings into plan changes; decides <code>build</code>'s outer loop; files separate outcomes under <code>## Deferred findings</code>.</td></tr>
+<tr><td><code>implement</code></td><td>Decides the inner loop. Collapses each finished pass to one line with its commit. With no plan (<code>quick</code>), blocks an oversized brief before writing anything.</td></tr>
+<tr><td><code>wave-session</code></td><td>Owns Wave <code>MEMORY.md</code> curation (moved out of <code>realign</code>).</td></tr>
+<tr><td><code>verify</code></td><td>Skips rebuilding <code>main</code> when <code>git diff &lt;qa head&gt; &lt;merge SHA&gt; -- . ':!scratch'</code> is empty and post-merge CI is green.</td></tr>
+</table>
+
+<p>Skills can extend each other by name. From QA (<code>scratch/qa.html</code>):</p>
+<pre>$ lf list skill
+  implement   .lf/skills/implement.md, extends lf:implement
+  gate        .lf/skills/gate.md, extends lf:gate         # file says extends: builtin
+  qa          .lf/skills/qa.md, extends base-qa           # base-qa → lf:qa
+  selfie      unavailable: no builtin skill is named "selfie"
+  loopa       unavailable: skill inheritance cycle: loopa -> loopb -> loopa</pre>
+<p><code>lf skill customize &lt;name&gt;</code> now writes <code>extends: lf:&lt;name&gt;</code>. A native Claude/Codex parent gives a Loopflow child only its body and description; <code>agent: Explore</code> and <code>context: fork</code> stay behind.</p>
+
+<h2>2. How to try it</h2>
+<pre>cd /Users/jack/src/loopflow.adb4bf-reorder-build-plan
+cargo build -p loopflow
+tmp=$(mktemp -d) &amp;&amp; git -C "$tmp" init -q &amp;&amp; cd "$tmp"
+$OLDPWD/target/debug/lf graph show code     # concept-review, realign before compress, qa
+$OLDPWD/target/debug/lf list graph          # quick present; no fix, no ui
+$OLDPWD/target/debug/lf skill customize qa  # writes extends: lf:qa</pre>
+<p>To feel <code>quick</code> on a real Task: <code>lf task create '&lt;small change&gt;'</code>, then <code>lf task auto off &lt;ID&gt;</code> if you want it to stop before landing, then <code>lf task run &lt;ID&gt; quick</code>.</p>
+
+<h2>3. What might surprise you</h2>
+<ul>
+<li><b>The Task grew a second feature.</b> Named skill inheritance (<code>catalog.rs</code>, +704/−130, the bulk of the Rust diff) landed inside a Task titled for Graph order. It was added as a later pass and went through its own build, compress, QA and review.</li>
+<li><b><code>quick</code> merges with no stop.</b> <code>lf task run</code> on it lands once checks pass. Desktop says <em>merges without asking</em>; <code>lf task auto off</code> stops before <code>land</code>.</li>
+<li><b><code>concept-review</code> never sees qa's findings</b> in <code>build</code>, because qa now runs after it. Design problems qa finds reach you through <code>scratch/qa.html</code> here at ship-review; in <code>pursue</code> (no ship-review) only through the PR.</li>
+<li><b>The last implement pass isn't synced before compress and qa.</b> <code>sync</code> leads each inner pass; <code>gate</code> and <code>land --wait-and-fix</code> sync later.</li>
+<li><b>Wave memory curation sits in <code>wave_session.md</code>, not <code>wave_operate.md</code></b> as the brief drafted, because <code>wave_operate.md</code> says Wave files are not its to change.</li>
+<li><b><code>lf list skill</code> prints the resolved parent</b> (<code>extends lf:implement</code>) rather than what the file says (<code>extends: implement</code> or <code>extends: builtin</code>).</li>
+<li><b>This repo's <code>.lf/skills/*.md</code> still say <code>extends: builtin</code></b> so released <code>lf</code> 0.16.0 keeps reading them; LOO-1107 removes the alias.</li>
+<li><b>Fixed here at ship-review:</b> <code>concept-review.md</code> now says that with nobody there the questions stay on the page and the reply gives its path (<code>363e38759c</code>). A headless run had ended its chat reply asking a person to answer by number and letter.</li>
+</ul>
+
+<h2>4. Findings left outside the PR</h2>
+<table>
+<tr><th>Finding</th><th>Proposal</th></tr>
+<tr><td>Temporary <code>extends: builtin</code> alias; repo skills still use it.</td><td class="task"><span class="tag">Own Task, already filed:</span> LOO-1107, after this ships past 0.16.0.</td></tr>
+<tr><td><code>.lf/wave/intelligence/MEMORY.md</code> (2026-09-28) still says <code>realign</code> owns memory curation. Read-only in this checkout.</td><td><span class="tag">Not filed:</span> one-line edit for the next intelligence Wave session after merge. Proposed text in <code>scratch/questions.md</code> #2.</td></tr>
+<tr><td><code>lf commit --step</code> ignores run-level <code>-a</code> and commits <code>lf &lt;skill&gt;: checkpoint</code> when the home has no <code>default_agent</code>.</td><td class="drop"><span class="tag">Drop:</span> only bites private test homes; written up in <code>.lf/qa/skills.md</code>.</td></tr>
+<tr><td>Headless <code>concept-review</code> reply asked a person to answer.</td><td class="fix"><span class="tag">Fixed here:</span> <code>363e38759c</code>.</td></tr>
+<tr><td>Cycle error names the file where the walk closed (<code>loopb.md</code> when listing <code>loopa</code>).</td><td class="drop"><span class="tag">Drop:</span> the chain in the message makes it findable.</td></tr>
+<tr><td>Repo-local UI Graph, <code>.lf/graphs/pursue-auto.yaml</code>, choosing <code>quick</code> automatically.</td><td class="drop"><span class="tag">Drop from this PR:</span> each is a separate outcome; none is clearly needed yet.</td></tr>
+<tr><td>PR #2047 shows <code>mergeStateStatus: DIRTY</code>; every CI job skipped.</td><td class="fix"><span class="tag">Next step:</span> <code>gate</code> syncs with <code>main</code>, resolves conflicts and starts CI.</td></tr>
+</table>
+
+<h2>5. Questions</h2>
+<ol class="q">
+<li>Named skill inheritance rides in this PR.
+  <ol><li>Keep it here (as built).</li><li>Split it into its own PR before landing.</li></ol></li>
+<li><code>quick</code> merging with no stop.
+  <ol><li>Keep zero stops (as built).</li><li>Add <code>interactive: verify</code> after land.</li></ol></li>
+<li>The stale line in <code>.lf/wave/intelligence/MEMORY.md</code>.
+  <ol><li>Edit it in the next intelligence Wave session (as proposed).</li><li>File a Task for it.</li></ol></li>
+<li><code>lf list skill</code> parent label.
+  <ol><li>Resolved target, <code>extends lf:implement</code> (as built).</li><li>The file's literal text.</li></ol></li>
+</ol>
+<p class="sub">Nobody answered at this step; it went on to delivery. All four are reversible after merge.</p>
+</body>
+</html>

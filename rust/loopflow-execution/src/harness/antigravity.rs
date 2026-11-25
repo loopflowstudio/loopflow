@@ -594,7 +594,7 @@ fn prompt_empty(line: &str, row: usize, (cursor_x, cursor_y): (u16, u16)) -> boo
     let input = input.trim();
     input.is_empty()
         || (usize::from(cursor_y) == row
-            && usize::from(cursor_x) == line.find('>').unwrap_or(0) + 2
+            && cursor_x == 2
             && input.ends_with("(shift+tab to cycle)"))
 }
 

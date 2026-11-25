@@ -205,7 +205,7 @@ pub(super) async fn run() -> Result<()> {
             None
         }
     };
-    let wake_nudge = super::wake::start(terminals.clone());
+    let waker = super::wake::start(terminals.clone());
     let remote = super::remote::manage(
         super::mobile::configured(),
         remote_requests,
@@ -222,7 +222,7 @@ pub(super) async fn run() -> Result<()> {
         result = remote => result,
         _ = peers.expiring() => unreachable!("peer expiry runs until shutdown"),
         _ = tickets.expiring() => unreachable!("ticket expiry runs until shutdown"),
-        result = local(listener, instance, executable_sha256, slots, clients, remote_control, tickets.clone(), subscriptions, terminals, wake_nudge) => result,
+        result = local(listener, instance, executable_sha256, slots, clients, remote_control, tickets.clone(), subscriptions, terminals, waker) => result,
     }
 }
 
@@ -237,7 +237,7 @@ async fn local(
     tickets: Arc<Tickets>,
     subscriptions: Arc<Subscriptions>,
     terminals: Option<Arc<Registry>>,
-    wake_nudge: Option<super::wake::WakeNudge>,
+    waker: super::wake::Waker,
 ) -> Result<()> {
     loop {
         let (socket, _) = match listener.accept().await {
@@ -270,7 +270,7 @@ async fn local(
         let tickets = tickets.clone();
         let subscriptions = subscriptions.clone();
         let terminals = terminals.clone();
-        let wake_nudge = wake_nudge.clone();
+        let waker = waker.clone();
         tokio::spawn(async move {
             if let Err(error) = connection(
                 socket,
@@ -279,7 +279,7 @@ async fn local(
                 &clients,
                 Some(remote_control),
                 terminals.clone(),
-                wake_nudge,
+                waker,
                 tickets,
                 &slots,
                 &subscriptions,
@@ -302,7 +302,7 @@ pub(super) async fn connection(
     clients: &Clients,
     remote_control: Option<mpsc::Sender<Control>>,
     terminals: Option<Arc<Registry>>,
-    wake_nudge: Option<super::wake::WakeNudge>,
+    waker: super::wake::Waker,
     tickets: Arc<Tickets>,
     slots: &Arc<Semaphore>,
     subscriptions: &Arc<Subscriptions>,
@@ -349,7 +349,7 @@ pub(super) async fn connection(
                 Admission::Local,
                 tickets,
                 terminals,
-                wake_nudge,
+                waker,
                 subscriptions,
                 queue,
             )
@@ -596,7 +596,7 @@ pub(super) async fn session<C: Carrier>(
     admission: Admission,
     tickets: Arc<Tickets>,
     terminals: Option<Arc<Registry>>,
-    wake_nudge: Option<super::wake::WakeNudge>,
+    waker: super::wake::Waker,
     subscriptions: &Arc<Subscriptions>,
     mut queue: mpsc::Receiver<super::outbox::Frame>,
 ) -> Result<()> {
@@ -1010,13 +1010,12 @@ pub(super) async fn session<C: Carrier>(
                 } else {
                     None
                 };
-                let (request_id, instance, outgoing, remote_control, terminals, wake_nudge) = (
+                let (request_id, instance, outgoing, remote_control, waker) = (
                     id.clone(),
                     instance.clone(),
                     outgoing.clone(),
                     remote_control.clone(),
-                    terminals.clone(),
-                    wake_nudge.clone(),
+                    waker.clone(),
                 );
                 let uploaded_reservation = uploaded_reservation.take();
                 let task = tasks.spawn(async move {
@@ -1041,8 +1040,7 @@ pub(super) async fn session<C: Carrier>(
                         outgoing,
                         reservation,
                         remote_control,
-                        terminals,
-                        wake_nudge,
+                        waker,
                     )
                     .await;
                 });
@@ -1709,8 +1707,7 @@ async fn request(
     outgoing: Outbox,
     reservation: Arc<Reservation>,
     remote_control: Option<mpsc::Sender<Control>>,
-    terminals: Option<Arc<Registry>>,
-    wake_nudge: Option<super::wake::WakeNudge>,
+    waker: super::wake::Waker,
 ) {
     #[cfg(test)]
     let completion = tests::take_request_completion(&id);
@@ -1723,9 +1720,9 @@ async fn request(
     let started = Instant::now();
     let trace_id = loopflow_model::id::TraceId::default();
     let answer = match operation {
-        Operation::Server(ServerOperation::SessionBoundary(boundary)) => Answer::read(
-            session_boundary(boundary, reservation.clone(), terminals, wake_nudge).await,
-        ),
+        Operation::Server(ServerOperation::SessionBoundary(boundary)) => {
+            Answer::read(session_boundary(boundary, reservation.clone(), waker).await)
+        }
         operation => {
             operate(
                 operation,
@@ -2034,8 +2031,7 @@ async fn plan_here(
 async fn session_boundary(
     boundary: super::wire::SessionBoundary,
     reservation: Arc<Reservation>,
-    terminals: Option<Arc<Registry>>,
-    wake_nudge: Option<super::wake::WakeNudge>,
+    waker: super::wake::Waker,
 ) -> Result<serde_json::Value, Error> {
     let (answer, after) = tokio::task::spawn_blocking(move || {
         let _held = reservation;
@@ -2051,9 +2047,7 @@ async fn session_boundary(
     .map_err(unavailable)?;
     if let Some(after) = after {
         tokio::task::spawn_blocking(move || {
-            loopflow_execution::journal::request::isolate(|| {
-                super::boundary::after(after, terminals, wake_nudge)
-            })
+            loopflow_execution::journal::request::isolate(|| super::boundary::after(after, waker))
         });
     }
     serde_json::to_value(answer).map_err(unavailable)
@@ -2256,7 +2250,7 @@ mod tests {
                     &clients,
                     None,
                     None,
-                    None,
+                    crate::server::wake::Waker::default(),
                     tickets,
                     &slots,
                     &subscriptions,
@@ -2466,7 +2460,7 @@ mod tests {
             Arc::new(Tickets::default()),
             Arc::new(Subscriptions::default()),
             None,
-            None,
+            crate::server::wake::Waker::default(),
         );
         // A status probe checks that the listener answers without opening a
         // Machine registry as a hello would.
@@ -2975,7 +2969,7 @@ mod tests {
                 &Clients::default(),
                 None,
                 None,
-                None,
+                crate::server::wake::Waker::default(),
                 Default::default(),
                 &Arc::new(Semaphore::new(MAX_CONNECTIONS)),
                 &Arc::new(Subscriptions::default()),

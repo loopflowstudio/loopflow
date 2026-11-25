@@ -101,11 +101,9 @@ impl StoreChanges {
             std::thread::sleep(timeout.min(Duration::from_millis(100)));
             return;
         };
-        if !queue.watching_file() {
-            queue.attach(&self.wal);
-        }
+        let watching = queue.ensure_attached(&self.wal);
         let in_flight = self.written.is_some_and(|at| at.elapsed() < IN_FLIGHT);
-        let timeout = if !queue.watching_file() {
+        let timeout = if !watching {
             // No store yet. Its directory may not exist either, but still wait
             // on the kqueue so `StoreWaker::wake` returns immediately.
             timeout.min(Duration::from_millis(100))
@@ -115,7 +113,7 @@ impl StoreChanges {
             timeout
         };
         match queue.wait(timeout) {
-            macos::Waited::Quiet | macos::Waited::Woken => {}
+            macos::Waited::Quiet => {}
             macos::Waited::Written => self.written = Some(Instant::now()),
             // SQLite removes the log when its last connection closes; a
             // replaced file needs a new descriptor.
@@ -161,79 +159,78 @@ mod macos {
         file: Option<OwnedFd>,
     }
 
+    /// Apply one kevent change to `queue`.
+    fn apply(queue: &OwnedFd, change: libc::kevent) -> bool {
+        // SAFETY: `queue` is an open kqueue and `change` is a valid single-element changelist.
+        unsafe {
+            libc::kevent(
+                queue.as_raw_fd(),
+                &change,
+                1,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null(),
+            ) == 0
+        }
+    }
+
     impl Queue {
         pub(super) fn open() -> Option<Self> {
-            // SAFETY: `kqueue` returns a fresh descriptor checked below and
-            // owned once; `change` is a valid stack kevent registering
-            // `EVFILT_USER`.
-            unsafe {
-                let queue = libc::kqueue();
-                if queue < 0 {
+            // SAFETY: `kqueue` returns a fresh descriptor checked below and owned once.
+            let queue = unsafe {
+                let fd = libc::kqueue();
+                if fd < 0 {
                     return None;
                 }
-                let queue = Arc::new(OwnedFd::from_raw_fd(queue));
-                let change = libc::kevent {
-                    ident: USER_IDENT,
-                    filter: libc::EVFILT_USER,
-                    flags: libc::EV_ADD | libc::EV_CLEAR,
-                    fflags: 0,
-                    data: 0,
-                    udata: std::ptr::null_mut(),
-                };
-                let registered = libc::kevent(
-                    queue.as_raw_fd(),
-                    &change,
-                    1,
-                    std::ptr::null_mut(),
-                    0,
-                    std::ptr::null(),
-                );
-                (registered == 0).then_some(Self { queue, file: None })
-            }
+                Arc::new(OwnedFd::from_raw_fd(fd))
+            };
+            let change = libc::kevent {
+                ident: USER_IDENT,
+                filter: libc::EVFILT_USER,
+                flags: libc::EV_ADD | libc::EV_CLEAR,
+                fflags: 0,
+                data: 0,
+                udata: std::ptr::null_mut(),
+            };
+            apply(&queue, change).then_some(Self { queue, file: None })
         }
 
         pub(super) fn waker_fd(&self) -> Arc<OwnedFd> {
             Arc::clone(&self.queue)
         }
 
-        pub(super) fn watching_file(&self) -> bool {
-            self.file.is_some()
-        }
-
-        pub(super) fn attach(&mut self, wal: &Path) {
+        pub(super) fn ensure_attached(&mut self, wal: &Path) -> bool {
+            if self.file.is_some() {
+                return true;
+            }
             let Ok(path) = CString::new(wal.as_os_str().as_bytes()) else {
-                return;
+                return false;
             };
             // SAFETY: `path` is a valid C string; the opened descriptor is
-            // checked and owned once, and `self.queue` is an open kqueue.
-            unsafe {
-                let file = libc::open(path.as_ptr(), libc::O_EVTONLY | libc::O_CLOEXEC);
-                if file < 0 {
-                    return;
+            // checked below and owned once.
+            let file = unsafe {
+                let fd = libc::open(path.as_ptr(), libc::O_EVTONLY | libc::O_CLOEXEC);
+                if fd < 0 {
+                    return false;
                 }
-                let file = OwnedFd::from_raw_fd(file);
-                let change = libc::kevent {
-                    ident: file.as_raw_fd() as usize,
-                    filter: libc::EVFILT_VNODE,
-                    flags: libc::EV_ADD | libc::EV_CLEAR,
-                    fflags: libc::NOTE_WRITE
-                        | libc::NOTE_EXTEND
-                        | libc::NOTE_DELETE
-                        | libc::NOTE_RENAME,
-                    data: 0,
-                    udata: std::ptr::null_mut(),
-                };
-                let registered = libc::kevent(
-                    self.queue.as_raw_fd(),
-                    &change,
-                    1,
-                    std::ptr::null_mut(),
-                    0,
-                    std::ptr::null(),
-                );
-                if registered == 0 {
-                    self.file = Some(file);
-                }
+                OwnedFd::from_raw_fd(fd)
+            };
+            let change = libc::kevent {
+                ident: file.as_raw_fd() as usize,
+                filter: libc::EVFILT_VNODE,
+                flags: libc::EV_ADD | libc::EV_CLEAR,
+                fflags: libc::NOTE_WRITE
+                    | libc::NOTE_EXTEND
+                    | libc::NOTE_DELETE
+                    | libc::NOTE_RENAME,
+                data: 0,
+                udata: std::ptr::null_mut(),
+            };
+            if apply(&self.queue, change) {
+                self.file = Some(file);
+                true
+            } else {
+                false
             }
         }
 
@@ -270,9 +267,6 @@ mod macos {
                             return Waited::Gone;
                         }
                         outcome = Waited::Written;
-                    } else if event.filter == libc::EVFILT_USER && matches!(outcome, Waited::Quiet)
-                    {
-                        outcome = Waited::Woken;
                     }
                 }
                 outcome
@@ -289,25 +283,13 @@ mod macos {
             data: 0,
             udata: std::ptr::null_mut(),
         };
-        // SAFETY: `queue` is an open kqueue kept alive by the caller's `Arc`.
-        unsafe {
-            libc::kevent(
-                queue.as_raw_fd(),
-                &change,
-                1,
-                std::ptr::null_mut(),
-                0,
-                std::ptr::null(),
-            );
-        }
+        apply(queue, change);
     }
 
     /// How a wait on the log ended.
     pub(super) enum Waited {
-        /// The timeout passed with no event.
+        /// The timeout passed or `StoreWaker::wake` fired, with no WAL event.
         Quiet,
-        /// `StoreWaker::wake` fired.
-        Woken,
         Written,
         /// The watched file is gone and the watch must be reopened.
         Gone,

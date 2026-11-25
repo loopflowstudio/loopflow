@@ -1,4 +1,4 @@
-at: edfc41596f06d0f05247efeeb1225c776ed3fb2c
+at: 8d39d284f6c289690d763bb98fe659f01930a9d4
 first:
   - path: docs/sessions.md
     why: When open and reopened conversations hear steers across all five harnesses
@@ -9,17 +9,19 @@ first:
   - path: docs/dev/environment.md
     why: Per-harness caller-session environment markers cleared on launch
   - path: scratch/plan.md
-    why: Pass 1-4 history, probes, and held-terminal wake design
+    why: Passes 1–5 history, probes, and held-terminal wake design
   - path: rust/loopflow-harness/src/lib.rs
     why: Required caller markers, driver recognition, and sign-in advice
   - path: rust/loopflow-execution/src/harness/mod.rs
     why: Idle reach, reopen delivery, and empty-thread replay
   - path: rust/loopflow-terminal/src/ghostty_vt.rs
-    why: Bracketed paste mode and visible screen text on held terminals
+    why: Bracketed paste mode, cursor, and visible screen text
   - path: rust/loopflow-storage/src/sqlite/steers.rs
     why: Endpoints and held terminal IDs recorded for idle candidates
+  - path: rust/loopflow-storage/src/changes.rs
+    why: StoreWaker breaks StoreChanges::wait without a WAL write
   - path: rust/loopflow-execution/src/steer.rs
-    why: IdleReach::Terminal, shared WAKE_PROMPT, and endpoint selection
+    why: IdleReach::Terminal with PromptReady, WAKE_PROMPT, and endpoint selection
   - path: rust/loopflow-execution/src/harness/antigravity.rs
     why: Held-terminal idle reach, opening idle recording, and prompt_ready guard
   - path: rust/loopflow-execution/src/transport/input.rs
@@ -29,9 +31,11 @@ first:
   - path: rust/loopflow-execution/src/transport/registry.rs
     why: Registry::wake_idle_prompt dispatch on the held-terminals thread
   - path: rust/loopflow/src/server/wake.rs
-    why: Unified reach match, deferred retries, and unconditional 5-harness wake tests
+    why: Unified reach match, Waker boundary retries, and 5-harness wake tests
   - path: rust/loopflow/src/server/boundary.rs
-    why: Post-Stop held-terminal wake retries while the TUI redraws
+    why: Boundary follow-ups hand off idle wakes to wake::Waker
+  - path: rust/loopflow/src/server/service.rs
+    why: Threads server-owned wake::Waker into session boundaries
   - path: rust/loopflow-execution/src/harness/native_session.rs
     why: Waiting news starts the Antigravity prompt hook on reopen
   - path: rust/loopflow/tests/session_launch_contract.rs

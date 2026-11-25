@@ -117,6 +117,7 @@ reopen with nothing waiting has no `-i` and adds no `USER_INPUT` row. Wait
 for the answer line before Esc: an Esc while the model still reads the steer
 file interrupts the turn, and the steer still reads `delivered`. `lf comment <task>` names the Task,
 so the server starts the closed conversation itself with the same line.
+
 # Waking an open, idle conversation
 
 `lf task checkout <id> -a agy` starts the Task's conversation in a held

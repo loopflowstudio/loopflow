@@ -145,13 +145,13 @@ impl Fixture {
             ".lf/config.yaml",
             &format!("agent: {provider}\ndiff: false\ndiff_files: false\npaste: false\n"),
         );
-        for harness in ["claude", "codex", "opencode"] {
+        for harness in ["claude", "codex", "opencode", "agy"] {
             let script = fixture.home.path().join("bin").join(harness);
-            let source = if harness == "opencode" {
-                include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
-                    .replace("__WAIT__", "False")
-            } else {
-                r#"#!/usr/bin/python3
+            let source = match harness {
+                "opencode" => include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
+                    .replace("__WAIT__", "False"),
+                "agy" => include_str!("../../loopflow-execution/tests/support/agy_cli.py").into(),
+                _ => r#"#!/usr/bin/python3
 import json, os, sys, runpy
 from pathlib import Path
 args = sys.argv[1:]
@@ -1092,13 +1092,6 @@ fn a_reopened_antigravity_task_hears_repository_direction_once() {
     let home = fixture.home.path();
     let machine = home.join("machine");
     let _env = support::EnvGuard::with_lf_home(&[], &machine);
-    let script = home.join("bin/agy");
-    fs::write(
-        &script,
-        include_str!("../../loopflow-execution/tests/support/agy_cli.py"),
-    )
-    .unwrap();
-    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
     let task = support::register_task_without_pr(
         &machine,
         fixture.repo.path(),

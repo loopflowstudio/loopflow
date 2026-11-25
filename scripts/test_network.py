@@ -20,13 +20,9 @@ NETWORK_RULES = """(deny network*)
 
 
 def _installed_harnesses(arguments: list[str]) -> list[Path]:
-    # Only the application library's missing-CLI fixture needs the host's
-    # installations hidden. Cargo can run the whole test binary in one process.
+    # Hide host provider installations from the application library test binary
+    # so missing-CLI fixtures cannot fall through to them via lf's PATH repair.
     if Path(arguments[0]).name.rpartition("-")[0] != "loopflow":
-        return []
-    if "--exact" in arguments and not any(
-        arg.endswith("::a_step_that_cannot_launch_is_not_started_again") for arg in arguments
-    ):
         return []
     # lf restores these system tool directories even with a fixture PATH.
     paths = (

@@ -507,6 +507,10 @@ final class CodeReaderContainerView: NSView {
         scrollView = NSScrollView()
         textView = CodeReaderTextView(usingTextLayoutManager: true)
         super.init(frame: .zero)
+        // Since macOS 14 views don't clip by default, and AppKit hands the gutter dirty
+        // rects reaching past it; its background fill would paint over the Files header and rail.
+        clipsToBounds = true
+        gutterView.clipsToBounds = true
 
         textView.isInteractive = interactive
         textView.isEditable = false
@@ -997,7 +1001,9 @@ final class CodeReaderCoordinator {
         let clipBounds = scrollView.contentView.bounds
         let visibleHeight = clipBounds.height
         let visibleWidth = clipBounds.width
-        guard visibleWidth > 0, visibleHeight > 0 else {
+        // A newly mounted file resizes the gutter and scroll view in the next layout, which resets
+        // the clip view; `handleLayout` scrolls once those frames settle.
+        guard visibleWidth > 0, visibleHeight > 0, !container.needsLayout else {
             pendingScroll = (line, rangeInLine)
             return
         }
@@ -1008,6 +1014,13 @@ final class CodeReaderCoordinator {
         let insetY = textView.textContainerOrigin.y
         let lineHeight = fragment.textLineFragments.first?.typographicBounds.height ?? textView.defaultLineHeight
         let lineMidY = fragment.layoutFragmentFrame.minY + insetY + lineHeight / 2
+        // The text view keeps the previous file's height until TextKit's own viewport pass, and the
+        // clamp below would pin a far line to the top; TextKit sizes it when asked to reveal the line.
+        isProgrammaticScroll = true
+        defer { isProgrammaticScroll = false }
+        if textView.frame.height < lineMidY + visibleHeight / 2, let info = textView.lineIndex.line(at: line) {
+            textView.scrollRangeToVisible(NSRange(location: info.location, length: 0))
+        }
         let maxY = max(0, textView.frame.height - visibleHeight)
         let targetY = min(maxY, max(0, lineMidY - visibleHeight / 2))
 
@@ -1024,11 +1037,9 @@ final class CodeReaderCoordinator {
             }
         }
 
-        isProgrammaticScroll = true
         scrollView.contentView.scroll(to: CGPoint(x: targetX, y: targetY))
         scrollView.reflectScrolledClipView(scrollView.contentView)
         lastScrollY = scrollView.contentView.bounds.minY
-        isProgrammaticScroll = false
         container.gutterView.needsDisplay = true
         positionSlots(in: container)
     }
@@ -1074,6 +1085,8 @@ final class CodeReaderCoordinator {
 
     private func handleGutterSelect(line: Int, extend: Bool) {
         guard let store, let path = currentPath else { return }
+        // The gutter's line range replaces any text selection, which would otherwise shade the comment slot.
+        container?.textView.setSelectedRange(NSRange(location: 0, length: 0))
         store.comments.select(
             path: path,
             source: .file(draft: store.selectedDocument?.dirty == true),

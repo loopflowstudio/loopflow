@@ -183,6 +183,44 @@ enum QAHook {
             }
             event(.leftMouseUp, n[3], n[4]).map(window.sendEvent)
             return "dragged \(window.title)"
+        case "mousedown":
+            // `mousedown <window> <x> <y> [<x2> <y2>] [m|s…]`: queues the drag and release, then calls the hit view's
+            // own mouseDown. A window that isn't key otherwise eats the first press of an AppKit view that
+            // doesn't accept first mouse (the code reader's text and gutter).
+            var n = arg.split(separator: " ").map(String.init)
+            var flags = NSEvent.ModifierFlags()
+            if let last = n.last, Double(last) == nil {
+                for letter in last {
+                    switch letter {
+                    case "s": flags.insert(.shift)
+                    case "m": flags.insert(.command)
+                    default: break
+                    }
+                }
+                n.removeLast()
+            }
+            let v = n.compactMap(Double.init)
+            guard v.count == 3 || v.count == 5, windows.indices.contains(Int(v[0])) else { return "usage: mousedown window x y [x2 y2] [mods]" }
+            let window = windows[Int(v[0])]
+            let height = window.contentView?.frame.height ?? window.frame.height
+            let (x2, y2) = v.count == 5 ? (v[3], v[4]) : (v[1], v[2])
+            func event(_ type: NSEvent.EventType, _ x: Double, _ y: Double) -> NSEvent? {
+                NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: height - y), modifierFlags: flags,
+                                   timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                   context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+            }
+            if v.count == 5 {
+                for step in 1...12 {
+                    let t = Double(step) / 12
+                    event(.leftMouseDragged, v[1] + (x2 - v[1]) * t, v[2] + (y2 - v[2]) * t).map { NSApp.postEvent($0, atStart: false) }
+                }
+            }
+            event(.leftMouseUp, x2, y2).map { NSApp.postEvent($0, atStart: false) }
+            guard let down = event(.leftMouseDown, v[1], v[2]),
+                  let frame = window.contentView?.superview ?? window.contentView,
+                  let hit = frame.hitTest(frame.convert(down.locationInWindow, from: nil)) else { return "no view" }
+            hit.mouseDown(with: down)
+            return "mousedown \(type(of: hit))"
         case "size":
             let n = arg.split(separator: " ").compactMap { Double($0) }
             guard n.count == 3, windows.indices.contains(Int(n[0])) else { return "usage: size window w h" }

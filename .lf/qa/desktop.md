@@ -695,10 +695,18 @@ With the QA hook (see above): `field Find file|<text>` (or `Find in file`, `Sear
 checkout text`) types into the picker or Find bar, and `windowkey 0 - down|return|escape`
 drives the focused field. `click` presses Buttons (Read, Edit, Diff, the sidebar
 toggle; it toggles, so send it once). SwiftUI tap gestures never fire from the
-hook in a window that isn't key: gutter comment taps, rail and outline rows and
-the update bar's Open. Code-reader word clicks do: `tap <window> <x> <y> [m]`
-posts down and up through the event queue, where the reader's window monitor
-reads them (`m` holds ⌘; the definitions peek's rows then answer `click`).
+hook in a window that isn't key: rail and outline rows and the update bar's
+Open. `tap <window> <x> <y> m` (down and up through the event queue) is a
+code-reader ⌘-click; the definitions peek's rows then answer `click`. A plain
+press on the reader's text or gutter is AppKit's first click in an inactive
+window and never reaches the view; `mousedown <window> <x> <y> [<x2> <y2>] [s|m]`
+queues the drag and release and calls the hit view's own `mouseDown`, which
+drives drag-selection, gutter line picks and ⇧-click ranges. The comment card's
+field is matched by its placeholder (`field Comment on main.rs:L6 · working
+file|<text>`, then `windowkey 0 - return`); `desktop capture -p session` shows
+what Send to conversation typed, since `snap` draws no Ghostty pane.
+`desktop files <path>:<line>` from another file is the check for landing in a
+newly mounted long file (`scrolls` shows the clip's y).
 `field` matches a placeholder set as plain or attributed text. `snap` shows
 WebKit pages only right after a load and goes blank once the display sleeps;
 `web <png>` takes WebKit's own snapshot and writes body text and `scrollY` beside

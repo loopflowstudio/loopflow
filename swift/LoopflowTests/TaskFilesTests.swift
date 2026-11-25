@@ -416,6 +416,24 @@ struct TaskFilesTests {
         #expect(store.jumps.target == nil && store.jumps.peek == nil)
     }
 
+    @Test func jumpingIntoAnotherLongFileScrollsToTheMarkedLine() async throws {
+        let (window, container) = try hostCodeReader(TaskCodeReader(path: "short.rs", text: "fn main() {}\n", ready: {}))
+        defer { window.contentView = nil; window.close() }
+        let hosting = try #require(window.contentView as? NSHostingView<TaskCodeReader>)
+        let long = (1...3000).map { "let line\($0) = \($0);" }.joined(separator: "\n")
+        let visit = FileVisit(line: 2500, showsSource: true, highlight: .lines(2500...2500))
+
+        // The new file mounts and scrolls in the same update, before TextKit's own viewport pass.
+        hosting.rootView = TaskCodeReader(path: "long.rs", text: long, location: visit, ready: {})
+        _ = window.measureFrame {}
+
+        let clip = container.scrollView.contentView.bounds
+        let fragment = try #require(container.textView.layoutFragment(forLine: 2500))
+        let lineY = fragment.layoutFragmentFrame.midY + container.textView.textContainerOrigin.y
+        #expect(clip.minY > 0 && clip.minY <= lineY && lineY <= clip.maxY, "line 2500 at \(lineY), visible \(clip)")
+        #expect(container.textView.highlightedLines == IndexSet(integer: 2500))
+    }
+
     @Test(.requiresDisplay) func multiLineDragSelectsAcrossLinesNatively() async throws {
         let (store, _) = try readerShortcuts()
         let path = "Lines.swift"

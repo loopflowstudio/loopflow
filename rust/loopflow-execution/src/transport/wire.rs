@@ -240,11 +240,12 @@ pub enum Request {
         #[serde(skip_serializing_if = "Option::is_none")]
         ready: Option<String>,
     },
-    /// Bind the held terminal to the Session its direct child created without
-    /// handing off exit recording (for example, a Skill waiting to checkpoint).
+    /// The launcher waits for its provider and checkpoints the Skill. If
+    /// retirement ends them both, the host finishes the capture instead.
     BindSession {
         key: String,
         session: String,
+        on_retirement: Option<Box<crate::harness::native_exit::NativeExit>>,
     },
     /// Transfer the direct child's exit recording to its host before exec.
     ExitRecord {

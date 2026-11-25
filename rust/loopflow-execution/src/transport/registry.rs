@@ -278,6 +278,7 @@ struct Unsettled {
     terminal: TerminalId,
     place: Place,
     code: Option<u8>,
+    recording: Option<super::Settling>,
     retry_at: Instant,
 }
 
@@ -293,6 +294,7 @@ impl Unsettled {
             terminal,
             place: place.clone(),
             code,
+            recording: None,
             retry_at: Instant::now(),
         }
     }
@@ -640,6 +642,7 @@ impl Registry {
                     terminal,
                     place: place.clone(),
                     code: Some(exit.status()),
+                    recording: None,
                     retry_at: Instant::now(),
                 });
                 continue;
@@ -923,23 +926,19 @@ fn run(
             match pass {
                 Ok(Ok(Pass::Continue)) => {}
                 Ok(Ok(Pass::Ended(code, settling))) => {
-                    // Exit records still being written finish off this loop.
-                    if let Some(settling) = settling {
-                        std::thread::spawn(move || settling.linger());
-                    }
                     let code = (!entry.child.outcome_unknown()).then_some(code);
-                    ended.push((terminal.clone(), code));
+                    ended.push((terminal.clone(), code, settling));
                 }
                 Ok(Err(error)) => {
                     tracing::warn!(%error, %terminal, "held terminal pass failed; continuing")
                 }
                 Err(_) => {
                     tracing::error!(%terminal, "held terminal host panicked; its agent keeps running in the holder");
-                    ended.push((terminal.clone(), None));
+                    ended.push((terminal.clone(), None, None));
                 }
             }
         }
-        for (terminal, code) in ended {
+        for (terminal, code, recording) in ended {
             let Some(entry) = terminals.remove(&terminal) else {
                 continue;
             };
@@ -954,6 +953,7 @@ fn run(
                 terminal,
                 place: entry.place,
                 code,
+                recording,
                 retry_at: Instant::now(),
             });
         }
@@ -1010,10 +1010,11 @@ impl Entry {
         watchers: &Watchers,
     ) -> Result<Self> {
         let mut hosted = Hosted::new(terminal.clone(), control_key, waker.try_clone()?, watchers)?;
-        hosted.keep_in(place.terminal(terminal.as_str()));
+        let child = Source::new(place.clone(), terminal.clone(), pid, at);
+        hosted.keep_in(place.terminal(terminal.as_str()), &child);
         Ok(Self {
             hosted,
-            child: Source::new(place.clone(), terminal.clone(), pid, at),
+            child,
             place: place.clone(),
             nudge: None,
             reported: None,
@@ -1101,19 +1102,46 @@ fn exit_record_file(place: &Place, terminal: &TerminalId) -> PathBuf {
 /// directory is the receipt: it goes only once the store has the exit, so a
 /// store outage leaves it for the next attempt. Whether it is settled.
 fn settle(exit: &mut Unsettled) -> bool {
-    // An exit no server was hosting for still settles its launcher's record,
-    // once: the record goes before the terminal's end is written.
-    let file = exit_record_file(&exit.place, &exit.terminal);
-    if let Some(record) = super::hosted::read_kept::<crate::harness::native_exit::NativeExit>(&file)
+    // Keep the handoff on disk even if the viewer stopped waiting for its
+    // result. Another server can finish it if this one stops mid-write.
+    if exit
+        .recording
+        .as_ref()
+        .is_some_and(super::Settling::writing)
     {
-        use std::os::unix::process::ExitStatusExt;
-        // An end nobody saw reads as killed.
-        let status = exit.code.map_or(libc::SIGKILL, |code| i32::from(code) << 8);
-        crate::harness::native_exit::settle(&record, std::process::ExitStatus::from_raw(status));
-        super::hosted::remove_kept(&file);
+        exit.retry_at = Instant::now() + SETTLE_RETRY;
+        return false;
     }
-    let recorded = crate::journal::process_ledger()
-        .and_then(|store| store.end_terminal(&exit.terminal, exit.code));
+    let directory = exit.place.terminal(exit.terminal.as_str());
+    let retirement =
+        super::hosted::read_kept::<String>(&directory.join(super::hosted::RETIRE_REASON));
+    if exit.recording.is_none() {
+        let file = directory.join(super::hosted::EXIT_RECORD);
+        let skill = directory.join(super::hosted::SKILL_EXIT);
+        let record = super::hosted::read_kept::<crate::harness::native_exit::NativeExit>(&file)
+            .or_else(|| {
+                retirement.as_ref()?;
+                super::hosted::read_kept(&skill)
+            });
+        if let Some(record) = record {
+            use std::os::unix::process::ExitStatusExt;
+            let status = exit.code.map_or(libc::SIGKILL, |code| i32::from(code) << 8);
+            crate::harness::native_exit::settle(
+                &record,
+                std::process::ExitStatus::from_raw(status),
+                retirement.as_deref(),
+            );
+            super::hosted::remove_kept(&file);
+            super::hosted::remove_kept(&skill);
+        }
+    }
+    let code = if retirement.is_some() {
+        Some(0)
+    } else {
+        exit.code
+    };
+    let recorded =
+        crate::journal::process_ledger().and_then(|store| store.end_terminal(&exit.terminal, code));
     if let Err(error) = recorded {
         tracing::warn!(%error, terminal = %exit.terminal, "terminal exit not recorded; keeping its receipt");
         exit.retry_at = Instant::now() + SETTLE_RETRY;
@@ -1122,7 +1150,7 @@ fn settle(exit: &mut Unsettled) -> bool {
     if let Ok(mut client) = Client::connect(&exit.place) {
         let _ = client.forget(exit.terminal.as_str());
     }
-    remove_receipt(&exit.place.terminal(exit.terminal.as_str()));
+    remove_receipt(&directory);
     true
 }
 

@@ -291,7 +291,9 @@ sends `exit_record` (and a delegated Skill sends `bind_session`) over
 `held.sock` with the created Session ID; the server binds that Session in
 `Registry::live` and updates `meta.json` (and keeps an `exit_record` in
 `exit-record.json` until settlement, which server restarts also fall back to
-when `meta.session` is absent). The native client's announcement stays in
+when `meta.session` is absent). A Skill keeps its wait for checkpoint and
+completion. Its `bind_session` carries the same capture and attachment in
+`skill-exit.json` in case retirement ends the launcher. The native client's announcement stays in
 `native-client.json` until that client ends. A launcher that execs its
 provider never announces it again, so a server that takes the terminal up
 reads it there; without it a Desktop pane would stay paused waiting for
@@ -567,9 +569,10 @@ and records it the same way, settling the kept `exit-record.json` first; an
 end nobody saw settles it as killed. A server that takes up a running
 terminal takes up its kept record too.
 
-A quit returns the provider's own exit to its views within a second; exit
-records still waiting on a locked or refused store finish in the background or
-are lost, logged.
+A quit returns the provider's own exit to its views within a second. The
+terminal directory stays while the settlement worker finishes writing. A
+server that restarts during that wait can still read the handoff. A failed
+store write is logged.
 
 Native Claude prompt/stop hooks keep silent waits, background tasks and
 scheduled wakeups until Claude reports settlement. Terminal status counts only
@@ -640,7 +643,11 @@ has been attached for fifteen minutes and `terminal_retention` is clear (never
 interrupting an active turn or pending request), both `lf task retire` and the
 server's one-minute recovery pass close the held terminal with the notice
 “Session closed after 15 minutes without a viewer”. The host checks for a
-returning view or a fresh departure before delivering the notice. Binding a running
+returning view or a fresh departure before delivering the notice. It keeps the
+reason beside the terminal before ending the child. The host settles an intentional
+close as completed, including a Skill whose launcher also ended. Session status
+shows `closed HH:MM (<reason>)`. A new attachment clears the reason.
+Binding a running
 standalone conversation to a Task (`lf session bind`) sets `bound_at` and moves
 it onto open-Task lifetime without restarting it. For done Tasks, the grace starts no earlier than
 completion; a newly resumed, never-viewed conversation starts it at launch. A

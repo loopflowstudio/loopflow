@@ -82,12 +82,14 @@ pub(super) struct Hosted {
     announced: bool,
     attached: bool,
     viewing: lifetime::Viewing,
-    close_reason: CloseReason,
+    replaced: bool,
+    retirement: Option<String>,
     /// Wakes the host's descriptor wait from another thread.
     waker: UnixStream,
     settling: Option<Settling>,
     observed_hold: Option<ViewerHold>,
     exit_record: Option<Box<NativeExit>>,
+    skill_exit: Option<Box<NativeExit>>,
     /// The exec'd native client's attachment, checked off the byte path.
     attachment: Arc<lifetime::Client>,
     /// Where that client's conversation moved, once the watcher saw it go.
@@ -152,11 +154,13 @@ impl Hosted {
             announced: false,
             attached: false,
             viewing,
-            close_reason: CloseReason::Finished,
+            replaced: false,
+            retirement: None,
             waker,
             settling: None,
             observed_hold: None,
             exit_record: None,
+            skill_exit: None,
             attachment,
             departure: None,
             kept: None,
@@ -180,13 +184,18 @@ impl Hosted {
 
     /// Keep the launcher's exit record and native client in `directory`,
     /// taking up what an earlier server kept there.
-    pub fn keep_in(&mut self, directory: std::path::PathBuf) {
+    pub fn keep_in(&mut self, directory: std::path::PathBuf, child: &Source) {
         if let Some(record) = read_kept::<Box<NativeExit>>(&directory.join(EXIT_RECORD)) {
             self.attachment.set(Some(&record));
             self.exit_record = Some(record);
         }
         if let Some(started) = read_kept::<NativeStarted>(&directory.join(NATIVE_CLIENT)) {
             self.client = Some(native::NativeClient::new(started.exit, started.detach));
+        }
+        self.skill_exit = read_kept(&directory.join(SKILL_EXIT));
+        self.retirement = read_kept(&directory.join(RETIRE_REASON));
+        if self.retirement.is_some() {
+            child.retire();
         }
         self.kept = Some(directory);
     }
@@ -249,6 +258,7 @@ impl Hosted {
                 hint_due,
                 attached,
                 exit_record,
+                skill_exit,
                 attachment,
                 departure,
                 kept,
@@ -388,8 +398,18 @@ impl Hosted {
                                 *exit_record = Some(record);
                                 viewer.reply(answers, Reply::Accepted);
                             }
-                            Request::BindSession { key, session } if key == *control_key => {
+                            Request::BindSession {
+                                key,
+                                session,
+                                on_retirement,
+                            } if key == *control_key => {
                                 bind_session(&session);
+                                if let (Some(directory), Some(record)) =
+                                    (kept.as_ref(), &on_retirement)
+                                {
+                                    keep(&directory.join(SKILL_EXIT), record);
+                                }
+                                *skill_exit = on_retirement;
                                 viewer.reply(answers, Reply::Accepted);
                             }
                             Request::DropExitRecord { key } if key == *control_key => {
@@ -623,9 +643,7 @@ impl Hosted {
         // client's end; an exec'd launcher leaves that announcement to our wait.
         let status = child.exited().map(|ended| ended.status());
         if let Some(moved) = self.attachment.take_departure() {
-            if moved.moved && self.close_reason != CloseReason::Retired {
-                self.close_reason = CloseReason::Replaced;
-            }
+            self.replaced |= moved.moved;
             self.departure = Some(moved);
             if status.is_none() {
                 // SAFETY: kill reads no memory. The child is the native client
@@ -640,6 +658,10 @@ impl Hosted {
         if self.viewers.iter().any(|viewer| viewer.ending.is_some())
             || (status.is_some() && self.exit_record.is_some())
         {
+            // A returning Skill has already recorded its provider's own exit.
+            if self.retirement.is_none() && self.skill_exit.take().is_some() {
+                self.forget_kept(SKILL_EXIT);
+            }
             if let Some(ended) = self.client.take() {
                 self.forget_kept(NATIVE_CLIENT);
                 self.finish_client(ended, child, answering);
@@ -654,12 +676,17 @@ impl Hosted {
         }
         if let Some(status) = status {
             end_jobs(child, &self.id)?;
-            if let Some(record) = self.exit_record.take() {
+            let record = self.exit_record.take().or_else(|| {
+                self.retirement.as_ref()?;
+                self.skill_exit.take()
+            });
+            if let Some(record) = record {
                 self.settling = Some(Settling::spawn(
                     record,
                     status,
                     self.waker.try_clone()?,
                     self.departure.take(),
+                    self.retirement.clone(),
                 ));
             } else {
                 // A launch that died before reporting its client's end.
@@ -667,7 +694,12 @@ impl Hosted {
                     self.forget_kept(NATIVE_CLIENT);
                     self.deliver(1, &held, answering, Span::Aside { through: None });
                 }
-                self.exit = Some((provider_exit_code(status), Instant::now()));
+                let code = if self.retirement.is_some() {
+                    0
+                } else {
+                    provider_exit_code(status)
+                };
+                self.exit = Some((code, Instant::now()));
             }
         }
         let delivered = self.settling.as_mut().and_then(|settling| {
@@ -675,11 +707,7 @@ impl Hosted {
             Some((settled, settling.process.clone()))
         });
         if let Some((settled, process)) = delivered {
-            if settled.moved && self.close_reason != CloseReason::Retired {
-                self.close_reason = CloseReason::Replaced;
-            }
-            // Recorded, or past waiting for: a later server settles it no more.
-            self.forget_kept(EXIT_RECORD);
+            self.replaced |= settled.moved;
             for line in &settled.lines {
                 self.deliver(
                     1,
@@ -728,8 +756,15 @@ impl Hosted {
                     || (self.attached
                         && self.viewers.iter().all(|viewer| viewer.output.is_empty())))
             {
-                if !child.outcome_unknown() {
-                    close_viewers(&mut self.viewers, self.close_reason);
+                if self.retirement.is_some() || !child.outcome_unknown() {
+                    let reason = if self.retirement.is_some() {
+                        CloseReason::Retired
+                    } else if self.replaced {
+                        CloseReason::Replaced
+                    } else {
+                        CloseReason::Finished
+                    };
+                    close_viewers(&mut self.viewers, reason);
                 }
                 release_viewer_hold(&self.id, self.observed_hold);
                 snapshot::leave(&self.id, &self.output);
@@ -752,14 +787,20 @@ impl Hosted {
         let notice = closes
             .iter()
             .rev()
-            .find_map(|(_, _, text)| text.as_deref())
+            .find_map(|(_, _, text)| text.as_deref().map(|text| (text, text)))
             .or_else(|| {
-                (grace_elapsed && !closes.is_empty())
-                    .then_some("Session closed after 15 minutes without a viewer")
-            });
+                (grace_elapsed && !closes.is_empty()).then_some((
+                    "15 minutes without a viewer",
+                    "Session closed after 15 minutes without a viewer",
+                ))
+            })
+            .filter(|_| !child.drained() && self.retirement.is_none());
         let retiring = notice.is_some();
-        if let Some(text) = notice {
-            self.close_reason = CloseReason::Retired;
+        if let Some((reason, text)) = notice {
+            if let Some(directory) = &self.kept {
+                keep(&directory.join(RETIRE_REASON), &reason);
+            }
+            self.retirement = Some(reason.to_owned());
             self.deliver(
                 1,
                 format!("\r\n{text}\r\n").as_bytes(),
@@ -923,6 +964,9 @@ impl Hosted {
 
 /// The launcher's handed-off exit record, beside its held terminal.
 pub(super) const EXIT_RECORD: &str = "exit-record.json";
+/// A Skill whose launcher can only finish its capture on an ordinary exit.
+pub(super) const SKILL_EXIT: &str = "skill-exit.json";
+pub(super) const RETIRE_REASON: &str = "retire-reason.json";
 /// The launcher's native client announcement, beside its held terminal.
 const NATIVE_CLIENT: &str = "native-client.json";
 

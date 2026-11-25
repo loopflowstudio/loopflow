@@ -574,7 +574,7 @@ pub(super) fn attach_in(
     tx.execute(
         "UPDATE agent_sessions SET agent_process_id=?2,agent_launcher_lf_process_id=?3,
             agent_started_at=?4,agent_pid=NULL,agent_os_started_at=NULL,agent_ended_at=NULL,
-            agent_exit_code=NULL,agent_spawn_state='reserved',agent_command=NULL,
+            agent_exit_code=NULL,agent_end_reason=NULL,agent_spawn_state='reserved',agent_command=NULL,
             agent_interactive=interactive,agent_endpoint=NULL,agent_inbox=NULL,agent_socket=NULL,
             attachment_token=?5,attached_lf_process_id=?3,attached_pid=?6,
             attached_os_started_at=?7,attached_terminal_id=?8,
@@ -912,11 +912,18 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// The provider's own exit code, as the launcher that became it saw it.
-    pub fn record_agent_exit_code(&self, agent: &AgentProcessId, code: i32) -> StoreResult<()> {
+    /// Keep the first observed ending, including when a server replays a
+    /// receipt after the launcher has already settled this generation.
+    pub fn record_native_end(
+        &self,
+        agent: &AgentProcessId,
+        code: u8,
+        retired: Option<&str>,
+    ) -> StoreResult<()> {
         self.conn.lock().expect("store mutex poisoned").execute(
-            "UPDATE agent_sessions SET agent_exit_code=?2 WHERE agent_process_id=?1",
-            params![agent, code],
+            "UPDATE agent_sessions SET agent_exit_code=?2,agent_end_reason=?3
+             WHERE agent_process_id=?1 AND agent_exit_code IS NULL AND agent_end_reason IS NULL",
+            params![agent, retired.is_none().then_some(code), retired],
         )?;
         Ok(())
     }

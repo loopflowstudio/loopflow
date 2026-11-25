@@ -162,6 +162,7 @@ printf '%s:%s\n' "$$" "$LF_CAPTURE_KEY" >> "$HOME/launches"
 printf 'provider ready\n'
 while IFS= read -r line < /dev/tty; do
     [ "$line" != quit ] || exit 0
+    [ "$line" != crash ] || exit 7
     printf 'received %s\n' "$line"
 done
 "#,
@@ -340,6 +341,52 @@ read -r answer < /dev/tty
             .unwrap();
         assert!(!ended, "{terminal} ended");
     }
+    fn session_card(&self, session: &str) -> Value {
+        let output = self
+            .command(&["session", "card", session, "--json"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()["session"].clone()
+    }
+
+    fn assert_retired_chat(&self, session: &str, launch: &str) {
+        let card = self.session_card(session);
+        let line = card["status_line"].as_str().unwrap();
+        assert!(line.starts_with("closed "), "{line}");
+        assert!(
+            line.ends_with(&format!(
+                " (15 minutes without a viewer); `lf resume {session}` opens it"
+            )),
+            "{line}"
+        );
+        assert_eq!(card["outlook"]["kind"], "waiting_for_you");
+        assert_eq!(card["outlook"]["reason"], "15 minutes without a viewer");
+        assert!(card["ended"]["exit_code"].is_null());
+
+        let key = launch.split(':').nth(1).unwrap();
+        let capture =
+            loopflow_execution::session_record::record_dir(self.home.path(), key).unwrap();
+        let receipt: Value =
+            serde_json::from_slice(&std::fs::read(capture.join("terminal.json")).unwrap()).unwrap();
+        assert_eq!(receipt["outcome"], "completed");
+        let snapshot = std::fs::read(
+            self.home
+                .path()
+                .join("screens")
+                .join(format!("{session}.ghostsnp")),
+        )
+        .unwrap();
+        let (_, encoded) =
+            snapshot.split_at(snapshot.iter().position(|byte| *byte == b'\n').unwrap() + 1);
+        let screen = loopflow_terminal::ghostty_vt::Terminal::decode(encoded)
+            .unwrap()
+            .text()
+            .unwrap();
+        assert!(screen.contains("15 minutes without a viewer"), "{screen}");
+        assert!(!screen.contains("exited with 137"), "{screen}");
+    }
+
     /// Wait until a held terminal's exit is recorded.
     fn held_ends(&self, terminal: &str) {
         let deadline = Instant::now() + Duration::from_secs(20);
@@ -710,6 +757,8 @@ fn direct_chat_resumes_in_the_terminal_or_holder_as_the_server_becomes_available
     original.type_keys(b"quit\n");
     assert!(original.wait_exit().success());
 
+    assert_eq!(fixture.session_card(&session)["outlook"]["kind"], "quit");
+
     let mut local = launch(&["resume", &session]);
     local.wait_text("provider ready");
     let held: Option<String> = fixture
@@ -824,6 +873,8 @@ printf 'written after detach\n' > note.txt
     std::fs::write(fixture.home.path().join("finish"), "").unwrap();
     fixture.held_ends(&held);
 
+    assert_eq!(fixture.session_card(&session)["outlook"]["kind"], "quit");
+
     let note = Command::new("git")
         .current_dir(fixture.repo.path())
         .args(["show", "HEAD:note.txt"])
@@ -845,7 +896,8 @@ printf 'written after detach\n' > note.txt
 fn standalone_chat_retires_only_after_detach_and_turn_completion() {
     let fixture = Fixture::new();
     let server = fixture.machine_server();
-    let mut pane = fixture.chat(&fixture.agy(), &["-a", "agy", ":", "idle retirement"]);
+    let path = fixture.agy();
+    let mut pane = fixture.chat(&path, &["-a", "agy", ":", "idle retirement"]);
     pane.wait_text("provider ready");
     let session = session_of(&fixture.sql(), &fixture.launches(1)[0]);
     let held = fixture.terminal_of(&session);
@@ -891,7 +943,7 @@ fn standalone_chat_retires_only_after_detach_and_turn_completion() {
         SELECT id,agent_process_id,attachment_token,unixepoch(),0,1,0 FROM agent_sessions WHERE id=?1",
         [&session]).unwrap();
     expire();
-    let _restarted = fixture.machine_server();
+    let restarted = fixture.machine_server();
     sweep();
     fixture.assert_held_hosted(&held);
     sql.execute(
@@ -901,6 +953,42 @@ fn standalone_chat_retires_only_after_detach_and_turn_completion() {
     .unwrap();
     sweep();
     fixture.held_ends(&held);
+    fixture.assert_retired_chat(&session, &fixture.launches(1)[0]);
+
+    drop(restarted);
+    let mut resumed = fixture.chat(&path, &["resume", &session]);
+    resumed.wait_text("provider ready");
+    resumed.type_keys(b"crash\n");
+    resumed.wait_exit();
+    let card = fixture.session_card(&session);
+    assert_eq!(card["ended"]["exit_code"], 7);
+    let line = card["status_line"].as_str().unwrap();
+    assert!(
+        line.starts_with("died ") && line.contains("(exit 7)"),
+        "{line}"
+    );
+}
+
+#[test]
+fn retired_skill_settles_its_capture_when_the_launcher_cannot_return() {
+    let fixture = Fixture::new();
+    fixture.repo.create_file(".lf/skills/idle.md", "Wait here.");
+    let server = fixture.machine_server();
+    let mut pane = fixture.chat(&fixture.agy(), &["-a", "agy", "idle"]);
+    pane.wait_text("provider ready");
+    let launch = &fixture.launches(1)[0];
+    let session = session_of(&fixture.sql(), launch);
+    let held = fixture.terminal_of(&session);
+    pane.type_keys(b"\x1d");
+    assert!(pane.wait_exit().success());
+    drop(server);
+    fixture.sql().execute(
+        "UPDATE held_terminals SET viewed=0,viewer_hold='absent',viewer_hold_at=unixepoch()-960 WHERE id=?1",
+        [&held],
+    ).unwrap();
+    let _restarted = fixture.machine_server();
+    fixture.held_ends(&held);
+    fixture.assert_retired_chat(&session, launch);
 }
 
 #[test]

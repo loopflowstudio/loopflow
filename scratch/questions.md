@@ -32,3 +32,13 @@
 - A delegated Skill keeps its launcher inside the held PTY to run its ordinary
   completion and checkpoint. The original invocation carries whether it owns
   that checkpoint across the relay, which otherwise looks like a new caller.
+
+- A delegated Skill already prepares a NativeExit before binding its Session.
+  Keep that receipt for retirement, when the launcher cannot finish its own
+  capture. Record the ending against its agent generation. A terminal-only
+  UPDATE can hit a resumed fallback chat because held_terminal_id survives
+  reattachment.
+
+- Waited launches keep the provider's shell status. The foreground interrupt
+  flag also covers SIGHUP and SIGTERM. Rewriting all those exits to 130
+  would report an external kill as a quit.

@@ -559,7 +559,7 @@ fn session_ending(
     }
     let state = session_state(session);
     let closed = state == SessionState::Closed;
-    let end = session.agent_end.filter(|_| closed);
+    let end = session.agent_end.as_ref().filter(|_| closed);
     let ended = end.and_then(|end| {
         Some(SessionEnd {
             at: loopflow_harness::transcript::rfc3339(end.at)?,
@@ -567,15 +567,17 @@ fn session_ending(
         })
     });
     let quit = end.is_some_and(|end| quit_by_person(end.exit_code));
+    let retirement = end.and_then(|end| end.reason.as_deref());
     let task_primary = session.primary_scope.as_deref() == Some("task");
     let conversation = task_primary && !session.task_terminal && session.completed_at.is_none();
     let attempts = session.starts_since_turn;
-    let start = (conversation && !quit && attempts > 0).then(|| SessionStarts {
-        attempts,
-        last_started_at: session
-            .last_started_at
-            .and_then(loopflow_harness::transcript::rfc3339),
-    });
+    let start =
+        (conversation && !quit && retirement.is_none() && attempts > 0).then(|| SessionStarts {
+            attempts,
+            last_started_at: session
+                .last_started_at
+                .and_then(loopflow_harness::transcript::rfc3339),
+        });
     if is_running(state) {
         let status_line = match session.last_started_at.filter(|_| start.is_some()) {
             Some(at) => format!("running (started again {}, attempt {attempts})", clock(at)),
@@ -615,8 +617,9 @@ fn session_ending(
         .filter(|_| conversation || !task_primary);
     // One that never had an agent has no liveness to read: it is not Closed.
     let never_ran = session.agent_process_id.is_none() && ended.is_none();
-    let ending = match end {
-        Some(end) => format!(
+    let ending = match (end, retirement) {
+        (Some(end), Some(reason)) => format!("closed {} ({reason})", clock(end.at)),
+        (Some(end), None) => format!(
             "died {} ({})",
             clock(end.at),
             end.exit_code
@@ -624,8 +627,8 @@ fn session_ending(
                     "exit {code}"
                 ))
         ),
-        None if never_ran => "not started".to_string(),
-        None => "closed".to_string(),
+        (None, _) if never_ran => "not started".to_string(),
+        (None, _) => "closed".to_string(),
     };
     if ended.is_none() && failure.is_none() && !(never_ran && conversation) {
         // Nothing says why it is down: a recorded agent this Machine cannot
@@ -666,6 +669,7 @@ fn session_ending(
     let facts = crate::ops::recovery::DownConversation {
         here: conversation && session.in_task_checkout,
         exit_code: end.and_then(|end| end.exit_code),
+        retired: retirement.is_some(),
         starts_since_turn: attempts,
         last_started_at: session.last_started_at,
     };
@@ -694,6 +698,12 @@ fn session_ending(
         ServerStart::Left(_) => None,
     };
     let (kind, at, reason, mut line) = match (verdict, failure.filter(|_| never_ran)) {
+        (ServerStart::Left(Left::Retired), _) => (
+            SessionOutlookKind::WaitingForYou,
+            None,
+            retirement.map(str::to_owned),
+            ending,
+        ),
         (ServerStart::Left(Left::Quit), _) => (
             SessionOutlookKind::Quit,
             None,
@@ -781,7 +791,7 @@ pub(crate) fn left_reason(
         Left::OutOfStarts => Some(format!("started {starts} times")),
         Left::Elsewhere if of_task => Some("its Task is not checked out here".to_string()),
         // Not a Task's: nothing here ever starts it.
-        Left::Elsewhere | Left::Quit => None,
+        Left::Elsewhere | Left::Quit | Left::Retired => None,
         Left::NotClaimedHere => Some("its Task is not claimed on this Machine".to_string()),
         Left::NoServer => Some("no server runs here to start it".to_string()),
     }

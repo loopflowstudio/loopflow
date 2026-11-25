@@ -65,9 +65,6 @@ const COMMAND_ATTACH_TIMEOUT: Duration = Duration::from_secs(60);
 /// provider's own exit back. A locked or refused store never holds a quit.
 const SETTLE_WAIT: Duration = Duration::from_millis(800);
 
-/// How long a server that hosted an exit stays to finish its records.
-const SETTLE_LINGER: Duration = Duration::from_secs(20);
-
 /// The exit code a provider's status reports on its own.
 pub(crate) fn provider_exit_code(status: std::process::ExitStatus) -> u8 {
     use std::os::unix::process::ExitStatusExt;
@@ -94,6 +91,7 @@ impl Settling {
         status: std::process::ExitStatus,
         waker: UnixStream,
         departure: Option<Settled>,
+        retirement: Option<String>,
     ) -> Self {
         let process = format!(
             "lf/{}",
@@ -103,16 +101,25 @@ impl Settling {
                 .as_str()
                 .replace('-', "")
         );
+        let code = if retirement.is_some() {
+            0
+        } else {
+            provider_exit_code(status)
+        };
         let (sender, settled) = mpsc::channel();
         std::thread::spawn(move || {
-            let _ = sender.send(crate::harness::native_exit::settle(&record, status));
+            let _ = sender.send(crate::harness::native_exit::settle(
+                &record,
+                status,
+                retirement.as_deref(),
+            ));
             let _ = (&waker).write_all(&[1]);
         });
         Self {
             settled,
             since: Instant::now(),
             fallback: departure.unwrap_or_else(|| Settled {
-                code: provider_exit_code(status),
+                code,
                 moved: false,
                 lines: Vec::new(),
             }),
@@ -146,9 +153,10 @@ impl Settling {
         Some(settled)
     }
 
-    /// Give records still being written time to land before the host lets go.
-    fn linger(self) {
-        let _ = self.settled.recv_timeout(SETTLE_LINGER);
+    /// The viewer may already have its timeout result while the worker still
+    /// owns the receipt. A received result or a closed channel ends the wait.
+    fn writing(&self) -> bool {
+        matches!(self.settled.try_recv(), Err(mpsc::TryRecvError::Empty))
     }
 }
 
@@ -2561,6 +2569,7 @@ pub(crate) fn hand_exit_record(record: &NativeExit) -> Result<bool> {
         Request::BindSession {
             key: handoff.key.clone(),
             session: record.session.clone(),
+            on_retirement: Some(Box::new(record.clone())),
         }
     } else {
         Request::ExitRecord {
@@ -2606,7 +2615,7 @@ pub fn viewed(id: &TerminalId) -> Result<bool> {
     attachment(id).map(|(viewed, _)| viewed)
 }
 
-/// End a held terminal with `text` for its viewers. No decision is stored.
+/// Close the held terminal with the reason its viewers and Session will show.
 pub(crate) fn close_notice(id: &TerminalId, text: &str) -> Result<()> {
     request_close(id, Request::CloseNotice { text: text.into() })
 }
@@ -2990,7 +2999,7 @@ mod tests {
 
     #[test]
     fn slow_exit_recording_keeps_an_already_observed_move() {
-        let (_sender, settled) = std::sync::mpsc::channel();
+        let (sender, settled) = std::sync::mpsc::channel();
         let mut settling = super::Settling {
             settled,
             since: std::time::Instant::now() - super::SETTLE_WAIT,
@@ -3007,6 +3016,9 @@ mod tests {
         assert!(outcome.moved);
         assert_eq!(outcome.lines, ["This conversation moved to tmux %9"]);
         assert!(settling.poll().is_none());
+        assert!(settling.writing());
+        drop(sender);
+        assert!(!settling.writing());
     }
 
     #[test]

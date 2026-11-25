@@ -685,7 +685,9 @@ fn run_client(
         }
     };
     if let Some(owner) = owned {
-        if let Err(error) = crate::harness::native_exit::record_exit(owner) {
+        // The shell status retains SIGINT (130) and external kills alike.
+        let code = crate::transport::provider_exit_code(status);
+        if let Err(error) = crate::harness::native_exit::record_exit(owner, code, None, false) {
             tracing::warn!(%error, "cannot record the provider's exit");
         }
     }

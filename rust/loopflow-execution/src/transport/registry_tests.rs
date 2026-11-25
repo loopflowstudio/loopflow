@@ -466,6 +466,41 @@ fn an_exit_record_kept_while_no_server_ran_is_settled_by_the_next_one() {
     second.close();
 }
 
+/// The holder observed a kill while no server was there to finish retirement.
+#[test]
+fn a_saved_retirement_settles_as_closed_when_the_server_returns() {
+    let _ledger = TestLedgerGuard::new();
+    let store = crate::journal::process_ledger().unwrap();
+    let place = Place::of(BUILD).unwrap();
+    let terminal = TerminalId::new();
+    let directory = place.terminal(terminal.as_str());
+    std::fs::create_dir_all(&directory).unwrap();
+    store.create_terminal(&terminal, BUILD).unwrap();
+    let agent = kept_exit_record(&place, &terminal);
+    let reason = "Task abandoned";
+    std::fs::write(
+        directory.join(super::super::hosted::RETIRE_REASON),
+        serde_json::to_vec(reason).unwrap(),
+    )
+    .unwrap();
+    let mut exit = super::Unsettled::recorded(&place, terminal.clone());
+    exit.code = Some(137);
+    assert!(super::settle(&mut exit));
+    assert!(provider_ended(&agent));
+    // A late provider wait must leave the already-recorded close intact.
+    store
+        .record_native_end(&agent.agent_process_id, 137, None)
+        .unwrap();
+    let end = session_projection::session_summary(&store, "held", 1)
+        .unwrap()
+        .unwrap()
+        .agent_end
+        .unwrap();
+    assert_eq!((end.reason.as_deref(), end.exit_code), (Some(reason), None));
+    assert_eq!(store.terminal_exit(&terminal).unwrap().unwrap().0, 0);
+    assert!(!directory.exists());
+}
+
 #[test]
 fn a_server_taking_up_a_terminal_settles_the_exit_record_kept_beside_it() {
     let _ledger = TestLedgerGuard::new();

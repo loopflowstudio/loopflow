@@ -109,6 +109,7 @@ pub struct DownConversation {
     pub here: bool,
     /// Its last agent's exit; `None` when nobody saw one.
     pub exit_code: Option<i32>,
+    pub retired: bool,
     pub starts_since_turn: u32,
     pub last_started_at: Option<i64>,
 }
@@ -127,6 +128,8 @@ pub enum ServerStart {
 pub enum Left {
     /// The person quit it.
     Quit,
+    /// The holder intentionally closed the terminal.
+    Retired,
     /// It was started [`CONVERSATION_STARTS`] times without finishing a turn.
     OutOfStarts,
     /// It is not an open Task's conversation in that Task's checkout here.
@@ -145,7 +148,9 @@ pub fn server_start(
     claimed_here: impl FnOnce() -> bool,
     server_runs: impl FnOnce() -> bool,
 ) -> ServerStart {
-    let left = if loopflow_storage::session::quit_by_person(conversation.exit_code) {
+    let left = if conversation.retired {
+        Left::Retired
+    } else if loopflow_storage::session::quit_by_person(conversation.exit_code) {
         Left::Quit
     } else if conversation.starts_since_turn >= CONVERSATION_STARTS {
         Left::OutOfStarts
@@ -208,6 +213,7 @@ pub fn due_task_conversations(
         let facts = DownConversation {
             here: true,
             exit_code: conversation.exit_code,
+            retired: conversation.retired,
             starts_since_turn: conversation.starts_since_turn,
             last_started_at: conversation.last_started_at,
         };

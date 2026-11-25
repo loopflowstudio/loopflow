@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1108 Concept Review — Builtin Task Graphs, Merge Authority &amp; Completion</title>
+<style>
+  :root {
+    --bg: #faf8f5;
+    --surface: #fffdf9;
+    --surface-muted: #f3eee7;
+    --border: #e6dfd6;
+    --border-strong: #d6ccc0;
+    --text: #2a2624;
+    --text-2: #5f5752;
+    --text-3: #65605d;
+    --accent: #722f37;
+    --accent-bg: #f6eaeb;
+    --ok: #386c48;
+    --ok-bg: #e1ece3;
+    --warn: #7f5a19;
+    --warn-bg: #f3ebda;
+    --bad: #a64038;
+    --bad-bg: #f5e2df;
+    --work: #2f629f;
+    --work-bg: #e0eaf5;
+    --term-bg: #221f1d;
+    --term-fg: #f3eee7;
+    --term-dim: #a89f96;
+    --font-serif: 'Old Standard TT', Georgia, 'Times New Roman', serif;
+    --font-sans: 'Atkinson Hyperlegible Next', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'Spline Sans Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #171514;
+      --surface: #1f1c1a;
+      --surface-muted: #292522;
+      --border: #36302c;
+      --border-strong: #4a433e;
+      --text: #f0ebe4;
+      --text-2: #b9afa6;
+      --text-3: #968c83;
+      --accent: #e08d96;
+      --accent-bg: #362024;
+      --ok: #88c99b;
+      --ok-bg: #1c2f23;
+      --warn: #e0b768;
+      --warn-bg: #322918;
+      --bad: #eb8c85;
+      --bad-bg: #39201f;
+      --work: #8ab8ec;
+      --work-bg: #1d2a3a;
+      --term-bg: #110f0e;
+      --term-fg: #ede7df;
+      --term-dim: #8c8279;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.6 var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+  header {
+    border-bottom: 1px solid var(--border-strong);
+    padding-bottom: 20px;
+    margin-bottom: 32px;
+  }
+  .eyebrow {
+    font: 600 12px/1.2 var(--font-mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 8px;
+  }
+  h1 {
+    font: 400 clamp(26px, 3.2vw, 36px)/1.18 var(--font-serif);
+    margin: 0 0 12px;
+  }
+  h2 {
+    font: 400 22px/1.25 var(--font-serif);
+    margin: 40px 0 14px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 {
+    font: 600 15px/1.35 var(--font-sans);
+    margin: 22px 0 8px;
+  }
+  p { margin: 0 0 12px; }
+  ul, ol { margin: 0 0 14px; padding-left: 22px; }
+  li { margin-bottom: 6px; }
+  code {
+    font: 13px/1.4 var(--font-mono);
+    background: var(--surface-muted);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  pre {
+    margin: 0 0 14px;
+    padding: 14px 16px;
+    background: var(--term-bg);
+    color: var(--term-fg);
+    border-radius: 8px;
+    overflow-x: auto;
+    font: 12.5px/1.55 var(--font-mono);
+  }
+  pre code { background: none; padding: 0; color: inherit; }
+  .dim { color: var(--term-dim); }
+  .hl-bad { color: #f39a93; }
+  .hl-ok { color: #96d8a9; }
+  .hl-warn { color: #f0c97a; }
+
+  .meta-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font: 600 12px/1.3 var(--font-mono);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-2);
+  }
+  .pill.existing { background: var(--surface-muted); color: var(--text-2); }
+  .pill.proposed { background: var(--work-bg); color: var(--work); border-color: transparent; }
+  .pill.yes { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
+  .pill.no { background: var(--bad-bg); color: var(--bad); border-color: transparent; }
+  .pill.outside { background: var(--warn-bg); color: var(--warn); border-color: transparent; }
+
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-left: 4px solid var(--accent);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin: 18px 0 24px;
+  }
+  .callout.bad { border-left-color: var(--bad); }
+  .callout.proposed { border-left-color: var(--work); }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout-title {
+    font: 600 13px/1.3 var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin: 0 0 8px;
+    color: var(--accent);
+  }
+  .callout.bad .callout-title { color: var(--bad); }
+  .callout.proposed .callout-title { color: var(--work); }
+  .callout.warn .callout-title { color: var(--warn); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0 22px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    vertical-align: top;
+    padding: 11px 13px;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    background: var(--surface-muted);
+    font: 600 12px/1.3 var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-2);
+  }
+  tr:last-child td { border-bottom: none; }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 16px;
+    margin: 14px 0 22px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .card-title {
+    font: 600 14px/1.3 var(--font-sans);
+    margin: 0;
+  }
+
+  /* Workflow bar preview */
+  .wf-preview {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--surface-muted);
+    border-radius: 6px;
+    font: 13px/1.4 var(--font-mono);
+    margin: 8px 0;
+  }
+  .wf-name { font-weight: 700; color: var(--text); margin-right: 4px; }
+  .wf-step { color: var(--text-2); }
+  .wf-step.stop { color: var(--accent); font-weight: 700; }
+  .wf-step.removed { text-decoration: line-through; color: var(--bad); opacity: 0.75; }
+  .wf-sentence { font: 13px/1.4 var(--font-sans); color: var(--text-2); margin: 4px 0 0; }
+
+  .q-card {
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin-bottom: 14px;
+  }
+  .q-card h3 { margin: 0 0 8px; font-size: 15px; }
+  .q-opts { list-style: none; padding: 0; margin: 10px 0 0; }
+  .q-opts li {
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    margin-bottom: 8px;
+    background: var(--bg);
+  }
+  .q-opts li.chosen {
+    border-color: var(--work);
+    background: var(--work-bg);
+  }
+  .q-key {
+    font: 700 13px/1 var(--font-mono);
+    color: var(--accent);
+    margin-right: 6px;
+  }
+  .small { font-size: 13px; color: var(--text-2); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">Concept Review · LOO-1108</p>
+    <h1>Builtin Task Graphs, Merge Authority &amp; Completion</h1>
+    <p><strong>Area reviewed:</strong> Builtin Task Graphs (<code>code</code>, <code>feature</code>, <code>quick</code>, <code>pursue</code>, <code>research</code>), how a Task finishes on merge, and how Loopflow predicts and announces whether a run will merge a PR. Widening past the two YAML files and <code>verify.md</code> checks whether the surrounding concepts line up once <code>verify</code> is gone.</p>
+    <div class="meta-bar">
+      <span class="pill existing">HEAD 67fc098d7c · plan only, no code edited yet</span>
+      <span class="pill proposed">Plan updated before implement</span>
+      <span class="pill outside">Stacked on LOO-1104 (PR #2047)</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. Do the product’s concepts and the code’s concepts line up?</h2>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:23%">Product concept</th>
+          <th style="width:28%">Code concept</th>
+          <th style="width:10%">Aligned?</th>
+          <th>What is wrong (where No)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Builtin <code>code</code> and <code>feature</code> finish when the PR merges</strong>; there is no post-merge <code>verify</code> skill.</td>
+          <td><code>builtins/task/graph/{code,feature}.yaml</code>, <code>builtins/task/skill/verify.md</code>, and <code>.lf/skills/verify.md</code></td>
+          <td><span class="pill no">No</span></td>
+          <td><code>code</code> and <code>feature</code> still wrap <code>deliver</code> in an outer <code>loop:</code> with <code>interactive: verify</code>, and <code>verify.md</code> is still builtin. Kickoff’s plan also missed <strong>this repository’s own <code>.lf/skills/verify.md</code></strong> (<code>extends: builtin</code>): deleting the builtin leaves loopflow’s own repo with a broken skill (<code>no builtin skill is named "verify"</code>).</td>
+        </tr>
+        <tr>
+          <td><strong>Whether a run may merge the PR</strong> (<code>lf task run</code>’s <code>merges:</code> warning and Desktop Start’s <em>merges without asking</em> label).</td>
+          <td>Three separate owners:<br>
+            1. <code>task_graph::landing_name</code> + <code>command_merges</code> (runtime stop)<br>
+            2. <code>TaskRunSelection::reaches_end</code> + hardcoded <code>true</code> on <code>AutoState::On</code> / <code>Live</code> (CLI <code>merges:</code>)<br>
+            3. <code>StartFlow.merges</code> in <code>BacklogView.swift</code> (Desktop Start)
+          </td>
+          <td><span class="pill no">No</span></td>
+          <td><strong>Biggest mismatch.</strong> One question (“does this run cross a merging step?”) has three incompatible implementations. <code>reaches_end</code> checks whether an interactive step lies ahead — not whether a merging step does — causing false positives on <code>pursue</code>/<code>deep-clean</code>/<code>optimize</code>/<code>incident</code>/<code>queue</code>/<code>task-design</code> and false negatives on any custom Graph with a post-merge stop. Swift re-parses label prefixes (<code>land</code>, <code>pr land</code>), missing <code>pr arm</code>, <code>pr-land</code>, and <code>xor</code> paths.</td>
+        </tr>
+        <tr>
+          <td><strong>Task completes when its Graph reaches <code>end</code></strong> (holding open when child Tasks are still open).</td>
+          <td><code>arrive_task_graph(..., END)</code> → <code>request_completion_in</code> → <code>task_run_finished</code> → <code>settle_pending_completion</code> → <code>Finished::of</code></td>
+          <td><span class="pill yes">Yes</span></td>
+          <td>Single lifecycle already proven by <code>quick</code> and repo Graphs ending in <code>deliver</code>. Merging sets PR to <code>Merged</code>, <code>end</code> queues completion, settlement marks leaf Tasks <code>done</code> and leaves parents with open children open as <code>Merged · N children open</code>.</td>
+        </tr>
+        <tr>
+          <td><strong>Workflow preview &amp; interactive stops</strong> (top-level steps, person marks, “You take part at …”, stop count).</td>
+          <td><code>CapturedGraph::interactive_steps</code>, <code>WorkflowOutline::of</code>, <code>TaskGraph::read</code>, Swift <code>WorkflowLine</code></td>
+          <td><span class="pill yes">Yes</span></td>
+          <td>Computed once in Rust and carried on the wire; CLI and Desktop render the same steps and sentence without reading step names.</td>
+        </tr>
+        <tr>
+          <td><strong>In-flight Tasks keep the workflow they started on</strong> across upgrades.</td>
+          <td><code>CapturedGraph</code> persisted compiled in <code>task_graphs.graph</code> with embedded <code>ConcreteSkill.skill</code> text</td>
+          <td><span class="pill yes">Yes</span></td>
+          <td>Tasks already on <code>code</code>/<code>feature</code> keep <code>verify</code> and its prose until they finish. No database migration needed.</td>
+        </tr>
+        <tr>
+          <td><strong><code>lf task auto off</code> holds before merging</strong>; <code>auto on</code> lands it.</td>
+          <td><code>task_auto</code> + <code>RunningGraph::stopped_landing</code> (via <code>landing_name</code>) + <code>TaskGraph::waiting_to_land</code></td>
+          <td><span class="pill yes">Yes</span></td>
+          <td>Runtime landing check reads <code>task_auto</code> live at any step matching <code>landing_name</code> (<code>land</code>, <code>pr land</code>, <code>pr arm</code>, <code>pr-land</code>) and stops cleanly without killing anything.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>2. Biggest mismatch: “Will this run merge the PR?”</h2>
+
+    <div class="callout bad">
+      <p class="callout-title">Why this surfaced right here</p>
+      <p>Kickoff’s plan noted that removing <code>verify</code> makes <code>lf task run</code> after <code>ship-review</code> start printing <code>merges:</code> because <code>TaskRunSelection::reaches_end</code> flips from <code>false</code> to <code>true</code>. That observation exposed a broken concept: <code>reaches_end</code> was never asking whether the run merges — only whether an interactive step lay ahead.</p>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head">
+          <p class="card-title">Before: <code>reaches_end</code> proxy</p>
+          <span class="pill existing">Existing</span>
+        </div>
+<pre><code><span class="dim">$ lf task run LOO-12 pursue</span>   <span class="dim"># ends at pr-publish, NEVER merges</span>
+LOO-12 · pursue from start running as Graph run lfp_1
+  <span class="hl-bad">merges: this run may merge the PR; `lf task auto off LOO-12` stops it</span>
+  follow: lf task status LOO-12
+
+<span class="dim">$ lf task run LOO-15</span>          <span class="dim"># custom Graph: deliver → interactive: post-check</span>
+LOO-15 · custom from reflect running as Graph run lfp_2
+  <span class="hl-bad">(no merges: line — even though deliver is about to merge the PR)</span>
+  follow: lf task status LOO-15
+
+<span class="dim">// Swift BacklogView.swift — separate prefix check:</span>
+node.kind == .op &amp;&amp; (node.label.hasPrefix("land")
+                  || node.label.hasPrefix("pr land"))
+<span class="hl-bad">// misses `cmd: pr arm`, skill `pr-land`, and XOR branches</span></code></pre>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <p class="card-title">After: one predicate built on <code>landing_name</code></p>
+          <span class="pill proposed">Proposed · LOO-1108</span>
+        </div>
+<pre><code><span class="dim">$ lf task run LOO-12 pursue</span>   <span class="dim"># no landing step in pursue</span>
+LOO-12 · pursue from start running as Graph run lfp_1
+  <span class="hl-ok">(no merges: line)</span>
+  follow: lf task status LOO-12
+
+<span class="dim">$ lf task run LOO-12</span>          <span class="dim"># code after ship-review → crosses land</span>
+LOO-12 · code from reflect running as Graph run lfp_2
+  <span class="hl-ok">merges: this run may merge the PR; `lf task auto off LOO-12` stops it</span>
+  follow: lf task status LOO-12
+
+<span class="dim">$ lf task run LOO-15</span>          <span class="dim"># custom Graph: deliver → interactive: post-check</span>
+LOO-15 · custom from reflect running as Graph run lfp_3
+  <span class="hl-ok">merges: this run may merge the PR; `lf task auto off LOO-15` stops it</span>
+  follow: lf task status LOO-15</code></pre>
+      </div>
+    </div>
+
+    <h3>How the single Rust predicate works</h3>
+    <p><code>try_start_task_run</code> in <code>rust/loopflow-execution/src/ops/task.rs</code> already receives <code>merges: fn(&amp;[String]) -&gt; bool</code> (<code>command_merges</code>). Replace <code>TaskRunSelection::reaches_end</code> (one caller) with <code>CapturedGraph::reaches_landing(&amp;self, place: &amp;Place, through: bool, merges: fn(&amp;[String]) -&gt; bool) -&gt; bool</code> in <code>task_graph.rs</code>:</p>
+    <ul>
+      <li>Walks forward from <code>place</code>, returning <code>true</code> on any step where <code>landing_name(step, merges).is_some()</code> (<code>land</code>, <code>pr land</code>, <code>pr arm</code>, <code>pr-land</code>).</li>
+      <li>When <code>through == false</code> (bare <code>lf task run</code> with auto unset), stops a path at any interactive step.</li>
+      <li>Descends into <code>xor:</code> branches independently: returns <code>true</code> if <em>any</em> path can merge before stopping, and continues past the <code>xor:</code> unless <em>every</em> path stops interactively.</li>
+      <li>Follows loop back-edges (<code>ConcreteSkill.returns</code>) when passing a deciding step so a run starting inside a loop (for example <code>loop: [deliver, interactive: check]</code> with <code>auto on</code> at <code>check</code>) still sees the <code>deliver</code> it can return to.</li>
+      <li>Used for both <code>TaskRunStart::Run</code> and <code>TaskRunStart::Live</code> (when <code>auto == Off</code>, <code>merges</code> is always <code>false</code>). Zero DTO or wire change.</li>
+    </ul>
+
+    <div class="callout warn">
+      <p class="callout-title">Outside this work · Desktop <code>StartFlow.merges</code></p>
+      <p><strong>Separate outcome:</strong> Replace Swift’s <code>StartFlow.merges</code> prefix check (<code>swift/LoopflowMac/Views/BacklogView.swift:128-130</code>) with a required boolean on <code>WorkflowOutline</code> (for example <code>merges_before_stop</code>) computed in Rust by <code>reaches_landing(&amp;start, false, command_merges)</code>. Left out of LOO-1108 because adding a required DTO field touches the wire schema, golden fixtures, and Desktop-against-installed-server decoding compatibility. LOO-1108 puts <code>reaches_landing</code> in place so that follow-up is mechanical.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. Missed in kickoff: this repository’s own <code>.lf/skills/verify.md</code></h2>
+    <div class="callout bad">
+      <p class="callout-title">Found by filename check (<code>git ls-files '*verify*'</code>)</p>
+      <p>Loopflow itself commits <code>.lf/skills/verify.md</code> containing <code>extends: builtin</code> and four bullets on checking Loopflow headless. Kickoff grepped file contents for <code>verify</code>, which did not match because the word appears only in the filename. Without deleting <code>.lf/skills/verify.md</code>, deleting the builtin breaks <code>lf verify</code> and <code>lf list skill</code> inside this repository with <code>.lf/skills/verify.md: no builtin skill is named "verify"</code>. Its four bullets are already covered by <code>.lf/skills/qa.md</code>; LOO-1108 deletes both files.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. What the product looks like: before &amp; after</h2>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head">
+          <p class="card-title"><code>code</code> workflow</p>
+          <span class="pill existing">Existing</span>
+        </div>
+        <div class="wf-preview">
+          <span class="wf-name">code</span>
+          <span class="wf-step">plan</span>
+          <span class="wf-step">build</span>
+          <span class="wf-step stop">☺ ship-review</span>
+          <span class="wf-step">deliver</span>
+          <span class="wf-step removed">☺ verify</span>
+        </div>
+        <p class="wf-sentence">Was: <em>You take part at ship-review and verify.</em> (2 stops)</p>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <p class="card-title"><code>code</code> workflow</p>
+          <span class="pill proposed">Proposed</span>
+        </div>
+        <div class="wf-preview">
+          <span class="wf-name">code</span>
+          <span class="wf-step">plan</span>
+          <span class="wf-step">build</span>
+          <span class="wf-step stop">☺ ship-review</span>
+          <span class="wf-step">deliver</span>
+        </div>
+        <p class="wf-sentence">Now: <em>You take part at ship-review.</em> (1 stop)</p>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <p class="card-title"><code>feature</code> workflow</p>
+          <span class="pill existing">Existing</span>
+        </div>
+        <div class="wf-preview">
+          <span class="wf-name">feature</span>
+          <span class="wf-step stop">☺ explore</span>
+          <span class="wf-step">plan</span>
+          <span class="wf-step">build</span>
+          <span class="wf-step stop">☺ ship-review</span>
+          <span class="wf-step">deliver</span>
+          <span class="wf-step removed">☺ verify</span>
+        </div>
+        <p class="wf-sentence">Was: <em>You take part at explore, ship-review and verify.</em> (3 stops)</p>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <p class="card-title"><code>feature</code> workflow</p>
+          <span class="pill proposed">Proposed</span>
+        </div>
+        <div class="wf-preview">
+          <span class="wf-name">feature</span>
+          <span class="wf-step stop">☺ explore</span>
+          <span class="wf-step">plan</span>
+          <span class="wf-step">build</span>
+          <span class="wf-step stop">☺ ship-review</span>
+          <span class="wf-step">deliver</span>
+        </div>
+        <p class="wf-sentence">Now: <em>You take part at explore and ship-review.</em> (2 stops)</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. Interaction walkthrough, failure &amp; counterexamples</h2>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:24%">Scenario</th>
+          <th>What happens under the proposed model</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Normal path</strong><br><span class="small"><code>code</code> start → merge → done</span></td>
+          <td><code>lf task run LOO-12 code</code> runs <code>plan</code> → <code>build</code> and stops at <code>ship-review</code> (<code>merges: false</code>). After review, <code>lf task run LOO-12</code> prints <code>merges:</code>, runs <code>reflect</code> → <code>gate</code> → <code>land --wait-and-fix</code>, merges the PR, arrives at <code>end</code>, and settles the Task to <code>done</code> (retiring the checkout).</td>
+        </tr>
+        <tr>
+          <td><strong>Changed mind mid-deliver</strong><br><span class="small"><code>lf task auto off</code></span></td>
+          <td><code>auto::off</code> records <code>AutoState::Off</code> and disarms GitHub auto-merge. Before <code>land --wait-and-fix</code>, <code>stopped_landing</code> pauses cleanly at <code>land</code> (not <code>end</code>). <code>lf task auto on</code> resumes at <code>land</code>, merges, and completes.</td>
+        </tr>
+        <tr>
+          <td><strong>Parent with open children</strong><br><span class="small"><code>deliver</code> merges parent PR</span></td>
+          <td>Graph reaches <code>end</code>, completion settlement returns <code>WaitingForChildren</code>, and the parent stays open as <code>Merged · N children open</code> so its conversation continues conducting its children.</td>
+        </tr>
+        <tr>
+          <td><strong>Regression spotted after merge</strong><br><span class="small">formerly <code>verify</code> fix-forward</span></td>
+          <td>Task is already <code>done</code>. Recover with <code>lf task reopen LOO-12</code> (starts a fresh checkout from <code>main</code> on the next run), <code>lf task create</code> for a new fix Task, or <code>lf incident</code> for urgent breakage.</td>
+        </tr>
+        <tr>
+          <td><strong>In-flight Tasks across upgrade</strong><br><span class="small">already started on old <code>code</code></span></td>
+          <td><code>CapturedGraph</code> in SQLite holds the compiled steps and skill text from take-up. Those Tasks finish their remaining <code>verify</code> step without error.</td>
+        </tr>
+        <tr>
+          <td><strong>Counterexample: non-merging Graph</strong><br><span class="small"><code>pursue</code>, <code>deep-clean</code>, <code>research</code></span></td>
+          <td><code>reaches_landing</code> finds no <code>landing_name</code> step → <code>merges: false</code> even with no interactive stops ahead or with <code>auto on</code>. No bogus “this run may merge the PR” warning.</td>
+        </tr>
+        <tr>
+          <td><strong>Counterexample: custom post-merge stop or loop</strong><br><span class="small"><code>deliver → interactive: check</code></span></td>
+          <td><code>reaches_landing</code> hits <code>land</code> before <code>check</code> (and follows loop <code>returns</code> back-edges when <code>through</code> is true) → <code>merges: true</code>. The run warns honestly.</td>
+        </tr>
+        <tr>
+          <td><strong>External repos on this Machine</strong><br><span class="small"><code>manabot</code>, <code>fantasia</code>, <code>etude</code>, <code>etude-sdk</code></span></td>
+          <td><strong>Outside this work.</strong> After release, Graphs with <code>- interactive: verify</code> fail new take-ups (<code>skill not found: verify</code>) and <code>.lf/skills/verify.md</code> with <code>extends: builtin</code> lists as <code>unavailable</code>. Repair is a hand edit in those repositories.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>6. Choices made for review &amp; open questions</h2>
+    <p class="small">Running headless inside the <code>plan</code> Graph: the bold, reversible choices below are written into <code>scratch/plan.md</code> so implementation proceeds in one pass. Answer by number and letter (for example <code>1a</code> or <code>2b</code>) when reviewing.</p>
+
+    <div class="q-card">
+      <h3>1. Post-merge checking once <code>verify</code> is removed</h3>
+      <p>Without <code>verify</code>, a Task finishes as soon as its PR merges — nobody is called back to check post-merge CI for the merge SHA or re-check claims against <code>main</code>.</p>
+      <ul class="q-opts">
+        <li class="chosen"><span class="q-key">1a (chosen)</span> <strong>Complete on merge, no post-merge step.</strong> Trust <code>qa</code>, <code>ship-review</code>, and <code>gate</code> before merge; use <code>lf task reopen</code>, a new Task, or <code>lf incident</code> if <code>main</code> breaks. Repositories that want a post-merge stop add their own <code>interactive:</code> step after <code>deliver</code>.</li>
+        <li><span class="q-key">1b</span> <strong>Add a headless post-merge check inside <code>deliver</code></strong> after <code>land</code> (checks post-merge CI on the merge SHA before completing, adding one headless agent run after every merge).</li>
+        <li><span class="q-key">1c</span> <strong>Remove <code>verify</code> from <code>code</code> and <code>feature</code>, but keep <code>lf verify</code></strong> as a standalone builtin skill people or repo Graphs can still invoke or extend.</li>
+      </ul>
+    </div>
+
+    <div class="q-card">
+      <h3>2. When <code>lf task run</code> prints the <code>merges:</code> warning</h3>
+      <p>Today, <code>lf task run</code> prints <code>merges: this run may merge the PR</code> whenever no interactive step lies ahead — so non-merging workflows like <code>pursue</code> and <code>deep-clean</code> warn that they may merge, while a custom workflow with a post-merge stop stays silent before merging.</p>
+      <ul class="q-opts">
+        <li class="chosen"><span class="q-key">2a (chosen)</span> <strong>Warn only when the run can actually reach a merging step</strong> (<code>land</code>, <code>pr land</code>, <code>pr arm</code>, or <code>pr-land</code>) before stopping. Honest for <code>code</code>, <code>feature</code>, <code>quick</code>, <code>pursue</code>, <code>research</code>, and custom post-merge-stop workflows.</li>
+        <li><span class="q-key">2b</span> <strong>Keep the current rule</strong> (warn whenever the run has no interactive stop ahead or auto is on, even if the workflow has no merging step) and leave <code>ops/task.rs</code> untouched in LOO-1108.</li>
+      </ul>
+    </div>
+
+    <div class="q-card">
+      <h3>3. Consolidating Desktop’s “merges without asking” label onto the same Rust predicate</h3>
+      <p>Desktop’s Start menu currently scans compiled step labels in Swift for <code>land</code> and <code>pr land</code> prefixes, which misses <code>pr arm</code>, <code>pr-land</code>, and <code>xor</code> paths.</p>
+      <ul class="q-opts">
+        <li class="chosen"><span class="q-key">3a (chosen)</span> <strong>File as a separate follow-up Task</strong> after LOO-1108 so this PR makes no DTO/wire schema break against installed servers.</li>
+        <li><span class="q-key">3b</span> <strong>Include the wire field in LOO-1108</strong> by adding <code>merges_before_stop</code> to <code>WorkflowOutline</code> and deleting Swift’s prefix check in the same PR.</li>
+      </ul>
+    </div>
+  </section>
+</main>
+</body>
+</html>

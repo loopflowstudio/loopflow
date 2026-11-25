@@ -342,6 +342,30 @@ impl SqliteStore {
         Ok(paths)
     }
 
+    /// Repositories on this Machine that have at least one unfinished Task or
+    /// non-retired Wave, for the periodic Git plan exchange.
+    pub fn active_plan_repository_paths(&self) -> StoreResult<Vec<PathBuf>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare_cached(
+            "SELECT DISTINCT r.repo FROM repository_plans r
+             WHERE EXISTS (
+                 SELECT 1 FROM tasks t
+                 WHERE t.repository_id=r.id
+                   AND t.abandoned_at IS NULL
+                   AND t.planning_state IS NOT 'completed'
+                   AND t.planning_deleted_at IS NULL
+             )
+             UNION
+             SELECT DISTINCT w.repo FROM waves w
+             WHERE w.retired_at IS NULL
+               AND EXISTS (SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1)",
+        )?;
+        let paths = query
+            .query_map([], |row| row.get::<_, String>(0).map(PathBuf::from))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(paths)
+    }
+
     pub fn repository_path(&self, id: &RepositoryId) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(

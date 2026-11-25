@@ -199,11 +199,26 @@ fn went_on(repo: &str, exchanged: Result<()>) {
 }
 
 /// After a command on this Machine's server answers: one exchange for its
-/// repository, on a thread of its own. Commands arriving while one runs, or
-/// within [`QUIET`] of the last, share it.
+/// repository. Commands arriving while one runs, or within [`QUIET`] of the
+/// last, are debounced *before* spawning a task or opening a store.
 pub fn after_command(directory: PathBuf) {
-    std::thread::spawn(move || {
-        if let Err(error) = exchange_after_command(&directory) {
+    let Ok(repo) = crate::repository::discover(&directory).map(|r| r.to_string()) else {
+        return;
+    };
+    {
+        let mut turns = TURNS.lock().expect("plan turns are never poisoned");
+        let turn = turns.entry(repo.clone()).or_default();
+        if turn.running {
+            turn.again = true;
+            return;
+        }
+        if turn.finished.is_some_and(|at| at.elapsed() < QUIET) {
+            return;
+        }
+        turn.running = true;
+    }
+    crate::runtime::handle().spawn_blocking(move || {
+        if let Err(error) = exchange_after_command(&repo) {
             tracing::debug!(error = %format!("{error:#}"), "plan exchange after a command failed");
         }
     });
@@ -220,31 +235,41 @@ struct Turn {
 
 static TURNS: Mutex<BTreeMap<String, Turn>> = Mutex::new(BTreeMap::new());
 
-fn exchange_after_command(directory: &Path) -> Result<()> {
-    let Some((store, repo)) = carried(directory)? else {
-        return Ok(());
-    };
-    {
-        let mut turns = TURNS.lock().expect("plan turns are never poisoned");
-        let turn = turns.entry(repo.clone()).or_default();
-        if turn.running {
-            turn.again = true;
-            return Ok(());
-        }
-        if turn.finished.is_some_and(|at| at.elapsed() < QUIET) {
-            return Ok(());
-        }
-        turn.running = true;
+fn exchange_after_command(repo: &str) -> Result<()> {
+    struct FinishGuard<'a> {
+        repo: &'a str,
+        completed: bool,
     }
+    impl Drop for FinishGuard<'_> {
+        fn drop(&mut self) {
+            if !self.completed {
+                let mut turns = TURNS.lock().expect("plan turns are never poisoned");
+                let turn = turns.entry(self.repo.to_owned()).or_default();
+                turn.running = false;
+                turn.again = false;
+                turn.finished = Some(Instant::now());
+            }
+        }
+    }
+    let mut guard = FinishGuard {
+        repo,
+        completed: false,
+    };
+    let path = crate::store::default_db_path();
+    if !path.exists() || crate::ops::tracker::connected(repo) {
+        return Ok(());
+    }
+    let store = crate::store::open_sqlite(&path)?;
     loop {
-        let result = exchange(&store, &repo, None);
+        let result = exchange(&store, repo, None);
         let mut turns = TURNS.lock().expect("plan turns are never poisoned");
-        let turn = turns.entry(repo.clone()).or_default();
+        let turn = turns.entry(repo.to_owned()).or_default();
         if std::mem::take(&mut turn.again) && result.is_ok() {
             continue;
         }
         turn.running = false;
         turn.finished = Some(Instant::now());
+        guard.completed = true;
         return result;
     }
 }

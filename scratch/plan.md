@@ -531,17 +531,14 @@ threads, `spawns` unchanged across two calls a minute apart. Then
      `snapshot::leave`) besides `agent_state` — all removed from the relay loop.
      In `server_idle.py` (`target/debug/lf --seconds 10`), `store_opens` dropped
      to `0` across all three phases (`quiet`, `file_edits`, `db_writes`).
-2. **Event-driven observation, one watcher, one runtime, quiet subscriptions.** *(next)*
-   Held-only refresh rule and single shared filesystem watcher (§1), one
-   bounded runtime + merged background threads (§4), domain-filtered + pushed
-   subscription wakeups with 30 s fallback reconcile (§5), scoped minute Git
-   plan exchange (§7). Shows idle forks at 0 and threads under 20.
-   Starting point from Pass 1's debug run: `quiet` still 69 threads and 36
-   spawns per 10 s with 0 store opens, so the remaining cost is the timers,
-   per-subscription runtimes and Git forks this pass removes. Pass 2's focused
-   tests are the `observe` held/unheld Git refresh pair and the two
-   `read_stream` wake tests under "Acceptance check".
-3. **Disposable custom-home lifetimes.** §8 (detached server on macOS + Linux,
+2. **Event-driven observation, one watcher, one runtime, quiet subscriptions.** *(done)*
+   - Built shared process-wide async runtime helper (`rust/loopflow-execution/src/runtime.rs`) with `runtime::install` and `runtime::block_on`; bounded `lf server run` to 4 workers, 12 blocking threads, 2 s blocking keep-alive; ran `store::run_sqlite` inline when already inside `block_on` (preventing nested blocking-pool saturation deadlocks); converted scattered production `Runtime::new()` / `Builder::new_current_thread()` calls across `loopflow-execution` and `loopflow` and deleted `read_stream::reader_runtime()`.
+   - Redesigned `observe.rs`: explicit RAII `Hold` refcounting per `FactSlot` (distinguishing live subscription holds from unheld `Computed` derived dependencies), `Cache::read_once` for one-shot served reads, one `observe-refresh` thread that sleeps until the next held due time and parks when idle, one process-wide `FsWatcher` (absorbing `transcript/watch.rs`'s 4 threads and `TaskFilesWatch`'s per-checkout watchers), event-driven macOS checkout watches for held `Git`/`CheckoutFiles` facts throttled to 3 s, direct `FactWatcher` push wakeups, and inline stat checks for both unheld served reads and bare reads.
+   - Updated `read_stream.rs` and `loopflow-storage/src/changes.rs`: raised `CHECK` from 1 s to 30 s (keeping 1 s `RETRY_BASE`), replaced per-subscription pull waker threads with one shared `subscription-waker` thread, added `StoreChanges::wait_with_history` + `StoreWaker` (`EVFILT_USER`), made `store-observer` read `revisions()` once and wake only followers whose watched domain (`Watch::State` vs `Watch::History`) moved, and folded `Subscriptions::planning` onto `read_stream::watch_planning` (eliminating its 1 s polling thread).
+   - Merged `store-maintenance` + `plan-git` into one periodic thread and `recovery` + `task-update-wake` into one `recovery-wake` thread; made `TitleReader` lazy with pooled connections; debounced `plan_carriers::after_command` before spawning or opening SQLite; replaced `plan_git::git_until`'s pipe-reader threads with `poll(2)`; scoped `plan_git::exchange_unowned` to `active_plan_repository_paths` (unfinished Task or non-retired Wave) with exponential backoff doubling from 2 min up to 1 h.
+   - **What it taught:** `history.db` writes do not touch `loopflow.db-wal`, so raising `CHECK` to 30 s required watching `history.db-wal` on the same kqueue (only while a `Watch::History` follower is active, woken via `EVFILT_USER` on join). Also, `Subscriptions::planning` and `TitleReader` each kept an extra background thread alive while idle, and `server_idle.py` needed a 3.5 s settle window between `file_edits` and `db_writes` so the trailing throttled Git refresh from `file_edits`'s last edit does not spill into `db_writes`.
+   - `server_idle.py` (`target/debug/lf --seconds 10`, budgets enforced) passed all three phases with zero violations: `quiet` 0.10% CPU / 18 threads / 0 spawns / 0 opens; `file_edits` 0.60% CPU / 16 threads / 4 spawns / 0 opens; `db_writes` 0.10% CPU / 18 threads / 0 spawns / 0 opens.
+3. **Disposable custom-home lifetimes.** *(next)* §8 (detached server on macOS + Linux,
    idle/missing-home exit, holder exit on deleted home, bootout of legacy
    hashed jobs, docs in `docs/dev/server.md`, `machines.md`, `.lf/qa/`).
 4. **Job budget and bounded files.** §9 (`RunningGraph::spawn` env budget +
@@ -557,8 +554,10 @@ then-current budgets.
 - `uv run python scripts/benchmarks/server_idle.py target/debug/lf --seconds 10 --no-fail`:
   - Baseline (before Pass 1 pool/settings/relay): `quiet` 0.60% CPU / 69 th / 36 spawns / 0 opens; `file_edits` 1.00% CPU / 69 th / 36 spawns / 0 opens; `db_writes` 0.60% CPU / 69 th / 48 spawns / 1 open.
   - After Pass 1: `quiet` 0.50% CPU / 69 th / 36 spawns / 0 opens; `file_edits` 1.00% CPU / 69 th / 36 spawns / 0 opens; `db_writes` 0.60% CPU / 69 th / 37 spawns / 0 opens.
-  - Release 60 s acceptance run (`target/release/lf --seconds 60`) runs at gate after Pass 2–4.
+  - After Pass 2 (budgets enforced, exit 0): `quiet` 0.10% CPU / 18 th / 0 spawns / 0 opens; `file_edits` 0.60% CPU / 16 th / 4 spawns / 0 opens; `db_writes` 0.10% CPU / 18 th / 0 spawns / 0 opens.
+  - Release 60 s acceptance run (`target/release/lf --seconds 60`) runs at gate after Pass 3–4.
 - Focused tests passed in Pass 1: `server::schema::tests::` (8), `server::wire::tests::` (2), `machine::wire::tests::` (2), Swift `ServerProtocolTests` (25), `loopflow-storage::pool::tests::` (4), `store::opening::` (12), `read_stream::tests::` (11), `loopflow-harness::transcript::tests::misses_under_watched_root_cache_until_invalidated` (1), `config::settings::tests::` (24), `observe::tests::` (17), `transport::registry::tests::` (16), `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`.
+- Focused tests passed in Pass 2: `loopflow-storage::changes::tests::` (3), `loopflow-storage::query_plans::tests::` (17), `loopflow-execution::runtime::tests::` (2), `observe::tests::` (19, including `unheld_git_fact_is_not_rerun_after_its_interval` and `held_git_fact_reruns_after_checkout_write_and_not_before`), `transcript::watch::tests::` (3), `read_stream::tests::` (13, including `idle_subscription_performs_zero_steps_over_five_seconds` and `history_write_does_not_wake_state_subscription`), `ops::plan_git::tests::` (10, including active-work scoping and exponential backoff), `ops::task::workspace::tests::` (1), `transport::output::tests::` (10), `loopflow::server::subscriptions::tests::` (12), `server::maintenance::tests::` (1), `server::recovery::tests::` (10), `server::wake::tests::` (12), `server::service::tests::` (`identical_consumers_share_setup`, `queued_subscription_cancellation_skips_construction`), `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`.
 - `sample 77346 3` on the live server, 2026-11-25 — run at kickoff, results above.
 
 ## User docs written before implementation

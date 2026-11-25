@@ -419,6 +419,11 @@ def main() -> int:
                     lambda tick, _e: tracked.write_text(f"edit {tick}\n"),
                 )
 
+                # Let the final throttled Git refresh from `file_edits` land
+                # before measuring `db_writes`.
+                time.sleep(3.5)
+                peer.drain_nonblocking()
+
                 stop_file = home / "stop-writer"
                 writer = subprocess.Popen(
                     [

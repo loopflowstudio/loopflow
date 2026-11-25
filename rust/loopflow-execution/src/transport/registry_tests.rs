@@ -799,7 +799,11 @@ printf '%s' "$line" > "{}"
     // Unknown terminal reports Absent.
     assert_eq!(
         registry
-            .wake_idle_prompt(&TerminalId::new(), "ignored")
+            .wake_idle_prompt(
+                &TerminalId::new(),
+                "ignored",
+                crate::harness::antigravity::prompt_ready
+            )
             .unwrap(),
         super::WakeTerminal::Absent
     );
@@ -807,6 +811,14 @@ printf '%s' "$line" > "{}"
     // Focus reports and mouse wheel events do not count as user keystrokes.
     view.type_in(b"\x1b[I\x1b[<64;10;20M\x1b[O");
     std::thread::sleep(Duration::from_millis(50));
+
+    // Caller-supplied screen predicate controls readiness (transport stays provider-agnostic).
+    assert_eq!(
+        registry
+            .wake_idle_prompt(&terminal, "refused-by-predicate", |_| false)
+            .unwrap(),
+        super::WakeTerminal::NotReady
+    );
 
     // An open bracketed paste blocks injection.
     let paste_seen = ledger.home().join("paste_seen");
@@ -829,7 +841,11 @@ sleep 30
     });
     assert_eq!(
         registry
-            .wake_idle_prompt(&draft_terminal, "blocked")
+            .wake_idle_prompt(
+                &draft_terminal,
+                "blocked",
+                crate::harness::antigravity::prompt_ready
+            )
             .unwrap(),
         super::WakeTerminal::NotReady
     );
@@ -838,7 +854,11 @@ sleep 30
     // The clean terminal (which only saw focus + mouse events) accepts the wake.
     assert_eq!(
         registry
-            .wake_idle_prompt(&terminal, crate::steer::WAKE_PROMPT)
+            .wake_idle_prompt(
+                &terminal,
+                crate::steer::WAKE_PROMPT,
+                crate::harness::antigravity::prompt_ready
+            )
             .unwrap(),
         super::WakeTerminal::Injected
     );

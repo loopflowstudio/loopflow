@@ -341,7 +341,13 @@ impl StreamDriver for Driver {
 
 impl super::Launcher for loopflow_harness::Antigravity {
     fn idle_reach(&self, endpoints: &IdleEndpoints) -> Option<IdleReach> {
-        endpoints.held_terminal.clone().map(IdleReach::Terminal)
+        endpoints
+            .held_terminal
+            .clone()
+            .map(|terminal| IdleReach::Terminal {
+                terminal,
+                prompt_ready,
+            })
     }
 
     fn capabilities(&self) -> super::Capabilities {

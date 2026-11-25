@@ -18,50 +18,24 @@ History and 5 Whys: [5whys.md](5whys.md). Concept review: [concept-review.html](
 - **Inline steer display in Antigravity:** Native QA on `agy 1.5.16`/`1.5.17` proved `metadata.user_markdown` causes `type mismatch: cannot convert string to message` and drops the hook reply; `renderInfo.markdown` stays hidden; `userMessage` writes `USER_INPUT` from `SYSTEM_SDK`. Prototype withdrawn, fixture updated to model the drop, and inline display split to **LOO-1103** (`task_a265825e5d3e484b88cd7c047a79b675`) per Jack Heart's `(b)` choice.
 - **Missing-CLI sandbox alignment:** `task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again` checks the same four system tool dirs (`/opt/homebrew/{bin,sbin}`, `/usr/local/{bin,sbin}`) hidden by `scripts/test_network.py`.
 
-## Pass 5 — Concept review fixes (harness-owned terminal readiness & immediate deferred-wake nudge)
+## Pass 5 — Concept review fixes (built & verified)
 
-Post-build concept review against base `989b41c3bb` (`scratch/concept-review.html`) found two conceptual mismatches introduced in Pass 4 that should be fixed before gate:
+Post-build concept review against base `989b41c3bb` (`scratch/concept-review.html`) found two conceptual mismatches introduced in Pass 4; both are now resolved:
 
-### 1. Move terminal prompt-readiness ownership out of generic `transport/` onto `IdleReach::Terminal`
+1. **Harness-owned terminal prompt-readiness (`IdleReach::Terminal`):**
+   - `loopflow_execution::steer::PromptReady` (`fn(&Terminal) -> bool`) is carried on `IdleReach::Terminal { terminal, prompt_ready }` (dropping unused `PartialEq, Eq` derives on `IdleReach`).
+   - `Antigravity::idle_reach` supplies `antigravity::prompt_ready`, so any future terminal-woken harness must supply its own screen-readiness guard.
+   - `Registry::wake_idle_prompt` and `Hosted::wake_idle_prompt` accept `prompt_ready`, removing the last provider-specific import from `transport/`.
+   - `server/wake.rs::wake` matches `IdleReach::Terminal { terminal, prompt_ready }` first before unpacking `thread` for provider-API variants.
+   - `transport::registry::tests::wake_idle_prompt_guards_against_drafts_typing_and_open_pastes_but_ignores_mouse_and_focus` passes `antigravity::prompt_ready` and verifies a custom rejecting predicate blocks injection.
 
-- **Problem:** `Hosted::wake_idle_prompt` (`rust/loopflow-execution/src/transport/hosted.rs:245`) hardcodes `crate::harness::antigravity::prompt_ready` — the only provider-specific import in all of `transport/`. Any future harness returning `IdleReach::Terminal` would compile cleanly and silently test its screen against Antigravity's box/footer layout.
-- **Model to build:**
-  - `loopflow_execution::steer::IdleReach::Terminal` carries both the terminal and the harness's readiness function:
-    ```rust
-    pub enum IdleReach {
-        Codex(std::path::PathBuf),
-        Inbox(Inbox),
-        Terminal {
-            terminal: loopflow_model::id::TerminalId,
-            prompt_ready: fn(&loopflow_terminal::ghostty_vt::Terminal) -> bool,
-        },
-    }
-    ```
-    (Drop unused `PartialEq, Eq` derives on `IdleReach` so clippy never sees function-pointer comparisons; keep `Debug, Clone`.)
-  - `Antigravity::idle_reach` returns `endpoints.held_terminal.clone().map(|terminal| IdleReach::Terminal { terminal, prompt_ready })`, forcing any future terminal-woken harness to supply its own predicate.
-  - `Registry::wake_idle_prompt(&self, terminal: &TerminalId, prompt: &str, prompt_ready: fn(&Terminal) -> bool)` -> `Command::WakePrompt { terminal, prompt, prompt_ready, reply }` -> `Hosted::wake_idle_prompt(&mut self, child, prompt, prompt_ready)` checks `self.output.terminal().is_some_and(prompt_ready)`. Remove the `crate::harness::antigravity` import from `transport/hosted.rs`.
-  - In `server/wake.rs::wake`, match `IdleReach::Terminal { terminal, prompt_ready }` first before unpacking `let Some(thread) = thread.as_deref() else { return Ok(false); }` for the provider-API variants (eliminating the unreachable `(_, None)` match arm).
-  - Update `transport/registry_tests.rs::wake_idle_prompt_guards_against_drafts_typing_and_open_pastes_but_ignores_mouse_and_focus` to pass `crate::harness::antigravity::prompt_ready` (and verify a custom predicate works too).
+2. **Immediate deferred-wake nudge (`StoreWaker` + instance-owned `WakeNudge`):**
+   - `loopflow_storage::changes::StoreChanges` creates its `kqueue` once up front with `EVFILT_USER` on macOS (attaching/detaching `EVFILT_VNODE` on the WAL fd inside the same `kqueue`) and uses `Mutex<bool>` + `Condvar` elsewhere; `StoreChanges::waker(&self) -> StoreWaker` wakes `StoreChanges::wait` immediately without touching SQLite.
+   - `changes::tests::waker_ends_the_wait_without_a_wal_write` proves immediate wakeup before a WAL exists, while armed on a WAL with no writes, and clean reset afterward.
+   - Removed process-global `static DEFERRED: AtomicBool` and `wake::note_deferred()`; `wake::start` returns `Option<WakeNudge>` (`Arc<(AtomicBool, StoreWaker)>`), threaded through `service.rs` to `boundary::after` / `boundary::wake`.
+   - `server::wake::tests::wake_nudge_wakes_waiting_watcher_without_a_revision_move` proves `WakeNudge::retry_deferred()` breaks a watcher out of `UNSIGNALLED` (60 s) and wakes an idle Antigravity terminal with no revision move or WAL write.
 
-### 2. Wake `Watcher` immediately on deferred turn-end wakes (remove process-global `static DEFERRED`)
-
-- **Problem:** When a steer arrives during a turn on an open Antigravity session and the person has a draft/menu open (or `agy` redraws >600 ms after `Stop`), `boundary::answer`'s `session_activity` write does not bump `task_update_revision` or `steer_revision`, so `Watcher` goes right back into `StoreChanges::wait(60s)` (blocking inside `kqueue` on macOS). `boundary::wake` then sets `static DEFERRED: AtomicBool = true` without waking `kqueue` — causing up to a **60-second stall** after the person clears their draft, and leaking global state across tests.
-- **Model to build:**
-  - Add a thread-safe `StoreWaker` handle to `loopflow_storage::changes::StoreChanges` (`StoreChanges::waker(&self) -> StoreWaker`):
-    - **macOS:** Create the `kqueue` once in `StoreChanges` with an `EVFILT_USER` event registered, and attach/re-attach `EVFILT_VNODE` on the WAL fd inside that same `kqueue` as the WAL appears or rotates (if the WAL does not exist yet, still wait on the `kqueue` up to `timeout.min(100ms)` so `waker.wake()` breaks out immediately). `StoreWaker::wake(&self)` posts `EVFILT_USER | NOTE_TRIGGER` to the `kqueue` fd (keep the `kqueue` fd behind `Arc<OwnedFd>` so closing `StoreChanges` safely outlives or drops cleanly).
-    - **non-macOS:** Wait on a `Mutex<bool>` + `Condvar` for `timeout.min(50ms)`; `StoreWaker::wake(&self)` sets the flag and calls `notify_one()`.
-  - Add a unit test in `loopflow-storage/src/changes.rs` proving `waker.wake()` ends a 20 s `changes.wait` immediately (even with no WAL write).
-  - Replace `static DEFERRED: AtomicBool` and `wake::note_deferred()` in `rust/loopflow/src/server/wake.rs` with an instance-owned `WakeNudge` (`Arc<(AtomicBool, StoreWaker)>`) returned by `wake::start(terminals)` and passed through `service.rs` to `boundary::after` / `boundary::wake`:
-    - `nudge.retry_deferred()` sets its `AtomicBool` and calls `waker.wake()`.
-    - `watch` checks `watcher.deferred || nudge.is_pending()` to select `DEFERRED_RETRY` (2 s), and `Watcher::read` swaps the instance flag to trigger `wake_idle` immediately.
-  - Add a focused test in `server::wake::tests` proving `WakeNudge::retry_deferred` wakes a waiting watcher loop out of `UNSIGNALLED` (60 s) without any store revision move.
-
-### Execution order
-
-1. Start with `loopflow-storage/src/changes.rs` (`StoreWaker` + unit test) — smallest, most fundamental piece that proves immediate wakeup on macOS `kqueue`.
-2. Wire `WakeNudge` through `server/{wake,boundary,service}.rs`, removing `static DEFERRED: AtomicBool`, and add the watcher wakeup test.
-3. Refactor `IdleReach::Terminal` + `Registry`/`Hosted::wake_idle_prompt` across `steer.rs`, `harness/antigravity.rs`, `transport/{hosted,registry,registry_tests}.rs`, and `server/wake.rs`.
-4. Run focused tests + `cargo fmt --check` + `cargo clippy --all-targets -- -D warnings`.
+Verified: `changes::tests` (4/4), `transport::registry::tests::wake_idle_prompt_*` (1/1), `server::wake::tests` (15/15), `server::boundary::tests` (14/14), `context_launch_tests::` recovery fixtures (`a_task_checkout_starts`, `a_killed_task_conversation`, `a_task_conversation_whose_agent`, 3/3), `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings`. Ready for gate.
 
 ## Acceptance at gate
 

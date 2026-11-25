@@ -166,7 +166,11 @@ pub(super) fn answer(
 
 /// Run what a boundary left, after its answer. Blocking; failures are logged,
 /// since no one waits for them.
-pub(super) fn after(after: After, terminals: Option<Arc<Registry>>) {
+pub(super) fn after(
+    after: After,
+    terminals: Option<Arc<Registry>>,
+    wake_nudge: Option<super::wake::WakeNudge>,
+) {
     let session = match &after {
         After::TurnEnd(ended) => ended.session.clone(),
         After::Reachable(session) => Some(session.clone()),
@@ -181,9 +185,11 @@ pub(super) fn after(after: After, terminals: Option<Arc<Registry>>) {
             };
             match after {
                 After::TurnEnd(ended) => {
-                    turn_end(std::sync::Arc::new(store), ended, terminals).await
+                    turn_end(std::sync::Arc::new(store), ended, terminals, wake_nudge).await
                 }
-                After::Reachable(session) => wake(&store.sqlite, session, terminals).await,
+                After::Reachable(session) => {
+                    wake(&store.sqlite, session, terminals, wake_nudge).await
+                }
             }
         })
     })();
@@ -199,6 +205,7 @@ async fn turn_end(
     store: SharedStore,
     ended: TurnEnd,
     terminals: Option<Arc<Registry>>,
+    wake_nudge: Option<super::wake::WakeNudge>,
 ) -> Result<()> {
     if let (Some(session), Some((endpoint, thread))) = (&ended.session, &ended.codex) {
         record_codex_turns(&store.sqlite, session, thread, endpoint).await;
@@ -217,7 +224,7 @@ async fn turn_end(
         return Ok(());
     };
     // The turn ended: an update that arrived during it goes out now.
-    wake(&store.sqlite, session.clone(), terminals).await?;
+    wake(&store.sqlite, session.clone(), terminals, wake_nudge).await?;
     if store.sqlite.pending_session_move(&session)?.is_none() {
         return Ok(());
     }
@@ -232,6 +239,7 @@ async fn wake(
     store: &SqliteStore,
     session: String,
     terminals: Option<Arc<Registry>>,
+    wake_nudge: Option<super::wake::WakeNudge>,
 ) -> Result<()> {
     for attempt in 0..3 {
         if attempt > 0 {
@@ -248,7 +256,9 @@ async fn wake(
             return Ok(());
         }
     }
-    super::wake::note_deferred();
+    if let Some(nudge) = wake_nudge {
+        nudge.retry_deferred();
+    }
     Ok(())
 }
 

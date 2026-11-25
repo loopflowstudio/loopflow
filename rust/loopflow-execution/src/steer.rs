@@ -168,20 +168,28 @@ pub struct IdleConversation {
     pub reach: IdleReach,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Screen-readiness predicate deciding whether a held terminal is at an empty,
+/// idle top-level prompt safe to receive a bracketed-paste wake.
+pub type PromptReady = fn(&loopflow_terminal::ghostty_vt::Terminal) -> bool;
+
+#[derive(Debug, Clone)]
 pub enum IdleReach {
     /// The Session's private app-server.
     Codex(std::path::PathBuf),
     /// What the provider's own code listens on.
     Inbox(Inbox),
-    /// The held terminal hosting the provider's interactive TUI.
-    Terminal(loopflow_model::id::TerminalId),
+    /// The held terminal hosting the provider's interactive TUI, paired with
+    /// the harness's screen-readiness guard.
+    Terminal {
+        terminal: loopflow_model::id::TerminalId,
+        prompt_ready: PromptReady,
+    },
 }
 
 fn idle_reach(candidate: &IdleCandidate) -> Option<IdleReach> {
     let kind = loopflow_harness::HarnessKind::parse(candidate.provider.as_deref()?)?;
     let reach = crate::harness::launcher(kind).idle_reach(&candidate.endpoints)?;
-    if candidate.thread.is_none() && !matches!(reach, IdleReach::Terminal(_)) {
+    if candidate.thread.is_none() && !matches!(reach, IdleReach::Terminal { .. }) {
         return None;
     }
     Some(reach)

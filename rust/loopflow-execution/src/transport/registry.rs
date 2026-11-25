@@ -270,6 +270,7 @@ enum Command {
     WakePrompt {
         terminal: TerminalId,
         prompt: String,
+        prompt_ready: crate::steer::PromptReady,
         reply: mpsc::Sender<WakeTerminal>,
     },
     /// The server is going; its terminals stay with their holders. A real
@@ -426,14 +427,20 @@ impl Registry {
             .map(|(terminal, _)| terminal.clone())
     }
 
-    /// If `terminal` is hosted and its VT screen shows an empty idle prompt
-    /// with no open paste or recent user keystrokes, inject `prompt` via
-    /// bracketed paste + Enter.
-    pub fn wake_idle_prompt(&self, terminal: &TerminalId, prompt: &str) -> Result<WakeTerminal> {
+    /// If `terminal` is hosted and its VT screen satisfies `prompt_ready` with
+    /// no open paste or recent user keystrokes, inject `prompt` via bracketed
+    /// paste + Enter.
+    pub fn wake_idle_prompt(
+        &self,
+        terminal: &TerminalId,
+        prompt: &str,
+        prompt_ready: crate::steer::PromptReady,
+    ) -> Result<WakeTerminal> {
         let (reply, outcome) = mpsc::channel();
         self.send(Command::WakePrompt {
             terminal: terminal.clone(),
             prompt: prompt.to_owned(),
+            prompt_ready,
             reply,
         })?;
         outcome
@@ -891,6 +898,7 @@ fn run(
                 Command::WakePrompt {
                     terminal,
                     prompt,
+                    prompt_ready,
                     reply,
                 } => {
                     let outcome = match terminals.get_mut(&terminal) {
@@ -898,7 +906,11 @@ fn run(
                         Some(entry) if matches!(entry.nudge, Some(Nudge::Replaying { .. })) => {
                             WakeTerminal::NotReady
                         }
-                        Some(entry) => entry.hosted.wake_idle_prompt(&mut entry.child, &prompt),
+                        Some(entry) => {
+                            entry
+                                .hosted
+                                .wake_idle_prompt(&mut entry.child, &prompt, prompt_ready)
+                        }
                     };
                     let _ = reply.send(outcome);
                 }

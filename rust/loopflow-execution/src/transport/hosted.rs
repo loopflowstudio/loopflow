@@ -223,12 +223,14 @@ impl Hosted {
         self.output.program_status()
     }
 
-    /// Inject `prompt` via bracketed paste + Enter when this terminal is at an
-    /// empty idle Antigravity prompt with no active paste or recent typing.
+    /// Inject `prompt` via bracketed paste + Enter when this terminal has no
+    /// active paste or recent user typing and `prompt_ready` accepts its live
+    /// VT screen.
     pub fn wake_idle_prompt(
         &mut self,
         child: &mut Source,
         prompt: &str,
+        prompt_ready: crate::steer::PromptReady,
     ) -> super::registry::WakeTerminal {
         use super::registry::WakeTerminal;
         if self.exit.is_some()
@@ -239,10 +241,7 @@ impl Hosted {
             || self
                 .last_user_key
                 .is_some_and(|at| at.elapsed() < USER_KEY_QUIET)
-            || !self
-                .output
-                .terminal()
-                .is_some_and(crate::harness::antigravity::prompt_ready)
+            || !self.output.terminal().is_some_and(prompt_ready)
         {
             return WakeTerminal::NotReady;
         }

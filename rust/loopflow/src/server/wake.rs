@@ -38,12 +38,33 @@ const SEND_DEADLINE: Duration = Duration::from_secs(2);
 /// A provider's turn start loads nothing new; it answers once the turn exists.
 const TURN_START_DEADLINE: Duration = Duration::from_secs(15);
 
-/// Set when a turn-end wake deferred a held terminal, so the watcher keeps
-/// retrying until the terminal returns to an empty idle prompt.
-static DEFERRED: AtomicBool = AtomicBool::new(false);
+/// Instance-owned nudge handle for one `task-update-wake` watcher. Calling
+/// [`retry_deferred`](Self::retry_deferred) flags a deferred turn-end wake and
+/// breaks the watcher's `StoreChanges::wait` out of `UNSIGNALLED` immediately.
+#[derive(Debug, Clone)]
+pub(super) struct WakeNudge {
+    state: Arc<(AtomicBool, loopflow_storage::changes::StoreWaker)>,
+}
 
-pub(super) fn note_deferred() {
-    DEFERRED.store(true, Ordering::Release);
+impl WakeNudge {
+    fn new(waker: loopflow_storage::changes::StoreWaker) -> Self {
+        Self {
+            state: Arc::new((AtomicBool::new(false), waker)),
+        }
+    }
+
+    pub(super) fn retry_deferred(&self) {
+        self.state.0.store(true, Ordering::Release);
+        self.state.1.wake();
+    }
+
+    fn is_pending(&self) -> bool {
+        self.state.0.load(Ordering::Acquire)
+    }
+
+    fn take_pending(&self) -> bool {
+        self.state.0.swap(false, Ordering::AcqRel)
+    }
 }
 
 /// Wake `session` now if it is idle and has news: a turn just ended, so an
@@ -55,32 +76,40 @@ pub(super) fn after_turn(store: &SqliteStore, session: &str, terminals: Option<&
 
 /// Start the Machine's one watcher. It runs as long as the server; without
 /// `terminals` it starts no stopped Session and cannot wake held terminals.
-pub(super) fn start(terminals: Option<Arc<Registry>>) {
+pub(super) fn start(terminals: Option<Arc<Registry>>) -> Option<WakeNudge> {
+    let path = loopflow_execution::store::default_db_path();
+    let changes = loopflow_storage::changes::StoreChanges::watch(&path);
+    let nudge = WakeNudge::new(changes.waker());
+    let watcher_nudge = nudge.clone();
     let spawned = std::thread::Builder::new()
         .name("task-update-wake".into())
-        .spawn(|| {
-            loopflow_execution::journal::request::isolate(|| watch(terminals));
+        .spawn(move || {
+            loopflow_execution::journal::request::isolate(|| {
+                watch(path, changes, terminals, watcher_nudge)
+            });
         });
-    if let Err(error) = spawned {
-        tracing::warn!(%error, "Task updates wait for each conversation's next turn");
+    match spawned {
+        Ok(_) => Some(nudge),
+        Err(error) => {
+            tracing::warn!(%error, "Task updates wait for each conversation's next turn");
+            None
+        }
     }
 }
 
-fn watch(terminals: Option<Arc<Registry>>) {
-    let path = loopflow_execution::store::default_db_path();
-    let mut changes = loopflow_storage::changes::StoreChanges::watch(&path);
+fn watch(
+    path: std::path::PathBuf,
+    mut changes: loopflow_storage::changes::StoreChanges,
+    terminals: Option<Arc<Registry>>,
+    nudge: WakeNudge,
+) {
     let mut watcher = Watcher {
         terminals,
         ..Watcher::default()
     };
     loop {
-        watcher.read(&path);
-        let timeout = if watcher.deferred || DEFERRED.load(Ordering::Acquire) {
-            DEFERRED_RETRY
-        } else {
-            UNSIGNALLED
-        };
-        changes.wait(timeout);
+        watcher.read(&path, Some(&nudge));
+        changes.wait(watcher.wait_timeout(Some(&nudge)));
     }
 }
 
@@ -95,12 +124,20 @@ struct Watcher {
 }
 
 impl Watcher {
+    fn wait_timeout(&self, nudge: Option<&WakeNudge>) -> Duration {
+        if self.deferred || nudge.is_some_and(WakeNudge::is_pending) {
+            DEFERRED_RETRY
+        } else {
+            UNSIGNALLED
+        }
+    }
+
     /// Wake idle conversations if the revisions moved since the last reading,
     /// or retry held terminals that were busy on an earlier pass.
     /// The first reading wakes too: what arrived while no server ran reaches
     /// each idle conversation now. One that already heard it gets nothing;
     /// claimed updates and confirmed steers say so.
-    fn read(&mut self, path: &Path) {
+    fn read(&mut self, path: &Path, nudge: Option<&WakeNudge>) {
         if self.store.is_none() && path.exists() {
             self.store = loopflow_execution::store::open_sqlite(path)
                 .inspect_err(|error| tracing::warn!(%error, "Task update watcher has no store"))
@@ -115,7 +152,7 @@ impl Watcher {
         {
             Ok(revision) => {
                 let moved = self.seen != Some(revision);
-                let nudged = DEFERRED.swap(false, Ordering::AcqRel);
+                let nudged = nudge.is_some_and(WakeNudge::take_pending);
                 if moved {
                     self.seen = Some(revision);
                     if let Some(terminals) = &self.terminals {
@@ -238,31 +275,34 @@ fn wake(
         }
         // Connect before claiming, so an unreachable conversation keeps its
         // news for its next boundary.
-        let (thread, reach) = match (reach, thread.as_deref()) {
-            (IdleReach::Terminal(terminal), _) => {
-                let Some(terminals) = terminals else {
-                    return Ok(false);
-                };
-                return match terminals.wake_idle_prompt(terminal, WAKE_PROMPT)? {
-                    WakeTerminal::Injected => {
-                        store.record_woken(adapter)?;
-                        Ok(false)
-                    }
-                    WakeTerminal::NotReady => Ok(true),
-                    WakeTerminal::Absent => Ok(false),
-                };
-            }
-            (IdleReach::Inbox(Inbox::Claude(key)), Some(thread)) => {
-                match open_inbox(key, thread)? {
-                    Some((socket, token)) => (thread, Reach::Claude(socket, token)),
-                    None => return Ok(false),
+        if let IdleReach::Terminal {
+            terminal,
+            prompt_ready,
+        } = reach
+        {
+            let Some(terminals) = terminals else {
+                return Ok(false);
+            };
+            return match terminals.wake_idle_prompt(terminal, WAKE_PROMPT, *prompt_ready)? {
+                WakeTerminal::Injected => {
+                    store.record_woken(adapter)?;
+                    Ok(false)
                 }
-            }
-            (IdleReach::Codex(endpoint), Some(thread)) => (thread, Reach::Codex(endpoint)),
-            (IdleReach::Inbox(Inbox::Socket(socket)), Some(thread)) => {
-                (thread, Reach::Socket(open_socket(socket)?))
-            }
-            (_, None) => return Ok(false),
+                WakeTerminal::NotReady => Ok(true),
+                WakeTerminal::Absent => Ok(false),
+            };
+        }
+        let Some(thread) = thread.as_deref() else {
+            return Ok(false);
+        };
+        let reach = match reach {
+            IdleReach::Inbox(Inbox::Claude(key)) => match open_inbox(key, thread)? {
+                Some((socket, token)) => Reach::Claude(socket, token),
+                None => return Ok(false),
+            },
+            IdleReach::Codex(endpoint) => Reach::Codex(endpoint),
+            IdleReach::Inbox(Inbox::Socket(socket)) => Reach::Socket(open_socket(socket)?),
+            IdleReach::Terminal { .. } => unreachable!("handled above"),
         };
         let steers = loopflow_execution::steer::claim(
             store,
@@ -1130,7 +1170,7 @@ printf '%s' "$line" > "{pasted}"
             terminals: Some(registry.clone()),
             ..Watcher::default()
         };
-        watcher.read(&path);
+        watcher.read(&path, None);
         assert!(watcher.deferred, "draft must defer held-terminal wake");
         assert!(!pasted.exists(), "draft must not be clobbered");
         assert_eq!(store.session_steers(session, 0, 8).unwrap().pending, 1);
@@ -1141,10 +1181,116 @@ printf '%s' "$line" > "{pasted}"
         wait_until("draft cleared", || cleared.exists());
         // Poll until Hosted has read the cleared screen from the holder.
         wait_until("deferred wake fired", || {
-            watcher.read(&path);
+            watcher.read(&path, None);
             !watcher.deferred
         });
         wait_until("wake prompt pasted", || pasted.exists());
+        assert_eq!(
+            std::fs::read_to_string(&pasted).unwrap(),
+            format!("\x1b[200~{}\x1b[201~", super::WAKE_PROMPT)
+        );
+        registry.close();
+    }
+
+    #[test]
+    fn wake_nudge_wakes_waiting_watcher_without_a_revision_move() {
+        let session = "wake-nudge";
+        let fixture = fixture(session);
+        let _home = pin_lf_home(fixture.home.path());
+        let store = &fixture.store;
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET provider='agy',provider_thread='native' WHERE id=?1",
+                [session],
+            )
+            .unwrap();
+        let pasted = fixture.home.path().join("pasted");
+        let idle = agy_idle_screen();
+        let script = format!(
+            r#"stty -echo
+printf '{idle}'
+IFS= read -r line
+printf '%s' "$line" > "{}"
+"#,
+            pasted.display()
+        );
+        let (registry, _) = held_agy_terminal(store, session, &script, "? for shortcuts");
+
+        // Steer lands mid-turn: the watcher observes the revision while the
+        // session is working, so `watcher.deferred` stays false.
+        super::super::boundary::answer(
+            store,
+            &SessionBoundary {
+                moment: BoundaryMoment::Tool,
+                delivery: fixture.delivery.clone(),
+                adapter: Some(fixture.adapter.clone()),
+                callback: serde_json::json!({"hook_event_name":"UserPromptSubmit","session_id":"native"}),
+                gap: None,
+                printed: Vec::new(),
+                inbox: None,
+            },
+        )
+        .unwrap();
+        store
+            .save_session_steer(session, "Fixture author", "nudge after turn end")
+            .unwrap();
+        let path = fixture.store_path();
+        let mut watcher = Watcher {
+            terminals: Some(registry.clone()),
+            ..Watcher::default()
+        };
+        watcher.read(&path, None);
+        assert!(!watcher.deferred);
+
+        // Turn ends: `session_activity` flips to yielded without moving either
+        // `task_update_revision` or `steer_revision`.
+        super::super::boundary::answer(
+            store,
+            &SessionBoundary {
+                moment: BoundaryMoment::Stop,
+                delivery: fixture.delivery.clone(),
+                adapter: Some(fixture.adapter.clone()),
+                callback: serde_json::json!({"hook_event_name":"Stop","session_id":"native"}),
+                gap: None,
+                printed: Vec::new(),
+                inbox: None,
+            },
+        )
+        .unwrap();
+
+        // Arm `StoreChanges` after the Stop write so no WAL event is pending,
+        // and confirm the watcher would otherwise wait `UNSIGNALLED` (60 s).
+        let mut changes = loopflow_storage::changes::StoreChanges::watch(&path);
+        changes.wait(std::time::Duration::from_millis(1));
+        let nudge = super::WakeNudge::new(changes.waker());
+        assert_eq!(watcher.wait_timeout(Some(&nudge)), super::UNSIGNALLED);
+
+        let watcher_nudge = nudge.clone();
+        let watcher_path = path.clone();
+        let worker = std::thread::spawn(move || {
+            let timeout = watcher.wait_timeout(Some(&watcher_nudge));
+            changes.wait(timeout);
+            watcher.read(&watcher_path, Some(&watcher_nudge));
+            watcher.deferred
+        });
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(
+            !pasted.exists(),
+            "watcher should still be waiting in UNSIGNALLED"
+        );
+        let nudged_at = std::time::Instant::now();
+        nudge.retry_deferred();
+        let still_deferred = worker.join().unwrap();
+        assert!(!still_deferred);
+        assert!(
+            nudged_at.elapsed() < std::time::Duration::from_secs(5),
+            "WakeNudge must break UNSIGNALLED immediately"
+        );
+        wait_until("wake prompt pasted after nudge", || pasted.exists());
         assert_eq!(
             std::fs::read_to_string(&pasted).unwrap(),
             format!("\x1b[200~{}\x1b[201~", super::WAKE_PROMPT)
@@ -1232,7 +1378,7 @@ printf '%s' "$line" > "{pasted}"
         // nothing but the store, and its first reading delivers it.
         fixture.comment(&fixture.store, "c-1", "PR: https://example.test/pr/1");
         let path = fixture.store_path();
-        Watcher::default().read(&path);
+        Watcher::default().read(&path, None);
         let content = received(&listener)[1]["message"]["content"].to_string();
         assert!(content.contains("pr/1"));
         // News after the restart wakes it too.
@@ -1251,7 +1397,7 @@ printf '%s' "$line" > "{pasted}"
         listener.set_nonblocking(true).unwrap();
         let mut watcher = Watcher::default();
         let path = fixture.store_path();
-        watcher.read(&path);
+        watcher.read(&path, None);
         // Another Task's Graph moves.
         fixture
             .store
@@ -1263,7 +1409,7 @@ printf '%s' "$line" > "{pasted}"
                 [],
             )
             .unwrap();
-        watcher.read(&path);
+        watcher.read(&path, None);
         assert_eq!(
             listener.accept().unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock,
@@ -1296,7 +1442,7 @@ printf '%s' "$line" > "{pasted}"
         );
         let path = fixture.store_path();
         let mut watcher = Watcher::default();
-        watcher.read(&path);
+        watcher.read(&path, None);
         assert_eq!(
             listener.accept().unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock
@@ -1305,7 +1451,7 @@ printf '%s' "$line" > "{pasted}"
         store
             .finish_run(RunOwner::GraphRun, &run, 20, Some(1), Some("lint failed"))
             .unwrap();
-        watcher.read(&path);
+        watcher.read(&path, None);
         let content = received(&listener)[1]["message"]["content"].to_string();
         assert!(content.contains(&format!("Run feature ({run}) · failed")));
         assert!(content.contains("lint failed"));

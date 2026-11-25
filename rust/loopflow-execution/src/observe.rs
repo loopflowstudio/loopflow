@@ -6,8 +6,29 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, Weak};
 use std::time::{Duration, SystemTime};
+
+static SPAWNS: AtomicU64 = AtomicU64::new(0);
+
+/// Record a subprocess spawned by the server or observation layer.
+pub fn record_spawn() {
+    SPAWNS.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Cumulative subprocesses recorded in this process.
+pub fn spawns() -> u64 {
+    SPAWNS.load(Ordering::Relaxed)
+}
+
+/// Number of observation facts currently held by active subscriptions.
+pub fn current_held_facts() -> u64 {
+    let Some(cache) = SHARED.lock().expect("observation cache").upgrade() else {
+        return 0;
+    };
+    cache.held_facts()
+}
 
 use crate::ops::task::TaskFileInventory;
 use crate::process::OsProcess;
@@ -119,6 +140,7 @@ impl Fact {
                 Answer::CheckoutFiles(retained(TaskFileInventory::scan(path).map(Arc::new)))
             }
             Self::Git(path, args) | Self::Github(path, args) => {
+                record_spawn();
                 let mut command = Command::new(if matches!(self, Self::Git(..)) {
                     "git"
                 } else {
@@ -448,6 +470,16 @@ impl Cache {
             .entry(fact)
             .or_insert((entry, revision));
         answer
+    }
+
+    /// Number of entries currently held by at least one `Dependencies`.
+    pub fn held_facts(&self) -> u64 {
+        self.entries
+            .lock()
+            .expect("observation cache")
+            .values()
+            .filter(|entry| Arc::strong_count(entry) > 1)
+            .count() as u64
     }
 
     /// How many times values matching `key` were computed.

@@ -316,6 +316,7 @@ fn open_unmigrated(path: &Path) -> StoreResult<Connection> {
             | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
             | rusqlite::OpenFlags::SQLITE_OPEN_URI,
     )?;
+    crate::instrumentation::record_connection_open();
     crate::instrumentation::observe_sqlite(&conn);
     conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
     Ok(conn)
@@ -551,6 +552,7 @@ impl SqliteStore {
         #[cfg(any(test, feature = "test-support"))]
         copy_test_store(path)?;
         let mut conn = Connection::open(path)?;
+        crate::instrumentation::record_connection_open();
         crate::instrumentation::observe_sqlite(&conn);
         configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
         super::migration_runner::apply_sqlite(build, &conn, observers)?;
@@ -590,6 +592,7 @@ impl SqliteStore {
             copy_test_store(path)?;
         }
         let mut conn = Connection::open(path)?;
+        crate::instrumentation::record_connection_open();
         crate::instrumentation::observe_sqlite(&conn);
         // Install the handler before journal-mode negotiation: that pragma can
         // itself meet another process opening the same WAL database.
@@ -641,6 +644,7 @@ impl SqliteStore {
                 | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
                 | rusqlite::OpenFlags::SQLITE_OPEN_URI,
         )?;
+        crate::instrumentation::record_connection_open();
         crate::instrumentation::observe_sqlite(&conn);
         conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
         crate::history::attach(&conn, path);

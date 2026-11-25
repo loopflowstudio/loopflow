@@ -1392,6 +1392,12 @@ pub enum ServerCommand {
     Connect,
     /// Report local readiness without registering or starting anything.
     Status,
+    /// Live runtime counters from the local server (threads, SQLite opens, spawns, held facts).
+    Diagnostics {
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Configure private mobile access using this host's signed-in Tailscale installation.
     Mobile {
         /// Stop remote access without stopping local Sessions.

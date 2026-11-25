@@ -508,6 +508,7 @@ fn git_until(
         // Its own group, so stopping it stops its transport helpers too.
         std::os::unix::process::CommandExt::process_group(&mut command, 0);
     }
+    crate::observe::record_spawn();
     let mut child = command.spawn().context("start git")?;
     let stdin = child.stdin.take();
     let stdout = read_in_background(child.stdout.take().expect("stdout is piped"));

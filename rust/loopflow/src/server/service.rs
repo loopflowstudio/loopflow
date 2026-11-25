@@ -1844,6 +1844,15 @@ async fn served(
             mobile_control(remote_control, Control::Status { reply }).await?;
             serde_json::to_value(result.await.map_err(unavailable)?).map_err(unavailable)
         }
+        Operation::Server(ServerOperation::ServerDiagnostics) => {
+            let diagnostics = super::wire::ServerDiagnostics {
+                threads: loopflow_execution::process::OsProcess::current_thread_count(),
+                store_opens: loopflow_storage::instrumentation::opened_connections(),
+                spawns: loopflow_execution::observe::spawns(),
+                held_facts: loopflow_execution::observe::current_held_facts(),
+            };
+            serde_json::to_value(diagnostics).map_err(unavailable)
+        }
         Operation::Server(ServerOperation::MobileConfigure { configuration }) => {
             let (reply, result) = tokio::sync::oneshot::channel();
             mobile_control(

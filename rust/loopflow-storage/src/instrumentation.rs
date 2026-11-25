@@ -10,6 +10,17 @@ pub static STATEMENTS: AtomicU64 = AtomicU64::new(0);
 pub static ROWS: AtomicU64 = AtomicU64::new(0);
 pub static SQL_PROFILES: AtomicU64 = AtomicU64::new(0);
 static REQUEST_TRACING: AtomicBool = AtomicBool::new(false);
+static OPENED_CONNECTIONS: AtomicU64 = AtomicU64::new(0);
+
+/// Record a physical SQLite `Connection::open*` call for process diagnostics.
+pub fn record_connection_open() {
+    OPENED_CONNECTIONS.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Cumulative physical SQLite connections opened by this process.
+pub fn opened_connections() -> u64 {
+    OPENED_CONNECTIONS.load(Ordering::Relaxed)
+}
 
 /// Install request counters on server connections, including connections reused later.
 /// Ordinary CLI processes keep their tracing off unless explicitly profiled.

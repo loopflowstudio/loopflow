@@ -4,3 +4,4 @@
 - Use the Task run's carrier ID for each arrival. A carrier can park once, and a repeat or Graph replacement starts a fresh carrier.
 - Use `step: research` inside the research Graph. A bare `research` resolves to the Graph of the same name.
 - When **Sort by status** is off, should a breakpoint temporarily appear above a Task someone dragged to the top? #2025 made the default Working order stable. For the Desktop pass, assume priority in Now and status-sorted work while keeping the saved drag order intact. The default sidebar presentation is still open.
+- Convert a released capture only when a run successfully claims its position. SQLite fixes the Graph at take-up, so the claim replaces that one row in the same transaction and retains its carrier and recovery counts. A Machine move carries the source coordinates until then.

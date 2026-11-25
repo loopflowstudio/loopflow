@@ -2749,6 +2749,17 @@ for _ in sys.stdin:
 
 #[test]
 fn stacked_child_land_drops_inherited_scratch_conflict_without_agent_and_pushes_once() {
+    land_stacked_child_after_parent_squash(true);
+}
+
+/// The parent merged and its branch was deleted before anything recorded the
+/// merge; land asks GitHub instead of fetching the deleted branch.
+#[test]
+fn stacked_child_lands_when_parent_merge_is_not_yet_recorded() {
+    land_stacked_child_after_parent_squash(false);
+}
+
+fn land_stacked_child_after_parent_squash(parent_merge_recorded: bool) {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     repo.create_file("scratch/.gitkeep", "");
@@ -2757,6 +2768,28 @@ fn stacked_child_land_drops_inherited_scratch_conflict_without_agent_and_pushes_
     repo.stage_all();
     repo.commit("base");
     repo.push();
+    // A GitHub-shaped origin, so lf can name the parent's PR on GitHub.
+    let github = "https://github.com/fixture/repo.git";
+    for args in [
+        vec![
+            "config".to_string(),
+            format!("url.{}.insteadOf", repo.bare_path().display()),
+            github.to_string(),
+        ],
+        vec![
+            "remote".into(),
+            "set-url".into(),
+            "origin".into(),
+            github.into(),
+        ],
+    ] {
+        assert!(Command::new("git")
+            .args(&args)
+            .current_dir(repo.path())
+            .status()
+            .unwrap()
+            .success());
+    }
 
     let git_in = |dir: &std::path::Path, args: &[&str]| -> String {
         let output = Command::new("git")
@@ -2810,6 +2843,9 @@ fn stacked_child_land_drops_inherited_scratch_conflict_without_agent_and_pushes_
     repo.commit("Squash parent without scratch");
     let target_sha = repo.head_sha();
     repo.push();
+    if !parent_merge_recorded {
+        git_in(repo.path(), &["push", "origin", "--delete", "parent"]);
+    }
 
     let agent_canary = repo.bare_path().join("agent-ran");
     let failing_agent = format!(
@@ -2817,7 +2853,18 @@ fn stacked_child_land_drops_inherited_scratch_conflict_without_agent_and_pushes_
         agent_canary.display()
     );
     let gh_log = repo.bare_path().join("gh-stacked.log");
-    let gh = gh_land_script(gh_log.to_string_lossy().as_ref());
+    let parent_merged = format!(
+        r#"if [ "$1" = "api" ] && [ "$2" != "graphql" ]; then
+  echo '{{"merged":true,"state":"closed","draft":false,"merge_commit_sha":"{target_sha}","merged_at":"2026-11-25T00:00:00Z","number":41,"html_url":"https://github.com/fixture/repo/pull/41","head":{{"sha":"{parent_head}"}}}}'
+  exit 0
+fi
+"#
+    );
+    let gh = gh_land_script(gh_log.to_string_lossy().as_ref()).replacen(
+        "#!/bin/sh\n",
+        &format!("#!/bin/sh\n{parent_merged}"),
+        1,
+    );
     let _env = EnvGuard::with_lf_home(
         &[
             ("gh", gh.as_str()),
@@ -2858,10 +2905,12 @@ fn stacked_child_land_drops_inherited_scratch_conflict_without_agent_and_pushes_
                 .stack_task_placement(&child, &parent.pr.id, &parent_head),
         )
         .unwrap();
-    parent_pr.merge_commit = Some(target_sha.clone());
-    runtime
-        .block_on(parent.store.update_task_pr(&parent_pr))
-        .unwrap();
+    if parent_merge_recorded {
+        parent_pr.merge_commit = Some(target_sha.clone());
+        runtime
+            .block_on(parent.store.update_task_pr(&parent_pr))
+            .unwrap();
+    }
 
     let push_log = repo.bare_path().join("push-stacked.log");
     install_push_log_hook(repo.bare_path(), &push_log);

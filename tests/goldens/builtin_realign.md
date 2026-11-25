@@ -136,7 +136,7 @@ and code. When intent is missing, ask for the specific decision; the
 implementation is not the spec. Then fix the plan at the source. Rewrite what
 the work proved wrong and delete steps that no longer apply. What you learned
 may change the approach, but missing behavior never weakens acceptance. A
-change that needs a product decision is written as the exact open choice.
+change that needs a design decision is written as the exact open choice.
 Nothing goes into the plan as settled unless someone said so; quote them.
 
 Read the work once as a reviewer, one look at the shape and not a full
@@ -169,7 +169,7 @@ each one a place:
   behavior:** write it into the plan as the next pass.
 - **Separate outcome:** list it in the plan under `## Deferred findings` (which
   `ship-review` reads), with what it would take. Don't build it.
-- **Reversible product choice (headless):** adopt the recommended direction
+- **Reversible design choice (headless):** adopt the recommended direction
   into the plan marked as made for review, with what was passed over and why
   (never as settled), so downstream steps build one coherent design and
   `ship-review` surfaces the choice.
@@ -185,7 +185,7 @@ notes while keeping `## Deferred findings` intact.
 When this step is deciding a loop: return `iterate` only when the plan now
 holds a pass of rework or missing promised behavior, naming that pass in the
 summary; return `advance` when what was found is fixed here or deferred; return
-`blocked` with the question on a product choice that can't be undone once
+`blocked` with the question on a design choice that can't be undone once
 shipped.
 
 Outside a loop (`plan`, `refresh`, or standalone), there is no `blocked`

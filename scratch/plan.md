@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Status: built (`78bde1d766`), compressed (`c6eab6e222`), QA'd (`73abaa380c`), reviewed (`scratch/concept-review.html`), post-build review findings applied (`02b9cf8f62`), and ship-review revisions applied (`fix` renamed to `quick`; builtin `ui` removed). Remaining: the generic-wording pass under `## Passes`.
+Status: built (`78bde1d766`), compressed (`c6eab6e222`), QA'd (`73abaa380c`), reviewed (`scratch/concept-review.html`), post-build review findings applied (`02b9cf8f62`), ship-review revisions applied (`4cb640f3f6`: `fix` renamed to `quick`; builtin `ui` removed), and generic design-wording pass applied. Remaining: gate.
 
 
 A Task on `code`, `feature`, `pursue` or `redesign` runs `compress` and `qa`
@@ -143,7 +143,7 @@ correctly in every Graph position it holds (and standalone).
   into the main body in a few lines: question the premise, since the plan came
   from the same pipeline; before anything is built, review the whole thing the
   plan builds and whether its first slice is the right one; after it is built,
-  review against the base as a first-time reader; show a product choice on the
+  review against the base as a first-time reader; show a design choice on the
   page as a recommendation with what was passed over.
 - Line 39 ("What this work should do differently goes in the plan, when the
   review is updating one") becomes: every finding goes on the page, marked as
@@ -176,7 +176,7 @@ no fresh review).
   - When deciding a loop (`build`): `iterate` only when the plan now holds a
     pass of rework or missing promised behavior, naming that pass in the
     summary; `advance` when what was found is fixed here or deferred; `blocked`
-    with the question on a product choice that can't be undone once shipped.
+    with the question on a design choice that can't be undone once shipped.
   - Outside a loop (`plan`, `refresh`): no `blocked` verdict exists — record
     any open irreversible choice in `scratch/questions.md` and `scratch/plan.md`,
     report what changed, and finish.
@@ -326,7 +326,7 @@ Docs:
 ## Known costs of the new order
 
 - `concept-review` runs before `compress` and `qa`, so it never reads qa's
-  findings. Product-level problems qa finds go to `scratch/qa.html`, which
+  findings. Design-level problems qa finds go to `scratch/qa.html`, which
   `ship-review` gathers; in `pursue` (no `ship-review`) they reach a person
   through the PR.
 - `sync` runs before each `implement` (in `build` and `quick`), so the final
@@ -384,31 +384,20 @@ One pass; it is prose, three YAML files, docs, and test expectations.
   - Updated Rust graph expectations in `compiled.rs`, `graph/mod.rs` (`edges()` reports relative offsets `1` and `3`, not absolute indices), `commands/graph.rs`, and `task_graph.rs:631` (`write-docs` shifted by +1 after `realign` joined `plan`).
   - QA (`scratch/qa.html`) verified `lf graph show`, `lf list graph`, Desktop `StartFlow` labels, `lf help`, and real Claude haiku decider runs for `build`'s inner loop, bounded brief, read-only `concept-review`, and oversized brief (caught and fixed in `73abaa380c`: no-plan `implement` now blocks oversized briefs before writing any plan or code).
 - Post-build review (`02b9cf8f62`): clarified `realign.md` reversible-choice handoff and `verify.md` `<qa head>` pointer.
-- Ship-review revision: renamed `fix.yaml` to `quick.yaml` ("Build a small, clear change and land it."), removed builtin `ui.yaml` and reverted `demo.md`, and updated tests, docs, and PR #2047 copy.
-- Remaining: one wording pass (below).
+- Ship-review revision (`4cb640f3f6`): renamed `fix.yaml` to `quick.yaml` ("Build a small, clear change and land it."), removed builtin `ui.yaml` and reverted `demo.md`, and updated tests, docs, and PR #2047 copy.
+- Generic "design" wording pass (applied): removed "product" wording from `concept-review.md` (using "the system", "domain concepts", "the concepts people work with", and "design choice"), aligned "product choice/decision" to "design choice/decision" in `realign.md`, `kickoff.md`, and `write-docs.md`, regenerated `tests/goldens/builtin_realign.md` (no `concept-review` golden exists), and updated this plan's prose.
 
-### Next pass: generic "design" wording
+  Steer from a comment on the Task (Jack Heart, 2026-11-25), word for word:
 
-Steer from a comment on the Task (Jack Heart, 2026-11-25), word for word:
-
-> Additional wording edit in builtin `concept-review.md` (and update its golden): remove "the product" / "product" wording (currently ~10 occurrences) so `concept-review` fits libraries, engines, compilers, protocols, and research pipelines as well as user-facing apps.
->
-> Replace with generic framing: e.g. "the system" / "the domain" / "the concepts people work with" / "a design choice" instead of "the product", "product concepts", "product choice", and "what the product should be". Align the matching "product choice/decision" phrases in `realign.md`, `kickoff.md`, and `write-docs.md` to "design choice/decision" too.
-
-Where the words are (`rust/loopflow-definitions/src/builtins/task/skill/`):
-- `concept-review.md`: lines 2, 3, 6 (the `description`, which skill listings show), 14, 16, 48, 53, 55, 80.
-- `realign.md:25, 58, 74`; `kickoff.md:14`; `write-docs.md:28`.
-- Goldens: no `concept-review` golden exists (`tests/goldens/`); regenerate `builtin_realign.md` with `uv run python tests/goldens/update_goldens.py`.
-- `concept-review.md`'s "product concepts / code concepts" pairing (line 53–55) is the skill's core frame; keep the two-sided comparison, renamed (e.g. "the concepts people work with" vs "the code's concepts").
-- Then update this plan's prose that says "product choice" (Ownership/skills sections) to match.
-
-Done when `grep -niE "product" rust/loopflow-definitions/src/builtins/task/skill/{concept-review,realign,kickoff,write-docs}.md` prints nothing and `binary(golden_prompt)` passes.
+  > Additional wording edit in builtin `concept-review.md` (and update its golden): remove "the product" / "product" wording (currently ~10 occurrences) so `concept-review` fits libraries, engines, compilers, protocols, and research pipelines as well as user-facing apps.
+  >
+  > Replace with generic framing: e.g. "the system" / "the domain" / "the concepts people work with" / "a design choice" instead of "the product", "product concepts", "product choice", and "what the product should be". Align the matching "product choice/decision" phrases in `realign.md`, `kickoff.md`, and `write-docs.md` to "design choice/decision" too.
 
 ## Post-build review findings
 
 Recorded by post-build `concept-review` against base `23ce1a69f9` (`scratch/concept-review.html`), both resolved before `pr-publish`:
 
-1. **Resolved — `realign.md` reversible-choice handoff:** added a bullet under `## After a review` so headless `realign` adopts a recommended reversible product choice into the plan marked as made for review (with what was passed over and why, never as settled), and regenerated `tests/goldens/builtin_realign.md`.
+1. **Resolved — `realign.md` reversible-choice handoff:** added a bullet under `## After a review` so headless `realign` adopts a recommended reversible design choice into the plan marked as made for review (with what was passed over and why, never as settled), and regenerated `tests/goldens/builtin_realign.md`.
 2. **Resolved — `verify.md` `<qa head>` pointer:** clarified that `<qa head>` is the branch's `lf qa:` commit.
 
 ## Deferred findings

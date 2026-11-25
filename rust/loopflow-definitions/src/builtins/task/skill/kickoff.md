@@ -11,7 +11,7 @@ discovery or swap in something technically convenient.
 **Continue; don't re-derive.** Build on the design that exists. If the plan
 is already good enough, keep it.
 
-**Choose.** An open product choice gets asked when someone is here. With
+**Choose.** An open design choice gets asked when someone is here. With
 nobody here, make the bold choice and mark it in the plan as made for review,
 with what you passed over.
 

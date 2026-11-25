@@ -1,9 +1,9 @@
 ---
-requires: the intended experience, the current product design, and a person when a product choice must be made
-produces: a page showing whether product and code concepts line up
+requires: the intended experience, the current design, and a person when a design choice must be made
+produces: a page showing whether domain and code concepts line up
 action_style: exploratory
 ---
-Step back and decide what the product's concepts and interactions should be, then follow that answer through the data model, APIs and infrastructure.
+Step back and decide what the system's concepts and interactions should be, then follow that answer through the data model, APIs and infrastructure.
 
 Start from the experience people want and the constraints they stated. The
 current implementation informs the design; it doesn't bind it. Question the
@@ -11,9 +11,9 @@ premise even when reviewing a plan: it came from the same pipeline and is not
 the standard.
 
 Step back first. Everything in front of you, the request, the Task, the
-plan, the diff, the conversation so far, points at an area of the product.
+plan, the diff, the conversation so far, points at an area of the system.
 Review that whole area, not the last thing that was said and not only the
-lines that changed. Find the part of the product it all touches, widen to the
+lines that changed. Find the part of the system it all touches, widen to the
 whole it belongs to, the concepts, the actions and the records behind them,
 and review that as it would stand with the work in it. A change can be right
 in every line and still be a patch on a concept that is wrong.
@@ -45,14 +45,14 @@ true to the experience. A model that is wrong in the area this work touches
 is this work, however large the fix: take another big pass to get it right.
 Every finding goes on the page, marked as this work or as a separate outcome
 stated plainly with what it would take. More behavior is scope, not review.
-When a finding turns on a product choice, show it on the page as a
+When a finding turns on a design choice, show it on the page as a
 recommendation with what was passed over and why, flagging any choice that
 can't be undone once shipped.
 
 Show it. Write `scratch/concept-review.html`, built around one question: do
-the product's concepts and the code's concepts line up?
+the concepts people work with and the code's concepts line up?
 
-- the product concepts: what a person knows about and the actions they take;
+- the domain concepts: what a person knows about and the actions they take;
 - the code concepts: the types, records and APIs behind them;
 - each pairing marked yes or no, with what is wrong where it is no: a concept
   the code has and the person never sees, one idea under two names, one name
@@ -77,5 +77,5 @@ design unless asked; the person reads the page and decides what happens next.
 
 When they want to go further, explore the biggest mismatch together before
 presenting a full redesign, draft the affected usage docs, and regenerate the
-page as answers come. Ask about choices that change what the product should
+page as answers come. Ask about choices that change what the system should
 be, never about cosmetic refactors, and keep what they say word for word.

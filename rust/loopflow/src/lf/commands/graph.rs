@@ -420,14 +420,18 @@ pub fn carry_task_run(
             }
             (step, merges)
         }
-        TaskRunStart::Live { run, graph_process } => {
+        TaskRunStart::Live {
+            run,
+            merges,
+            graph_process,
+        } => {
             return announce(&TaskRun::Running {
                 log: Some(loopflow_execution::process::launch_log::graph_log_path(
                     graph_process.as_str(),
                 )),
                 issue,
                 run,
-                merges: true,
+                merges,
                 graph_process,
             })
         }

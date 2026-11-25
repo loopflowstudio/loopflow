@@ -90,9 +90,9 @@ lf steer <ID> "raise ValueError, not ZeroDivisionError"   # redirects the run be
 ```
 
 `code` is a built-in Graph: it plans, implements in reviewable commits, runs
-`qa`, publishes the PR, pauses for your review, then delivers and pauses once
-more to verify on `main`. A Task remembers its Graph, so later `lf task run <ID>`
-calls continue from where it stopped.
+`qa`, publishes the PR, pauses for your review, then delivers and merges the
+PR. A Task remembers its Graph, so later `lf task run <ID>` calls continue from
+where it stopped.
 
 - Set `graph: code` in `.lf/config.yaml` to make it the repo default.
 - Run `lf -b task run <ID>` to run straight through interactive stops headless.

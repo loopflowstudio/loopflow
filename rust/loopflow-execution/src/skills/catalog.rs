@@ -1087,8 +1087,8 @@ mod tests {
         );
         write(
             repo.path(),
-            ".lf/skills/verify.md",
-            "---\nextends: implement\n---\nOur own verify.\n",
+            ".lf/skills/measure.md",
+            "---\nextends: implement\n---\nOur own measure.\n",
         );
         write(
             repo.path(),
@@ -1129,7 +1129,7 @@ mod tests {
             (Some(BuiltinRelation::Extends), Some("base-qa".into()))
         );
         assert_eq!(
-            relations("verify"),
+            relations("measure"),
             (Some(BuiltinRelation::Replaces), Some("implement".into()))
         );
         assert_eq!(

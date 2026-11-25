@@ -350,6 +350,7 @@ mod tests {
             "record-learnings",
             "wave-report",
             "testing-audit",
+            "verify",
         ] {
             assert!(get_builtin_skill(name).is_none(), "{name}");
         }

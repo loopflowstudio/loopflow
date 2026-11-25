@@ -397,7 +397,7 @@ Source and license notices ship offline with the catalogue.
 Under the jump bar, the workflow bar reads where the Task stands:
 
 ```text
-code  plan  build  👤ship-review  deliver  👤verify   build is running implement. You are next needed at ship-review.   [Auto-Ship]  …
+code  plan  build  👤ship-review  deliver   build is running implement. You are next needed at ship-review.   [Auto-Ship]  …
 ```
 
 The Graph's name, then its top-level steps in order, a person before each step

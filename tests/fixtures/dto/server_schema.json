@@ -14737,7 +14737,7 @@
               ]
             },
             "merges": {
-              "description": "The run may merge the PR: auto is on, or no interactive step is\nleft ahead, and nobody turned auto off.",
+              "description": "The run can reach a merging step before stopping, and nobody turned\nauto off.",
               "type": "boolean"
             },
             "run": {
@@ -16771,7 +16771,7 @@
           "type": "array"
         },
         "sentence": {
-          "description": "\"You take part at explore, ship-review and verify.\" or \"Runs on its own.\"",
+          "description": "\"You take part at explore and ship-review.\" or \"Runs on its own.\"",
           "type": "string"
         },
         "steps": {

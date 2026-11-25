@@ -1253,10 +1253,13 @@ async fn try_start_task_run(
         settle_pending_completion(store, task).await?;
         return Ok(Some((TaskRunStart::Ended, claimed_arrival)));
     };
-    let label = if start.place == crate::task_graph::Place::default() {
-        format!("{} from start", graph.name)
-    } else {
-        format!("{} from {}", graph.name, graph.step_name(&start.place))
+    // A continued breakpoint sets out from inside its loop, not the start.
+    let label = match arrival.and(graph.step_name_of(&start.cursor)) {
+        Some(step) => format!("{} from {step}", graph.name),
+        None if start.place == crate::task_graph::Place::default() => {
+            format!("{} from start", graph.name)
+        }
+        None => format!("{} from {}", graph.name, graph.step_name(&start.place)),
     };
     if !crate::store::task_work::start_task_graph_run(
         &store.sqlite,

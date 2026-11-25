@@ -980,6 +980,18 @@ mod tests {
             quiet(&store),
             "the steer saved for this comment is its only delivery"
         );
+        comment(
+            &store,
+            &task,
+            "1b, the warm palette\n\n<!-- loopflow-requester:\"jack\" -->\n\n<!-- loopflow-breakpoint:arrival -->",
+            TaskCommentAuthor::Person {
+                name: Some("jack".into()),
+            },
+        );
+        assert!(
+            quiet(&store),
+            "a breakpoint reply reaches the next step as its handoff"
+        );
     }
 
     #[test]

@@ -2555,7 +2555,7 @@ fn breakpoint_presents_finished_work() {
     drop(server);
     let _server = start_server();
     let reply = "1b — compare keyboard use";
-    check(&[
+    let iterated = run(&[
         "task",
         "run",
         "INF-123",
@@ -2566,6 +2566,12 @@ fn breakpoint_presents_finished_work() {
         "--reason",
         reply,
     ]);
+    let launched = String::from_utf8_lossy(&iterated.stdout);
+    assert!(
+        launched.contains("research from research running"),
+        "the continued run names where it sets out: {launched}{}",
+        String::from_utf8_lossy(&iterated.stderr)
+    );
     let second = wait_for_review(Some(&first));
     let contexts = received_contexts(home.path());
     assert_eq!(contexts.len(), 2);

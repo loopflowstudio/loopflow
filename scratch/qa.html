@@ -1,5 +1,6 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>LOO-1096 QA · breakpoints on real providers</title>
+<meta charset="utf-8">
+<title>LOO-1096 QA · breakpoints after Pass 5</title>
 <style>
 body{font:15px/1.5 -apple-system,sans-serif;max-width:56em;margin:2em auto;padding:0 1em;color:#222}
 pre{background:#f4f4f2;padding:.8em;overflow-x:auto;font-size:12.5px;white-space:pre-wrap}
@@ -7,66 +8,104 @@ h2{margin-top:2em;border-top:1px solid #ddd;padding-top:1em}
 .ok{color:#176b2c;font-weight:600}.bad{color:#a12;font-weight:600}.fix{color:#7a4b00;font-weight:600}
 img{max-width:100%;border:1px solid #ccc}
 td,th{padding:.3em .6em;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
-</style></head><body>
-<h1>Breakpoints on real providers</h1>
-<p>Branch <code>lf</code> at f99ad5ace plus the fixes below. Private <code>LF_HOME</code> under <code>/tmp/lf-qa-bp</code>, a disposable recipe-card repository with a bare origin, real Claude for the primary (default model) and for explore (<code>claude:sonnet</code>). Run on 2026-11-25.</p>
+</style>
+<h1>Breakpoints after Pass 5, on real Claude</h1>
+<p>Branch <code>lf</code> at <code>9f10fada8e</code> plus the three fixes below. Private <code>LF_HOME</code> at <code>/tmp/lf-qa-bp5/home</code>, a disposable repository with a bare origin, real Claude for every primary (default model) and for workers (<code>claude:haiku</code>). Graphs:</p>
+<pre>cmdbreak:     - cmd: help task / - break: check / - cmd: help
+naming:       - step: note / - break / - step: echo
+naming-loop:  - loop: [ step: note, break ]</pre>
+<p><code>note</code> writes <code>scratch/note.md</code> with two names, one numbered question and a recommendation. <code>echo</code> writes, word for word, whatever direction it was given to <code>scratch/received.md</code>. Run on 2026-11-25. The earlier run on real providers (explore → kickoff on the feature Graph) is summarized at the end.</p>
 
-<h2>1 · A new feature Task runs explore on its own model</h2>
-<p>Did: <code>lf task create 'Add a dark mode to the recipe card' --run --graph feature --json</code>, with <code>skills.explore.agent: codex</code>.</p>
-<p>Saw: Codex was out of quota until Nov 30. Status said <q>explore is waiting for codex capacity until Nov 25 07:31 … It goes on by itself</q>. The retry kept Codex after I changed the setting to <code>claude:sonnet</code>, so I interrupted and ran again. Explore then ran headless as <code>claude -p … --model sonnet</code> while the primary ran in a held terminal on the default model. <span class="ok">Works.</span></p>
+<h2>1 · A wait started before the run returns at the breakpoint</h2>
+<p><b>Did:</b> <code>lf task wait c917ac --until breakpoint --timeout 300</code> in the background, then <code>lf task run c917ac cmdbreak</code>.</p>
+<p><b>Saw:</b> <span class="ok">exit 0 after 6 s</span>:</p>
+<pre>  Graph cmdbreak: At breakpoint check.
+  latest Graph: Graph cmdbreak stopped at breakpoint check; `lf task run c917ac` continues it · started by QA Person
+  action: run  (At breakpoint check.)</pre>
+<p>The action line names the breakpoint. Before Pass 5 the action reason was the generic "run the next work…".</p>
 
-<h2>2 · The primary quits during explore</h2>
-<p>Did: attached with <code>lf resume --task 2d0e18</code> and pressed Enter on Claude's trust dialog, which selects its exit choice.</p>
-<p>Saw: <code>claude exited with 1.</code> The server restarted the primary (<q>Conversation: running (started again 07:28, attempt 1)</q>). <span class="ok">Works.</span></p>
+<h2>2 · The primary presents a command step's result</h2>
+<p><b>Did:</b> <code>lf resume --task c917ac</code> in a PTY, accepted Claude's folder-trust dialog.</p>
+<p><b>Saw:</b> on its first turn the primary presented the handoff:</p>
+<pre>The Task Wait for a check breakpoint · c917ac is waiting for your review at the check breakpoint of its cmdbreak graph.
 
-<h2>3 · Parking at after-explore</h2>
-<p>Saw: about two minutes later, <q>Graph feature: At breakpoint after-explore.</q> On the next line, status said:</p>
-<pre>latest Graph: Graph feature finished; nothing further is launched · started by QA Person</pre>
-<p><span class="fix">Fixed.</span> That line describes the run that parked, which ended its carrier. It now reads:</p>
-<pre>latest Graph: Graph feature stopped at breakpoint after-explore; `lf task run 2d0e18` continues it · started by QA Person</pre>
-<p>The artifact explore left, <code>scratch/explore.html</code>:</p>
-<img src="qa/explore.png" alt="explore.html: three dark-mode visions with live demos and a recommendation">
+Finished work: the first step, help task (run 3a1db007), ran without errors. … Full output is in the log: /private/tmp/lf-qa-bp5/home/logs/graph-cc49dfbe-….log
+Next if you continue: the graph runs its last step, help, which prints the general lf help. After that the graph is done.
+Your choices:
+1. Continue to the help step.
+2. Rerun or skip a step.
+3. Stop here.</pre>
+<p><b>Typed:</b> <code>1</code>. It ran <code>lf task run c917ac --at-arrival c1a610d8-… --reason "1 (continue to the help step)"</code>, and the Graph reached its end. <span class="ok">Works.</span></p>
+<p><span class="bad">Broken:</span> the primary then said “Two updates came in”. The second was its own reply sent back to it, with the HTML markers included:</p>
+<pre>Task c917ac: new comment from QA Person: 1 (continue to the help step)
 
-<h2>4 · The handoff reaches the primary</h2>
-<p>On its first turn the restarted primary (task-session) chose:</p>
-<pre>lf session rename … 'recipe dark mode' --suggest; lf task wait 2d0e18 --until submitted --timeout 540</pre>
-<p>Its description was <q>Rename session and wait for explore breakpoint</q>. <span class="bad">Broken:</span> <code>--until submitted</code> returned only for an open PR or a finished Task, so the primary sat inside the tool call while the Task waited at the breakpoint. The handoff could not land until the 9-minute timeout.</p>
-<p><span class="fix">Fixed.</span> <code>submitted</code> now also returns when the Task waits at a breakpoint (<code>ops/task.rs</code>). I updated the <code>--until</code> help and the task-session skill to match, and added a unit case. Live check on a command Graph (<code>- cmd: help task</code>, <code>- break: check</code>, <code>- cmd: help</code>): a wait started before <code>lf task run</code> returned exit 0 with <q>At breakpoint check.</q> Right after a continue, <code>task_graphs.breakpoint</code> was already NULL, so a new wait does not return early.</p>
-<p>The live primary was still running the old binary's wait, so I pressed Esc. Claude fires no Stop hook on Esc, and the server's idle wake needs one, so nothing came for 87 s. That gap existed before this change. When I typed <q>where does this stand?</q>, the handoff was delivered with the turn, and the primary presented it:</p>
-<pre>Explore run 440a0a35 finished, and the Task is waiting for you at the after-explore breakpoint. Nothing in index.html has changed …
- A. Follows your device | B. Adds a switch | C. Cook mode   (what you get · cost and risk)
- 1. Which vision?  a) Follow the device (recommended)  b) … plus a switch  c) Cook mode
- 2. Which dark colours?  a) browser built-in (recommended)  b) warm kitchen palette
- 3. Add the mobile viewport tag?  a) Yes  b) No (recommended)
-Recommendation: 1a, 2a, 3b …
-Reply with your picks, like "1a 2a 3b", or just "continue" to accept the recommendation.</pre>
+&lt;!-- loopflow-requester:"QA Person" --&gt;
 
-<h2>5 · Choosing the other layout</h2>
-<p>Typed: <q>1b 2b 3b, I want the switch with a warm kitchen palette</q>. The primary appended the decision to <code>scratch/design.md</code> and ran:</p>
-<pre>lf task run 2d0e18 --at-arrival f49ee81a-… --reason '"1b 2b 3b, I want the switch with a warm kitchen palette" — 1b: follow device plus Auto/Light/Dark switch; 2b: warm kitchen palette in dark only; 3b: …'</pre>
-<p>The kickoff worker received that steer with the words verbatim and committed <q>lf kickoff: Plan dark mode with an Auto / Light / Dark switch and warm palette</q>. <span class="ok">Works.</span> I interrupted at concept-review rather than run a full build.</p>
+&lt;!-- loopflow-breakpoint:c1a610d8-89ae-4bff-b0b3-de095d44eabe --&gt;</pre>
+<p><span class="fix">Fixed.</span> Pass 5 records a breakpoint reply as a comment and no longer saves a steer for it. Task updates send every comment that has no steer as news, so the reply came back. <code>task_undirected_comments</code> (<code>sqlite/task_comments.rs</code>) now leaves out comments that carry the <code>loopflow-breakpoint:</code> marker, because the reply already reaches the next step as its handoff. A case added to <code>direction_comments_arrive_as_steers_not_task_updates</code> fails without the fix. Live recheck in scenario 5: the reply was saved once, and <code>steers</code> held no <code>update:</code> row for it.</p>
 
-<h2>6 · Auto through a parked breakpoint</h2>
-<p><code>lf task auto on</code> on a Task parked at <code>check</code>: the run continued to the end and the Task went to <q>done · auto: on</q>. <span class="ok">Works.</span></p>
+<h2>3 · A primary that quit with /exit is started again at the breakpoint</h2>
+<p>The earlier run could not reach this. <b>Did:</b> <code>lf task run b0b5de naming</code>, attached, accepted the trust dialog, typed <code>/exit</code> while <code>note</code> ran. Status showed <code>Conversation: quit 08:53; `lf resume --task b0b5de` opens it</code>.</p>
+<p><b>Saw:</b> once the Task parked at <code>after-note</code>, status read <code>Conversation: running</code>, and a new <code>claude --name b0b5de …</code> ran under the private holder. <span class="ok">Works.</span> On attach it showed Claude's trust dialog again (this <code>/tmp</code> repository is untrusted; a real repository would not ask). After Yes:</p>
+<pre>The naming run (5b7f4cc2) finished and the Task is waiting for your review at the after-note step.
 
-<h2>7 · Notes that were wrong</h2>
-<p><span class="fix">Fixed.</span> <code>.lf/skills/qa.md</code> told QA runs to add <code>.lf/graphs/qa.yaml</code> ending in <code>- interactive: demo</code>. A Graph named <code>qa</code> also replaces the <code>qa</code> step inside <code>build</code>: <code>lf graph show feature</code> listed <code>cmd: help task / break: check / cmd: help</code> there. The note now uses <code>qa-start.yaml</code> with <code>- break</code>. <code>.lf/qa/antigravity.md</code> no longer says <code>interactive:</code>.</p>
+What the worker produced: one file, scratch/note.md, with two candidate names for the command-line tool. Nothing else was edited.
+- recipe: matches the repo name and the README title ("recipe tool"). It's short and easy to type.
+- cookbook: names the collection of recipes rather than the act of running one.
+
+The worker went only on the README and the Task name, and it didn't check whether either name clashes with an existing command. I checked: neither recipe nor cookbook exists on this machine. …
+Recommendation: use recipe, and check for name clashes before release.
+Question 1: Which name?
+- a) recipe (recommended)
+- b) cookbook
+Once you choose, the Task moves on to its final step, echo.</pre>
+<p>The artifact link pointed at the file in the Task checkout.</p>
+
+<h2>4 · Choosing the option that wasn't recommended</h2>
+<p><b>Typed:</b> <code>1b, go with cookbook; it reads better on a shelf of tools</code>. The primary ran:</p>
+<pre>lf task run --at-arrival 35738b2d-… --reason '"1b, go with cookbook; it reads better on a shelf of tools" (selects option b: `cookbook`, over the recommended `recipe`)'</pre>
+<p><code>echo</code>'s <code>scratch/received.md</code>:</p>
+<pre># Received
+
+"1b, go with cookbook; it reads better on a shelf of tools" (selects option b: `cookbook`, over the recommended `recipe`)</pre>
+<p><span class="ok">Works:</span> the person's words reached the next worker unchanged. This primary ran the old binary, so it was also told about its own reply; that is the bug fixed in scenario 2.</p>
+
+<h2>5 · A loop breakpoint: iterate, restart at the breakpoint, direction</h2>
+<table>
+<tr><th>Did</th><th>Saw</th></tr>
+<tr><td><code>lf task run a57fc7 --decision iterate</code> on the first visit (the worker recorded a verdict)</td><td>Ran <code>note</code> a second time and parked again. <span class="ok">Works.</span></td></tr>
+<tr><td><code>lf task run a57fc7 --from after-note --decision iterate</code></td><td>Clap refused: <code>'--from' cannot be used with '--decision'</code>.</td></tr>
+<tr><td><code>lf task run a57fc7 --from after-note</code></td><td>Parked at <code>after-note</code> again with a handoff that has no producer: <code>Continuing finishes the Graph.</code></td></tr>
+<tr><td><code>--decision iterate</code> on that visit, without <code>--reason</code></td><td><code>Error: iterating at this breakpoint requires `--reason &lt;direction&gt;`</code>, exit 1. <span class="ok">Works.</span></td></tr>
+<tr><td><code>--decision iterate --reason 'try names that start with k'</code></td><td>The next note proposed <code>knead</code> / <code>kitchen</code>. One comment held the words, with a <code>loopflow-breakpoint:</code> marker. <span class="ok">Works.</span></td></tr>
+</table>
+<p><span class="bad">Broken (1):</span> every continuation printed <code>a57fc7 · naming-loop from start running as Graph run …</code>, even though the run set out from inside the loop. <code>cmdbreak</code> said “from start” as well when it continued to <code>help</code>. The label used the cursor's top-level place, which is 0 for anything inside a top-level loop. <span class="fix">Fixed</span> in <code>ops/task.rs</code>: a continued breakpoint names the step its cursor stands at. Live: <code>naming-loop from note running …</code> and <code>cmdbreak from help running …</code>. A fresh run still says <code>from start</code>.</p>
+<p><span class="bad">Broken (2):</span> pass 1's worker summary, which the handoff quotes, said: “the prior pass summary was just a header with no results, so there was nothing earlier to compare against.” Pass 1's opening message carried <code>Decision pass 1. … Compare what the preceding pass set out to do with what changed or was learned. Say when earlier results are missing.</code> This branch makes the worker before a loop's break its decision step, so every research or ship-review loop opens with that sentence. <span class="fix">Fixed</span> in <code>lf/commands/graph.rs</code>: the compare sentence starts at pass 2. <code>public_taskless_graph_records_distinct_completed_loop_passes</code> now checks that pass 1 lacks it and pass 2 has it (passed).</p>
+
+<h2>6 · <code>--until submitted</code> no longer returns at a breakpoint</h2>
+<p>On a57fc7, parked with no PR, <code>lf task wait a57fc7 --until submitted --timeout 5</code> waited the full 5 s and printed status. <span class="ok">Works</span>, as Pass 5 intended: only <code>--until breakpoint</code> returns at a park.</p>
 
 <h2>Checks</h2>
 <table>
-<tr><td><code>cargo test -p loopflow-execution --lib ops::task::tests::task_wait_condition_releases_terminal_tasks</code></td><td class="ok">passed</td></tr>
-<tr><td><code>cargo test -p loopflow --lib breakpoint_feature_kickoff_receives_the_chosen_layout</code> (now also asserts the status line)</td><td class="ok">passed (85 s)</td></tr>
+<tr><td><code>cargo test -p loopflow-execution --lib harness::task_updates::</code></td><td>16 passed</td></tr>
+<tr><td><code>cargo test -p loopflow --test session_lifecycle_tests public_taskless_graph_records_distinct_completed_loop_passes</code></td><td>passed (24.9 s)</td></tr>
+<tr><td id="suites"><code>query_plans::</code>, <code>ops::task::tests::breakpoint_</code>, <code>loopflow --lib breakpoint_</code></td><td>17, 3 and 13 passed</td></tr>
+<tr><td><code>cargo test -p loopflow --lib breakpoint_presents_finished_work</code> (now asserts <code>research from research running</code> on iterate)</td><td>passed</td></tr>
+<tr><td><code>cargo fmt --check</code></td><td>passed</td></tr>
 <tr><td>Clippy, Swift, full suites</td><td>gate / CI</td></tr>
 </table>
 
 <h2>Where it stands</h2>
-<p><b>Works now:</b> a worker on another model, a primary that quit and was restarted, parking, status, a handoff with artifacts and numbered choices, a reply carried through <code>--at-arrival</code>/<code>--reason</code> to the next worker, waits that return at a breakpoint, and auto through a parked breakpoint.</p>
-<p><b>Not reached:</b> Desktop (Now ordering, the Continue button, the sidebar) and iOS. Those need the Dev bundle and a display, so they stay with gate and demo. Codex as a worker (no quota until Nov 30). A primary that was fully quit (<code>/exit</code>) rather than crashed, waiting for a breakpoint to start it in a held terminal.</p>
-<p><b>Still wrong, worst first:</b></p>
-<ol>
-<li>Esc during a tool call leaves Claude idle without a Stop hook, so a parked handoff waits for the next typed prompt instead of waking the conversation. This predates the change and affects every idle wake.</li>
-<li>A provider limit retry keeps the agent captured at step start. Changing the setting has no effect until an interrupt and a fresh run.</li>
-<li>A bare step name in a builtin Graph (<code>build</code>'s <code>qa</code>) resolves to any repository Graph of that name.</li>
-<li>Status names a running step by UUID (<q>Step d148293b-… is running explore</q>), and the suggested action at a breakpoint is generic (<q>run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first</q>).</li>
-</ol>
-</body></html>
+<p><b>Works now:</b> a wait that returns when the run parks, the primary presenting a command step and a skill step with their artifacts and numbered choices, a primary quit with <code>/exit</code> and started again at the breakpoint, a reply that picks the option that wasn't recommended reaching the next worker word for word, loop iterate and named restart with the <code>--reason</code> requirement, and reply comments saved once and not sent back.</p>
+<p><b>Not reached:</b> Desktop and iOS (Now ordering, the Continue button, Start from…). This run has no display, so they stay with gate's Swift suites and the demo. Codex and other harnesses as workers or primaries: the earlier run found Codex out of quota until Nov 30. A blocked verdict at a breakpoint: no real worker produced one, so only unit tests cover it.</p>
+<p><b>Still wrong, worst first</b> (all from the earlier run and outside this change, except the last):</p>
+<ul>
+<li>Esc during a Claude tool call fires no Stop hook, so a parked handoff waits for the next typed prompt instead of waking the conversation.</li>
+<li>A provider-limit retry keeps the agent captured when the step started; changing the setting does nothing until an interrupt and a fresh run.</li>
+<li>Builtin <code>build</code> names <code>qa</code> bare, so a repository Graph named <code>qa</code> replaces that step.</li>
+<li>Status names a running step by UUID (<code>Step d148293b-… is running explore</code>).</li>
+<li>After <code>--from &lt;breakpoint&gt;</code> the handoff has no producer, so the primary only gets “Continuing finishes the Graph.”, with no link to <code>scratch/note.md</code> even though the earlier pass wrote it. The primary has to go and look. Left as is: a breakpoint with no producer was a deliberate Pass 3 case.</li>
+</ul>
+
+<h2>Earlier run (before Pass 5)</h2>
+<p>Feature Graph on real Claude: explore on <code>claude:sonnet</code> while the primary ran on the default model. The primary crashed during explore and was restarted, and the Task parked at <code>after-explore</code>. The handoff showed <code>scratch/explore.html</code> (<a href="qa/explore.png">screenshot</a>) with three numbered questions. The reply “1b 2b 3b, I want the switch with a warm kitchen palette” reached kickoff verbatim. That run's fixes (status says “stopped at breakpoint”, a wait that returns at a breakpoint, the QA note's <code>qa.yaml</code>) are in Pass 5.</p>

@@ -55,7 +55,21 @@ false`). A finished batch (`lf -b : '…'`) is in no listing; read its ID from
 `agent_sessions` with Python's `sqlite3` on `file:…/loopflow.db?mode=ro`
 (the `sqlite3` CLI fails to open the live store read-only). The Task's primary
 conversation waits on Claude's `--add-dir` trust dialog for a fresh `/tmp`
-repository; attach with `lf resume --task <task>` and choose "Yes, add it".
+repository; attach with `lf resume --task <task>` and choose "Yes, add it"
+(Down, then Enter: Enter alone picks "No, exit"). A primary the server starts
+again, after `/exit` or a crash, asks again. To render a raw PTY capture, run
+`uv run --with pyte` from the checkout; the `65535u` it shows is Claude's
+kitty-keyboard pop, not input.
+
+Breakpoint handoffs on real Claude: a Graph `- step: note`, `- break`,
+`- step: echo` with one-line skills on `claude:haiku` parks in about a minute.
+`lf task wait <task> --until breakpoint` returns at the park. The reply's
+`--reason` shows once in `lf task show <task> --json` under
+`comments.comments` with a `loopflow-breakpoint:` marker; the next worker's
+first message is in its transcript under
+`~/.claude/projects/<cwd with / and . as ->/`. Read `steers` from
+`loopflow.db?mode=ro` to see what reached the primary (`breakpoint:<task>`
+for handoffs, `update:` for Task news).
 
 An earlier build's Session owner: in a fresh home, before the branch opens it,
 run the installed `lf -i -a claude : '<msg>'` (with `LF_BIN` unset) under a PTY

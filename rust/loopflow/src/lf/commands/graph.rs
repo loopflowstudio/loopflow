@@ -1426,7 +1426,12 @@ impl SkillExecutor for &RunningGraph<'_> {
                 let pass = u64::from(traversals.copied().unwrap_or(0)) + 1;
                 let steps = leaf.index - start + 1;
                 let target = loopflow_execution::task_graph::step_name(&body[start]);
-                message.push_str(&format!("\n\nDecision pass {pass}. Iterating repeats {steps} steps, back to {target}.\nCompare what the preceding pass set out to do with what changed or was learned. Say when earlier results are missing."));
+                message.push_str(&format!(
+                    "\n\nDecision pass {pass}. Iterating repeats {steps} steps, back to {target}."
+                ));
+                if pass > 1 {
+                    message.push_str("\nCompare what the preceding pass set out to do with what changed or was learned. Say when earlier results are missing.");
+                }
             }
             (body, leaf.index)
         };

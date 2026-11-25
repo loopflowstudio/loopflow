@@ -2311,6 +2311,21 @@ fn public_taskless_graph_records_distinct_completed_loop_passes() {
             "Decision pass 3. Iterating repeats 2 steps, back to work-proof.",
         ]
     );
+    let compares: Vec<bool> = ["Decision pass 1.", "Decision pass 2."]
+        .iter()
+        .map(|pass| {
+            let text = sessions
+                .values()
+                .find_map(|messages| messages[0]["text"].as_str().filter(|t| t.contains(pass)))
+                .unwrap();
+            text.contains("Compare what the preceding pass")
+        })
+        .collect();
+    assert_eq!(
+        compares,
+        [false, true],
+        "only a later pass has one to compare"
+    );
 }
 
 #[test]

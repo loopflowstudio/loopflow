@@ -94,6 +94,10 @@ Closed all four concept splits identified at `4b295b5e3a` ([concept-review.html]
 - Focused Swift tests passed: 107/107 tests across 6 suites (`TaskActionsTests`, `WorkflowLineTests`, `DTOFixtureTests`, `RegistryQueryTests`, `DashboardWorkspaceTests`, `DesktopHeadlessTests/taskWorkflow`), plus `ServerProtocolTests` against the regenerated `server_schema.json`.
 - `cargo fmt --check` passed.
 
+## QA · November 25, after Pass 5
+
+Real Claude for primaries and `claude:haiku` workers on a private Machine. A primary that quit with `/exit` was started again at the breakpoint and presented the worker's artifact and question. A reply choosing the option that wasn't recommended reached the next worker word for word. `--until breakpoint` returned at the park; `--until submitted` did not. Iterating at a revisited loop breakpoint required `--reason`. Three fixes: a breakpoint reply was sent back to the primary as a "new comment" update with raw markers (`task_undirected_comments` now skips it); continuing a breakpoint printed "from start" (it now names the step); and pass 1 of a loop was told to compare with a preceding pass, which the worker made up (the sentence now starts at pass 2). Details are in [qa.html](qa.html).
+
 ## Remaining · gate and demo
 
 Nothing remains to implement; Pass 5 closed every split in [concept-review.html](concept-review.html).

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Concept Review — LOO-1104: Builtin Task Graphs &amp; Skill Ownership (Post-Build)</title>
+<title>Concept Review — LOO-1104: Builtin Task Graphs &amp; Skill Ownership (Post-Revision)</title>
 <style>
   :root {
     --bg: #fafaf8;
@@ -84,7 +84,7 @@
   h2 { font-size: 19px; margin: 36px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
   h3 { font-size: 15.5px; margin: 18px 0 8px; }
   p { margin: 0 0 12px; }
-  .lead { color: var(--muted); font-size: 15.5px; max-width: 80ch; }
+  .lead { color: var(--muted); font-size: 15.5px; max-width: 82ch; }
   .status-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
   .badge {
     display: inline-block;
@@ -148,7 +148,6 @@
     padding: 16px 18px;
     margin: 14px 0;
   }
-  .card.callout { border-left: 4px solid var(--no-fg); }
   .card.resolved { border-left: 4px solid var(--yes-fg); }
   .grid-2 {
     display: grid;
@@ -170,12 +169,6 @@
     border-radius: 6px;
     border: 1px solid var(--border);
     background: var(--surface-alt);
-  }
-  .step.stop {
-    background: var(--accent-soft);
-    border-color: var(--accent);
-    color: var(--accent);
-    font-weight: 600;
   }
   .step.add {
     background: var(--yes-bg);
@@ -227,163 +220,160 @@
 <body>
 <main>
   <header>
-    <div class="kicker">Concept Review &middot; LOO-1104 &middot; Post-build against base <code>23ce1a69f9</code></div>
+    <div class="kicker">Concept Review &middot; LOO-1104 &middot; Full diff against base <code>23ce1a69f9</code></div>
     <h1>Builtin Task Graphs &amp; Skill Ownership Contracts</h1>
     <p class="lead">
-      <strong>Area reviewed:</strong> Builtin Task Graphs (<code>plan</code>, <code>build</code>, <code>ui</code>, <code>fix</code>, and the workflows that compose them: <code>code</code>, <code>feature</code>, <code>pursue</code>, <code>redesign</code>, <code>refresh</code>) and the ownership contracts of the builtin skills behind them (<code>implement</code>, <code>concept-review</code>, <code>realign</code>, <code>demo</code>, <code>verify</code>, <code>ship-review</code>, <code>kickoff</code>, <code>advance</code>, <code>write-docs</code>, <code>wave-session</code> / <code>wave-operate</code>).
+      <strong>Area reviewed:</strong> Builtin Task Graphs (<code>plan</code>, <code>build</code>, <code>quick</code>, and the workflows that compose them: <code>code</code>, <code>feature</code>, <code>pursue</code>, <code>redesign</code>, <code>refresh</code>, <code>queue</code>, <code>deliver</code>, <code>optimize</code>) and the ownership contracts of the builtin skills behind them (<code>implement</code>, <code>concept-review</code>, <code>realign</code>, <code>verify</code>, <code>ship-review</code>, <code>kickoff</code>, <code>advance</code>, <code>write-docs</code>, <code>wave-session</code> / <code>wave-operate</code>).
     </p>
     <p class="lead" style="margin-top:8px;">
-      <strong>State on <code>HEAD</code> (<code>73abaa380c</code>):</strong> Built (<code>78bde1d766</code>), compressed (<code>c6eab6e222</code>), and QA'd with real Claude haiku decider runs (<code>73abaa380c</code>). All six conceptual mismatches from the pre-build review are fixed and committed. One narrow prose seam remains in the <code>concept-review &rarr; realign</code> handoff (marked <span class="badge proposed">Proposed</span> below), plus four reversible product choices already built on <code>HEAD</code> waiting for your confirmation at ship-review.
+      <strong>State on <code>HEAD</code> (<code>684bbae383</code>):</strong> All changes are built, compressed, and QA'd against the current Graph and skill set: <code>build</code> and <code>plan</code> reordered, <code>fix</code> renamed to <code>quick</code> and builtin <code>ui</code> removed (<code>4cb640f3f6</code>), <code>realign</code>'s reversible-choice handoff and <code>verify</code>'s <code>&lt;qa head&gt;</code> pointer closed (<code>02b9cf8f62</code>), generic design wording applied across <code>concept-review</code> and planning skills (<code>b1d9ac2819</code>), and live haiku QA verified <code>realign</code> deciding <code>build</code>'s outer loop plus the CLI not-found newline fix (<code>684bbae383</code>). No conceptual mismatches remain on <code>HEAD</code>; three reversible defaults built into <code>HEAD</code> wait for confirmation if you want any changed.
     </p>
     <div class="status-strip">
-      <span class="badge built">Built on HEAD: 73abaa380c</span>
-      <span class="badge yes">7 of 8 pairings line up</span>
-      <span class="badge no">1 small handoff seam in realign.md</span>
-      <span class="badge proposed">Proposed small fix at ship-review / gate</span>
+      <span class="badge built">Built on HEAD: 684bbae383</span>
+      <span class="badge yes">7 of 7 pairings line up</span>
+      <span class="badge yes">0 mismatches remaining</span>
+      <span class="badge built">Ready to advance</span>
     </div>
   </header>
 
-  <h2>1. Do product concepts and code concepts line up?</h2>
-  <p>Evaluated against the full diff on <code>HEAD</code> (<code>23ce1a69f9..73abaa380c</code>) and the surrounding builtin Graphs, skills, docs, and Desktop menu logic.</p>
+  <h2>1. Do the concepts people work with and the code's concepts line up?</h2>
+  <p>Evaluated across the complete diff on <code>HEAD</code> (<code>23ce1a69f9..684bbae383</code>), every builtin Task Graph, the composed Wave skills in <code>build.rs</code>, user docs, and Desktop's <code>StartFlow</code> menu logic.</p>
 
   <table>
     <thead>
       <tr>
-        <th style="width:20%">Product concept</th>
-        <th style="width:24%">Code / Skill / Graph concept</th>
+        <th style="width:20%">Domain concept</th>
+        <th style="width:25%">Code / Skill / Graph concept</th>
         <th style="width:10%">State</th>
         <th style="width:10%">Lines up?</th>
-        <th>What is right or wrong on <code>HEAD</code></th>
+        <th>Why it holds on <code>HEAD</code></th>
       </tr>
     </thead>
     <tbody>
       <tr>
         <td><strong>Build passes until done, then polish once</strong><br>Finish planned passes, settle concepts, then simplify and QA once.</td>
-        <td><code>build.yaml</code>: <code>loop(loop(sync &rarr; implement) &rarr; concept-review &rarr; realign) &rarr; compress &rarr; qa &rarr; pr-publish</code></td>
+        <td><code>build.yaml</code>: <code>loop(loop(cmd: sync &rarr; implement) &rarr; concept-review &rarr; realign) &rarr; compress &rarr; qa &rarr; pr-publish</code></td>
         <td><span class="badge built">Built</span></td>
         <td><span class="badge yes">Yes</span></td>
-        <td>Eliminates the measured repeat-QA/compress loop. Verified in Rust graph tests (<code>compiled.rs</code>, <code>graph/mod.rs</code>) and live haiku inner-loop QA (<code>scratch/qa.html</code> scenario 5: pass 1 collapses its plan line with its commit and iterates; pass 2 advances).</td>
+        <td>Moves <code>compress</code> and <code>qa</code> outside the rework loop so design revisions no longer invalidate prior QA/compress runs. Verified by compiled Graph tests (<code>compiled.rs</code>, <code>graph/mod.rs</code>) and live haiku inner- and outer-loop QA (<code>scratch/qa.html</code>).</td>
       </tr>
       <tr>
         <td><strong>Plan before coding</strong><br>Write the plan, critique it read-only, reconcile it, then draft docs.</td>
         <td><code>plan.yaml</code>: <code>kickoff &rarr; concept-review &rarr; realign &rarr; write-docs</code></td>
         <td><span class="badge built">Built</span></td>
         <td><span class="badge yes">Yes</span></td>
-        <td>Composes cleanly into <code>code</code>, <code>feature</code>, <code>pursue</code>, and <code>redesign</code> with no edits to those four Graphs.</td>
+        <td>Separates critique from plan edits before any code exists, and composes cleanly into <code>code</code>, <code>feature</code>, <code>pursue</code>, and <code>redesign</code> with zero edits to those Graphs.</td>
       </tr>
       <tr>
-        <td><strong>Critique vs. plan change</strong><br>A review shows what is wrong; a separate step changes the plan and decides whether to rework.</td>
-        <td><code>concept-review.md</code> (read-only HTML) &rarr; <code>realign.md</code> (owns <code>scratch/plan.md</code>, fixes small mismatches inline, defers separate outcomes, decides outer loop)</td>
-        <td><span class="badge built">Built</span></td>
-        <td><span class="badge no">No (1 seam)</span></td>
-        <td><strong>Reversible product choices drop between the two skills.</strong> <code>concept-review.md</code> is strictly read-only (verified in QA scenario 6) and shows reversible choices as recommendations. <code>realign.md</code> handles irreversible choices (<code>blocked</code> in a loop, <code>scratch/questions.md</code> outside), but line 25&ndash;26 still says <em>"Nothing goes into the plan as settled unless someone said so"</em> and <code>## After a review</code> has no rule for adopting a recommended reversible choice as "made for review".</td>
-      </tr>
-      <tr>
-        <td><strong>UI workflow</strong><br>Build UI, try it live each pass, simplify, deliver.</td>
-        <td><code>ui.yaml</code>: <code>kickoff &rarr; loop(sync &rarr; implement &rarr; qa &rarr; interactive: demo) &rarr; compress &rarr; deliver</code> + <code>demo.md</code> headless stand-in</td>
+        <td><strong>Critique vs. plan change</strong><br>One step critiques read-only; one step updates the plan, handles findings, and decides rework.</td>
+        <td><code>concept-review.md</code> (writes only <code>scratch/concept-review.html</code>) &rarr; <code>realign.md</code> (owns <code>scratch/plan.md</code>, fixes small mismatches inline, writes <code>## Deferred findings</code>, adopts reversible recommendations as "made for review", decides outer loop)</td>
         <td><span class="badge built">Built</span></td>
         <td><span class="badge yes">Yes</span></td>
-        <td>No double PR publish (<code>deliver</code>'s <code>gate</code> publishes once); <code>sync</code> runs before <code>implement</code>; Desktop Start menu reads <code>Build and try a UI change, then deliver it &middot; 1 stop</code>; Auto-Ship <code>demo</code> inspects <code>scratch/qa.html</code> honestly instead of inventing reactions.</td>
+        <td>Eliminates the divergent headless plan-writing mode in <code>concept-review</code>. The earlier handoff seam for reversible choices was closed in <code>02b9cf8f62</code> and verified on haiku (<code>scratch/qa.html</code> #4&ndash;5): <code>concept-review</code> touched nothing outside its HTML page, and <code>realign</code> placed each finding accurately.</td>
       </tr>
       <tr>
-        <td><strong>Fast unattended bug-fix</strong><br>Fix a bounded bug from the brief and merge when checks pass.</td>
-        <td><code>fix.yaml</code>: <code>loop(sync &rarr; implement) &rarr; qa &rarr; gate &rarr; cmd: land --wait-and-fix</code> + no-plan guard in <code>implement.md</code></td>
+        <td><strong>Fast unattended small change</strong><br>Build a bounded change straight from the brief, QA, gate, and land.</td>
+        <td><code>quick.yaml</code>: <code>loop(cmd: sync &rarr; implement) &rarr; qa &rarr; gate &rarr; cmd: land --wait-and-fix</code> + bounded-brief guard in <code>implement.md</code></td>
         <td><span class="badge built">Built</span></td>
         <td><span class="badge yes">Yes</span></td>
-        <td>Desktop Start menu reads <code>merges without asking</code>; <code>lf task auto off</code> still holds before <code>land</code>. Live QA (scenarios 4&prime; &amp; 7&prime;) proved a bounded bug builds in 1 pass with no <code>scratch/</code>, while an oversized brief blocks immediately with zero files or commits.</td>
+        <td>Renamed from <code>fix</code> because it runs <code>implement</code> rather than <code>debug</code>; builtin <code>ui</code> was removed so UI workflows stay repo-local. Desktop's <code>StartFlow</code> labels <code>quick</code> as <code>merges without asking</code>, <code>lf task auto off</code> still holds before <code>land</code>, and an oversized brief blocks before writing code.</td>
       </tr>
       <tr>
-        <td><strong>Curate Wave memory</strong><br>One owner for <code>.lf/wave/&lt;w&gt;/MEMORY.md</code> direction and token budget.</td>
+        <td><strong>Curate Wave memory</strong><br>One owner for <code>.lf/wave/&lt;w&gt;/MEMORY.md</code> direction and context budget.</td>
         <td><code>wave_session.md</code> owns curation; <code>wave_operate.md</code> stays pure Task operator; <code>realign.md</code> leaves one-line pointer</td>
         <td><span class="badge built">Built</span></td>
         <td><span class="badge yes">Yes</span></td>
-        <td>Matches <code>build.rs</code> composition (<code>wave_session.md</code> + <code>wave_operate.md</code>) with zero self-contradiction or duplicated rules. <code>docs/work.md</code> and <code>AGENTS.md</code> match.</td>
+        <td>Matches <code>build.rs</code> composition (<code>wave_session.md</code> + <code>wave_operate.md</code>) with no self-contradiction or duplicate <code>.lf/wave/</code> rules. <code>docs/work.md</code> and <code>AGENTS.md</code> agree.</td>
       </tr>
       <tr>
         <td><strong>Fast-path verification after merge</strong><br>Skip rebuilding <code>main</code> when the exact files QA tested are what merged and CI is green.</td>
-        <td><code>verify.md</code>: <code>git diff &lt;qa head&gt; &lt;merge SHA&gt; -- . ':!scratch'</code> empty + green post-merge CI + no post-merge-only claims</td>
+        <td><code>verify.md</code>: <code>git diff &lt;qa head&gt; &lt;merge SHA&gt; -- . ':!scratch'</code> empty (<code>&lt;qa head&gt;</code> = branch's <code>lf qa:</code> commit) + green post-merge CI + no post-merge-only claims</td>
         <td><span class="badge built">Built</span></td>
         <td><span class="badge yes">Yes</span></td>
-        <td>Sound on both counterexamples (catches post-QA edits/syncs, ignores <code>scratch/</code> cleared by <code>lf land</code>). Minor polish noted in QA #3: state that <code>&lt;qa head&gt;</code> is the branch's <code>lf qa:</code> commit.</td>
+        <td>Catches post-QA edits by <code>gate</code>/<code>land</code> and upstream syncs, survives later merges on <code>main</code> (compares <code>&lt;merge SHA&gt;</code>, not moving <code>origin/main</code>), and ignores <code>scratch/</code> cleared by <code>lf land</code>.</td>
       </tr>
       <tr>
-        <td><strong>Generic builtin skills</strong><br>Builtins work for any tracker and any terminal/editor.</td>
-        <td><code>kickoff.md</code>, <code>advance.md</code>, <code>write-docs.md</code></td>
+        <td><strong>Domain- and host-neutral builtins</strong><br>Builtins fit any codebase, tracker, and host surface.</td>
+        <td><code>concept-review.md</code>, <code>realign.md</code>, <code>kickoff.md</code>, <code>advance.md</code>, <code>write-docs.md</code></td>
         <td><span class="badge built">Built</span></td>
         <td><span class="badge yes">Yes</span></td>
-        <td>No <code>Linear</code>, <code>Loopflow Desktop</code>, or <code>--host desktop</code> leakage remains in task skills; <code>write-docs.md</code> uses host-neutral <code>lf open --file &lt;path&gt;</code>.</td>
+        <td>No <code>Linear</code>, <code>Loopflow Desktop</code>, or <code>--host desktop</code> leakage remains in task skills; <code>write-docs.md</code> uses host-neutral <code>lf open --file &lt;path&gt;</code>; <code>concept-review.md</code> and planning skills use generic system/domain/design framing (<code>b1d9ac2819</code>).</td>
       </tr>
     </tbody>
   </table>
 
-  <h2>2. Remaining mismatch &amp; proposed fix (Before &rarr; After)</h2>
+  <h2>2. Biggest mismatch solved on <code>HEAD</code> (Before &rarr; After)</h2>
 
-  <div class="card callout">
-    <h3>Reversible product choices drop between <code>concept-review</code> and <code>realign</code></h3>
+  <div class="card resolved">
+    <h3>Conflated review, plan mutation, and premature polish &mdash; resolved and verified on <code>HEAD</code></h3>
     <p>
-      Walk a headless <code>plan</code> run (<code>kickoff &rarr; concept-review &rarr; realign &rarr; write-docs</code>) on a Task where <code>concept-review</code> finds a conceptual issue that turns on a <strong>reversible product choice</strong> (such as choosing between two Graph layouts or two skill homes):
+      Previously, <code>build</code> ran <code>compress</code> and <code>qa</code> on every outer-loop pass before <code>concept-review</code> decided whether to rework, while <code>concept-review</code> carried a second headless mode that mutated <code>scratch/plan.md</code> and decided loops directly. Every skill now has one role across both <code>plan</code> and <code>build</code>:
     </p>
     <div class="grid-2">
       <div>
-        <span class="badge no">Before (current HEAD)</span>
-        <pre><code>concept-review.md:48
-  Shows option A recommended over B on
-  scratch/concept-review.html (cannot edit plan).
+        <span class="badge no">Before (base 23ce1a69f9)</span>
+        <pre><code>plan:
+  kickoff &rarr; concept-review (edits plan!) &rarr; write-docs
 
-realign.md:25-26
-  "A change that needs a product decision is
-   written as the exact open choice. Nothing
-   goes into the plan as settled unless
-   someone said so; quote them."
+build:
+  loop:
+    loop: [implement &rarr; cmd: sync &rarr; realign]
+    compress          # invalidated on rework
+    qa                # invalidated on rework
+    concept-review    # edits plan + decides loop
+  pr-publish
 
-realign.md:48-63 (## After a review)
-  Lists: small fix | rework pass | deferred.
-  No rule for reversible recommendations!
-  &rarr; plan stays a menu, or realign breaks line 26.</code></pre>
+realign:
+  owned plan + Wave MEMORY.md curation</code></pre>
       </div>
       <div>
-        <span class="badge proposed">Proposed (2-3 sentences in realign.md)</span>
-        <pre><code>realign.md (## After a review)
-  Add one bullet:
-  - Reversible product choice (headless):
-    adopt the recommended direction into
-    scratch/plan.md marked "made for review"
-    with what was passed over, never as
-    "settled" &mdash; so write-docs and implement
-    build one coherent design and ship-review
-    surfaces the choice.
-  - Irreversible choice: blocked in a loop;
-    scratch/questions.md outside a loop.
+        <span class="badge yes">After (built on HEAD 684bbae383)</span>
+        <pre><code>plan:
+  kickoff &rarr; concept-review (HTML only) &rarr; realign &rarr; write-docs
 
-+ verify.md:18: note &lt;qa head&gt; is the lf qa: commit.
-+ regenerate tests/goldens/builtin_realign.md.</code></pre>
+build:
+  loop:
+    loop: [cmd: sync &rarr; implement]   # counts down passes
+    concept-review                  # read-only HTML critique
+    realign                         # owns plan + decides loop
+  compress                          # runs once, after design settles
+  qa                                # runs once, after design settles
+  pr-publish
+
+wave-session:
+  sole owner of Wave MEMORY.md curation</code></pre>
       </div>
     </div>
-    <p class="muted" style="margin-top:8px;">
-      This is a 3-sentence prose seam rather than a broken Graph model. Recorded in <code>scratch/plan.md</code> so it can be applied cleanly at <code>ship-review</code> or <code>gate</code> without re-running the 6-step build loop.
-    </p>
+
+    <h3>Failure &amp; recovery counterexamples checked</h3>
+    <ul style="margin:6px 0 0;padding-left:20px;font-size:14px;">
+      <li><strong>Counterexample breaks the plan mid-build:</strong> <code>implement</code> records what broke in <code>scratch/plan.md</code> and returns <code>advance</code> (instead of iterating onto a broken plan), handing directly to <code>concept-review &rarr; realign</code> to replan and iterate back to <code>sync</code>.</li>
+      <li><strong>Oversized or contradicted brief on <code>quick</code>:</strong> With no <code>scratch/plan.md</code>, <code>implement</code> judges scope before building and returns <code>blocked</code> (exit 3, zero files/commits) rather than writing a multi-pass plan and auto-merging.</li>
+      <li><strong>Irreversible vs. reversible design choice after headless review:</strong> <code>concept-review</code> flags irreversible choices and recommends reversible ones on the page. In a loop (<code>build</code>), <code>realign</code> returns <code>blocked</code> on irreversible choices and adopts reversible recommendations into <code>scratch/plan.md</code> marked <em>made for review</em> with what was passed over; outside a loop (<code>plan</code>, <code>refresh</code>), <code>realign</code> records any irreversible choice in <code>scratch/questions.md</code> and <code>scratch/plan.md</code>.</li>
+      <li><strong><code>ship-review</code> iterates back to <code>build</code>:</strong> <code>realign</code> tracks finding dispositions by substance, replaces settled review notes when a fresh <code>scratch/concept-review.html</code> arrives, and keeps <code>## Deferred findings</code> intact.</li>
+      <li><strong><code>gate</code> or <code>sync</code> edits code after <code>qa</code>:</strong> <code>verify</code> diffs <code>&lt;qa head&gt;</code> (the branch's <code>lf qa:</code> commit) against <code>&lt;merge SHA&gt;</code> excluding <code>scratch/</code>; any shipped file change forces the full rebuild check on <code>main</code>.</li>
+    </ul>
   </div>
 
   <h2>3. What a person sees (built on <code>HEAD</code>)</h2>
   <div class="grid-2">
     <div>
-      <h3>Desktop Start menu (verified via <code>lf graph list --json</code>)</h3>
-      <div class="menu-preview">&#x2713; feature      Explore, build, deliver and verify              3 stops
-  code         Build, deliver and verify                       2 stops
-  redesign     Rethink a started Task                          1 stop
-  research     Investigate and report, with no PR              1 stop
-  ui           Build and try a UI change, then deliver it      1 stop
+      <h3>Desktop Start menu (<code>StartFlow</code> from <code>HEAD</code>)</h3>
+      <div class="menu-preview">&#x2713; feature      Explore, build, deliver and verify         3 stops
+  code         Build, deliver and verify                  2 stops
+  redesign     Rethink a started Task                     1 stop
+  research     Investigate and report, with no PR         1 stop
   More &rsaquo;
   Run without stopping
-  deep-clean   Delete what an area no longer needs             never stops
-  fix          Fix a bounded bug or small tweak and land it    merges without asking
-  incident     Restore first, then fix the cause               never stops
-  optimize     Move one number                                 never stops
-  queue        Compress, integrate upstream changes            never stops
-  task-design  Draft the Task design                           never stops</div>
+  deep-clean   Delete what an area no longer needs        never stops
+  incident     Restore first, then fix the cause          never stops
+  optimize     Move one number                            never stops
+  queue        Compress, integrate upstream changes       never stops
+  quick        Build a small, clear change and land it    merges without asking
+  task-design  Draft the Task design                      never stops</div>
     </div>
     <div>
-      <h3>Reordered <code>plan</code> + <code>build</code> &amp; live QA results</h3>
+      <h3>Graph flows &amp; live QA (<code>scratch/qa.html</code>)</h3>
       <div class="card" style="margin:0;">
         <div class="muted" style="font-size:12px;margin-bottom:4px;">plan (built)</div>
         <div class="flow">
@@ -400,46 +390,59 @@ realign.md:48-63 (## After a review)
           </span>
           <span class="arrow">&rarr;</span><span class="step">compress</span><span class="arrow">&rarr;</span><span class="step">qa</span><span class="arrow">&rarr;</span><span class="step">pr-publish</span>
         </div>
-        <div class="muted" style="font-size:12px;margin:10px 0 4px;">Live QA highlights (<code>scratch/qa.html</code>)</div>
+        <div class="muted" style="font-size:12px;margin:10px 0 4px;">quick (built)</div>
+        <div class="flow">
+          <span class="loop-box"><span class="loop-tag">loop</span><span class="step">sync</span><span class="arrow">&rarr;</span><span class="step">implement</span></span>
+          <span class="arrow">&rarr;</span><span class="step">qa</span><span class="arrow">&rarr;</span><span class="step">gate</span><span class="arrow">&rarr;</span><span class="step add">land --wait-and-fix</span>
+        </div>
+        <div class="muted" style="font-size:12px;margin:10px 0 4px;">Verified live on haiku</div>
         <ul style="margin:4px 0 0;padding-left:18px;font-size:13px;">
-          <li><strong>Two-pass plan:</strong> pass 1 collapsed its line with commit SHA and iterated; pass 2 advanced.</li>
-          <li><strong>Read-only review:</strong> <code>scratch/plan.md</code> SHA identical before and after headless <code>concept-review</code>.</li>
-          <li><strong>Oversized no-plan brief:</strong> blocked immediately (exit 3), zero files written, zero commits.</li>
+          <li><strong>Inner &amp; outer loops:</strong> <code>implement</code> collapsed pass lines and advanced; <code>concept-review</code> stayed read-only; <code>realign</code> fixed a small mismatch inline, adopted a reversible choice as made for review, deferred docs, and advanced.</li>
+          <li><strong>Oversized no-plan brief:</strong> blocked before writing any file or commit.</li>
+          <li><strong>Missing Graph/Skill errors:</strong> end with a clean newline (<code>lf.rs</code>).</li>
         </ul>
       </div>
     </div>
   </div>
 
-  <h2>4. Open choices waiting for your confirmation</h2>
-  <p class="muted">Items 1&ndash;3 are already built on <code>HEAD</code> as reversible defaults; item 4 is the small prose seam proposed above. Answer by number and letter (e.g. "1a, 2b") if you want any changed.</p>
+  <h3>Live CLI output on <code>HEAD</code> (empty repo, builtins only)</h3>
+  <pre><code>$ lf list graph  # excerpt
+  build    loop(loop(cmd: sync &rarr; implement) &rarr; concept-review &rarr; realign) &rarr; compress &rarr; qa &rarr; pr-publish
+  plan     kickoff &rarr; concept-review &rarr; realign &rarr; write-docs
+  quick    loop(cmd: sync &rarr; implement) &rarr; qa &rarr; gate &rarr; cmd: land --wait-and-fix
+
+$ lf graph show build          $ lf graph show plan       $ lf graph show quick
+cmd: sync                      kickoff                    cmd: sync
+implement                      concept-review             implement
+concept-review                 realign                    qa
+realign                        write-docs                 gate
+compress                                                  cmd: land --wait-and-fix
+qa
+pr-publish</code></pre>
+
+  <h2>4. Reversible defaults built on <code>HEAD</code> (confirm or change)</h2>
+  <p class="muted">All three items below are already built and committed on <code>HEAD</code> (<code>684bbae383</code>). Nothing is blocking merge; answer by number and letter (e.g. "1b, 2a") only if you want any default changed.</p>
 
   <ol class="q-list">
     <li>
       <div class="q-title">1. Where should Wave memory (<code>MEMORY.md</code>) get curated now that <code>realign</code> no longer owns it?</div>
       <ol class="opts" type="a">
-        <li><span class="badge built">Built on HEAD</span> <strong>In the Wave conversation (<code>wave-session</code>)</strong> &mdash; when you talk to a Wave, that conversation updates, promotes, and trims <code>MEMORY.md</code> and publishes it. Unattended Wave runs (<code>wave-operate</code>) stay strictly focused on checking and moving Tasks without editing Wave files.</li>
-        <li><strong>In unattended Wave runs (<code>wave-operate</code>) too</strong> &mdash; allows scheduled or unattended Wave passes to edit <code>MEMORY.md</code> automatically, dropping the rule that Wave runs leave Wave files untouched.</li>
+        <li><span class="badge built">Built on HEAD</span> <strong>In the Wave conversation (<code>wave-session</code>)</strong> &mdash; when you talk to a Wave, that conversation promotes child lessons, replaces stale guidance, trims <code>MEMORY.md</code> to fit its context limit, and publishes it. Unattended Wave runs (<code>wave-operate</code>) stay focused on checking and moving Tasks without editing Wave files.</li>
+        <li><strong>In unattended Wave runs (<code>wave-operate</code>) too</strong> &mdash; lets scheduled or unattended Wave runs edit <code>MEMORY.md</code> automatically, dropping the rule that those runs leave Wave files untouched.</li>
       </ol>
     </li>
     <li>
-      <div class="q-title">2. When you turn Auto-Ship on for a <code>ui</code> Task (nobody at the keyboard), what should happen at <code>demo</code>?</div>
+      <div class="q-title">2. Should <code>quick</code> merge as soon as checks pass with no human stop?</div>
       <ol class="opts" type="a">
-        <li><span class="badge built">Built on HEAD</span> <strong>Stand in using the QA report</strong> &mdash; the agent inspects <code>scratch/qa.html</code> screenshots and transcripts, loops back to implement only if the UI is visibly broken or missing promised behavior, and otherwise notes that no person tried it and ships (matching how Auto-Ship handles <code>ship-review</code> in <code>code</code>).</li>
-        <li><strong>Always pause for a person</strong> &mdash; refuse to pass <code>demo</code> without human eyes, even when Auto-Ship is turned on.</li>
-      </ol>
-    </li>
-    <li>
-      <div class="q-title">3. Should <code>fix</code> merge as soon as checks pass with no human stop?</div>
-      <ol class="opts" type="a">
-        <li><span class="badge built">Built on HEAD</span> <strong>Zero stops</strong> &mdash; builds from the brief, runs QA and gate, and merges once CI passes. Desktop's Start menu marks it <code>merges without asking</code>, and turning Auto off on a Task still pauses before merge.</li>
+        <li><span class="badge built">Built on HEAD</span> <strong>Zero stops</strong> &mdash; builds from the brief, runs QA and gate, and merges once CI passes. Desktop's Start menu warns <code>merges without asking</code>, and turning Auto off on a Task still pauses before merge.</li>
         <li><strong>Pause once after merge to verify</strong> &mdash; keeps the unattended build and merge, then stops at <code>verify</code> on <code>main</code> before closing the Task.</li>
       </ol>
     </li>
     <li>
-      <div class="q-title">4. Should <code>realign</code> explicitly adopt a headless review's reversible product choice into the plan as "made for review"?</div>
+      <div class="q-title">3. When a headless review recommends a reversible design choice, should <code>realign</code> adopt it into the plan marked "made for review"?</div>
       <ol class="opts" type="a">
-        <li><span class="badge proposed">Proposed (small edit at ship-review / gate)</span> <strong>Yes</strong> &mdash; when a review recommends a reversible choice, <code>realign</code> writes that chosen direction into the plan marked "made for review" (with what was passed over) so docs and implementation build one coherent design and <code>ship-review</code> flags the choice for you; irreversible choices still stop or record an open question.</li>
-        <li><strong>Keep <code>realign</code> leaving open choices undecided</strong> &mdash; never adopt a product recommendation into the plan without a person's reply.</li>
+        <li><span class="badge built">Built on HEAD</span> <strong>Yes</strong> &mdash; <code>realign</code> writes the recommended direction into the plan marked <em>made for review</em> (with what was passed over and why) so docs and implementation build one coherent design and <code>ship-review</code> surfaces the choice; irreversible choices still block or record an open question.</li>
+        <li><strong>Leave all open design choices undecided</strong> &mdash; keep the plan holding an open menu whenever nobody is present to answer.</li>
       </ol>
     </li>
   </ol>
@@ -449,8 +452,8 @@ realign.md:48-63 (## After a review)
     <ul style="margin:0; padding-left:20px;">
       <li><strong>Update <code>.lf/wave/intelligence/MEMORY.md</code></strong> (read-only in a Task checkout): its 2026-09-28 entry says <code>realign</code> owns memory curation. Update in an intelligence Wave session once LOO-1104 lands.</li>
       <li><strong><code>lf commit --step</code> ignoring run-level <code>-a</code></strong> (found in <code>scratch/qa.html</code> #1): when a private home has no <code>default_agent</code>, step commits fall back to <code>lf &lt;skill&gt;: checkpoint</code>. Documented in <code>.lf/qa/skills.md</code>; separate CLI bug if worth fixing.</li>
-      <li><strong>Repo-local <code>.lf/graphs/pursue-auto.yaml</code></strong>: uses custom loops with <code>loop-or-next</code>; separate repo cleanup if desired.</li>
-      <li><strong>Automatic Graph selection</strong> (choosing <code>ui</code> or <code>fix</code> from Task content): separate feature; today a person or Wave default picks the Graph.</li>
+      <li><strong>Headless <code>concept-review</code> closing voice</strong> (found in <code>scratch/qa.html</code>): a headless run ended its chat reply addressing a person ("Questions (answer by number and letter)..."). Separate wording polish; the page itself stays read-only and hands cleanly to <code>realign</code>.</li>
+      <li><strong>Repo-local UI workflows, <code>.lf/graphs/pursue-auto.yaml</code> &amp; automatic Graph selection:</strong> separate outcomes outside builtin Task Graphs.</li>
     </ul>
   </div>
 </main>

@@ -31,11 +31,10 @@ this order:
 2. How to try it: the built thing at the place to start, the command ready to
    type or the window open.
 3. What is likeliest to surprise them: choices made on their behalf, what was
-   passed over, behavior that changed on purpose. When the diff touches a
-   sensitive boundary—auth, credentials or secrets, outbound telemetry or data,
-   deployment, or a hot path—call out what changed across that boundary and
-   offer to run a focused review skill (e.g. `security-review` or any
-   repository review in `lf list skill`) before delivering.
+   passed over, behavior that changed on purpose. When the diff touches
+   security-relevant code—auth, credentials or secrets, telemetry or outbound
+   data, untrusted input, or deployment—call out what changed and suggest
+   running `lf security-review` before delivering.
 4. Findings: everything left outside the PR, each with a proposal. Fix here,
    its own Task, or drop.
 5. Numbered questions, so "2b" is a complete answer.

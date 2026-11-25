@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ship Review — LOO-1106: Land Tasks straight to CI with no gate step</title>
+<style>
+  :root {
+    --bg: #fafaf8;
+    --surface: #ffffff;
+    --surface-alt: #f3f2ee;
+    --border: #e2e0d8;
+    --text: #1c1b18;
+    --muted: #5f5c53;
+    --accent: #1d4ed8;
+    --ok-bg: #ecfdf5;
+    --ok-fg: #065f46;
+    --ok-border: #a7f3d0;
+    --warn-bg: #fffbeb;
+    --warn-fg: #92400e;
+    --warn-border: #fde68a;
+    --out-bg: #f3f4f6;
+    --out-fg: #374151;
+    --out-border: #d1d5db;
+    --code-bg: #f4f3ef;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #131311;
+      --surface: #1b1b18;
+      --surface-alt: #23231f;
+      --border: #33322c;
+      --text: #eceae2;
+      --muted: #a19e93;
+      --accent: #60a5fa;
+      --ok-bg: #052e16;
+      --ok-fg: #6ee7b7;
+      --ok-border: #065f46;
+      --warn-bg: #2e2005;
+      --warn-fg: #fcd34d;
+      --warn-border: #78350f;
+      --out-bg: #27272a;
+      --out-fg: #d4d4d8;
+      --out-border: #3f3f46;
+      --code-bg: #24231e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.55;
+    font-size: 15px;
+  }
+  main { max-width: 980px; margin: 0 auto; padding: 36px 24px 72px; }
+  header { border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 28px; }
+  .kicker { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+  h1 { font-size: 26px; line-height: 1.25; margin: 0 0 10px; }
+  h2 { font-size: 19px; margin: 36px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 15.5px; margin: 18px 0 8px; }
+  p { margin: 0 0 12px; }
+  ul, ol { margin: 0 0 14px; padding-left: 22px; }
+  li { margin-bottom: 6px; }
+  .lead { color: var(--muted); font-size: 15.5px; max-width: 82ch; }
+  .strip { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .badge {
+    display: inline-block; font-size: 11.5px; font-weight: 600; padding: 2px 9px;
+    border-radius: 999px; border: 1px solid var(--border); white-space: nowrap;
+  }
+  .badge.ok { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-border); }
+  .badge.warn { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-border); }
+  .badge.out { background: var(--out-bg); color: var(--out-fg); border-color: var(--out-border); }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+    font-size: 13px; background: var(--code-bg); padding: 1px 5px; border-radius: 4px;
+  }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 13px 15px; overflow-x: auto; font-size: 12.5px; line-height: 1.48; margin: 10px 0 16px;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 14px 0 20px; font-size: 14px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+  }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--surface-alt); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  tr:last-child td { border-bottom: none; }
+  .callout {
+    background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent);
+    border-radius: 8px; padding: 14px 16px; margin: 16px 0;
+  }
+  .callout.warn { border-left-color: #d97706; }
+  .question {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px; margin: 12px 0;
+  }
+  .question h3 { margin: 0 0 8px; font-size: 15px; }
+  .opts { list-style: none; padding-left: 0; margin: 8px 0 0; }
+  .opts li { padding: 6px 10px; border-radius: 6px; background: var(--surface-alt); margin-bottom: 6px; }
+  .muted { color: var(--muted); }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <div class="kicker">Ship Review · LOO-1106 · PR #2050</div>
+  <h1>Land Tasks straight to CI with no <code>gate</code> step</h1>
+  <p class="lead">
+    Removes <code>gate</code> and <code>queue</code> everywhere, makes <code>lf land</code> / <code>lf arm</code> / <code>lf pr submit</code> mechanically clear <code>scratch/</code> once on the pushed head so CI runs immediately, adds trust-boundary / focused-review prompts to <code>kickoff</code> and <code>ship-review</code>, and tightens compute-discipline guidance across builtin skills.
+  </p>
+  <div class="strip">
+    <span class="badge ok">PR #2050 Open (928f614c6a)</span>
+    <span class="badge warn">Checkpoint PR — CI deferred until scratch clears</span>
+    <span class="badge ok">QA passed (4/4 scenarios + stacked-parent fix)</span>
+    <span class="badge ok">Concept review: aligned</span>
+  </div>
+</header>
+
+<section>
+  <h2>1. What ships</h2>
+  <ul>
+    <li><strong>No <code>gate</code> step in delivery:</strong> <code>deliver</code> goes straight from <code>reflect</code> to <code>cmd: land --wait-and-fix</code>; <code>quick</code> goes from <code>qa</code> to <code>cmd: land --wait-and-fix</code>. Builtin <code>gate.md</code>, <code>.lf/skills/gate.md</code>, builtin <code>queue.yaml</code>, <code>.lf/graphs/finish-queue.yaml</code>, and dead cached PR-copy readers (<code>scratch/pr-title.txt</code>, <code>pr-body.md</code>, <code>.pr-copy-ref</code>) are deleted.</li>
+    <li><strong>One scratch-free push on every delivery path:</strong> <code>lf land</code>, <code>lf arm</code>, and <code>lf pr submit</code> clear branch-added <code>scratch/</code> files once at the push boundary (<code>clear_for_delivery</code>) — covering clean sync, <code>Noop</code>, <code>resync == false</code>, conflict recovery, and <code>--local</code>. Pure stacked-scratch modify/delete conflicts drop without launching <code>sync-conflicts</code>; real code conflicts keep <code>scratch/plan.md</code> on disk and leave the branch untouched on abort.</li>
+    <li><strong>Stacked-parent merge detection before fetch (caught in QA):</strong> <code>resolve_task_pr_upstream</code> now asks GitHub whether a live-recorded stack parent merged before attempting to fetch its deleted branch.</li>
+    <li><strong>Trust-boundary &amp; focused-review prompts:</strong> Builtin <code>kickoff.md</code> adds an optional <strong>Trust &amp; data boundary</strong> section and <code>ship-review.md</code> calls out sensitive boundaries and offers a focused review skill (e.g. <code>security-review</code>) before delivery. Repo overlays <code>.lf/skills/kickoff.md</code> and <code>.lf/skills/ship-review.md</code> name Loopflow's four concrete triggers (Modal/Daytona credential forwarding, telemetry/outbound data, mobile/Tailscale server auth, install/release publisher).</li>
+    <li><strong>Compute-discipline guidance:</strong> Added <code>Spend compute deliberately</code> to <code>LOOPFLOW.md</code> / <code>skills/loopflow/SKILL.md</code> and tightened narrow-check / CI-deferral rules in <code>implement</code>, <code>compress</code>, <code>qa</code>, <code>ci-fix</code>, and <code>debug</code>.</li>
+  </ul>
+
+  <h3>Real output from QA (branch debug <code>lf</code>)</h3>
+<pre><code>$ lf graph show deliver
+reflect
+cmd: land --wait-and-fix
+
+$ lf graph show quick
+cmd: sync
+implement
+qa
+cmd: land --wait-and-fix
+
+$ lf gate
+error: skill or graph not found: gate. Run `lf list skill` or `lf list graph` to discover definitions, or `lf : &lt;message&gt;` to send a message
+[exit 2]
+
+# Stacked child whose parent squash-landed &amp; deleted its remote branch:
+$ lf land
+Nothing to commit
+Merging origin/main...
+Completing merge after dropping branch-added scratch conflicts...
+Dropped branch-added scratch conflicts
+Updating PR...
+Enabling auto-merge...
+
+https://github.com/qa/repo/pull/101
+# Push log: 1 push; origin/&lt;branch&gt;:scratch/ contains only scratch/.gitkeep; 0 sync-conflicts agents launched.</code></pre>
+</section>
+
+<section>
+  <h2>2. How to try it</h2>
+  <p>From this checkout (debug binary already built at <code>target/debug/lf</code>, or rebuild with <code>cargo build -p loopflow</code>):</p>
+<pre><code>env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') sh -c '
+  lf="$PWD/target/debug/lf"
+  tmp=$(mktemp -d) &amp;&amp; git -C "$tmp" init -q &amp;&amp; cd "$tmp"
+  "$lf" graph show deliver
+  "$lf" graph show quick
+  "$lf" list graph | grep -E "deliver|quick|queue"
+  "$lf" gate || true
+' &lt; /dev/null</code></pre>
+  <p>Diff reading order is in <code>scratch/tour.yaml</code>; full QA transcripts are in <code>scratch/qa.html</code>; PR is <a href="https://github.com/loopflowstudio/loopflow/pull/2050">PR #2050</a>.</p>
+</section>
+
+<section>
+  <h2>3. What is likeliest to surprise you</h2>
+  <ul>
+    <li><strong><code>.lf/graphs/pursue-auto.yaml</code> is still present and uses <code>loop-or-next</code>:</strong> This branch removed <code>gate</code> and its outer loop from <code>pursue-auto.yaml</code>, leaving <code>loop-or-next</code> intact — even though <code>pursue-auto.yaml</code> (and five other <code>.lf/graphs/*.yaml</code> files) have zero callers in <code>.lf/wave/</code>, <code>.lf/config.yaml</code>, or docs.</li>
+    <li><strong><code>LOOPFLOW.md</code> gained 3 lines (paid on every run):</strong> Added <code>Spend compute deliberately</code> to both <code>rust/loopflow-definitions/src/builtins/LOOPFLOW.md</code> and <code>skills/loopflow/SKILL.md</code> (per the compute steer during <code>compress</code>), alongside per-skill updates in <code>implement</code>, <code>compress</code>, <code>debug</code>, <code>qa</code>, and <code>ci-fix</code>.</li>
+    <li><strong><code>queue</code> Graph and cached PR copy were deleted outright:</strong> Builtin <code>queue.yaml</code>, <code>.lf/graphs/finish-queue.yaml</code>, and dead <code>scratch/pr-title.txt</code> / <code>pr-body.md</code> / <code>.pr-copy-ref</code> readers were removed rather than kept. <code>lf scratch clear</code> stays as a standalone CLI command.</li>
+    <li><strong>Delivery keeps notes on disk during real code conflicts:</strong> <code>prepare_pr</code> no longer clears <code>scratch/</code> before <code>sync_land</code>; clearing happens once in <code>finish_sync</code> right before pushing so <code>sync-conflicts</code> can read <code>scratch/plan.md</code> and <code>lf sync --abort</code> leaves zero clear commits.</li>
+    <li><strong>Upstream <code>main</code> just merged PR #2049 (<code>d8b2afebd9</code>, removing <code>verify</code>):</strong> This branch's commit <code>8294357459</code> edited <code>rust/loopflow-definitions/src/builtins/task/skill/verify.md</code> (4 lines), which PR #2049 deleted on <code>main</code>. Syncing <code>main</code> will raise a trivial delete/modify conflict on <code>verify.md</code> (drop it).</li>
+    <li><strong>Sensitive boundaries:</strong> No runtime auth, credential forwarding, outbound telemetry, or install/release publisher code changed in this diff — only the planning and ship-review prompt files that call those boundaries out. No separate <code>security-review</code> run is needed before delivery.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>4. Findings left outside this PR</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 28%">Finding</th>
+        <th style="width: 48%">Context</th>
+        <th style="width: 24%">Proposal</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Stale <code>.lf/graphs/</code> &amp; <code>loop-or-next</code></strong></td>
+        <td><code>pursue-auto.yaml</code> and <code>recover-transient-faults.yaml</code> still reference <code>loop-or-next</code> and have zero callers in <code>.lf/wave/</code> or config (along with <code>kickoff-demo</code>, <code>local-build-auto</code>, <code>local-build-prepare</code>, <code>macos-ci-auto</code>). Builtin <code>loop-or-next.md</code> itself still exists as a fallback decider.</td>
+        <td><strong>Fix here</strong> (delete unreferenced <code>pursue-auto.yaml</code>) or <strong>own Task</strong> to retire dead repo graphs + <code>loop-or-next</code></td>
+      </tr>
+      <tr>
+        <td><strong><code>main</code> moved past <code>pr-publish</code> (PR #2049)</strong></td>
+        <td><code>origin/main</code> deleted <code>verify.md</code> after this branch edited it; <code>lf sync</code> during delivery will need to drop <code>verify.md</code>.</td>
+        <td><strong>Fix here</strong> (sync <code>main</code> cleanly before delivery) or let <code>land</code> resolve it</td>
+      </tr>
+      <tr>
+        <td><strong>Tailored review skills</strong></td>
+        <td><code>security-review</code> / <code>performance-review</code> skills referenced as opt-in examples in <code>kickoff</code> / <code>ship-review</code> do not exist yet as builtins or repo skills.</td>
+        <td><strong>Own Task</strong> when wanted</td>
+      </tr>
+      <tr>
+        <td><strong>Two local Linear fixture failures</strong></td>
+        <td><code>pr_tests::task_snapshot_reads_its_current_parent_project</code> and <code>task_pr_missing_cached_linear_url_refuses_before_remote_mutation</code> panicked on <code>QueryReturnedNoRows</code> during local nextest; untouched by this branch.</td>
+        <td><strong>Drop</strong> (let CI adjudicate on the clean head)</td>
+      </tr>
+      <tr>
+        <td><strong>Plain <code>lf sync</code> stacked-scratch conflict</strong></td>
+        <td>Outside delivery, plain <code>lf sync</code> wants to keep edited <code>scratch/plan.md</code> after a parent squash-merges (opposite of delivery's discard).</td>
+        <td><strong>Drop</strong> (separate behavior)</td>
+      </tr>
+      <tr>
+        <td><strong>Wave <code>MEMORY.md</code> <code>gate</code> notes</strong></td>
+        <td>Historical references in <code>.lf/wave/*/MEMORY.md</code> (read-only in a Task checkout).</td>
+        <td><strong>Drop</strong> (curated by <code>wave-session</code>)</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>5. Questions</h2>
+  <p class="muted">Reply with numbers and letters (for example: <code>1a 2a 4a</code>).</p>
+
+  <div class="question">
+    <h3>1. What should happen to <code>.lf/graphs/pursue-auto.yaml</code> (and the other unreferenced <code>.lf/graphs/</code> using <code>loop-or-next</code>)?</h3>
+    <ul class="opts">
+      <li><strong>1a (Recommended):</strong> Delete <code>.lf/graphs/pursue-auto.yaml</code> here (and keep <code>recover-transient-faults</code> / builtin <code>loop-or-next</code> cleanup for a separate Task if wanted).</li>
+      <li><strong>1b:</strong> Delete all six unreferenced <code>.lf/graphs/</code> files (<code>pursue-auto</code>, <code>recover-transient-faults</code>, <code>kickoff-demo</code>, <code>local-build-auto</code>, <code>local-build-prepare</code>, <code>macos-ci-auto</code>) here.</li>
+      <li><strong>1c:</strong> Keep <code>pursue-auto.yaml</code> as edited in this PR and file a separate Task for <code>.lf/graphs/</code> + <code>loop-or-next</code>.</li>
+    </ul>
+  </div>
+
+  <div class="question">
+    <h3>2. Keep the 3-line <code>Spend compute deliberately</code> principle in <code>LOOPFLOW.md</code>?</h3>
+    <ul class="opts">
+      <li><strong>2a (Built):</strong> Yes — keep it in <code>LOOPFLOW.md</code>, <code>skills/loopflow/SKILL.md</code>, and the five test-running skills.</li>
+      <li><strong>2b:</strong> Remove it from <code>LOOPFLOW.md</code> and <code>skills/loopflow/SKILL.md</code> (and goldens), keeping the guidance only in <code>implement</code>, <code>compress</code>, <code>debug</code>, <code>qa</code>, and <code>ci-fix</code>.</li>
+    </ul>
+  </div>
+
+  <div class="question">
+    <h3>3. Keep the other reversible choices (deleting <code>queue</code> + cached PR copy, keeping standalone <code>lf scratch clear</code>, keeping notes on disk during real code conflicts)?</h3>
+    <ul class="opts">
+      <li><strong>3a (Built):</strong> Yes, keep all of them as built.</li>
+      <li><strong>3b:</strong> Change one (say which).</li>
+    </ul>
+  </div>
+
+  <div class="question">
+    <h3>4. Where does LOO-1106 go next?</h3>
+    <ul class="opts">
+      <li><strong>4a:</strong> Deliver now — run <code>lf task run LOO-1106</code> straight into <code>deliver</code> (<code>reflect</code> → <code>land --wait-and-fix</code>).</li>
+      <li><strong>4b:</strong> Apply your picks from Q1–Q3 plus sync <code>main</code> (dropping <code>verify.md</code> cleanly) first, then deliver.</li>
+    </ul>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

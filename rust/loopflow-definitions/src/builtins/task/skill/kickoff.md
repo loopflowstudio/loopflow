@@ -60,10 +60,10 @@ Cover these where they matter and skip the rest:
   at each consumer.
 - **Operational boundary** — latency, scale, network or recovery limits the
   code must hold.
-- **Trust & data boundary** — when the change touches auth, credentials or
-  secrets, outbound telemetry or data, untrusted input, or deployment, state
-  what crosses the boundary and note whether a focused review (e.g.
-  `security-review`) should run before delivery.
+- **Security and privacy** — when the change touches auth, credentials or
+  secrets, telemetry or outbound data, untrusted input, or deployment, state
+  what must stay protected and note whether `lf security-review` should run
+  before delivery.
 - **Exclusions** — nearby behavior left out.
 - **What goes** — the files, symbols, tests and fixtures this change removes,
   and the behavior and data that must survive. Never plan repairs to them.

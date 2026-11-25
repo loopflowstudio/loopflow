@@ -277,6 +277,7 @@ mod tests {
             "reduce",
             "polish",
             "concept-review",
+            "security-review",
             "ship-review",
             "explore",
             "research",

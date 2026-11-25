@@ -3,8 +3,8 @@ extends: builtin
 ---
 ## In this repository
 
-**Call out Loopflow's sensitive boundaries.** When the diff touches credential
-forwarding to Modal or Daytona, telemetry fields or outbound data, mobile or
-Tailscale server auth, or install and release publisher boundaries, highlight
-what changed across the boundary under what is likeliest to surprise them and
-offer to run a focused review skill before delivering.
+**Suggest `lf security-review` on security-relevant changes.** When the diff
+touches credential forwarding to Modal or Daytona, telemetry or outbound data,
+mobile or Tailscale server auth, or install and release publishing, call out
+what changed under what is likeliest to surprise them and suggest running
+`lf security-review` before delivering.

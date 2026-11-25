@@ -9,6 +9,15 @@ use crate::transcript::{self, Turn};
 use crate::{command_program, Antigravity, Harness, HarnessKind};
 
 impl Harness for Antigravity {
+    fn kind(&self) -> HarnessKind {
+        HarnessKind::Antigravity
+    }
+    fn recognizes_driver(&self, command: &str) -> bool {
+        (command_program(command, "agy") || command_program(command, "antigravity"))
+            && command
+                .split_whitespace()
+                .any(|arg| arg == "--output-format")
+    }
     fn caller_session_env(&self) -> &'static [&'static str] {
         &[
             "ANTIGRAVITY_AGENT",
@@ -23,17 +32,8 @@ impl Harness for Antigravity {
             "ANTIGRAVITY_TRAJECTORY_ID",
         ]
     }
-    fn kind(&self) -> HarnessKind {
-        HarnessKind::Antigravity
-    }
     fn sign_in_advice(&self) -> &'static str {
         "run `agy` and sign in"
-    }
-    fn recognizes_driver(&self, command: &str) -> bool {
-        (command_program(command, "agy") || command_program(command, "antigravity"))
-            && command
-                .split_whitespace()
-                .any(|arg| arg == "--output-format")
     }
     fn transcript_home(&self) -> PathBuf {
         dirs::home_dir()

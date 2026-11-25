@@ -8,12 +8,6 @@ use crate::transcript::{self, Turn};
 use crate::{command_program, Harness, HarnessKind, Pi};
 
 impl Harness for Pi {
-    fn sign_in_advice(&self) -> &'static str {
-        "run `pi` and enter `/login`"
-    }
-    fn caller_session_env(&self) -> &'static [&'static str] {
-        &[]
-    }
     fn kind(&self) -> HarnessKind {
         HarnessKind::Pi
     }
@@ -24,6 +18,12 @@ impl Harness for Pi {
                 .any(|arg| arg.contains("/pi-coding-agent/") && arg.ends_with("/cli.js")))
             && command.split_whitespace().any(|arg| arg == "--mode")
             && command.split_whitespace().any(|arg| arg == "rpc")
+    }
+    fn caller_session_env(&self) -> &'static [&'static str] {
+        &[]
+    }
+    fn sign_in_advice(&self) -> &'static str {
+        "run `pi` and enter `/login`"
     }
     fn api_key_env(&self) -> &'static [&'static str] {
         &[

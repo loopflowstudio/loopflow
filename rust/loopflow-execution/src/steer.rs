@@ -192,6 +192,13 @@ pub fn is_idle_reachable(
         }))
 }
 
+fn is_live(identity: Option<(u32, i64)>) -> bool {
+    identity.is_some_and(|(pid, start)| {
+        crate::process::os_process::process_identity_evidence(pid, start)
+            == crate::store::ProcessIdentityEvidence::Live
+    })
+}
+
 /// Only confirmed live, managed conversations can be woken.
 pub fn idle_conversations(
     store: &loopflow_storage::sqlite::SqliteStore,
@@ -200,18 +207,15 @@ pub fn idle_conversations(
     Ok(store
         .idle_conversation_candidates(session)?
         .into_iter()
-        .filter(|candidate| {
-            candidate.identity.is_some_and(|(pid, start)| {
-                crate::process::os_process::process_identity_evidence(pid, start)
-                    == crate::store::ProcessIdentityEvidence::Live
-            })
-        })
         .filter_map(|candidate| {
-            Some(IdleConversation {
-                reach: idle_reach(&candidate)?,
+            // Check the harness endpoint before querying the OS process table
+            // so unreachable sessions (e.g. Antigravity) cost no syscalls.
+            let reach = idle_reach(&candidate)?;
+            is_live(candidate.identity).then_some(IdleConversation {
                 adapter: candidate.adapter,
                 thread: candidate.thread,
                 cwd: candidate.cwd,
+                reach,
             })
         })
         .collect())
@@ -227,13 +231,7 @@ pub fn sessions_to_start(
     Ok(store
         .read_steer_wakes()?
         .into_iter()
-        .filter(|wake| {
-            let running = wake.identity.is_some_and(|(pid, start)| {
-                crate::process::os_process::process_identity_evidence(pid, start)
-                    == crate::store::ProcessIdentityEvidence::Live
-            });
-            !running && named.insert(wake.session.clone())
-        })
+        .filter(|wake| !is_live(wake.identity) && named.insert(wake.session.clone()))
         .collect())
 }
 

@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use crate::transcript::claude::is_user_input;
 use crate::transcript::{self, json_lines, ExpiryPolicy, Turn};
-use crate::{Claude, Harness, HarnessKind};
+use crate::{command_program, Claude, Harness, HarnessKind};
 
 /// Claude's token fields, shared by live stream and saved transcript decoding.
 pub(crate) fn usage(value: &serde_json::Value) -> TurnUsage {
@@ -46,11 +46,11 @@ fn input_time(path: &Path, id: &str) -> Option<i64> {
 }
 
 impl Harness for Claude {
-    fn recognizes_driver(&self, command: &str) -> bool {
-        crate::command_program(command, "claude")
+    fn kind(&self) -> HarnessKind {
+        HarnessKind::Claude
     }
-    fn sign_in_advice(&self) -> &'static str {
-        "run `claude auth login`"
+    fn recognizes_driver(&self, command: &str) -> bool {
+        command_program(command, "claude")
     }
     fn caller_session_env(&self) -> &'static [&'static str] {
         &[
@@ -67,8 +67,8 @@ impl Harness for Claude {
             "CLAUDE_EFFORT",
         ]
     }
-    fn kind(&self) -> HarnessKind {
-        HarnessKind::Claude
+    fn sign_in_advice(&self) -> &'static str {
+        "run `claude auth login`"
     }
     fn title_args(&self, name: &str) -> Vec<String> {
         vec!["--name".into(), name.into()]

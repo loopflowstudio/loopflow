@@ -448,6 +448,12 @@ fn each_harness_classifies_its_own_refusals() {
                 ("agy_error", "RESOURCE_EXHAUSTED", UsageLimit),
             ],
         };
+        for expected in [UsageLimit, CredentialInvalidated, ModelUnavailable] {
+            assert!(
+                cases.iter().any(|(_, _, failure)| *failure == expected),
+                "{harness:?}: missing {expected:?} refusal case"
+            );
+        }
         for &(code, message, failure) in cases {
             let classified = super::launcher(harness).classify_failure(code, message);
             assert_eq!(classified, Some(failure), "{harness:?}: {code}: {message}");

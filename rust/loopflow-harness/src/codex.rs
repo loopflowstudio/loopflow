@@ -31,8 +31,13 @@ fn input_times(path: &Path, wanted: &BTreeSet<&str>) -> BTreeMap<String, i64> {
 }
 
 impl Harness for Codex {
-    fn sign_in_advice(&self) -> &'static str {
-        "run `codex login`"
+    fn kind(&self) -> HarnessKind {
+        HarnessKind::Codex
+    }
+    fn recognizes_driver(&self, command: &str) -> bool {
+        command_program(command, "codex")
+            && command.split_whitespace().any(|arg| arg == "app-server")
+            && command.split_whitespace().any(|arg| arg == "--listen")
     }
     fn caller_session_env(&self) -> &'static [&'static str] {
         &[
@@ -46,13 +51,8 @@ impl Harness for Codex {
             "CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
         ]
     }
-    fn kind(&self) -> HarnessKind {
-        HarnessKind::Codex
-    }
-    fn recognizes_driver(&self, command: &str) -> bool {
-        command_program(command, "codex")
-            && command.split_whitespace().any(|arg| arg == "app-server")
-            && command.split_whitespace().any(|arg| arg == "--listen")
+    fn sign_in_advice(&self) -> &'static str {
+        "run `codex login`"
     }
     fn title_args(&self, _name: &str) -> Vec<String> {
         vec!["-c".into(), "tui.terminal_title=[]".into()]

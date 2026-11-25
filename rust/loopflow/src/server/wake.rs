@@ -730,16 +730,17 @@ mod tests {
             .unwrap();
 
         // Each listener returns the actual turn addressed to this conversation.
-        let (inbox, message): (Option<Inbox>, Box<dyn FnOnce() -> String>) = match harness {
+        type ReadTurn = Box<dyn FnOnce() -> String>;
+        let (inbox, message): (Option<Inbox>, Option<ReadTurn>) = match harness {
             HarnessKind::Claude => {
                 let listener = UnixListener::bind(&socket).unwrap();
                 (
                     Some(Inbox::Claude(fixture.claude(&socket))),
-                    Box::new(move || {
+                    Some(Box::new(move || {
                         let frames = received(&listener);
                         assert_eq!(frames[1]["session_id"], thread);
                         frames[1]["message"]["content"].as_str().unwrap().to_owned()
-                    }),
+                    })),
                 )
             }
             HarnessKind::Codex => {
@@ -755,26 +756,26 @@ mod tests {
                 let server = codex_app_server(&socket);
                 (
                     None,
-                    Box::new(move || {
+                    Some(Box::new(move || {
                         let start = server.join().unwrap();
                         assert_eq!(start["method"], "turn/start");
                         assert_eq!(start["params"]["threadId"], thread);
                         start["params"]["toolOutput"]["output"].to_string()
-                    }),
+                    })),
                 )
             }
             HarnessKind::OpenCode | HarnessKind::Pi => {
                 let messages = extension(&socket, "started\n", 1);
                 (
                     Some(Inbox::Socket(socket)),
-                    Box::new(move || {
+                    Some(Box::new(move || {
                         let message = messages.recv().unwrap();
                         assert_eq!(message["thread"], thread);
                         message["text"].as_str().unwrap().to_owned()
-                    }),
+                    })),
                 )
             }
-            HarnessKind::Antigravity => (None, Box::new(|| panic!("agy has no idle inbox"))),
+            HarnessKind::Antigravity => (None, None),
         };
 
         let report = |moment, callback, inbox| {
@@ -850,7 +851,7 @@ mod tests {
                 );
                 assert_eq!(page.pending, 0);
                 assert!(
-                    message().contains("use the other table"),
+                    message.unwrap()().contains("use the other table"),
                     "{harness:?} {wake_at:?}"
                 );
             }

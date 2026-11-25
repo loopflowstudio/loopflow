@@ -107,7 +107,7 @@ pub fn support(harness: HarnessKind, behavior: Behavior) -> Support {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verification {
-    Automated(&'static str),
+    Automated(&'static [&'static str]),
     RealProvider(&'static str),
 }
 
@@ -115,15 +115,15 @@ pub fn verification(behavior: Behavior) -> Verification {
     use Verification::{Automated, RealProvider};
     match behavior {
         Behavior::WorkerStep | Behavior::UsageRecording | Behavior::StepContext | Behavior::MidTurnSteer =>
-            Automated("task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness"),
-        Behavior::HeadlessPermissions => Automated("harness::launch_matrix::every_harness_runs_all_four_launch_kinds"),
-        Behavior::MissingCli => Automated("task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again"),
-        Behavior::UnansweredQuestion => Automated("task_graph_launch_tests::a_question_with_nobody_there_ends_the_step"),
-        Behavior::Interrupt => Automated("task_graph_launch_tests::a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again"),
-        Behavior::RefusalFallthrough => Automated("harness::conformance_tests::each_harness_classifies_its_own_refusals"),
-        Behavior::IdleWorkSessionWake => Automated("server::wake::tests::every_harness_wakes_its_idle_work_session"),
-        Behavior::ReopenWaitingSteers => Automated("server::wake::tests::reopened_work_sessions_take_waiting_steers, session_launch_contract::a_reopened_antigravity_task_hears_repository_direction_once"),
-        Behavior::InstalledSkills => Automated("harness::conformance_tests::every_harness_reads_a_synced_skill"),
+            Automated(&["task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness"]),
+        Behavior::HeadlessPermissions => Automated(&["harness::launch_matrix::every_harness_runs_all_four_launch_kinds"]),
+        Behavior::MissingCli => Automated(&["task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again"]),
+        Behavior::UnansweredQuestion => Automated(&["task_graph_launch_tests::a_question_with_nobody_there_ends_the_step"]),
+        Behavior::Interrupt => Automated(&["task_graph_launch_tests::a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again"]),
+        Behavior::RefusalFallthrough => Automated(&["harness::conformance_tests::each_harness_classifies_its_own_refusals"]),
+        Behavior::IdleWorkSessionWake => Automated(&["server::wake::tests::every_harness_wakes_its_idle_work_session"]),
+        Behavior::ReopenWaitingSteers => Automated(&["server::wake::tests::reopened_work_sessions_take_waiting_steers", "session_launch_contract::a_reopened_antigravity_task_hears_repository_direction_once"]),
+        Behavior::InstalledSkills => Automated(&["harness::conformance_tests::every_harness_reads_a_synced_skill"]),
         Behavior::ViewerHandoff => RealProvider("transport_tests covers held-terminal sharing. Check the provider TUI live"),
     }
 }
@@ -161,7 +161,7 @@ mod tests {
             match verification(behavior) {
                 Verification::Automated(tests) => {
                     let names = tests
-                        .split(", ")
+                        .iter()
                         .map(|test| format!("`{test}`"))
                         .collect::<Vec<_>>();
                     writeln!(out, " automated ({}) |", names.join(", ")).unwrap();

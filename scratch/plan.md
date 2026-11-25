@@ -61,6 +61,11 @@ also names the existing `lf resume --task` fixture.
 
 ## Remaining work
 
+The implementation is done: `harness/parity.rs` declares every cell, the README
+table is generated and checked, and every automated row cites a test that
+exists and loops over `HarnessKind::ALL` through `Behavior::assert_observed`.
+LOO-1099 is filed. Nothing remains here before gate.
+
 Already-open Antigravity idle wake belongs to LOO-1099. Revisit a provider
 route there with the draft, dialog and server-replacement cases above.
 Gate owns the acceptance list and the live reopen demo. Gap owners are

@@ -10,16 +10,16 @@ the way you work and share it.
 
 ## Skills
 
-A Skill is one job in Markdown: `design` plans, `implement` builds, `qa`
-verifies, `gate` reviews and publishes. Chain Skills in a Graph rather than
-cramming everything into one prompt; steps pass work through Git commits and
-notes in `scratch/`.
+A Skill is one job in Markdown: `design` plans, `implement` builds, `compress`
+simplifies, `qa` verifies. Chain Skills in a Graph rather than cramming
+everything into one prompt; steps pass work through Git commits and notes in
+`scratch/`.
 
 ### Extend or replace a builtin
 
 ```bash
 lf skill customize pr-message    # creates .lf/skills/pr-message.md extending the builtin
-lf skill customize gate --full   # copies the full builtin text to replace it
+lf skill customize qa --full     # copies the full builtin text to replace it
 lf list skill                    # shows which Skills extend vs. replace builtins
 ```
 
@@ -27,13 +27,13 @@ Extending a builtin lets you add repo-specific instructions while still
 receiving upstream improvements to the builtin:
 
 ```markdown
-<!-- .lf/skills/gate.md -->
+<!-- .lf/skills/qa.md -->
 ---
 extends: builtin
 ---
 ## In this repository
 
-Run `make e2e` before publishing.
+Run `make e2e` against the local preview server before finishing.
 ```
 
 A Skill without `extends: builtin` replaces the builtin of the same name for
@@ -86,7 +86,7 @@ Audit auth changes on this branch. Fix missing validation and untested paths.
 # .lf/graphs/ship-api.yaml
 - step: {name: implement, agent: claude:opus}
 - audit                         # runs on Codex per its frontmatter
-- gate
+- cmd: land --wait-and-fix
 ```
 
 - `agent:` pins the harness (and model, if named).
@@ -117,8 +117,7 @@ Mix Skills and mechanical `cmd:` steps:
 ```yaml
 # deliver (builtin)
 - reflect                     # folds your feedback from this Task into skill edits
-- gate                        # publishes PR so CI starts, then reviews while CI runs
-- cmd: land --wait-and-fix    # merges when checks pass, repairing CI failures
+- cmd: land --wait-and-fix    # syncs, clears scratch, and merges when CI passes
 ```
 
 ### Loops (`loop:`)
@@ -229,7 +228,7 @@ moments:
     - loop:
         - graph: build      # sync/implement, concept-review, realign, compress, qa, publish PR
         - interactive: ship-review  # read one summary page; iterate sends feedback back to build
-    - graph: deliver        # reflect, gate, land --wait-and-fix
+    - graph: deliver        # reflect, land --wait-and-fix
     - interactive: verify   # check it on main; finish or fix forward
 ```
 
@@ -244,21 +243,21 @@ lf task auto on LOO-12              # auto on: an agent stands in for you at eve
 At **`ship-review`**, Loopflow builds one HTML page (`scratch/ship-review.html`):
 what ships, in your terms, and everything the run left outside the PR, each
 with a proposal to fix it here, give it its own Task, or drop it. It is not a
-code review; concept review and gate already answered whether the change is
+code review; concept review and QA already answered whether the change is
 right. Ask for changes in the Task conversation to loop back to `build`, or
 move on to `deliver`.
 
 ### Built-in Graphs
 
 ```bash
-lf task run LOO-13 quick    # builds from the brief, runs qa and gate, and lands when CI passes
+lf task run LOO-13 quick    # builds from the brief, runs qa, and lands when CI passes
 ```
 
 | Graph | What it does |
 |---|---|
 | `feature` | `explore` (interactive) → `plan` → `build` ↔ `ship-review` (interactive) → `deliver` → `verify` (interactive) |
 | `code` | Same as `feature`, starting at `plan` (default when no Graph is configured) |
-| `quick` | loop(`sync` → `implement`) → `qa` → `gate` → `land --wait-and-fix` |
+| `quick` | loop(`sync` → `implement`) → `qa` → `land --wait-and-fix` |
 | `pursue` | `plan` then `build` with no interactive stops: request to published PR |
 | `research` | Investigate and report findings without opening a PR |
 | `optimize` | Iterative measure → change → keep/revert loop |

@@ -65,10 +65,10 @@ Audit auth changes on this branch. Fix missing validation and untested paths.
 
 ```yaml
 # .lf/graphs/ship-api.yaml
-- interactive: design   # stops for you; writes scratch/plan.md
-- implement             # commits its work on the branch
-- audit                 # runs on Codex per its frontmatter
-- gate                  # publishes the PR so CI starts, then reviews while CI runs
+- interactive: design       # stops for you; writes scratch/plan.md
+- implement                 # commits its work on the branch
+- audit                     # runs on Codex per its frontmatter
+- cmd: land --wait-and-fix  # syncs, clears scratch, and merges when CI passes
 ```
 
 ```bash
@@ -154,7 +154,7 @@ Each page picks up where the previous one leaves off:
 | Start | [Get started](getting-started.md) | Install, first Skill, first Task, review, and ship |
 | Work | [Work](work.md) | Multiple Tasks, steering, shared plans (Git/Linear/Asana), Waves |
 | Sessions | [Sessions](sessions.md) | Multi-view attach, `lf resume`, update/crash survival, switching agents |
-| Ops | [Ops](ops.md) | PRs, `gate`, CI repair, releases, checkouts/stacking, SSH & rented machines |
+| Ops | [Ops](ops.md) | PRs, CI repair, releases, checkouts/stacking, SSH & rented machines |
 | Surfaces | [Surfaces](surfaces.md) · [Workspaces](workspaces.md) | Desktop, Rex, cmux, Herdr, tmux, `lf open`, `--subscribe --json` |
 | Client server | [Connect clients](server.md) | Local server lifecycle, Desktop reconnect, phone access over Tailscale |
 | Telemetry | [Telemetry](telemetry.md) | Cost, context budgets, transcripts, live runs, `lf doctor` |
@@ -185,9 +185,9 @@ contract), `scratch/`, and `.lf/wave/` automatically. Pull in more context when
 you need it:
 
 ```bash
-lf gate --docs DESIGN.md            # one file
-lf gate --docs 'docs/*.md'          # a glob
-lf gate --diff files                # paths of files changed on the branch
+lf qa --docs DESIGN.md              # one file
+lf qa --docs 'docs/*.md'            # a glob
+lf qa --diff files                  # paths of files changed on the branch
 lf debug -c                         # clipboard contents
 lf --context debug -c               # preview assembled input without launching
 ```

@@ -65,10 +65,10 @@ Audit auth changes on this branch. Fix missing validation and untested paths.
 
 ```yaml
 # .lf/graphs/ship-api.yaml
-- interactive: design   # stops for you; writes scratch/plan.md
-- implement             # commits its work on the branch
-- audit                 # runs on Codex per its frontmatter
-- gate                  # publishes the PR so CI starts, then reviews while CI runs
+- interactive: design       # stops for you; writes scratch/plan.md
+- implement                 # commits its work on the branch
+- audit                     # runs on Codex per its frontmatter
+- cmd: land --wait-and-fix  # syncs, clears scratch, and merges when CI passes
 ```
 
 ```bash

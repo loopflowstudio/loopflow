@@ -380,9 +380,27 @@ empty; the tests pass, including the new Pass 1 tests below. CI runs the suites.
 2. **Remove `gate`.** The skill, overlay, Graph steps, `queue`,
    `finish-queue`, cached PR copy, builtin skill prose, engine strings, test
    expectations and the golden.
-3. **Docs.** Everything under "Prose that names the skill" outside the
-   builtins, plus `.github/CI.md` and `AGENTS.md` (aligned with
-   `pr-message.md`) describing the land that pass 1 built.
+3. **Docs.** Remaining internal/dev docs under "Prose that names the skill"
+   outside the builtins (`AGENTS.md`, `docs/dev/delivery.md`,
+   `docs/dev/planning.md`, `docs/dev/index.md` + `docs/dev/index.html`,
+   `docs/dev/reference-runtime.md`, `scripts/testing.md`, `swift/README.md`,
+   `rust/loopflow/tests/README.md`, `tests/e2e/README.md`, `.lf/qa/desktop.md`,
+   `website/README.md`, `design/prototypes/homepage-next/index.html`).
+
+## User docs written (`write-docs`)
+
+Already updated in place to describe the shipped behavior:
+- `README.md`
+- `docs/index.md`
+- `docs/getting-started.md`
+- `docs/ops.md`
+- `docs/orchestration.md`
+- `docs/config.md`
+- `docs/troubleshooting.md`
+- `docs/surfaces.md`
+- `.github/CI.md`
+- `website/home.html`
+- `website/main.py`
 
 Done when `lf graph show deliver` and `lf graph show quick` print no `gate`;
 `lf gate` and the `queue` Graph are unknown; a land through a conflicting

@@ -26,20 +26,16 @@ pub struct Entry {
 
 impl Entry {
     pub fn source_label(&self) -> String {
-        let mut notes = Vec::new();
+        let mut parts = vec![self.source.clone()];
         if let Some(target) = &self.extends {
-            notes.push(format!("extends {target}"));
+            parts.push(format!("extends {target}"));
         }
-        if let Some(relation) = self.builtin {
-            if relation != BuiltinRelation::Extends {
-                notes.push(relation.describe().to_string());
-            }
+        match self.builtin {
+            Some(BuiltinRelation::Extends) if self.extends.is_some() => {}
+            Some(relation) => parts.push(relation.describe().to_string()),
+            None => {}
         }
-        if notes.is_empty() {
-            self.source.clone()
-        } else {
-            format!("{}, {}", self.source, notes.join(", "))
-        }
+        parts.join(", ")
     }
 }
 
@@ -162,7 +158,7 @@ pub fn discover(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
         let catalog = crate::skills::catalog::SkillCatalog::discover(Some(repo))?;
         let prefix = path.get(1).map(|name| format!("{name}/"));
         for source in catalog.entries() {
-            let name = source.name.clone();
+            let name = &source.name;
             if prefix
                 .as_ref()
                 .is_some_and(|prefix| !name.starts_with(prefix))
@@ -175,14 +171,15 @@ pub fn discover(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
                 }
                 Err(error) => format!("unavailable: {error}"),
             };
+            let (builtin, extends) = source.relations();
             entries.push(Entry {
                 name: name.clone(),
                 kind: "skill".into(),
                 source: definition_source(repo, source.path.as_deref()),
                 description,
                 invocation: format!("lf skill -- {name}"),
-                builtin: source.builtin_relation(),
-                extends: source.extends_target(),
+                builtin,
+                extends,
             });
         }
         if !path.is_empty() {

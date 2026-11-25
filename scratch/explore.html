@@ -1,0 +1,1222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Host-agnostic review pages: Rex split, Desktop, and browser (Round 3)</title>
+<style>
+  /* Loopflow Light palette (website/static/theme.css) */
+  :root {
+    --background: #faf8f5;
+    --surface: #fffdf9;
+    --surface-muted: #f3eee7;
+    --surface-element: #ece6dd;
+    --border: #e6dfd6;
+    --border-strong: #d6ccc0;
+    --border-active: #8b8277;
+    --text: #2a2624;
+    --text-secondary: #5f5752;
+    --text-tertiary: #65605d;
+    --accent: #722f37;
+    --accent-hover: #5e2630;
+    --accent-text: #faf8f5;
+    --accent-soft: #f3e8e9;
+    --working-ink: #2f629f;
+    --working-fill: #e2eaf2;
+    --warning-ink: #7f5a19;
+    --warning-fill: #efe7d8;
+    --failure-ink: #a64038;
+    --failure-fill: #f3e2df;
+    --success-ink: #386c48;
+    --success-fill: #e1ebe3;
+    --diff-add-bg: #e7f0e8;
+    --diff-del-bg: #f4e3e1;
+    --mark-bg: #efe3c8;
+    --serif: "Old Standard TT", Georgia, "Times New Roman", serif;
+    --sans: "Atkinson Hyperlegible Next", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono: "Spline Sans Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --background: #161413;
+      --surface: #1e1b19;
+      --surface-muted: #26221f;
+      --surface-element: #302b27;
+      --border: #322d29;
+      --border-strong: #463f3a;
+      --border-active: #968b80;
+      --text: #ede9e3;
+      --text-secondary: #b0a79f;
+      --text-tertiary: #8f867e;
+      --accent: #c46b75;
+      --accent-hover: #d4828b;
+      --accent-text: #161413;
+      --accent-soft: #2e1d20;
+      --working-ink: #7bb0eb;
+      --working-fill: #1f2b38;
+      --warning-ink: #dfb464;
+      --warning-fill: #302819;
+      --failure-ink: #e07b72;
+      --failure-fill: #331e1c;
+      --success-ink: #79b88b;
+      --success-fill: #1c2c21;
+      --diff-add-bg: #1c2a20;
+      --diff-del-bg: #321d1b;
+      --mark-bg: #3d331d;
+    }
+  }
+  :root[data-theme="dark"] {
+    --background: #161413;
+    --surface: #1e1b19;
+    --surface-muted: #26221f;
+    --surface-element: #302b27;
+    --border: #322d29;
+    --border-strong: #463f3a;
+    --border-active: #968b80;
+    --text: #ede9e3;
+    --text-secondary: #b0a79f;
+    --text-tertiary: #8f867e;
+    --accent: #c46b75;
+    --accent-hover: #d4828b;
+    --accent-text: #161413;
+    --accent-soft: #2e1d20;
+    --working-ink: #7bb0eb;
+    --working-fill: #1f2b38;
+    --warning-ink: #dfb464;
+    --warning-fill: #302819;
+    --failure-ink: #e07b72;
+    --failure-fill: #331e1c;
+    --success-ink: #79b88b;
+    --success-fill: #1c2c21;
+    --diff-add-bg: #1c2a20;
+    --diff-del-bg: #321d1b;
+    --mark-bg: #3d331d;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.58;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .column {
+    max-width: 840px;
+    margin: 0 auto;
+    padding: 36px 20px 96px;
+  }
+
+  .page-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 22px;
+  }
+  h1 {
+    margin: 0 0 10px;
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 34px;
+    line-height: 1.14;
+    letter-spacing: -0.03em;
+    font-variant-ligatures: none;
+  }
+  .lede {
+    margin: 0;
+    font-size: 15.5px;
+    color: var(--text-secondary);
+    max-width: 66ch;
+  }
+
+  h2 {
+    margin: 44px 0 10px;
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 20px;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 {
+    margin: 22px 0 6px;
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 15.5px;
+    line-height: 1.35;
+  }
+  p { margin: 0 0 12px; }
+  ul, ol { margin: 0 0 14px; padding-left: 20px; }
+  li { margin-bottom: 6px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .small { font-size: 13.5px; color: var(--text-secondary); }
+  code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: var(--surface-muted);
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+  pre {
+    margin: 8px 0 12px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.5;
+    background: var(--surface-muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  button {
+    font-family: var(--sans);
+    font-size: 13px;
+    line-height: 1.2;
+    padding: 6px 11px;
+    border-radius: 4px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  button:hover { background: var(--surface-muted); border-color: var(--border-active); }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button.accent {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
+    font-weight: 600;
+  }
+  button.accent:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+  button[aria-pressed="true"] {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .status::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+  }
+  .status.ok { color: var(--success-ink); }
+  .status.warn { color: var(--warning-ink); }
+  .status.fail { color: var(--failure-ink); }
+  .status.work { color: var(--working-ink); }
+  .status.proposed { color: var(--accent); }
+  .status.existing { color: var(--text-secondary); }
+
+  .jump-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    font-size: 13.5px;
+    margin: 0 0 22px;
+    color: var(--text-secondary);
+  }
+  .jump-bar a { color: var(--text-secondary); border-bottom: 1px solid var(--border-strong); padding-bottom: 1px; }
+  .jump-bar a:hover { color: var(--accent); border-bottom-color: var(--accent); text-decoration: none; }
+
+  .split-band {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    margin: 14px 0 22px;
+    padding: 15px 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+  }
+  @media (max-width: 680px) { .split-band { grid-template-columns: 1fr; } }
+  .split-band > div + div { border-left: 1px solid var(--border); padding-left: 18px; }
+  @media (max-width: 680px) { .split-band > div + div { border-left: none; padding-left: 0; border-top: 1px solid var(--border); padding-top: 14px; } }
+  .split-band ul { margin: 8px 0 0; padding-left: 18px; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 20px;
+    font-size: 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  th, td {
+    text-align: left;
+    vertical-align: top;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    background: var(--surface-muted);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  tr:last-child td { border-bottom: none; }
+  .table-wrap { overflow-x: auto; }
+
+  /* ==================== REX AGENT-BROWSER SPLIT DIAGRAM ==================== */
+  .rex-split {
+    display: grid;
+    grid-template-columns: 1fr 1.25fr;
+    gap: 0;
+    margin: 16px 0 22px;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    overflow: hidden;
+    font-size: 13.5px;
+  }
+  @media (max-width: 680px) { .rex-split { grid-template-columns: 1fr; } }
+  .rex-pane { padding: 14px 16px; }
+  .rex-pane + .rex-pane { border-left: 1px solid var(--border-strong); }
+  @media (max-width: 680px) { .rex-pane + .rex-pane { border-left: none; border-top: 1px solid var(--border-strong); } }
+  .rex-pane-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 8px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+  }
+
+  /* ==================== LIVE PROTOTYPE FRAME ==================== */
+  .host-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 12px 0 14px;
+    padding: 10px 14px;
+    background: var(--surface-muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13.5px;
+  }
+  .proto-shell {
+    position: relative;
+    margin: 14px 0 28px;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .proto-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    padding: 10px 16px;
+    background: var(--surface-muted);
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+
+  .feedback-strip {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding: 8px 16px;
+    background: var(--accent-soft);
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .feedback-strip.empty {
+    background: var(--surface-muted);
+    color: var(--text-secondary);
+  }
+  .feedback-strip-count { font-weight: 600; color: var(--accent); }
+  .feedback-strip.empty .feedback-strip-count { font-weight: 400; color: var(--text-secondary); }
+
+  .proto-body { padding: 18px 18px 20px; }
+  .proto-section {
+    padding: 16px 0;
+    border-top: 1px solid var(--border);
+  }
+  .proto-section:first-child { padding-top: 0; border-top: none; }
+  .proto-section:last-child { padding-bottom: 0; }
+  .proto-title {
+    margin: 0 0 6px;
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.28;
+    letter-spacing: -0.01em;
+  }
+
+  .hazard-band {
+    padding: 11px 14px;
+    background: var(--failure-fill);
+    border: 1px solid var(--border-strong);
+    border-left: 3px solid var(--failure-ink);
+    border-radius: 4px;
+    margin: 12px 0;
+    font-size: 14px;
+  }
+
+  .code-block {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin: 10px 0 12px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  .code-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 7px 12px;
+    background: var(--surface-muted);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--sans);
+    font-size: 12.5px;
+    color: var(--text-secondary);
+  }
+  .code-lines { overflow-x: auto; background: var(--surface); }
+  .code-line {
+    display: grid;
+    grid-template-columns: 44px 1fr;
+    padding: 1px 12px 1px 0;
+    white-space: pre;
+  }
+  .code-line.add { background: var(--diff-add-bg); }
+  .code-line.del { background: var(--diff-del-bg); }
+  .code-line.bug { background: var(--failure-fill); }
+  .ln {
+    text-align: right;
+    padding-right: 10px;
+    color: var(--text-tertiary);
+    user-select: none;
+  }
+  .line-note {
+    grid-column: 1 / -1;
+    margin: 2px 12px 6px 44px;
+    padding: 6px 10px;
+    background: var(--surface-muted);
+    border-left: 2px solid var(--accent);
+    font-family: var(--sans);
+    font-size: 13px;
+    white-space: normal;
+  }
+  .line-note.hidden { display: none; }
+
+  .choice-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 11px 0;
+    border-top: 1px solid var(--border);
+  }
+  .choice-row:first-of-type { border-top: none; padding-top: 4px; }
+  .choice-text { flex: 1 1 310px; font-size: 14px; }
+  .choice-controls { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  .open-q { margin-top: 12px; }
+  .open-q textarea {
+    width: 100%;
+    min-height: 52px;
+    margin-top: 6px;
+    font-family: var(--sans);
+    font-size: 14px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+    resize: vertical;
+  }
+
+  .comment-list {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .comment-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 9px 12px;
+    background: var(--surface-muted);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    font-size: 13.5px;
+  }
+  .comment-quote {
+    display: inline-block;
+    background: var(--mark-bg);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 12.5px;
+    margin-bottom: 4px;
+  }
+
+  /* Floating highlight-to-comment popover */
+  .sel-popover {
+    position: fixed;
+    z-index: 40;
+    width: min(340px, calc(100vw - 24px));
+    padding: 10px 12px;
+    background: var(--surface);
+    border: 1px solid var(--border-active);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+    display: none;
+  }
+  .sel-popover.open { display: block; }
+  .sel-popover-quote {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    background: var(--mark-bg);
+    padding: 3px 6px;
+    border-radius: 3px;
+    margin-bottom: 8px;
+    max-height: 46px;
+    overflow: hidden;
+  }
+  .sel-popover input {
+    width: 100%;
+    font-family: var(--sans);
+    font-size: 13.5px;
+    padding: 6px 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+    margin-bottom: 8px;
+  }
+  .sel-popover-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .dispatch-drawer {
+    padding: 12px 16px;
+    background: var(--surface-muted);
+    border-top: 1px solid var(--border-strong);
+  }
+  .dispatch-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 6px;
+    font-size: 13px;
+  }
+
+  .option-block {
+    padding: 16px 0;
+    border-top: 1px solid var(--border);
+  }
+  .option-block:first-of-type { border-top: none; padding-top: 6px; }
+  .option-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 18px;
+    margin-top: 10px;
+    padding: 12px 14px;
+    background: var(--surface-muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13.5px;
+  }
+  @media (max-width: 680px) { .option-meta { grid-template-columns: 1fr; } }
+
+  .q-list { list-style: none; padding: 0; margin: 14px 0 0; }
+  .q-item {
+    padding: 14px 0;
+    border-top: 1px solid var(--border);
+  }
+  .q-item:first-child { border-top: none; padding-top: 4px; }
+  .q-title { font-weight: 600; margin-bottom: 6px; }
+  .q-opts { list-style: none; padding: 0; margin: 6px 0 0; }
+  .q-opts li { margin-bottom: 5px; font-size: 14px; }
+  .q-key { font-family: var(--mono); font-weight: 600; color: var(--accent); margin-right: 6px; }
+</style>
+</head>
+<body>
+<div class="column">
+
+  <header class="page-head">
+    <div>
+      <h1>Host-agnostic review pages: Rex split, Desktop, and browser</h1>
+      <p class="lede">
+        Round 3: keeping Vision A's technical flow and highlight-to-comment + global <code>data-choice</code> controls, and making the HTML speak directly to <code>lf server</code> over localhost so the entire review loop works in a Rex agent-browser split with no Desktop required.
+      </p>
+    </div>
+    <button id="theme-toggle" type="button" aria-label="Toggle color theme">Dark</button>
+  </header>
+
+  <nav class="jump-bar" aria-label="Sections">
+    <a href="#rex-flow">Rex agent-browser split</a>
+    <a href="#live-demo">Try all 3 hosts live</a>
+    <a href="#transport">One transport, three hosts</a>
+    <a href="#safety">Steer-only vs allowlisted commands</a>
+    <a href="#questions">Open questions</a>
+  </nav>
+
+  <section id="rex-flow">
+    <p>
+      Right now, <code>lf open --file</code> refuses any host other than Loopflow Desktop (<code>rust/loopflow/src/lf/commands/open/files.rs:19</code>), and <code>lf server</code> already embeds <code>axum</code> for transport. Adding a tiny loopback-only HTTP route in <code>lf server</code> lets the exact same compiled HTML page drive a live agent in Rex, feed Desktop's <code>ReviewCommentsStrip</code>, or degrade to clipboard copy offline.
+    </p>
+
+    <div class="rex-split">
+      <div class="rex-pane">
+        <div class="rex-pane-head">
+          <span>Left pane: live agent in Rex</span>
+          <span class="status work">Waiting at ship-review</span>
+        </div>
+        <pre style="margin: 0;">$ lf task run LOO-1097
+ship-review wrote scratch/ship-review.html
+Serving at http://127.0.0.1:49218/p/t_9f4a/ship-review.html
+
+# When you press Cmd+Enter on the right pane:
+# lf server delivers your steer + choices straight here
+# and the agent acts in front of you.</pre>
+      </div>
+      <div class="rex-pane">
+        <div class="rex-pane-head">
+          <span>Right pane: browser split (Rex or system browser)</span>
+          <span class="status proposed">Same-origin loopback</span>
+        </div>
+        <ul style="margin: 0; padding-left: 18px;">
+          <li>Served from <code>127.0.0.1</code> with an unguessable per-session capability token in the URL (zero CORS; external websites cannot reach it).</li>
+          <li>Drag-highlight any text, type, or diff line to comment.</li>
+          <li>Click global <code>data-choice</code> / <code>data-multiselect</code> buttons.</li>
+          <li>Press <strong><code>⌘↩</code></strong> to POST straight to <code>lf server</code> (steer the agent in the left pane, or run allowlisted <code>lf</code> actions).</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== LIVE PROTOTYPE WITH HOST SWITCHER ==================== -->
+  <section id="live-demo">
+    <h2>Try it across all three hosts (prototype on <code>LOO-1097</code>)</h2>
+    <p class="small">
+      Switch the simulated host below, then highlight any sentence or Rust line and click decision buttons to see the exact dispatch behavior for Rex, Desktop, and offline <code>file://</code>.
+    </p>
+
+    <div class="host-bar" role="group" aria-label="Simulated host">
+      <strong>Simulated host:</strong>
+      <button type="button" class="host-btn" data-host="rex" aria-pressed="true">Rex agent-browser split (loopback HTTP)</button>
+      <button type="button" class="host-btn" data-host="desktop" aria-pressed="false">Loopflow Desktop (TaskHTMLView)</button>
+      <button type="button" class="host-btn" data-host="offline" aria-pressed="false">Offline browser (file://)</button>
+    </div>
+
+    <div class="proto-shell" id="proto-root">
+      <div class="proto-header">
+        <span id="proto-url"><code>http://127.0.0.1:49218/p/t_9f4a/scratch/ship-review.html</code></span>
+        <span class="status ok" id="proto-conn">Connected to lf server (LOO-1097)</span>
+      </div>
+
+      <div class="feedback-strip" id="feedback-strip">
+        <span class="feedback-strip-count" id="strip-count">0 items pending</span>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button type="button" id="strip-clear" style="display: none;">Clear</button>
+          <button type="button" class="accent" id="strip-send" disabled>Steer agent in Rex ⌘↩</button>
+        </div>
+      </div>
+
+      <div class="proto-body" id="commentable-area">
+
+        <div class="proto-section" data-section="What we built">
+          <div class="proto-title">What we built: hold direct chats in <code>lf holder run</code> and split session endings</div>
+          <p>
+            Whenever <code>lf server</code> is running, interactive <code>lf</code>, <code>lf -a agy</code>, and <code>lf &lt;skill&gt;</code> launches now run inside <code>lf holder run</code> instead of directly in Rex's PTY. Opening the same conversation in Desktop or another Rex tab attaches as a second viewer instead of killing and restarting the provider. Standalone chats idle with zero viewers for 15 minutes retire cleanly without auto-committing worktree edits.
+          </p>
+
+          <div class="hazard-band">
+            <span class="status fail">Technical hazard surfaced in <code>qa</code></span>
+            <p style="margin: 6px 0 0;">
+              <strong>Copied-DB demos sent <code>SIGTERM</code> to production's live <code>agy</code> PIDs.</strong> A snapshot of prod's store under <code>LF_HOME=/tmp/lf-demo-1063</code> cleared <code>held_terminals</code> on startup while retaining prod's <code>agent_pid</code> column, so opening a Task fell through to <code>TakeOver</code> and signaled live prod processes.
+            </p>
+          </div>
+        </div>
+
+        <div class="proto-section" data-section="Key data structures and APIs">
+          <h3 style="margin-top: 0;">Key data structures and APIs</h3>
+          <div class="table-wrap">
+            <table style="margin: 8px 0 4px;">
+              <thead>
+                <tr>
+                  <th style="width: 26%;">Type / table / API</th>
+                  <th style="width: 34%;">Shape &amp; location</th>
+                  <th style="width: 40%;">Ownership &amp; invariant going forward</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>HeldTerminal</code></td>
+                  <td><code>held_terminals(id, session_id, pid, viewers)</code></td>
+                  <td>Owns the live PTY and viewer count. Cleared on server restart; any new surface attaches by <code>held_terminal_id</code>.</td>
+                </tr>
+                <tr>
+                  <td><code>ResumeIntent</code></td>
+                  <td><code>Attach { terminal_id } | TakeOver { pid } | FreshStart</code><br><code>session/resume.rs:142</code></td>
+                  <td>Single decision seam for every viewer. Prefers live <code>Attach</code> before legacy raw-PID <code>TakeOver</code>.</td>
+                </tr>
+                <tr>
+                  <td><code>EndReason</code></td>
+                  <td><code>Quit | Idle | TaskCompleted | Died</code><br><code>migrations/agent_end_reason.sql</code></td>
+                  <td>Additive nullable column wired into <code>store_revisions</code> triggers. Reopening a completed Task stays <code>closed</code>.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="proto-section" data-section="How it works (resume.rs)">
+          <h3 style="margin-top: 0;">How it works: the attachment seam</h3>
+          <div class="code-block">
+            <div class="code-head">
+              <span><code>rust/loopflow-execution/src/session/resume.rs</code> · lines 142-150</span>
+              <button type="button" id="notes-toggle" aria-pressed="true">Hide line notes</button>
+            </div>
+            <div class="code-lines">
+              <div class="code-line"><span class="ln">142</span><span>pub fn resolve_resume_intent(session: &amp;SessionRow, holder: Option&lt;&amp;HeldTerminal&gt;) -&gt; ResumeIntent {</span></div>
+              <div class="code-line add"><span class="ln">143</span><span>+    if let Some(h) = holder.filter(|h| h.is_alive()) {</span></div>
+              <div class="code-line add"><span class="ln">144</span><span>+        return ResumeIntent::Attach { terminal_id: h.id.clone() };</span></div>
+              <div class="code-line add"><span class="ln">145</span><span>+    }</span></div>
+              <div class="line-note seam-note"><strong>Why this order matters:</strong> Every surface hits this branch first, making multi-viewer opens lossless across Rex and Desktop.</div>
+              <div class="code-line add bug"><span class="ln">146</span><span>+    if let Some(pid) = session.agent_pid {</span></div>
+              <div class="code-line add bug"><span class="ln">147</span><span>+        return ResumeIntent::TakeOver { pid };</span></div>
+              <div class="code-line add bug"><span class="ln">148</span><span>+    }</span></div>
+              <div class="line-note seam-note"><strong>Where F1 enters:</strong> Legacy unheld rows carry only a raw PID with no store ID, so a copied DB signals another <code>LF_HOME</code>'s process.</div>
+              <div class="code-line"><span class="ln">149</span><span>    ResumeIntent::FreshStart</span></div>
+              <div class="code-line"><span class="ln">150</span><span>}</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="proto-section" data-section="Decisions">
+          <h3 style="margin-top: 0;">Decisions (<code>data-choice</code> + optional <code>data-action</code>)</h3>
+
+          <div class="choice-row" data-choice="f1" data-label="F1 (copied-DB PID kill)">
+            <div class="choice-text">
+              <strong>F1. Scope PID signaling to <code>LF_HOME</code> store identity</strong><br>
+              <span class="small">~25 lines in <code>process/signal.rs</code>, no schema change.</span>
+            </div>
+            <div class="choice-controls">
+              <button type="button" data-value="Fix here" data-action="steer">Fix here</button>
+              <button type="button" data-value="File Task" data-action="task-create">File Task</button>
+              <button type="button" data-value="Drop">Drop</button>
+            </div>
+          </div>
+
+          <div class="choice-row" data-choice="f2" data-label="F2 (Desktop Open here button)">
+            <div class="choice-text">
+              <strong>F2. Desktop "Open here" placeholder on ended panes</strong><br>
+              <span class="small">Zero Swift files touched in PR #2043.</span>
+            </div>
+            <div class="choice-controls">
+              <button type="button" data-value="Fix here" data-action="steer">Fix here</button>
+              <button type="button" data-value="File Task" data-action="task-create">File Task</button>
+              <button type="button" data-value="Drop">Drop</button>
+            </div>
+          </div>
+
+          <div class="choice-row" data-choice="direction" data-label="Next step">
+            <div class="choice-text">
+              <strong>Overall call on PR #2043</strong>
+            </div>
+            <div class="choice-controls">
+              <button type="button" data-value="Move on to delivery">Move on</button>
+              <button type="button" data-value="Iterate on this branch">Iterate</button>
+            </div>
+          </div>
+
+          <div class="open-q" data-question="note" data-label="Additional direction">
+            <strong style="font-size: 14px;">Any other direction (<code>data-question</code>)</strong>
+            <textarea placeholder="Optional note or question to send with your choices..."></textarea>
+          </div>
+
+          <div id="attached-comments-wrap" style="margin-top: 14px; display: none;">
+            <strong style="font-size: 14px;">Highlighted comments attached to this sheet</strong>
+            <div class="comment-list" id="comment-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dispatch-drawer">
+        <div class="dispatch-head">
+          <strong id="dispatch-title">Loopback POST to lf server (Rex agent-browser split)</strong>
+          <span class="small" id="dispatch-status">Waiting for Submit ⌘↩</span>
+        </div>
+        <pre id="dispatch-out" style="margin: 0;">Highlight text or click a choice above, then hit ⌘↩ to preview what the page dispatches.</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== ONE TRANSPORT, THREE HOSTS ==================== -->
+  <section id="transport">
+    <h2>One page runtime, three hosts (zero Desktop lock-in)</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 20%;">Host</th>
+            <th style="width: 30%;">How the page opens</th>
+            <th style="width: 50%;">What <code>Submit ⌘↩</code> does</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Rex split or browser</strong><br><span class="status proposed">New</span></td>
+            <td><code>lf server</code> serves <code>scratch/*.html</code> on <code>http://127.0.0.1:&lt;port&gt;/p/&lt;token&gt;/...</code>; <code>lf open --file</code> opens it in a Rex browser split or default browser.</td>
+            <td>Same-origin <code>POST /p/&lt;token&gt;/submit</code> to <code>lf server</code>. Delivers your choices + highlight comments straight to the Task/Session (via <code>lf steer</code> or active session input), and optionally runs allowlisted <code>lf</code> mutations.</td>
+          </tr>
+          <tr>
+            <td><strong>Loopflow Desktop</strong><br><span class="status existing">Extends TaskHTMLView</span></td>
+            <td>Opened in <code>TaskHTMLView</code> (offline <code>WKContentRuleList</code> stays untouched).</td>
+            <td>Detects <code>window.loopflow</code> (<code>WKScriptMessageHandler</code>) and feeds straight into <code>ReviewCommentsStrip</code> / <code>addToConversation</code> beside your Diff comments (sending stays yours).</td>
+          </tr>
+          <tr>
+            <td><strong>Offline <code>file://</code></strong><br><span class="status existing">Fallback</span></td>
+            <td>Double-clicked or opened when <code>lf server</code> is stopped.</td>
+            <td>Neither <code>window.loopflow</code> nor loopback endpoint exists; button becomes <strong>Copy reply ⌘↩</strong> and copies the exact same formatted text.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ==================== SAFETY & ACTION SCOPE ==================== -->
+  <section id="safety">
+    <h2>Key design fork: what should the HTML be allowed to trigger?</h2>
+    <p class="small">
+      Both options use the exact same loopback server route (bound strictly to <code>127.0.0.1</code>, capability token per session, zero CORS, same-origin check). They differ on whether the page only steers the agent or also invokes <code>lf</code> commands directly.
+    </p>
+
+    <div class="option-block">
+      <h3>Option A: Steer-only (smallest surface, agent acts in the Rex left pane)</h3>
+      <p>
+        <strong>How it works:</strong> Submitting the page does exactly one thing: calls <code>lf steer</code> (or delivers input to the active Session) with your clicked choices, free-form direction, and anchored highlight comments. The live agent sitting in your Rex left pane receives that message immediately and executes whatever you asked (fixing F1, calling <code>lf task create</code> for F2, answering your highlighted questions, or advancing).
+      </p>
+      <div class="option-meta">
+        <div><strong>Appeal:</strong> Tiny server endpoint (one route: <code>POST /p/:token/steer</code>). Zero command-execution policy to maintain, zero risk of an HTML artifact silently running mutations, and every decision stays visible in the Session transcript.</div>
+        <div><strong>Trade-off:</strong> Simple mechanical actions (like "File Task for F2" or "Move on to delivery") still cost one LLM turn in the left pane instead of firing instantly.</div>
+      </div>
+    </div>
+
+    <div class="option-block">
+      <h3>Option B: Steer + narrow allowlisted <code>lf</code> actions</h3>
+      <p>
+        <strong>How it works:</strong> Submit always previews the exact actions before sending. Choices and highlight comments go to <code>lf steer</code>; explicit structured button intents (strictly allowlisted in Rust: <code>task.create</code>, <code>task.advance</code>, <code>task.land</code>, <code>steer</code>) can also execute directly in <code>lf server</code> with zero LLM latency. Arbitrary shell commands are never accepted.
+      </p>
+      <div class="option-meta">
+        <div><strong>Appeal:</strong> Clicking <code>File Task</code> on F2 + <code>Move on</code> executes deterministically in milliseconds, even if no interactive agent is currently attached to the Task.</div>
+        <div><strong>Trade-off:</strong> Larger server contract (typed action schema + preview UI + error handling when an action fails mid-batch).</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== NUMBERED QUESTIONS ==================== -->
+  <section id="questions">
+    <h2>Open questions</h2>
+    <p class="small">Reply with codes like <code>1a, 2b, 3a</code>, or say "build this" with your picks.</p>
+
+    <ol class="q-list">
+      <li class="q-item">
+        <div class="q-title">1. When you submit from the HTML page in a Rex split, what should it execute?</div>
+        <ul class="q-opts">
+          <li><span class="q-key">1a.</span> Steer-only (Option A): always sends one structured <code>lf steer</code> / session message to the agent in the left pane, and the agent runs <code>lf task create</code> or iterates in front of you.</li>
+          <li><span class="q-key">1b.</span> Steer + narrow allowlisted <code>lf</code> actions (Option B): highlights/notes steer the agent, while explicit buttons can also trigger <code>task create</code> / <code>advance</code> / <code>land</code> directly through <code>lf server</code> after previewing.</li>
+        </ul>
+      </li>
+
+      <li class="q-item">
+        <div class="q-title">2. In Rex, should submit fire the steer immediately, or type into the agent's unsent input (like Desktop)?</div>
+        <ul class="q-opts">
+          <li><span class="q-key">2a.</span> Fire <code>lf steer</code> immediately on <code>⌘↩</code> (works identically whether the agent is running, idle, or headless, and needs no PTY key-injection).</li>
+          <li><span class="q-key">2b.</span> Type into the active terminal without pressing Enter when an interactive agent is attached in Rex (matches Desktop's "sending stays yours"), falling back to <code>lf steer</code> otherwise.</li>
+        </ul>
+      </li>
+
+      <li class="q-item">
+        <div class="q-title">3. How should the page kit ship in the first slice stacked after <code>LOO-1104</code>?</div>
+        <ul class="q-opts">
+          <li><span class="q-key">3a.</span> End-to-end thin slice: <code>lf server</code> loopback page host + one shared runtime (highlight-to-comment + <code>data-choice</code>/<code>data-multiselect</code>/<code>data-question</code>) + <code>TaskHTMLView</code> bridge + updated <code>ship-review</code>/<code>explore</code>/<code>concept-review</code>/<code>qa</code> skills (and fold in <code>9da7f05a58</code>'s visual-language &amp; "system" cleanup).</li>
+          <li><span class="q-key">3b.</span> Same as 3a, plus a full <code>lf page build</code> compiler with real <code>git diff</code> injection and <code>.lf/components/</code> overrides in the same Task.</li>
+          <li><span class="q-key">3c.</span> Split into two Tasks: (1) interactive loopback/Desktop review runtime + skill prompt upgrade (folding in <code>9da7f05a58</code>), then (2) <code>lf page build</code> component compiler once the live loop feels right.</li>
+        </ul>
+      </li>
+    </ol>
+  </section>
+
+</div>
+
+<!-- Floating highlight-to-comment popover -->
+<div class="sel-popover" id="sel-popover" role="dialog" aria-label="Comment on highlighted text">
+  <div class="sel-popover-quote" id="sel-quote-preview"></div>
+  <input type="text" id="sel-comment-input" placeholder="Ask a question or leave a comment..." autocomplete="off">
+  <div class="sel-popover-actions">
+    <span class="small" id="sel-section-label"></span>
+    <div style="display: flex; gap: 6px;">
+      <button type="button" id="sel-cancel">Cancel</button>
+      <button type="button" class="accent" id="sel-save">Add</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const root = document.documentElement;
+  const toggleBtn = document.getElementById("theme-toggle");
+  function isDark() {
+    const t = root.getAttribute("data-theme");
+    if (t === "dark") return true;
+    if (t === "light") return false;
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+  function syncThemeLabel() { toggleBtn.textContent = isDark() ? "Light" : "Dark"; }
+  syncThemeLabel();
+  toggleBtn.addEventListener("click", function () {
+    root.setAttribute("data-theme", isDark() ? "light" : "dark");
+    syncThemeLabel();
+  });
+
+  const notesBtn = document.getElementById("notes-toggle");
+  let notesOn = true;
+  notesBtn.addEventListener("click", function () {
+    notesOn = !notesOn;
+    document.querySelectorAll(".seam-note").forEach(function (el) { el.classList.toggle("hidden", !notesOn); });
+    notesBtn.setAttribute("aria-pressed", String(notesOn));
+    notesBtn.textContent = notesOn ? "Hide line notes" : "Show line notes";
+  });
+
+  const protoRoot = document.getElementById("proto-root");
+  const commentArea = document.getElementById("commentable-area");
+  const strip = document.getElementById("feedback-strip");
+  const stripCount = document.getElementById("strip-count");
+  const stripSend = document.getElementById("strip-send");
+  const stripClear = document.getElementById("strip-clear");
+  const commentWrap = document.getElementById("attached-comments-wrap");
+  const commentList = document.getElementById("comment-list");
+  const protoUrl = document.getElementById("proto-url");
+  const protoConn = document.getElementById("proto-conn");
+  const dispatchTitle = document.getElementById("dispatch-title");
+  const dispatchStatus = document.getElementById("dispatch-status");
+  const dispatchOut = document.getElementById("dispatch-out");
+
+  let activeHost = "rex";
+  const state = { choices: {}, questions: {}, comments: [] };
+  let nextCommentId = 1;
+
+  const hostMeta = {
+    rex: {
+      url: "http://127.0.0.1:49218/p/t_9f4a/scratch/ship-review.html",
+      connClass: "status ok",
+      connText: "Connected to lf server (LOO-1097)",
+      btn: "Steer agent in Rex ⌘↩",
+      title: "Loopback POST to lf server (Rex agent-browser split)"
+    },
+    desktop: {
+      url: "TaskHTMLView · scratch/ship-review.html (offline)",
+      connClass: "status work",
+      connText: "Desktop bridge (window.loopflow)",
+      btn: "Send to conversation ⌘↩",
+      title: "Desktop ReviewCommentsStrip -> addToConversation (unsent input)"
+    },
+    offline: {
+      url: "file:///Users/jack/src/loopflow.../scratch/ship-review.html",
+      connClass: "status existing",
+      connText: "Offline fallback (no server)",
+      btn: "Copy reply ⌘↩",
+      title: "Clipboard fallback (paste into any chat)"
+    }
+  };
+
+  function syncHostUI() {
+    const m = hostMeta[activeHost];
+    protoUrl.innerHTML = "<code>" + m.url + "</code>";
+    protoConn.className = m.connClass;
+    protoConn.textContent = m.connText;
+    stripSend.textContent = m.btn;
+    dispatchTitle.textContent = m.title;
+  }
+
+  document.querySelectorAll(".host-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      activeHost = btn.getAttribute("data-host");
+      document.querySelectorAll(".host-btn").forEach(function (b) {
+        b.setAttribute("aria-pressed", String(b === btn));
+      });
+      syncHostUI();
+      if (totalCount() > 0) renderDispatch(false);
+    });
+  });
+
+  function totalCount() {
+    const c = Object.keys(state.choices).length;
+    const q = Object.values(state.questions).filter(function (x) { return x.text.trim().length > 0; }).length;
+    return c + q + state.comments.length;
+  }
+
+  function buildMessage() {
+    const lines = ["Review feedback on scratch/ship-review.html (LOO-1097 @ ff1e5d9):"];
+    Object.values(state.choices).forEach(function (item) {
+      lines.push("- " + item.label + ": " + item.value);
+    });
+    Object.values(state.questions).forEach(function (item) {
+      if (item.text.trim()) lines.push("- " + item.label + ": " + item.text.trim());
+    });
+    state.comments.forEach(function (cm, idx) {
+      lines.push("(" + (idx + 1) + ') [' + cm.section + '] "' + cm.quote + '" -> ' + cm.text);
+    });
+    return lines.join("\n");
+  }
+
+  function renderDispatch(submitted) {
+    const msg = buildMessage();
+    if (activeHost === "rex") {
+      const actions = [];
+      Object.values(state.choices).forEach(function (item) {
+        if (item.action === "task-create") {
+          actions.push({ kind: "task.create", title: item.label + " (follow-up from LOO-1097)" });
+        }
+      });
+      const payload = {
+        endpoint: "POST /p/t_9f4a/submit",
+        target: "LOO-1097",
+        steer: msg,
+        optional_allowlisted_actions: actions
+      };
+      dispatchOut.textContent = JSON.stringify(payload, null, 2);
+      dispatchStatus.textContent = submitted ? "Dispatched to lf server -> agent in Rex left pane woken" : "Preview ready (press ⌘↩ to dispatch)";
+    } else if (activeHost === "desktop") {
+      dispatchOut.textContent = "window.loopflow.addToConversation(\n" + JSON.stringify(msg) + "\n)\n// Placed in Task conversation unsent input; sending stays yours.";
+      dispatchStatus.textContent = submitted ? "Typed into Desktop conversation input" : "Preview ready (press ⌘↩)";
+    } else {
+      dispatchOut.textContent = msg;
+      dispatchStatus.textContent = submitted ? "Copied to clipboard (offline fallback)" : "Preview ready (press ⌘↩ to copy)";
+    }
+  }
+
+  function syncStrip() {
+    const choiceCount = Object.keys(state.choices).length +
+      Object.values(state.questions).filter(function (x) { return x.text.trim().length > 0; }).length;
+    const cmCount = state.comments.length;
+    const total = choiceCount + cmCount;
+
+    if (total === 0) {
+      strip.classList.add("empty");
+      stripCount.textContent = "No choices or comments yet (highlight text or click a button below)";
+      stripSend.disabled = true;
+      stripClear.style.display = "none";
+      dispatchStatus.textContent = "Waiting for Submit ⌘↩";
+      dispatchOut.textContent = "Highlight text or click a choice above, then hit ⌘↩ to preview what the page dispatches.";
+    } else {
+      strip.classList.remove("empty");
+      const parts = [];
+      if (choiceCount > 0) parts.push(choiceCount + (choiceCount === 1 ? " choice" : " choices"));
+      if (cmCount > 0) parts.push(cmCount + (cmCount === 1 ? " comment" : " comments"));
+      stripCount.textContent = parts.join(" · ");
+      stripSend.disabled = false;
+      stripClear.style.display = "";
+      renderDispatch(false);
+    }
+    renderComments();
+  }
+
+  function renderComments() {
+    if (state.comments.length === 0) {
+      commentWrap.style.display = "none";
+      commentList.innerHTML = "";
+      return;
+    }
+    commentWrap.style.display = "";
+    commentList.innerHTML = "";
+    state.comments.forEach(function (cm) {
+      const row = document.createElement("div");
+      row.className = "comment-item";
+      const body = document.createElement("div");
+      const quoteEl = document.createElement("div");
+      quoteEl.className = "comment-quote";
+      quoteEl.textContent = '[' + cm.section + '] "' + cm.quote + '"';
+      const txt = document.createElement("div");
+      txt.textContent = cm.text;
+      body.appendChild(quoteEl);
+      body.appendChild(txt);
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.textContent = "Remove";
+      rm.addEventListener("click", function () {
+        state.comments = state.comments.filter(function (x) { return x.id !== cm.id; });
+        syncStrip();
+      });
+      row.appendChild(body);
+      row.appendChild(rm);
+      commentList.appendChild(row);
+    });
+  }
+
+  protoRoot.querySelectorAll("[data-choice]").forEach(function (group) {
+    const id = group.getAttribute("data-choice");
+    const label = group.getAttribute("data-label") || id;
+    group.querySelectorAll("button[data-value]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        const val = btn.getAttribute("data-value");
+        const action = btn.getAttribute("data-action") || null;
+        const already = state.choices[id] && state.choices[id].value === val;
+        if (already) {
+          delete state.choices[id];
+          btn.setAttribute("aria-pressed", "false");
+        } else {
+          state.choices[id] = { label: label, value: val, action: action };
+          group.querySelectorAll("button[data-value]").forEach(function (b) {
+            b.setAttribute("aria-pressed", String(b === btn));
+          });
+        }
+        syncStrip();
+      });
+    });
+  });
+
+  protoRoot.querySelectorAll("[data-question]").forEach(function (group) {
+    const id = group.getAttribute("data-question");
+    const label = group.getAttribute("data-label") || id;
+    const field = group.querySelector("textarea, input");
+    if (!field) return;
+    field.addEventListener("input", function () {
+      state.questions[id] = { label: label, text: field.value };
+      syncStrip();
+    });
+  });
+
+  /* Highlight-to-comment popover */
+  const popover = document.getElementById("sel-popover");
+  const popQuote = document.getElementById("sel-quote-preview");
+  const popSection = document.getElementById("sel-section-label");
+  const popInput = document.getElementById("sel-comment-input");
+  const popSave = document.getElementById("sel-save");
+  const popCancel = document.getElementById("sel-cancel");
+  let pendingSelection = null;
+
+  function closePopover() {
+    popover.classList.remove("open");
+    pendingSelection = null;
+    popInput.value = "";
+  }
+  function sectionForNode(node) {
+    let el = node && node.nodeType === 1 ? node : node && node.parentElement;
+    while (el && el !== commentArea) {
+      if (el.hasAttribute("data-section")) return el.getAttribute("data-section");
+      el = el.parentElement;
+    }
+    return "Page";
+  }
+
+  commentArea.addEventListener("mouseup", function () {
+    setTimeout(function () {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) return;
+      const text = sel.toString().replace(/\s+/g, " ").trim();
+      if (text.length < 2) return;
+      const range = sel.getRangeAt(0);
+      if (!commentArea.contains(range.commonAncestorContainer)) return;
+      const rect = range.getBoundingClientRect();
+      const clipped = text.length > 120 ? text.slice(0, 117) + "..." : text;
+      pendingSelection = { section: sectionForNode(range.commonAncestorContainer), quote: clipped };
+      popQuote.textContent = '"' + clipped + '"';
+      popSection.textContent = pendingSelection.section;
+      popover.style.top = Math.min(window.innerHeight - 150, Math.max(12, rect.bottom + 8)) + "px";
+      popover.style.left = Math.min(window.innerWidth - 356, Math.max(12, rect.left)) + "px";
+      popover.classList.add("open");
+      popInput.focus();
+    }, 10);
+  });
+
+  function savePopoverComment() {
+    if (!pendingSelection) return;
+    const text = popInput.value.trim();
+    if (!text) return;
+    state.comments.push({ id: nextCommentId++, section: pendingSelection.section, quote: pendingSelection.quote, text: text });
+    closePopover();
+    if (window.getSelection) window.getSelection().removeAllRanges();
+    syncStrip();
+  }
+
+  popSave.addEventListener("click", savePopoverComment);
+  popCancel.addEventListener("click", closePopover);
+  popInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); savePopoverComment(); }
+    if (e.key === "Escape") { e.preventDefault(); closePopover(); }
+  });
+  document.addEventListener("mousedown", function (e) {
+    if (popover.classList.contains("open") && !popover.contains(e.target)) closePopover();
+  });
+
+  function doSubmit() {
+    if (totalCount() === 0) return;
+    renderDispatch(true);
+    if (activeHost === "offline" && navigator.clipboard) {
+      navigator.clipboard.writeText(buildMessage()).catch(function () {});
+    }
+  }
+  stripSend.addEventListener("click", doSubmit);
+  document.addEventListener("keydown", function (e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && totalCount() > 0 && !popover.classList.contains("open")) {
+      e.preventDefault();
+      doSubmit();
+    }
+  });
+
+  stripClear.addEventListener("click", function () {
+    state.choices = {};
+    state.questions = {};
+    state.comments = [];
+    protoRoot.querySelectorAll("button[data-value]").forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
+    protoRoot.querySelectorAll("[data-question] textarea, [data-question] input").forEach(function (f) { f.value = ""; });
+    syncStrip();
+  });
+
+  syncHostUI();
+  syncStrip();
+})();
+</script>
+</body>
+</html>

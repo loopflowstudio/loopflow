@@ -10,13 +10,14 @@ import ViewInspector
 @MainActor
 struct TaskRowTests {
     @Test("Validated reports win over runtime inference", arguments: [
-        (ProgramStatusState.idle, "Available"), (.working, "Busy"), (.done, "Done"),
+        (ProgramStatusState.idle, "Available"), (.working, "Busy"), (.done, "Available"),
         (.blocked, "Blocked"), (.error, "Error"),
     ])
     func reportedStatus(state: ProgramStatusState, label: String) throws {
         let report = ProgramStatusReport(state: state, id: "worker", kind: nil, progress: nil,
                                          app: "cargo", title: nil, msg: "**literal**\u{202E}")
-        let reporting = try session("reporter", status: ProgramStatusRecords(seen: true, records: [report]))
+        let reporting = try session("reporter", availability: state == .done ? .available : nil,
+                                    status: ProgramStatusRecords(seen: true, records: [report]))
         let waiting = try session("waiting", availability: .available)
         let status = SessionProgramStatus(sessions: [waiting, reporting], unavailable: nil)
         #expect(status.label == label)
@@ -28,11 +29,32 @@ struct TaskRowTests {
         #expect(ask == (state == .blocked ? "**literal**" : task.condition.reason))
         let programStatus = try #require(reporting.programStatus)
         let pane = try #require(StatusMark(status: programStatus))
-        #expect(try pane.inspect().find(text: "\(label) · **literal**").string() == "\(label) · **literal**")
+        let paneLabel = "\(state.label) · **literal**"
+        #expect(try pane.inspect().find(text: paneLabel).string() == paneLabel)
         #expect(status.help.contains("reporter"))
         #expect(status.help.contains("**literal**"))
         #expect(!status.help.contains("\u{202E}"))
 
+    }
+
+    @Test("The sidebar shows the current Graph step beside the status")
+    func sidebarGraphStep() throws {
+        let task = try #require(roadmap().waves.first?.tasks.items.first)
+        let view = TaskRow(id: task.id, presentation: .init(title: task.task.name, identifier: task.task.identifier, context: nil),
+                           task: task, status: .unknown, graphStep: "ship-review")
+        #expect(try view.inspect().find(text: "ship-review").string() == "ship-review")
+    }
+
+    @Test func finishedProgramLeavesLiveIdleSessionVisible() throws {
+        func records(_ state: ProgramStatusState) -> ProgramStatusRecords {
+            .init(seen: true, records: [.init(state: state, id: nil, kind: nil, progress: nil, app: nil, title: nil, msg: nil)])
+        }
+        let exited = try session("exited", state: .closed, status: records(.done))
+        #expect(SessionProgramStatus(sessions: [exited], unavailable: nil).row == nil)
+        let idle = try session("waiting", availability: .available, status: records(.idle))
+        let status = SessionProgramStatus(sessions: [exited, idle], unavailable: nil)
+        #expect(status.label == "Available")
+        #expect(status.session?.id == idle.id)
     }
 
     @Test("Different terminals retain independent report ids and source attribution")

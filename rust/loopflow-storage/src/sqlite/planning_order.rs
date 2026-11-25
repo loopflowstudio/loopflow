@@ -10,40 +10,24 @@ use serde_json::json;
 
 use crate::work::task::Task;
 use crate::{StoreError, StoreResult};
-use loopflow_model::durable::{ProjectId, TaskId};
+use loopflow_model::durable::ProjectId;
 
 pub(super) fn reorder_in(conn: &Connection, task: &Task, rank: u32) -> StoreResult<()> {
-    place_in_order(
-        conn,
-        &task.id,
-        task.project_id.as_ref(),
-        siblings_in(conn, task)?,
-        rank as usize,
-    )?;
-    Ok(())
-}
-
-fn place_in_order(
-    conn: &Connection,
-    task: &TaskId,
-    project: Option<&ProjectId>,
-    mut order: Vec<String>,
-    position: usize,
-) -> StoreResult<Vec<String>> {
+    let mut order = siblings_in(conn, task)?;
     let from = order
         .iter()
-        .position(|id| id == task.as_str())
+        .position(|id| id == task.id.as_str())
         .ok_or(StoreError::NotFound)?;
-    let to = position.min(order.len() - 1);
+    let to = (rank as usize).min(order.len() - 1);
     if from != to {
         let moved = order.remove(from);
         order.insert(to, moved);
-        if let Some(project) = project {
+        if let Some(project) = &task.project_id {
             enqueue_order(conn, project, &order)?;
         }
         apply_order(conn, &order, WriteOrigin::Local)?;
     }
-    Ok(order)
+    Ok(())
 }
 
 /// Queue a newly bound Project's local order, which its Tasks may have taken
@@ -76,29 +60,7 @@ fn enqueue_order(conn: &Connection, project: &ProjectId, order: &[String]) -> St
     Ok(())
 }
 
-/// `task` takes `target`'s place among `target`'s Project's Tasks, or among
-/// the repository's standalone Tasks, moving into that Project first.
-pub(super) fn move_in(conn: &Connection, task: &Task, target: &Task) -> StoreResult<Vec<String>> {
-    if task.repository_id != target.repository_id {
-        return Err(StoreError::InvalidData(format!(
-            "{} and {} are in different repositories; nothing changed.",
-            task.identifier, target.identifier
-        )));
-    }
-    let project = target.project_id.as_ref();
-    if task.project_id != target.project_id {
-        super::task_content::move_task_in(conn, task, task.project_id.as_ref(), project)?;
-    }
-    let order = siblings_in(conn, target)?;
-    let position = order
-        .iter()
-        .position(|id| id == target.id.as_str())
-        .ok_or(StoreError::NotFound)?;
-    place_in_order(conn, &task.id, project, order, position)
-}
-
-/// The Tasks `task` is ranked among, in rank order. Ties break by id, as
-/// `TaskOrder::key` does on every board, so a Move lands where it was dropped.
+/// The Tasks `task` is ranked among, in rank order, with id breaking ties.
 fn siblings_in(conn: &Connection, task: &Task) -> StoreResult<Vec<String>> {
     let mut query = conn.prepare(
         "SELECT id FROM tasks WHERE repository_id=?1 AND project_id IS ?2

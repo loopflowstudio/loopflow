@@ -1,0 +1,3 @@
+-- Working Task order stays Machine-local in `task_orders`, apart from the
+-- shared Project and backlog rank in `tasks.planning_rank`.
+-- keeping: task_orders LOO-1063

@@ -51,7 +51,7 @@ kernel locks                 live local exclusion authority
 | CLI processes | `processes` | Indexed command lifecycle and immutable causal ancestry, written by command start and completion |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | Optional PR, retained historical PRs and tracker events |
 | Work adjuncts | `tool_responses`, `task_ownership`, `people` | `tool_responses` is leaving (never had a caller); the append-only Task ownership log (each entry names the Machine that wrote it) and the people it names, keyed by tracker identity |
-| Desktop arrangement | `dashboards`, `dashboard_arrangements`, `work_pane_layouts` | Saved Dashboard queries and their occurrence order; Task order is `tasks.planning_rank`; `work_pane_layouts` is leaving, since Desktop keeps pane layouts per Mac |
+| Desktop arrangement | `dashboards`, `dashboard_arrangements`, `task_orders`, `work_pane_layouts` | Saved Dashboard queries and their occurrence order; `task_orders` is this Machine's Working Task order, apart from the shared Project and backlog rank in `tasks.planning_rank`; `work_pane_layouts` is leaving, since Desktop keeps pane layouts per Mac |
 | Historical Ask | `ask_exchanges`, `ask_linear_comment_outbox` | Retained exchange/publication facts; former Ask rows are ordinary conversations in `agent_sessions` |
 | Tracker refresh | `tracker_projects`, `tracker_items`, `tracker_wave_sync`, `tracker_events`, `planning_scope_checks` | Tracker events, shared attempt freshness and successful scope watermark |
 | PR landing | `pr_landings`, `ci_incidents` | Exact PR-head delivery intent, claims, and repair admission |

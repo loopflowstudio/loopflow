@@ -905,7 +905,17 @@ mod tests {
         let billing = crate::test_fixture::project(&store, "/repo", "billing");
         let first = task_in(&billing.id);
         let second = task_in(&billing.id);
-        store.reorder_task(&second, &first).unwrap();
+        let revision = store.task(&second).unwrap().unwrap().revision;
+        store
+            .edit_task(
+                &second,
+                revision,
+                &crate::work::task::TaskUpdate {
+                    rank: Some(0),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
         // Unbound: nothing carries the reorder yet.
         assert!(orders(&billing.id).is_empty());
         let observed = inventory().project;

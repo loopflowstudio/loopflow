@@ -6,8 +6,8 @@
 
 Tables come from replaying the migrations; concepts from the ownership map in
 `docs/dev/reference.md`, which `check_architecture.py` keeps covering every
-table. Members a migration marks `-- leaving:` show the Task that drops them;
-`due_removals.py` prints when.
+table. Members a migration marks `-- leaving:`, and no later one `-- keeping:`,
+show the Task that drops them; `due_removals.py` prints when.
 
 Stdlib only, like the migration check it builds on.
 """
@@ -52,11 +52,11 @@ def render() -> str:
     local = check_migrations._local_migrations()
     catalog = check_migrations.Catalog.of_origin_main(local)
     schema = check_migrations._schema(catalog.replay())
-    leaving: dict[str, tuple[str, str]] = {}
-    for name in catalog.ordered():
-        for mark in check_migrations.leaving_marks(name, local[name].decode()):
-            if schema.has(mark.member):
-                leaving[mark.member] = (mark.task, Path(name).stem)
+    leaving = {
+        member: (mark.task, Path(name).stem)
+        for member, (name, mark) in check_migrations.active_leaving_marks(catalog).items()
+        if schema.has(member)
+    }
 
     def marked(member: str) -> str:
         task, migration = leaving[member]

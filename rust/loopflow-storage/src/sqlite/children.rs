@@ -760,11 +760,7 @@ impl SqliteStore {
     pub fn list_open_tasks(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
-        tasks_where(
-            &conn,
-            wave_id.map(|id| ("p.wave_id", id.as_str())),
-            &super::durable::task_open_sql("t"),
-        )
+        tasks_where(&conn, wave_id, &super::durable::task_open_sql("t"))
     }
 
     /// The Tasks filed from `parent`, in filing order, open or closed.
@@ -2672,28 +2668,25 @@ fn has_prior_work(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
 }
 
 pub(super) fn tasks_in(conn: &Connection, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
-    tasks_where(conn, wave_id.map(|id| ("p.wave_id", id.as_str())), "1")
-}
-
-pub(super) fn repository_tasks_in(
-    conn: &Connection,
-    repository: &RepositoryId,
-) -> StoreResult<Vec<Task>> {
-    tasks_where(conn, Some(("t.repository_id", repository.as_str())), "1")
+    tasks_where(conn, wave_id, "1")
 }
 
 fn tasks_where(
     conn: &Connection,
-    scope: Option<(&str, &str)>,
+    wave_id: Option<&WaveId>,
     condition: &str,
 ) -> StoreResult<Vec<Task>> {
-    let filter = scope.map_or_else(String::new, |(column, _)| format!("{column}=?1 AND "));
+    let filter = if wave_id.is_some() {
+        "p.wave_id=?1 AND "
+    } else {
+        ""
+    };
     let query = format!(
         "{TASK_COLUMNS} WHERE {filter}({condition}) AND {TASK_VISIBLE} ORDER BY t.updated_at DESC"
     );
     let identifiers = TaskIdentifiers::read(conn)?;
     let mut statement = conn.prepare(&query)?;
-    let rows = statement.query_map(params_from_iter(scope.map(|(_, value)| value)), |row| {
+    let rows = statement.query_map(params_from_iter(wave_id.map(WaveId::as_str)), |row| {
         map_listed_task_row(&identifiers, row)
     })?;
     rows.collect::<rusqlite::Result<_>>()

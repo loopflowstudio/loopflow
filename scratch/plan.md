@@ -279,39 +279,25 @@ delegation seam, `native_session::run_client`, `Request::ExitRecord`, and
 
 ## Passes
 
-1. **Hold direct launches & bind dynamic Sessions in `Registry`.** Default, inline and bare resume implemented. Standalone Skills require the completion work above.
-   - Update `transport/hosted.rs` + `transport/registry.rs` so
-     `Request::ExitRecord` binds `Registry::live[terminal] = Some(session)` and
-     persists `meta.session` (with `exit-record.json` fallback on server
-     restart).
-   - Add `transport::delegate_launch` (probing `Connection::open().is_ok()` on
-     interactive TTY launches) and wire it in `bin/lf.rs` for direct
-     interactive launches (default `lf`, inline, Skill — after target
-     resolution and `move_default_agent_to_worktree`), plus update
-     `transport::session_kind` so bare `lf resume` also uses the holder when
-     the server is reachable.
-   - Build the `MachineServer` integration tests first (direct launch held +
-     lossless second view without PID restart, server restart continuity,
-     no-server fallback) and update affected `transport.rs` unit tests.
-2. **Standalone 15-minute idle-unviewed retirement.**
-   - Add the bare unviewed-terminal query in `loopflow-storage`
-     (`sqlite/task_retirement.rs`) and `close_unviewed_chats` in
-     `ops/task/retirement.rs` (guarding on `terminal_retention` and
-     `VIEWER_OBSERVATION_GRACE`), invoked from both `lf task retire` and
-     `server/recovery.rs`'s 1-minute pass.
-   - Add unit + integration tests covering due bare retirement, active-turn
-     protection, bound/primary exclusion, and viewer return canceling closure.
-3. **Docs & consistency sweep.**
-   - User and architecture docs drafted ahead of implementation in:
-     - `docs/sessions.md`
-     - `docs/glossary.md`
-     - `docs/server.md`
-     - `docs/dev/index.md` (and rendered `docs/dev/index.html`)
-     - `rust/loopflow-execution/src/harness/README.md`
-     - `rust/loopflow-execution/src/transport/README.md`
-     - `rust/loopflow-execution/src/harness/README.md`
-     - `rust/loopflow/src/server/README.md`
-   - Verify every reference matches the shipped implementation (especially exact close-notice text and direct `lf graph` interactive-step behavior: confirm whether interactive steps spawned by a direct terminal `lf graph` inherit held delegation or stay in the caller's terminal).
+1. **Done: hold direct chats, bind dynamic Sessions.** Default, `-a`, inline
+   and bare `lf resume` run held when the server answers (`transport::delegate_chat`,
+   `bin/lf.rs` `dispatch_launch`); `Registry` binds the Session from
+   `ExitRecord`. PTY checks in `transport_tests.rs` (`direct_chat_`) cover two
+   viewers, server restart, no-server fallback and a fresh Desktop pane.
+2. **Next: standalone 15-minute retirement, then held Skills.**
+   - Storage query for due unviewed standalone held terminals (exclusions via
+     `primary_scope_sql`), `close_unviewed_chats` guarded by
+     `terminal_retention` and a live-viewer check at close time, run from
+     `lf task retire` and `server/recovery.rs`'s 1-minute pass. Tests: due
+     closes; recent, viewed, active-turn, bound and primary stay open.
+   - Skills: extend `delegate_chat` to `lf <skill>` only once completion
+     (`with_skill_runtime` event, `commit_skill_step`) runs after the last view
+     detaches. Test a Skill that writes a file, detach, check commit and event.
+     Teaches whether completion belongs to the held child or the holder.
+3. **Docs sweep.** Docs were drafted ahead of code and already claim held
+   Skills and 15-minute retirement (`docs/sessions.md`, `docs/glossary.md`,
+   `transport/README.md`). Match them to what pass 2 ships, including the
+   close-notice text and whether direct `lf graph` interactive steps are held.
 
 ## Passed over
 

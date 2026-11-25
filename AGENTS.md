@@ -11,7 +11,7 @@ How we build Loopflow. Contributors and agents follow it.
 - No `Args:`/`Returns:` docstrings; if the types are clear, skip the docstring
 
 **Rust:**
-- Run `cargo fmt` and `cargo clippy --all-targets -- -D warnings` before committing; CI treats warnings as errors
+- Run `cargo fmt` before committing; leave workspace-wide `cargo clippy` to CI (use `cargo clippy -p <crate>` only when fixing a lint)
 - Return `Option<T>` for "not found", `Result<T, E>` for failures
 - Use `expect("why this is safe")` over `unwrap()` outside tests
 
@@ -185,7 +185,6 @@ cargo test -p loopflow-execution --lib skills::catalog::           # one focused
 uv run pytest python/tests/test_gate_bounded.py          # one focused Python file
 uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalog::)'  # a few named tests; CI runs the suites
 cargo fmt
-cargo clippy --all-targets -- -D warnings
 uv sync
 ```
 

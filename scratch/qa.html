@@ -1,0 +1,45 @@
+<!doctype html><html><head><meta charset="utf-8"><title>LOO-1104 qa</title>
+<style>
+:root{color-scheme:light dark;--fg:#1b1b1b;--bg:#fbfbf8;--mut:#666;--ok:#1f7a3a;--bad:#b3261e;--code:#f0efe9}
+@media (prefers-color-scheme:dark){:root{--fg:#e8e6e1;--bg:#17171a;--mut:#9a9a9a;--ok:#5cc27a;--bad:#ff8a80;--code:#25252a}}
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;color:var(--fg);background:var(--bg);max-width:920px;margin:2rem auto;padding:0 1rem}
+pre{background:var(--code);padding:.7rem;overflow:auto;font-size:12.5px;border-radius:6px}
+code{background:var(--code);padding:0 .25em;border-radius:3px}
+.ok{color:var(--ok);font-weight:600}.bad{color:var(--bad);font-weight:600}
+table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #8884;padding:.35rem .5rem;text-align:left;vertical-align:top}
+</style></head><body>
+<h1>LOO-1104 qa: reordered <code>build</code>/<code>plan</code>, new <code>ui</code> and <code>fix</code></h1>
+<p>Branch <code>lf</code> (<code>target/debug/lf</code>) in disposable repositories under <code>/tmp/lfqa1104</code> with a bare local origin and a private <code>LF_HOME</code>. Real Claude (haiku) turns for each decider scenario.</p>
+
+<h2>Scenarios</h2>
+<table>
+<tr><th>#</th><th>What I did</th><th>What I saw</th><th></th></tr>
+<tr><td>1</td><td><code>lf graph show build|plan|ui|fix|code</code>, <code>lf list graph</code> in an empty repo</td><td><code>build</code>: sync, implement, concept-review, realign, compress, qa, pr-publish. <code>code</code> runs concept-review and realign before compress and qa. <code>ui</code> and <code>fix</code> listed with their loop shapes.</td><td class="ok">works</td></tr>
+<tr><td>2</td><td>Recomputed Desktop's Start-menu labels (<code>StartFlow</code> logic) from <code>lf graph list --json</code></td><td><code>ui</code> → "Build and try a UI change, then deliver it · 1 stop"; <code>fix</code> → "Fix a bounded bug or small tweak and land it · merges without asking"; <code>build</code>/<code>plan</code> are pieces under More. Matches <code>docs/surfaces.md</code>.</td><td class="ok">works</td></tr>
+<tr><td>3</td><td><code>lf help</code> for concept-review, realign, implement, demo, verify, wave-session; grep kickoff/advance/write-docs for Linear/Desktop</td><td>Each reads cleanly standalone; concept-review says it writes only <code>scratch/concept-review.html</code>; grep prints nothing.</td><td class="ok">works</td></tr>
+<tr><td>4</td><td><code>fix</code>-shaped loop (<code>cmd: sync → implement</code>), no plan, brief "greet.py crashes with IndexError…"</td><td>One pass, commit plus test, <code>advance</code>. Decider prompt: <code>Decision pass 1. Iterating repeats 2 steps, back to sync.</code></td><td class="ok">works</td></tr>
+<tr><td>5</td><td>Same loop, two-pass <code>scratch/plan.md</code> ("Each pass below is its own implement run")</td><td>Pass 1 → <code>iterate</code> naming pass 2; plan line collapsed to <code>1. Done (4705b8d): …</code>. Pass 2 → <code>advance</code>, "No planned passes remain".</td><td class="ok">works</td></tr>
+<tr><td>6</td><td><code>lf -b concept-review</code> with a plan present</td><td><code>scratch/plan.md</code> sha1 identical before and after (513c2c85…); only <code>scratch/concept-review.html</code> added.</td><td class="ok">works</td></tr>
+<tr><td>7</td><td>No plan, oversized brief: "Turn greet.py into a multi-tenant hosted greeting service: OAuth, Postgres, billing, React dashboard"</td><td><b>Before the fix:</b> implement wrote its own four-pass <code>scratch/plan.md</code>, then followed the "with a plan" rule: <code>iterate</code> after pass 1 (32d7129, tenants + API), <code>iterate</code> after pass 2 (OAuth, 31 tests), mid-billing in pass 3 when I stopped it. It had installed <code>postgresql@16</code> through Homebrew and started a server on <code>/tmp/greet-pgdata</code>. Under <code>fix</code> this ends at <code>cmd: land</code>.</td><td class="bad">broken → fixed</td></tr>
+<tr><td>7′</td><td>Same brief after the fix</td><td><code>Error: Graph is blocked: Question: which single slice should be built first…</code> exit 3, nothing written, no commits.</td><td class="ok">works</td></tr>
+<tr><td>4′</td><td>Scenario 4 rerun after the fix</td><td>One pass, <code>advance</code>, no <code>scratch/</code> created.</td><td class="ok">works</td></tr>
+</table>
+
+<h2>Fixed</h2>
+<p><code>implement.md</code>, "When deciding a loop", no-plan case: now "the brief is the plan; don't write one. First judge whether it is one bounded change… If it isn't… return <code>blocked</code> before building." The old text let the agent create a plan, after which the plan rule took over. Deleted the "Let the slice change the plan" paragraph, which repeated "When the plan is wrong" (109 lines, under the plan's 110 cap). Regenerated <code>tests/goldens/builtin_implement.md</code> (golden_prompt passes). One sentence added in <code>docs/orchestration.md</code>'s <code>fix</code> note.</p>
+
+<h2>Not reached</h2>
+<ul>
+<li><code>fix</code> end to end through <code>qa → gate → land</code>: needs a GitHub remote. Only the loop was driven; the tail is unchanged builtin steps.</li>
+<li><code>ui</code> with a person at <code>demo</code>, and <code>demo</code> standing in under auto on: no UI fixture here. Its wording was read only.</li>
+<li>Desktop's Start menu as rendered: labels recomputed from the same JSON, but the app wasn't opened.</li>
+<li><code>realign</code> deciding the outer loop on a real review page, and <code>verify</code>'s identical-tree fast path: read only.</li>
+</ul>
+
+<h2>Still wrong (worst first)</h2>
+<ol>
+<li>Outside this change: with <code>-a claude:haiku</code> and no <code>default_agent</code>, every step commit printed <code>load error: No agent selected</code> and committed <code>lf &lt;skill&gt;: checkpoint</code>. The run's <code>-a</code> doesn't reach <code>lf commit --step</code>. <code>.lf/qa/skills.md</code> said it did, and is corrected.</li>
+<li>Plan wording steers <code>implement</code>'s decision: "each pass is reviewed before the next starts" made it <code>advance</code> after pass 1 with pass 2 unbuilt. That is consistent with "Pause when the next item needs… review", but a kickoff plan that says "reviewed" would cut <code>build</code>'s inner loop short.</li>
+<li><code>verify</code>'s fast path names <code>&lt;qa head&gt;</code> without saying how to find it (the <code>lf qa:</code> step commit is the natural one).</li>
+</ol>
+</body></html>

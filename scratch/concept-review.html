@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept Review — LOO-1104: Builtin Task Graphs &amp; Skill Ownership (Post-Build)</title>
+<style>
+  :root {
+    --bg: #fafaf8;
+    --surface: #ffffff;
+    --surface-alt: #f3f2ee;
+    --border: #e2e0d8;
+    --text: #1c1b18;
+    --muted: #5f5c53;
+    --accent: #1d4ed8;
+    --accent-soft: #eff6ff;
+    --yes-bg: #ecfdf5;
+    --yes-fg: #065f46;
+    --yes-border: #a7f3d0;
+    --no-bg: #fef2f2;
+    --no-fg: #991b1b;
+    --no-border: #fecaca;
+    --prop-bg: #fffbeb;
+    --prop-fg: #92400e;
+    --prop-border: #fde68a;
+    --built-bg: #eef2ff;
+    --built-fg: #3730a3;
+    --built-border: #c7d2fe;
+    --code-bg: #f4f3ef;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #131311;
+      --surface: #1b1b18;
+      --surface-alt: #23231f;
+      --border: #33322c;
+      --text: #eceae2;
+      --muted: #a19e93;
+      --accent: #60a5fa;
+      --accent-soft: #172554;
+      --yes-bg: #052e16;
+      --yes-fg: #6ee7b7;
+      --yes-border: #065f46;
+      --no-bg: #3b0d0c;
+      --no-fg: #fca5a5;
+      --no-border: #7f1d1d;
+      --prop-bg: #2e2005;
+      --prop-fg: #fcd34d;
+      --prop-border: #78350f;
+      --built-bg: #1e1b4b;
+      --built-fg: #c7d2fe;
+      --built-border: #3730a3;
+      --code-bg: #24231e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.55;
+    font-size: 15px;
+  }
+  main {
+    max-width: 1020px;
+    margin: 0 auto;
+    padding: 36px 24px 72px;
+  }
+  header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 20px;
+    margin-bottom: 28px;
+  }
+  .kicker {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  h1 { font-size: 26px; line-height: 1.25; margin: 0 0 10px; }
+  h2 { font-size: 19px; margin: 36px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 15.5px; margin: 18px 0 8px; }
+  p { margin: 0 0 12px; }
+  .lead { color: var(--muted); font-size: 15.5px; max-width: 80ch; }
+  .status-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .badge {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  .badge.yes { background: var(--yes-bg); color: var(--yes-fg); border-color: var(--yes-border); }
+  .badge.no { background: var(--no-bg); color: var(--no-fg); border-color: var(--no-border); }
+  .badge.proposed { background: var(--prop-bg); color: var(--prop-fg); border-color: var(--prop-border); }
+  .badge.built { background: var(--built-bg); color: var(--built-fg); border-color: var(--built-border); }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+    font-size: 13px;
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    font-size: 12.5px;
+    line-height: 1.48;
+    margin: 10px 0 14px;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0 22px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    font-size: 13.5px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th {
+    background: var(--surface-alt);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  tr:last-child td { border-bottom: none; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin: 14px 0;
+  }
+  .card.callout { border-left: 4px solid var(--no-fg); }
+  .card.resolved { border-left: 4px solid var(--yes-fg); }
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 14px;
+    margin: 12px 0;
+  }
+  .flow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin: 8px 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12.5px;
+  }
+  .step {
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface-alt);
+  }
+  .step.stop {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .step.add {
+    background: var(--yes-bg);
+    color: var(--yes-fg);
+    border-color: var(--yes-border);
+    font-weight: 600;
+  }
+  .arrow { color: var(--muted); }
+  .loop-box {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 8px;
+    border: 1px dashed var(--muted);
+    border-radius: 8px;
+  }
+  .loop-tag {
+    font-size: 10.5px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-right: 2px;
+  }
+  .menu-preview {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12.5px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .q-list { list-style: none; padding: 0; margin: 12px 0; }
+  .q-list > li {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+  }
+  .q-title { font-weight: 600; margin-bottom: 6px; }
+  .opts { margin: 8px 0 0; padding-left: 20px; }
+  .opts li { margin-bottom: 6px; }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="kicker">Concept Review &middot; LOO-1104 &middot; Post-build against base <code>23ce1a69f9</code></div>
+    <h1>Builtin Task Graphs &amp; Skill Ownership Contracts</h1>
+    <p class="lead">
+      <strong>Area reviewed:</strong> Builtin Task Graphs (<code>plan</code>, <code>build</code>, <code>ui</code>, <code>fix</code>, and the workflows that compose them: <code>code</code>, <code>feature</code>, <code>pursue</code>, <code>redesign</code>, <code>refresh</code>) and the ownership contracts of the builtin skills behind them (<code>implement</code>, <code>concept-review</code>, <code>realign</code>, <code>demo</code>, <code>verify</code>, <code>ship-review</code>, <code>kickoff</code>, <code>advance</code>, <code>write-docs</code>, <code>wave-session</code> / <code>wave-operate</code>).
+    </p>
+    <p class="lead" style="margin-top:8px;">
+      <strong>State on <code>HEAD</code> (<code>73abaa380c</code>):</strong> Built (<code>78bde1d766</code>), compressed (<code>c6eab6e222</code>), and QA'd with real Claude haiku decider runs (<code>73abaa380c</code>). All six conceptual mismatches from the pre-build review are fixed and committed. One narrow prose seam remains in the <code>concept-review &rarr; realign</code> handoff (marked <span class="badge proposed">Proposed</span> below), plus four reversible product choices already built on <code>HEAD</code> waiting for your confirmation at ship-review.
+    </p>
+    <div class="status-strip">
+      <span class="badge built">Built on HEAD: 73abaa380c</span>
+      <span class="badge yes">7 of 8 pairings line up</span>
+      <span class="badge no">1 small handoff seam in realign.md</span>
+      <span class="badge proposed">Proposed small fix at ship-review / gate</span>
+    </div>
+  </header>
+
+  <h2>1. Do product concepts and code concepts line up?</h2>
+  <p>Evaluated against the full diff on <code>HEAD</code> (<code>23ce1a69f9..73abaa380c</code>) and the surrounding builtin Graphs, skills, docs, and Desktop menu logic.</p>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:20%">Product concept</th>
+        <th style="width:24%">Code / Skill / Graph concept</th>
+        <th style="width:10%">State</th>
+        <th style="width:10%">Lines up?</th>
+        <th>What is right or wrong on <code>HEAD</code></th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Build passes until done, then polish once</strong><br>Finish planned passes, settle concepts, then simplify and QA once.</td>
+        <td><code>build.yaml</code>: <code>loop(loop(sync &rarr; implement) &rarr; concept-review &rarr; realign) &rarr; compress &rarr; qa &rarr; pr-publish</code></td>
+        <td><span class="badge built">Built</span></td>
+        <td><span class="badge yes">Yes</span></td>
+        <td>Eliminates the measured repeat-QA/compress loop. Verified in Rust graph tests (<code>compiled.rs</code>, <code>graph/mod.rs</code>) and live haiku inner-loop QA (<code>scratch/qa.html</code> scenario 5: pass 1 collapses its plan line with its commit and iterates; pass 2 advances).</td>
+      </tr>
+      <tr>
+        <td><strong>Plan before coding</strong><br>Write the plan, critique it read-only, reconcile it, then draft docs.</td>
+        <td><code>plan.yaml</code>: <code>kickoff &rarr; concept-review &rarr; realign &rarr; write-docs</code></td>
+        <td><span class="badge built">Built</span></td>
+        <td><span class="badge yes">Yes</span></td>
+        <td>Composes cleanly into <code>code</code>, <code>feature</code>, <code>pursue</code>, and <code>redesign</code> with no edits to those four Graphs.</td>
+      </tr>
+      <tr>
+        <td><strong>Critique vs. plan change</strong><br>A review shows what is wrong; a separate step changes the plan and decides whether to rework.</td>
+        <td><code>concept-review.md</code> (read-only HTML) &rarr; <code>realign.md</code> (owns <code>scratch/plan.md</code>, fixes small mismatches inline, defers separate outcomes, decides outer loop)</td>
+        <td><span class="badge built">Built</span></td>
+        <td><span class="badge no">No (1 seam)</span></td>
+        <td><strong>Reversible product choices drop between the two skills.</strong> <code>concept-review.md</code> is strictly read-only (verified in QA scenario 6) and shows reversible choices as recommendations. <code>realign.md</code> handles irreversible choices (<code>blocked</code> in a loop, <code>scratch/questions.md</code> outside), but line 25&ndash;26 still says <em>"Nothing goes into the plan as settled unless someone said so"</em> and <code>## After a review</code> has no rule for adopting a recommended reversible choice as "made for review".</td>
+      </tr>
+      <tr>
+        <td><strong>UI workflow</strong><br>Build UI, try it live each pass, simplify, deliver.</td>
+        <td><code>ui.yaml</code>: <code>kickoff &rarr; loop(sync &rarr; implement &rarr; qa &rarr; interactive: demo) &rarr; compress &rarr; deliver</code> + <code>demo.md</code> headless stand-in</td>
+        <td><span class="badge built">Built</span></td>
+        <td><span class="badge yes">Yes</span></td>
+        <td>No double PR publish (<code>deliver</code>'s <code>gate</code> publishes once); <code>sync</code> runs before <code>implement</code>; Desktop Start menu reads <code>Build and try a UI change, then deliver it &middot; 1 stop</code>; Auto-Ship <code>demo</code> inspects <code>scratch/qa.html</code> honestly instead of inventing reactions.</td>
+      </tr>
+      <tr>
+        <td><strong>Fast unattended bug-fix</strong><br>Fix a bounded bug from the brief and merge when checks pass.</td>
+        <td><code>fix.yaml</code>: <code>loop(sync &rarr; implement) &rarr; qa &rarr; gate &rarr; cmd: land --wait-and-fix</code> + no-plan guard in <code>implement.md</code></td>
+        <td><span class="badge built">Built</span></td>
+        <td><span class="badge yes">Yes</span></td>
+        <td>Desktop Start menu reads <code>merges without asking</code>; <code>lf task auto off</code> still holds before <code>land</code>. Live QA (scenarios 4&prime; &amp; 7&prime;) proved a bounded bug builds in 1 pass with no <code>scratch/</code>, while an oversized brief blocks immediately with zero files or commits.</td>
+      </tr>
+      <tr>
+        <td><strong>Curate Wave memory</strong><br>One owner for <code>.lf/wave/&lt;w&gt;/MEMORY.md</code> direction and token budget.</td>
+        <td><code>wave_session.md</code> owns curation; <code>wave_operate.md</code> stays pure Task operator; <code>realign.md</code> leaves one-line pointer</td>
+        <td><span class="badge built">Built</span></td>
+        <td><span class="badge yes">Yes</span></td>
+        <td>Matches <code>build.rs</code> composition (<code>wave_session.md</code> + <code>wave_operate.md</code>) with zero self-contradiction or duplicated rules. <code>docs/work.md</code> and <code>AGENTS.md</code> match.</td>
+      </tr>
+      <tr>
+        <td><strong>Fast-path verification after merge</strong><br>Skip rebuilding <code>main</code> when the exact files QA tested are what merged and CI is green.</td>
+        <td><code>verify.md</code>: <code>git diff &lt;qa head&gt; &lt;merge SHA&gt; -- . ':!scratch'</code> empty + green post-merge CI + no post-merge-only claims</td>
+        <td><span class="badge built">Built</span></td>
+        <td><span class="badge yes">Yes</span></td>
+        <td>Sound on both counterexamples (catches post-QA edits/syncs, ignores <code>scratch/</code> cleared by <code>lf land</code>). Minor polish noted in QA #3: state that <code>&lt;qa head&gt;</code> is the branch's <code>lf qa:</code> commit.</td>
+      </tr>
+      <tr>
+        <td><strong>Generic builtin skills</strong><br>Builtins work for any tracker and any terminal/editor.</td>
+        <td><code>kickoff.md</code>, <code>advance.md</code>, <code>write-docs.md</code></td>
+        <td><span class="badge built">Built</span></td>
+        <td><span class="badge yes">Yes</span></td>
+        <td>No <code>Linear</code>, <code>Loopflow Desktop</code>, or <code>--host desktop</code> leakage remains in task skills; <code>write-docs.md</code> uses host-neutral <code>lf open --file &lt;path&gt;</code>.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>2. Remaining mismatch &amp; proposed fix (Before &rarr; After)</h2>
+
+  <div class="card callout">
+    <h3>Reversible product choices drop between <code>concept-review</code> and <code>realign</code></h3>
+    <p>
+      Walk a headless <code>plan</code> run (<code>kickoff &rarr; concept-review &rarr; realign &rarr; write-docs</code>) on a Task where <code>concept-review</code> finds a conceptual issue that turns on a <strong>reversible product choice</strong> (such as choosing between two Graph layouts or two skill homes):
+    </p>
+    <div class="grid-2">
+      <div>
+        <span class="badge no">Before (current HEAD)</span>
+        <pre><code>concept-review.md:48
+  Shows option A recommended over B on
+  scratch/concept-review.html (cannot edit plan).
+
+realign.md:25-26
+  "A change that needs a product decision is
+   written as the exact open choice. Nothing
+   goes into the plan as settled unless
+   someone said so; quote them."
+
+realign.md:48-63 (## After a review)
+  Lists: small fix | rework pass | deferred.
+  No rule for reversible recommendations!
+  &rarr; plan stays a menu, or realign breaks line 26.</code></pre>
+      </div>
+      <div>
+        <span class="badge proposed">Proposed (2-3 sentences in realign.md)</span>
+        <pre><code>realign.md (## After a review)
+  Add one bullet:
+  - Reversible product choice (headless):
+    adopt the recommended direction into
+    scratch/plan.md marked "made for review"
+    with what was passed over, never as
+    "settled" &mdash; so write-docs and implement
+    build one coherent design and ship-review
+    surfaces the choice.
+  - Irreversible choice: blocked in a loop;
+    scratch/questions.md outside a loop.
+
++ verify.md:18: note &lt;qa head&gt; is the lf qa: commit.
++ regenerate tests/goldens/builtin_realign.md.</code></pre>
+      </div>
+    </div>
+    <p class="muted" style="margin-top:8px;">
+      This is a 3-sentence prose seam rather than a broken Graph model. Recorded in <code>scratch/plan.md</code> so it can be applied cleanly at <code>ship-review</code> or <code>gate</code> without re-running the 6-step build loop.
+    </p>
+  </div>
+
+  <h2>3. What a person sees (built on <code>HEAD</code>)</h2>
+  <div class="grid-2">
+    <div>
+      <h3>Desktop Start menu (verified via <code>lf graph list --json</code>)</h3>
+      <div class="menu-preview">&#x2713; feature      Explore, build, deliver and verify              3 stops
+  code         Build, deliver and verify                       2 stops
+  redesign     Rethink a started Task                          1 stop
+  research     Investigate and report, with no PR              1 stop
+  ui           Build and try a UI change, then deliver it      1 stop
+  More &rsaquo;
+  Run without stopping
+  deep-clean   Delete what an area no longer needs             never stops
+  fix          Fix a bounded bug or small tweak and land it    merges without asking
+  incident     Restore first, then fix the cause               never stops
+  optimize     Move one number                                 never stops
+  queue        Compress, integrate upstream changes            never stops
+  task-design  Draft the Task design                           never stops</div>
+    </div>
+    <div>
+      <h3>Reordered <code>plan</code> + <code>build</code> &amp; live QA results</h3>
+      <div class="card" style="margin:0;">
+        <div class="muted" style="font-size:12px;margin-bottom:4px;">plan (built)</div>
+        <div class="flow">
+          <span class="step">kickoff</span><span class="arrow">&rarr;</span>
+          <span class="step">concept-review</span><span class="arrow">&rarr;</span>
+          <span class="step add">realign</span><span class="arrow">&rarr;</span>
+          <span class="step">write-docs</span>
+        </div>
+        <div class="muted" style="font-size:12px;margin:10px 0 4px;">build (built)</div>
+        <div class="flow">
+          <span class="loop-box"><span class="loop-tag">outer</span>
+            <span class="loop-box"><span class="loop-tag">inner</span><span class="step">sync</span><span class="arrow">&rarr;</span><span class="step">implement</span></span>
+            <span class="arrow">&rarr;</span><span class="step">concept-review</span><span class="arrow">&rarr;</span><span class="step add">realign</span>
+          </span>
+          <span class="arrow">&rarr;</span><span class="step">compress</span><span class="arrow">&rarr;</span><span class="step">qa</span><span class="arrow">&rarr;</span><span class="step">pr-publish</span>
+        </div>
+        <div class="muted" style="font-size:12px;margin:10px 0 4px;">Live QA highlights (<code>scratch/qa.html</code>)</div>
+        <ul style="margin:4px 0 0;padding-left:18px;font-size:13px;">
+          <li><strong>Two-pass plan:</strong> pass 1 collapsed its line with commit SHA and iterated; pass 2 advanced.</li>
+          <li><strong>Read-only review:</strong> <code>scratch/plan.md</code> SHA identical before and after headless <code>concept-review</code>.</li>
+          <li><strong>Oversized no-plan brief:</strong> blocked immediately (exit 3), zero files written, zero commits.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <h2>4. Open choices waiting for your confirmation</h2>
+  <p class="muted">Items 1&ndash;3 are already built on <code>HEAD</code> as reversible defaults; item 4 is the small prose seam proposed above. Answer by number and letter (e.g. "1a, 2b") if you want any changed.</p>
+
+  <ol class="q-list">
+    <li>
+      <div class="q-title">1. Where should Wave memory (<code>MEMORY.md</code>) get curated now that <code>realign</code> no longer owns it?</div>
+      <ol class="opts" type="a">
+        <li><span class="badge built">Built on HEAD</span> <strong>In the Wave conversation (<code>wave-session</code>)</strong> &mdash; when you talk to a Wave, that conversation updates, promotes, and trims <code>MEMORY.md</code> and publishes it. Unattended Wave runs (<code>wave-operate</code>) stay strictly focused on checking and moving Tasks without editing Wave files.</li>
+        <li><strong>In unattended Wave runs (<code>wave-operate</code>) too</strong> &mdash; allows scheduled or unattended Wave passes to edit <code>MEMORY.md</code> automatically, dropping the rule that Wave runs leave Wave files untouched.</li>
+      </ol>
+    </li>
+    <li>
+      <div class="q-title">2. When you turn Auto-Ship on for a <code>ui</code> Task (nobody at the keyboard), what should happen at <code>demo</code>?</div>
+      <ol class="opts" type="a">
+        <li><span class="badge built">Built on HEAD</span> <strong>Stand in using the QA report</strong> &mdash; the agent inspects <code>scratch/qa.html</code> screenshots and transcripts, loops back to implement only if the UI is visibly broken or missing promised behavior, and otherwise notes that no person tried it and ships (matching how Auto-Ship handles <code>ship-review</code> in <code>code</code>).</li>
+        <li><strong>Always pause for a person</strong> &mdash; refuse to pass <code>demo</code> without human eyes, even when Auto-Ship is turned on.</li>
+      </ol>
+    </li>
+    <li>
+      <div class="q-title">3. Should <code>fix</code> merge as soon as checks pass with no human stop?</div>
+      <ol class="opts" type="a">
+        <li><span class="badge built">Built on HEAD</span> <strong>Zero stops</strong> &mdash; builds from the brief, runs QA and gate, and merges once CI passes. Desktop's Start menu marks it <code>merges without asking</code>, and turning Auto off on a Task still pauses before merge.</li>
+        <li><strong>Pause once after merge to verify</strong> &mdash; keeps the unattended build and merge, then stops at <code>verify</code> on <code>main</code> before closing the Task.</li>
+      </ol>
+    </li>
+    <li>
+      <div class="q-title">4. Should <code>realign</code> explicitly adopt a headless review's reversible product choice into the plan as "made for review"?</div>
+      <ol class="opts" type="a">
+        <li><span class="badge proposed">Proposed (small edit at ship-review / gate)</span> <strong>Yes</strong> &mdash; when a review recommends a reversible choice, <code>realign</code> writes that chosen direction into the plan marked "made for review" (with what was passed over) so docs and implementation build one coherent design and <code>ship-review</code> flags the choice for you; irreversible choices still stop or record an open question.</li>
+        <li><strong>Keep <code>realign</code> leaving open choices undecided</strong> &mdash; never adopt a product recommendation into the plan without a person's reply.</li>
+      </ol>
+    </li>
+  </ol>
+
+  <h2>5. Outside this Task</h2>
+  <div class="card">
+    <ul style="margin:0; padding-left:20px;">
+      <li><strong>Update <code>.lf/wave/intelligence/MEMORY.md</code></strong> (read-only in a Task checkout): its 2026-09-28 entry says <code>realign</code> owns memory curation. Update in an intelligence Wave session once LOO-1104 lands.</li>
+      <li><strong><code>lf commit --step</code> ignoring run-level <code>-a</code></strong> (found in <code>scratch/qa.html</code> #1): when a private home has no <code>default_agent</code>, step commits fall back to <code>lf &lt;skill&gt;: checkpoint</code>. Documented in <code>.lf/qa/skills.md</code>; separate CLI bug if worth fixing.</li>
+      <li><strong>Repo-local <code>.lf/graphs/pursue-auto.yaml</code></strong>: uses custom loops with <code>loop-or-next</code>; separate repo cleanup if desired.</li>
+      <li><strong>Automatic Graph selection</strong> (choosing <code>ui</code> or <code>fix</code> from Task content): separate feature; today a person or Wave default picks the Graph.</li>
+    </ul>
+  </div>
+</main>
+</body>
+</html>

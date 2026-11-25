@@ -628,7 +628,7 @@ mod tests {
         );
         assert_eq!(
             graph.find("write-docs").unwrap().cursor().index,
-            next.cursor().index + 2
+            next.cursor().index + 3
         );
         assert_eq!(graph.find("start").unwrap().cursor().index, 0);
         assert!(graph.find("no-such-step").is_none());

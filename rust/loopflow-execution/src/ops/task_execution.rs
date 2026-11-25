@@ -385,10 +385,17 @@ fn stopped_execution(
         }
     }
     if interrupted {
-        let reason = if status == TaskState::Paused {
-            format!("{label} is stopped while the Task is paused")
-        } else {
-            format!("{label} was stopped. `lf task run` continues from it.")
+        // A step that drained to exit 0 finished; the Graph stopped after it.
+        let reason = match (
+            step == ExecutionResult::Succeeded,
+            status == TaskState::Paused,
+        ) {
+            (true, true) => format!("{label} finished; the Task is paused before its next step"),
+            (true, false) => {
+                format!("{label} finished and the Graph stopped. `lf task run` continues from the next step.")
+            }
+            (false, true) => format!("{label} is stopped while the Task is paused"),
+            (false, false) => format!("{label} was stopped. `lf task run` continues from it."),
         };
         return (TaskExecutionState::Idle, reason);
     }

@@ -133,10 +133,16 @@ A held `cmd:` step drains on pause (it is an lf command, possibly a mutation):
 the chip reads `Pausing: <step>` until the go file is touched. Use an agent step
 for a pause that stops the step at once.
 
-Complete posts a Notice whose Undo lives for six seconds. Click Undo within
-about a second of ✓, from the same shell command; a `snap` between them can
-outlast the Notice. Complete moves the window to the next Task, and Undo
-doesn't move it back, so reselect before the next click. The hook's `tree`
+`click` on ▶/⏸, ✓ and Undo can land without effect; `drag` with the same start
+and end point reaches them every time, and selecting a sidebar row needs it too.
+A `env -i` wrapper drops `LF_DESKTOP`: pass it inside, as
+`env.sh LF_DESKTOP=<bundle id> lf-branch desktop state --json`, to read which
+Task the window has selected.
+
+Complete posts a Notice whose Undo lives for six seconds; at 1500×900 Undo sits
+at (811, 863). Send ✓ and Undo from the same shell command about a second
+apart; a `snap` between them can outlast the Notice. Undo reselects the
+reopened Task. The hook's `tree`
 doesn't list the bar's controls, and the chip's menu is unreachable (the hook
 timer stops while an `NSMenu` tracks).
 

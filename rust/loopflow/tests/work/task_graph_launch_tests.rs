@@ -2428,6 +2428,12 @@ assert unpause.returncode != 0 and 'still finishing' in unpause.stderr, unpause"
         paused["control"],
         serde_json::json!({"action": "resume", "label": "Paused: sync --plan"})
     );
+    let status = task.run(&["task", "status", "INF-123"]);
+    let status = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        status.contains("pr land --local finished; the Task is paused before its next step"),
+        "{status}"
+    );
     task.task_run_ok(&["task", "unpause", "INF-123", "--run"]);
     assert_eq!(task.graph()["position"], at("end"));
     let graphs = support::recorded_graphs(task.home.path());

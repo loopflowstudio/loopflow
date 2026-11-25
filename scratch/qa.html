@@ -1,43 +1,41 @@
-<!doctype html><meta charset="utf-8"><title>QA · LOO-1078 C1 workflow track on the Mac Dev app at f057895fb9</title>
+<!doctype html><meta charset="utf-8"><title>QA · LOO-1078 C1 fixes on the Mac Dev app at a3e62d706f</title>
 <style>body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:1100px;margin:2em auto;padding:0 1em;color:#222}
-pre,code{background:#f5f5f2}pre{padding:.8em;overflow:auto;font-size:12.5px}td,th{padding:.4em .6em;vertical-align:top;border-bottom:1px solid #ddd;text-align:left}
+pre,code{background:#f5f5f2}td,th{padding:.4em .6em;vertical-align:top;border-bottom:1px solid #ddd;text-align:left}
 table{border-collapse:collapse}img{max-width:100%;border:1px solid #ccc;margin:.3em 0}.ok{color:#1a7f37}.open{color:#b42318}.note{color:#9a6700}</style>
-<h1>QA: the C1 workflow track, clicked on the Mac Dev app</h1>
-<p>Branch <code>lf</code> and an isolated Dev bundle (<code>com.loopflow.mac.qac1.dev</code>, with <code>.lf/qa/QAHook.swift</code> compiled in for clicks and snapshots) built at <code>f057895fb9</code>.
-The bundle ran against a private Machine (<code>LF_HOME=/tmp/lfqc1/lfhome</code>) and a disposable repository <code>shop</code> with a bare origin. Graph <code>track</code> has these steps:
-<code>- graph: forge</code>, <code>- interactive: demo</code>, <code>- graph: finish</code>, <code>- graph: settle</code>. Each sub-Graph is one <code>cmd: help graph</code> step, which an <code>LF_BIN</code> wrapper holds until a go file appears. Three Tasks ran through the real server. Every click went to the real window through the hook, at 1500×900 pt unless noted.</p>
+<h1>QA: the C1 fixes, clicked on the Mac Dev app</h1>
+<p>The previous walkthrough (<code>f057895fb9</code>) found four gaps. 2d9b3ca205 fixed them and a3e62d706f made Pausing its own <code>WorkflowAction</code>. This run checks both in the real window.</p>
+<p>Branch <code>lf</code> and an isolated Dev bundle (<code>com.loopflow.mac.qac2.dev</code>, <code>.lf/qa/QAHook.swift</code> compiled in, then removed from the tree) were built at <code>a3e62d706f</code>. They ran against a private Machine (<code>LF_HOME=/tmp/lfqc2/lfhome</code>) and a disposable repository <code>shop</code> with a bare origin. Graph <code>track</code> is <code>- graph: forge</code>, <code>- interactive: demo</code>, <code>- graph: finish</code>, <code>- graph: settle</code>, and each sub-Graph is one <code>cmd: help graph</code>. An <code>LF_BIN</code> wrapper holds that command until a go file appears and logs each run. Three Tasks ran through the real server, at 1500×900 pt.</p>
 
 <h2>Scenarios</h2>
 <table>
 <tr><th>Scenario</th><th>What happened</th></tr>
-<tr><td>Running Task opens</td><td class="ok">Fixed ⏸ (blue), chip <code>forge · help graph ⌄</code>, then <code>👤 demo · finish · settle</code>. Auto and ✓ sit at the far right. No <code>···</code>.<br><img src="qa-shots/c1-running.png" width="700"></td></tr>
-<tr><td>⏸ on a running step</td><td class="ok">The chip read <code>Pausing…</code> on the click, then Rust's <code>Pausing: help graph</code> with a dimmed ▶. Status said “Pausing at forge (help graph is finishing).” The row moved to Paused in <code>lf task list</code>. When the command exited, the bar read <code>Paused: help graph</code> with a filled amber ▶, and status said “Paused in forge at help graph. `lf task unpause --run` resumes it.”<br>
-<img src="qa-shots/c1-s2a.png"><img src="qa-shots/c1-s2b.png"><img src="qa-shots/c1-s3.png"></td></tr>
-<tr><td>▶ at a resumable pause</td><td class="ok"><code>Unpausing…</code>, then <code>forge · help graph</code> with ⏸ again. A new worker started in the same checkout, and the row went back to Active.<br><img src="qa-shots/c1-s4a.png"><img src="qa-shots/c1-s4b.png"></td></tr>
-<tr><td>Parked at a human step</td><td class="ok"><code>forge  [demo · next: finish ⌄]  finish  settle</code> with an unfilled ▶; the sidebar showed Waiting.<br><img src="qa-shots/c1-s5.png"></td></tr>
-<tr><td>Step button <code>settle</code></td><td class="ok"><code>Starting…</code> in the chip, then <code>settle · help graph</code> with ⏸ and the earlier steps dimmed. Status said “settle is running help graph.”<br><img src="qa-shots/c1-s6a.png"><img src="qa-shots/c1-s6b.png"></td></tr>
-<tr><td>Narrow fold</td><td class="ok">At 1000 pt the full track shows. At 700 pt it folds to ⏸ + chip. At 560 pt the chip truncates (<code>settle · help g…</code>) while Auto and ✓ stay in place.<br><img src="qa-shots/c1-w1000.png"><img src="qa-shots/c1-w700.png"><img src="qa-shots/c1-w560.png"></td></tr>
-<tr><td>Auto on, then off</td><td class="ok">On: the switch, ⏸ and chip turned green in the click, and the row moved to Shipping at once. Off: the row stayed in Shipping until the Machine's reading, then returned to Active a few seconds later (the designed behavior). The CLI agreed at each point.<br><img src="qa-shots/c1-s7a.png"><img src="qa-shots/c1-s8a.png"><img src="qa-shots/c1-s8b.png"></td></tr>
-<tr><td>✓ Complete and Undo</td><td class="ok">The row left the list and the window moved to the next Task. The Notice read <code>e33766 completed  Undo</code>. Clicking Undo within a second sent <code>task.reopen</code> one second after <code>task.complete</code> (server log), and the Task was back at <code>started</code> with its Graph untouched. After the six-second lifetime the Notice is gone; <code>lf task reopen</code> did the same job from the CLI.<br><img src="qa-shots/c1-complete.png" width="700"></td></tr>
-<tr><td>Paused group in the sidebar</td><td class="ok">Pausing from the bar put the row under a <b>Paused</b> heading below Active, with the label “Paused · help graph”. The Task stayed in the Working list.<br><img src="qa-shots/c1-s12.png"></td></tr>
+<tr><td>Running Task</td><td class="ok">Blue ⏸, chip <code>forge · help graph</code>, then <code>👤 demo · finish · settle</code>, Auto, ✓.<br><img src="qa-shots/c2-running.png"></td></tr>
+<tr><td>⏸ on a held <code>cmd:</code> step<br><i>(fix: amber Pausing, step-prefixed chip)</i></td><td class="ok">On the click the button turned to a disabled amber <code>pause.fill</code> with <code>Pausing…</code>, then Rust's <code>Pausing: forge · help graph</code>. Last run showed a dimmed ▶ and <code>Pausing: help graph</code>. Status: “Pausing at forge (help graph is finishing).” A click on the amber button while it drained sent no request (no <code>task.unpause</code> in the server log).<br><img src="qa-shots/c2-pausing-click.png"><img src="qa-shots/c2-pausing.png"></td></tr>
+<tr><td>Drained step exits 0<br><i>(fix: single-run drained <code>cmd:</code>)</i></td><td class="ok">The cursor moved past <code>forge</code>: filled amber ▶, <code>forge  [Paused: demo ⌄]  finish  settle</code>, and the row was under Paused in <code>lf task list</code>.<br><img src="qa-shots/c2-paused-demo.png"></td></tr>
+<tr><td>▶ at that pause</td><td class="ok">Smart unpause at a human step parked the Task: <code>demo · next: finish</code> with an open ▶, and the row read Waiting. The wrapper's log shows <code>forge</code> ran once, and no worker started. The primary conversation stayed open the whole time. <code>lf task unpause d2e710 --run</code> on a second Task answered “Task d2e710 waits at demo” and ran nothing.<br><img src="qa-shots/c2-unpaused-parked.png"></td></tr>
+<tr><td>✓ then Undo<br><i>(fix: Undo reselects)</i></td><td class="ok">✓ moved the window to the next Task and posted <code>d2e710 completed  Undo</code>. Undo, about a second later, sent <code>task.reopen</code> 1.5 s after <code>task.complete</code>. The window went back to d2e710 (<code>lf desktop state</code>: selected <code>task_d2e710…</code>), with the Graph still running <code>forge · help graph</code>.<br><img src="qa-shots/c2-complete.png" width="700"><img src="qa-shots/c2-undo.png" width="700"></td></tr>
+<tr><td>Paused group</td><td class="ok">Pausing d2e710 from the bar put it under a <b>Paused</b> heading below Active, labelled “Paused · demo”, with the bar reading <code>Paused: demo</code>.<br><img src="qa-shots/c2-paused-group.png" width="700"></td></tr>
 </table>
 
 <h2>Fixed in this run</h2>
-<p>Nothing in the product. The run added notes to <code>.lf/qa/task-pause.md</code>, covering a <code>cmd:</code> step draining on pause and how to time Undo.</p>
+<p><code>lf task status</code> called a drained step that exited 0 stopped: “latest Graph: help graph is stopped while the Task is paused”, and after unpause, “help graph was stopped. `lf task run` continues from it”. That step had finished and would not run again. <code>stopped_execution</code> (<code>ops/task_execution.rs</code>) now separates a finished step from an interrupted one:</p>
+<ul>
+<li>paused: “help graph finished; the Task is paused before its next step”</li>
+<li>not paused: “help graph finished and the Graph stopped. `lf task run` continues from the next step.”</li>
+</ul>
+<p>Both sentences were read live from the rebuilt binary on the same private Machine. <code>task_graph_launch_tests::pause_during_land_finishes_the_merge_and_stops_before_the_next_step</code> now asserts the paused sentence after a drained <code>pr land --local</code>, and it passed on macOS.</p>
+<p>In <code>.lf/qa/task-pause.md</code>, notes now cover using <code>drag</code> for the bar's buttons, Undo's position, and how to read the window's selection through an <code>env -i</code> wrapper.</p>
 
 <h2>Not reached</h2>
 <ul>
-<li class="open">The chip menu (Start from, Interrupt step, Pause). It is an <code>NSMenu</code>, and the hook's timer doesn't run during menu tracking. The headless Mac and iPhone Simulator tests cover its items.</li>
-<li class="open">The hover sentence. Hover can't be driven, and the bar's controls don't appear in the in-process accessibility tree. The same sentence string reads correctly in <code>lf task status</code> (“Pausing at forge…”, “Paused in settle at help graph…”).</li>
-<li class="open">An interrupted verify beside an accented ✓ after a merged PR. This needs a real GitHub merge, which a bare local origin can't record, and creating and merging a GitHub repository is an outward-facing step. The headless test <code>aMergedPRKeepsTheStoppedVerifyAction</code> covers it.</li>
-<li>The iPhone bar. It shares <code>TaskWorkflowControls</code>, and the Simulator tests from the implement step cover it.</li>
+<li class="open">The chip and context menus, including Pause and Unpause staying disabled while a stop is pending (a3e62d706f). The hook can't drive an <code>NSMenu</code>, so only the headless Mac tests cover this.</li>
+<li class="open">The iPhone bar and swipe-to-complete through <code>TaskFeed.complete</code>. This run used no Simulator, so the earlier Simulator tests are the only coverage.</li>
+<li class="open">The hover sentence, because hover can't be driven. <code>lf task status</code> prints the same sentence.</li>
 </ul>
 
 <h2>Still worth a look, worst first</h2>
 <ul>
-<li class="note">After Complete → Undo, the window stays on the Task it moved to. The reopened Task comes back in the list but isn't reselected, so the next ⏸ click hit a different Task. Someone who undoes probably wants to be back where they were.</li>
-<li class="note">Pausing during a <code>cmd:</code> step (an lf command such as <code>land</code>) lets it drain by design. Once it exits, the cursor stays on that step, and <code>unpause --run</code> runs it again (the Graph log reads “interrupted at help graph” even though the command exited 0). Running <code>land</code> again is harmless, but a non-idempotent <code>cmd:</code> step would run twice.</li>
-<li class="note">The running chip names the top-level step (<code>forge · help graph</code>), but the Paused and Pausing chips name only the inner step (<code>Paused: help graph</code>). In this Graph, three steps are all <code>help graph</code>, so the paused chip doesn't say which one. The sentence (“Paused in forge at …”) does.</li>
-<li class="note">Completing a Task whose Graph is running leaves the step running (<code>task_complete</code> settles children “without moving their Graphs”). That is what lets Undo restore the Task exactly as it was, but a completed Task can keep a worker alive until the step ends. This behavior predates this branch.</li>
-<li class="note">Predates this branch (#1974): <code>lf task status</code> and the Desktop's run reason print <code>Step 4ca06e56-… is running help graph</code>, a raw step UUID.</li>
+<li class="note">When a pause leaves the cursor on a human step, the Graph sentence reads “Paused at demo. `lf task unpause --run` resumes it.” Unpause with <code>--run</code> then runs nothing (“waits at demo”). The wording promises a run that never comes. The sentence could name the human step instead, as “Waiting for you at demo” does after unpause.</li>
+<li class="note">Completing a Task whose Graph is running leaves its step running. This predates the branch and lets Undo restore the Task exactly.</li>
+<li class="note">From earlier runs (#1974): the Desktop run reason and <code>action:</code> line still print “Step e801e283-… is running help graph”, a raw step UUID.</li>
 </ul>

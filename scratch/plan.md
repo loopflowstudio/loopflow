@@ -37,6 +37,11 @@ Paused sidebar rows may still show `Available · inferred` from the open primary
 - Mac Swift (`scripts/test_desktop.sh`): 110 tests in 5 suites (`TaskActionsTests`, `PendingChangesTests`, `DTOFixtureTests`, `DesktopHeadlessTests`, `TaskConceptTests`) passed, covering `.pausing` amber `pause.fill` + hidden stop menu items, `Paused: design` when `graph == nil && held`, `.task` stream holding `PendingChanges` until covered or ended, and Mac `Complete → Undo` reselection.
 - iPhone Simulator (`scripts/test_ios.py` on iOS 26.2): 12 tests in `TaskActionsTests` and `TaskFeedTests` passed, covering `.pausing` disabled `pause.fill`, patched `TaskWorkspaceView` row disabling `✓` immediately on pending Complete, and swipe-to-complete Undo.
 
+### C1 fixes on the Mac Dev app (`a3e62d706f`, `scratch/qa.html`)
+- In the real window: amber disabled `pause.fill` with `Pausing: forge · help graph`; the drained `cmd:` advanced to `Paused: demo`; ▶ parked at `demo · next: finish` and `forge` ran once; Undo after ✓ reselected the reopened Task; the Paused group held the row.
+- Fixed: status called a drained step that exited 0 "stopped"; it now reads "<step> finished; the Task is paused before its next step" (asserted in `pause_during_land_finishes_the_merge_and_stops_before_the_next_step`).
+- Open: "Paused at <human step>. `lf task unpause --run` resumes it." promises a run that unpause parks instead.
+
 ### C1 walkthrough on the Mac Dev app (`8ad26dbb89`, `scratch/qa.html`)
 - ▶/⏸, step buttons, narrow fold (1000/700/560 pt), Auto on/off, and ✓ with `completed · Undo` all worked on a private Machine.
 - Surfaced four gaps, fixed in 2d9b3ca205: `Paused: help graph` dropped the top-level step, `Pausing` showed a dimmed ▶, a draining `cmd:` ran twice on `unpause --run`, and `Complete → Undo` did not reselect the reopened Task.

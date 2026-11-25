@@ -189,23 +189,19 @@ pub(super) async fn run() -> Result<()> {
     let subscriptions = Arc::new(Subscriptions::default());
     let (remote_control, remote_requests) = mpsc::channel(8);
     super::maintenance::start();
-    super::maintenance::start_plan_exchange();
     tokio::spawn(loopflow_execution::ops::tracker_events::watch_owned_work(
         None,
     ));
     // Held terminals keep running in their holders whether or not this server
     // can host them; without a registry their views wait for the next server.
     let terminals = match Registry::open(&executable_sha256) {
-        Ok(terminals) => {
-            super::recovery::start(terminals.clone());
-            Some(terminals)
-        }
+        Ok(terminals) => Some(terminals),
         Err(error) => {
             tracing::error!(%instance, %error, "Held terminals are not hosted by this server");
             None
         }
     };
-    super::wake::start(terminals.clone());
+    super::recovery::start(terminals.clone());
     let remote = super::remote::manage(
         super::mobile::configured(),
         remote_requests,
@@ -1880,17 +1876,15 @@ async fn served(
                 let query = origin.place(query)?;
                 measured_result(measured, || {
                     loopflow_execution::journal::request::isolate(|| {
-                        loopflow_execution::observe::Cache::shared()
-                            .capture(|| match origin {
-                                Origin::Local(peers) => query.read_with(
-                                    &|| requester.strong_count() == 0,
-                                    |machine, sender, read| peers.query(machine, sender, read),
-                                ),
-                                Origin::Machine(_) => {
-                                    query.read_here_until(&|| requester.strong_count() == 0)
-                                }
-                            })
-                            .0
+                        loopflow_execution::observe::Cache::shared().read_once(|| match origin {
+                            Origin::Local(peers) => query.read_with(
+                                &|| requester.strong_count() == 0,
+                                |machine, sender, read| peers.query(machine, sender, read),
+                            ),
+                            Origin::Machine(_) => {
+                                query.read_here_until(&|| requester.strong_count() == 0)
+                            }
+                        })
                     })
                 })
             })
@@ -3995,7 +3989,8 @@ mod tests {
             assert!(bodies.iter().all(|body| *body == bodies[0]));
             let work = meter::snapshot().since(before);
             meter::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
-            assert_eq!(work.stages["runtime_build"].count, 1);
+            assert_eq!(work.stages.get("runtime_build").map_or(0, |c| c.count), 0);
+            assert_eq!(work.stages["reader_setup"].count, 1);
             assert_eq!(work.stages["projection"].count, 1);
             drop(first.writer);
             first.server.await.unwrap().unwrap();
@@ -4094,10 +4089,10 @@ mod tests {
         meter::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
         assert_eq!(
             work.stages
-                .get("runtime_build")
+                .get("reader_setup")
                 .map_or(0, |count| count.count),
             0,
-            "canceled queued subscription constructed a runtime"
+            "canceled queued subscription constructed a reader"
         );
     }
 

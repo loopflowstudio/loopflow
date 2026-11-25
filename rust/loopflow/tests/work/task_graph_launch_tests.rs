@@ -2943,7 +2943,14 @@ fn provider_completion_preserves_a_live_run_and_its_graph_process_records_the_ar
     task.publish(false);
     let placement = task.status();
     assert!(placement["pr"]["id"].is_string());
-    task.ok(&["wave", "add", "other", "--json"]);
+    // `wave add` would make the Project in Linear, which this fixture can't reach.
+    let repo = task.repo.path().canonicalize().unwrap();
+    loopflow_execution::test_support::seed_wave_project(
+        &task.registered.store.sqlite,
+        repo.to_str().unwrap(),
+        "other",
+    )
+    .unwrap();
     task.ok(&["task", "move", "INF-123", "--wave", "other"]);
     let moved = task.status();
     assert_eq!(moved["wave"], "other");

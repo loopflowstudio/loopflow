@@ -1656,7 +1656,7 @@ mod tests {
             r#"{"kind":"task.report","directory":"/r","issue":"FIX-1","message":"landed"}"#,
             r#"{"kind":"task.interrupt","directory":"/r","issue":"FIX-1"}"#,
             r#"{"kind":"session.steer","directory":"/r","session":null,"wave":"product","message":"ship by Friday"}"#,
-            r#"{"kind":"wave.plan.connect","directory":"/r","wave":null,"all":true,"team_key":null,"team_name":null}"#,
+            r#"{"kind":"wave.plan.connect","directory":"/r","wave":null,"project":null,"all":true,"team_key":null,"team_name":null}"#,
             r#"{"kind":"wave.plan.reteam","directory":"/r","apply":false}"#,
             r#"{"kind":"repo.release","directory":"/r","version":"minor","target":null}"#,
             r#"{"kind":"checkout.commit","directory":"/r","message":"Tidy","push":false,"no_add":false,"paths":[],"agent":null}"#,

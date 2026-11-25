@@ -2193,9 +2193,13 @@ fn task_planning_explain_create_uses_piped_input_and_previews_the_project_joined
         .unwrap(),
     ))
     .unwrap();
-    // Its Project ended: the preview names none, and creation makes the next.
+    // Its Project ended: the Task still joins the Wave's one Project.
     assert_eq!(preview["impediments"], serde_json::json!([]));
-    assert!(preview["action"]["project"].is_null(), "{preview}");
+    assert_eq!(
+        preview["action"]["project"],
+        registered.task.project_id.as_ref().unwrap().as_str(),
+        "{preview}"
+    );
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     assert!(fs::read(&path).unwrap() == before);
     success(
@@ -2214,15 +2218,15 @@ fn task_planning_explain_create_uses_piped_input_and_previews_the_project_joined
         .output()
         .unwrap(),
     );
-    let (tasks, open): (i64, i64) = db
+    let (tasks, projects): (i64, i64) = db
         .query_row(
-            "SELECT (SELECT count(*) FROM tasks),
-                    (SELECT count(*) FROM projects WHERE status='started')",
-            [],
+            "SELECT (SELECT count(*) FROM tasks WHERE project_id=?1),
+                    (SELECT count(*) FROM projects)",
+            [registered.task.project_id.as_ref().unwrap().as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
-    assert_eq!((tasks, open), (2, 1));
+    assert_eq!((tasks, projects), (2, 1));
 }
 
 #[test]

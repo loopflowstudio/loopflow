@@ -54,6 +54,7 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
         let _lifecycle = recovery::lock_async(main.as_path()).await?;
         add_local(&store, main.as_path(), name, objective).await?
     };
+    sync_wave_project(&store, &main.to_string(), &added.id).await?;
     super::tracker::create_wave_project(&store, &added.main_checkout, &added.id)
         .await
         .map_err(|error| {

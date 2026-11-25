@@ -212,7 +212,10 @@ fn checkout_session_membership_survives_project_transfer_without_binding() {
     assert_eq!(retained.worktree, task.worktree);
     let after = crate::store::task_work::task_work(&store, &task_id).unwrap();
     assert_eq!(after.sessions, before.sessions);
-    assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+    // The conversation follows its Task into the other Wave.
+    let mut moved = session;
+    moved.wave_id = Some(other);
+    assert_eq!(store.session(&moved.id).unwrap().unwrap(), moved);
 }
 
 #[test]

@@ -289,7 +289,12 @@ fn start_owned_sync(
         return finish_sync(repo, operation, &expected, options.push);
     }
     if matches!(plan.strategy, SyncStrategy::Noop) {
-        return finish_sync(repo, operation, &expected, options.push && expected.delivery);
+        return finish_sync(
+            repo,
+            operation,
+            &expected,
+            options.push && expected.delivery,
+        );
     }
 
     progress.status(&format!("Merging {}...", options.onto));

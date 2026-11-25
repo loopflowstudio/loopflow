@@ -2786,7 +2786,10 @@ fn stacked_child_land_drops_inherited_scratch_conflict_without_agent_and_pushes_
     fs::write(child_path.join("scratch/child.md"), "child own note\n").unwrap();
     fs::write(child_path.join("child.txt"), "child work\n").unwrap();
     git_in(&child_path, &["add", "."]);
-    git_in(&child_path, &["commit", "-m", "child edits plan and adds work"]);
+    git_in(
+        &child_path,
+        &["commit", "-m", "child edits plan and adds work"],
+    );
     git_in(&child_path, &["push", "-u", "origin", "child"]);
 
     // Parent squash-lands onto main without scratch/plan.md.

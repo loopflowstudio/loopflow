@@ -353,39 +353,25 @@ empty; the tests pass, including the new Pass 1 tests below. CI runs the suites.
 
 ## Passes
 
-1. **Landing, the pass that could prove the plan wrong.** `ops::scratch::clear`
-   takes a base; `SyncExpectation.require_changes` becomes `delivery`;
-   `sync_land` passes `push: !options.local`; `prepare_pr` clears only when
-   `resync == false` (plus non-Task empty check and standalone shortcut guard);
-   `start_owned_sync` pushes on `Noop` when `options.push && expected.delivery`
-   and auto-drops target-absent branch-added `scratch/` conflicts when no real
-   conflict remains; `finish_sync` clears scratch against `target_sha` before
-   the empty-tree check and push; delete `accept_completed_integration`'s
-   `HEAD^2` read and `sync_land`'s duplicate `record_stack_sync`. New tests in
-   `rust/loopflow/tests/land_tests.rs`, each with the remote `update` hook
-   counting pushes:
-   - a conflicting sync whose resolver (`agent_script`) verifies
-     `scratch/plan.md` is still readable on disk, resolves the code conflict,
-     and writes `scratch/notes.md`: the remote head has neither `plan.md` nor
-     `notes.md`, one push, `lf pr submit` and `lf land` both;
-   - a stacked child that edited an inherited `scratch/plan.md` (plus a second
-     `scratch/child.md`), parent squash-landed: no agent launched, remote head
-     has only `.gitkeep`, the recorded stack base is the target, one push;
-   - a `SyncStrategy::Noop` delivery (already-integrated stacked child or
-     persistent worktree with a committed scratch note): clears and pushes the
-     clean head once.
-   It shows whether single-owner delivery clear survives `verify_sync`,
-   `rerere`, the stack record and the Task PR range checks. If it does not, the
-   plan is wrong here and realign takes it.
-2. **Remove `gate`.** The skill, overlay, Graph steps, `queue`,
-   `finish-queue`, cached PR copy, builtin skill prose, engine strings, test
-   expectations and the golden.
-3. **Docs.** Remaining internal/dev docs under "Prose that names the skill"
-   outside the builtins (`AGENTS.md`, `docs/dev/delivery.md`,
-   `docs/dev/planning.md`, `docs/dev/index.md` + `docs/dev/index.html`,
-   `docs/dev/reference-runtime.md`, `scripts/testing.md`, `swift/README.md`,
-   `rust/loopflow/tests/README.md`, `tests/e2e/README.md`, `.lf/qa/desktop.md`,
-   `website/README.md`, `design/prototypes/homepage-next/index.html`).
+1. **Done (`42aa4e92d9`):** Landing single-owner scratch clear (`ops::scratch::clear`
+   takes `base`, `SyncExpectation.delivery`, `Noop` delivery push, mechanical
+   branch-added scratch conflict drop in `start_owned_sync`, `finish_sync`
+   clear before empty-tree check and single push, `sync_land` `push: !options.local`
+   + `finalize_local` ancestor-checked remote branch deletion,
+   `matching_task_pr_merge_request` returning `Ok(None)` for unpublished Tasks).
+   Verified with all 3 new `land_tests` scenarios (conflict resolution for
+   `submit` & `land`, stacked child without agent launch, `Noop` delivery) plus
+   existing `land_tests` and `scratch_tests`.
+2. **Done (`8294357459`):** Removed builtin `gate.md`, `.lf/skills/gate.md`,
+   `queue.yaml`, `.lf/graphs/finish-queue.yaml`, `gate` steps from `deliver`,
+   `quick`, `pursue-auto`, dead cached PR copy handoff, and updated builtin
+   skill prose, engine instructions, DTO fixtures, tests, and `builtin_implement.md`
+   golden. Added **Trust & data boundary** and focused-review prompts to
+   builtin `kickoff.md` and `ship-review.md` plus Loopflow's concrete triggers
+   in `.lf/skills/kickoff.md` and `.lf/skills/ship-review.md`.
+3. **Done (`a6c63e56c5`):** Updated internal/developer docs (`AGENTS.md`,
+   `docs/dev/*`, `scripts/testing.md`, `scripts/test.py`, README guides,
+   prototype HTML) and regenerated `docs/dev/index.html`.
 
 ## User docs written (`write-docs`)
 

@@ -44,7 +44,9 @@ Extended breakpoint review readback ([graph.rs](../rust/loopflow/src/lf/commands
 - `breakpoint_edges_cover_launch_failure_terminal_auto_race_and_named_restart` passed (1.86s): covered launch failure after accepting a reply, terminal settlement + completion request, auto racing a late reply at a repeated marker without publishing losing direction, and deliberate restart targeting a named occurrence with `--at-arrival`.
 - `builtins::tests` (12), `prompt::tests::format_prompt_` (9), `documented_commands::` (4), `golden_prompt` (updated 6 goldens), and `cargo fmt --check` all passed.
 
-## Pass 4 · Find and reopen the review
+## Pass 4 · Find and reopen the review (next)
+
+Still remaining after Pass 3: interactive-skill display paths in `task_graph.rs`, `graph/compiled.rs`, `graph/transitions.rs`, `store/task_work.rs`, `lf/commands/run.rs`, `served_reads.rs`, and Swift `TaskWork.swift` / `Graph.swift` with their tests. This pass teaches whether one projection can serve every surface.
 
 Project one stop, sentence and lawful next action from Rust through Task status, catalog, Graph show/list, explain, preview, terminal title, Mac and iOS. Today the outline walks the same Graph for a legacy interactive-skill list and again to name markers in its sentence. Replace those paths and the per-skill display flags with one breakpoint projection, including composed Graphs and return arrows. Extend the shared Task/roadmap fixtures. Keep approaching a marker, standing at it, merge wait, failure and end distinguishable. Finish help, reference models, AGENTS.md and the QA playbook against the [feature walkthrough](../docs/orchestration.md#where-a-person-takes-part).
 

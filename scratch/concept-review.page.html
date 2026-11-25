@@ -2,33 +2,37 @@
 
 <div class="lf-meta">
   <span>Task <code>LOO-1109</code></span>
-  <span>Post-build concept review at <code>c04a60309d</code> against <code>6d617de686</code></span>
-  <span>Built with <code>lf page build</code></span>
+  <span>Concept review (pass 2) at <code>5706b81f39</code> against <code>6d617de686</code></span>
+  <span>Outcome: <strong>concepts line up — nothing to change</strong></span>
 </div>
 
-<p><strong>Area reviewed:</strong> review pages end-to-end — compiling body fragments with <code>lf page build</code>, serving and routing them across hosts with <code>server/loopback.rs</code> and <code>lf page open</code>, interacting in the browser and offline with <code>runtime.js</code> + <code>base.css</code>, bridging into Loopflow Desktop via <code>TaskHTMLBridge</code> + <code>ReviewComments</code>, and authoring from the five review skills. Everything in the branch touches this single loop, so it is reviewed whole against <code>origin/main</code> rather than only the last QA commit.</p>
+<p><strong>Area reviewed:</strong> review pages end-to-end — compiling body fragments with <code>lf page build</code>, serving and routing them across hosts with <code>server/loopback.rs</code> and <code>lf page open</code>, interacting in browser and offline with <code>runtime.js</code> and <code>base.css</code>, bridging into Loopflow Desktop via <code>TaskHTMLBridge</code> and <code>ReviewComments</code>, and authoring from the five review skills. Everything in the branch belongs to this single loop, so the whole area is reviewed against <code>6d617de686</code> rather than only the last commit.</p>
 
-<h2>Built today vs. proposed for Pass 5</h2>
+<h2>What stands at <code>5706b81f39</code></h2>
 
 <table>
   <thead>
     <tr>
       <th>Status</th>
-      <th>What stands at <code>c04a60309d</code></th>
+      <th>Summary</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td><strong>Built and committed</strong></td>
-      <td>Loopback carrier (<code>server/loopback.rs</code>, local-only <code>page.url</code>, shared <code>Messages&lt;S&gt;</code>), <code>lf page build</code> compiler (<code>lf/commands/page/{build,components,diff,operations,html}.rs</code>), <code>lf page open</code>, shared runtime &amp; theme (<code>builtins/page/</code>, <code>.lf/theme.css</code>), Desktop bridge (<code>TaskHTMLBridge</code>, <code>ReviewComment.Anchor</code>, <code>ServerLink.sendRawOperation</code>, read-only <code>ReviewRenderedView</code>), five updated skills, user docs, and Chrome QA fixes.</td>
+      <td>Loopback carrier (<code>server/loopback.rs</code>, deterministic per-socket port with <code>:0</code> fallback, 32-byte in-memory token, local-only <code>page.url</code>, shared <code>Messages&lt;S&gt;</code>), <code>lf page build</code> compiler (<code>lf/commands/page/{build,components,diff,operations,html}.rs</code>), <code>lf page open</code>, shared runtime &amp; theme (<code>builtins/page/</code>, <code>.lf/theme.css</code>), Desktop bridge (<code>TaskHTMLBridge</code>, <code>ReviewComment.Anchor</code>, plain-string page items, <code>ServerLink.sendRawOperation</code>, read-only <code>ReviewRenderedView</code>), five updated review skills, <code>lf help page</code>, and user docs.</td>
     </tr>
     <tr>
-      <td><strong>Fixed in Pass 5</strong></td>
-      <td>Resolved all four conceptual/lifecycle leaks found at <code>c04a60309d</code>: (1) <code>lf page open</code> now reads <code>session.interactive</code> from SQLite so interactive plain-terminal sessions open the browser while headless workers stay quiet, (2) <code>base.css</code> guards <code>[data-label]::before</code> with <code>:not(:has(&gt; p, &gt; label, &gt; h3, &gt; h4, &gt; legend))</code> and gives direct prompt children <code>flex-basis: 100%</code>, (3) <code>lf page build</code> stamps <code>wire::REVISION</code>/<code>wire::MIN_REVISION</code> and <code>runtime.js</code> surfaces handshake errors and any loopback close with a truthful disconnect banner, and (4) <strong>Clear</strong> calls <code>clearDrafts({ markReported: false })</code> so unreported <code>data-lf</code> receipts still ride along on the next reply.</td>
+      <td><strong>Resolved since Pass 1 (<code>c04a60309d</code> → <code>5706b81f39</code>)</strong></td>
+      <td>All four concept/lifecycle mismatches from Pass 1 are fixed and verified in Chrome, plus three follow-on fixes from compress and QA pass 2: (1) <code>lf page open</code> reads <code>session.interactive</code> from SQLite and short-circuits explicit <code>--host</code>; (2) <code>base.css</code> renders <code>data-label</code> only on bare controls, gives rich prompts full row width, and keeps decision card titles drawn once; (3) <code>PageStamp.protocol</code> stamps <code>wire::REVISION</code>/<code>MIN_REVISION</code>, <code>runtime.js</code> surfaces handshake errors and any loopback close with a truthful banner and clears stale send sentences on edit; (4) browser <strong>Clear</strong> preserves unreported <code>data-lf</code> receipts; (5) <code>Loopback::bind</code> keeps one origin across server restarts so <code>localStorage</code> drafts and receipts survive <code>lf install</code>; (6) Desktop bridge items travel as plain strings without a redundant <code>PageItem</code> struct.</td>
+    </tr>
+    <tr>
+      <td><strong>Deferred to later steps</strong></td>
+      <td>Live Dev Desktop run (headless environment; bridge state ownership, remount receipts, and raw operation forwarding are covered by headless Swift tests in <code>TaskFilesTests</code>, <code>ReviewDiffTests</code>, and <code>ServerClientTests</code>) and full gate/CI test suite run.</td>
     </tr>
     <tr>
       <td><strong>Outside this work</strong></td>
-      <td>Native browser split inside Rex / <code>agent-browser</code> host (Rex currently has no browser block type; would require a Rex browser block or dedicated host adapter); raw UUID in server's <code>task.steer</code> <code>delivery.sentence</code> (owned by server steer presentation, outside the page kit).</td>
+      <td>Native browser split inside Rex / <code>agent-browser</code> host (Rex currently exposes no browser block type and <code>agent-browser</code> is not installed on this Machine); raw UUID inside the server's <code>task.steer</code> <code>delivery.sentence</code> (owned by server steer presentation, outside the page kit); live tab-to-tab <code>storage</code> event syncing when the same page is open in two browser tabs simultaneously.</td>
     </tr>
   </tbody>
 </table>
@@ -39,164 +43,118 @@
   <thead>
     <tr>
       <th>Domain concept</th>
-      <th>Code concept at <code>c04a60309d</code></th>
+      <th>Code concept at <code>5706b81f39</code></th>
       <th>Match</th>
-      <th>What holds or is wrong</th>
+      <th>Assessment</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td><strong>Page source vs. compiled page</strong><br>Author writes a short fragment; person opens one self-contained file</td>
-      <td><code>lf page build</code> (<code>*.page.html</code> → <code>*.html</code>); <code>is_scratch_page</code> in Rust (<code>ops/task/find.rs</code>) and Swift (<code>TaskFilesStore.swift</code>); <code>lf page open</code> refuses <code>.page.html</code></td>
+      <td><strong>Page source vs. compiled page</strong><br>Author writes a short body fragment; person opens one self-contained HTML file</td>
+      <td><code>lf page build</code> (<code>*.page.html</code> → <code>*.html</code>); <code>is_scratch_page</code> in Rust (<code>ops/task/find.rs</code>) and Swift (<code>TaskFilesStore.swift</code>); <code>lf page open</code> rejects <code>.page.html</code></td>
       <td><strong>Yes</strong></td>
-      <td>Clean boundary. Untracked files and renames reuse <code>checkout_file_diff</code>; <code>data-lf</code> expands against <code>server::schema::describe()</code> and validates via <code>Operation</code>; <code>build_id</code> hashes the compiled body so round 2 on the same <code>HEAD</code> starts clean.</td>
+      <td>One clean boundary. Real hunks reuse <code>checkout_file_diff</code> once per file path (covering untracked files and renames); <code>data-lf</code> expands against <code>server::schema::describe()</code> with specific unknown/missing-field errors; <code>build_id</code> hashes the compiled body so rebuilds on the same <code>HEAD</code> start clean.</td>
     </tr>
     <tr>
       <td><strong>Answering the work (<code>⌘↩</code>)</strong><br>Notes, choices, and answers reach active work even when a headless worker built the page</td>
-      <td><code>PageStamp.work</code> (<code>task</code> / <code>wave</code> / standalone interactive <code>session</code> / <code>repository</code>); <code>runtime.js</code> sends <code>task.steer</code> for Tasks, else <code>session.steer</code></td>
+      <td><code>PageStamp.work</code> (<code>task</code> / <code>wave</code> / standalone interactive <code>session</code> / <code>repository</code>); <code>runtime.js</code> sends <code>task.steer</code> for Tasks, else <code>session.steer</code>; one-line formatter shared across browser, Desktop, and clipboard</td>
       <td><strong>Yes</strong></td>
-      <td>Pre-build dead-worker bug is gone. Task pages stamp the readable identifier (<code>LOO-1109</code>), steer through <code>task.steer</code>, and show the server's <code>delivery.sentence</code>.</td>
+      <td>Task pages stamp the readable identifier (<code>LOO-1109</code>), steer via <code>task.steer</code> (never a dead headless worker's <code>session</code>), show <code>delivery.sentence</code> on success, and clear that sentence on the next edit.</td>
     </tr>
     <tr>
-      <td><strong>Opening a page where you work</strong><br>Desktop in Files, interactive terminal/Rex in browser, headless Graph steps quiet</td>
-      <td><code>lf page open</code> (<code>lf/commands/page.rs</code>) routes via <code>agent_caller()</code> + <code>viewed_placement()</code> (<code>open.rs:918</code>)</td>
-      <td><strong>No</strong></td>
-      <td><strong>Wrong proxy for "headless".</strong> <code>viewed_placement()</code> only knows <code>desktop</code>, <code>rex</code>, <code>cmux</code>, <code>herdr</code>, and <code>tmux</code>. An interactive <code>lf</code> session in a plain terminal (Ghostty, iTerm, Terminal.app) has <code>session.interactive == true</code> in SQLite, yet <code>viewed_placement()</code> returns <code>None</code> — so <code>lf page open</code> classifies it as headless and never opens the browser. <code>page/build.rs</code> already reads <code>session.interactive</code>; <code>page.rs</code> ignores it.</td>
+      <td><strong>Opening a page where you work</strong><br>Desktop opens in Files; interactive terminal or Rex opens in browser; headless Graph steps stay quiet</td>
+      <td><code>lf page open</code> (<code>lf/commands/page.rs</code>): explicit <code>--host</code> short-circuits; otherwise <code>agent_caller()</code> + shared <code>load_session()</code> (<code>session.interactive</code>) + <code>LF_DESKTOP</code> / <code>viewed_placement()</code></td>
+      <td><strong>Yes</strong></td>
+      <td>Pass 1 mismatch resolved. Interactive sessions in Ghostty, iTerm, Terminal.app, Rex, or tmux open the browser; headless workers (<code>session.interactive == false</code>) always print the URL quietly even if <code>LF_DESKTOP</code> is inherited.</td>
     </tr>
     <tr>
       <td><strong>Question prompt vs. reply label</strong><br>Readable, highlightable question on the page; concise label in the one-line steer</td>
-      <td><code>data-label</code> read by <code>runtime.js</code> for steer formatting AND drawn by CSS <code>::before { content: attr(data-label) }</code> in <code>base.css</code></td>
-      <td><strong>No</strong></td>
-      <td><strong>One attribute for two jobs.</strong> Pass 4 wrote <code>&lt;div data-choice="q1" data-label="1. Browser host beside Rex"&gt;&lt;p&gt;&lt;strong&gt;1.&lt;/strong&gt; When opening…&lt;/p&gt;…</code> in <code>scratch/ship-review.page.html</code>. After QA added <code>::before</code>, the page renders <code>1.</code> twice, puts <code>&lt;p&gt;</code> inside a button flex row without <code>flex-basis: 100%</code>, and makes the <code>::before</code> heading unselectable for highlight-to-comment.</td>
+      <td><code>base.css</code> draws <code>[data-label]::before</code> only via <code>:not(:has(&gt; p, &gt; label, &gt; h3, &gt; h4, &gt; legend))</code>; rich prompt children take <code>flex-basis: 100%</code>; <code>.lf-decision [data-choice][data-label]::before</code> suppresses duplicate titles</td>
+      <td><strong>Yes</strong></td>
+      <td>Pass 1 and QA pass 2 mismatches resolved. Bare controls draw their heading automatically; rich numbered questions stay selectable for highlight-to-comment without duplicating the title; decision cards draw their title once.</td>
     </tr>
     <tr>
-      <td><strong>Loopback carrier &amp; connection health</strong><br>Browser talks safely to <code>lf server</code>, stays in sync with protocol version, and explains disconnects</td>
-      <td><code>server/loopback.rs</code> (<code>Host</code> + <code>Origin</code> + constant-time 32-byte token, local-only <code>page.url</code>) + <code>runtime.js</code> (hardcoded <code>revision: 10</code>, <code>welcomed</code> boolean)</td>
-      <td><strong>No</strong></td>
-      <td><strong>Duplicated version constant + silent handshake failure.</strong> Server admission is solid, but <code>runtime.js</code> hardcodes <code>revision: 10, min_revision: 10</code> instead of reading <code>wire::REVISION</code> from the stamp. Any protocol bump, stale bookmark, or stopped server on reload fails before <code>welcome</code>; <code>runtime.js</code> ignores un-ID'd <code>error</code> frames and suppresses the banner whenever <code>welcomed == false</code>, silently degrading to clipboard copy. When a live server stops, the banner also claims it "restarted".</td>
+      <td><strong>Loopback carrier, restarts &amp; health</strong><br>Browser talks safely to <code>lf server</code>, survives restarts without losing work, and explains disconnects</td>
+      <td><code>server/loopback.rs</code> (deterministic per-socket port + <code>:0</code> fallback, 32-byte in-memory token, <code>Host</code> + constant-time token + same-origin <code>Origin</code> checks, local-Unix-socket-only <code>page.url</code>); <code>PageStamp.protocol</code> + <code>runtime.js</code> banner</td>
+      <td><strong>Yes</strong></td>
+      <td>Pass 1 and QA pass 2 mismatches resolved. Restarting <code>lf server</code> rotates the token while keeping the port/origin so reopened pages keep <code>localStorage</code> drafts and receipts; protocol version comes straight from <code>wire::REVISION</code>; any non-unload disconnect or handshake error shows a truthful banner and flips to <code>Copy reply ⌘↩</code>.</td>
     </tr>
     <tr>
       <td><strong>Direct actions (<code>data-lf</code>) vs. reply queue</strong><br>Choices queue for <code>⌘↩</code>; action buttons confirm, run now, keep receipts, and ride once on the next reply</td>
-      <td><code>runtime.js</code> <code>state.receipts</code> + <code>clearDrafts()</code>; <code>ReviewDiff.swift</code> <code>sentPageState</code> + <code>pageReceipts()</code></td>
-      <td><strong>No</strong></td>
-      <td><strong>One function conflates Clear and Send.</strong> Receipts now survive reload and Desktop send, but clicking <strong>Clear</strong> in the browser strip calls the same <code>clearDrafts()</code> as <code>submitReply()</code>, flipping <code>reported: true</code> on receipts that were never sent. Discarding a typo'd note silently drops <code>[already ran: …]</code> from the next steer.</td>
+      <td><code>runtime.js</code> <code>state.receipts</code>, <code>syncActionsFromState()</code>, <code>clearDrafts({ markReported })</code>; <code>ReviewDiff.swift</code> <code>sentPageState()</code> and <code>pageReceipts()</code></td>
+      <td><strong>Yes</strong></td>
+      <td>Pass 1 mismatch resolved. Receipts stay separate from the reply strip, survive reloads, restarts, Desktop remounts, and sends, ride once as <code>[already ran: …]</code> on the next reply, and are never wiped by clicking <strong>Clear</strong> on unsent drafts.</td>
     </tr>
     <tr>
-      <td><strong>Desktop draft ownership &amp; read-only Diff</strong><br>Page notes join Diff comments, survive file switches and peer Machines, and never touch HTML Diff</td>
-      <td><code>TaskHTMLBridge</code> attached only in <code>TaskFileReadingView</code>; <code>ReviewComments</code> owns <code>pageStates</code> keyed by <code>(path, buildID)</code>; <code>ReviewRenderedView</code> has <code>bridge == nil</code>; <code>ServerLink.sendRawOperation</code></td>
+      <td><strong>Desktop draft ownership &amp; read-only Diff</strong><br>Page notes join Diff comments, survive file switches and peer Machines, and never touch HTML diffs</td>
+      <td><code>TaskHTMLBridge</code> attached only in <code>TaskFileReadingView</code>; <code>ReviewRenderedView</code> leaves <code>bridge == nil</code>; <code>ReviewComments</code> owns <code>pageStates</code> keyed by <code>(path, buildID)</code> and plain <code>[String]</code> items; <code>ServerLink.sendRawOperation</code> with peer <code>directory</code> swap</td>
       <td><strong>Yes</strong></td>
-      <td>Clean single owner in Swift; zero <code>localStorage</code> in Desktop (safe on peer-Machine <code>about:blank</code>); no redundant <code>ServerOperation</code> case. (Live Dev Desktop QA still deferred; covered by headless Swift tests.)</td>
+      <td>Clean single owner in Swift; zero <code>localStorage</code> in Desktop (safe on peer-Machine <code>about:blank</code>); no redundant <code>PageItem</code> wrapper or extra <code>ServerOperation</code> case.</td>
     </tr>
     <tr>
       <td><strong>Shared skill kit &amp; extensibility</strong><br>Five review skills share one contract and compose with <code>extends:</code>, <code>.lf/theme.css</code>, <code>.lf/components/</code></td>
       <td><code>lf help page</code> (<code>lf/mod.rs</code>), five updated skills, <code>LOOPFLOW.md</code>, <code>tour</code> untouched</td>
       <td><strong>Yes</strong></td>
-      <td>Single source of truth for authoring rules; no duplicated HTML recipes across skills; clean composition with <code>LOO-1104</code>.</td>
+      <td>Single authoring contract with no duplicated HTML/CSS/JS recipes across skills and clean composition with <code>LOO-1104</code>.</td>
     </tr>
   </tbody>
 </table>
 
-<h2>The four mismatches, before and after</h2>
+<h2>Lifecycle check: failure and recovery verified in code</h2>
 
-<h3>1. Interactive plain-terminal sessions misclassified as headless</h3>
+<p>Walking the hardest failure and recovery paths at <code>5706b81f39</code> shows no remaining conceptual cracks:</p>
 
-<p>Walking the interaction: a person starts an interactive <code>lf explore</code> in Ghostty or iTerm2. The agent compiles <code>scratch/explore.page.html</code> and runs <code>lf page open scratch/explore.html</code>. Because <code>viewed_placement()</code> only recognizes multiplexer IDs (<code>desktop:</code>, <code>rex:</code>, <code>cmux:</code>, <code>herdr:</code>, <code>tmux:</code>), it returns <code>None</code> and <code>route_for</code> prints a URL without opening the browser — even though SQLite already knows <code>session.interactive == true</code>.</p>
+<ul>
+  <li><strong>Server restart mid-review (<code>lf install</code>):</strong> The open tab detects WebSocket close, shows <code>Loopflow server disconnected — run lf page open &lt;path&gt;</code>, and switches to <code>Copy reply ⌘↩</code>. Running <code>lf page open</code> mints a fresh 32-byte token on the same per-socket port, so the reopened tab lands on the same browser origin and restores every unsent note and <code>Filed …</code> receipt.</li>
+  <li><strong>Confirming a <code>data-lf</code> action, then clearing drafts:</strong> <code>File Task now</code> runs immediately with a per-confirm <code>request_id</code> (reused on retry) and turns into <code>Filed LOO-1200</code> without opening the reply strip. Clicking <strong>Clear</strong> drops unsent notes/choices with <code>markReported: false</code>, so <code>[already ran: task.create → LOO-1200]</code> still rides on the next <code>⌘↩</code> steer (and only once).</li>
+  <li><strong>Desktop file switch and peer Machine:</strong> Switching from <code>scratch/ship-review.html</code> to a Swift file unmounts <code>TaskHTMLView</code>, but <code>ReviewComments</code> owns <code>pageStates</code> and <code>items</code> in Swift. Sending from the code file inserts page notes + Diff comments on one line, retains receipts marked <code>reported: true</code>, and bumps <code>pageClearGeneration</code>; returning to the page restores receipts without resurrecting sent notes.</li>
+</ul>
 
-<lf-diff path="rust/loopflow/src/lf/commands/page.rs" lines="70-135">
-  <lf-note line="75">Reads session.interactive from SQLite via shared load_session().</lf-note>
-  <lf-note line="123">Plain-terminal interactive sessions now route to OpenRoute::Browser while session.interactive == false stays PrintQuiet.</lf-note>
-</lf-diff>
-
-<lf-component name="before-after">
-  <div slot="before">
-    <p><code>decide_open_route</code> checks only <code>viewed_placement()</code>. Any interactive agent outside Desktop/Rex/cmux/herdr/tmux returns <code>None</code> → <code>PrintQuiet</code>, breaking "Browser beside Rex or any terminal" in <code>docs/surfaces.md</code>.</p>
-  </div>
-  <div slot="after">
-    <p>Look up <code>caller.session_id</code> in SQLite (the same pattern <code>page/build.rs:248</code> uses): if <code>session.interactive == false</code> → <code>PrintQuiet</code>; if <code>session.interactive == true</code> → <code>Desktop</code> when viewed in Desktop (or <code>LF_DESKTOP</code> set), else <code>Browser</code>. If the session row is absent (test fixtures), fall back to <code>viewed_placement()</code> so unknown callers stay quiet.</p>
-  </div>
-</lf-component>
-
-<h3>2. <code>data-label</code> doing two jobs breaks <code>scratch/ship-review.html</code></h3>
-
-<p>On this branch's own compiled <code>scratch/ship-review.html</code>, Question 1 has both a short <code>data-label</code> (for the steer line) and a fuller <code>&lt;p&gt;</code> question. Because <code>base.css</code> unconditionally renders <code>::before { content: attr(data-label) }</code>, the page prints <code>1.</code> twice, lays out <code>&lt;p&gt;</code> inside a flex row without <code>flex-basis: 100%</code>, and makes the <code>::before</code> text unselectable for highlight-to-comment.</p>
-
-<lf-diff path="rust/loopflow-definitions/src/builtins/page/base.css" lines="262-289">
-  <lf-note line="272">Only draws ::before when the control has no direct selectable prompt child.</lf-note>
-  <lf-note line="282">Gives direct prompt children full row width inside flex choice/multiselect containers.</lf-note>
-</lf-diff>
-
-<lf-diff path="scratch/ship-review.page.html" lines="140-145">
-  <lf-note line="140">data-label stays the concise reply key while the selectable &lt;p&gt; on line 141 is the sole visible question.</lf-note>
-</lf-diff>
+<h3>Key boundary changes from Pass 1 → Pass 2</h3>
 
 <lf-component name="before-after">
   <div slot="before">
-    <p>Bare controls (<code>&lt;div data-choice="q1" data-label="1. Keep?"&gt;&lt;button&gt;Yes&lt;/button&gt;&lt;/div&gt;</code>) work, but rich controls with a <code>&lt;p&gt;</code> prompt double-render the heading and break flex wrapping.</p>
+    <p><strong>Pass 1 (<code>c04a60309d</code>):</strong> <code>lf page open</code> ignored <code>session.interactive</code>; <code>base.css</code> double-rendered rich prompts and decision titles; <code>runtime.js</code> hardcoded protocol <code>10</code> and hid pre-welcome disconnects; <strong>Clear</strong> silently dropped unreported <code>data-lf</code> receipts; and <code>127.0.0.1:0</code> rotated the port on server restart, wiping <code>localStorage</code> drafts and receipts.</p>
   </div>
   <div slot="after">
-    <p>Render <code>::before</code> only when the control has no direct prose/heading child (<code>:not(:has(&gt; p, &gt; label, &gt; h3, &gt; h4, &gt; legend))</code>), and give direct <code>&lt;p&gt;</code> children <code>flex-basis: 100%</code>. Short bare controls still render <code>data-label</code> automatically; rich questions show only their selectable <code>&lt;p&gt;</code> while keeping <code>data-label</code> concise in the steer reply.</p>
+    <p><strong>Current <code>HEAD</code> (<code>5706b81f39</code>):</strong> routing reads <code>session.interactive</code> and honors explicit <code>--host</code>; prompts and decision titles render once; protocol revision is stamped from <code>wire::REVISION</code> with truthful disconnect banners; <strong>Clear</strong> keeps unreported receipts; and <code>Loopback::bind</code> keeps a stable per-socket port (yielding to <code>:0</code> only if occupied) while rotating the in-memory token.</p>
   </div>
 </lf-component>
 
-<h3>3. Hardcoded protocol revision and silent loopback handshake failure</h3>
-
-<p>Walking failure and recovery: when <code>wire::REVISION</code> bumps from 10 to 11 (or a person reloads a stale loopback tab after <code>lf server</code> restarts or stops), the WebSocket closes before <code>welcome</code>. Today <code>runtime.js</code> hardcodes <code>10</code>, drops un-ID'd <code>error</code> frames, and hides the banner unless <code>welcomed</code> was already true — so the page silently falls back to clipboard copy with no explanation.</p>
-
-<lf-diff path="rust/loopflow-definitions/src/builtins/page/runtime.js" lines="239-294">
-  <lf-note line="245">Reads wire::REVISION / wire::MIN_REVISION stamped by lf page build into #lf-page.</lf-note>
-  <lf-note line="271">Captures un-ID'd handshake error frames and shows the server message immediately.</lf-note>
-  <lf-note line="292">Shows handshake error or truthful disconnect banner on any loopback close, even before welcome.</lf-note>
+<lf-diff path="rust/loopflow/src/server/loopback.rs" lines="108-147">
+  <lf-note line="110">Derives one stable port in 49152–65535 per server socket so browser localStorage survives lf server restarts.</lf-note>
+  <lf-note line="131">Falls back to an ephemeral port if another process holds the preferred port, so the server never refuses to start.</lf-note>
+  <lf-note line="138">Always mints a fresh 32-byte random in-memory token per start, invalidating old URLs.</lf-note>
 </lf-diff>
 
-<lf-component name="before-after">
-  <div slot="before">
-    <p>Protocol bump breaks every browser review page silently; stale loopback URLs and stopped servers on reload show no banner; live disconnect says "restarted" even when the server is stopped.</p>
-  </div>
-  <div slot="after">
-    <p><code>lf page build</code> stamps <code>protocol: { revision, min_revision }</code> from <code>crate::server::wire</code>. <code>runtime.js</code> sends those values, records any un-ID'd handshake <code>error</code> message, and on <code>close</code> for any loopback URL shows either that error or <code>Loopflow server disconnected — run lf page open &lt;path&gt;</code> while switching the button to <code>Copy reply ⌘↩</code>.</p>
-  </div>
-</lf-component>
-
-<h3>4. Browser Clear discards unreported <code>data-lf</code> receipts</h3>
-
-<p>Walking recovery: a reviewer clicks <strong>File Task now</strong> (<code>Filed LOO-1200</code>), adds a note, hits <strong>Clear</strong> to rewrite the note, and then presses <code>⌘↩</code>. Because <strong>Clear</strong> shares <code>clearDrafts()</code> with <code>submitReply()</code>, it flips <code>reported: true</code> on the receipt even though nothing was sent — so <code>[already ran: task.create → LOO-1200]</code> disappears from the steer.</p>
-
-<lf-diff path="rust/loopflow-definitions/src/builtins/page/runtime.js" lines="801-810">
-  <lf-note line="803">Marks receipts reported only when markReported is true (actual send), leaving Clear drafts separate.</lf-note>
+<lf-diff path="rust/loopflow/src/lf/commands/page.rs" lines="70-134">
+  <lf-note line="71">Explicit --host desktop|browser short-circuits before touching SQLite or placement state.</lf-note>
+  <lf-note line="80">Reads session.interactive via shared load_session() so plain-terminal interactive sessions open the browser while headless workers stay quiet.</lf-note>
 </lf-diff>
-
-<lf-component name="before-after">
-  <div slot="before">
-    <p><code>clearDrafts()</code> always marks receipts <code>reported: true</code>, conflating "sent to agent" with "discarded unsent draft".</p>
-  </div>
-  <div slot="after">
-    <p><code>clearDrafts({ markReported })</code> marks receipts reported only on actual send (<code>submitReply</code> success and Desktop <code>__lfDesktopApplyState(null)</code>); clicking <strong>Clear</strong> drops unsent notes/choices while keeping unreported receipts ready for the next reply.</p>
-  </div>
-</lf-component>
 
 <h2>Open product choices (built, reversible, waiting for review)</h2>
 
-<p>All four mismatches above have clear fixes written into <code>scratch/plan.md</code> as Pass 5. The choices below are already built and reversible — answer with codes like <code>1b, 2a</code> if you want any changed.</p>
+<p>No design or code change is needed before delivery. The reversible product choices below are already built into the branch — reply with codes like <code>1a, 2a</code> if you want any changed.</p>
 
 <div data-choice="q1" data-label="1. Browser host beside Rex">
-  <p><strong>1.</strong> When an interactive agent in Rex opens a review page, it currently opens your Mac's default browser (and prints only the URL when headless). Keep the OS default browser until Rex has a browser block, or target a specific browser/split tool?</p>
-  <button type="button" data-value="1a: Keep OS default browser">1a. Keep OS default browser (built)</button>
-  <button type="button" data-value="1b: Target a specific browser/split tool">1b. Target a specific browser/split tool</button>
+  <p><strong>1.</strong> When an interactive agent in Rex opens a review page, Loopflow currently opens your Mac's default browser (and prints only the link when running in the background). Keep your default browser until Rex adds a browser pane, or target a specific browser/split tool?</p>
+  <button type="button" data-value="1a: Keep default browser">1a. Keep default browser (built)</button>
+  <button type="button" data-value="1b: Target a specific browser/split tool">1b. Target a specific browser or split tool</button>
 </div>
 
-<div data-choice="q2" data-label="2. Direct data-lf actions vs reply queue">
-  <p><strong>2.</strong> Finding choices (<code>Fix here</code> / <code>File Task</code> / <code>Drop</code>) queue for <code>⌘↩</code>, while explicit <code>data-lf</code> action buttons confirm inline, execute immediately, keep their in-place receipt, and only append <code>[already ran: …]</code> if you also send a reply. Keep that split, or batch action buttons into <code>⌘↩</code>?</p>
-  <button type="button" data-value="2a: Keep immediate confirm + in-place receipt">2a. Keep immediate confirm + receipt (built)</button>
-  <button type="button" data-value="2b: Batch action buttons into ⌘↩">2b. Batch action buttons into ⌘↩</button>
+<div data-choice="q2" data-label="2. Direct action buttons vs reply queue">
+  <p><strong>2.</strong> Finding choices (<code>Fix here</code> / <code>File Task</code> / <code>Drop</code>) wait in your reply queue until you press <code>⌘↩</code>, whereas explicit action buttons like <strong>File Task now</strong> confirm inline, run immediately, stay as a receipt in place, and only add a short <code>[already ran: …]</code> note if you also send a reply. Keep that split, or wait to run action buttons until <code>⌘↩</code>?</p>
+  <button type="button" data-value="2a: Run action buttons immediately with receipt">2a. Run action buttons immediately with receipt (built)</button>
+  <button type="button" data-value="2b: Wait to run action buttons until ⌘↩">2b. Wait to run action buttons until ⌘↩</button>
 </div>
 
 <div data-choice="q3" data-label="3. Browser ⌘↩ delivery beside Rex">
-  <p><strong>3.</strong> Pressing <code>⌘↩</code> in a browser beside Rex sends <code>task.steer</code> immediately and shows the server's delivery line. Keep immediate steering, or type the message into Rex's unsent input box without pressing Enter?</p>
-  <button type="button" data-value="3a: Immediate task.steer">3a. Immediate task.steer (built)</button>
-  <button type="button" data-value="3b: Type into Rex unsent input">3b. Type into Rex unsent input</button>
+  <p><strong>3.</strong> Pressing <code>⌘↩</code> in a browser beside Rex sends your reply straight to the Task so the agent acts right away and shows the delivery status in the bar. Keep immediate sending, or paste the reply into your terminal's unsent input box so you press Enter yourself?</p>
+  <button type="button" data-value="3a: Send straight to the Task">3a. Send straight to the Task (built)</button>
+  <button type="button" data-value="3b: Paste into unsent terminal input">3b. Paste into unsent terminal input</button>
 </div>
 
 <div data-question="q4" data-label="4. Other concept or UX notes">
-  <p><strong>4.</strong> Anything else in the built page kit, Desktop bridge, or loopback carrier that feels off?</p>
+  <p><strong>4.</strong> Anything else about how review pages open, look, or send replies that you want adjusted?</p>
   <textarea rows="3" placeholder="Optional notes…"></textarea>
 </div>

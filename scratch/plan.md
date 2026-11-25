@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Status: built (`78bde1d766`), compressed (`c6eab6e222`), QA'd (`73abaa380c`), reviewed (`scratch/concept-review.html`), post-build review findings applied (`02b9cf8f62`), ship-review revisions applied (`4cb640f3f6`: `fix` renamed to `quick`; builtin `ui` removed), generic design-wording pass applied (`b1d9ac2819`), QA'd again (`684bbae383`), and named skill inheritance (`extends: <name>` / `extends: lf:<name>`) built. Remaining: gate.
+Status: built (`78bde1d766`), compressed (`c6eab6e222`), QA'd (`73abaa380c`), reviewed (`scratch/concept-review.html`), post-build review findings applied (`02b9cf8f62`), ship-review revisions applied (`4cb640f3f6`: `fix` renamed to `quick`; builtin `ui` removed), generic design-wording pass applied (`b1d9ac2819`), QA'd again (`684bbae383`), concept-reviewed again (`5ec9a261ef`, against `684bbae383`: 7 of 7 pairings line up, no mismatches), and named skill inheritance (`extends: <name>` / `extends: lf:<name>`) built (`b51d7711a8`, after that review; its focused tests and a live `lf list skill` run are unverified here). Remaining: gate.
 
 
 A Task on `code`, `feature`, `pursue` or `redesign` runs `compress` and `qa`
@@ -371,7 +371,8 @@ env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') sh -c '
 grep -rnE "Linear|Loopflow Desktop|--host desktop" \
   rust/loopflow-definitions/src/builtins/task/skill/{kickoff,advance,write-docs}.md   # no output
 uv run python scripts/test.py --reuse-passing \
-  --rust-filter 'test(graph::) | binary(golden_prompt) | test(documented_commands::) | test(builtins::)'
+  --rust-filter 'test(graph::) | binary(golden_prompt) | test(documented_commands::) | test(builtins::) | test(skills::catalog::) | test(skills::listing::)'
+# Swift ServerProtocolTests and the regenerated server_schema.json fixture: CI.
 ```
 
 ## Passes
@@ -409,6 +410,7 @@ Recorded by post-build `concept-review` against base `23ce1a69f9` (`scratch/conc
 - **Drop temporary `extends: builtin` alias and migrate `.lf/skills/*.md` (LOO-1107):** filed as `LOO-1107` (`task_ef922f96c6bd42a98d0ffc556c93e554`) to run once LOO-1104 ships past `lf` 0.16.0.
 - **Update `.lf/wave/intelligence/MEMORY.md`:** read-only in a Task checkout; replace the 2026-09-28 entry ("`realign` now owns memory curation") with "`wave-session` owns memory curation" in an intelligence Wave session once LOO-1104 lands.
 - **Step-commit `-a` propagation (`scratch/qa.html` #1):** with `-a claude:haiku` and no `default_agent`, `lf commit --step` falls back to `lf <skill>: checkpoint`. Outside LOO-1104's scope; `.lf/qa/skills.md` documents the current behavior.
+- **Headless `concept-review` closing voice (`scratch/qa.html`):** a headless run ended its chat reply asking a person to answer by number and letter; the page stayed read-only. Wording polish, separate outcome.
 - **Repo-local UI workflows, `.lf/graphs/pursue-auto.yaml` & automatic Graph selection:** separate outcomes outside this Task.
 
 Done when `lf list graph` shows `quick` beside the reordered `build`

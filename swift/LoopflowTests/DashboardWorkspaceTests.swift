@@ -123,7 +123,7 @@ struct DashboardWorkspaceTests {
         let source = WorkWorkspaceKey(repository: "repo_11111111111111111111111111111111", kind: .task, id: "task_b")
         await model.reorderWorkingTask(source, to: "task_a", side: nil).value
         #expect(model.workingTaskIDs == ids)
-        #expect(model.navigation.notices.current?.text == reason)
+        #expect(model.navigation.notices.current?.text == "task_b couldn't be reordered: " + reason)
     }
 
     @Test func workingTasksOpensOnlyTheTasksItsGridShows() throws {

@@ -816,9 +816,10 @@ struct WorkModelStreamTests {
         answered.continuation.finish()
         let request = try await feed.request(2)
         #expect(request == .checkpoint(id: request.id, replay: []))
-        // The CLI answers without revisions, so there is no reading to wait for.
-        #expect(model.pendingChanges.changes.isEmpty)
+        // The CLI answers without revisions: the preview holds through the reread it asked for.
+        #expect(!model.pendingChanges.changes.isEmpty)
         await feed.send(try fixture.frame("checkpoint", sequence: 2, answers: request.id, body: "null"))
+        try await eventually { model.pendingChanges.changes.isEmpty }
     }
 
     @Test("A held Claim shows the owner the repository reading names, before the reply")

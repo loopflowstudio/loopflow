@@ -5,6 +5,8 @@
 - Revisit live idle wake after finding a reliable prompt or provider address.
   The trust dialog and model picker observations in the plan rule out the
   proposed paste-mode readiness check.
+- Own the Antigravity idle-wake gap with a new follow-up Task, not
+  LOO-1098, so the cell never points at a finished Task.
 - Keep viewer handoff as a real-provider check (LOO-1097) and unanswered
   questions as an automated gap (48edb9).
 

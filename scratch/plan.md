@@ -120,16 +120,30 @@ Specifically:
 
 ## Remaining work
 
-- Find a safe way to wake an *already open* idle Antigravity conversation.
-  Keep the last step's receiver, single delivery, focus, menus and draft
-  requirements. Server replacement must retain enough information to avoid
-  submitting a person's draft.
-- Build the typed parity table and tests over every harness as specified
-  above. Keep the Antigravity idle-wake cell a gap owned by LOO-1098 until
-  the live demo works. Reopen acceptance should exercise the public resume
-  entry point, provider turn and stored delivery receipt.
-- Regenerate the table and bring the provider checklist and server docs into
-  agreement with the implemented contract.
+Done so far: reopen wake for Antigravity (real agy 1.5.16 run above;
+`session_launch_contract` fixtures), nested-launch marker stripping, 5 Whys.
+`parity.rs` does not exist yet. The README table is still hand-written and
+cites tests that do not exist (`every_harness_takes_waiting_steers_on_reopen`,
+`every_harness_wakes_its_idle_work_session`, a single unified interrupt test).
+
+**Pass 2 (next): typed parity table.** Add `harness/parity.rs` as specified,
+generate the README table between the markers with its check and
+`--ignored` regenerate test, and convert each automated behavior test to an
+exhaustive loop over `HarnessKind::ALL` that checks the cell both ways
+(Conformance above). The reopen row cites a real test: either a loop over
+`HarnessKind::ALL` through `lf resume`, or the existing per-harness reopen
+fixtures named exactly. Teaches whether the `Verification` split holds once
+every row points at a real test.
+
+**Pass 3: idle-open Antigravity wake.** Stopped by the implementation finding
+above; no provider route is known. The idle-wake cell stays a `Gap`. Its
+owner must not be LOO-1098 itself: when this Task completes, the gap would
+point at a finished Task, which is the 5 Whys failure. File a follow-up Task
+for live idle wake before gate and name it as the owner (choice recorded in
+`questions.md`).
+
+Gate then runs the acceptance list and the live reopen demo; the idle-open
+half of demo step 1 is the follow-up Task's.
 
 ## Acceptance at gate
 

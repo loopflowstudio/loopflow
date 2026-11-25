@@ -32,10 +32,10 @@ struct DashboardWorkspaceTests {
                               steps: [.init(name: "build", interactive: false), .init(name: "demo", interactive: true)],
                               currentStep: 1, sentence: "You are next needed at demo.")
         // No program reporting, whatever the row's own line says: the sentence shows.
-        #expect(DashboardTile.workflow(graph, status: .unknown, auto: false, setup: nil)?.sentence == "You are next needed at demo.")
+        #expect(DashboardTile.workflow(graph, status: .unknown, setup: nil)?.sentence == "You are next needed at demo.")
         let asking = try programStatus(reporting: .blocked, msg: "Approve the plan?")
         #expect(asking.ask == "Approve the plan?")
-        #expect(DashboardTile.workflow(graph, status: asking, auto: false, setup: nil) == nil)
+        #expect(DashboardTile.workflow(graph, status: asking, setup: nil) == nil)
     }
 
     /// Rust's `SlotLayout::golden`, as every built-in plan reports it.

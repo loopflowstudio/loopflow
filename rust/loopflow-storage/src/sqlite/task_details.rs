@@ -22,6 +22,8 @@ pub struct TaskDetailFacts {
     pub states: HashMap<TaskId, TaskState>,
     /// Unsettled pauses, with the first worker OS session awaiting cleanup when recorded.
     pub pause_cleanup: HashMap<TaskId, PauseCleanup>,
+    /// Paused Tasks whose `lf task unpause --run` restarts work instead of staying parked.
+    pub resumes_on_unpause: HashSet<TaskId>,
     pub open_children: HashMap<TaskId, u32>,
     pub active_prs: HashMap<TaskId, TaskPr>,
     /// Predecessor PRs the Tasks are stacked on.
@@ -47,26 +49,26 @@ impl SqliteStore {
     pub fn saved_task_detail_facts(
         &self,
         tasks: &[&Task],
-        ships: ShipsBeforeReview<'_>,
+        graph_detail: GraphDetailReader<'_>,
     ) -> StoreResult<(loopflow_model::durable::MachineId, TaskDetailFacts)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
         let ids: Vec<TaskId> = tasks.iter().map(|task| task.id.clone()).collect();
         let json = ids_json(ids.iter().map(TaskId::as_str));
         let states = states_in(&snapshot, &json)?;
-        let paused: Vec<_> = states
+        let mut resumes_on_unpause: HashSet<TaskId> = states
             .iter()
             .filter(|(_, state)| **state == TaskState::Paused)
-            .map(|(id, _)| id.as_str())
+            .map(|(id, _)| id.clone())
             .collect();
-        let pause_cleanup = if paused.is_empty() {
+        let pause_cleanup = if resumes_on_unpause.is_empty() {
             HashMap::new()
         } else {
             keyed(
                 &snapshot,
                 "SELECT task_id,json_extract(stopping_sessions,'$[0].session') FROM task_pauses
                  WHERE task_id IN (SELECT value FROM json_each(?1)) AND stopping_sessions IS NOT NULL",
-                &ids_json(paused),
+                &ids_json(resumes_on_unpause.iter().map(TaskId::as_str)),
                 |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), PauseCleanup { worker_session: row.get(1)? })),
             )?
         };
@@ -98,20 +100,38 @@ impl SqliteStore {
         let mut graph_names = HashMap::new();
         let mut steps = HashMap::new();
         {
+            let need_graph = ids_json(
+                inspect
+                    .iter()
+                    .copied()
+                    .chain(resumes_on_unpause.iter().map(TaskId::as_str)),
+            );
             let mut query = snapshot.prepare(
                 "SELECT task_id,json_extract(graph,'$.name'),step,run_start,
                         CASE WHEN task_id IN (SELECT value FROM json_each(?2)) THEN graph END
                  FROM task_graphs WHERE task_id IN (SELECT value FROM json_each(?1))",
             )?;
-            let mut rows = query.query(params![&json, ids_json(inspect.iter().copied())])?;
+            let mut rows = query.query(params![&json, need_graph])?;
             while let Some(row) = rows.next()? {
                 let id = TaskId::from_raw(row.get::<_, String>(0)?);
                 graph_names.insert(id.clone(), row.get::<_, String>(1)?);
                 let step: String = row.get(2)?;
                 let run_start: Option<String> = row.get(3)?;
                 if let Some(graph) = row.get::<_, Option<String>>(4)? {
-                    if ships(&graph, &step, run_start.as_deref(), auto.get(&id).copied())? {
-                        working_groups.insert(id.clone(), WorkingGroup::Shipping);
+                    match graph_detail(GraphDetailInput {
+                        graph: &graph,
+                        step: &step,
+                        cursor: run_start.as_deref(),
+                        auto: auto.get(&id).copied(),
+                        paused: resumes_on_unpause.contains(&id),
+                    })? {
+                        GraphDetail::Ships(true) => {
+                            working_groups.insert(id.clone(), WorkingGroup::Shipping);
+                        }
+                        GraphDetail::ResumesOnUnpause(false) => {
+                            resumes_on_unpause.remove(&id);
+                        }
+                        GraphDetail::Ships(false) | GraphDetail::ResumesOnUnpause(true) => {}
                     }
                 }
                 if run_start.is_none() {
@@ -123,6 +143,7 @@ impl SqliteStore {
             working_groups,
             states,
             pause_cleanup,
+            resumes_on_unpause,
             open_children: keyed(
                 &snapshot,
                 &format!(
@@ -195,9 +216,26 @@ impl SqliteStore {
     }
 }
 
+/// Inputs for inspecting a Task's captured Graph inside `saved_task_detail_facts`.
+#[derive(Debug)]
+pub struct GraphDetailInput<'a> {
+    pub graph: &'a str,
+    pub step: &'a str,
+    pub cursor: Option<&'a str>,
+    pub auto: Option<AutoState>,
+    /// Active Working Tasks check Shipping; Paused Tasks check whether unpause resumes.
+    pub paused: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum GraphDetail {
+    Ships(bool),
+    ResumesOnUnpause(bool),
+}
+
 /// Execution interprets the cursor and the CLI recognizes commands that land a PR.
-pub type ShipsBeforeReview<'a> =
-    &'a mut dyn FnMut(&str, &str, Option<&str>, Option<AutoState>) -> StoreResult<bool>;
+pub type GraphDetailReader<'a> =
+    &'a mut dyn FnMut(GraphDetailInput<'_>) -> StoreResult<GraphDetail>;
 
 /// Read only the auto marks on the Tasks in this reading.
 pub(super) fn auto_states_in(

@@ -248,7 +248,7 @@ Padding, non-zero spacing and corner radii use named steps. Frame widths and
 heights size the controls themselves.
 
 Components, in `swift/Loopflow/Design/`, for both apps: `TaskRow`,
-`StatusMark`, `WorkflowLine`, `LoopflowButtonStyle` (`.neutral`, `.accent`,
+`StatusMark`, `TaskWorkflowControls`, `WorkflowLine`, `LoopflowButtonStyle` (`.neutral`, `.accent`,
 `.destructive`) and `StateView`. The Mac also has `TitleBar` and `EmptyState` in
 `swift/LoopflowMac/Design/`.
 
@@ -257,15 +257,13 @@ Components, in `swift/Loopflow/Design/`, for both apps: `TaskRow`,
   reports (Blocked, Busy, Available, Done, Error). When no program reports, a
   Mac row shows a blocked or waiting condition if the Task needs someone.
   Otherwise the row shows its lifecycle word.
-- `WorkflowLine`'s steps, running step and sentence come from Rust
-  (`TaskGraph.steps`, `current_step`, `sentence`), so `lf task status` prints
-  the same sentence. Where the steps do not fit, the sentence stands alone and
-  wraps. Before a Task starts, the line draws the catalog’s workflow steps
-  (`lf graph list --json`). New Task shows where you take part beneath them.
-- `TaskActions` (beside `WorkflowLine`) is what a Task offers: Start or Run,
-  Auto-Ship or Stop Auto-Ship, and Rust's reason when a run cannot start. The
-  Mac's Workflow bar and the phone's "Task actions" menu draw it; neither
-  decides what to offer, and the Notice names an action by its button's words.
+- `TaskWorkflowControls` and `TaskActions` draw the shared Task workflow track:
+  fixed ▶/⏸, top-level steps with the current step grown into the menu chip
+  (`WorkflowControl` from Rust), Auto, and Complete. On narrow panes only ▶ and
+  the chip stay.
+- `WorkflowLine` draws a Graph's sentence alone (in Dashboard tiles) or a
+  catalog outline's wrapped steps with where a person takes part underneath
+  (in New Task and workflow help).
 - `LoopflowButtonStyle` is as tall as the platform's control height. On the
   phone the accent button fills the width it is offered; a screen has one.
 - On iPhone, `StateView` shows a left-aligned serif title, a sentence and

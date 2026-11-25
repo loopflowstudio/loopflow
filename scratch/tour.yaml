@@ -1,4 +1,4 @@
-at: f9e6cbd697aa50d429550f559ea5f4ff4121ab32
+at: fc5a407bb5028551c6aa610c3153490566bab9f2
 first:
   - path: docs/work.md
     why: Pause and resume from the saved step
@@ -35,7 +35,7 @@ first:
   - path: rust/loopflow-execution/src/ops/task/run_recovery.rs
     why: Recheck pause before counting and restarting a carrier
   - path: rust/loopflow-storage/src/sqlite/task_details.rs
-    why: Read Graph names, steps and Working groups together
+    why: Batch Graph names, steps, Working groups and resume checks
   - path: rust/loopflow-storage/src/work/selection.rs
     why: Select a held Task in either board section
   - path: rust/loopflow-storage/src/sqlite/selections.rs
@@ -60,6 +60,8 @@ first:
     why: Preview Auto, Run, Interrupt and pause until read
   - path: swift/Loopflow/Design/TaskWorkflowControls.swift
     why: The C1 track: transport, steps, chip, Auto, ✓
+  - path: swift/Loopflow/Design/WorkflowLine.swift
+    why: Keep only outline steps and Dashboard tile sentences
   - path: swift/LoopflowMac/Views/TaskWorkView.swift
     why: Unpause from every Mac menu before opening the workspace
   - path: swift/LoopflowiOS/TaskWorkspaceView.swift

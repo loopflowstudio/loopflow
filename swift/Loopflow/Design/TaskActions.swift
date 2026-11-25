@@ -13,7 +13,6 @@ public struct TaskActions: Equatable {
     public let steps: [String]
     /// The Graph's top-level steps as the workflow track draws them.
     public let track: [TaskGraph.Step]
-    public let tones: [WorkflowLine.Tone]
     /// Where the control's label stands in the track: the step it replaces,
     /// or `track.count` past the last one at the end.
     public let chip: Int
@@ -61,21 +60,18 @@ public struct TaskActions: Equatable {
 
         if let graph {
             track = graph.steps
-            tones = WorkflowLine.tones(graph)
             let ended = graph.position == .at(step: TaskGraph.end) || control?.action == .done
             chip = graph.currentStep ?? (ended ? graph.steps.count : 0)
             sentence = graph.sentence
         } else {
             track = outline?.steps ?? []
-            tones = Array(repeating: control?.action == .done ? .done : .ahead, count: track.count)
             chip = control?.action == .done ? track.count : 0
             sentence = outline?.sentence
         }
 
         var seen = Set<String>()
-        let stages = graph?.steps ?? outline?.steps ?? []
         let interactive = graph?.interactiveSteps ?? outline?.interactiveSteps ?? []
-        let choices = graph == nil && outline == nil ? [] : ["start"] + stages.map(\.name) + interactive.map(\.name)
+        let choices = graph == nil && outline == nil ? [] : ["start"] + track.map(\.name) + interactive.map(\.name)
         steps = choices.filter { seen.insert($0).inserted }
     }
 

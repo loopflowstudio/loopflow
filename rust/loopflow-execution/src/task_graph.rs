@@ -446,7 +446,7 @@ pub fn step_name(step: &ConcreteStep) -> String {
     }
 }
 
-/// The left button and visible label of the Task's split workflow control.
+/// The workflow track's primary action and current-step chip label.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkflowControl {
     pub action: WorkflowAction,

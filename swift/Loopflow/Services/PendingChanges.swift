@@ -108,7 +108,7 @@ public final class PendingChanges {
     /// The workflow control's change the Machine is settling, or answered with
     /// no reading showing it yet. A second click waits for that reading.
     public func controlRequest(for issue: String) -> String? {
-        for change in changes where change.command.task == issue {
+        for change in changes.reversed() where change.command.task == issue {
             switch change.command {
             case .pause: return Self.pausing
             case .unpause: return Self.unpausing
@@ -192,17 +192,15 @@ public final class PendingChanges {
     /// Notice says "LOO-5 Keep theirs requested" in the click and the Machine's
     /// readings show the rest. A refusal posts over it.
     public func request(_ name: String, subject: String, write: ServedWrite, notices: NoticeCenter,
-                        undo: Notice.Action? = nil, answered: @escaping @MainActor () async -> Void = {},
-                        refused: @escaping @MainActor () -> Void = {}) {
+                        answered: @escaping @MainActor () async -> Void = {}) {
         let requestID = UUID().uuidString
-        notices.post(Notice("\(subject) \(name) requested", key: requestID, action: undo))
+        notices.post(Notice("\(subject) \(name) requested", key: requestID))
         Task {
             do {
                 _ = try await deliver(write, requestID: requestID)
                 await answered()
             } catch {
                 notices.post(Notice("\(subject) \(name) couldn't be requested: \(message(for: error))", key: requestID))
-                refused()
             }
         }
     }

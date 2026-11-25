@@ -328,13 +328,27 @@ pub fn task_detail_facts(
     tasks: &[&Task],
     merges: fn(&[String]) -> bool,
 ) -> StoreResult<loopflow_storage::sqlite::TaskDetailFacts> {
+    use loopflow_storage::sqlite::{GraphDetail, GraphDetailInput};
     let mut cached = crate::task_graph::cached_merges(merges);
-    let mut ships = |graph: &str, step: &str, cursor: Option<&str>, auto| -> StoreResult<bool> {
-        let graph: crate::task_graph::CapturedGraph = serde_json::from_str(graph)?;
-        let cursor = cursor.map(serde_json::from_str).transpose()?;
-        Ok(graph.ships_before_review(step, cursor.as_ref(), auto, &mut cached))
+    let mut graph_detail = |input: GraphDetailInput<'_>| -> StoreResult<GraphDetail> {
+        let graph: crate::task_graph::CapturedGraph = serde_json::from_str(input.graph)?;
+        let cursor = input.cursor.map(serde_json::from_str).transpose()?;
+        if input.paused {
+            Ok(GraphDetail::ResumesOnUnpause(graph.resumes_on_unpause(
+                input.step,
+                cursor.as_ref(),
+                input.auto,
+            )))
+        } else {
+            Ok(GraphDetail::Ships(graph.ships_before_review(
+                input.step,
+                cursor.as_ref(),
+                input.auto,
+                &mut cached,
+            )))
+        }
     };
-    let (local, mut facts) = store.saved_task_detail_facts(tasks, &mut ships)?;
+    let (local, mut facts) = store.saved_task_detail_facts(tasks, &mut graph_detail)?;
     let mut names = machine_names(store)?;
     names.insert(local, local_label());
     for ownership in facts.ownership.values_mut() {

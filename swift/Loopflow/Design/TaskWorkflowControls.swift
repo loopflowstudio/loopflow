@@ -69,8 +69,7 @@ public struct TaskWorkflowControls<Items: View>: View {
     }
 
     private func stepButton(_ step: TaskGraph.Step, index: Int) -> some View {
-        let tone = actions.tones.indices.contains(index) ? actions.tones[index] : .ahead
-        return Button { run(step.name) } label: {
+        Button { run(step.name) } label: {
             HStack(spacing: Spacing.xxs) {
                 if step.interactive {
                     Image(systemName: "person.fill").font(Typography.meta)
@@ -78,7 +77,7 @@ public struct TaskWorkflowControls<Items: View>: View {
                 }
                 Text(step.name)
             }
-            .foregroundStyle(tone == .done ? palette.textSecondary : palette.textTertiary)
+            .foregroundStyle(index < actions.chip ? palette.textSecondary : palette.textTertiary)
             .padding(.horizontal, 4)
             .frame(height: transport)
             .contentShape(Rectangle())

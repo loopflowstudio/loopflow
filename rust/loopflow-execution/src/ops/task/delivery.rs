@@ -365,11 +365,13 @@ pub fn matching_task_pr_merge_request(
         }
         let branch = current_branch(repo)?;
         let head = rev_parse(repo, "HEAD")?;
-        let pr = store
+        let Some(pr) = store
             .active_task_pr(&task.id)
             .await
             .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
-            .ok_or_else(|| task_error(format!("Task {} has no active PR", task.identifier)))?;
+        else {
+            return Ok(None);
+        };
         if pr.is_settled() || branch.as_deref() != Some(pr.branch.as_str()) {
             return Ok(None);
         }

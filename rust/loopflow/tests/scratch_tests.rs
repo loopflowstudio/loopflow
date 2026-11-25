@@ -64,8 +64,9 @@ fn clear_uses_the_diff_and_preserves_unrelated_index_and_working_edits() {
     );
     assert!(repo.path().join("scratch/untracked.md").exists());
     let head = repo.head_sha();
+    let base = loopflow_execution::ops::scratch::default_base(repo.path()).unwrap();
     assert_eq!(
-        loopflow_execution::ops::scratch::clear(repo.path()).unwrap(),
+        loopflow_execution::ops::scratch::clear(repo.path(), &base).unwrap(),
         0
     );
     assert_eq!(repo.head_sha(), head);
@@ -88,8 +89,9 @@ fn clear_preserves_existing_files_moved_into_scratch() {
     repo.stage_all();
     repo.commit("Move existing documents and add notes");
 
+    let base = loopflow_execution::ops::scratch::default_base(repo.path()).unwrap();
     assert_eq!(
-        loopflow_execution::ops::scratch::clear(repo.path()).unwrap(),
+        loopflow_execution::ops::scratch::clear(repo.path(), &base).unwrap(),
         1
     );
     assert_eq!(

@@ -3298,7 +3298,8 @@ fn execute_command(
         Some(Commands::Scratch {
             cmd: loopflow::lf::ScratchCommand::Clear,
         }) => in_repo_runtime(args, |repo| {
-            let count = loopflow_execution::ops::scratch::clear(repo)?;
+            let base = loopflow_execution::ops::scratch::default_base(repo)?;
+            let count = loopflow_execution::ops::scratch::clear(repo, &base)?;
             println!("Cleared {count} added scratch files.");
             Ok(())
         }),

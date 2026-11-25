@@ -110,8 +110,9 @@ fn stacked_checkout_preserves_inherited_scratch_and_edits() {
             .unwrap()
             .success());
     }
+    let base = loopflow_execution::ops::scratch::default_base(worktree).unwrap();
     assert_eq!(
-        loopflow_execution::ops::scratch::clear(worktree).unwrap(),
+        loopflow_execution::ops::scratch::clear(worktree, &base).unwrap(),
         1
     );
     assert_eq!(

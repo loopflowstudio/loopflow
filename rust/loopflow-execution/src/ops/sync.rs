@@ -64,7 +64,7 @@ pub struct SyncPlan {
 struct SyncExpectation {
     strategy: SyncStrategy,
     stacked: bool,
-    require_changes: bool,
+    delivery: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -257,7 +257,7 @@ fn start_owned_sync(
     repo: &Path,
     options: &SyncOptions,
     plan: Option<&SyncPlan>,
-    require_changes: bool,
+    delivery: bool,
     progress: &impl Progress,
 ) -> OpsResult<SyncVerification> {
     // Fetch and plan before taking the fence: a stalled network fetch must
@@ -280,7 +280,7 @@ fn start_owned_sync(
     let expected = SyncExpectation {
         strategy: plan.strategy.clone(),
         stacked: options.fork_base.is_some(),
-        require_changes,
+        delivery,
     };
     validate_fork_base(repo, options.fork_base.as_deref())?;
 
@@ -289,7 +289,7 @@ fn start_owned_sync(
         return finish_sync(repo, operation, &expected, options.push);
     }
     if matches!(plan.strategy, SyncStrategy::Noop) {
-        return finish_sync(repo, operation, &expected, false);
+        return finish_sync(repo, operation, &expected, options.push && expected.delivery);
     }
 
     progress.status(&format!("Merging {}...", options.onto));
@@ -307,6 +307,11 @@ fn start_owned_sync(
 
     if continue_reused_resolutions(repo, progress)? {
         progress.status("Reused recorded conflict resolution");
+        return finish_sync(repo, operation, &expected, options.push);
+    }
+
+    if expected.delivery && continue_delivery_scratch_conflicts(repo, &target_sha, progress)? {
+        progress.status("Dropped branch-added scratch conflicts");
         return finish_sync(repo, operation, &expected, options.push);
     }
 
@@ -331,6 +336,51 @@ fn continue_reused_resolutions(repo: &Path, progress: &impl Progress) -> OpsResu
     Ok(continue_merge(repo, None)?.success)
 }
 
+/// Drop unmerged branch-added scratch paths that the integration target does
+/// not carry when no real conflict remains. Keeps scratch on disk whenever any
+/// non-scratch or target-owned path still needs `sync-conflicts`.
+fn continue_delivery_scratch_conflicts(
+    repo: &Path,
+    target_sha: &str,
+    progress: &impl Progress,
+) -> OpsResult<bool> {
+    let remaining = rerere_remaining(repo)?;
+    if remaining.is_empty() {
+        return Ok(false);
+    }
+    let merge_base = crate::git::merge_base(repo, "HEAD", target_sha)?;
+    let added = crate::git::scratch::added(repo, &merge_base, "HEAD")?;
+    let mut scratch_paths = Vec::with_capacity(remaining.len());
+    for path in &remaining {
+        let Some(path_str) = path.to_str() else {
+            return Ok(false);
+        };
+        if !added.iter().any(|candidate| candidate == path_str)
+            || path_exists_in_tree(repo, target_sha, path_str)?
+        {
+            return Ok(false);
+        }
+        scratch_paths.push(path_str);
+    }
+    let mut args = vec!["--literal-pathspecs", "rm", "-f", "--"];
+    args.extend(scratch_paths);
+    crate::git::git_stdout(repo, &args)?;
+    progress.status("Completing merge after dropping branch-added scratch conflicts...");
+    Ok(continue_merge(repo, None)?.success)
+}
+
+fn path_exists_in_tree(repo: &Path, rev: &str, path: &str) -> OpsResult<bool> {
+    let spec = format!("{rev}:{path}");
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["cat-file", "-e", &spec])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()?;
+    Ok(status.success())
+}
+
 fn finish_sync(
     repo: &Path,
     operation: SyncOperation,
@@ -350,7 +400,7 @@ fn finish_sync(
         // but it must cross the same Task settlement fence first.
         let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
         crate::ops::task::clear_task_pr_merge_before_head_mutation(repo, false, &|_| {})?;
-        push_synced_branch(repo, &verification.branch)?;
+        push_synced_branch(repo, &verification.branch, &verification.head)?;
         crate::ops::commit::verify_remote_branch_head(
             repo,
             &verification.branch,
@@ -379,13 +429,14 @@ fn verify_sync(
             conflicts.lines().collect::<Vec<_>>().join(", ")
         )));
     }
-    if expected.require_changes
-        && rev_parse(repo, "HEAD^{tree}")? == rev_parse(repo, &format!("{target_sha}^{{tree}}"))?
-    {
-        return Err(OpsError::Message(
-            "no authored changes remain after integration; refusing to publish an empty PR"
-                .to_string(),
-        ));
+    if expected.delivery {
+        crate::ops::scratch::clear(repo, target_sha)?;
+        if rev_parse(repo, "HEAD^{tree}")? == rev_parse(repo, &format!("{target_sha}^{{tree}}"))? {
+            return Err(OpsError::Message(
+                "no authored changes remain after integration; refusing to publish an empty PR"
+                    .to_string(),
+            ));
+        }
     }
     Ok(SyncVerification {
         branch: owner.branch.clone(),
@@ -491,9 +542,12 @@ fn revalidate_start(repo: &Path, owner: &GitOperationOwner, plan: &SyncPlan) -> 
     Ok(())
 }
 
-fn push_synced_branch(repo: &Path, branch: &str) -> OpsResult<()> {
+fn push_synced_branch(repo: &Path, branch: &str, expected_head: &str) -> OpsResult<()> {
     let reference = format!("refs/heads/{branch}");
     let remote = git(repo, &["ls-remote", "--heads", "origin", &reference])?;
+    if remote.split_whitespace().next() == Some(expected_head) {
+        return Ok(());
+    }
     let lease = if remote.trim().is_empty() {
         // Deletion leaves a stale tracking ref. Require absence atomically so a
         // concurrently recreated branch cannot be overwritten.

@@ -2671,3 +2671,403 @@ esac
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+fn install_push_log_hook(bare: &std::path::Path, push_log: &std::path::Path) {
+    let hook = bare.join("hooks/update");
+    fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$1\" >> '{}'\n",
+            push_log.display()
+        ),
+    )
+    .expect("write update hook");
+    let mut permissions = fs::metadata(&hook).expect("hook metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&hook, permissions).expect("make hook executable");
+}
+
+fn remote_scratch_files(bare: &std::path::Path, branch: &str) -> Vec<String> {
+    let output = Command::new("git")
+        .arg("--git-dir")
+        .arg(bare)
+        .args([
+            "ls-tree",
+            "-r",
+            "--name-only",
+            &format!("refs/heads/{branch}"),
+            "scratch/",
+        ])
+        .output()
+        .expect("list remote scratch files");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+#[test]
+fn delivery_clears_scratch_after_conflict_resolution_and_pushes_once() {
+    for mode in ["submit", "land"] {
+        let home = tempfile::tempdir().unwrap();
+        let repo = TestRepo::new();
+        repo.create_file("scratch/.gitkeep", "");
+        repo.create_file("conflict.txt", "base\n");
+        repo.create_file(".lf/config.yaml", "agent: claude\n");
+        repo.create_file(".gitignore", ".lf/prompts/\n.lf/tmp/\n");
+        repo.stage_all();
+        repo.commit("base");
+        repo.push();
+
+        repo.create_branch("feature");
+        repo.create_file("conflict.txt", "feature line\n");
+        repo.create_file("scratch/plan.md", "plan readable during conflict\n");
+        repo.stage_all();
+        repo.commit("feature work and plan");
+        push_branch(&repo, "feature");
+
+        repo.checkout("main");
+        repo.create_file("conflict.txt", "main line\n");
+        repo.stage_all();
+        repo.commit("main work");
+        repo.push();
+        repo.checkout("feature");
+
+        let push_log = repo.bare_path().join(format!("push-{mode}.log"));
+        install_push_log_hook(repo.bare_path(), &push_log);
+
+        let resolver = r#"#!/usr/bin/python3
+import json, pathlib, subprocess, sys
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+_ = json.loads(sys.stdin.readline())
+print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'fixture-thread'}), flush=True)
+plan = pathlib.Path('scratch/plan.md')
+assert plan.is_file() and plan.read_text() == 'plan readable during conflict\n', 'scratch/plan.md must remain readable during conflict resolution'
+pathlib.Path('conflict.txt').write_text('feature and main\n')
+pathlib.Path('scratch/notes.md').write_text('resolver scratch note\n')
+subprocess.run(['git', 'add', 'conflict.txt', 'scratch/notes.md'], check=True)
+subprocess.run(['git', '-c', 'core.editor=true', 'commit', '--no-edit'], check=True, stdout=sys.stderr)
+print(json.dumps({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'resolved'}]}}), flush=True)
+print(json.dumps({'type': 'result', 'uuid': 'fixture-result', 'session_id': 'fixture-thread', 'subtype': 'success', 'is_error': False, 'result': 'resolved'}), flush=True)
+for _ in sys.stdin:
+    pass
+"#;
+        let gh_log = repo.bare_path().join(format!("gh-{mode}.log"));
+        let gh = gh_land_script(gh_log.to_string_lossy().as_ref());
+        let _env = EnvGuard::with_lf_home(
+            &[
+                ("gh", gh.as_str()),
+                ("claude", resolver),
+                ("open", noop_open_script()),
+            ],
+            home.path(),
+        );
+
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_lf"));
+        for (name, _) in
+            std::env::vars_os().filter(|(name, _)| name.to_string_lossy().starts_with("LF_"))
+        {
+            cmd.env_remove(name);
+        }
+        let args: &[&str] = if mode == "submit" {
+            &[
+                "pr",
+                "submit",
+                "--strict",
+                "--title",
+                "Resolved conflict",
+                "--body",
+                "Cleared after conflict resolution",
+            ]
+        } else {
+            &[
+                "land",
+                "--strict",
+                "--title",
+                "Resolved conflict",
+                "--body",
+                "Cleared after conflict resolution",
+            ]
+        };
+        let output = cmd
+            .args(args)
+            .current_dir(repo.path())
+            .env("LF_HOME", home.path())
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{mode} failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            remote_scratch_files(repo.bare_path(), "feature"),
+            vec!["scratch/.gitkeep"],
+            "{mode}: remote head must have neither plan.md nor notes.md"
+        );
+        let merged_conflict = Command::new("git")
+            .arg("--git-dir")
+            .arg(repo.bare_path())
+            .args(["show", "refs/heads/feature:conflict.txt"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&merged_conflict.stdout),
+            "feature and main\n"
+        );
+        assert_eq!(
+            fs::read_to_string(&push_log)
+                .expect("one push")
+                .lines()
+                .collect::<Vec<_>>(),
+            vec!["refs/heads/feature"],
+            "{mode}: delivery must push the clean head once"
+        );
+    }
+}
+
+#[test]
+fn stacked_child_land_drops_inherited_scratch_conflict_without_agent_and_pushes_once() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    repo.create_file("scratch/.gitkeep", "");
+    repo.create_file(".lf/config.yaml", "agent: claude\n");
+    repo.create_file(".gitignore", ".lf/prompts/\n.lf/tmp/\n");
+    repo.stage_all();
+    repo.commit("base");
+    repo.push();
+
+    let git_in = |dir: &std::path::Path, args: &[&str]| -> String {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+
+    let parent_path = repo.create_named_worktree("parent");
+    fs::write(parent_path.join("parent.txt"), "parent work\n").unwrap();
+    fs::write(parent_path.join("scratch/plan.md"), "parent plan\n").unwrap();
+    git_in(&parent_path, &["add", "."]);
+    git_in(&parent_path, &["commit", "-m", "parent work and plan"]);
+    git_in(&parent_path, &["push", "-u", "origin", "parent"]);
+    let parent_head = git_in(&parent_path, &["rev-parse", "HEAD"]);
+
+    let child_dir = tempfile::tempdir().unwrap();
+    let child_path = child_dir.path().join("child");
+    git_in(
+        repo.path(),
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "child",
+            child_path.to_str().unwrap(),
+            &parent_head,
+        ],
+    );
+    fs::write(child_path.join("scratch/plan.md"), "child edited plan\n").unwrap();
+    fs::write(child_path.join("scratch/child.md"), "child own note\n").unwrap();
+    fs::write(child_path.join("child.txt"), "child work\n").unwrap();
+    git_in(&child_path, &["add", "."]);
+    git_in(&child_path, &["commit", "-m", "child edits plan and adds work"]);
+    git_in(&child_path, &["push", "-u", "origin", "child"]);
+
+    // Parent squash-lands onto main without scratch/plan.md.
+    repo.create_file("parent.txt", "parent work\n");
+    repo.stage_all();
+    repo.commit("Squash parent without scratch");
+    let target_sha = repo.head_sha();
+    repo.push();
+
+    let agent_canary = repo.bare_path().join("agent-ran");
+    let failing_agent = format!(
+        "#!/bin/sh\ntouch '{}'\necho 'unexpected sync-conflicts agent launch' >&2\nexit 1\n",
+        agent_canary.display()
+    );
+    let gh_log = repo.bare_path().join("gh-stacked.log");
+    let gh = gh_land_script(gh_log.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(
+        &[
+            ("gh", gh.as_str()),
+            ("claude", failing_agent.as_str()),
+            ("open", noop_open_script()),
+        ],
+        home.path(),
+    );
+
+    let parent = register_task_with_pr(home.path(), &parent_path, "parent", &parent_head);
+    let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
+    rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET external_issue_id=NULL WHERE id=?1",
+            [child.id.as_str()],
+        )
+        .unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut parent_pr = parent.pr.clone();
+    parent_pr.publication = Some(loopflow_execution::work::task::PrPublication {
+        requested_at: parent_pr.created_at,
+        presentation: None,
+        github: Some(loopflow_execution::work::task::GithubPr {
+            number: 41,
+            url: "https://github.com/fixture/repo/pull/41".into(),
+            head_sha: Some(parent_head.clone()),
+        }),
+        merge: None,
+    });
+    runtime
+        .block_on(parent.store.update_task_pr(&parent_pr))
+        .unwrap();
+    runtime
+        .block_on(
+            parent
+                .store
+                .stack_task_placement(&child, &parent.pr.id, &parent_head),
+        )
+        .unwrap();
+    parent_pr.merge_commit = Some(target_sha.clone());
+    runtime
+        .block_on(parent.store.update_task_pr(&parent_pr))
+        .unwrap();
+
+    let push_log = repo.bare_path().join("push-stacked.log");
+    install_push_log_hook(repo.bare_path(), &push_log);
+
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_lf"));
+    for (name, _) in
+        std::env::vars_os().filter(|(name, _)| name.to_string_lossy().starts_with("LF_"))
+    {
+        cmd.env_remove(name);
+    }
+    let output = cmd
+        .args([
+            "land",
+            "--strict",
+            "--title",
+            "Stacked child",
+            "--body",
+            "Drops inherited scratch conflict mechanically",
+        ])
+        .current_dir(&child_path)
+        .env("LF_HOME", home.path())
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "stacked land failed:\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        !agent_canary.exists()
+            && !stdout.contains("Launching sync agent")
+            && !stderr.contains("Launching sync agent"),
+        "stacked scratch conflict must resolve without launching an agent"
+    );
+    assert_eq!(
+        remote_scratch_files(repo.bare_path(), "child"),
+        vec!["scratch/.gitkeep"]
+    );
+    assert_eq!(
+        fs::read_to_string(&push_log)
+            .expect("one push")
+            .lines()
+            .collect::<Vec<_>>(),
+        vec!["refs/heads/child"]
+    );
+    let updated_child = runtime
+        .block_on(parent.store.get_task(&child.id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(updated_child.base_commit, target_sha);
+    assert_eq!(updated_child.parent_pr_id, None);
+}
+
+#[test]
+fn noop_delivery_clears_committed_scratch_and_pushes_once() {
+    let gh = gh_no_pr_script();
+    let _env = EnvGuard::new(&[("gh", &gh)]);
+    let repo = TestRepo::new();
+    repo.create_file("scratch/.gitkeep", "");
+    repo.stage_all();
+    repo.commit("track scratch");
+    repo.push();
+
+    let persistent = loopflow_execution::git::worktrees::ensure_agent_worktree(
+        repo.path(),
+        loopflow_execution::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
+    )
+    .unwrap();
+    fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();
+    fs::write(
+        persistent.path.join("scratch/committed-note.md"),
+        "clear before push\n",
+    )
+    .unwrap();
+    loopflow_execution::ops::commit_selected(
+        &persistent.path,
+        &["memory.md".into(), "scratch/committed-note.md".into()],
+        Some("Memory and committed note"),
+    )
+    .unwrap();
+    fs::write(
+        persistent.path.join("scratch/private.md"),
+        "untracked local note\n",
+    )
+    .unwrap();
+
+    let push_log = repo.bare_path().join("push-noop.log");
+    install_push_log_hook(repo.bare_path(), &push_log);
+
+    submit(
+        &persistent.path,
+        &LandOptions {
+            strict: false,
+            local: false,
+            wait_and_fix: false,
+            worktree: None,
+            commit_message: None,
+            pr_title: Some("Persistent memory".into()),
+            pr_body: Some("Noop delivery clears committed scratch".into()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .unwrap();
+
+    assert_eq!(
+        remote_scratch_files(repo.bare_path(), &persistent.branch),
+        vec!["scratch/.gitkeep"]
+    );
+    assert!(!persistent.path.join("scratch/committed-note.md").exists());
+    assert_eq!(
+        fs::read_to_string(persistent.path.join("scratch/private.md")).unwrap(),
+        "untracked local note\n"
+    );
+    assert_eq!(
+        fs::read_to_string(&push_log)
+            .expect("one push")
+            .lines()
+            .collect::<Vec<_>>(),
+        vec![format!("refs/heads/{}", persistent.branch)]
+    );
+}

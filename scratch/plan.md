@@ -5,7 +5,7 @@ History and 5 Whys: [5whys.md](5whys.md). Concept review: [concept-review.html](
 ## Built & verified at `76ff5e7438` (passes 1–2)
 
 - **Antigravity reopen with waiting steers & Task updates:** `agy --conversation <id> -i "Read the waiting steers and Task updates for this Session."` fires `PreInvocation` before anyone types, claims and stamps steers only inside the hook, and omits `-i` when nothing is waiting. Verified live on real `agy 1.5.16` (pass 1 at `c0b28b7dc6`, pass 2 at `4414e34eb5`).
-- **Required harness interface & unconditional parity tests:** Removed `harness/parity.rs` and the generated README parity table per Jack Heart's direction. `Harness` requires `recognizes_driver`, `caller_session_env`, `sign_in_advice`, `transcript_home`, and `transcript_reader`; `Launcher` requires `capabilities`, `idle_reach`, `classify_failure`, `open`, and `driver`; `Capabilities` has no `Default` and separates `initial_prompt_on_resume: bool` (Codex empty-thread replay) from `reopen_steers: ReopenSteers::{ServerBoundary, PromptHook}`. All behavior tests iterate `HarnessKind::ALL` with narrow inline `TODO` arms only for pre-existing `LOO-1099` and `Task 48edb9`.
+- **Required harness interface & unconditional parity tests:** Removed `harness/parity.rs` and the generated README parity table per Jack Heart's direction. `Harness` requires `recognizes_driver`, `caller_session_env`, `sign_in_advice`, `transcript_home`, and `transcript_reader`; `Launcher` requires `capabilities`, `idle_reach`, `classify_failure`, `open`, and `driver`; `Capabilities` has no `Default` and separates `initial_prompt_on_resume: bool` (Codex empty-thread replay) from `reopen_steers: ReopenSteers::{ServerBoundary, PromptHook}`. All behavior tests iterate `HarnessKind::ALL` with one narrow inline `TODO` arm left, for pre-existing `Task 48edb9` (headless questions); the `LOO-1099` arm went in Pass 4.
 - **Harness-owned idle-wake endpoints:** `sqlite/steers.rs::idle_conversation_candidates` returns raw `IdleCandidate` rows (`INDEXED BY agent_sessions_unended_agent`, 3.63 ms for 200 unfinished rows / 0.035 ms for one session); `loopflow-execution/src/steer.rs` routes both server wake (`idle_conversations`, skipping OS process checks when `idle_reach` is `None`) and hook start checks (`is_idle_reachable`) through `Launcher::idle_reach`. Live QA on real Claude, Codex, and Antigravity passed and confirmed this closes a real store hazard (974 Codex rows in `~/.lf/loopflow.db` had `agent_inbox` set; Codex now reads only `agent_endpoint`).
 - **Missing-CLI sandbox alignment:** `task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again` checks the same four system tool dirs (`/opt/homebrew/{bin,sbin}`, `/usr/local/{bin,sbin}`) hidden by `scripts/test_network.py`.
 
@@ -97,6 +97,12 @@ At `ship-review` (2026-11-25), Jack Heart directed folding already-open idle Ant
 - `cargo test -p loopflow --lib lf::commands::context::tests::a_wakeable_start_leaves_waiting_steers_to_the_wake` — 1 passed
 
 Deferred to gate / CI (high local Machine load ~100+): `cargo clippy --all-targets -- -D warnings`, `documented_commands::`, full acceptance matrix, and live QA on real `agy 1.5.17` (open idle wake, Task update / interactive-step handoff, and draft/menu non-clobbering).
+
+## Remaining
+
+- **Live QA on real `agy 1.5.17` (qa / gate):** demo 1 end to end — open idle wake from `lf steer`, a Graph settling at an interactive step, and a draft, `/` menu or model picker left untouched until the prompt is empty. No live run of the Pass 4 path exists yet; only unit fixtures and the 2026-11-25 probes.
+- **Small shape fix (compress):** `server/wake.rs::wake` handles `IdleReach::Terminal` in an early `if let` and then needs `unreachable!("handled above")` in the later match; fold it into one match on `reach`.
+- Clippy, `documented_commands::` and the acceptance list below were not run locally (Machine load); gate runs them.
 
 ## Acceptance at gate
 

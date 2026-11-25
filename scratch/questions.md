@@ -4,9 +4,9 @@
   - `"i would rather make it harder to add a harnes if it makes it harder to miss imortant behavior. when i add a harness, i want it to have all the good stuff"`
   - `"1. Just remove the table. Instead, just make sure that all behaviors are asserted to work and testeed  across all harnesses."`
   - `"and that the Harness interface demands full functionality"`
-  Remove `harness/parity.rs` and the `harness/README.md` parity table; put required mechanisms directly on `Harness` / `Launcher` / `Capabilities` and assert every behavior unconditionally across `HarnessKind::ALL`, isolating only the pre-existing gaps (LOO-1099 live `agy` idle wake, Task 48edb9 headless questions) as narrow inline exceptions with no wildcards.
+  Remove `harness/parity.rs` and the `harness/README.md` parity table; put required mechanisms directly on `Harness` / `Launcher` / `Capabilities` and assert every behavior unconditionally across `HarnessKind::ALL`, isolating only pre-existing gaps (now just Task 48edb9 headless questions) as narrow inline exceptions with no wildcards.
 - **Reopen on Antigravity:** Use Antigravity's native interactive prompt (`-i "Read the waiting steers and Task updates for this Session."`) to fire `PreInvocation`, keeping steers unread until the hook prints them. Open UX detail noted in QA: that generic opening line is visible as the first turn in the TUI.
-- **Already-open idle Antigravity wake:** Owned by LOO-1099 (live PTY probes ruled out `?2004h` paste-mode readiness due to trust dialog, slash menu, model picker, and server-adoption draft safety).
+- **Already-open idle Antigravity wake:** back in LOO-1098 (see the ship-review section below); `?2004h` alone is not readiness, so `prompt_ready` reads the whole screen.
 - **Viewer handoff:** Owned by LOO-1097 (live provider TUI behavior).
 
 - `AI_AGENT` stays in the shared markers. A nested launch clears it regardless of which provider set it.

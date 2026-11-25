@@ -53,4 +53,6 @@
 
 > lets do c1 an build it
 
+> ok lg2m ship it
+
 The design changes these quotes asked for are items 1–4 in `plan.md`.

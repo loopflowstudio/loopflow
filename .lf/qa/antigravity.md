@@ -117,9 +117,27 @@ reopen with nothing waiting has no `-i` and adds no `USER_INPUT` row. Wait
 for the answer line before Esc: an Esc while the model still reads the steer
 file interrupts the turn, and the steer still reads `delivered`. `lf comment <task>` names the Task,
 so the server starts the closed conversation itself with the same line.
-While agy is open and idle at an empty prompt, a steer or Task update wakes
-its held terminal with the same line; drafts, `/` menus, model pickers, and
-trust dialogs hold off the wake until the prompt is empty again.
+# Waking an open, idle conversation
+
+`lf task checkout <id> -a agy` starts the Task's conversation in a held
+terminal; attach a PTY viewer that keeps running and takes keys from a file it
+tails (answer `ESC[5n` with `ESC[0n` as well as `ESC[6n`). Once
+`session_activity.yielded` is 1, `lf steer <id> 'reply with one word X'`
+pastes "Read the waiting steers and Task updates for this Session." into the
+terminal within a few seconds, viewed or not; `lf task run <id>` settling at
+an interactive step wakes it the same way. Each wake is one `USER_INPUT` row.
+
+After the first turn agy 1.5.17 draws a dim mode hint in the empty prompt
+(`> Auto mode: edits & safe commands auto-approved (shift+tab to cycle)`),
+cursor parked before it; later idle prompts are a bare `>`. Steer while the
+hint shows: an earlier build read it as a draft and never woke.
+
+To check the guards, type into the view before steering: a draft (`my draft`),
+`/` (the slash menu), or `/model` then Esc (leaves `/model` as a draft). The
+steer stays `pending` in `lf session steers`; backspacing the prompt empty
+delivers it about 5 s later (2 s keystroke quiet plus the 2 s retry). Enter
+written by the driver did not select from the slash menu, so the model picker
+itself was checked only through the fixture.
 
 # Checking inline steer display
 

@@ -100,8 +100,8 @@ Deferred to gate / CI (high local Machine load ~100+): `cargo clippy --all-targe
 
 ## Remaining
 
-- **Live QA on real `agy 1.5.17` (qa / gate):** demo 1 end to end — open idle wake from `lf steer`, a Graph settling at an interactive step, and a draft, `/` menu or model picker left untouched until the prompt is empty. No live run of the Pass 4 path exists yet; only unit fixtures and the 2026-11-25 probes.
 - Clippy, `documented_commands::` and the acceptance list below were not run locally (Machine load); gate runs them.
+- Live QA of Pass 4 passed on `agy 1.5.17` after one fix (empty prompt showing agy's dim mode hint); see `scratch/qa.html` Pass 4. The model picker screen was checked only in the fixture.
 
 ## Acceptance at gate
 

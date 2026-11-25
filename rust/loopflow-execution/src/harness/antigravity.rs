@@ -561,7 +561,7 @@ pub(crate) fn prompt_ready(terminal: &loopflow_terminal::ghostty_vt::Terminal) -
         return false;
     };
     // Empty single-line prompt box: `───` / `>` / `───`.
-    if bottom != top + 2 || lines[top + 1].trim() != ">" {
+    if bottom != top + 2 || !prompt_empty(lines[top + 1], top + 1, terminal.cursor()) {
         return false;
     }
     let footer = &lines[bottom + 1..];
@@ -576,6 +576,20 @@ pub(crate) fn prompt_ready(terminal: &loopflow_terminal::ghostty_vt::Terminal) -
         && !footer
             .iter()
             .any(|line| blocked.iter().any(|marker| line.contains(marker)))
+}
+
+/// An empty input line is a bare `>`, or `> ` followed by the dim mode hint
+/// `agy` 1.5.17 draws there ("Auto mode: … (shift+tab to cycle)") with the
+/// cursor parked before it. Typed text moves the cursor and replaces the hint.
+fn prompt_empty(line: &str, row: usize, (cursor_x, cursor_y): (u16, u16)) -> bool {
+    let Some(input) = line.trim_end().strip_prefix('>') else {
+        return false;
+    };
+    let input = input.trim();
+    input.is_empty()
+        || (usize::from(cursor_y) == row
+            && usize::from(cursor_x) == line.find('>').unwrap_or(0) + 2
+            && input.ends_with("(shift+tab to cycle)"))
 }
 
 /// Settings for one session that let the TUI start in a worktree lf created
@@ -1060,6 +1074,16 @@ mod tests {
             "\x1b[?2004h\x1b[2J\x1b[H  Antigravity CLI 1.5.17\r\n\r\n{rule}\r\n\x1b[94m>\x1b[m\r\n{rule}\r\n? for shortcuts                                 auto · Gemini 4 Neon · high\r\n"
         );
         assert!(super::prompt_ready(&render(idle.as_bytes())));
+
+        // The mode hint agy draws in an empty prompt, cursor parked before it.
+        let hinted = format!(
+            "\x1b[?2004h\x1b[2J\x1b[H{rule}\r\n\x1b[94m>\x1b[m \x1b[90mAuto mode: edits & safe commands auto-approved (shift+tab to cycle)\x1b[m\r\n{rule}\r\n? for shortcuts   auto · Gemini 4 Neon · high\x1b[2;3H"
+        );
+        assert!(super::prompt_ready(&render(hinted.as_bytes())));
+
+        // The same words typed as a draft leave the cursor after them.
+        let typed_hint = hinted.replace("\x1b[2;3H", "\x1b[2;70H");
+        assert!(!super::prompt_ready(&render(typed_hint.as_bytes())));
 
         // Without bracketed paste mode enabled, never inject.
         let no_paste = idle.replacen("\x1b[?2004h", "", 1);

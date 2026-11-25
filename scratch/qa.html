@@ -89,3 +89,44 @@ update had delivery receipts. After quitting, a second repository steer
 showed one pending. <code>lf resume --task cfe765</code> answered
 <code>COBALT</code> before any typing and left zero pending. The pane showed
 the answer and the generic reopen prompt, with the original steer body absent.</p>
+
+<h2>Pass 4 · Already-open idle Antigravity wake (live, agy 1.5.17)</h2>
+<p>Branch <code>lf</code> at <code>dba28ca8a4</code> plus this run's fix. Private <code>LF_HOME=/tmp/lfq4/home</code>, repository with Graph <code>- cmd: help task</code> → <code>- interactive: demo</code>. Conversation started by <code>lf task checkout 841884 -a agy</code>, viewed with <code>lf resume --task</code> in a Python PTY whose keys come from a control file.</p>
+<table><tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>1. First idle prompt after the opening turn, <code>lf steer</code></td><td class="gap">broke: steer stayed pending 40 s+. Fixed, then works</td></tr>
+<tr><td>2. Server restart with that steer pending: recovery reopens <code>agy --conversation … -i</code>, answers <code>SAFFRON</code></td><td class="ok">works</td></tr>
+<tr><td>3. Open idle, <code>lf steer</code>: answers <code>JUNIPER</code> 4 s later, receipt delivered</td><td class="ok">works</td></tr>
+<tr><td>4. Draft <code>my draft</code> typed, steer: pending after 25 s, draft untouched; backspace to empty → <code>OCHRE</code> 7 s later</td><td class="ok">works</td></tr>
+<tr><td>5. <code>/</code> slash menu open, steer: pending after 20 s; Esc + backspace → <code>CERULEAN</code> 5 s later</td><td class="ok">works</td></tr>
+<tr><td>6. <code>/model</code> left as a draft after Esc: pending for 90 s; cleared → <code>VERMILION</code> 5 s later</td><td class="ok">works</td></tr>
+<tr><td>7. <code>lf task run</code> while idle: the Graph settles at <code>demo</code> and the conversation reports "advanced to the interactive demo step" unprompted</td><td class="ok">works</td></tr>
+<tr><td>8. No viewer attached, steer: delivered in 1 s; reattaching shows <code>AMBER</code></td><td class="ok">works</td></tr>
+<tr><td>Model picker screen itself</td><td class="gap">not reached: the driver's Enter did not select <code>/model</code> from the menu. Covered by the fixture and the 2026-11-25 probe</td></tr>
+</table>
+<p>Native transcript: 9 <code>USER_INPUT</code> rows, the opening turn, one reopen and one per wake (7). No <code>recording gap</code> or panic in <code>lf.log</code>.</p>
+
+<h3>What broke in scenario 1</h3>
+<p>After its first turn agy 1.5.17 draws a dim hint inside the empty prompt. <code>prompt_ready</code> required the line to be a bare <code>&gt;</code>, so it took the hint for a draft and never pasted:</p>
+<pre>────────────────────────────────────────────────────────────
+\x1b[94m&gt;\x1b[m \x1b[90mAuto mode: edits &amp; safe commands auto-approved (shift+tab to cycle)\x1b[m
+────────────────────────────────────────────────────────────
+? for shortcuts                              auto · Gemini 4 Neon · high
+cursor: column 2 of the prompt row</pre>
+<p>Fix: an input line is also empty when it holds a hint ending <code>(shift+tab to cycle)</code> (all four of agy's mode hints do) and the cursor sits right after <code>&gt; </code>. Typing those same words leaves the cursor after them, which the fixture checks. <code>Terminal::cursor()</code> was still test-only. The plan said it had been opened, but it had not, so production builds now get it too.</p>
+
+<h3>Scenario 4, held then delivered</h3>
+<pre>--- 25 s after the steer, draft in place
+────────────────────────────────────────────────────────────
+&gt; my draft
+────────────────────────────────────────────────────────────
+1 pending
+--- backspaced to empty
+&gt; Read the waiting steers and Task updates for this Session.
+  OCHRE</pre>
+
+<h3>Still open, worst first</h3>
+<ol>
+<li>The hint check matches agy's wording (<code>(shift+tab to cycle)</code>). A future agy with a different hint would stop waking at that prompt: the steer stays pending and is delivered on the next typed turn or reopen. Nothing is lost or clobbered.</li>
+<li>The model picker screen was not reached live (see table).</li>
+<li><code>lf session steers … | head -1</code> panics with "failed printing to stdout: Broken pipe". This is outside this diff.</li>
+</ol>

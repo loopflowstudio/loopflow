@@ -326,7 +326,7 @@ impl Terminal {
         (cols, rows)
     }
 
-    #[cfg(any(test, feature = "test-support"))]
+    /// The cursor's column and row on the active screen.
     pub fn cursor(&self) -> (u16, u16) {
         let x = self
             .data::<u16>(ffi::DATA_CURSOR_X, "cursor_x")
@@ -711,9 +711,7 @@ mod ffi {
     pub const DATA_COLS: i32 = 1;
     pub const DATA_TITLE: i32 = 12;
     pub const DATA_ROWS: i32 = 2;
-    #[cfg(any(test, feature = "test-support"))]
     pub const DATA_CURSOR_X: i32 = 3;
-    #[cfg(any(test, feature = "test-support"))]
     pub const DATA_CURSOR_Y: i32 = 4;
     pub const DATA_ACTIVE_SCREEN: i32 = 6;
     pub const DATA_SCROLLBACK_ROWS: i32 = 15;

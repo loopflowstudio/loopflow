@@ -1,21 +1,21 @@
-at: d3d4485922d7dc9d4eed22e769eb31f8d1b018c7
+at: 05d69ee93f78d225d492a78feed1494c1fe1a197
 first:
   - path: .lf/skills/ci-fix.md
     why: New repo overlay with verified CI check reproductions
   - path: .lf/skills/implement.md
     why: Drops scripts/testing.md attachment; adds inline map and parity rules
   - path: .lf/skills/gate.md
-    why: Adds conditional Rust lint, DTO/iOS parity, and recovery rules
+    why: Adds conditional Rust lint, DTO/iOS parity, and recovery order
   - path: .lf/skills/kickoff.md
     why: Adds seven-surface blast-radius checklist and DESIGN.md reference
   - path: .lf/skills/qa.md
-    why: Adds display-lock preflight; routes CLI/cache notes into .lf/qa/
+    why: Routes Desktop preflight and CLI/cache notes into .lf/qa/
   - path: scripts/testing.md
     why: Slimmed by ~200 lines; links out to build_cache.md
   - path: scripts/build_cache.md
     why: Verbatim move of Builds and Shared compilation cache sections
   - path: .lf/qa/desktop.md
-    why: Display-lock preflight added at top
+    why: Owns display-lock preflight and updates moved Task-setup link
   - path: .lf/qa/served-launches.md
     why: Receives private-Machine Task start notes from qa.md
   - path: .lf/qa/build-cache.md

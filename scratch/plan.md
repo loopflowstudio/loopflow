@@ -21,8 +21,8 @@ changes, so no `golden_prompt` snapshots move.
 - `.lf/skills/kickoff.md`: seven-surface checklist, `DESIGN.md` +
   `design/prototypes/` for UI Tasks.
 - `.lf/skills/qa.md`: private-Machine and build-cache notes moved to
-  `.lf/qa/served-launches.md` and `.lf/qa/build-cache.md`; display-lock
-  preflight in `qa.md` and `.lf/qa/desktop.md`; `.lf/qa/mobile.md` starts with
+  `.lf/qa/served-launches.md` and `.lf/qa/build-cache.md`; links to
+  display-lock preflight in `.lf/qa/desktop.md`; `.lf/qa/mobile.md` starts with
   `Read when`.
 
 ## Findings that explain the approach
@@ -47,9 +47,9 @@ changes, so no `golden_prompt` snapshots move.
 - `head -n 1 .lf/qa/*.md`: every file starts with `Read when `.
 - `cargo test -p loopflow --test integration documented_commands::`: 4 passed.
 - `uv run --managed-python python scripts/check_architecture.py`: pass.
-- Sizes: `scripts/testing.md` 289 L / 17,028 B (was 486 L / ~28 KB);
-  `scripts/build_cache.md` 187 L / 10,515 B; `implement.md` 3,414 B, 0 attached;
-  `ci-fix.md` 2,789 B, 0 attached; `qa.md` 1,918 B (was 3,624 B).
+- Sizes: `scripts/testing.md` 288 L / 17,027 B (was 486 L / ~28 KB);
+  `scripts/build_cache.md` 187 L / 10,515 B; `implement.md` 3,382 B, 0 attached;
+  `ci-fix.md` 2,787 B, 0 attached; `qa.md` 1,399 B (was 3,624 B).
 
 ## Remains
 

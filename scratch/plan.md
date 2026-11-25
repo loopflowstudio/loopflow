@@ -449,6 +449,14 @@ button).
    Swift `ReviewComments` as sole state owner (two-case anchor, clear on
    unmounted send), `ServerClient` raw JSON `Operation` forward,
    `ReviewRenderedView` kept read-only. Swift headless tests.
+   The page side already exists: `runtime.js` posts `ready` (awaits saved
+   state), `sync`, and `operation` (awaits the reply) to
+   `messageHandlers.loopflow` and skips `localStorage` under it. Missing on the
+   page side: an entry point Swift calls to clear a mounted page after
+   `insert(into:)` (nothing assigns a `window.*` hook today) — add it with the
+   Swift handler. Will teach: whether a reply-capable handler plus raw-JSON
+   `ServerClient` send fits without a new `ServerOperation` case.
+   Open shape question for compress: `page_build.rs` is 1434 lines in one file.
 4. **Pending — Skills and docs.** The five skills, `lf help page` alignment,
    `LOOPFLOW.md`, `server/README.md`, goldens, and keeping the pre-written user
    docs in sync with any CLI/behavior adjustments. LOO-1109's own

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>LOO-995 concept review after slice 14</title>
+<title>LOO-995 concept review after slice 15</title>
 <style>
 :root { color-scheme: light dark; --fg:#1d1d1f; --bg:#fbfbfa; --muted:#6b6b70; --line:#dcdcd8; --yes:#1f7a3a; --no:#b3261e; --prop:#0b5cad; --card:#f1f1ee; }
 @media (prefers-color-scheme: dark) { :root { --fg:#ececec; --bg:#17171a; --muted:#a0a0a8; --line:#34343a; --yes:#6fd18f; --no:#ff8a80; --prop:#8ab8ff; --card:#212126; } }
@@ -20,19 +20,19 @@ table { border-collapse: collapse; width: 100%; } td, th { border-top: 1px solid
 </style>
 </head>
 <body>
-<h1>Concept review after slice 14</h1>
-<p>Area: a Wave's one Project across its whole life against the branch base: made with the Wave, moved and renamed with it, made in the tracker by a command, retried, shown while unbound, carried through the upgrade. Slice 14 took Project creation out of sync; this pass reads the area with that in place.</p>
+<h1>Concept review after slice 15</h1>
+<p>Area: a Wave's one Project across its whole life against the branch base: made with the Wave, moved and renamed with it, made in the tracker by a command, retried, shown while unbound, carried through the upgrade. Slice 15 ("1b 2a 3a") gave the retry one verb; this pass reads the area with that in place, before gate ("after that, just ship this").</p>
 
 <h2>One interaction, with its failure</h2>
-<pre>$ lf wave create ledger                 # Linear unreachable
-Error: wave/ledger has no tracker Project yet: … Run `lf wave plan connect ledger` to make it.
+<pre>$ lf wave create ledger                 # tracker unreachable (Linear or Asana)
+Error: wave/ledger has no tracker Project yet: … Run `lf wave create ledger` to make it.
 $ lf wave status ledger
 Project   ledger (local) · started
-          not in Linear yet; `lf wave plan connect ledger` makes it     # same sentence in Desktop (ProjectSummary.unbound)
-                                         # Desktop's 5-minute wave.sync: reads, delivers queued saves, makes nothing
-$ lf task create --wave ledger 'x'      # Linear back: the drain makes ledger's Project, then sends x into it
-$ lf wave plan connect ledger           # or this: makes it, binds it, queues the local order (slice 13)</pre>
-<p>Every path ends with one Linear Project bound by id. Nothing is made for a Wave nobody acted on: upgraded dormant <code>engbot</code> stays local until someone connects it or files a Task into it.</p>
+          not in Linear yet; `lf wave create ledger` makes it     # same sentence in Desktop (ProjectSummary.unbound)
+                                         # Desktop's 5-minute wave.sync: reads, delivers queued saves, makes no Project of its own
+$ lf task create --wave ledger 'x'      # tracker back: the drain makes ledger's Project, then sends x into it (2a)
+$ lf wave create ledger                 # or this: makes it, binds it, queues the local order; no second commit</pre>
+<p>QA's thirteenth run (<code>scratch/qa.html</code>) saw this sequence in Linear, Asana and no-tracker repositories, on the CLI and served <code>wave.create</code>/<code>wave.sync</code>.</p>
 
 <h2>Do the concepts line up?</h2>
 <table>
@@ -40,29 +40,27 @@ $ lf wave plan connect ledger           # or this: makes it, binds it, queues th
 <tr><td>A Wave has one Project; its Tasks are in it</td><td><code>held_wave_project_in</code>, <code>project_of_wave</code>, <code>tasks.project_id</code></td><td class="yes">yes</td><td>— (unique index staged to LOO-1089)</td></tr>
 <tr><td>Moving a Task to a Wave moves it to that Wave's Project</td><td>one move rule; <code>task_project</code> field edit</td><td class="yes">yes</td><td>—</td></tr>
 <tr><td>Renaming / removing a Wave renames / retires its Project</td><td><code>relocate_waves</code>, <code>retire_wave_in</code></td><td class="yes">yes</td><td>—</td></tr>
-<tr><td>Creating a Wave makes its tracker Project</td><td><code>wave_lifecycle::add</code> → <code>tracker::create_wave_project</code></td><td class="yes">yes</td><td>—</td></tr>
-<tr><td>Sync refreshes; it doesn't make things</td><td><code>planning_sync::refresh_wave</code></td><td class="yes">yes</td><td>Its doc comment says "never makes a tracker Project"; its drain does, for a Project a queued Task names. True to intent (the Task was filed), loose in wording.</td></tr>
+<tr><td>Creating a Wave makes its tracker Project; creating it again finishes the job</td><td><code>wave_lifecycle::add</code> → <code>tracker::create_wave_project</code></td><td class="yes">yes</td><td>—</td></tr>
+<tr><td>"Make my Wave's Project in the tracker" — one action</td><td><code>make_project_command(wave)</code> = <code>lf wave create &lt;wave&gt;</code></td><td class="yes">yes</td><td>Was "no" after slice 14 (two verbs by tracker). Now one constant format; it could be inlined, not worth a pass.</td></tr>
+<tr><td>Sync refreshes; it doesn't make things on its own</td><td><code>planning_sync::refresh_wave</code></td><td class="yes">yes</td><td>— (comment now names the drain's exception)</td></tr>
+<tr><td>Attach an existing Linear Project</td><td><code>lf wave plan connect &lt;wave&gt; &lt;project&gt;</code></td><td class="yes">yes</td><td>Connect with no Project still makes one in Linear: a second maker, unnamed in messages. In an Asana repository it asks for a Linear login (questions.md). Connect is Linear's verb; both are as chosen.</td></tr>
 <tr><td>Reordering reaches the tracker, bound or not</td><td>binding queues the local order (slice 13)</td><td class="yes">yes</td><td>—</td></tr>
 <tr><td>An unbound Project says so, on every surface</td><td><code>ProjectSummary.unbound</code>, <code>tracker::unbound_project</code></td><td class="yes">yes</td><td>—</td></tr>
-<tr><td>"Make my Wave's Project in the tracker" — one action</td><td><code>tracker::make_project_command</code>: Linear → <code>lf wave plan connect</code>, Asana → <code>lf wave create</code></td><td class="no">no</td><td>One action, two verbs chosen by tracker. <code>lf wave create &lt;wave&gt;</code> on a live Wave already makes an unbound Project in either tracker, so the branch exists only to name connect for Linear.</td></tr>
 <tr><td>An upgraded store keeps pending deliveries</td><td><code>remove_chapters.sql</code> dropped→kept map (slice 8)</td><td class="yes">yes</td><td>—</td></tr>
 </table>
 
-<h2>The one mismatch</h2>
+<h2>Biggest remaining mismatch</h2>
 <div class="cols">
-<div class="now"><p><code>make_project_command</code> matches on the tracker. Linear's retry runs the connect flow (Team claim, config write check, inventory refresh) to make one Project; Asana's reruns create, because connect would move the repository to Linear.</p></div>
-<div class="prop"><p>Name <code>lf wave create &lt;wave&gt;</code> everywhere: it is idempotent for a live Wave and makes only what is missing. <code>make_project_command</code> becomes a constant format, connect stays Linear's "attach a Linear Project" verb. Small: one function and the message assertions in four tests.</p></div>
+<div class="now"><p>Connect is two actions under one verb: attach a named Linear Project, or (no Project named) make one. The second duplicates <code>lf wave create</code> for Linear only.</p></div>
+<div class="prop"><p>Not proposed here. Narrowing connect to attach-only is a CLI shape change outside this Task's ask, and the answer "1b" kept connect as Linear's setup verb. Left on the page for whoever revisits connect.</p></div>
 </div>
-<p>Not taken in this pass: it is a naming choice already listed for review (plan Remains 4), it changes no state or recovery, and connect works as named. Recommended for gate if the reviewer agrees.</p>
 
 <h2>Outcome</h2>
-<p>The concepts and the code line up apart from the retry verb above. No further implement pass: advance to gate.</p>
+<p>Nothing to change. The concepts and the code line up; advance to gate (plan Remains 1–2).</p>
 
 <h2>Questions</h2>
 <ol>
-<li>Retry verb for an unbound Project: (a) as built, connect for Linear and create for Asana; (b) <code>lf wave create &lt;wave&gt;</code> for both.</li>
-<li>A queued Task makes its unbound Project during any drain, including Desktop's planning clock: (a) keep, the Task was filed to reach the tracker; (b) hold the Task with "not in Linear yet" until a maker runs.</li>
-<li>Tracker down during <code>lf wave create</code> leaves the Wave recorded with an unbound Project (slice 12 choice): (a) keep; (b) roll back the Wave.</li>
+<li>Later, not this Task: <code>lf wave plan connect &lt;wave&gt;</code> with no Project named: (a) keep making one in Linear; (b) require a Project and point at <code>lf wave create</code>.</li>
 </ol>
 </body>
 </html>

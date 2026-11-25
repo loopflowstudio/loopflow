@@ -774,4 +774,7 @@ Checks 2026-11-24: `cargo test -p loopflow --lib local_planning::` (30) and
 execution `task_planning_tests:: asana_planning_tests:: wave_lifecycle` (44)
 pass. Swift `WaveDetailReadingTests` and the rest go to gate (Remains 1).
 
+Concept review after slice 15 (`scratch/concept-review.html`): concepts and
+code line up; nothing to change.
+
 Next: gate, then ship ("just ship this").

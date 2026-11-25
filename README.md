@@ -80,7 +80,7 @@ lf -b task run <ID> ship-api    # run every step headless to a merged PR
 
 Built-in Graphs (`feature`, `code`, `quick`, `research`, `optimize`) work out of
 the box and are templates you can customize (`lf graph customize feature`).
-Extend built-in Skills with `extends: builtin` instead of forking them.
+Extend built-in or repository Skills with `extends: lf:<name>` or `extends: <name>` instead of forking them.
 
 **3. Organize Tasks into Waves.** A Wave is an area of work with its own goal
 (`GOAL.md`), memory (`MEMORY.md`) and plan, and its own setup for every Task in

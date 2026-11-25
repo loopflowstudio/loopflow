@@ -420,9 +420,11 @@ impl<'a> DefinitionLoader<'a> {
                     self.load_graph(selected).map(Target::Graph)
                 } else {
                     catalog
-                        .exact(selected)
-                        .expect("selected definition is a skill")
-                        .load()
+                        .load_source(
+                            catalog
+                                .exact(selected)
+                                .expect("selected definition is a skill"),
+                        )
                         .map(Target::Skill)
                 };
             }

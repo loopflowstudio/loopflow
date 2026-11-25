@@ -44,3 +44,25 @@ with `Error: Graph is blocked: <reason>`. Plan wording steers the decider
 ("each pass is reviewed before the next" made it advance after pass 1), so
 write the plan the way kickoff would. An oversized brief may install and start
 services (Postgres under `/tmp`): stop what the run started by PID.
+
+`build`'s outer loop (`realign` deciding) runs the same way: a fixture
+`.lf/graphs/<name>.yaml` with `- loop:` over an inner `- loop:` (`cmd: sync`,
+`implement`), then `concept-review` and `realign`, plus a two-pass
+`scratch/plan.md` whose first pass is built, takes about ten minutes on haiku.
+`realign`'s opening turn reads `Decision pass 1. Iterating repeats 4 steps,
+back to sync.` Add a `.gitignore` first: step commits sweep up `__pycache__`
+from the agent's test runs, so `concept-review`'s commit looks like it wrote
+code. For `realign` alone, `lf -b -a claude:haiku realign` over a hand-written
+`scratch/concept-review.html` (a reversible choice, a small mismatch, a
+separate outcome) shows each finding's placement in a minute.
+
+To read the text a skill launch composes (`extends:` chains, merged
+frontmatter), put a stand-in `claude` first on `PATH` that writes its argv and
+stdin to files and prints one `{"type":"result",...}` line, then run
+`lf -b -a claude <skill> 'probe'` under a private `LF_HOME`. The first stdin
+line is the stream-json user message holding `<lf:skill:<name>>…`; an inherited
+`agent:` shows as `--model` in argv. The batch never finishes against that
+stand-in, and macOS has no `timeout`: wrap it in `perl -e 'alarm 25; exec @ARGV'`.
+The four launches before the prompt are `auth status --json` and `--version`.
+Cycles and missing targets refuse at launch and in `lf graph show` of a Graph
+that names the skill.

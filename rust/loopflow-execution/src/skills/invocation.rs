@@ -492,7 +492,7 @@ mod tests {
         std::fs::write(bundle.join("reference.txt"), "the reference").unwrap();
         let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
         let invocation = SkillInvocation {
-            skill: catalog.resolve("audit").unwrap().unwrap().load().unwrap(),
+            skill: catalog.load_skill("audit").unwrap(),
             arguments: "  exact \"arguments\"\nsecond line  ".into(),
         };
         assert_eq!(invocation.skill.source_text(), original);

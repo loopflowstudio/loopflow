@@ -21,15 +21,29 @@ A claim you can't check is a finding, not a hand-back. Name what was missing,
 and build the missing route as part of a fix when it's small, or capture it as
 a follow-up.
 
-Pick one outcome and record it, with the commands and what they printed, in a
-note under `scratch/` and in your final message:
+Pick one outcome and record it, with the merged SHA, post-merge CI status,
+commands and what they printed, in `scratch/verify.md` and in your final
+message:
 
-- **Verified.** Every claim holds on main. Advance; the Task completes.
-- **Fix forward.** A promised claim doesn't hold. Name the gap and iterate: the
-  fix continues in this Task's checkout from main and ships as a new PR. Never
-  revert.
+- **Verified.** Every claim holds on main. Recommend advancing; Task completion
+  belongs to the step or person that closes the Task.
+- **Fix forward.** A promised claim doesn't hold. Name the gap and recommend
+  iterating: the fix continues in this Task's checkout from main and ships as a
+  new PR. Never revert.
 - **Follow-up.** Something outside this Task's outcome is wrong or missing.
-  Create a linked follow-up with `lf task create`, then advance.
+  Propose the linked follow-up and recommend advancing.
 
-With someone in the conversation, show what you checked and let them judge the
-experience. Headless, decide and keep moving.
+## In conversation
+
+Show what you checked, let them judge the experience, file any follow-up Tasks
+they want and act on their choice.
+
+## Headless
+
+Write `scratch/verify.md` with what passed, what failed or stayed unverified,
+numbered choices for anything needing judgment and your recommended next
+action. Leave Task completion and optional follow-up Task creation to the step
+or conversation that owns them. In your final answer (and loop verdict
+summary), link `scratch/verify.md`, summarize the checks on the merged SHA, and
+repeat the recommendation and numbered choices so someone can answer from the
+conversation.

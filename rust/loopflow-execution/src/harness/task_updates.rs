@@ -1011,4 +1011,63 @@ mod tests {
         assert_eq!(pending(&store, "reader").len(), 1);
         assert!(pending(&store, "worker").is_empty());
     }
+
+    #[test]
+    fn a_parents_conversation_hears_when_a_child_parks_at_a_breakpoint() {
+        let (_home, store, parent) = task_session();
+        let child = task(
+            &store,
+            "Compare layouts",
+            "/task-updates-child",
+            Some(&parent),
+        );
+        let identifier = store.task(&child).unwrap().unwrap().identifier;
+        conversation(&store, "child-reader", &child);
+        assert_eq!(unread(&store, "reader"), (vec![], vec![]));
+        assert_eq!(unread(&store, "child-reader"), (vec![], vec![]));
+
+        crate::store::task_work::take_up_task_graph(
+            &store,
+            &child,
+            &crate::task_graph::CapturedGraph {
+                name: "feature".into(),
+                steps: Vec::new(),
+            },
+        )
+        .unwrap();
+        let carrier = LfProcessId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [&carrier],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE task_graphs SET lf_process_id=?2,run_start='{\"index\":0}' WHERE task_id=?1",
+                rusqlite::params![child.as_str(), carrier.as_str()],
+            )
+            .unwrap();
+        }
+        let record =
+            serde_json::json!({"id": carrier.as_str(), "cursor": {"index": 1}}).to_string();
+        store
+            .arrive_task_graph(
+                &child,
+                &carrier,
+                "after-explore",
+                Some((&record, "Compare layouts")),
+            )
+            .unwrap();
+        let (notices, updates) = unread(&store, "reader");
+        assert_eq!(
+            notices,
+            [format!(
+                "{identifier} \"Compare layouts\", which this conversation conducts, stopped at after-explore. lf task status {identifier}"
+            )]
+        );
+        assert!(updates.is_empty());
+        let (child_notices, _) = unread(&store, "child-reader");
+        assert!(child_notices.is_empty());
+    }
 }

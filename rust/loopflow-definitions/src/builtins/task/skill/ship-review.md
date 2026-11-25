@@ -1,6 +1,6 @@
 ---
 requires: a built change with a published PR, and what the run wrote about it
-produces: one page that says what ships and what was left outside it, a decision on every finding, and where the work goes next
+produces: one page that says what ships and what was left outside it, proposed finding dispositions, and a recommended next action
 action_style: conversational
 ---
 Make what ships understood, and decide what happens to everything the run left outside it.
@@ -42,6 +42,8 @@ and too big or too scope-expanding to fix here. A small thing is fixed here
 or not filed, unless there is a real reason to separate it. Several such
 findings go into one Task, not one each.
 
+## In conversation
+
 **The person decides.** Ask about what is likeliest to surprise them, never
 "does this look good?". They may disagree that something belongs outside this
 PR; then it is this work. File Tasks once they have said which. Don't change
@@ -54,11 +56,17 @@ Going quiet or closing the window is never approval.
 Finish with one outcome: build more, with their words written into the plan
 for the next pass; or go on to delivery.
 
-## With nobody there
+## Headless
 
-Build the page all the same; it is the record they read afterwards. Fix small
-things here: copy, a missed rename. File every untracked finding that clears
-the bar, together where they belong together. Never reopen the design. Go
-back to build only when a promised behavior is missing or broken. Otherwise
-go on to delivery, and say on the page which questions are still theirs.
-Don't invent a reaction.
+Write `scratch/ship-review.html` and `scratch/tour.yaml`. Never reopen the
+design, merge the PR, complete the Task or file optional follow-up Tasks ahead
+of review; propose each finding's disposition (fix here, its own Task or drop)
+and leave merge, completion and optional follow-ups to the step or conversation
+that owns them.
+
+Recommend returning to build (`iterate`) only when a promised behavior is
+missing or broken; otherwise recommend advancing to delivery (`advance`). In
+your final answer (and loop verdict summary), link `scratch/ship-review.html`
+and `scratch/tour.yaml`, summarize what ships and what was left outside it,
+state the recommended next action and repeat the numbered choices so someone
+can answer from the conversation. Don't invent a reaction.

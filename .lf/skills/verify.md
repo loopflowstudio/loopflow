@@ -9,4 +9,5 @@ extends: builtin
   private home when the claim needs them.
 - For the Mac app, build it and run its view and interaction tests headless;
   capture screenshots headless when a view's look is the claim.
+- Record the merged SHA, commands, output and artifact paths in `scratch/verify.md`.
 - After a release, run the installed binary the way people do.

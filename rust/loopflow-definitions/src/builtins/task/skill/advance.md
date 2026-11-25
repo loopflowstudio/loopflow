@@ -15,7 +15,7 @@ Session or launch a Graph; ambiguous feedback starts nothing.
 **A Task continues.** Read `lf task status <issue> --json`. Leave a running
 Graph alone. A stopped Graph is history: check what it finished and changed.
 Run `lf task run <issue>` only when the request names the next work; a Task
-waiting at an interactive step continues after it, and `--from <step>` starts
+parked at a breakpoint continues past it, and `--from <step>` starts
 elsewhere. A finished Graph alone is no reason to run it again.
 
 **A design has no Task.** Continue in its checkout: implement directly or run

@@ -8,6 +8,8 @@ not the shared `~/Applications/Loopflow Dev.app` that other worktrees overwrite,
 and confirm its stamped revision matches `HEAD` before launching or relaunching.
 When the change works with the installed server, point it at `~/.lf` instead of
 building `lf` and a fixture repo, noting any server change waiting on branch `lf`.
+Headless, build and verify the isolated `.dev` bundle without opening a window,
+leave it ready to open, and put its launch command in `scratch/demo.md`.
 
 ## Disposable Loopflow demos
 

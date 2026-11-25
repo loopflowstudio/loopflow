@@ -6,7 +6,9 @@ Turn the direction into a plan worth building: risks answered, one approach chos
 
 **Plan the outcome you were given.** The direction arrives settled: the Task
 brief, what was chosen in explore, what people have said. Don't reopen
-discovery or swap in something technically convenient.
+discovery or swap in something technically convenient. Use the choice in
+the breakpoint reply when one is supplied. Otherwise plan the direction
+explore recommended.
 
 **Continue; don't re-derive.** Build on the design that exists. If the plan
 is already good enough, keep it.

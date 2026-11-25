@@ -9,10 +9,9 @@ A Task can have several conversations; this one is not its Graph's process.
 You are also the Task's operator: the method at the end of this skill is how
 to move it, and this part says when.
 
-**Open by reading.** A first turn without a request reads fresh state, says
-where the Task stands and ends, with no Work changed. Steers that arrived with
-it are direction on record: report them, and act when asked here. A stopped
-run stays stopped until someone asks.
+**Open by reading.** Read fresh state. If this Task has a breakpoint handoff,
+present it, including on your first turn. Otherwise a first turn without a
+request reports where the Task stands and any steers already on record.
 
 **Answer first.** A question or a change of direction interrupts operating; it
 doesn't end it. Resume afterwards and finish before the turn ends.
@@ -21,12 +20,17 @@ doesn't end it. Resume afterwards and finish before the turn ends.
 changed, means reading status again. Never operate from what an earlier turn
 remembered.
 
-**Name the step that waits.** At an interactive step the Task waits here for a
-person; say which, and what they decide there. In `code`, the first is
-`ship-review` after `build`: they read one page saying what ships and what
-was left outside it, decide what happens to each finding, and their answer
-sends the change back to `build` or on to delivery.
-`lf task run <issue>` continues once they have answered.
+**Present the finished work.** At this Task’s breakpoint, show what the
+worker produced. Link its artifacts, explain its recommended next action and
+present its numbered choices. Answer questions here while the Graph stays
+at the breakpoint.
+
+When someone chooses, use the continuation command in that handoff. Keep
+its `--at-arrival` and pass their exact words in `--reason`. For a reply
+like “1b”, include what that option selects. If they change a loop decision,
+include the corresponding `--decision`. A plain continue accepts the
+recommendation. If that visit has ended, read current status before acting
+on any later direction.
 
 **End a turn when the Task has its disposition.** Merge alone is not done.
 
@@ -38,15 +42,14 @@ it. An idea that is other work becomes its own Task: `lf help capture-tasks`.
 The Task's Graphs keep running on their own, and settled progress arrives here
 as posts while the conversation is open.
 
-**A post is an observation, not direction.** Report it briefly, name each
-changed run by its id, and leave review and the auto setting as they are. Don't
-promise follow-ups for when the conversation is closed.
+**Report progress posts briefly.** Name each changed run by its id. A
+breakpoint handoff for this Task opens the review described above.
 
 **Conduct this Task's children.** Pass `--parent <this-task-id>` to
 `lf task create` when filing a child Task (or `lf task update <id> --parent
 <this-task-id>` to adopt an existing one); plain `lf task create` files
-top-level work. A notice arrives when a direct child stops at an interactive
-step, a run of it fails or stops, its PR merges, or it closes; steps passing
+top-level work. A notice arrives when a direct child reaches a breakpoint,
+a run of it fails or stops, its PR merges, or it closes; steps passing
 inside its run send nothing. A notice is news about work that is yours, so
 following it up is in scope: read `lf task status <child>`, then say where the
 child stands and what it needs. Direction for a child goes to the child, with

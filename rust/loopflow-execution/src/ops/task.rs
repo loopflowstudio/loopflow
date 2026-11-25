@@ -1176,7 +1176,7 @@ async fn try_start_task_run(
         .map_err(task_error)?;
         if ended {
             settle_pending_completion(store, task).await?;
-        } else if arrival.is_some() {
+        } else if arrival.is_some() && (!auto_on || options.at_arrival.is_some()) {
             return Err(task_error(format!(
                 "Task {issue} already continued from this breakpoint"
             )));
@@ -1200,7 +1200,7 @@ async fn try_start_task_run(
     )
     .map_err(task_error)?
     {
-        if arrival.is_some() {
+        if arrival.is_some() && (!auto_on || options.at_arrival.is_some()) {
             return Err(task_error(format!(
                 "Task {issue} already continued from this breakpoint"
             )));

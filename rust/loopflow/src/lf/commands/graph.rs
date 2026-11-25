@@ -1121,8 +1121,8 @@ impl RunningGraph<'_> {
 
     fn breakpoint_review(&self, name: &str, cursor: &ExecutionCursor) -> Result<String> {
         let mut lines = vec![format!("Breakpoint {name}")];
-        if let Some(verdict) = &cursor.leaf().progress.verdict {
-            lines.push(verdict.summary.clone());
+        let body = if let Some(verdict) = &cursor.leaf().progress.verdict {
+            Some(verdict.summary.clone())
         } else if let Some(process) = &cursor.producer {
             let result = match self.captured(Some(process))? {
                 Some((_, input)) => {
@@ -1135,23 +1135,59 @@ impl RunningGraph<'_> {
                         Err(error) => format!("Answer unavailable for {input}: {error}"),
                     }
                 }
-                None => format!("Step {process} completed."),
+                None => self.recorded_step_result(process)?,
             };
-            lines.push(result);
+            Some(result)
+        } else {
+            None
+        };
+        if let Some(body) = body {
+            lines.push(body.clone());
+            lines.extend(resolve_artifact_links(self.cwd, &body));
         }
         let mut next = cursor.clone();
         lines.push(match next.finish(self.steps) {
             Ok(true) => "Continuing finishes the Graph.".into(),
             Ok(false) => {
                 let (body, leaf) = next.current_body(self.steps);
-                format!(
-                    "Continuing runs {}.",
-                    loopflow_execution::task_graph::step_name(&body[leaf.index])
-                )
+                match &body[leaf.index] {
+                    ConcreteStep::Breakpoint(stop) => {
+                        format!("Continuing reaches breakpoint {}.", stop.name)
+                    }
+                    step => format!(
+                        "Continuing runs {}.",
+                        loopflow_execution::task_graph::step_name(step)
+                    ),
+                }
             }
             Err(error) => format!("Blocked: {error}"),
         });
         Ok(lines.join("\n"))
+    }
+
+    fn recorded_step_result(&self, process: &LfProcessId) -> Result<String> {
+        let Some((graph_id, detail)) = self.store.sqlite.graph_step_detail(process)? else {
+            return Ok(format!("Step {process} completed."));
+        };
+        let label = if detail.label.is_empty() {
+            format!("Step {process}")
+        } else {
+            format!("{} ({process})", detail.label)
+        };
+        let outcome = detail.outcome.as_deref().unwrap_or("completed");
+        let exit = detail
+            .exit_code
+            .map_or_else(String::new, |code| format!(" (exit {code})"));
+        let mut result = format!("{label} · {outcome}{exit}.");
+        if let Some(error) = &detail.error {
+            result.push(' ');
+            result.push_str(error);
+        }
+        let log = loopflow_execution::process::launch_log::graph_log_path(graph_id.as_str());
+        if log.is_file() {
+            result.push_str(&format!("\nLog: {}", log.display()));
+        }
+        Ok(result)
     }
 
     /// The Session a step's Process opened and the answer its turn returned.
@@ -1168,6 +1204,104 @@ impl RunningGraph<'_> {
             loopflow_execution::transcript::answer::input_final_answer(&self.store.sqlite, &input)?;
         Ok((session, answer))
     }
+}
+
+/// Resolve `scratch/...` artifact references mentioned in `text` on this
+/// execution Machine. When any referenced file is missing, report what is
+/// available under `scratch/`.
+fn resolve_artifact_links(cwd: &Path, text: &str) -> Vec<String> {
+    let referenced = extract_scratch_paths(text);
+    if referenced.is_empty() {
+        return Vec::new();
+    }
+    let root = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+    let mut existing = Vec::new();
+    let mut missing = Vec::new();
+    for rel in referenced {
+        let full = root.join(&rel);
+        if full.is_file() {
+            existing.push(format!("- {rel} ({})", full.display()));
+        } else {
+            missing.push(rel);
+        }
+    }
+    let mut sections = Vec::new();
+    if !existing.is_empty() {
+        sections.push(format!("Artifacts:\n{}", existing.join("\n")));
+    }
+    if !missing.is_empty() {
+        sections.push(format!("Missing artifacts: {}", missing.join(", ")));
+        let available = available_scratch_artifacts(&root, 20);
+        if available.is_empty() {
+            sections.push("No artifacts exist under scratch/ yet.".into());
+        } else {
+            let listing = available
+                .into_iter()
+                .map(|(rel, full)| format!("- {rel} ({})", full.display()))
+                .collect::<Vec<_>>()
+                .join("\n");
+            sections.push(format!("Available in scratch/:\n{listing}"));
+        }
+    }
+    sections
+}
+
+fn extract_scratch_paths(text: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut cursor = text;
+    while let Some(offset) = cursor.find("scratch/") {
+        let candidate = &cursor[offset..];
+        let end = candidate
+            .find(|ch: char| {
+                ch.is_whitespace() || matches!(ch, '`' | '"' | '\'' | ')' | ']' | '>' | '<')
+            })
+            .unwrap_or(candidate.len());
+        let trimmed = candidate[..end].trim_end_matches(['.', ',', ';', ':']);
+        let path = Path::new(trimmed);
+        let safe = trimmed.len() > "scratch/".len()
+            && !trimmed.ends_with('/')
+            && path
+                .components()
+                .all(|component| matches!(component, std::path::Component::Normal(_)));
+        if safe && !paths.iter().any(|seen| seen == trimmed) {
+            paths.push(trimmed.to_owned());
+        }
+        cursor = &candidate["scratch/".len()..];
+    }
+    paths
+}
+
+fn available_scratch_artifacts(root: &Path, limit: usize) -> Vec<(String, std::path::PathBuf)> {
+    let scratch = root.join("scratch");
+    if !scratch.is_dir() {
+        return Vec::new();
+    }
+    let mut stack = vec![scratch];
+    let mut found = Vec::new();
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if name.starts_with('.') {
+                continue;
+            }
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.is_file() {
+                if let Ok(rel) = path.strip_prefix(root) {
+                    found.push((rel.to_string_lossy().into_owned(), path));
+                }
+            }
+        }
+    }
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+    found.truncate(limit);
+    found
 }
 
 /// The JSON value a final answer carries: the answer itself, or the object
@@ -1715,5 +1849,207 @@ mod tests {
         assert_eq!(mode(&["lf", "task", "run", "INF-1"]), (false, false));
         assert_eq!(mode(&["lf", "-b", "task", "run", "INF-1"]), (true, false));
         assert_eq!(mode(&["lf", "-i", "task", "run", "INF-1"]), (false, true));
+    }
+
+    #[test]
+    fn breakpoint_review_reads_commands_resolves_artifacts_and_handles_missing_sources() {
+        use crate::lf::Cli;
+        use clap::Parser;
+        use loopflow_execution::graph::runner::ExecutionCursor;
+        use loopflow_execution::graph::transitions::{GraphDecision, GraphVerdict};
+        use loopflow_execution::graph::{
+            Breakpoint, Command, ConcreteCommand, ConcreteSkill, ConcreteStep, Skill,
+        };
+        use loopflow_model::id::LfProcessId;
+        use loopflow_storage::graph_process::{ExecutionStart, RunOwner};
+        use std::sync::Mutex;
+
+        let home = tempdir().unwrap();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
+        std::env::set_var("LF_HOME", home.path());
+        let repo = tempdir().unwrap();
+        let store = std::sync::Arc::new(loopflow_execution::store::Store {
+            sqlite: loopflow_execution::store::opening::open_ephemeral(
+                &home.path().join("store.db"),
+            )
+            .unwrap(),
+        });
+        let cli = Cli::try_parse_from(["lf"]).unwrap();
+        let cmd = ConcreteStep::Command(ConcreteCommand {
+            item: Command {
+                command: "graph".into(),
+                args: vec!["show".into(), "research".into()],
+            },
+            sources: Vec::new(),
+        });
+        let brk = |name: &str| {
+            ConcreteStep::Breakpoint(Breakpoint {
+                name: name.into(),
+                returns: None,
+                sources: Vec::new(),
+            })
+        };
+        let work = ConcreteStep::Skill(ConcreteSkill {
+            skill: Skill::named("work"),
+            id: None,
+            interactive: false,
+            interactive_name: None,
+            returns: None,
+            sources: Vec::new(),
+        });
+        let steps = [cmd, brk("after-cmd"), brk("second"), work, brk("last")];
+        let graph_id = LfProcessId::new();
+        let running = super::RunningGraph {
+            store: store.clone(),
+            process: graph_id.clone(),
+            graph: "review-probe",
+            steps: &steps,
+            message: None,
+            cwd: repo.path(),
+            launcher: &cli,
+            position: Mutex::new(ExecutionCursor::default()),
+            task: None,
+            task_run: None,
+            interrupt: None,
+        };
+        record_run(&running);
+
+        // 1. Command step recorded result + log path.
+        let cmd_proc = LfProcessId::new();
+        store
+            .sqlite
+            .record_graph_step(&graph_id, &cmd_proc, 0, &[], &ExecutionStart::reserved(10))
+            .unwrap();
+        store
+            .sqlite
+            .finish_run(RunOwner::GraphStep, &cmd_proc, 12, Some(0), None)
+            .unwrap();
+        let log_path = loopflow_execution::process::launch_log::graph_log_path(graph_id.as_str());
+        fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+        fs::write(&log_path, "command output\n").unwrap();
+        let cursor = ExecutionCursor {
+            index: 1,
+            producer: Some(cmd_proc.clone()),
+            ..ExecutionCursor::default()
+        };
+        let review = running.breakpoint_review("after-cmd", &cursor).unwrap();
+        assert!(review.contains("graph show research"), "{review}");
+        assert!(review.contains(cmd_proc.as_str()), "{review}");
+        assert!(review.contains("succeeded (exit 0)"), "{review}");
+        assert!(review.contains(&log_path.display().to_string()), "{review}");
+        assert!(
+            review.contains("Continuing reaches breakpoint second."),
+            "{review}"
+        );
+
+        // 2. Leading / adjacent / terminal break without producer.
+        let adjacent = ExecutionCursor {
+            index: 2,
+            ..ExecutionCursor::default()
+        };
+        let review = running.breakpoint_review("second", &adjacent).unwrap();
+        assert_eq!(review, "Breakpoint second\nContinuing runs work.");
+        let terminal = ExecutionCursor {
+            index: 4,
+            ..ExecutionCursor::default()
+        };
+        let review = running.breakpoint_review("last", &terminal).unwrap();
+        assert_eq!(review, "Breakpoint last\nContinuing finishes the Graph.");
+
+        // 3. Artifact link resolution on the execution Machine + missing artifact fallback.
+        fs::create_dir_all(repo.path().join("scratch")).unwrap();
+        fs::write(repo.path().join("scratch/explore.html"), "<h1>Visions</h1>").unwrap();
+        fs::write(repo.path().join("scratch/notes.md"), "notes").unwrap();
+        let resolved_explore = repo
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join("scratch/explore.html");
+        let resolved_notes = repo.path().canonicalize().unwrap().join("scratch/notes.md");
+        let mut with_verdict = ExecutionCursor {
+            index: 4,
+            ..ExecutionCursor::default()
+        };
+        with_verdict.progress.verdict = Some(GraphVerdict {
+            decision: GraphDecision::Advance,
+            summary: "See `scratch/explore.html` and scratch/missing.md.".into(),
+        });
+        let review = running.breakpoint_review("last", &with_verdict).unwrap();
+        assert!(
+            review.contains(&format!(
+                "- scratch/explore.html ({})",
+                resolved_explore.display()
+            )),
+            "{review}"
+        );
+        assert!(
+            review.contains("Missing artifacts: scratch/missing.md"),
+            "{review}"
+        );
+        assert!(
+            review.contains(&format!(
+                "- scratch/notes.md ({})",
+                resolved_notes.display()
+            )),
+            "{review}"
+        );
+
+        // 4. Missing provider transcript falls back to retained answer, and absent retained
+        //    answer reports cleanly instead of failing the review.
+        let worker_proc = LfProcessId::new();
+        let input = loopflow_execution::session_record::new_artifact_key();
+        let mut prepared = loopflow_storage::test_fixture::unpublished_conversation(None, None, 1);
+        prepared.id = "worker-retained".into();
+        prepared.artifact_key = Some(input.clone());
+        prepared.input_published = true;
+        prepared.provider = Some("codex".into());
+        prepared.interactive = false;
+        let session = store
+            .sqlite
+            .create_session_prepared(prepared, Some(&worker_proc))
+            .unwrap();
+        loopflow_storage::test_fixture::record_captured_start(&store.sqlite, &session.id, "turn-1");
+        let captured = store
+            .sqlite
+            .session(&session.id)
+            .unwrap()
+            .unwrap()
+            .captured
+            .unwrap();
+        store
+            .sqlite
+            .record_answered_turn_end(
+                captured,
+                &"missing-thread".into(),
+                "turn-1",
+                1,
+                &serde_json::json!({"status": "completed"}),
+            )
+            .unwrap();
+        let missing_cursor = ExecutionCursor {
+            index: 4,
+            producer: Some(worker_proc.clone()),
+            ..ExecutionCursor::default()
+        };
+        let unavailable = running.breakpoint_review("last", &missing_cursor).unwrap();
+        assert!(
+            unavailable.contains("Answer unavailable for"),
+            "{unavailable}"
+        );
+        store.sqlite.record_turn_final_message(
+            &session.id,
+            &"missing-thread".into(),
+            "turn-1",
+            "Retained summary in scratch/explore.html.",
+        );
+        let fallback = running.breakpoint_review("last", &missing_cursor).unwrap();
+        assert!(
+            fallback.contains("Retained summary in scratch/explore.html."),
+            "{fallback}"
+        );
+        assert!(
+            fallback.contains(&resolved_explore.display().to_string()),
+            "{fallback}"
+        );
     }
 }

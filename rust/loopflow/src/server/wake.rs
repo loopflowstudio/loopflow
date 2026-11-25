@@ -1107,4 +1107,172 @@ mod tests {
         let line = listed();
         assert!(!line.contains("could not start"), "{line}");
     }
+
+    fn park_breakpoint(
+        fixture: &Fixture,
+        step: &str,
+        text: &str,
+    ) -> loopflow_model::id::LfProcessId {
+        let store = &fixture.store;
+        store
+            .take_up_task_graph(&fixture.task, r#"{"name":"feature","steps":[]}"#)
+            .unwrap();
+        let carrier = loopflow_model::id::LfProcessId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [&carrier],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE task_graphs SET breakpoint=NULL,lf_process_id=?2,run_start='{\"index\":0}' WHERE task_id=?1",
+                rusqlite::params![fixture.task.as_str(), carrier.as_str()],
+            )
+            .unwrap();
+        }
+        let record =
+            serde_json::json!({"id": carrier.as_str(), "cursor": {"index": 1}}).to_string();
+        store
+            .arrive_task_graph(&fixture.task, &carrier, step, Some((&record, text)))
+            .unwrap();
+        carrier
+    }
+
+    /// Breakpoint delivery across the five harnesses (Claude, Codex, OpenCode,
+    /// Pi idle wake; Antigravity next-turn and held-start, with immediate idle
+    /// wake deferred to LOO-1098), plus busy delivery, restart before delivery,
+    /// and a failed held start keeping the arrival unread.
+    #[test]
+    fn breakpoint_delivery_covers_five_harnesses_busy_restart_and_failed_start() {
+        // 1. Open-idle Claude + busy turn delivery.
+        let claude = fixture("brk-claude");
+        claude
+            .store
+            .choose_task_primary(&claude.task, "brk-claude")
+            .unwrap();
+        let (listener, inbox) = claude.idle_claude();
+        listener.set_nonblocking(true).unwrap();
+        // Busy turn: watcher does not wake until the turn ends.
+        claude
+            .store
+            .record_native_turn(&claude.adapter, "native", false, None)
+            .unwrap();
+        park_breakpoint(&claude, "after-explore", "Compare scratch/explore.html");
+        wake_idle(&claude.store, None);
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock,
+            "busy primary is not woken mid-turn"
+        );
+        claude.stop(&claude.store, &inbox);
+        after_turn(&claude.store, "brk-claude");
+        listener.set_nonblocking(false).unwrap();
+        let content = received(&listener)[1]["message"]["content"].to_string();
+        assert!(content.contains("Breakpoint review "), "{content}");
+        assert!(
+            content.contains("Compare scratch/explore.html"),
+            "{content}"
+        );
+
+        // 2. Open-idle Codex.
+        let codex = fixture("brk-codex");
+        codex
+            .store
+            .choose_task_primary(&codex.task, "brk-codex")
+            .unwrap();
+        let endpoint = codex.home.path().join("codex.sock");
+        {
+            let conn = codex.store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET provider='codex',agent_endpoint=?2 WHERE id=?1",
+                rusqlite::params!["brk-codex", endpoint.to_string_lossy()],
+            )
+            .unwrap();
+        }
+        codex
+            .store
+            .record_native_turn(&codex.adapter, "native", true, Some(0))
+            .unwrap();
+        park_breakpoint(&codex, "after-explore", "Codex review artifact");
+        let server = codex_app_server(&endpoint);
+        wake_idle(&codex.store, Some("brk-codex"));
+        let start = server.join().unwrap();
+        let output = start["params"]["toolOutput"]["output"].to_string();
+        assert!(output.contains("Codex review artifact"), "{output}");
+
+        // 3. Open-idle OpenCode and Pi.
+        for provider in ["opencode", "pi"] {
+            let session = format!("brk-{provider}");
+            let fx = fixture(&session);
+            fx.store.choose_task_primary(&fx.task, &session).unwrap();
+            let socket = fx.home.path().join("ext.sock");
+            let messages = extension(&socket, "started\n");
+            fx.settle(provider, &socket);
+            park_breakpoint(&fx, "after-explore", &format!("{provider} review"));
+            wake_idle(&fx.store, Some(&session));
+            let text = messages.try_recv().expect(provider)["text"].to_string();
+            assert!(text.contains(&format!("{provider} review")), "{text}");
+        }
+
+        // 4. Antigravity: next-turn claim while open, then held-start after quit
+        //    with server restart before delivery and a failed start first.
+        let agy = fixture("brk-agy");
+        agy.store.choose_task_primary(&agy.task, "brk-agy").unwrap();
+        {
+            let conn = agy.store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET provider='antigravity' WHERE id='brk-agy'",
+                [],
+            )
+            .unwrap();
+        }
+        park_breakpoint(&agy, "after-explore", "Agy next-turn review");
+        let claimed = loopflow_execution::steer::claim(
+            &agy.store,
+            agy.home.path(),
+            &agy.adapter,
+            "native",
+            loopflow_execution::steer::NativeBoundary::Turn,
+        )
+        .unwrap()
+        .expect("next-turn hook receives breakpoint");
+        assert!(
+            claimed.text.contains("Agy next-turn review"),
+            "{}",
+            claimed.text
+        );
+        loopflow_execution::steer::delivered(&agy.store, "brk-agy", &claimed);
+
+        // Quit during work, then a second breakpoint arrives while server is down.
+        {
+            let conn = agy.store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET agent_ended_at=unixepoch(),agent_pid=NULL,agent_os_started_at=NULL WHERE id='brk-agy'",
+                [],
+            )
+            .unwrap();
+        }
+        let second = park_breakpoint(&agy, "after-ship-review", "Agy held-start review");
+        let restarted = loopflow_execution::store::open_sqlite(&agy.store_path()).unwrap();
+        let mut starts = Vec::new();
+        start_stopped(
+            &restarted,
+            |_| Ok(Some("antigravity unavailable".into())),
+            |session, request| {
+                starts.push((session.to_string(), request));
+                Ok(())
+            },
+        );
+        assert!(starts.is_empty(), "failed readiness spawns nothing");
+        assert_eq!(
+            restarted.session_steers("brk-agy", 0, 8).unwrap().pending,
+            1,
+            "failed start leaves the breakpoint steer unread"
+        );
+        let manual = restarted.take_steers_to_start("brk-agy").unwrap();
+        assert_eq!(manual.len(), 1);
+        assert_eq!(manual[0].revision, second.as_str());
+        assert!(manual[0].text.contains("Agy held-start review"));
+    }
 }

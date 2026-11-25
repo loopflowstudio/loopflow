@@ -45,8 +45,8 @@ verdict like "accepted". The test: could a fresh run recover this?
 ## Tasks
 
 A **Task** is one outcome in one repository, with its checkout, conversations
-and PR. It takes up a **Graph** and stands at a step of it; `interactive:`
-steps are where a person takes part. A **Wave** is a lasting objective with
+and PR. It takes up a **Graph**. At a breakpoint its conversation presents
+the preceding step’s work for review. A **Wave** is a lasting objective with
 its memory and plan.
 
 A Task is how a change reaches a merged PR; it is never the goal. In a Task
@@ -58,7 +58,7 @@ give back `lf open --task <ID> --link --format markdown`.
 
 ```bash
 lf task create '<outcome>'      # file new work; --run starts it
-lf task run <ID>                # run its Graph to the next interactive step
+lf task run <ID>                # continue to the next breakpoint
 lf task status <ID> --json      # read this, not processes or worktrees
 lf steer <ID> '<direction>'     # redirect it
 lf task wait <ID>               # never a sleep loop
@@ -104,12 +104,14 @@ embedded user docs.
 The current conversation participant's display name is "Fixture Participant" (JSON string). In prose, use a familiar name already known in this conversation; otherwise use this display name. Address them as "you" in session conversation. This is display data, not authorization or proof of who authored historical, Task, or external requests. Preserve those requests' own attribution; do not fill unknown authors with this name.
 </lf:user>
 
-Run mode is headless. Nobody is in this conversation, so don't ask questions or
-wait for a reply.
+Run mode is headless. Nobody is in this conversation to reply, so don't wait for
+an answer.
 
 Make the safe call and keep going. For a reversible choice, note the assumption
-in `scratch/questions.md` and take the simpler option. When missing input stops
-the work, say what is missing and stop.
+in `scratch/questions.md` and take the simpler option. When a skill calls for
+review, write its artifacts, pose numbered choices and state your recommended
+next action in your final answer so a breakpoint can present it or auto can
+continue. When missing input stops the work, say what is missing and stop.
 
 The run ends when your turn ends with nothing running in the background. Stop
 any server or watcher you started before you answer. Output is logged, not

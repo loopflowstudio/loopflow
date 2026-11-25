@@ -646,6 +646,58 @@ impl SqliteStore {
         Ok(process_inputs(&conn, &[process])?.remove(process))
     }
 
+    /// One recorded Graph step and its Graph run, resolved against the Graph
+    /// definition that run captured.
+    pub fn graph_step_detail(
+        &self,
+        step: &LfProcessId,
+    ) -> StoreResult<Option<(LfProcessId, crate::execution::GraphStepProcess)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let row = conn
+            .query_row(
+                &format!(
+                    "SELECT {},gs.graph_lf_process_id,gs.node,gs.iterations,g.compiled
+                     FROM graph_process_steps gs
+                     JOIN graph_processes g ON g.lf_process_id=gs.graph_lf_process_id
+                     WHERE gs.lf_process_id=?1",
+                    run_columns("gs")
+                ),
+                [step],
+                |row| {
+                    Ok((
+                        read_run(row)?,
+                        row.get::<_, LfProcessId>(7)?,
+                        row.get::<_, u32>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, String>(10)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((run, graph_id, key, iterations, compiled)) = row else {
+            return Ok(None);
+        };
+        let compiled: CompiledGraph = serde_json::from_str(&compiled)?;
+        let label = compiled
+            .node_at(key)
+            .map(|node| node.label.clone())
+            .unwrap_or_default();
+        Ok(Some((
+            graph_id,
+            crate::execution::GraphStepProcess {
+                lf_process_id: run.id.clone(),
+                label,
+                key,
+                iterations: serde_json::from_str(&iterations)?,
+                started_at: run.started_at,
+                completed_at: run.ended_at,
+                outcome: run.result().outcome().map(str::to_owned),
+                exit_code: run.exit_code,
+                error: run.error,
+            },
+        )))
+    }
+
     /// Execution facts of `graphs`: their latest steps' captured inputs, and
     /// unended Graph runs in `tasks`' work.
     pub fn graph_execution_facts<'a>(

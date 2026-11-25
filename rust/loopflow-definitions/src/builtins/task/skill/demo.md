@@ -50,5 +50,15 @@ identity and never by name, and keep anything that holds history.
 
 ## Headless
 
-With nobody there, nobody can feel it. Say the demo didn't happen and why, then
-finish. Don't act out a person's reactions or invent feedback.
+Prepare the built product so someone can open and feel it right away, without
+opening focus-stealing windows or leaving background processes behind when your
+turn ends. Verify it runs; write `scratch/demo.html` when a comparison page
+helps. Stop temporary servers or watchers you started while keeping built
+artifacts and history ready to reopen.
+
+Write `scratch/demo.md` with what changed, the exact launch command or app path
+ready to run, where to start, numbered questions to judge how it feels and your
+recommended next action if nobody intervenes. In your final answer, link
+`scratch/demo.md` (and `scratch/demo.html` when written), repeat the launch
+command, recommendation and numbered questions so someone can answer from the
+conversation. Don't act out a person's reactions or invent feedback.

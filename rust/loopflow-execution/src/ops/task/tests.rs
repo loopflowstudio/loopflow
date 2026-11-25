@@ -3072,3 +3072,245 @@ fn breakpoint_in_a_task_terminal_still_waits_for_its_conversation() {
     );
     assert_eq!(super::TaskRunMode::Headless.next_stop(&graph, &start), None);
 }
+
+#[tokio::test]
+async fn breakpoint_edges_cover_launch_failure_terminal_auto_race_and_named_restart() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let mut fx = task_fixture_at("EDGE-1", repo.path().canonicalize().unwrap()).await;
+    let checkout = repo.path().canonicalize().unwrap();
+    std::fs::create_dir_all(checkout.join(".lf/graphs")).unwrap();
+    std::fs::create_dir_all(checkout.join(".lf/skills")).unwrap();
+    for skill in ["step-a", "step-b"] {
+        std::fs::write(
+            checkout.join(format!(".lf/skills/{skill}.md")),
+            format!("Fixture {skill}"),
+        )
+        .unwrap();
+    }
+    std::fs::write(
+        checkout.join(".lf/graphs/edges.yaml"),
+        "- step:\n    id: first_a\n    name: step-a\n- break: after-a\n- step:\n    id: second_a\n    name: step-a\n- step-b\n- break: finish\n",
+    )
+    .unwrap();
+    let graph = crate::task_graph::CapturedGraph::load("edges", &checkout)
+        .unwrap()
+        .unwrap();
+    crate::store::task_work::take_up_task_graph(&fx.store.sqlite, &fx.task.id, &graph).unwrap();
+
+    let park = |store: &crate::store::Store,
+                step: &str,
+                index: usize|
+     -> loopflow_model::id::LfProcessId {
+        let carrier = loopflow_model::id::LfProcessId::new();
+        {
+            let conn = store.sqlite.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [&carrier],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE task_graphs SET breakpoint=NULL,lf_process_id=?2,run_start='{\"index\":0}' WHERE task_id=?1",
+                rusqlite::params![fx.task.id.as_str(), carrier.as_str()],
+            )
+            .unwrap();
+        }
+        let arrival = crate::store::task_work::BreakpointArrival {
+            id: carrier.clone(),
+            cursor: crate::graph::runner::ExecutionCursor {
+                index,
+                ..Default::default()
+            },
+        };
+        store
+            .sqlite
+            .arrive_task_graph(
+                &fx.task.id,
+                &carrier,
+                step,
+                Some((
+                    &serde_json::to_string(&arrival).unwrap(),
+                    "Ready for review",
+                )),
+            )
+            .unwrap();
+        carrier
+    };
+
+    // 1. Launch failure after accepting a reply retains the reply and next step for retry.
+    let first = park(&fx.store, "after-a", 1);
+    let reply = "Use the compact variant";
+    let selection = super::select_task_run(
+        &fx.store,
+        &fx.task,
+        &checkout,
+        &super::TaskProcessOptions {
+            at_arrival: Some(first.clone()),
+            reason: Some(reply.into()),
+            ..Default::default()
+        },
+        |_| false,
+    )
+    .unwrap();
+    let start = selection.start.expect("advances to second_a");
+    assert_eq!(start.cursor.index, 2);
+    assert_eq!(start.cursor.progress.direction.as_deref(), Some(reply));
+    // Simulate carrier claiming the breakpoint then dying before running step 2.
+    let dead_carrier = loopflow_model::id::LfProcessId::new();
+    let row = crate::store::task_work::task_graph_row(&fx.store.sqlite, &fx.task.id)
+        .unwrap()
+        .unwrap();
+    assert!(crate::store::task_work::start_task_graph_run(
+        &fx.store.sqlite,
+        &fx.task.id,
+        &row,
+        &start.cursor,
+        None,
+        (
+            &dead_carrier,
+            &loopflow_storage::graph_process::ExecutionStart::reserved(1)
+        ),
+    )
+    .unwrap());
+    fx.store
+        .sqlite
+        .finish_run(
+            loopflow_storage::graph_process::RunOwner::TaskCarrier,
+            &dead_carrier,
+            2,
+            Some(1),
+            Some("launch failed"),
+        )
+        .unwrap();
+    // Plain retry picks up the saved cursor at index 2 with the accepted reply intact.
+    let retry = super::select_task_run(
+        &fx.store,
+        &fx.task,
+        &checkout,
+        &super::TaskProcessOptions::default(),
+        |_| false,
+    )
+    .unwrap();
+    let retry_start = retry.start.expect("resumes at second_a");
+    assert_eq!(retry_start.cursor.index, 2);
+    assert_eq!(
+        retry_start.cursor.progress.direction.as_deref(),
+        Some(reply)
+    );
+
+    // 2. Deliberate restart targeting a named occurrence with the arrival the primary saw.
+    let second = park(&fx.store, "after-a", 1);
+    let restart = super::select_task_run(
+        &fx.store,
+        &fx.task,
+        &checkout,
+        &super::TaskProcessOptions {
+            at_arrival: Some(second.clone()),
+            from: Some("second_a".into()),
+            reason: Some("Restart at second_a".into()),
+            ..Default::default()
+        },
+        |_| false,
+    )
+    .unwrap();
+    let restart_start = restart.start.expect("targets second_a");
+    assert_eq!(restart_start.cursor.index, 2);
+    assert_eq!(
+        restart_start.cursor.progress.direction.as_deref(),
+        Some("Restart at second_a")
+    );
+
+    // 3. Auto racing a late reply at a repeated marker: only the winning transition claims it.
+    let visit_one = park(&fx.store, "after-a", 1);
+    let visit_two = park(&fx.store, "after-a", 1);
+    assert_ne!(visit_one, visit_two);
+    let late = super::select_task_run(
+        &fx.store,
+        &fx.task,
+        &checkout,
+        &super::TaskProcessOptions {
+            at_arrival: Some(visit_one.clone()),
+            reason: Some("Late reply for visit 1".into()),
+            ..Default::default()
+        },
+        |_| false,
+    );
+    assert!(
+        late.unwrap_err()
+            .to_string()
+            .contains("that review has ended"),
+        "stale arrival at repeated marker is refused"
+    );
+    // And if two callers read visit_two simultaneously, only one claim succeeds.
+    let snapshot = crate::store::task_work::task_graph_row(&fx.store.sqlite, &fx.task.id)
+        .unwrap()
+        .unwrap();
+    let winner = loopflow_model::id::LfProcessId::new();
+    let loser = loopflow_model::id::LfProcessId::new();
+    assert!(crate::store::task_work::start_task_graph_run(
+        &fx.store.sqlite,
+        &fx.task.id,
+        &snapshot,
+        &restart_start.cursor,
+        None,
+        (
+            &winner,
+            &loopflow_storage::graph_process::ExecutionStart::reserved(1)
+        ),
+    )
+    .unwrap());
+    assert!(!crate::store::task_work::start_task_graph_run(
+        &fx.store.sqlite,
+        &fx.task.id,
+        &snapshot,
+        &restart_start.cursor,
+        None,
+        (
+            &loser,
+            &loopflow_storage::graph_process::ExecutionStart::reserved(1)
+        ),
+    )
+    .unwrap());
+
+    // 4. Terminal settlement: continuing a terminal breakpoint reaches end, requests
+    //    completion, and refuses a duplicate continuation of the same arrival.
+    let final_visit = park(&fx.store, "finish", 4);
+    let terminal = super::select_task_run(
+        &fx.store,
+        &fx.task,
+        &checkout,
+        &super::TaskProcessOptions {
+            at_arrival: Some(final_visit.clone()),
+            ..Default::default()
+        },
+        |_| false,
+    )
+    .unwrap();
+    assert!(terminal.start.is_none(), "continuing finish reaches end");
+    assert!(fx
+        .store
+        .sqlite
+        .end_task_graph(&fx.task.id, Some(&final_visit))
+        .unwrap());
+    assert!(!fx
+        .store
+        .sqlite
+        .end_task_graph(&fx.task.id, Some(&final_visit))
+        .unwrap());
+    let ended_row = fx
+        .store
+        .sqlite
+        .task_graph_row(&fx.task.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(ended_row.step, "end");
+    assert!(ended_row.breakpoint.is_none());
+    assert!(fx
+        .store
+        .sqlite
+        .task_completion_pending(&fx.task.id)
+        .unwrap()
+        .is_some());
+    // Clear mutable borrow warning if any.
+    let _ = &mut fx.task;
+}

@@ -2194,16 +2194,6 @@ fn three_nested_loops_each_return_to_their_own_first_step() {
     );
 }
 
-#[test]
-fn breakpoint_runs_the_released_pending_worker_once() {
-    run_first_feature_review(true);
-}
-
-#[test]
-fn breakpoint_runs_explore_before_a_new_feature_stops() {
-    run_first_feature_review(false);
-}
-
 fn install_review_primary(home: &Path, checkout: &Path, task: &support::RegisteredTask) -> String {
     let (session, thread) = support::stopped_claude_conversation(home, checkout);
     let store = &task.store.sqlite;
@@ -2229,7 +2219,8 @@ fn start_review_server(home: &Path) -> MachineServer {
     MachineServer::start_with_path(lf_binary(), home, &path)
 }
 
-fn run_first_feature_review(released: bool) {
+/// A fresh feature Task on a private Machine with a quit primary conversation.
+fn with_feature_task(test: impl FnOnce(&Path, &Path, &support::RegisteredTask)) {
     let repo = loopflow_test_support::TestRepo::new();
     support::bind_task_planning(&repo);
     let checkout = repo.path().canonicalize().unwrap();
@@ -2240,13 +2231,39 @@ fn run_first_feature_review(released: bool) {
         "feature-review",
         &repo.head_sha(),
     );
-    let store = &task.store.sqlite;
     install_review_primary(home.path(), &checkout, &task);
     let _server = start_review_server(home.path());
     observe_planning(&task, &checkout);
     repo.create_branch("feature-review");
-    let history = released.then(|| {
-        store.test_graph(
+    test(&checkout, home.path(), &task);
+}
+
+// Wait for the handoff at the primary, not just the parked cursor.
+fn first_explore_review(
+    home: &Path,
+    task: &support::RegisteredTask,
+    result: &str,
+) -> loopflow_execution::store::task_work::BreakpointArrival {
+    let presented = support::first_inputs(home, 1);
+    let store = &task.store.sqlite;
+    let row = store.task_graph_row(&task.task.id).unwrap().unwrap();
+    assert_eq!(row.step, "after-explore");
+    let stop: loopflow_execution::store::task_work::BreakpointArrival =
+        serde_json::from_str(row.breakpoint.as_ref().unwrap()).unwrap();
+    let review = store
+        .steer_by_source(&format!("breakpoint:{}", task.task.id), stop.id.as_str())
+        .unwrap()
+        .unwrap();
+    assert!(review.text.contains(result), "{}", review.text);
+    assert!(presented.contains(&review.text), "{presented}");
+    stop
+}
+
+#[test]
+fn breakpoint_runs_the_released_pending_worker_once() {
+    with_feature_task(|checkout, home, task| {
+        let store = &task.store.sqlite;
+        let history = store.test_graph(
             "old-feature",
             checkout.to_str().unwrap(),
             &[
@@ -2254,12 +2271,8 @@ fn run_first_feature_review(released: bool) {
                 ("explore", Some("succeeded")),
             ],
             Some("succeeded"),
-        )
-    });
-    let mut args = vec!["task", "run", "INF-123"];
-    if released {
-        // This completed prefix and the pending worker have the same skill
-        // name, as in the released research Graph. Only the latter may run.
+        );
+        // Only the pending one of these identically named workers may run.
         let capture = serde_json::json!({"name":"old-feature","steps":[
             {"Skill":{"skill":{"name":"explore","content":"A finished prefix."},"id":null,"interactive":false,"returns":null,"sources":["old-feature"]}},
             {"Skill":{"skill":{"name":"explore","content":"Explore the captured layout."},"id":null,"human":true,"returns":null,"sources":["old-feature"]}}
@@ -2268,64 +2281,146 @@ fn run_first_feature_review(released: bool) {
             .take_up_task_graph(&task.task.id, &capture.to_string())
             .unwrap();
         store.set_task_graph_step(&task.task.id, "explore").unwrap();
-    } else {
-        assert!(store.task_graph_row(&task.task.id).unwrap().is_none());
-        args.push("feature");
-    }
-    let result = "Compare the two layouts in scratch/explore.html.";
-    let (_bin, path) = scripted_provider(home.path(), &[result]);
-    let run = run_lf(&checkout, home.path(), &args, Some(&path));
-    assert!(
-        run.status.success(),
-        "{}",
-        String::from_utf8_lossy(&run.stderr)
-    );
-    wait_for("the worker to finish and park its review", || {
-        store
-            .task_graph_row(&task.task.id)
-            .unwrap()
-            .is_some_and(|row| row.breakpoint.is_some())
-    });
-    let row = store.task_graph_row(&task.task.id).unwrap().unwrap();
-    assert_eq!(row.step, "after-explore");
-    let stop: loopflow_execution::store::task_work::BreakpointArrival =
-        serde_json::from_str(row.breakpoint.as_ref().unwrap()).unwrap();
-    assert_eq!(stop.cursor.index, if released { 2 } else { 1 });
-    let review = store
-        .steer_by_source(&format!("breakpoint:{}", task.task.id), stop.id.as_str())
-        .unwrap()
-        .unwrap();
-    assert!(review.text.contains(result), "{}", review.text);
-    assert!(support::first_inputs(home.path(), 1).contains(result));
-    let contexts = received_contexts(home.path());
-    assert_eq!(contexts.len(), 1);
-    if released {
-        assert!(contexts[0].contains("Explore the captured layout."));
-        let run = history.unwrap();
+
+        let result = "Compare the two layouts in scratch/explore.html.";
+        let (_bin, path) = scripted_provider(home, &[result]);
+        let resume = || {
+            let output = run_lf(checkout, home, &["task", "run", "INF-123"], Some(&path));
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        resume();
+        assert_eq!(first_explore_review(home, task, result).cursor.index, 2);
         let previous = lf_json(
-            &checkout,
-            home.path(),
-            &["graph", "show", run.as_str(), "--json"],
+            checkout,
+            home,
+            &["graph", "show", history.as_str(), "--json"],
         );
         assert_eq!(step_fields(&previous, "key"), [0, 1]);
         assert_eq!(step_fields(&previous, "label"), ["explore", "explore"]);
-        let end = run_lf(
-            &checkout,
-            home.path(),
-            &["task", "run", "INF-123"],
-            Some(&path),
-        );
-        assert!(
-            end.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end.stderr)
-        );
+        resume();
         assert_eq!(
             store.task_graph_row(&task.task.id).unwrap().unwrap().step,
             "end"
         );
-        assert_eq!(received_contexts(home.path()).len(), 1);
-    }
+        let contexts = received_contexts(home);
+        assert_eq!(contexts.len(), 1);
+        assert!(contexts[0].contains("Explore the captured layout."));
+    });
+}
+
+#[derive(Clone, Copy)]
+enum LayoutChoice {
+    Reply,
+    Continue,
+    Auto,
+}
+
+#[test]
+fn breakpoint_feature_kickoff_receives_the_chosen_layout() {
+    run_layout_choice(LayoutChoice::Reply);
+}
+
+#[test]
+fn breakpoint_feature_kickoff_receives_the_recommendation_on_continue() {
+    run_layout_choice(LayoutChoice::Continue);
+}
+
+#[test]
+fn breakpoint_feature_kickoff_receives_the_recommendation_on_auto() {
+    run_layout_choice(LayoutChoice::Auto);
+}
+
+fn run_layout_choice(choice: LayoutChoice) {
+    let recommendation = "Plan the roomy layout so each row can show a preview.";
+    let reply = "1b — use the compact layout and keep the keyboard shortcuts";
+    let result = format!("Compare scratch/explore.html. {recommendation} 1a Roomy. 1b Compact.");
+    with_feature_task(|checkout, home, task| {
+        let (_bin, path) = scripted_provider(home, &[&result, WORK]);
+        // Explore writes its artifacts during its turn. Hold kickoff once it has
+        // read its input so the real feature Graph never runs build or delivery.
+        fs::write(
+            home.join("tool_turn.py"),
+            format!(
+                r#"
+import json, os, pathlib, subprocess
+home = pathlib.Path(os.environ["LF_HOME"])
+turn = json.loads((home / "prompts").read_text().splitlines()[-1])[1]["params"]["input"][0]["text"]
+if "<lf:skill:explore>" in turn:
+    scratch = pathlib.Path("scratch")
+    scratch.mkdir(exist_ok=True)
+    (scratch / "explore.html").write_text("<h1>Task layouts</h1><p>1a Roomy. 1b Compact.</p>")
+    (scratch / "direction.md").write_text("Recommendation: {recommendation}")
+    subprocess.run(["git", "add", "scratch/explore.html", "scratch/direction.md"], check=True)
+    subprocess.run(["git", "commit", "-qm", "Compare Task layouts"], check=True)
+elif "<lf:skill:kickoff>" in turn:
+    (home / "hold-turn").touch()
+"#
+            ),
+        )
+        .unwrap();
+        let check = |args: &[&str]| {
+            let output = run_lf(checkout, home, args, Some(&path));
+            assert!(
+                output.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        if matches!(choice, LayoutChoice::Auto) {
+            check(&["task", "auto", "on", "INF-123", "--graph", "feature"]);
+        } else {
+            check(&["task", "run", "INF-123", "feature"]);
+            let stop = first_explore_review(home, task, &result);
+            assert_eq!(stop.cursor.index, 1);
+            assert!(checkout.join("scratch/explore.html").is_file());
+            assert_eq!(received_contexts(home).len(), 1);
+            match choice {
+                LayoutChoice::Reply => check(&[
+                    "task",
+                    "run",
+                    "INF-123",
+                    "--at-arrival",
+                    stop.id.as_str(),
+                    "--reason",
+                    reply,
+                ]),
+                _ => check(&["task", "run", "INF-123"]),
+            }
+        }
+        wait_for("kickoff to read its planning input", || {
+            home.join("holding").exists()
+        });
+        check(&["task", "interrupt", "INF-123"]);
+        fs::remove_file(home.join("hold-turn")).unwrap();
+        wait_for("the feature Graph to stop", || {
+            support::recorded_graphs(home)
+                .last()
+                .is_some_and(|(end, _)| end.is_some())
+        });
+        let contexts = received_contexts(home);
+        assert_eq!(contexts.len(), 2);
+        assert!(contexts[0].contains("<lf:skill:explore>"));
+        let kickoff = &contexts[1];
+        assert!(kickoff.contains("<lf:skill:kickoff>"));
+        assert!(
+            kickoff.contains(&format!("Recommendation: {recommendation}")),
+            "{kickoff}"
+        );
+        if matches!(choice, LayoutChoice::Reply) {
+            assert!(
+                kickoff.contains(&format!(
+                    "Previous step feedback or iteration direction:\n{reply}"
+                )),
+                "{kickoff}"
+            );
+        } else {
+            assert!(!kickoff.contains(reply));
+        }
+    });
 }
 
 #[test]
@@ -2472,6 +2567,52 @@ fn breakpoint_presents_finished_work() {
     assert_eq!(position(), serde_json::json!({"kind": "at", "step": "end"}));
     // Running the Graph left its prompt files; ending kept them.
     assert!(checkout.join(".lf/prompts").exists());
+}
+
+#[test]
+fn breakpoint_direct_graph_in_task_checkout_leaves_task_alone() {
+    with_feature_task(|checkout, home, task| {
+        let result = "Explore result in scratch/explore.html.";
+        let (_bin, path) = scripted_provider(home, &[result, ADVANCE]);
+        let run = run_lf(
+            checkout,
+            home,
+            &["task", "run", "INF-123", "feature"],
+            Some(&path),
+        );
+        assert!(
+            run.status.success(),
+            "{}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+        let stop = first_explore_review(home, task, result);
+
+        // Run a direct Graph with a breakpoint inside the Task checkout.
+        let direct = run_lf(checkout, home, &["-b", "graph", "research"], Some(&path));
+        assert!(
+            direct.status.success(),
+            "{}",
+            String::from_utf8_lossy(&direct.stderr)
+        );
+
+        // The Task's Graph, step, parked arrival and breakpoint steers stay untouched.
+        let row = task
+            .store
+            .sqlite
+            .task_graph_row(&task.task.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.step, "after-explore");
+        let after: loopflow_execution::store::task_work::BreakpointArrival =
+            serde_json::from_str(row.breakpoint.as_ref().unwrap()).unwrap();
+        assert_eq!(after.id, stop.id);
+        assert!(task
+            .store
+            .sqlite
+            .task_completion_pending(&task.task.id)
+            .unwrap()
+            .is_none());
+    });
 }
 
 #[test]

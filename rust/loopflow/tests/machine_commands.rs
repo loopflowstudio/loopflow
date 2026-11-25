@@ -6572,10 +6572,15 @@ fn a_served_run_for_a_task_mini_runs_starts_it_there() {
         .request(Operation::Write(Mutation::TaskRun {
             directory: plan.local_path.clone(),
             issue: task.to_string(),
-            graph: None,
-            from: None,
-            agent: None,
-            approve: false,
+            request: loopflow_execution::engine::task::TaskRunRequest {
+                graph: None,
+                from: None,
+                agent: None,
+                approve: false,
+                at_arrival: None,
+                decision: None,
+                reason: None,
+            },
         }))
         .unwrap()
         .result;

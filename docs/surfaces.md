@@ -183,8 +183,8 @@ What do you want?
 
 In Product ▾, running feature ▾, Product's default
 
-☺ explore   plan   build   ☺ ship-review   deliver   ☺ verify
-You take part at explore, ship-review and verify.
+explore   ☺   plan   build   ship-review   ☺   deliver   verify   ☺
+You take part after explore, ship-review and verify.
 
                                         Cancel   File   Start ⌘↩
 ```
@@ -195,10 +195,9 @@ to another Wave or to the repository; the second picks its workflow, from
 choice the workflow is: the default of the Wave or repository named before it,
 your own default, or "for this Task only" once you pick another. Pick the default again to go back.
 
-Under the sentence is the workflow as the Task will show it later: its steps,
-a person before each one where you take part, then the same thing in words. A
-workflow with no such step reads "Runs on its own." Change the menu and both
-lines change with it.
+The workflow shows its steps in order, with a marker where you can review
+the finished work. The sentence below names those stops. A workflow with no
+breakpoints reads “Runs on its own.” Change the menu and both lines update.
 
 - **Start** (⌘↩) files the Task and runs it.
 - **File** runs `lf task create` without `--run`: the Task lands in that
@@ -215,12 +214,12 @@ request stays on screen with "Not started.", the error, **Try again** and
 Open a filed Task and it says what Start will do, in the sheet's words:
 
 ```text
-feature   ☺ explore   plan   build   ☺ ship-review   deliver   ☺ verify   Start
+feature   explore   ☺   plan   build   ship-review   ☺   deliver   verify   ☺   Start
 
 Not started
 
 It will run feature, Product's default.
-You take part at explore, ship-review and verify.
+You take part after explore, ship-review and verify.
 
 [Start]   Start with… ▾
 ```

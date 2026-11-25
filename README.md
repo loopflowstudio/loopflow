@@ -36,9 +36,10 @@ Each Task carries:
   it. Open it in several terminals or Desktop at once; it outlives closed
   windows, `lf install` updates, crashes and reboots.
 - **A workflow (Graph).** Steps like `design`, `implement`, `qa`, `ship-review`,
-  and `deliver`, each running in the Task's own worktree and branch. `lf task run`
-  pauses at `interactive:` steps for your input and runs the rest headless;
-  `lf -b task run` or `lf task auto on` runs every step autonomously.
+  and `deliver`, each running on its configured agent in the Task's worktree.
+  At a breakpoint, the Task conversation shows the finished work and the
+  proposed next step. Reply to choose a direction, or run `lf task run <ID>`
+  to take the recommendation.
 - **Its own pull request, branch and tracker issue,** kept together, through
   stacked Tasks (`lf sync <parent-ID>`) and CI repair (`lf land --wait-and-fix`).
 - **Its history.** Every conversation, Graph run and step, and what each cost.
@@ -65,17 +66,18 @@ Audit auth changes on this branch. Fix missing validation and untested paths.
 
 ```yaml
 # .lf/graphs/ship-api.yaml
-- interactive: design   # stops for you; writes scratch/plan.md
+- design                # writes a proposed plan in scratch/plan.md
+- break                 # review the plan before implementation starts
 - implement             # commits its work on the branch
 - audit                 # runs on Codex per its frontmatter
 - gate                  # publishes the PR so CI starts, then reviews while CI runs
 ```
 
 ```bash
-lf audit                        # run one Skill right now
-lf graph ship-api               # design with you, then run the rest headless
-lf task run <ID> ship-api       # run a Task through it, pausing at design
-lf -b task run <ID> ship-api    # run every step headless to a merged PR
+lf design                       # work on a design together in this terminal
+lf graph ship-api               # review the finished plan at your terminal
+lf task run <ID> ship-api       # review the finished plan in the Task conversation
+lf -b task run <ID> ship-api    # carry the proposed plan straight into implementation
 ```
 
 Built-in Graphs (`feature`, `code`, `auto`, `research`, `optimize`) work out of

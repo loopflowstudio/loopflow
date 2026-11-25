@@ -90,12 +90,13 @@ lf steer <ID> "raise ValueError, not ZeroDivisionError"   # redirects the run be
 ```
 
 `code` is a built-in Graph: it plans, implements in reviewable commits, runs
-`qa`, publishes the PR, pauses for your review, then delivers and pauses once
-more to verify on `main`. A Task remembers its Graph, so later `lf task run <ID>`
-calls continue from where it stopped.
+`qa`, publishes the PR and prepares a review. It stops after `ship-review`
+so you can decide whether to deliver. After delivery, `verify` checks the
+change on `main` and the Graph stops with those results. The Task remembers
+its Graph. Later `lf task run <ID>` calls continue from where it stopped.
 
 - Set `graph: code` in `.lf/config.yaml` to make it the repo default.
-- Run `lf -b task run <ID>` to run straight through interactive stops headless.
+- Run `lf -b task run <ID>` to follow the recommendations through breakpoints for this run.
 - Put `auto: on` beside `graph:` in `.lf/wave/<wave>/config.yaml` to take that
   Wave's Tasks from request to merged PR autonomously; `lf task auto off <ID>`
   takes one back.
@@ -109,32 +110,30 @@ lf session list                  # live conversations, OS-confirmed
 
 ## 4. Pick up the conversation
 
-When the PR is ready, the Task pauses at `ship-review` in its own conversation.
-It prepares one summary page (`scratch/ship-review.html`) covering what ships,
-how to try it, the choices made for you, and everything left outside the PR,
-each with a proposal to fix it here, give it its own Task or drop it.
+At the breakpoint after `ship-review`, your Task conversation has the review
+ready, even if you closed its window while the build ran. Open
+`scratch/ship-review.html` from the conversation to see what ships, how to
+try it and what the worker recommends doing about anything left out.
 
 ```bash
 lf resume --task <ID>            # open from any terminal, on whichever harness it ran
 ```
 
-Ask for changes right there. Close the terminal and come back next week: the
-conversation persists across window closes, `lf install` updates, crashes, and
-reboots.
+Reply “Cover zero divided by zero before merging” to send the build
+through another pass with that direction. If the review recommends delivery
+and you agree, `lf task run <ID>` continues to delivery.
 
 ## 5. Land it
 
 ```bash
-lf task auto on <ID>             # runs remaining steps, then merges; repairs failing CI until it lands
-lf task auto off <ID>            # wait at the next interactive step and disarm auto-merge
+lf task auto on <ID>             # follow the recommendations through delivery and verification
+lf task auto off <ID>            # wait at the next breakpoint and disarm auto-merge
 ```
 
-`lf task auto on` turns auto on and runs the Task: an agent stands in at each
-remaining interactive step, then `deliver` runs `reflect` (folds your feedback
-into skill improvements), `gate` (publishes the PR so CI starts, then reviews
-while CI runs), and `lf land --wait-and-fix`. It returns once the run starts,
-like `lf task run` (`-b` waits until merge). The Task completes when its PR merges, and
-`lf wt prune` cleans up finished worktrees later.
+With auto on, `deliver` runs `reflect`, `gate` and `lf land --wait-and-fix`.
+After merge, `verify` checks the result. An advancing decision at the final
+breakpoint takes the Task to completion. `lf wt prune` cleans up finished
+worktrees later.
 
 The same landing commands work on any branch outside a Task:
 

@@ -43,7 +43,8 @@ If opening fails, the Graph keeps running: fix the host issue and run
 
 Task conversations stay alive while the Graph runs and come back automatically
 after a kill, crash, or reboot ([Sessions](sessions.md#auto-recovery-after-a-kill-crash-or-reboot)).
-A conversation you explicitly quit stays quit until you `lf resume --task LOO-12`.
+If you quit the conversation while work runs, the next breakpoint reopens it
+in a held terminal. Attach with `lf resume --task LOO-12`.
 
 To investigate a failure, run `lf incident` inside any Task checkout (even
 after the Task is done) to run an independent investigation with that Task's
@@ -101,21 +102,14 @@ lf task list --closed --wave infra --since 7d  # closed in the last week
 lf task list --subscribe --json                # stream a JSON line on every change
 ```
 
-`lf task status` says where the Task stands on its Graph in one sentence, the
-same words Desktop's workflow bar shows:
+At a breakpoint the Task is **Active**. It appears in **Now** and at the
+top of active work in Desktop. Open it to read the finished step's result
+and respond. You can leave the conversation and come back to the same choice.
 
-```text
-LOO-12  moving
-  Graph code: build is running implement. You are next needed at ship-review.
-```
-
-With auto on, the second clause names auto: "Auto stands in next at
-ship-review." A stopped Graph reads "Stopped at build. `lf task run` starts it
-again." `--json` carries the parts: `graph.steps` (each top-level step's
-`name` and `interactive`, true when a person takes part anywhere inside the
-step), `graph.current_step` (its index, null before the start and at the end)
-and `graph.sentence`. Before a Task starts, Desktop draws the same steps from
-[`lf graph list --json`](orchestration.md#describe-a-graph).
+`lf task status` and Desktop's workflow bar show the same sentence about
+the current step and the next stop. For scripts, `--json` includes the steps,
+the current step index and `graph.sentence`. Before a Task starts, Desktop
+gets its workflow from [the Graph catalog](orchestration.md#describe-a-graph).
 
 Every read queries this machine's local store, so it answers instantly and
 works offline.
@@ -183,7 +177,7 @@ LOO-12  idle
   PR: #1972 merged
   Merged · 3 children open
   child: LOO-14  Retry budget per host  moving
-  child: LOO-15  Log each retry         idle at ship-review · #1981 open
+  child: LOO-15  Log each retry         active after ship-review · #1981 open
   child: LOO-16  Document the budget    unstarted
 ```
 
@@ -205,14 +199,14 @@ work, a stack says which branch it starts from, and neither sets the other: add
 `--stack-on LOO-12` when a child needs LOO-12's unmerged code.
 
 LOO-12's conversation conducts its children. It is told, and woken if idle,
-when a child stops at an interactive step, a child's run fails or stops, a
+when a child reaches a breakpoint, a child's run fails or stops, a
 child's PR merges, or a child is completed or abandoned. Steps passing inside
 a child's run tell it nothing. A steer goes only to the Task it names:
 `lf steer LOO-14 "…"` reaches LOO-14's agents, not LOO-12's conversation.
 
 ```text
 loopflow: LOO-15 "Log each retry", which this conversation conducts, stopped
-at ship-review. lf task status LOO-15
+after ship-review. lf task status LOO-15
 ```
 
 A merge is news once Loopflow has seen it: `lf land` and auto mode see their
@@ -246,7 +240,7 @@ LOO-12 done
   LOO-14 done: #1980 merged
     LOO-17 abandoned: no merged PR
   LOO-16 abandoned: no merged PR
-  LOO-15 abandoned: #1981 open, at ship-review
+  LOO-15 abandoned: #1981 open, after ship-review
 ```
 
 Completing a parent Task settles every open descendant: children whose PR
@@ -626,8 +620,8 @@ parent's row as `lf task list --json` prints it, or `null`, so
 **Graph selection.** A Task keeps the graph it took up. Before its first run:
 the one named on `lf task run LOO-12 GRAPH`, then its Wave's default, then
 `graph:` in `.lf/config.yaml`, then builtin `code`. `lf task run LOO-12 --from
-demo` starts at any step; starting from an interactive step only puts the Task
-there. See [Orchestration](orchestration.md#where-a-person-takes-part).
+demo` runs the `demo` Skill again. Starting from a named breakpoint
+puts the Task at that marker. See [Orchestration](orchestration.md#where-a-person-takes-part).
 
 **Membership and lifecycle.** A [follow-up](#file-follow-ups-from-a-task) is
 filed in its parent's Wave and Project, and stays there if the parent later

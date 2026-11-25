@@ -14,6 +14,24 @@ Run `lf task create 'Compare two layouts for the Task list' --graph feature --ru
 
 Creating a backlog Task still just files it. Starting a feature Task launches explore at step zero. The creation request reaches the worker through the brief and stays the first request in the primary when one was requested.
 
+## Docs to read alongside the change
+
+Start with the [feature Task walkthrough and Graph syntax](../docs/orchestration.md#where-a-person-takes-part)
+and the [first PR review](../docs/getting-started.md#4-pick-up-the-conversation).
+The shared introduction is in [README.md](../README.md) and [docs/index.md](../docs/index.md).
+The [homepage workflow card](../website/home.html) shows the same stops.
+[Work](../docs/work.md), [Sessions](../docs/sessions.md) and [Surfaces](../docs/surfaces.md)
+cover finding and reopening the review. The [glossary](../docs/glossary.md),
+[agent API](../docs/agent-api.md), [operations](../docs/ops.md) and
+[security guide](../docs/security.md) use the same breakpoint terminology.
+When pass 2 converts the builtin Graphs, update the YAML reader in
+`website/tests/e2e/test_faces.py` and run `test_workflow_card_shows_the_steps_the_graph_runs`
+to compare the homepage examples with the executable Graphs.
+
+- `cargo test -p loopflow --test integration documented_commands::` passed all four checks.
+- `uv run --project website --extra test pytest -q website/tests/test_readme_index_sync.py` passed.
+- Desktop file open and subsequent state inspection both timed out. The docs are linked above.
+
 ## What it means to answer a breakpoint
 
 A breakpoint marks a place. An arrival identifies one visit to it. A worker supplies the result and a default. The primary conversation presents them and can discuss them over several turns. The Task owns the single action that takes the next step. Delivering the result, answering a clarifying question, or closing the conversation leaves the Graph where it is.

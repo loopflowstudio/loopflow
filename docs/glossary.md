@@ -9,7 +9,7 @@ Every term the docs use, in one plain sentence.
 | **Skill** | One step: Markdown instructions for an agent in `.lf/skills/` (or a builtin). |
 | **Graph** | A YAML workflow of Skills, commands, loops, and branches in `.lf/graphs/` (or a builtin). |
 | **Workflow** | The Graph a Task took up and the step it currently stands at. |
-| **Interactive step** | A Graph step written `interactive: <skill>`, where work pauses for human input (`-b` runs it headless). |
+| **Breakpoint** | A `- break` or `- break: <name>` in a Graph. A Task stops there with the preceding step’s result ready to discuss in its conversation. Auto and `-b` follow the proposed continuation. |
 | **Loopflow** | A graph that can go back and try again. Exactly: a graph with at least one backward edge. |
 | **Deciding step** | The final Skill of a `loop:` block, returning `advance`, `iterate`, or `blocked`. |
 | **Task** | One unit of work with its own worktree, branch, persistent conversation, workflow, and pull request. |

@@ -335,7 +335,7 @@ Asana, Doppler and OpenCode. See [Native authentication](subscriptions.md).
 | `lf land [--wait-and-fix]` | Enable auto-merge; with `--wait-and-fix`, watch and repair CI until merged |
 | `lf pr publish` / `open` / `submit` / `arm` / `abandon` | PR lifecycle at each commitment level |
 | `lf pr reconcile` | Settle recorded landings once; recover a Task's missing PR |
-| `lf task auto on\|off [ISSUE]` | Turn [auto](orchestration.md#auto) on and run the Task to merge / off: wait at the next interactive or merging step |
+| `lf task auto on\|off [ISSUE]` | Turn [auto](orchestration.md#auto) on and run the Task to merge / off: wait at the next breakpoint or merging step |
 | `lf repo ci [--since 7d]` | Report CI failures and automated repairs |
 | `lf repo release run\|check\|status\|regress\|promote` | End-to-end releases and stable promotion |
 | `lf commit`, `lf sync [TASK\|BRANCH]`, `lf wt …` | Git operations with Task and stack awareness |

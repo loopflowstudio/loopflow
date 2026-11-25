@@ -53,11 +53,11 @@
     </article>
     <article>
       <div class="card"><ul class="wfs">
-<li><code>feature</code><p class="line"><i>start</i><b>explore</b><span>plan →</span><span>build →</span><b>ship-review</b><span>deliver →</span><b>verify</b><i>end</i></p><small>The default. You jam on the design, and you try every change before it ships.</small></li>
-<li><code>code</code><p class="line"><i>start</i><span>plan →</span><span>build →</span><b>ship-review</b><span>deliver →</span><b>verify</b><i>end</i></p><small>One stop. Your agent builds straight from the task, and you try the change.</small></li>
-<li><code>research</code><p class="line"><i>start</i><span>research →</span><b>research</b><i>end</i></p><small>No pull request. Your agent investigates, and the task ends when you accept the findings.</small></li>
+<li><code>feature</code><p class="line"><i>start</i><span>explore →</span><b>break</b><span>plan →</span><span>build →</span><span>ship-review →</span><b>break</b><span>deliver →</span><span>verify →</span><b>break</b><i>end</i></p><small>Choose a design from the alternatives, review the PR, then see the checks on main.</small></li>
+<li><code>code</code><p class="line"><i>start</i><span>plan →</span><span>build →</span><span>ship-review →</span><b>break</b><span>deliver →</span><span>verify →</span><b>break</b><i>end</i></p><small>Review what ships before delivery, then decide whether the merged change needs another pass.</small></li>
+<li><code>research</code><p class="line"><i>start</i><span>research →</span><b>break</b><i>end</i></p><small>No pull request. Your agent investigates, and the task ends when you accept the findings.</small></li>
       </ul></div>
-      <p class="cap">Three workflows that ship with Loopflow. The highlighted stops are where you come in; everything between them runs on its own.</p>
+      <p class="cap">At each highlighted breakpoint, your Task conversation shows the finished work and what the agent recommends next.</p>
 <pre tabindex="0" aria-label="A comment reaching a teammate's agent" class="term"><span class="p">$</span> <b>lf</b> task claim ETU-14         <span class="c"># Theo takes it, on their laptop</span>
 <span class="p">$</span> <b>lf</b> task run ETU-14           <span class="c"># their agents start on it</span>
 

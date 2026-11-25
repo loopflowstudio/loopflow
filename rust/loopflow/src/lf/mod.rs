@@ -2214,20 +2214,23 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Complete a Task without moving its Graph; settles open children (merged → done, others → abandoned)
+    /// Complete a Task without moving its Graph; open children need --children
     #[command(
-        after_help = "Completing a parent Task settles every open descendant: children whose PR merged are marked done, and all other open children are abandoned (closing their PRs and deleting their branches). Abandoned Tasks cannot be reopened."
+        after_help = "A Task with open children refuses to complete, writing nothing, and lists every open descendant. Pass --children rehome to move its direct open children up to the nearest open ancestor (or to the top level) where they stay open, or --children abandon to mark merged descendants done and abandon the rest, closing their PRs and deleting their branches. --children abandon refuses while a descendant it would abandon has a running Graph, headless run or active turn; a conversation idle at an interactive step is closed. `lf task reopen` reopens a done or abandoned Task."
     )]
     Complete {
         issue: String,
-        /// Why, kept in the Task's completion request
+        /// What happens to open children: rehome keeps them open under the nearest open ancestor; abandon settles them
+        #[arg(long, value_enum)]
+        children: Option<loopflow_storage::sqlite::children::ChildPolicy>,
+        /// Why, kept in the Task's completion
         #[arg(long)]
         reason: Option<String>,
         /// Print the completed Task
         #[arg(long)]
         json: bool,
     },
-    /// Reopen local planning without moving its Graph or replacing the PR
+    /// Reopen a done or abandoned Task at its current Graph position
     Reopen {
         issue: String,
         #[arg(long)]

@@ -140,7 +140,7 @@ struct DashboardWorkspaceTests {
         resolution["members"] = members
         json["resolution"] = resolution
         json["projection"] = ["visible": members, "suppressed": []]
-        json["contents"] = members.map { ["work": $0["work"]!, "title": "t", "states": [], "identifier": NSNull(), "graph_step": NSNull(), "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": []] }
+        json["contents"] = members.map { ["work": $0["work"]!, "title": "t", "states": [], "identifier": NSNull(), "graph_step": NSNull(), "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": [], "open_children": NSNull()] }
         let plan = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: json))
         let model = WorkModel(query: RegistryQuery { args, _ in throw RegistryQueryError("Unexpected command \(args)") }, repoPath: "/repo")
         let registry = SessionsWorkspaceRegistry(localMachineId: "local")

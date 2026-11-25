@@ -776,6 +776,10 @@ pub struct ViewContent {
     /// An explicit connect command, never a fallback shell or provider launch argv.
     pub argv: Option<Vec<String>>,
     pub unavailable: Vec<String>,
+    /// How many direct children of a Task are open, so a client can ask what
+    /// happens to them before completing it; `None` for anything but a Task.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub open_children: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

@@ -586,6 +586,7 @@ mod tests {
             location: None,
             argv: None,
             unavailable: vec![],
+            open_children: Some(0),
         };
         for (state, expected) in [
             (SelectionState::Unstarted, false),

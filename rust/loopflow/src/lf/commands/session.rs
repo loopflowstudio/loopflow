@@ -924,12 +924,14 @@ async fn resume(
 }
 
 /// The conversation `lf resume` run from `directory` selects, recorded as
-/// started by a person unless `request_id` is the recovery pass's own.
+/// started by a person when `launch` is true and `request_id` is not the
+/// recovery pass's own.
 async fn select(
     store: &Arc<Store>,
     directory: &Path,
     target: loopflow_execution::ops::human_session::SessionTarget<'_>,
     request_id: Option<&str>,
+    launch: bool,
 ) -> anyhow::Result<String> {
     let selected =
         loopflow_execution::ops::human_session::select_connection(store, directory, target).await?;
@@ -938,12 +940,14 @@ async fn select(
             "Nothing to resume here; starting a new conversation."
         ));
     }
-    loopflow_execution::ops::recovery::record_start(
-        &store.sqlite,
-        &selected.id.as_str().into(),
-        request_id,
-        time::OffsetDateTime::now_utc().unix_timestamp(),
-    )?;
+    if launch {
+        loopflow_execution::ops::recovery::record_start(
+            &store.sqlite,
+            &selected.id.as_str().into(),
+            request_id,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+        )?;
+    }
     Ok(selected.id)
 }
 
@@ -960,7 +964,7 @@ async fn reopen(
     fork: bool,
     json: bool,
 ) -> anyhow::Result<Opening> {
-    let id = select(store, directory, target, request_id).await?;
+    let id = select(store, directory, target, request_id, !connection.prepare).await?;
     loopflow_execution::ops::human_session::open(
         store,
         directory,

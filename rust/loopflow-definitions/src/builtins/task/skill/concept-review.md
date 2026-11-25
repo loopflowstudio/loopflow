@@ -64,7 +64,8 @@ One self-contained file, readable in light and dark, that shows the thing
 instead of describing it, marks proposed apart from existing, and ends with
 numbered questions so "2b" is a complete answer. When the repository has a
 visual language (a design system, the app, its docs, internal tools), borrow
-its palette, type and layout. Say its path.
+its palette, type and layout. Present it with
+`lf desktop files scratch/concept-review.html` and give its path.
 
 `scratch/concept-review.html` is the only file this skill writes; it does not
 edit `scratch/plan.md`, code or docs, and it does not decide a loop. With

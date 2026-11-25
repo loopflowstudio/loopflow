@@ -34,7 +34,8 @@ A page helps when there's something to compare. Write `scratch/demo.html` with
 before and after, or two variants side by side, and the numbered questions:
 one self-contained file, light and dark. When the repository has a visual
 language (a design system, the app, its docs, internal tools), borrow its
-palette, type and layout. Say its path.
+palette, type and layout. Present it with `lf desktop files scratch/demo.html`
+and give its path.
 
 ## Keep their words
 

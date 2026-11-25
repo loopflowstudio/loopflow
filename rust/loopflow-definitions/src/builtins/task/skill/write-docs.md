@@ -28,10 +28,9 @@ surprising prerequisite is design feedback.
    real design choice, write the exact question into the plan and
    report it.
 
-4. **Show it.** Run `lf open --file <path>`, repeating `--file` for several.
-   It shows the files in an attached Files view and never launches anything;
-   with none attached, report the paths and continue. Record the changed paths
-   in the plan so the next step reads them.
+4. **Show it.** Present each edited document with `lf desktop files <path>`.
+   If Desktop is unattached (exit 4), give the paths and continue. Record the
+   changed paths in the plan so the next step reads them.
 
 Finish with the paths and any open question, and an invitation to edit the
 docs or discuss them while work continues. Don't wait for a review nobody

@@ -31,14 +31,20 @@ lf open --task LOO-12 --host desktop          # open in Loopflow Desktop
   `lf --task LOO-12 open --link --format markdown` (paste into PRs, Slack, or
   notes; installing `lf` registers the `loopflow:` URL handler).
 
-To present docs in Desktop:
+The Desktop presentation command opens a finished page or selects lines
+in a file for review.
 
 ```bash
-lf open --host desktop --file docs/usage.md --file README.md
+lf desktop files scratch/explore.html
+lf desktop files src/parser.rs:24-31 --mode diff
 ```
 
-Opens those files in Desktop's Files pane (rendered Markdown/HTML, keeping
-active drafts intact) without launching a conversation or editor.
+A path opens in **Read** by default. Desktop keeps the prior reading position
+in Files’ jump history and preserves drafts, Undo and terminal focus. During
+active editing or Diff review in a visible pane, the path appears in **Open & Scratch** with a
+dismissible `Presented <path> · Open` bar. Dismissing it keeps the file in the
+rail. Presenting from a zoomed conversation reveals the file beside it and
+keeps keyboard focus in the terminal. An unattached Desktop returns exit status 4.
 
 `lf session rename SESSION 'Resume repair'` updates the
 terminal title via standard OSC sequences, plus native cmux tabs/workspaces and
@@ -52,7 +58,12 @@ The native macOS app reads the same local store as `lf`; it keeps no copy of its
 - **Sidebar (⌘1–9):** your [Working Tasks](#working-tasks-in-the-sidebar) in
   shared order (dragging reorders them for Wave views and CLI lists too).
 - **Task workspace:** three resizable panes: `session` (conversation), `shell`
-  (at the Task's worktree), and `browser` (Files, Graph log, local dev URLs).
+  (at the Task's worktree), and `browser` (**Brief**, **Diff**, **Files**, Graph
+  log, local dev URLs). **Files** opens files read-only by default with one-key
+  **Edit** (⌃⌘E), checkout-wide **⌘P** fuzzy find and **⇧⌘F** grep, **⌘F**
+  in-file find, **⌘-click** / `gd` jump to definition with **⌘[** / **⌘]** jump
+  history, line comments shared with **Diff** (⌘↩), and quiet update notices for
+  `scratch/` writes.
 - **Dashboards:** saved side-by-side grids of Tasks selected by query. Each
   tile is headed by the Task's sidebar row, with the sentence saying where its
   workflow stands.

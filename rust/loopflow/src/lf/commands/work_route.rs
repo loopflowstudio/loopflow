@@ -215,6 +215,12 @@ fn launch_task(cli: &Cli) -> Option<&str> {
         Some(Commands::Session {
             cmd: SessionCommand::Resume { connection, .. },
         }) if connection.task.is_some() => connection.task.as_deref(),
+        Some(Commands::Task {
+            cmd:
+                TaskCommand::Find { issue, .. }
+                | TaskCommand::Grep { issue, .. }
+                | TaskCommand::Symbols { issue, .. },
+        }) => Some(issue),
         Some(Commands::Steer {
             target: Some(target),
             ..

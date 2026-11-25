@@ -38,8 +38,9 @@ network, readable in light and dark and at narrow widths. Lead with the
 decision needed and mark proposed apart from existing. One reading column, no
 dashboard chrome. End with numbered questions so "2b" is a complete answer.
 When the repository has a visual language (a design system, the app, its docs,
-internal tools), borrow its palette, type and layout. Say its path, and
-regenerate the same file each round.
+internal tools), borrow its palette, type and layout. Present the page with
+`lf desktop files scratch/explore.html` and give its path. Regenerate the same
+file each round.
 
 ## Follow their lead
 

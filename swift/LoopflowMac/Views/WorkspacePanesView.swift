@@ -741,26 +741,33 @@ struct SessionPaneView: View {
         if case .browser(let taskId, let tabs, let selected, _) = pane.content {
             let task = model.task(id: taskId)?.task
             let files = try? workspace.files(for: pane.content, task: task, query: sessions.query, follow: false)
-            ScrollView(.horizontal) {
-                HStack(spacing: Spacing.xs) {
-                    if let files {
-                        ForEach(task == nil ? [.changes, .files] : TaskFilesStore.Page.allCases, id: \.self) { page in
-                            browserTab(page.rawValue,
-                                       selected: selected == BrowserTab.files.id && files.shownPage(hasTask: task != nil) == page,
-                                       id: "page-\(page.rawValue.lowercased())") {
-                                workspace.showBrowser(.files, from: pane)
-                                files.page = page
-                                files.noteInteraction()
+            let shownPage = files?.shownPage(hasTask: task != nil)
+            let selectedID = selected == BrowserTab.files.id ? shownPage?.rawValue ?? selected : selected
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    HStack(spacing: Spacing.xs) {
+                        if let files {
+                            ForEach(task == nil ? [.changes, .files] : TaskFilesStore.Page.allCases, id: \.self) { page in
+                                browserTab(page.rawValue,
+                                           selected: selectedID == page.rawValue,
+                                           id: "page-\(page.rawValue.lowercased())") {
+                                    workspace.showBrowser(.files, from: pane)
+                                    files.page = page
+                                }.id(page.rawValue)
                             }
                         }
-                    }
-                    ForEach(tabs.filter { $0 != .files || files == nil }) { tab in
-                        browserTab(tab.title, selected: tab.id == selected, id: tab.id) {
-                            workspace.showBrowser(tab, from: pane)
+                        ForEach(tabs.filter { $0 != .files || files == nil }) { tab in
+                            browserTab(tab.title, selected: tab.id == selected, id: tab.id) {
+                                workspace.showBrowser(tab, from: pane)
+                            }.id(tab.id)
                         }
-                    }
-                }.buttonStyle(.plain).font(Typography.meta)
-            }.fixedSize(horizontal: false, vertical: true)
+                    }.buttonStyle(.plain).font(Typography.meta)
+                }.fixedSize(horizontal: false, vertical: true)
+                .onChange(of: selectedID, initial: true) { if let selectedID { proxy.scrollTo(selectedID) } }
+                .onGeometryChange(for: CGFloat.self, of: \.size.width) { _ in
+                    if let selectedID { proxy.scrollTo(selectedID) }
+                }
+            }
             .help("Brief ⌥⌘1 · Diff ⌥⌘2 · Files ⌥⌘3")
             // Files follows this window's reading of the Task when it changes.
             .onChange(of: try? workspace.filesPlace(for: pane.content, task: task), initial: true) { _, place in
@@ -857,17 +864,15 @@ struct SessionPaneView: View {
                     case .success(let files):
                         TaskFilesView(store: files, checkoutBase: task?.reference.workspace?.baseCommit, task: task,
                             graph: task.flatMap { model.taskWork[$0.id].value?.graph }, isFocused: isFocused, addToConversation: conversationInput())
+                            .background(PaneFocusTarget(isFocused: isFocused, searching: files.filePicker != nil || files.find != nil))
                             .task(id: pane.content.selectedBrowserTab?.id) {
                                 // A tab names its own comparison, never one Graph step's.
-                                files.showStep(nil)
+                                files.diffReview.showStep(nil)
                                 if case .changes(let comparison) = pane.content.selectedBrowserTab {
-                                    files.comparison = comparison
+                                    files.diffReview.comparison = comparison
                                     files.page = .changes
-                                    await files.refresh()
-                                } else if files.comparison != .workingTree(base: "parent") {
-                                    files.comparison = .workingTree(base: "parent")
-                                    await files.refresh()
-                                    await files.loadDiff()
+                                } else if files.diffReview.comparison != .workingTree(base: "parent") {
+                                    files.diffReview.comparison = .workingTree(base: "parent")
                                 }
                             }
                             .simultaneousGesture(TapGesture().onEnded { focusPane() })
@@ -1078,10 +1083,19 @@ struct PaneHoverRegion: NSViewRepresentable {
 // advancing straight to another visible terminal in the same key-view loop.
 private struct PaneFocusTarget: NSViewRepresentable {
     let isFocused: Bool
+    var searching = false
 
     func makeNSView(context: Context) -> FocusView { FocusView() }
 
     func updateNSView(_ view: FocusView, context: Context) {
+        let closedSearch = view.searching && !searching
+        view.searching = searching
+        if closedSearch, isFocused {
+            // SwiftUI removes the search field after updating its siblings.
+            Task { @MainActor [weak view] in
+                if let view, view.focusRequested, !view.searching { view.applyFocus() }
+            }
+        }
         guard view.focusRequested != isFocused else { return }
         view.focusRequested = isFocused
         view.applyFocus()
@@ -1089,6 +1103,7 @@ private struct PaneFocusTarget: NSViewRepresentable {
 
     final class FocusView: NSView {
         var focusRequested = false
+        var searching = false
         override var acceptsFirstResponder: Bool { focusRequested }
 
         override func viewDidMoveToWindow() {
@@ -1097,10 +1112,18 @@ private struct PaneFocusTarget: NSViewRepresentable {
         }
 
         func applyFocus() {
+            guard let window else { return }
             if focusRequested {
-                window?.makeFirstResponder(self)
-            } else if window?.firstResponder === self {
-                window?.makeFirstResponder(nil)
+                if let view = window.firstResponder as? NSView {
+                    // The field editor can live outside its text field's subtree.
+                    let owner = (view as? NSTextView).flatMap { $0.isFieldEditor ? $0.delegate as? NSView : nil } ?? view
+                    let frame = convert(bounds, to: nil)
+                    if owner.isDescendant(of: self) || (!owner.visibleRect.isEmpty &&
+                        frame.contains(owner.convert(owner.visibleRect, to: nil))) { return }
+                }
+                window.makeFirstResponder(self)
+            } else if window.firstResponder === self {
+                window.makeFirstResponder(nil)
             }
         }
     }

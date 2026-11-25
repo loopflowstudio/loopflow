@@ -57,12 +57,18 @@ struct ToolTabTests {
         reopenedFiles.restoreDrafts(decoded.drafts)
         #expect(reopenedFiles.tabs == tabs)
         #expect(reopenedFiles.selection == "first.txt")
-        #expect(reopenedFiles.document("first.txt").text == "unsaved draft")
-        #expect(!reopenedFiles.document("first.txt").canSave)
-        await reopenedFiles.document("first.txt").reconcile(TaskFileSnapshot(recoveries: [], issueIdentifier: work.id,
+        let recovered = try #require(reopenedFiles.selectedDocument)
+        #expect(reopenedFiles.mode == .read)
+        #expect(recovered.text == "unsaved draft")
+        #expect(!recovered.canSave)
+        await recovered.reconcile(TaskFileSnapshot(recoveries: [], issueIdentifier: work.id,
             taskId: work.id, path: "first.txt", content: "base", data: nil, state: .text, revision: "base-revision", readOnlyReason: nil, sizeBytes: 4))
-        #expect(reopenedFiles.document("first.txt").text == "unsaved draft")
-        #expect(reopenedFiles.document("first.txt").canSave)
+        #expect(recovered.text == "unsaved draft")
+        #expect(recovered.canSave)
+        #expect(recovered.retainedEditor == nil)
+        reopenedFiles.mode = .edit
+        recovered.editor.undoManager?.undo()
+        #expect(recovered.text == "base")
     }
 
     @Test func emptyFilesRetainTheirRecordedLocation() throws {

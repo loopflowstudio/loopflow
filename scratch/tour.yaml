@@ -1,4 +1,4 @@
-at: b03f3fb830698d08a77198d3f49208cb997d3697
+at: 224664b16a4ab693a000acad8dd7869cc5c99978
 first:
   - path: docs/work.md
     why: Binding rule, split-checkout output, and checkout adoption behavior
@@ -6,13 +6,13 @@ first:
     why: Storage and workspace admission invariants for bound Sessions
   - path: docs/sessions.md
   - path: rust/loopflow-storage/src/sqlite/session_recovery.rs
-    why: Decouples recovery and outlook predicate from session.cwd == task.worktree
+    why: Single recovery and summary predicate decoupled from session cwd
   - path: rust/loopflow-storage/src/sqlite/children.rs
     why: Drops cwd rewrite and pairs creation with its Wave
   - path: rust/loopflow-storage/src/sqlite/sessions.rs
-    why: Guards admission on capture/bind, filters adoption lookup, and wires task_checked_out_here
+    why: Guards admission on capture/bind, filters adoption lookup, uses predicate
   - path: rust/loopflow-execution/src/ops/task/adoption.rs
-    why: Removes directory switching, logs split-checkout diagnostic, and allows re-selecting assigned Sessions in another Task's checkout
+    why: Removes directory switching, logs split-checkout note, allows re-selecting assigned Sessions
   - path: rust/loopflow-execution/src/ops/human_session/primary.rs
     why: Restricts scope lookup and workspace admission to unstarted placeholders
   - path: rust/loopflow-execution/src/ops/task.rs
@@ -22,7 +22,7 @@ first:
   - path: swift/LoopflowMac/Views/SessionActionSheet.swift
     why: Updates Desktop bind sheet copy
   - path: rust/loopflow-execution/src/ops/task/adoption/tests.rs
-    why: Verifies unchanged cwd, idle admission, checkout adoption skip, and re-selecting in another Task's checkout
+    why: Verifies unchanged cwd, idle admission, adoption skip, and cross-checkout re-selection
   - path: rust/loopflow-execution/src/ops/human_session/tests.rs
     why: Verifies split-checkout recovery outlook and missing-checkout refusal
   - path: rust/loopflow/src/server/recovery.rs

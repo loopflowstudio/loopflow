@@ -307,8 +307,8 @@ mod tests {
     /// A Task claimed here with a checkout and its conversation, whose agent
     /// is running as this test process.
     struct Fixture {
-        _home: tempfile::TempDir,
-        _repo: TestRepo,
+        home: tempfile::TempDir,
+        repo: TestRepo,
         store: SqliteStore,
         task: TaskId,
         session: LfSessionId,
@@ -318,7 +318,7 @@ mod tests {
     fn fixture() -> Fixture {
         let home = tempfile::tempdir_in("/tmp").unwrap();
         let store =
-            loopflow_execution::store::opening::open_ephemeral(&home.path().join("store.db"))
+            loopflow_execution::store::opening::open_ephemeral(&home.path().join("loopflow.db"))
                 .unwrap();
         let repo = TestRepo::new();
         let checkout = repo.path().to_string_lossy().into_owned();
@@ -374,8 +374,8 @@ mod tests {
             .unwrap();
         }
         let fixture = Fixture {
-            _home: home,
-            _repo: repo,
+            home,
+            repo,
             store,
             task,
             session,
@@ -674,93 +674,39 @@ mod tests {
     #[test]
     fn a_dead_task_conversation_in_another_directory_restarts_in_its_own_directory() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
-        let home = tempfile::tempdir_in("/tmp").unwrap();
+        let fixture = fixture();
         let _home = loopflow_execution::config::environment::EnvVarGuard::set(
             "LF_HOME",
-            home.path().to_str().unwrap(),
+            fixture.home.path().to_str().unwrap(),
         );
         let binary = std::env::current_exe().unwrap();
         let _binary = loopflow_execution::config::environment::EnvVarGuard::set(
             "LF_BIN",
             binary.to_str().unwrap(),
         );
-        let store =
-            loopflow_execution::store::opening::open_ephemeral(&home.path().join("loopflow.db"))
-                .unwrap();
-        let repo = TestRepo::new();
-        let task_checkout = repo.path().canonicalize().unwrap();
-        let session_dir = repo
+        let session_dir = fixture
+            .repo
             .create_named_worktree("research")
             .canonicalize()
             .unwrap();
-        assert_ne!(session_dir, task_checkout);
-
-        let task = TaskId::new();
-        store
-            .create_task(&loopflow_storage::work::task::NewTask {
-                parent_task_id: None,
-                repository_id: loopflow_execution::repository::location::ensure_repository(
-                    &store,
-                    task_checkout.to_str().unwrap(),
-                )
-                .unwrap(),
-                id: task.clone(),
-                project_id: None,
-                title: "Split recovery".into(),
-                description: String::new(),
-                due_date: None,
-            })
-            .unwrap();
-        loopflow_execution::store::ownership::claim_task(&store, &task).unwrap();
-        let session = store
-            .test_session(
-                "session_split_recovery",
-                &loopflow_execution::session_record::new_artifact_key(),
-            )
-            .id;
-        let captured = store.session(session.as_str()).unwrap().unwrap().captured;
-        loopflow_execution::store::sessions::bind_session(
-            &store,
-            session.as_str(),
-            captured,
-            &task,
-        )
-        .unwrap();
-        let launcher = store.test_lf_process();
-        let claim = attachment::claim_session_attachment(&store, session.as_str(), None, &launcher)
-            .unwrap();
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
-                params![task.as_str(), task_checkout.to_str().unwrap()],
-            )
-            .unwrap();
-            conn.execute(
-                "UPDATE agent_sessions SET interactive=1,cwd=?2,agent_ended_at=?3,
-                     agent_exit_code=137,agent_pid=NULL,agent_os_started_at=NULL
-                 WHERE id=?1",
-                params![session.as_str(), session_dir.to_str().unwrap(), NOW - 5],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
-                params![task.as_str(), session.as_str()],
-            )
-            .unwrap();
-        }
+        assert_ne!(session_dir, fixture.repo.path().canonicalize().unwrap());
+        fixture.execute(
+            "UPDATE agent_sessions SET cwd=?2 WHERE id=?1",
+            params![fixture.session.as_str(), session_dir.to_str().unwrap()],
+        );
+        fixture.exited(137);
 
         let started_cwds = RefCell::new(Vec::new());
         recover_conversations(
-            &store,
+            &fixture.store,
             NOW,
             |_| false,
             |_| Ok(None),
             |conversation, request| {
-                assert_eq!(conversation.session, session);
+                assert_eq!(conversation.session, fixture.session);
                 assert_eq!(
                     request,
-                    format!("recover:{}:{}:1", session, claim.agent_process_id)
+                    format!("recover:{}:{}:1", fixture.session, fixture.agent)
                 );
                 let start = crate::server::service::continuing(
                     conversation.session.clone(),
@@ -778,27 +724,10 @@ mod tests {
         assert_eq!(started_cwds.into_inner(), [session_dir]);
 
         // Without a local checkout row for the Task, recovery leaves it down.
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "DELETE FROM task_checkouts WHERE task_id=?1",
-                [task.as_str()],
-            )
-            .unwrap();
-        let started_without_checkout = RefCell::new(Vec::new());
-        recover_conversations(
-            &store,
-            NOW + 60,
-            |_| false,
-            |_| Ok(None),
-            |_, request| {
-                started_without_checkout.borrow_mut().push(request);
-                Ok(())
-            },
-        )
-        .unwrap();
-        assert!(started_without_checkout.into_inner().is_empty());
+        fixture.execute(
+            "DELETE FROM task_checkouts WHERE task_id=?1",
+            [fixture.task.as_str()],
+        );
+        assert!(fixture.pass(NOW + 60, false).is_empty());
     }
 }

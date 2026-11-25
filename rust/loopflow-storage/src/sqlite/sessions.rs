@@ -488,7 +488,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         graph.pid,graph.os_started_at,graph.exit_code,graph.error,a.agent_ended_at IS NOT NULL,
         a.agent_ended_at,a.agent_exit_code,
         a.starts_since_turn,a.last_started_at,a.start_failure,
-        EXISTS(SELECT 1 FROM task_checkouts pc WHERE pc.task_id=t.id AND {here}),
+        {here},
         a.agent_pid IS NULL AND a.agent_ended_at IS NULL
          AND EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL)
         FROM page s JOIN agent_sessions a ON a.id=s.id

@@ -3,3 +3,4 @@
 - Choice for review: a reply can change advance to iterate or iterate to advance on the presented visit. Continue carries the accepted words through a restart. A late reply stays in the conversation for discussion. The first slice exercises this through a quit primary.
 - Use the Task run's carrier ID for each arrival. A carrier can park once, and a repeat or Graph replacement starts a fresh carrier.
 - Use `step: research` inside the research Graph. A bare `research` resolves to the Graph of the same name.
+- When **Sort by status** is off, should a breakpoint temporarily appear above a Task someone dragged to the top? #2025 made the default Working order stable. For the Desktop pass, assume priority in Now and status-sorted work while keeping the saved drag order intact. The default sidebar presentation is still open.

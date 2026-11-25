@@ -2240,8 +2240,9 @@ pub enum TaskCommand {
 `graph:`, or `code`. At a breakpoint the preceding step is finished. Continue to accept its \
 proposal or use --decision and --reason to choose another loop pass. A run also stops before a legacy interactive step, where the Task waits for its \
 conversation; the next `lf task run` continues after it. A run that fails starts again at the \
-step that failed; the steps before it stay done, and --from reruns them. `-i` runs every step \
-with you in this terminal instead. A run that reaches a merging step, as `-b` does, may merge the PR \
+step that failed; the steps before it stay done, and --from reruns them. `-i` runs legacy interactive \
+steps in this terminal. Ordinary skills run headless and Task breakpoints open in the Task conversation. \
+A run that reaches a merging step, as `-b` does, may merge the PR \
 unless someone turned auto off; then it waits at the landing step until `lf task auto on`. `-b` turns \
 no auto on: a run carried again after it dies stops at its next interactive step. Add --open to open its primary conversation locally when the launch returns, \
 using lf open's ordinary host selection. Preview and --quote open nothing."

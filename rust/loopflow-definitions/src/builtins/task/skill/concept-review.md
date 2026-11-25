@@ -64,6 +64,9 @@ One self-contained file, readable in light and dark, that shows the thing
 instead of describing it, marks proposed apart from existing, and ends with
 numbered questions so "2b" is a complete answer. Say its path.
 
+`scratch/concept-review.html` is the only file this skill writes; it does not
+edit `scratch/plan.md`, code or docs, and it does not decide a loop.
+
 ## With a person
 
 The page is the review. This is often what stands in for code review: the
@@ -76,6 +79,3 @@ When they want to go further, explore the biggest mismatch together before
 presenting a full redesign, draft the affected usage docs, and regenerate the
 page as answers come. Ask about choices that change what the product should
 be, never about cosmetic refactors, and keep what they say word for word.
-
-`scratch/concept-review.html` is the only file this skill writes; it does not
-edit `scratch/plan.md`, code or docs, and it does not decide a loop.

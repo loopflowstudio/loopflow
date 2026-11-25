@@ -202,7 +202,7 @@ built. Where behavior is missing, say so rather than weakening the docs.
 Unclear: make the simplest reversible choice and record it in
 `scratch/questions.md`. Contradicted, by a counterexample that breaks the
 slice, the data model or the deletion path: stop the work that depends on it
-and revise the plan. Never note a contradiction and keep building on it.
+and note what broke in the plan. Never note a contradiction and build on it.
 
 If you had to discover an undocumented convention, add it to the agent guide
 so the next run doesn't rediscover it. When the change is ready for someone to

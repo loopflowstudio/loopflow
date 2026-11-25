@@ -586,18 +586,24 @@ mod tests {
         assert!(serde_json::from_str::<super::GraphNode>(missing).is_err());
     }
 
+    fn compile_builtin(repo: &std::path::Path, name: &str) -> super::CompiledGraph {
+        let graph = load_graph(name, repo).unwrap();
+        crate::graph::compiled::compile(&graph.name, &compile_graph(&graph, repo).unwrap())
+    }
+
     #[test]
-    fn builtin_graphs_keep_their_delivery_boundaries_without_review_steps() {
+    fn builtin_graphs_compile_with_expected_steps_stops_and_loops() {
+        type Case<'a> = (&'a str, &'a [&'a str], &'a [usize], &'a [(usize, usize)]);
         let repo = tempfile::tempdir().unwrap();
-        let cases: &[(&str, &[&str], &[usize], usize)] = &[
-            ("queue", &["compress", "sync", "realign", "gate"], &[], 0),
-            ("refresh", &["sync", "realign"], &[], 0),
-            ("task-design", &["kickoff"], &[], 0),
+        let cases: &[Case<'_>] = &[
+            ("queue", &["compress", "sync", "realign", "gate"], &[], &[]),
+            ("refresh", &["sync", "realign"], &[], &[]),
+            ("task-design", &["kickoff"], &[], &[]),
             (
                 "incident",
                 &["unbreak", "debug", "5whys", "launch-plan"],
                 &[],
-                0,
+                &[],
             ),
             (
                 "pursue",
@@ -615,28 +621,40 @@ mod tests {
                     "pr-publish",
                 ],
                 &[],
-                2,
+                &[(5, 4), (7, 4)],
             ),
             (
                 "fix",
                 &["sync", "implement", "qa", "gate", "land --wait-and-fix"],
                 &[],
-                1,
+                &[(1, 0)],
+            ),
+            (
+                "ui",
+                &[
+                    "kickoff",
+                    "sync",
+                    "implement",
+                    "qa",
+                    "demo",
+                    "compress",
+                    "reflect",
+                    "gate",
+                    "land --wait-and-fix",
+                ],
+                &[4],
+                &[(4, 1)],
             ),
             (
                 "deliver",
                 &["reflect", "gate", "land --wait-and-fix"],
                 &[],
-                0,
+                &[],
             ),
-            ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[], 0),
+            ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[], &[]),
         ];
         for (name, labels, interactive, returns) in cases {
-            let graph = load_graph(name, repo.path()).unwrap();
-            let compiled = crate::graph::compiled::compile(
-                *name,
-                &compile_graph(&graph, repo.path()).unwrap(),
-            );
+            let compiled = compile_builtin(repo.path(), name);
             assert_eq!(
                 compiled
                     .steps
@@ -656,128 +674,37 @@ mod tests {
                 *interactive,
                 "{name}"
             );
-            assert_eq!(
-                compiled
-                    .steps
-                    .iter()
-                    .filter(|s| s.returns_to.is_some())
-                    .count(),
-                *returns,
-                "{name}"
-            );
+            let actual_returns: Vec<_> = compiled
+                .steps
+                .iter()
+                .filter_map(|s| s.returns_to.map(|to| (s.key, to)))
+                .collect();
+            let expected_returns: Vec<_> = returns
+                .iter()
+                .map(|&(from, to)| (compiled.steps[from].key, compiled.steps[to].key))
+                .collect();
+            assert_eq!(actual_returns, expected_returns, "{name}");
         }
     }
 
     #[test]
     fn refresh_integrates_upstream_before_realigning() {
         let repo = tempfile::tempdir().unwrap();
-        let graph = load_graph("refresh", repo.path()).unwrap();
-        let compiled = crate::graph::compiled::compile(
-            &graph.name,
-            &compile_graph(&graph, repo.path()).unwrap(),
-        );
-        let labels: Vec<_> = compiled
-            .steps
-            .iter()
-            .map(|node| node.label.as_str())
-            .collect();
-        assert_eq!(labels, ["sync", "realign"]);
+        let compiled = compile_builtin(repo.path(), "refresh");
         assert_eq!(compiled.steps[0].kind, GraphNodeKind::Op);
         assert_eq!(compiled.steps[1].kind, GraphNodeKind::Skill);
     }
 
     #[test]
-    fn pursue_loops_to_a_published_pr() {
+    fn pursue_runs_no_landing_ops_and_tracks_included_sources() {
         let repo = tempfile::tempdir().unwrap();
-        let graph = load_graph("pursue", repo.path()).unwrap();
-        let compiled = crate::graph::compiled::compile(
-            &graph.name,
-            &compile_graph(&graph, repo.path()).unwrap(),
-        );
-        let labels: Vec<_> = compiled
-            .steps
-            .iter()
-            .map(|node| node.label.as_str())
-            .collect();
-        assert_eq!(
-            labels,
-            [
-                "kickoff",
-                "concept-review",
-                "realign",
-                "write-docs",
-                "sync",
-                "implement",
-                "concept-review",
-                "realign",
-                "compress",
-                "qa",
-                "pr-publish",
-            ]
-        );
-        let sync = compiled.steps[4].key;
-        let returns: Vec<_> = compiled
-            .steps
-            .iter()
-            .filter_map(|node| node.returns_to.as_ref().map(|to| (node.key, to)))
-            .collect();
-        assert_eq!(
-            returns,
-            [
-                (compiled.steps[5].key, &sync),
-                (compiled.steps[7].key, &sync)
-            ]
-        );
+        let compiled = compile_builtin(repo.path(), "pursue");
         // Review and landing are the conversation's to launch, not this Graph's.
-        assert!(compiled.steps.iter().all(|node| !node.interactive));
         assert!(compiled
             .steps
             .iter()
             .all(|node| node.kind != GraphNodeKind::Op || node.label == "sync"));
         assert_eq!(compiled.steps[4].sources, ["pursue", "build"]);
-    }
-
-    #[test]
-    fn ui_loops_through_interactive_demo_then_compresses_and_delivers() {
-        let repo = tempfile::tempdir().unwrap();
-        let graph = load_graph("ui", repo.path()).unwrap();
-        let compiled = crate::graph::compiled::compile(
-            &graph.name,
-            &compile_graph(&graph, repo.path()).unwrap(),
-        );
-        let labels: Vec<_> = compiled
-            .steps
-            .iter()
-            .map(|node| node.label.as_str())
-            .collect();
-        assert_eq!(
-            labels,
-            [
-                "kickoff",
-                "sync",
-                "implement",
-                "qa",
-                "demo",
-                "compress",
-                "reflect",
-                "gate",
-                "land --wait-and-fix",
-            ]
-        );
-        let interactive: Vec<_> = compiled
-            .steps
-            .iter()
-            .enumerate()
-            .filter_map(|(i, node)| node.interactive.then_some(i))
-            .collect();
-        assert_eq!(interactive, [4]);
-        let sync = compiled.steps[1].key;
-        let returns: Vec<_> = compiled
-            .steps
-            .iter()
-            .filter_map(|node| node.returns_to.as_ref().map(|to| (node.key, to)))
-            .collect();
-        assert_eq!(returns, [(compiled.steps[4].key, &sync)]);
     }
 
     #[test]

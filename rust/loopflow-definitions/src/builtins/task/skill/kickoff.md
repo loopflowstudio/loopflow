@@ -26,9 +26,8 @@ with what you passed over.
    the ones nobody named. Come back with answers, not a worry list: "the
    tracker's API has no conditional assignment, so we read-then-assign with
    conflict detection", not "there might be API limitations". When two
-   explanations
-   fit, run the smallest probe that tells them apart. Keep the finding even
-   when it kills the attractive approach.
+   explanations fit, run the smallest probe that tells them apart. Keep the
+   finding even when it kills the attractive approach.
 
 3. **Compare mechanisms.** Where it's uncertain, weigh approaches that differ
    by mechanism, not presentation. A route is blocked when what it still needs

@@ -554,6 +554,11 @@ threads, `spawns` unchanged across two calls a minute apart. Then
      - `scripts/test_server_registration.py` tests macOS SMAppService bundled-app registration (`registration.m`), not custom-home hashed jobs, and `transport_tests.rs`'s `supervised` proof hits `ensure()`'s already-installed fast path; both and all `MachineServer` fixtures survive unchanged.
      - On macOS, `launchctl print-disabled gui/<uid>` retains `=> enabled` override lines for past `com.loopflow.{server,machine}.<hash>` jobs even after `bootout` removes them from `launchctl list`. Not registering custom homes stops adding entries.
      - Two real bugs caught by Pass 3 tests: (1) children spawned by a holder under a parent with `SIGHUP = SIG_IGN` ignored `SIGHUP` on master PTY close until `Holder::start` reset `SIGHUP` to `SIG_DFL` in `pre_exec`; (2) `maintenance::refresh` lacked `path.exists()`, allowing `open_sqlite` to recreate a deleted custom home with a new inode during `remove_dir_all` (prevented by both the guard and `(dev, ino)` tracking).
+   - Realign after Pass 3 moved the duplicated `home_identity`/`home_removed` from `server/service.rs` and `terminal_holder.rs` into `loopflow_execution::store` (clippy clean; tests not rerun).
+   - Left from Pass 3's shape read (fold into Pass 4 or compress):
+     - Both the custom-home server (`CUSTOM_HOME_CHECK`, 2 s) and holder (`HOME_CHECK`, 2 s) poll `stat(home)` on a timer, against the "never on an idle timer" rule. Cheap, but the shared `FsWatcher` watching the home's parent could replace both polls.
+     - A clientless idle custom-home server opens a read-only store every 30 s (`CUSTOM_HOME_EXECUTION_CHECK` → `store_has_unfinished_execution`), so `store_opens` rises in that state; the benchmark holds a client and never sees it. Use the pooled store or the store-change waker instead of a fresh open.
+     - The 10-minute idle deadline uses `Instant`; AGENTS.md asks for `SystemTime` on minute-scale deadlines (a sleeping Mac stretches it).
 4. **Job budget and bounded files.** *(next)* §9 (`RunningGraph::spawn` env budget +
    `nice 5` + host-local `machine.jobs` in `docs/config.md`) and §10 (log rotation,
    delivery/log/backup/lock-file pruning).

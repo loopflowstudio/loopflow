@@ -164,8 +164,8 @@ fn connected(clients: &Clients) -> Vec<ConnectedClient> {
 pub(super) async fn run() -> Result<()> {
     let home = loopflow_execution::store::lf_home_dir();
     let custom_home = loopflow_execution::store::custom_home_selected();
-    let home_identity = home_identity(&home);
-    if custom_home && home_removed(&home, home_identity) {
+    let home_identity = loopflow_execution::store::home_identity(&home);
+    if custom_home && loopflow_execution::store::home_removed(&home, home_identity) {
         loopflow_execution::installation::server::retire_self_if_registered();
         tracing::info!(home = %home.display(), "Custom home is gone; server exiting");
         return Ok(());
@@ -287,22 +287,6 @@ fn store_has_unfinished_execution(home: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
-fn home_identity(home: &std::path::Path) -> Option<(u64, u64)> {
-    use std::os::unix::fs::MetadataExt;
-    std::fs::metadata(home)
-        .ok()
-        .map(|meta| (meta.dev(), meta.ino()))
-}
-
-fn home_removed(home: &std::path::Path, initial: Option<(u64, u64)>) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    match std::fs::metadata(home) {
-        Ok(meta) => initial.is_some_and(|(dev, ino)| (meta.dev(), meta.ino()) != (dev, ino)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
-        Err(_) => false,
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 struct CustomHomeSchedule {
     check_every: Duration,
@@ -326,7 +310,7 @@ async fn watch_custom_home(
     interval.tick().await;
     loop {
         interval.tick().await;
-        if home_removed(&home, initial_identity) {
+        if loopflow_execution::store::home_removed(&home, initial_identity) {
             return ShutdownReason::HomeRemoved;
         }
         let has_clients = slots.available_permits() < MAX_CONNECTIONS;
@@ -4592,7 +4576,8 @@ mod tests {
 
     #[test]
     fn custom_home_watcher_exits_when_home_is_removed() {
-        use super::{home_identity, watch_custom_home, CustomHomeSchedule, ShutdownReason};
+        use super::{watch_custom_home, CustomHomeSchedule, ShutdownReason};
+        use loopflow_execution::store::home_identity;
 
         let home = tempfile::tempdir().unwrap();
         let home_path = home.path().to_path_buf();
@@ -4629,7 +4614,8 @@ mod tests {
 
     #[test]
     fn custom_home_watcher_waits_for_clients_and_unfinished_execution_before_idle_exit() {
-        use super::{home_identity, watch_custom_home, CustomHomeSchedule, ShutdownReason};
+        use super::{watch_custom_home, CustomHomeSchedule, ShutdownReason};
+        use loopflow_execution::store::home_identity;
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let home = tempfile::tempdir().unwrap();

@@ -332,8 +332,8 @@ pub(crate) fn serve_for_home(
     home: Option<&Path>,
     ready: impl FnOnce(),
 ) -> Result<Served> {
-    let initial_home = home.and_then(home_identity);
-    if home.is_some_and(|dir| home_removed(dir, initial_home)) {
+    let initial_home = home.and_then(crate::store::home_identity);
+    if home.is_some_and(|dir| crate::store::home_removed(dir, initial_home)) {
         return Ok(Served::Finished);
     }
     let lock = std::fs::OpenOptions::new()
@@ -437,7 +437,7 @@ pub(crate) fn serve_for_home(
         if let (Some(home), Some(due)) = (home, next_home_check) {
             let now = Instant::now();
             if now >= due {
-                if home_removed(home, initial_home) {
+                if crate::store::home_removed(home, initial_home) {
                     // Closing each master PTY hangs up its foreground process group (SIGHUP).
                     for terminal in holder.terminals.values_mut() {
                         terminal.master = None;
@@ -466,22 +466,6 @@ pub(crate) fn serve_for_home(
             let _ = std::fs::remove_file(&place.socket);
             return Ok(Served::Finished);
         }
-    }
-}
-
-fn home_identity(home: &Path) -> Option<(u64, u64)> {
-    use std::os::unix::fs::MetadataExt;
-    std::fs::metadata(home)
-        .ok()
-        .map(|meta| (meta.dev(), meta.ino()))
-}
-
-fn home_removed(home: &Path, initial: Option<(u64, u64)>) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    match std::fs::metadata(home) {
-        Ok(meta) => initial.is_some_and(|(dev, ino)| (meta.dev(), meta.ino()) != (dev, ino)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => true,
-        Err(_) => false,
     }
 }
 

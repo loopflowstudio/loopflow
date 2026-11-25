@@ -129,6 +129,25 @@ pub fn custom_home_selected() -> bool {
     !same_database_file(&lf_home_dir(), &default_lf_home_dir()).unwrap_or(false)
 }
 
+/// A home's `(dev, ino)`, so a deleted-and-recreated directory reads as gone.
+pub fn home_identity(home: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(home)
+        .ok()
+        .map(|meta| (meta.dev(), meta.ino()))
+}
+
+/// Whether `home` is definitively gone: not found, or replaced by a new inode.
+/// A transient I/O error never counts.
+pub fn home_removed(home: &Path, initial: Option<(u64, u64)>) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match std::fs::metadata(home) {
+        Ok(meta) => initial.is_some_and(|(dev, ino)| (meta.dev(), meta.ino()) != (dev, ino)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+        Err(_) => false,
+    }
+}
+
 /// The selected home's database.
 pub fn default_db_path() -> PathBuf {
     lf_home_dir().join("loopflow.db")

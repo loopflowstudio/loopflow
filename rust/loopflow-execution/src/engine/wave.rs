@@ -25,9 +25,7 @@ pub fn planning_connect(
     let repo = repo_root(directory)?;
     let targets = if all {
         // A clone's authored directories register before the store is listed.
-        tokio::runtime::Runtime::new()
-            .map_err(written)?
-            .block_on(crate::ops::wave_lifecycle::register_authored(&repo))
+        crate::runtime::block_on(crate::ops::wave_lifecycle::register_authored(&repo))
             .map_err(written)?;
         crate::ops::linear::list_local_waves(&repo).map_err(written)?
     } else {

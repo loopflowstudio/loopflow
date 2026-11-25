@@ -342,8 +342,7 @@ pub fn reconnect_current() -> Result<()> {
     let needs_enrollment =
         locator.is_none() && store.sqlite.repository_id(&repo.to_string())?.is_some();
     if needs_enrollment || registered.is_some_and(|path| path != repo.to_string()) {
-        let runtime = tokio::runtime::Runtime::new()?;
-        let store = runtime.block_on(crate::store::open_store(
+        let store = crate::runtime::block_on(crate::store::open_store(
             &crate::store::storage_config_from_env()?,
         ))?;
         reconcile(&store.sqlite, &repo, None, None)?;

@@ -1379,7 +1379,7 @@ fn session_flags(headless: bool) -> &'static [&'static str] {
 
 /// `future` run to completion on a runtime of its own, as its command does.
 fn block_on<F: std::future::Future>(future: F) -> anyhow::Result<F::Output> {
-    Ok(tokio::runtime::Runtime::new()?.block_on(future))
+    Ok(loopflow_execution::runtime::block_on(future))
 }
 
 fn invalid(message: &str) -> loopflow_execution::engine::Error {

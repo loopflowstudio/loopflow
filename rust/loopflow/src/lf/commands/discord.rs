@@ -52,8 +52,7 @@ pub fn serve(repo: &Path, wave: &str) -> Result<()> {
         .timeout(Duration::from_secs(15))
         .build()?;
     let url = format!("https://discord.com/api/v10/channels/{channel_id}/messages");
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = Arc::new(
             loopflow_execution::store::open_existing_store()
                 .await?

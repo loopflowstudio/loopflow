@@ -239,6 +239,9 @@ where
     F: FnOnce(sqlite::SqliteStore) -> StoreResult<T> + Send + 'static,
 {
     let store = store.clone();
+    if crate::runtime::in_block_on() {
+        return func(store);
+    }
     crate::journal::request::spawn_blocking(move || func(store))
         .await
         .map_err(|err| StoreError::InvalidData(err.to_string()))?
@@ -257,7 +260,8 @@ pub(crate) async fn run_planning_write<T: Send + 'static>(
 ) -> StoreResult<T> {
     #[cfg(any(test, feature = "test-support"))]
     let gate = PLANNING_ACCEPTANCE_GATE.try_with(Clone::clone).ok();
-    run_sqlite(store, move |store| {
+    let store = store.clone();
+    crate::journal::request::spawn_blocking(move || {
         let _acquisition = acquisition;
         #[cfg(any(test, feature = "test-support"))]
         if let Some((entered, release)) = gate {
@@ -267,6 +271,7 @@ pub(crate) async fn run_planning_write<T: Send + 'static>(
         write(store)
     })
     .await
+    .map_err(|err| StoreError::InvalidData(err.to_string()))?
 }
 
 impl Store {

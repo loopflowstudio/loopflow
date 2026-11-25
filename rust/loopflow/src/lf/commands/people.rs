@@ -10,8 +10,7 @@ use loopflow_execution::ops::people::{repo_people, RepoPerson};
 pub fn people(directory: &Path) -> Result<(Vec<RepoPerson>, Vec<String>)> {
     let repo = loopflow_execution::repository::containing(directory)?
         .ok_or_else(|| anyhow!("run `lf repo people` in a repository"))?;
-    let runtime = tokio::runtime::Runtime::new()?;
-    let store = runtime.block_on(loopflow_execution::store::open_store(
+    let store = loopflow_execution::runtime::block_on(loopflow_execution::store::open_store(
         &loopflow_execution::store::storage_config_from_env()?,
     ))?;
     repo_people(&store.sqlite, repo.as_path())

@@ -27,7 +27,7 @@ pub fn run(
             connection,
             fork,
             request_id,
-        } => tokio::runtime::Runtime::new()?.block_on(resume(
+        } => loopflow_execution::runtime::block_on(resume(
             cli,
             connection,
             connection.target(cli, id.as_deref())?,
@@ -38,7 +38,7 @@ pub fn run(
             id,
             connection,
             request_id,
-        } => tokio::runtime::Runtime::new()?.block_on(new_thread(
+        } => loopflow_execution::runtime::block_on(new_thread(
             cli,
             connection,
             connection.target(cli, id.as_deref())?,
@@ -63,7 +63,7 @@ fn run_command(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result
             cmd: None,
             ..
         } => super::activity::run(feed),
-        _ => tokio::runtime::Runtime::new()?.block_on(run_async(command, cli)),
+        _ => loopflow_execution::runtime::block_on(run_async(command, cli)),
     }
 }
 
@@ -79,8 +79,7 @@ pub fn steer(
 ) -> anyhow::Result<()> {
     use loopflow_execution::engine::session::SteerScope;
     let directory = std::env::current_dir()?;
-    let runtime = tokio::runtime::Runtime::new()?;
-    let (store, session) = runtime.block_on(async {
+    let (store, session) = loopflow_execution::runtime::block_on(async {
         let store = open_shared_store().await?;
         let session = match target {
             Some(id) => loopflow_execution::ops::human_session::session_by_id(&store, id).await?,
@@ -89,7 +88,7 @@ pub fn steer(
         anyhow::Ok((store, session))
     })?;
     if let (Some(session), true) = (&session, cli.batch) {
-        if steer_turn(cli, &runtime, &store, session, &directory, message)? {
+        if steer_turn(cli, &store, session, &directory, message)? {
             return Ok(());
         }
     }
@@ -113,7 +112,7 @@ pub fn steer(
             "name who to steer: a Session ID, a Task ID, `--wave WAVE` or `--repo NAME_OR_PATH`"
         ),
     };
-    let steer = runtime.block_on(loopflow_execution::engine::session::steer(
+    let steer = loopflow_execution::runtime::block_on(loopflow_execution::engine::session::steer(
         &store, &directory, scope, message,
     ))?;
     match (json, &session) {
@@ -135,7 +134,6 @@ pub fn steer(
 /// continues it, so the caller only saves it.
 fn steer_turn(
     cli: &crate::lf::Cli,
-    runtime: &tokio::runtime::Runtime,
     store: &Arc<Store>,
     session: &loopflow_execution::session::LfSession,
     directory: &Path,
@@ -157,7 +155,8 @@ fn steer_turn(
     {
         return Ok(false);
     }
-    let session = runtime.block_on(human::admit_workspace(store, session.clone()))?;
+    let session =
+        loopflow_execution::runtime::block_on(human::admit_workspace(store, session.clone()))?;
     let author = loopflow_execution::config::participant_name_in(directory)?
         .unwrap_or_else(|| "attribution unresolved".into());
     let steers = sqlite.take_session_steers(&session.id, &author, message)?;
@@ -491,7 +490,7 @@ pub fn list_sessions(args: &SessionListArgs) -> anyhow::Result<()> {
         let _transcripts = loopflow_execution::transcript::watch::watch(&observations);
         return subscribe_list(filter, loopflow_execution::read_stream::Transport::Stdio).map(drop);
     }
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = open_shared_store().await?;
         list(&store, args.json, &filter).await
     })
@@ -589,7 +588,7 @@ async fn rename_session(
 
 /// `lf session rename <id> <name>`: the renamed Session.
 pub(crate) fn renamed(id: &str, name: &str) -> anyhow::Result<SessionRecord> {
-    tokio::runtime::Runtime::new()?.block_on(rename_session(
+    loopflow_execution::runtime::block_on(rename_session(
         id,
         &[name.to_owned()],
         SessionTitleSource::Human,
@@ -645,7 +644,7 @@ pub(crate) enum SessionBinding {
 /// `lf session bind <id> --task <task> --json`: the bound Session, or with
 /// `preview` (`--dry-run`) the Task a bind would assign, assigning nothing.
 pub(crate) fn bound(id: &str, task: &str, preview: bool) -> anyhow::Result<SessionBinding> {
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = open_shared_store().await?;
         Ok(if preview {
             SessionBinding::Preview(Box::new(
@@ -671,7 +670,7 @@ pub(crate) fn moved(
         repo: None,
         ..Default::default()
     };
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = open_shared_store().await?;
         move_sessions(&store, &filter, &target).await
     })
@@ -681,7 +680,7 @@ pub(crate) fn moved(
 pub(crate) fn read_once(
     filter: &loopflow_execution::session::SessionFilter,
 ) -> anyhow::Result<serde_json::Value> {
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = open_shared_store().await?;
         read_list(&store, filter).await
     })
@@ -991,7 +990,7 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
     // A served request carries its `--agent` here; a new conversation
     // resolves its harness from the invocation's settings.
     let _settings = loopflow_execution::config::settings::select_invocation(cli.setting_values()?);
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = open_shared_store().await?;
         match cmd {
             SessionCommand::Resume {
@@ -1118,7 +1117,7 @@ pub fn returns_record(command: &SessionCommand, cli: &crate::lf::Cli) -> bool {
 }
 
 pub fn print_returned(id: &str) -> anyhow::Result<()> {
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = open_shared_store().await?;
         let session = loopflow_execution::ops::human_session::session_by_id(&store, id)
             .await?
@@ -1225,7 +1224,7 @@ pub(super) fn mutate(
         }
         return Ok(());
     }
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         match command {
             SessionCommand::Rename {
                 id,

@@ -126,7 +126,6 @@ pub(super) fn run_with_io(
     let forwarded = (!preview && launching)
         .then(|| loopflow_execution::machine::forward::read(directory))
         .transpose()?;
-    let runtime = tokio::runtime::Runtime::new()?;
     if let Some(id) = super::work_route::resumed_session(cli).filter(|_| !preview) {
         // Resuming a Session that lives here, or moved elsewhere, moves it (or its Task) there first.
         loopflow_execution::ops::session_move::move_session(id, target, super::write::run_task)?;
@@ -134,16 +133,16 @@ pub(super) fn run_with_io(
     let source = if preview || resident_operation {
         None
     } else {
-        runtime.block_on(loopflow_execution::machine::task::resolve_task_source(
-            cli.task.as_deref(),
-            directory,
-        ))?
+        loopflow_execution::runtime::block_on(
+            loopflow_execution::machine::task::resolve_task_source(cli.task.as_deref(), directory),
+        )?
     };
     let target = if preview || resident_operation {
-        runtime
-            .block_on(loopflow_execution::machine::connection::find_registered_machine(target))?
+        loopflow_execution::runtime::block_on(
+            loopflow_execution::machine::connection::find_registered_machine(target),
+        )?
     } else {
-        runtime.block_on(resolve_target(target, forward_agent))?
+        loopflow_execution::runtime::block_on(resolve_target(target, forward_agent))?
     };
     // Automatic routing already chose both Machine and plan. Keep that reading
     // together rather than combining its Machine with a second plan reading.
@@ -243,7 +242,7 @@ pub(super) fn run_with_io(
             cmd: crate::lf::TaskCommand::Location { .. }
         })
     ) {
-        let bytes = runtime.block_on(request(&target, &cmd[1..], None))?;
+        let bytes = loopflow_execution::runtime::block_on(request(&target, &cmd[1..], None))?;
         output(&mut io, &String::from_utf8(bytes)?)?;
         return Ok(());
     }
@@ -272,7 +271,7 @@ pub(super) fn run_with_io(
         if !connection.json && !cli.json {
             cmd.push("--json".into());
         }
-        let bytes = runtime.block_on(request(&target, &cmd[1..], None))?;
+        let bytes = loopflow_execution::runtime::block_on(request(&target, &cmd[1..], None))?;
         let record = serde_json::from_slice(&bytes)?;
         if !connection.prepare {
             let record = viewed_remotely(record, &target, forward_agent)?;
@@ -283,7 +282,7 @@ pub(super) fn run_with_io(
             loopflow_execution::transport::relay_over(&record.open_argv, unfocused)?;
             // Read the returned Session without repeating New/fork or starting
             // another provider. JSON belongs after the terminal has returned.
-            let bytes = runtime.block_on(request(
+            let bytes = loopflow_execution::runtime::block_on(request(
                 &target,
                 &[
                     "session".into(),

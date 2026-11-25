@@ -1134,13 +1134,10 @@ impl super::Launcher for loopflow_harness::Codex {
             let opened = std::thread::scope(|scope| {
                 scope
                     .spawn(|| {
-                        tokio::runtime::Builder::new_current_thread()
-                            .enable_all()
-                            .build()?
-                            .block_on(open_native(&super::Launch {
-                                config: &config,
-                                ..*launch
-                            }))
+                        crate::runtime::block_on(open_native(&super::Launch {
+                            config: &config,
+                            ..*launch
+                        }))
                     })
                     .join()
                     .map_err(|_| anyhow!("Codex startup worker panicked"))?

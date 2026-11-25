@@ -394,8 +394,7 @@ pub(super) fn resolve(target: &mut Resolved, prepare: bool) -> Result<()> {
     if !prepare && existing.is_none() {
         return Ok(());
     }
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = std::sync::Arc::new(
             loopflow_execution::store::open_store(
                 &loopflow_execution::store::storage_config_from_env()?,

@@ -58,17 +58,14 @@ pub(crate) fn validate_agent_process_close(
     std::thread::scope(|scope| {
         scope
             .spawn(|| {
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()?
-                    .block_on(async {
-                        tokio::time::timeout(
-                            Duration::from_secs(3),
-                            inspect_agent_threads(endpoint, thread),
-                        )
-                        .await
-                        .map_err(|_| anyhow!("AgentProcess inspection timed out"))?
-                    })
+                crate::runtime::block_on(async {
+                    tokio::time::timeout(
+                        Duration::from_secs(3),
+                        inspect_agent_threads(endpoint, thread),
+                    )
+                    .await
+                    .map_err(|_| anyhow!("AgentProcess inspection timed out"))?
+                })
             })
             .join()
             .map_err(|_| anyhow!("AgentProcess close worker panicked"))?

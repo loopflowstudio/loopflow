@@ -666,7 +666,7 @@ pub(crate) fn read_task_pane(
         Some(issue),
     )?;
     // A read reads what the store records; `wave.sync` exchanges planning.
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = loopflow_execution::store::read_existing_registry()?
             .map(std::sync::Arc::new)
             .context("no Loopflow store exists on this Machine")?;
@@ -682,7 +682,7 @@ pub(crate) fn subscribe_task_pane(
     transport: Transport,
 ) -> Result<Option<Subscription>> {
     let repo = loopflow_execution::ops::task::task_repository(directory, Some(issue))?;
-    let task_id = tokio::runtime::Runtime::new()?.block_on(async {
+    let task_id = loopflow_execution::runtime::block_on(async {
         let store = loopflow_execution::store::read_existing_registry()?
             .map(std::sync::Arc::new)
             .context("no Loopflow store exists on this Machine")?;

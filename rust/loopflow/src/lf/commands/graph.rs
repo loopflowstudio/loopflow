@@ -690,10 +690,7 @@ async fn interrupt_cursor(
 
 /// Run `future` to completion from this synchronous command.
 fn block_on<T>(future: impl std::future::Future<Output = Result<T>>) -> Result<T> {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?
-        .block_on(future)
+    loopflow_execution::runtime::block_on(future)
 }
 
 async fn open_graph_store() -> Result<SharedStore> {

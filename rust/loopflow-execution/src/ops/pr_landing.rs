@@ -129,8 +129,7 @@ pub(crate) fn read_merge_request_removal(
     repo: &str,
     pr_number: u32,
 ) -> OpsResult<MergeRequestRemoval> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    let store = runtime.block_on(landing_store())?;
+    let store = crate::runtime::block_on(landing_store())?;
     merge_request_removal(
         worktree,
         u64::from(pr_number),
@@ -268,8 +267,7 @@ fn admit_ci_fix(
     checks: &[CiCheck],
     release: Option<&(super::release_lock::ReleaseLock, crate::git::WorktreeLease)>,
 ) -> OpsResult<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
+    crate::runtime::block_on(async {
         let store = landing_store().await?;
         let lock = crate::store::admission::lock_task_checkouts(
             &store.sqlite,

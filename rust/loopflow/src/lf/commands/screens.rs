@@ -186,7 +186,7 @@ pub fn task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {
         .sqlite
         .task(&id)?
         .context("Task is no longer recorded")?;
-    let pane = tokio::runtime::Runtime::new()?.block_on(async {
+    let pane = loopflow_execution::runtime::block_on(async {
         let status = loopflow_execution::ops::task::registered_task_status(&store, task).await?;
         super::waves::task_pane(&store, status).await
     })?;

@@ -536,6 +536,11 @@ threads, `spawns` unchanged across two calls a minute apart. Then
    bounded runtime + merged background threads (§4), domain-filtered + pushed
    subscription wakeups with 30 s fallback reconcile (§5), scoped minute Git
    plan exchange (§7). Shows idle forks at 0 and threads under 20.
+   Starting point from Pass 1's debug run: `quiet` still 69 threads and 36
+   spawns per 10 s with 0 store opens, so the remaining cost is the timers,
+   per-subscription runtimes and Git forks this pass removes. Pass 2's focused
+   tests are the `observe` held/unheld Git refresh pair and the two
+   `read_stream` wake tests under "Acceptance check".
 3. **Disposable custom-home lifetimes.** §8 (detached server on macOS + Linux,
    idle/missing-home exit, holder exit on deleted home, bootout of legacy
    hashed jobs, docs in `docs/dev/server.md`, `machines.md`, `.lf/qa/`).

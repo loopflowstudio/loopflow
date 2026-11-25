@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-1078 · Task pause &amp; Working groups — concept review (pass 2)</title>
+<title>LOO-1078 · Task pause &amp; Working groups — concept review</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -57,7 +57,7 @@
   .verdict {
     background: var(--card);
     border: 1px solid var(--line);
-    border-left: 4px solid var(--no);
+    border-left: 4px solid var(--yes);
     border-radius: 6px;
     padding: .85rem 1rem;
     margin: 1rem 0 1.5rem;
@@ -82,7 +82,6 @@
     padding: .85rem 1rem;
   }
   .card.proposed { border: 2px dashed var(--new); background: var(--prop-bg); }
-  .card.broken { border-color: var(--no); background: var(--warn-bg); }
   .tag {
     display: inline-block;
     font-size: 11.5px;
@@ -94,7 +93,6 @@
     margin-bottom: .45rem;
   }
   .tag.built { color: var(--yes); background: var(--ok-bg); }
-  .tag.problem { color: var(--no); background: var(--warn-bg); }
   .tag.proposed { color: var(--new); background: var(--prop-bg); }
   .mock {
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
@@ -105,13 +103,37 @@
     padding: .65rem .8rem;
     margin-top: .5rem;
   }
-  .mock-hdr { font-size: 11.5px; font-weight: 600; color: var(--mut); margin: .45rem 0 .2rem; }
+  .mock-hdr { font-size: 11.5px; font-weight: 600; color: var(--mut); margin: .55rem 0 .2rem; }
   .mock-hdr:first-child { margin-top: 0; }
   .mock-row { padding: .3rem .45rem; border-radius: 5px; margin-bottom: .2rem; }
+  .mock-row.sel { background: var(--code-bg); }
   .mock-title { font-weight: 600; }
   .mock-meta { font-size: 12px; color: var(--mut); }
   .mock-warn { color: var(--no); font-size: 12px; font-weight: 600; }
   .mock-ok { color: var(--yes); font-weight: 600; }
+  .bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--bg);
+    padding: .45rem .65rem;
+    font-size: 12.5px;
+    margin-top: .5rem;
+    flex-wrap: wrap;
+  }
+  .pill {
+    display: inline-block;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: .15rem .5rem;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .pill.accent { background: var(--yes); color: #fff; border-color: transparent; }
+  .pill.dis { opacity: .48; }
   pre {
     background: var(--bg);
     border: 1px solid var(--line);
@@ -121,8 +143,8 @@
     font: 12.5px/1.45 ui-monospace, "SF Mono", Menlo, monospace;
     margin: .5rem 0 0;
   }
-  ol.q li { margin-bottom: .8rem; }
-  .choice-box {
+  ol.q li { margin-bottom: .85rem; }
+  .note-box {
     background: var(--card);
     border: 1px solid var(--line);
     border-radius: 8px;
@@ -136,65 +158,67 @@
 
 <h1>Task pause, Working groups, and the path to landing</h1>
 <p class="sub">
-  <strong>Area reviewed (pass 2):</strong> the full Task-pause lifecycle, Working-list grouping (<code>Active</code> / <code>Shipping</code> / <code>Paused</code>), condition/attention reporting, automatic <code>verify</code>, and the controls that expose them — at <code>279b71c8d1</code> against stack base <code>43f6d7fb48</code> (LOO-1063).
-  <span class="tag built">built</span> is committed at <code>HEAD</code>; <span class="tag proposed">proposed</span> is queued in <code>scratch/plan.md</code> for the next pass.
+  <strong>Area reviewed (pass 3):</strong> the full Task-pause lifecycle, Working-list grouping (<code>Active</code> / <code>Shipping</code> / <code>Paused</code>), condition/attention reporting, automatic <code>verify</code>, and the controls that expose them — at <code>c931ad9efe</code> against stack base <code>43f6d7fb48</code> (LOO-1063).
+  <span class="tag built">built</span> is committed at <code>HEAD</code>; <span class="tag proposed">deferred</span> waits for the next slice after the Working-groups demo.
 </p>
 
 <div class="verdict">
-  <strong>Verdict — one focused pass before demo:</strong> Pass 1's four mismatches are built and verified in QA (clean interrupted exit-130 recovery, <code>SelectionState::Paused</code>, live conversation reports on paused rows, non-landing Graph grouping, and Mac context-menu parity).
-  Two smaller concept leaks and one broken build commit remain at <code>279b71c8d1</code>:
-  (1) <code>derive_task_condition</code> in Rust still classifies paused Tasks as <code>Blocked</code> (dirty checkout) or <code>Waiting</code>, pulling every paused Task into Portfolio's <strong>Now</strong> list and forcing a Swift-only suppression in <code>TaskRow.swift</code>;
-  (2) <code>CapturedGraph::ships_before_review</code> ignores <code>AutoState::Off</code> while a run is still in flight before landing (showing <strong>Shipping</strong> during <code>gate</code> until it stops at <code>land</code>);
-  (3) commit <code>279b71c8d1</code> added an empty <code>rust/loopflow/src/main.rs</code> that breaks <code>cargo check -p loopflow</code> (<code>error[E0601]</code>).
+  <strong>Verdict — nothing to change before the Working-groups demo:</strong>
+  All three pass-2 findings are built, compressed, and verified in QA:
+  (1) the accidental empty <code>rust/loopflow/src/main.rs</code> is gone (<code>3e8947f9ae</code>);
+  (2) <code>derive_task_condition</code> returns <code>Clear</code> for <code>TaskState::Paused</code> and <code>RoadmapTask.need</code> clears optimistically, keeping paused Tasks out of Portfolio <strong>Now</strong> without a <code>TaskRow.swift</code> patch (<code>a378785ea7</code>);
+  (3) <code>CapturedGraph::needs_review</code> checks <code>AutoState::Off</code> on landing steps for both running cursors and parked steps, keeping manual landings in <strong>Active</strong> during <code>gate</code> and moving to <strong>Shipping</strong> once past landing (<code>5c520fcfe6</code>).
+  Compress folded Working-group classification into one Graph query (<code>85eebde63c</code>), and QA fixed the paused landing-stop sentence so status reads <code>Waiting at &lt;step&gt; while the Task is paused</code> instead of calling the Graph finished (<code>c931ad9efe</code>).
+  The only remaining non-matching row is the Task workflow bar Round 5 V4 redesign, intentionally sequenced after this demo.
 </div>
 
 <h2>1. Do the product’s concepts and the code’s concepts line up?</h2>
 <table>
-  <tr><th>Product concept / action</th><th>Code behind it (at <code>279b71c8d1</code>)</th><th>Line up?</th><th>Notes</th></tr>
+  <tr><th>Product concept / action</th><th>Code behind it (at <code>c931ad9efe</code>)</th><th>Line up?</th><th>Notes</th></tr>
   <tr>
     <td><b>Pause a started Task</b><br>Stops worker + subprocesses in its OS session; keeps ownership, checkout, PR, cursor, and open conversation.</td>
     <td><code>lf task pause</code> → <code>ops::task::pause::pause</code> → <code>begin_task_pause</code> (<code>task_pauses</code> + <code>TaskEventKind::Paused</code>) → <code>settle_worker_session</code> → <code>settle_task_pause</code></td>
     <td class="yes">yes</td>
-    <td><span class="tag built">built</span> Verified in QA on real Claude builds (1.6 s stop, 7 worker PIDs gone, neighbor + primary alive).</td>
+    <td><span class="tag built">built</span> Verified in QA on real Claude builds (1.1–1.6 s stop, worker subprocesses gone, neighbor + primary alive).</td>
   </tr>
   <tr>
-    <td><b>Primary conversation stays live while paused</b><br>Talk to it, steer it, recover on crash; Graph runs and worker retries wait for unpause.</td>
-    <td><code>require_task_unpaused</code> under <code>pause::admission</code>; <code>run_recovery</code> takes the same admission lock; <code>wake</code> runs normally; <code>task_operate</code> has <code>paused</code> disposition.</td>
+    <td><b>Primary conversation stays live while paused</b><br>Talk to it, steer it, recover on crash; Graph runs and worker/limit retries wait for unpause.</td>
+    <td><code>require_task_unpaused</code> under <code>pause::admission</code>; <code>run_recovery</code> takes the same admission lock; <code>wake</code> runs normally; <code>task_operate</code> / <code>wave_operate</code> / <code>repo_operate</code> leave paused Tasks quiet.</td>
     <td class="yes">yes</td>
-    <td><span class="tag built">built</span> Verified in QA across server restart and live comment/steer delivery.</td>
+    <td><span class="tag built">built</span> Verified across server restart, crash recovery, and live steer delivery.</td>
   </tr>
   <tr>
-    <td><b>Unpause a paused build</b><br>Lifts the hold cleanly; interrupted step stays idle and ready for Run; genuine pre-pause failures stay visible.</td>
-    <td><code>release_task_pause</code> clears <code>task_pauses</code> + dead carrier; <code>stopped_execution</code> maps <code>ExecutionResult::Interrupted</code> → <code>Idle</code>; <code>TaskGraph.sentence</code> distinguishes <code>unpause</code> vs <code>unpause --run</code>.</td>
+    <td><b>Unpause a paused Task</b><br>Lifts the hold cleanly; interrupted step stays idle and ready for Run; paused landing stop returns to auto-off waiting; pre-pause failures stay visible.</td>
+    <td><code>release_task_pause</code> clears <code>task_pauses</code> + dead carrier; <code>stopped_execution</code> maps <code>Interrupted</code> → <code>Idle</code>; <code>TaskGraph::landing_stop</code> distinguishes paused vs auto-off waiting; <code>TaskGraph.sentence</code> names <code>unpause</code> vs <code>unpause --run</code>.</td>
     <td class="yes">yes</td>
-    <td><span class="tag built">built</span> Fixed since pass 1 (<code>ecd41cbbea</code>) and verified in QA. See Q1 for whether app Unpause should resume mid-run / auto Tasks in V4.</td>
+    <td><span class="tag built">built</span> Landing-stop sentence fixed in QA (<code>c931ad9efe</code>). See Q1 for whether app Unpause should send <code>run: true</code> in V4.</td>
   </tr>
   <tr>
-    <td><b>Paused as a Task state everywhere</b><br>Same state in status, CLI filter, view queries, Mac, and iPhone.</td>
-    <td><code>TaskState::Paused</code> ↔ <code>SelectionState::Paused</code> (1:1); <code>state:paused</code> queries work; Backlog paused rows show <code>Paused</code>; Mac workflow bar, <code>…</code>, and sidebar menu share <code>TaskPauseButton</code>.</td>
+    <td><b>Paused as one Task state everywhere</b><br>Same state in status, CLI filter, view queries, Mac, and iPhone.</td>
+    <td><code>TaskState::Paused</code> ↔ <code>SelectionState::Paused</code> (1:1); <code>state:paused</code> selects both owned and unassigned held Tasks; Mac bar, <code>…</code>, and sidebar context menu share <code>TaskPauseButton</code>; iPhone menu shares <code>TaskActions.pause</code>.</td>
     <td class="yes">yes</td>
-    <td><span class="tag built">built</span> Fixed since pass 1 (<code>3977c63372</code>).</td>
+    <td><span class="tag built">built</span></td>
   </tr>
   <tr>
-    <td><b>Paused Tasks are quiet (not asking for attention)</b><br>Sidebar row shows live conversation reports (<code>Blocked</code>/<code>Error</code>/<code>Busy</code>/<code>Available</code>), else <code>Paused</code>; Portfolio <strong>Now</strong> excludes paused Tasks.</td>
-    <td><code>waves.rs::derive_task_condition</code> emits <code>Blocked</code> (dirty worktree) or <code>Waiting</code> (<code>next_move.owner == User</code>) for <code>TaskState::Paused</code>; <code>TaskRow.swift:53</code> suppresses <code>task.need</code> locally, while <code>NowProjection.swift</code>, accessibility, and <code>TaskBriefView</code> still read <code>task.need</code>.</td>
-    <td class="no">no</td>
-    <td><b>Biggest mismatch (§2).</b> Split authority: Rust says every paused Task needs attention, Swift hides it on one view and leaks it into Portfolio <strong>Now</strong>.</td>
+    <td><b>Paused Tasks are quiet (out of Portfolio Now)</b><br>Dirty worktrees and paused waits do not raise <code>Blocked</code>/<code>Waiting</code>; live conversation reports still show on the row, else <code>Paused</code>.</td>
+    <td><code>waves.rs::derive_task_condition</code> returns <code>(TaskConditionState::Clear, next_move.reason)</code> for <code>TaskState::Paused</code> while keeping <code>local_progress.dirty</code> and pre-pause <code>execution.state</code>; <code>RoadmapTask.need</code> returns <code>nil</code> for <code>.paused</code>.</td>
+    <td class="yes">yes</td>
+    <td><span class="tag built">built</span> Single owner in Rust (<code>a378785ea7</code>); <code>TaskRow.swift</code> patch removed. See Q2 on inferred <code>Available</code> vs <code>Paused</code> when no program reports.</td>
   </tr>
   <tr>
-    <td><b>Working list grouped into Active / Shipping / Paused</b><br><code>Paused</code> wins; <code>Shipping</code> = <code>auto == on</code> or landing Graph with no human gate left ahead; <code>Active</code> = everything else.</td>
-    <td><code>WorkingGroup::{Active, Shipping, Paused}</code> in <code>task_details.rs</code> + <code>selections.rs</code> via <code>CapturedGraph::ships_before_review</code> (one Graph parse per tile).</td>
-    <td class="no">no</td>
-    <td><b>Boundary leak (§3).</b> <code>ships_before_review</code> checks <code>auto == Off</code> only when stopped at <code>land</code>, not while a run is in flight before <code>land</code> (e.g. during <code>gate</code>).</td>
+    <td><b>Working list grouped into Active / Shipping / Paused</b><br><code>Paused</code> wins; <code>Shipping</code> = <code>auto == on</code> or landing Graph with no human step or <code>auto == off</code> landing stop ahead; <code>Active</code> = everything else.</td>
+    <td><code>WorkingGroup::{Active, Shipping, Paused}</code> via <code>WorkingGroup::before_graph</code> + <code>CapturedGraph::ships_before_review</code> in one <code>task_graphs</code> query in both <code>task_details.rs</code> and <code>selections.rs</code>.</td>
+    <td class="yes">yes</td>
+    <td><span class="tag built">built</span> Running <code>gate</code> with <code>auto: off</code> reads <strong>Active</strong> immediately (<code>5c520fcfe6</code>); one-pass read (<code>85eebde63c</code>).</td>
   </tr>
   <tr>
     <td><b>Automatic <code>verify</code> after <code>deliver</code></b><br>Fast post-merge check on <code>main</code>; files a linked fix-forward Task if a claim fails; never blocks on deploys.</td>
     <td><code>code.yaml</code> &amp; <code>feature.yaml</code> end <code>deliver</code> → automatic <code>verify</code>; rewritten <code>verify.md</code>.</td>
     <td class="yes">yes</td>
-    <td><span class="tag built">built</span> Verified in QA; aligns with <strong>Shipping</strong> once past <code>ship-review</code>.</td>
+    <td><span class="tag built">built</span> Aligns cleanly with <strong>Shipping</strong> once past <code>ship-review</code>.</td>
   </tr>
   <tr>
-    <td><b>Pausing… (cleanup in progress)</b><br>Unpause and unassign wait while worker OS sessions stop or <code>lf land</code> drains.</td>
+    <td><b>Pausing… (cleanup &amp; draining <code>lf land</code>)</b><br>Unpause and unassign wait while worker OS sessions stop or an in-flight merge finishes.</td>
     <td><code>task_pauses.stopping_sessions</code>, <code>PauseStage::{Stopping, Held}</code>, <code>PauseCleanup</code>, <code>TaskRunControl { pausing, unavailable }</code>.</td>
     <td class="yes">yes</td>
     <td><span class="tag built">built</span> Crash-recoverable; one legality wire type across Mac and iPhone.</td>
@@ -203,117 +227,75 @@
     <td><b>Moves carry the hold</b><br>Source keeps the hold until arrival; destination starts nothing; OS PIDs stay on source.</td>
     <td><code>TaskPause { at, by }</code> in <code>MovedTask</code>; <code>place_moved_task_pause</code>; source accepts pause while leaving under cleanup lock.</td>
     <td class="yes">yes</td>
-    <td><span class="tag built">built</span> Post-send pre-arrival retry window stays a named PR limit (Q3).</td>
+    <td><span class="tag built">built</span> Post-send pre-arrival retry window stays a named PR limit (Q4).</td>
   </tr>
   <tr>
-    <td><b>Task workflow bar (Round 5 V4)</b><br>Unified Graph pill, fixed-width 0px-jump Pause/Complete, compact <code>Auto</code> toggle.</td>
-    <td>Not built yet — current <code>TaskWorkflowBar</code> has <code>[Start/Run] [Pause/Unpause] [Auto-Ship] […]</code>.</td>
+    <td><b>Task workflow bar (Round 5 V4)</b><br>Unified Graph pill, fixed-width 0px-jump Pause/Complete, compact <code>Auto</code> toggle on Mac and iPhone.</td>
+    <td>Current <code>TaskWorkflowBar</code> shows <code>[Start/Run] [Pause/Unpause] [Auto-Ship] […]</code>; iPhone <code>TaskWorkspaceView</code> prints <code>actions.refusal</code> beneath <code>WorkflowLine</code> when <code>auto == off</code>.</td>
     <td class="no">no</td>
-    <td><span class="tag proposed">deferred</span> Sequenced after the Working-groups demo per <code>scratch/demo-notes.md</code>.</td>
+    <td><span class="tag proposed">deferred</span> Sequenced right after the Working-groups demo per <code>scratch/demo-notes.md</code> and <code>scratch/explore.html</code> Round 5 V4.</td>
   </tr>
 </table>
 
-<h2>2. Biggest mismatch: paused Tasks invade Portfolio’s <em>Now</em> list</h2>
+<h2>2. What stands at <code>HEAD</code> vs the deferred Task bar pass</h2>
 <p>
-  You pause a Task specifically to hold it quietly without giving it up — usually mid-build with a dirty checkout. Because <code>rust/loopflow/src/lf/commands/waves.rs::derive_task_condition</code> does not check <code>TaskState::Paused</code>, a paused Task with uncommitted edits gets <code>condition = Blocked("Task has uncommitted work")</code>, and a clean paused Task gets <code>condition = Waiting("Task is paused; run `lf task unpause …`")</code>.
-  <code>TaskRow.swift:53</code> patched around that locally (<code>task.lifecycle == .paused ? nil : task.need</code>), so the sidebar looks calm — but <code>WaveWorkMap.swift::RoadmapTask.need</code>, <code>NowProjection.swift</code> (Portfolio <strong>Now</strong>), accessibility labels, and <code>TaskBriefView</code> still read the unpatched condition.
+  Every Working-list, pause-lifecycle, and condition concept now has one owner in Rust and renders consistently across CLI, Mac, and iPhone. The remaining mismatch is the top-right workflow bar chrome (planned as revision 4 after the Working-groups demo): today’s bar still leads with a full <code>Auto-Ship</code> button beside <code>Pause</code>/<code>Unpause</code>, and on iPhone a paused Task with <code>auto: off</code> echoes the disabled <code>Auto-Ship</code> refusal beneath the paused Graph sentence.
 </p>
 
 <div class="pair">
-  <div class="card broken">
-    <span class="tag problem">built · Portfolio Now with a paused mid-build Task</span>
+  <div class="card">
+    <span class="tag built">built at c931ad9efe · sidebar &amp; current workflow bar</span>
     <div class="mock">
-      <div class="mock-hdr">Blocked</div>
+      <div class="mock-hdr">Active</div>
       <div class="mock-row">
-        <div class="mock-title">Pause a Task without giving it up</div>
-        <div class="mock-meta"><code>LOO-1078</code> · <span class="mock-warn">Blocked</span> · Product</div>
-        <div class="mock-meta">Task has uncommitted work</div>
+        <div class="mock-title">Review the copy</div>
+        <div class="mock-meta"><code>032398</code> · Active · demo</div>
       </div>
-      <div class="mock-hdr">Waiting</div>
+      <div class="mock-hdr">Shipping</div>
       <div class="mock-row">
-        <div class="mock-title">Wait at demo</div>
-        <div class="mock-meta"><code>ddb912</code> · <span class="mock-warn">Waiting</span> · repo</div>
-        <div class="mock-meta">Task is paused; run `lf task unpause ddb912` to lift the hold</div>
+        <div class="mock-title">Ship on auto again</div>
+        <div class="mock-meta"><code>4396bc</code> · <span class="mock-warn">Blocked</span> · Auto · compile</div>
+      </div>
+      <div class="mock-hdr">Paused</div>
+      <div class="mock-row sel">
+        <div class="mock-title">Land after the build</div>
+        <div class="mock-meta"><code>a1fbda</code> · Paused · land</div>
       </div>
     </div>
-    <pre>// waves.rs::derive_task_condition — no Paused branch
-//   dirty checkout → Condition::Blocked
-//   clean checkout → Condition::Waiting (next_move.owner == User)
-// TaskRow.swift:53 — Swift-only patch (missed NowProjection)
-let need = task.lifecycle == .paused ? nil : task.need</pre>
+    <div class="bar">
+      <span><code>landing</code> compile <b>land</b> help task · Paused at land.</span>
+      <span><span class="pill accent">Unpause</span> <span class="pill dis">Auto-Ship</span> <span class="pill">…</span></span>
+    </div>
   </div>
   <div class="card proposed">
-    <span class="tag proposed">proposed · next pass</span>
+    <span class="tag proposed">deferred · Task bar Round 5 V4 (next slice)</span>
     <div class="mock">
-      <div class="mock-hdr">Portfolio Now</div>
+      <div class="mock-hdr">Top-right Task bar (0px horizontal jump)</div>
       <div class="mock-row">
-        <div class="mock-meta">Paused Tasks stay in Working › Paused, out of Now.</div>
-      </div>
-      <div class="mock-hdr">Sidebar › Paused</div>
-      <div class="mock-row">
-        <div class="mock-title">Pause a Task without giving it up</div>
-        <div class="mock-meta"><code>LOO-1078</code> · <span class="mock-ok">Available</span> · compile</div>
+        <div class="mock-meta">• Unified Graph pill (<code>Running · compile</code> / <code>Paused at land</code> / <code>Waiting · ship-review</code>) with direct step picks inside.</div>
+        <div class="mock-meta">• Fixed-width <strong>Pause / Resume</strong> and <strong>Complete</strong> controls; compact physical <code>Auto</code> toggle replaces hero <code>Auto-Ship</code>.</div>
+        <div class="mock-meta">• Mirror to iPhone and stop printing a second amber paused banner under <code>WorkflowLine</code> when <code>auto: off</code>.</div>
       </div>
     </div>
-    <pre>// waves.rs::derive_task_condition — one rule in Rust
-if runtime.is_some_and(|r| r.status == TaskState::Paused) {
-    (TaskConditionState::Clear, next_move.reason.clone())
-}
-// WaveWorkMap.swift::RoadmapTask.need (covers optimistic pause too)
-if lifecycle == .paused { return nil }
-// TaskRow.swift:53 — delete the duplicate lifecycle == .paused check</pre>
+    <div class="bar">
+      <span><code>landing</code> compile <b>land</b> help task</span>
+      <span><span class="pill">Paused at land ▾</span> <span class="pill accent">Resume</span> <span class="pill">Auto ○</span> <span class="pill">Complete</span></span>
+    </div>
   </div>
 </div>
 
-<p>
-  <strong>Why this is smaller and cleaner:</strong> Rust becomes the single owner of whether a paused Task needs attention, Portfolio <strong>Now</strong> stops filling up with held work, and <code>TaskRow.swift</code> drops its special case. If the paused Task’s open conversation asks a question, <code>TaskRowStatus</code> still shows <code>Blocked</code> and the question because live <code>program</code> reports are checked first. If a step failed before pause, <code>execution.state == Blocked</code> remains recorded in <code>lf task status</code> and resurfaces in <code>condition</code> the instant the Task is unpaused.
-</p>
-
-<h2>3. Second mismatch: <code>auto == off</code> in flight before landing reads as <em>Shipping</em></h2>
-<p>
-  In <code>rust/loopflow-execution/src/task_graph.rs::ships_before_review</code>, <code>auto == Some(AutoState::Off)</code> is checked only when <code>cursor == None</code> (already stopped at <code>land</code>). If someone runs <code>lf task auto off</code> while <code>deliver</code> is still in <code>reflect</code> or <code>gate</code>, <code>cursor</code> is <code>Some(gate)</code>, so the check is skipped and the row stays in <strong>Shipping</strong> — even though <code>auto == off</code> disarmed landing and the run will stop at <code>land</code> for a person.
-</p>
-
-<div class="pair">
-  <div class="card broken">
-    <span class="tag problem">built · task_graph.rs::ships_before_review</span>
-    <pre>// Only checks auto == Off when already stopped (cursor == None):
-if let Some(cursor) = cursor {
-    ... // ignores AutoState::Off → Shipping during gate!
-} else {
-    if auto == Some(AutoState::Off) &amp;&amp; landing_stop(...) {
-        return false;
-    }
-}</pre>
-  </div>
-  <div class="card proposed">
-    <span class="tag proposed">proposed · next pass</span>
-    <pre>// Inside needs_review(place, stop_at_landing, merges):
-// landing step → stop_at_landing (true when AutoState::Off, false otherwise)
-// • gate with auto == Off → hits land → needs_review = true → Active
-// • stopped at land with auto == Off → hits land → true → Active
-// • verify / end after land → no land ahead → false → Shipping
-// Deletes the separate landing_stop branch in ships_before_review.</pre>
-  </div>
-</div>
-
-<h2>4. Build blocker found at <code>HEAD</code></h2>
-<p>
-  Commit <code>279b71c8d1</code> (<code>lf qa: Add empty rust/loopflow/src/main.rs</code>) added a 0-byte <code>rust/loopflow/src/main.rs</code>. Because <code>rust/loopflow/Cargo.toml</code> does not disable <code>autobins</code>, Cargo tries to compile a third binary crate named <code>loopflow</code> from it and fails with <code>error[E0601]: main function not found in crate loopflow</code>. Deleting <code>rust/loopflow/src/main.rs</code> restores the build.
-</p>
-
-<h2>5. One interaction walkthrough, with failure, recovery, and counterexamples</h2>
+<h2>3. Interaction walkthrough, failure, recovery, and counterexamples</h2>
 <table>
-  <tr><th>Step</th><th>What a person sees (after pass-2 fixes)</th><th>What holds it in code</th></tr>
+  <tr><th>Step</th><th>What a person sees at <code>c931ad9efe</code></th><th>Code behind it</th></tr>
   <tr>
     <td><b>1. Pause mid-build (dirty checkout)</b></td>
-    <td><code>LOO-12 paused</code> in ~1.6 s; worker + OS-session subprocesses exit; neighbor keeps building; primary conversation stays open; row moves to Working › <strong>Paused</strong> and stays out of Portfolio <strong>Now</strong>.</td>
-    <td><code>begin_task_pause</code> + <code>settle_worker_session</code>; <code>derive_task_condition</code> returns <code>Clear</code> for <code>Paused</code>; <code>WorkingGroup::Paused</code>.</td>
+    <td><code>a1fbda paused</code> in ~1.1 s; worker + OS-session subprocesses exit; neighbor keeps building; primary conversation stays open; row moves to Working › <strong>Paused</strong>; condition is <code>clear</code> (out of Portfolio <strong>Now</strong>) while <code>dirty: true</code> stays recorded.</td>
+    <td><code>begin_task_pause</code> + <code>settle_worker_session</code>; <code>derive_task_condition</code> returns <code>Clear</code>; <code>WorkingGroup::Paused</code>.</td>
   </tr>
   <tr>
     <td><b>2. Chat / steer while paused</b></td>
-    <td><code>lf steer</code> / comment wakes the open conversation; row under <strong>Paused</strong> shows <code>Busy</code> / <code>Available</code> / <code>Blocked</code> + question; no Graph starts, including after a server restart.</td>
-    <td><code>admit_launch</code> &amp; recovery loops hold under <code>pause::admission</code>; <code>TaskRowStatus</code> reads live <code>program</code> first.</td>
+    <td><code>lf steer</code> / comment wakes the open conversation; row under <strong>Paused</strong> shows live conversation reports (<code>Blocked</code> + question, <code>Error</code>, <code>Busy</code>, <code>Available</code>), else <code>Paused</code>; no Graph starts across server restarts.</td>
+    <td><code>admit_launch</code> &amp; recovery loops hold under <code>pause::admission</code>; <code>TaskRowStatus</code> reads <code>program</code> first.</td>
   </tr>
   <tr>
     <td><b>3. Failure &amp; recovery: draining <code>lf land</code> or crash mid-pause</b></td>
@@ -322,40 +304,35 @@ if let Some(cursor) = cursor {
   </tr>
   <tr>
     <td><b>4. Unpause (plain, or <code>--run</code>)</b></td>
-    <td>Plain unpause lifts the hold cleanly: row leaves <strong>Paused</strong> (to <strong>Active</strong> or <strong>Shipping</strong>), interrupted step reads <code>Idle</code> (ready for Run), any pre-pause exit-1 failure resurfaces as <code>Blocked</code>. <code>--run</code> lifts and continues immediately.</td>
-    <td><code>release_task_pause</code> clears hold + dead carrier; <code>stopped_execution</code> maps <code>Interrupted</code> → <code>Idle</code>.</td>
+    <td>Plain unpause lifts the hold: row returns to <strong>Active</strong> or <strong>Shipping</strong>, interrupted step reads <code>Idle</code> (ready for Run), paused landing stop restores the auto-off sentence, and any pre-pause failure or dirty-worktree blocker resurfaces immediately.</td>
+    <td><code>release_task_pause</code> clears hold + dead carrier; <code>stopped_execution</code> maps <code>Interrupted</code> → <code>Idle</code>; <code>TaskGraph::landing_stop</code>.</td>
   </tr>
 </table>
 
-<h3>Counterexamples checked</h3>
+<h3>Counterexamples verified</h3>
 <ul>
-  <li><b>Paused Task whose open conversation asks a question:</b> <code>condition</code> is <code>Clear</code>, so the row does not show worktree noise, while <code>TaskRowStatus</code> checks <code>program</code> first and shows <code>Blocked</code> + the question.</li>
-  <li><b>Step failed before pause, then unpaused:</b> while paused, <code>condition</code> is <code>Clear</code> (quiet in Now) and <code>execution.state</code> remains <code>Blocked</code> in status; on unpause, <code>derive_task_condition</code> immediately surfaces <code>Blocked</code> again.</li>
-  <li><b><code>lf task auto off</code> during <code>gate</code> vs during <code>verify</code>:</b> during <code>gate</code> (before <code>land</code>), <code>stop_at_landing</code> puts the Task in <strong>Active</strong>; during <code>verify</code> (after <code>land</code>), no landing step remains ahead so it stays <strong>Shipping</strong>.</li>
-  <li><b>Unpaused <code>auto: on</code> Task stopped mid-build:</b> stays in <strong>Shipping</strong> (auto is on) with <code>Stopped at build. `lf task run` starts it again.</code> — flagged in QA and Q1 below for the Task bar V4 pass.</li>
+  <li><b><code>lf task auto off</code> while running before <code>land</code> vs after <code>land</code>:</b> toggling <code>off</code> → <code>on</code> → <code>off</code> during a live build moved the row <strong>Active</strong> → <strong>Shipping</strong> → <strong>Active</strong> without disturbing the build; past <code>land</code> (at <code>verify</code> or <code>end</code>) it stays <strong>Shipping</strong>.</li>
+  <li><b>Pause at a landing stop (<code>auto: off</code>):</b> <code>TaskGraph::landing_stop</code> keeps status reading <code>Waiting at land while the Task is paused</code> instead of calling the Graph finished; unpause restores <code>Waiting at land: auto is off …</code>.</li>
+  <li><b>Paused Task whose open conversation asks a question:</b> <code>condition</code> is <code>Clear</code> (out of Now, no dirty-worktree noise), while <code>TaskRowStatus</code> checks <code>program</code> first and shows <code>Blocked</code> + the question on the sidebar row.</li>
+  <li><b>Legacy captured Graph with <code>interactive: verify</code> after <code>land</code>:</b> <code>needs_review</code> resets at <code>land</code>, so before landing it reads <strong>Shipping</strong> and once parked at <code>interactive: verify</code> it returns to <strong>Active</strong>.</li>
 </ul>
 
-<h2>6. Choices made for review &amp; work outside this pass</h2>
-<div class="choice-box">
-  <strong>Choices written into <code>scratch/plan.md</code> for the next pass (all reversible):</strong>
-  <ol style="margin:.4rem 0 0; padding-left:1.25rem;">
-    <li><code>derive_task_condition</code> returns <code>TaskConditionState::Clear</code> for <code>TaskState::Paused</code>, and <code>RoadmapTask.need</code> returns <code>nil</code> when <code>lifecycle == .paused</code> (covering optimistic pause), deleting the duplicate check in <code>TaskRow.swift</code>.</li>
-    <li><code>needs_review</code> treats a landing step as a human stop whenever <code>auto == AutoState::Off</code>, so running <code>gate</code> with <code>auto == off</code> reads <strong>Active</strong> immediately rather than waiting until the run hits <code>land</code>.</li>
-    <li>Keep plain unpause (<code>run: false</code>) on Mac/iPhone for the Working-groups demo, and decide Unpause-resumes-mid-run inside the upcoming Task bar V4 pass (Q1).</li>
-  </ol>
+<h2>4. Scope notes &amp; named PR limits</h2>
+<div class="note-box">
+  <strong>Deferred inside LOO-1078 (after the Working-groups demo):</strong> Task workflow bar Round 5 V4 redesign (<code>scratch/explore.html</code>), including removing the redundant iPhone paused refusal line beneath <code>WorkflowLine</code> when <code>auto: off</code>.
+  <br><strong>Named PR limits:</strong> Codex 0.171.0 tool commands spawned in their own OS session (<code>osPid: null</code>); a pause first issued in the narrow window after a move payload is sent and before the destination checkout exists.
 </div>
-<p>
-  <strong>Deferred inside LOO-1078 (after Working-groups demo):</strong> Task workflow bar Round 5 V4 redesign (<code>scratch/explore.html</code>).
-  <br><strong>Named PR limits:</strong> Codex 0.171.0 tool commands in their own OS session (<code>osPid: null</code>); pause issued in the narrow window after a move payload is sent and before the destination checkout exists.
-</p>
 
-<h2>7. Open questions</h2>
+<h2>5. Open questions</h2>
 <ol class="q">
-  <li><b>Clicking Unpause on Mac / iPhone when paused mid-run (or with <code>auto: on</code>) — noticed in QA:</b>
-    <br>a) <b>Built &amp; kept for the Working-groups demo:</b> Unpause sends plain unpause (<code>run: false</code>) everywhere; clicking <code>Run</code> restarts the build (an <code>auto: on</code> Task returns to <strong>Shipping</strong> idle until <code>Run</code>).
-    <br>b) In the Task bar V4 pass, have Unpause send <code>run: true</code> when paused mid-run without a failure (and <code>run: false</code> when paused at an interactive step), matching V4’s <code>▶ Resume &lt;step&gt;</code> button so paused builds and <code>Auto</code> Tasks actually move again on one click.</li>
+  <li><b>Clicking Unpause on Mac / iPhone when paused mid-run (or with <code>auto: on</code>):</b>
+    <br>a) <b>Built for the Working-groups demo:</b> Unpause sends plain unpause (<code>run: false</code>) everywhere; clicking <code>Run</code> restarts the build.
+    <br>b) In the Task bar V4 pass, have Unpause send <code>run: true</code> when paused mid-run without a failure (and <code>run: false</code> when paused at an interactive step), matching V4’s <code>Resume</code> button.</li>
+  <li><b>Inferred <code>Available · inferred</code> on paused sidebar rows (spotted in QA):</b>
+    <br>a) <b>Built behavior:</b> keep <code>SessionProgramStatus</code> uniform across all Working rows (so an open idle Claude session without a reporter reads <code>Available · inferred</code> under the <strong>Paused</strong> group header, same as under <strong>Active</strong>).
+    <br>b) When <code>task.lifecycle == .paused</code>, show explicit program reports (<code>Blocked</code>, <code>Error</code>, <code>Busy</code>, reported <code>Available</code>), but let <code>Paused</code> win over inferred availability.</li>
   <li><b><code>WorkingGroup::Shipping</code> after merge / at <code>end</code>:</b>
-    <br>a) <b>Built choice:</b> once past <code>ship-review</code>, a landing Graph stays in <strong>Shipping</strong> through <code>deliver</code>, automatic <code>verify</code>, and <code>end</code> until you click Complete.
+    <br>a) <b>Built choice:</b> once past <code>ship-review</code>, a landing Graph stays in <strong>Shipping</strong> through <code>deliver</code>, automatic <code>verify</code>, and <code>end</code> until Complete.
     <br>b) Move a Task at <code>end</code> (merged &amp; verified, waiting only to be completed) back to <strong>Active</strong>.</li>
   <li><b>Named PR limits:</b>
     <br>a) <b>Built choice:</b> document Codex 0.171.0 separate-session tools and post-send move retry as PR limits.

@@ -22,6 +22,13 @@
 > 3b
 > 4 im done with until the next slice is finsihed
 
+> i dont really get what Run | Pause means
+
+> like if its not paused souldnt it be running?
+> the distinction i guess is if its at a human step
+
+> but basically it should either say Run: <step after human> or Running: xxx or something
+
 ## Implied design changes (pending confirmation to send back to `implement`)
 
 1. **Keep the Task Session open on pause:**

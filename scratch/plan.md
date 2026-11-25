@@ -27,10 +27,24 @@ Stacked on `LOO-1063` (Working sidebar order + status sort). Keep the `stopping_
    - The candidate CLI rejected the old outer loop: `loop at verify returns across interactive step "ship-review"; a person decides there`. Keep the build/review loop and end both Graphs with deliver, then automatic verify. A failed merged claim gets a linked fix-forward Task.
    - Rewrite the builtin `verify` skill (`rust/loopflow-definitions/src/builtins/task/skill/verify.md`) so it runs whatever verification it can **quickly** after merge and never blocks indefinitely (e.g. waiting for a production release/deploy).
    - With `verify` automatic, the existing "no interactive step left ahead" rule cleanly aligns with **Shipping** once a Task passes `ship-review`.
-4. **Redesign the top-right Task bar (`TaskWorkflowBar` / `TaskActions`) per `scratch/explore.html` Round 5 (V4).**
-   - Demote Auto-Ship from a permanent hero button to a compact physical `Auto` toggle switch (Figma UI3 style), promoting **Pause** and **Complete** to first-class controls with Notion-style soft, borderless chrome.
-   - Use one unified Graph vocabulary in the status/action pill (`Running · <step>` / `Paused at <step>` / `Waiting · <step>` / `Merged · <step>`, with direct step picks inside the pill instead of overlapping `Moving` / `Run` / `Start` / `Start from…` words).
-   - Keep left Graph and right controls non-duplicative (tie running/paused state to the active step without repeating a long sentence) and keep right-hand control slots fixed-width so clicking Pause/Run/Auto causes **0px horizontal jump**. Mirror cleanly to iPhone.
+4. **Next — Task bar redesign (V4c) + smart Unpause (from Working-groups demo, see `scratch/demo-notes.md`).**
+   - **Eliminate `Run | Pause` ambiguity and `idle` limbo after unpause:**
+     - If a started Task is not paused and not at a human step, it should be running (not sitting in `idle` showing both `Run` and `Pause`).
+     - **Smart Unpause:** clicking Unpause / `▶` on a Task paused mid-step (not at an interactive step and not at `end`) lifts the hold **and** resumes running (`run: true` / `unpause --run`). Clicking Unpause on a Task paused at an interactive step (e.g. `ship-review`) lifts the hold and returns it to waiting at that human step. Keep an explicit "Unpause without running" option inside the pill dropdown for cases where someone wants to stay idle.
+   - **One unified split status-action pill (`V4c` in `scratch/explore.html` Round 5) + fixed-width right controls (`0px` jump on click):**
+     - Replace the separate `Run`, `Pause`, and `Auto-Ship` buttons in `TaskWorkflowBar` (and mirror cleanly in iPhone `TaskWorkspaceView` / `TaskActions`) with:
+       1. **Split status-action pill** (left half executes primary toggle; right half + `▾` opens the unified menu with direct step picks, `Pause` when at a human step, `Interrupt step`, `Unpause without running`, `Unassign`, `Abandon…`):
+          - Unstarted: `▶ | Run: <first step> ▾`
+          - Running: `⏸ | Running: <active step> ▾` (left click pauses)
+          - At human step (e.g. `ship-review`): `▶ | Run: <step after human> ▾` (left click continues to the next step; `Pause` lives in the `▾` menu, never beside `Run`)
+          - Paused mid-step: `▶ | Paused: <step> ▾` (left click unpauses & resumes)
+          - Paused at human step: `▶ | Paused: <human step> ▾` (left click unpauses back to waiting)
+          - Failed / stopped before end: `▶ | Run: <step> ▾`
+          - Merged / at `end`: `✓ | Done ▾` (or `Verified`)
+       2. **Compact physical `Auto` toggle switch** (fixed width; lit green when armed, dimmed/held while paused; never shifts layout width).
+       3. **First-class `Complete` (`✓`)** (quiet ghost icon while open, accented burgundy `✓ Complete` when ready/merged; fixed or balanced layout without jumping).
+       4. **`···`** for secondary metadata actions (`New conversation`, `Move to Wave`, copy ID/link/branch, open PR/Wave, sessions).
+     - Keep left `WorkflowLine` clean and non-duplicative with the pill (tie active step visually without repeating a redundant status sentence; Rust carries any shared label/next-step predicate on the wire so Mac and iPhone agree and decide nothing locally).
 
 See `scratch/demo-notes.md` for exact quotes and `scratch/explore.html` for the interactive Round 5 V4 prototype.
 
@@ -78,10 +92,9 @@ On macOS, 12 focused Rust tests passed. The two-Machine CLI returned `clear` wit
 
 ## Remaining, in order
 
-1. **Demo the Working groups.** Pause one of two owned Tasks with the other in auto. Show Active / Shipping / Paused, the paused Task’s live conversation, plain unpause, and automatic verify after deliver.
-2. **Task bar (revision 4).** After the Working-groups demo, follow `scratch/explore.html` Round 5 V4 and decide whether app Unpause sends `run: true` for mid-run / auto paused Tasks.
-3. **Named gaps for the PR.** Separate-session Codex 0.171.0 tool jobs can survive. A pause after a move’s payload is sent can require a retry on arrival.
-4. **Gate / CI.** Five-harness worker matrix, Linux session enumeration, lifeline/attachment/hosted-terminal suites.
+1. **Task bar (V4c) + smart Unpause (revision 4 above).** Build the unified split status-action pill (`▶ | Run: <step after human> ▾` · `⏸ | Running: <active step> ▾` · `▶ | Paused: <step> ▾`), physical `Auto` toggle switch, first-class `Complete` (`✓`), 0px-jump fixed slots, smart Unpause (`run: true` when paused mid-step; plain lift when paused at an interactive step), and non-duplicative `WorkflowLine`, with Rust owning the shared wire labels/predicates and clean iPhone parity.
+2. **Named gaps for the PR.** Separate-session Codex 0.171.0 tool jobs can survive. A pause after a move’s payload is sent can require a retry on arrival.
+3. **Gate / CI.** Five-harness worker matrix, Linux session enumeration, lifeline/attachment/hosted-terminal suites.
 
 ## QA on a private Machine
 

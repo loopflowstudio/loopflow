@@ -159,6 +159,18 @@ mod environment_tests {
     }
 
     #[tokio::test]
+    async fn a_nested_provider_cannot_address_the_parent_antigravity_conversation() {
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command
+            .env("ANTIGRAVITY_LS_ADDRESS", "parent")
+            .env("ANTIGRAVITY_CSRF_TOKEN", "fixture")
+            .env("ANTIGRAVITY_CONVERSATION_ID", "parent")
+            .args(["-c", r#"test -z "${ANTIGRAVITY_LS_ADDRESS+x}${ANTIGRAVITY_CSRF_TOKEN+x}${ANTIGRAVITY_CONVERSATION_ID+x}""#]);
+        configure_agent_env(&mut command, &crate::agent::AgentConfig::default());
+        assert!(command.status().await.unwrap().success());
+    }
+
+    #[tokio::test]
     async fn provider_child_cannot_read_the_bridge_token() {
         let mut command = tokio::process::Command::new("/bin/sh");
         command.args(["-c", "test -z \"${LF_DISCORD_TOKEN+x}\""]);

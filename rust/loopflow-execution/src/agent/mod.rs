@@ -143,6 +143,17 @@ pub(crate) const CALLER_SESSION_ENV: &[&str] = &[
     "OPENCODE_SESSION_ID",
     "OPENCODE_TERMINAL",
     "OPENCODE_CONFIG_CONTENT",
+    // Antigravity sets these in the conversation's tool environment.
+    "ANTIGRAVITY_AGENT",
+    "ANTIGRAVITY_AGENTAPI_EXE",
+    "ANTIGRAVITY_APP_DATA_DIR",
+    "ANTIGRAVITY_CONVERSATION_ID",
+    "ANTIGRAVITY_CSRF_TOKEN",
+    "ANTIGRAVITY_LS_ADDRESS",
+    "ANTIGRAVITY_LS_VERSION",
+    "ANTIGRAVITY_PROJECT_ID",
+    "ANTIGRAVITY_SOURCE_METADATA",
+    "ANTIGRAVITY_TRAJECTORY_ID",
 ];
 
 /// Start `command` as a new conversation rather than the caller's child. Run

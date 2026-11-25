@@ -120,7 +120,9 @@ impl TaskObservation {
             .map(|(_, failure)| failure)
             .collect::<BTreeSet<_>>();
         let mut news = failures.into_iter().collect::<Vec<_>>();
-        if let Some(TaskGraphPosition::At { step }) = &self.position {
+        if let Some(TaskGraphPosition::At { step } | TaskGraphPosition::Breakpoint { step, .. }) =
+            &self.position
+        {
             if old.position != self.position && step != "start" && step != "end" {
                 news.push(format!("stopped at {step}"));
             }
@@ -340,6 +342,7 @@ fn position_text(position: Option<&TaskGraphPosition>) -> String {
             "At end (Task completion is separate)".into()
         }
         Some(TaskGraphPosition::At { step }) if step == "start" => "At start".into(),
+        Some(TaskGraphPosition::Breakpoint { step, .. }) => format!("At breakpoint {step}"),
         Some(TaskGraphPosition::At { step }) => format!("At {step} · available for review"),
         Some(TaskGraphPosition::Run { at, running, .. }) => {
             format!("{} at {at}", if *running { "Running" } else { "Stopped" })
@@ -488,7 +491,7 @@ mod tests {
             ..loopflow_storage::graph_process::ExecutionStart::reserved(1)
         };
         store
-            .start_task_graph_run(&task, "start", None, r#"{"index":0}"#, (&run, &start))
+            .start_task_graph_run(&task, "start", None, None, r#"{"index":0}"#, (&run, &start))
             .unwrap();
         let saved = serde_json::json!({
             "position": {"kind":"run","step":"start","at":"earlier step","lf_process_id":run,"running":true},
@@ -511,7 +514,7 @@ mod tests {
         assert!(deliver(&store).contains("new comment from jack: PR:"));
         assert!(quiet(&store));
         // A run arrives at its last step before it records its outcome.
-        store.arrive_task_graph(&task, &run, "end").unwrap();
+        store.arrive_task_graph(&task, &run, "end", None).unwrap();
         assert!(quiet(&store), "arrived but unsettled");
         finish_run(&store, &run, "succeeded");
         let updates = pending(&store, "reader");

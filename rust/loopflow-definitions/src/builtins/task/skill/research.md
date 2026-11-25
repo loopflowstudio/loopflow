@@ -46,3 +46,7 @@ answer first, the system as a diagram, sources linked to claims, then
 counterexamples and open questions. One self-contained file, readable in light
 and dark, ending with numbered questions so "2b" is a complete answer. Say its
 path. A one-line answer needs no page.
+
+When running headless, finish the research and give the proposed next action.
+Put the findings, artifact paths, default and any numbered choices in the final
+answer. When returning a loop decision, put them in its summary or blocked reason.

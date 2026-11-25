@@ -31,6 +31,7 @@ impl DefinitionKind {
 /// An executable value shared by CLI selection and authored Graph composition.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Target {
+    Breakpoint(Option<String>),
     Command(Command),
     Skill(Skill),
     Graph(GraphDefinition),
@@ -47,6 +48,7 @@ impl Target {
             Self::Command(command) => command.display_name(),
             Self::Skill(skill) => skill.name.clone(),
             Self::Xor(_) => "xor".to_string(),
+            Self::Breakpoint(name) => name.clone().unwrap_or_else(|| "break".into()),
             Self::Loop(_) => "loop".to_string(),
         };
         match self {

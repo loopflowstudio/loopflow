@@ -2236,17 +2236,80 @@ fn three_nested_loops_each_return_to_their_own_first_step() {
 }
 
 #[test]
-fn the_research_graph_stops_at_its_findings_then_reaches_end() {
+fn breakpoint_batch_accepts_the_verdict_without_parking() {
     let repo = loopflow_test_support::TestRepo::new();
     support::bind_task_planning(&repo);
-    let home = TempDir::new().unwrap();
+    let home = tempfile::tempdir_in("/tmp").unwrap();
+    let checkout = repo.path().canonicalize().unwrap();
+    let task = support::register_task_without_pr(
+        home.path(),
+        &checkout,
+        "batch-research",
+        &repo.head_sha(),
+    );
+    let _server = start_codex_fixture_server(home.path());
+    observe_planning(&task, &checkout);
+    repo.create_branch("batch-research");
+    let (_bin, path) = scripted_provider(home.path(), &[ADVANCE]);
+    let run = run_lf(
+        &checkout,
+        home.path(),
+        &["-b", "task", "run", "INF-123", "research"],
+        Some(&path),
+    );
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let row = task
+        .store
+        .sqlite
+        .task_graph_row(&task.task.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.step, "end");
+    assert!(row.breakpoint.is_none());
+    assert!(task
+        .store
+        .sqlite
+        .task_auto(&task.task.id)
+        .unwrap()
+        .is_none());
+    assert_eq!(received_contexts(home.path()).len(), 1);
+}
+
+#[test]
+fn breakpoint_presents_finished_work() {
+    let repo = loopflow_test_support::TestRepo::new();
+    support::bind_task_planning(&repo);
+    let home = tempfile::tempdir_in("/tmp").unwrap();
     let checkout = repo.path().canonicalize().unwrap();
     let task =
         support::register_task_without_pr(home.path(), &checkout, "research-end", &repo.head_sha());
-    let _server = start_codex_fixture_server(home.path());
+    let (session, thread) = support::stopped_claude_conversation(home.path(), &checkout);
+    let store = &task.store.sqlite;
+    let captured = store.session(&session).unwrap().unwrap().captured;
+    loopflow_execution::store::sessions::bind_session(store, &session, captured, &task.task.id)
+        .unwrap();
+    store.choose_task_primary(&task.task.id, &session).unwrap();
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET agent_exit_code=0,agent_ended_at=1 WHERE id=?1",
+            [&session],
+        )
+        .unwrap();
+    fs::write(home.path().join("config.yaml"), "default_agent: codex\n").unwrap();
+    let server_path = format!("{}:/usr/bin:/bin", home.path().join("bin").display());
+    let start_server = || MachineServer::start_with_path(lf_binary(), home.path(), &server_path);
+    let server = start_server();
     observe_planning(&task, &checkout);
     repo.create_branch("research-end");
-    let (_bin, path) = scripted_provider(home.path(), &[WORK]);
+    let answer = r#"{"decision":"advance","summary":"Findings in scratch/research.md. 1a Finish. 1b Compare keyboard use.","reason":null}"#;
+    let (_bin, path) = scripted_provider(home.path(), &[answer, ADVANCE]);
     let run = |args: &[&str]| run_lf(repo.path(), home.path(), args, Some(&path));
     let position = || {
         lf_json(
@@ -2256,30 +2319,79 @@ fn the_research_graph_stops_at_its_findings_then_reaches_end() {
         )["execution"]["work"]["graph"]["position"]
             .clone()
     };
-    let ran = run(&["task", "run", "INF-123", "research"]);
-    assert!(
-        ran.status.success(),
-        "{}",
-        String::from_utf8_lossy(&ran.stderr)
-    );
-    // A bare run may return as its Graph registers; it stops before the
-    // interactive research step.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    while position()["kind"] != "at" {
-        assert!(std::time::Instant::now() < deadline, "{}", position());
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
+    let wait_for_review = |previous: Option<&str>| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        loop {
+            let current = position();
+            if current["kind"] == "breakpoint" && current["arrival"].as_str() != previous {
+                assert_eq!(current["step"], "after-research");
+                return current["arrival"].as_str().unwrap().to_owned();
+            }
+            assert!(std::time::Instant::now() < deadline, "{current}");
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    };
+    let check = |args: &[&str]| {
+        let output = run(args);
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    check(&["task", "run", "INF-123", "research"]);
+    let first = wait_for_review(None);
+    let review = task
+        .store
+        .sqlite
+        .steer_by_source(&format!("breakpoint:{}", task.task.id), &first)
+        .unwrap()
+        .unwrap();
+    assert!(review
+        .text
+        .contains("scratch/research.md. 1a Finish. 1b Compare keyboard use."));
+    assert!(review.text.contains("Continuing finishes the Graph."));
+    let presented = support::first_inputs(home.path(), 1);
+    assert!(presented.contains(&review.text), "{presented}");
     assert_eq!(
-        position(),
-        serde_json::json!({"kind": "at", "step": "research"})
+        fs::read_to_string(home.path().join("resumed-thread"))
+            .unwrap()
+            .trim(),
+        thread
     );
-    // Nothing runs after the findings: the next run reaches end.
-    let ended = run(&["task", "run", "INF-123"]);
+    drop(server);
+    let _server = start_server();
+    let reply = "1b — compare keyboard use";
+    check(&[
+        "task",
+        "run",
+        "INF-123",
+        "--at-arrival",
+        &first,
+        "--decision",
+        "iterate",
+        "--reason",
+        reply,
+    ]);
+    let second = wait_for_review(Some(&first));
+    let contexts = received_contexts(home.path());
+    assert_eq!(contexts.len(), 2);
     assert!(
-        ended.status.success(),
+        contexts[1].contains("Decision pass 2.") && contexts[1].contains(reply),
         "{}",
-        String::from_utf8_lossy(&ended.stderr)
+        contexts[1]
     );
+    let stale = run(&["task", "run", "INF-123", "--at-arrival", &first]);
+    assert!(!stale.status.success());
+    assert_eq!(position()["arrival"], second);
+    assert_eq!(
+        fs::read_to_string(home.path().join("turns"))
+            .unwrap()
+            .lines()
+            .count(),
+        2
+    );
+    check(&["task", "run", "INF-123"]);
     assert_eq!(position(), serde_json::json!({"kind": "at", "step": "end"}));
     // Running the Graph left its prompt files; ending kept them.
     assert!(checkout.join(".lf/prompts").exists());

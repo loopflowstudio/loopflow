@@ -6,14 +6,27 @@ use serde::{Deserialize, Serialize};
 
 use crate::graph::{return_target, ConcreteStep};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum GraphDecision {
     #[serde(alias = "next", alias = "complete")]
     Advance,
     #[serde(alias = "repeat", alias = "continue")]
     Iterate,
+    #[value(skip)]
     Blocked,
+}
+
+impl GraphDecision {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Advance => "advance",
+            Self::Iterate => "iterate",
+            Self::Blocked => "blocked",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,7 +77,7 @@ pub fn finish_step(
             }
             verdict.decision
         }
-        None if edge.is_some() => {
+        None if edge.is_some() && !matches!(steps[index], ConcreteStep::Breakpoint(_)) => {
             return Ok(GraphTransition::Blocked(format!(
                 "loop at step {index} requires a decision"
             )));

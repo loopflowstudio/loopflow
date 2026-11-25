@@ -85,6 +85,12 @@ fn render_steps(
                     output.push_str("   Wait for the participant's response here before continuing; never substitute another reviewer or assume approval.\n");
                 }
             }
+            ConcreteStep::Breakpoint(stop) => {
+                output.push_str(&format!("{position}. At {}, present the completed work and its proposed continuation. Wait for a reply.\n", stop.name));
+                if let Some(target) = return_target(steps, index) {
+                    output.push_str(&format!("   To iterate, repeat from step {prefix}{}. To advance, continue after {position}.\n", target + 1));
+                }
+            }
             ConcreteStep::Command(command) => {
                 let argv = command.item.argv();
                 let quoted = shlex::try_join(argv.iter().map(String::as_str))

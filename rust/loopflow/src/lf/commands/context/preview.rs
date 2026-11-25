@@ -218,9 +218,7 @@ fn preview_graph(
             arguments: message.unwrap_or_default().to_owned(),
         });
         let mut input = message.unwrap_or_default().to_owned();
-        if let Some(step) = items.first() {
-            GraphOutput::append_step_instructions(step, &mut input);
-        }
+        GraphOutput::append_step_instructions(&items, 0, &mut input);
         Some(Box::new(run::preview_prompt(
             repo,
             Some(&skill.skill.name),
@@ -238,7 +236,7 @@ fn preview_graph(
         inputs: &mut Vec<GraphNodeInput>,
     ) {
         for node in nodes {
-            let input = if node.kind == GraphNodeKind::Op {
+            let input = if matches!(node.kind, GraphNodeKind::Op | GraphNodeKind::Breakpoint) {
                 GraphInput::NotAgent
             } else if let Some(input) = current.take() {
                 GraphInput::Current { input }

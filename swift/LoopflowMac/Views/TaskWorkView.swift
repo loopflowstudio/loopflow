@@ -134,7 +134,7 @@ struct TaskWorkflowBar: View {
             Spacer(minLength: 0)
             if let run = actions.run {
                 let refusal = model.changeRefusal ?? actions.runRefusal
-                Button(run.label) { model.startTaskFromInput(nil, task: task) }
+                Button(run.label) { model.startTaskFromInput(nil, arrival: run.arrival, task: task) }
                     .buttonStyle(LoopflowButtonStyle())
                     .fixedSize()
                     .disabled(refusal != nil)

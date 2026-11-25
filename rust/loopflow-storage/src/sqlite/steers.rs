@@ -496,6 +496,13 @@ fn scopes() -> String {
         AND (p.source NOT LIKE 'update:%' AND p.source NOT LIKE 'notice:%'
          OR ((SELECT interactive FROM agent_sessions WHERE id=?1)
              AND p.source NOT LIKE 'update:'||?1||':%'))
+        AND (p.source NOT LIKE 'breakpoint:%' OR p.revision=(
+            SELECT json_extract(g.breakpoint,'$.id') FROM task_primary_sessions tp
+            JOIN task_graphs g ON g.task_id=tp.task_id
+            JOIN tasks t ON t.id=tp.task_id
+            JOIN agent_sessions s ON s.id=tp.session_id
+            WHERE tp.task_id=p.task_id AND tp.session_id=?1 AND s.interactive=1
+            AND s.completed_at IS NULL AND s.moved_to_machine_id IS NULL AND {open}))
         -- A shared steer saved before this Session started and already read
         -- by another Session of its kind was read there; a later Session
         -- starts past it. A Task conversation's reading leaves the next
@@ -505,7 +512,7 @@ fn scopes() -> String {
             WHERE d.steer_id=p.id AND d.session_id!=?1 AND d.delivered_at IS NOT NULL
             AND o.interactive=(SELECT interactive FROM agent_sessions WHERE id=?1)))
         )",
-        super::task_work::counts_for_task("s"))
+        super::task_work::counts_for_task("s"), open=super::durable::task_open_sql("t"))
 }
 
 /// A claim whose hook never stamped it lapses after this long, and the steer

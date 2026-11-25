@@ -241,6 +241,17 @@ impl Cli {
         )
     }
 
+    pub fn task_run_mode(&self) -> loopflow_execution::ops::task::TaskRunMode {
+        use loopflow_execution::ops::task::TaskRunMode;
+        if self.interactive {
+            TaskRunMode::InPlace
+        } else if self.batch {
+            TaskRunMode::Headless
+        } else {
+            TaskRunMode::Stop
+        }
+    }
+
     /// `lf task auto on`: the Task's run, asked for auto.
     pub fn turns_auto_on(&self) -> bool {
         matches!(
@@ -2252,11 +2263,12 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Run the Task's Graph in its worktree until the next interactive step;
+    /// Run the Task's Graph in its worktree until the next review;
     /// returns once it runs (`-b` runs every step headless to `end` and waits)
     #[command(
         after_help = "A Task runs the graph it took up: its Wave's default, its repository's \
-`graph:`, or `code`. A run stops before each interactive step, where the Task waits for its \
+`graph:`, or `code`. At a breakpoint the preceding step is finished. Continue to accept its \
+proposal or use --decision and --reason to choose another loop pass. A run also stops before a legacy interactive step, where the Task waits for its \
 conversation; the next `lf task run` continues after it. A run that fails starts again at the \
 step that failed; the steps before it stay done, and --from reruns them. `-i` runs every step \
 with you in this terminal instead. A run that reaches a merging step, as `-b` does, may merge the PR \
@@ -2271,6 +2283,12 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         /// Start at this step instead: to go back, skip ahead, or wait at an interactive step
         #[arg(long, value_name = "STEP")]
         from: Option<String>,
+        /// Continue only the breakpoint visit this conversation reviewed
+        #[arg(long)]
+        at_arrival: Option<loopflow_model::id::LfProcessId>,
+        /// Choose the loop's next move at this breakpoint
+        #[arg(long, value_enum, conflicts_with = "from")]
+        decision: Option<loopflow_execution::graph::transitions::GraphDecision>,
         #[arg(long)]
         name: Option<String>,
         /// Fork from another Task's branch; push if absent or an unpublished parent is ahead

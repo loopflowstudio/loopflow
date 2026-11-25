@@ -310,7 +310,7 @@ fn graph_steps(repo: &Path, graph: &str, step: Option<&str>) -> Result<Vec<Skill
             let skill = match step {
                 ConcreteStep::Skill(skill) => &skill.skill,
                 ConcreteStep::Xor(branch) => &branch.router,
-                ConcreteStep::Command(_) => continue,
+                ConcreteStep::Breakpoint(_) | ConcreteStep::Command(_) => continue,
             };
             if target.is_none_or(|(graph, id)| {
                 skill.occurrence.as_ref().is_some_and(|occ| {

@@ -8,6 +8,9 @@
     "from": "implement",
     "agent": "claude",
     "approve": false,
+    "at_arrival": null,
+    "decision": null,
+    "reason": null,
     "graph": null
   },
   "select": null,

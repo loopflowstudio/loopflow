@@ -185,10 +185,10 @@ fn reaching_end_without_remaining_steps_requests_completion_once() {
     )
     .unwrap();
     store.set_task_graph_step(&task, "review").unwrap();
-    assert!(store.end_task_graph(&task).unwrap());
+    assert!(store.end_task_graph(&task, None).unwrap());
     assert!(store.task_completion_pending(&task).unwrap().is_some());
     assert_eq!(store.task_auto(&task).unwrap(), None);
-    assert!(!store.end_task_graph(&task).unwrap());
+    assert!(!store.end_task_graph(&task, None).unwrap());
 }
 
 #[test]
@@ -219,7 +219,7 @@ fn reaching_end_leaves_a_task_with_open_children_open() {
     )
     .unwrap();
     store.set_task_graph_step(&parent, "review").unwrap();
-    assert!(store.end_task_graph(&parent).unwrap());
+    assert!(store.end_task_graph(&parent, None).unwrap());
     assert!(store.task_completion_pending(&parent).unwrap().is_none());
     assert_eq!(store.open_task_child_count(&parent).unwrap(), 1);
 

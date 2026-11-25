@@ -46,6 +46,19 @@ Compare and consume that arrival in the write that installs the run cursor or re
 
 ### 1. Prove one complete review and reply
 
+Implemented in the research Graph. The deciding worker finishes before the marker. The Task row holds the cursor and the carrier ID for this visit. Parking also writes a steer for the primary; the next run compares the arrival, applies the chosen decision and carries the reply forward. Both Task action buttons send the arrival they displayed. Other builtins still use their captured interactive steps.
+
+The focused CLI checks live in `graph_tests::breakpoint_`. The runner check `a_breakpoint_keeps_the_selected_path_and_its_pending_verdict` exercises a nested path. A SQLite probe with 10,000 Tasks and 10,000 primaries measured 34.1 μs per delivery eligibility read. SQLite searched the Session, Task, primary and Graph by index. The arrival update used the existing Task key.
+
+Local checks on November 24:
+
+- `cargo test -p loopflow -p loopflow-execution --lib breakpoint_ -- --test-threads=1` passed all four cases. The stand-ins saw the review on the original Claude thread, the quoted reply and pass two at the Codex worker, the rejected stale reply, and batch completion with auto unset.
+- The branch CLI ran an ad hoc Graph on a private Machine. Foreground printed “Continuing runs graph show research.” and stopped. Batch ran the command.
+- The three served-write tests and eight server-schema tests passed, including the regenerated schema.
+- All changed Swift files parsed. A standalone run of the production TaskGraph decoder and action round-tripped the shared fixture and returned Continue with its displayed arrival. Gate runs the package test and all-target Clippy. The local Clippy run stopped after 24 minutes under sustained Machine load, before a result.
+
+Next, translate old captures and their saved coordinates before replacing the other builtins. Broader delivery coverage includes a primary created after arrival, racing auto against a late reply, and the other harnesses. Now ordering and real-provider dogfooding remain in passes 3 and 4.
+
 Start with a fixture Task running `loop: [research, break]` on two different harnesses. Use one ordinary primary delivery path through the existing steer machinery in this slice. Research writes the two alternatives and recommends finishing. Quit the primary while it runs. Park with that result, restart the Machine server, reopen the original conversation held, and present the exact final answer. Reply “2b — compare keyboard use” to repeat. The second research worker sees the selected option, the quoted reply and pass two. Repeat the old continue after the second visit and check that it leaves that visit untouched. Plain continue there accepts an advancing verdict and requests completion once. With batch enabled the same worker verdicts settle without a handoff. Finish the broader wake and harness coverage in pass 3. This slice crosses parser, runner, storage, Task run and conversation before widening the catalog or UI.
 
 Today the research Graph names two research workers. The compiler requires a deciding skill, runner settlement consumes its verdict, and settling a Task clears the live cursor. [Compiler](../rust/loopflow-execution/src/graph/mod.rs) · [Runner](../rust/loopflow-execution/src/graph/runner.rs) · [Transitions](../rust/loopflow-execution/src/graph/transitions.rs)
@@ -82,8 +95,8 @@ Carry the breakpoint kind through graph show/list/catalog, composition and retur
 The named fixture below is to be built in this Task. It uses the real CLI and private Machine server, a worker stand-in on a different harness from the primary, a held terminal and marker-controlled completion. It runs headless, with no model quota, GUI, tracker or fixed sleep.
 
 ```sh
-cargo test -p loopflow --lib task_graph_launch_tests::breakpoint_presents_finished_work
-swift test --package-path swift --filter BreakpointPresentationTests
+cargo test -p loopflow --lib graph_tests::breakpoint_
+scripts/test_desktop.sh --filter DTOFixtureTests/breakpointOffersContinuationForThePresentedArrival
 ```
 
 Extend the first slice through the shared Task/roadmap DTO fixture. Observe one successful worker before its first arrival, zero processes for the marker, one held primary on the original thread with the unique artifact line, link, default and questions, and an Active Task leading eligible active work and visible in Now. Put the review inside a selected XOR path with another occurrence of the same skill elsewhere. Override advance with iterate and check the captured path, pass count and exact direction seen by the worker. At the second visit, race the old reply against auto on. Only the current default may move the Task. The unread handoff disappears. Cover bare continue, blocked, terminal advance, launch failure after acceptance and a missing transcript with retained answer separately. Under `-b` check the graph reaches end without a held start or an auto-setting change. Swift decodes and renders the same stop, reason and ordering. Use the repository’s isolated Cargo-test environment. Before shipping, dogfood the demo with a real provider and record what appeared on reopen separately from the stand-in results.

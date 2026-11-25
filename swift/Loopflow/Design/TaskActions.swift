@@ -9,6 +9,7 @@ public struct TaskActions: Equatable {
         public let label: String
         /// The command the button stands for.
         public let help: String
+        public var arrival: String? = nil
     }
 
     /// The Task's auto setting, named in the Notice by the action it offers.
@@ -64,6 +65,8 @@ public extension TaskGraph {
         switch position {
         case .at(TaskGraph.start): return .init(label: "Start", help: help)
         case .at(TaskGraph.end): return nil
+        case .breakpoint(_, let arrival):
+            return .init(label: "Continue", help: "\(help) --at-arrival \(arrival)", arrival: arrival)
         case .at(let step): return .init(label: "Run", help: "\(help): continue after \(step)")
         case .run(_, _, _, true): return nil
         case .run(_, let at, _, false): return .init(label: "Run", help: "\(help): run again at \(at)")

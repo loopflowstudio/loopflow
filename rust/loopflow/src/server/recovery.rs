@@ -133,10 +133,7 @@ impl Watcher {
                 .min();
         }
         self.seen = Some((revisions, now));
-        let held = |session: &LfSessionId| {
-            terminals.session_terminal(session).is_some()
-                || terminals.pending_terminal(session, None).is_some()
-        };
+        let held = |session: &LfSessionId| terminals.held_terminal(session).is_some();
         let start = |conversation: &TaskConversation, request: String| {
             let mut start = super::service::continuing(
                 conversation.session.clone(),
@@ -152,7 +149,7 @@ impl Watcher {
             start
                 .argv
                 .splice(target..target, ["--request-id".to_string(), request]);
-            terminals.start(start)?;
+            terminals.start_unless_held(start)?;
             pace(store, conversation);
             Ok(())
         };

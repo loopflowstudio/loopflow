@@ -249,6 +249,17 @@ runs again with that feedback. After `verify`, review `scratch/verify.md`
 and choose whether to finish or make another pass. If a worker reports
 that it is blocked, the reason stays visible until you resolve it.
 
+The built-in research Graph uses `step: research` to select the Skill with
+the same name as the Graph. It runs once per pass. To repeat the investigation
+with new direction, include the decision and your reply.
+
+```bash
+lf task run LOO-12 --decision iterate --reason "Compare keyboard use"
+```
+
+The Task conversation includes `--at-arrival` when it continues a review.
+A reply from an earlier visit leaves the current visit available.
+
 To give a breakpoint a name, write `- break: layout-choice`.
 `lf task run <ID> --from layout-choice` goes directly to that marker.
 `lf task run <ID> --from explore` runs the Skill again. A jump straight to

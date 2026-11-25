@@ -22,6 +22,9 @@ pub struct ExecutionContext {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct ExecutionCursor {
     pub index: usize,
+    /// The last successful step process, including a corrected provider turn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub producer: Option<loopflow_model::id::LfProcessId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub child: Option<Box<NestedCursor>>,
     #[serde(default)]
@@ -73,14 +76,24 @@ pub trait SkillExecutor: Send + Sync {
         Ok(())
     }
 
-    async fn run_skill(&self, skill: &ConcreteSkill, ctx: ExecutionContext)
-        -> Result<SkillOutcome>;
+    /// Whether the run may apply the default move at this marker.
+    fn continue_at_breakpoint(
+        &self,
+        stop: &crate::graph::Breakpoint,
+        cursor: &ExecutionCursor,
+    ) -> Result<bool>;
+
+    async fn run_skill(
+        &self,
+        skill: &ConcreteSkill,
+        ctx: ExecutionContext,
+    ) -> Result<(SkillOutcome, Option<loopflow_model::id::LfProcessId>)>;
 
     async fn run_command(
         &self,
         ops: &ConcreteCommand,
         ctx: ExecutionContext,
-    ) -> Result<SkillOutcome>;
+    ) -> Result<(SkillOutcome, Option<loopflow_model::id::LfProcessId>)>;
 }
 
 #[derive(Debug, Clone)]
@@ -129,7 +142,9 @@ impl<E: SkillExecutor> GraphRunner<E> {
             // waiting to return to its parent.
             return settle_step(items, cursor);
         };
-        if leaf.progress.verdict.is_some() || leaf.route.is_some() {
+        if !matches!(item, ConcreteStep::Breakpoint(_))
+            && (leaf.progress.verdict.is_some() || leaf.route.is_some())
+        {
             return settle_step(items, cursor);
         }
         let ctx = ExecutionContext {
@@ -139,13 +154,26 @@ impl<E: SkillExecutor> GraphRunner<E> {
             }),
             direction: leaf.progress.direction.clone(),
         };
-        let outcome = match item {
+        let (outcome, process) = match item {
+            ConcreteStep::Breakpoint(stop) => {
+                return if self.executor.continue_at_breakpoint(stop, cursor)? {
+                    settle_step(items, cursor)
+                } else {
+                    Ok(Some(GraphOutcome::StoppedAt(stop.name.clone())))
+                };
+            }
             ConcreteStep::Skill(skill) => self.executor.run_skill(skill, ctx).await?,
             ConcreteStep::Xor(branch) => {
                 self.executor.run_skill(&branch.router_skill(), ctx).await?
             }
             ConcreteStep::Command(op) => self.executor.run_command(op, ctx).await?,
         };
+        if matches!(
+            outcome,
+            SkillOutcome::Completed | SkillOutcome::Decided(_) | SkillOutcome::Routed(_)
+        ) {
+            cursor.producer = process;
+        }
         match outcome {
             SkillOutcome::Completed => settle_step(items, cursor),
             SkillOutcome::Waiting => Ok(Some(GraphOutcome::Waiting)),
@@ -221,6 +249,10 @@ impl ExecutionCursor {
     /// An error leaves the entire cursor unchanged.
     pub fn finish(&mut self, steps: &[ConcreteStep]) -> Result<bool> {
         let mut next = self.clone();
+        let (body, leaf) = self.current_body(steps);
+        if matches!(body.get(leaf.index), Some(ConcreteStep::Breakpoint(_))) {
+            next.producer = None;
+        }
         next.finish_inner(steps)?;
         let finished = next.index == steps.len();
         *self = next;
@@ -287,6 +319,15 @@ impl ExecutionCursor {
                 }));
                 return Ok(());
             }
+        }
+        if crate::graph::decision_edge(steps, self.index) == Some(self.index + 1) {
+            anyhow::ensure!(
+                self.progress.verdict.is_some(),
+                "loop at step {} requires a decision",
+                self.index
+            );
+            self.index += 1;
+            return Ok(());
         }
         match finish_step(steps, self.index, &mut self.progress)? {
             GraphTransition::Next(index) => self.index = index,
@@ -417,6 +458,14 @@ mod tests {
 
     #[async_trait]
     impl SkillExecutor for RecordingExecutor {
+        fn continue_at_breakpoint(
+            &self,
+            stop: &crate::graph::Breakpoint,
+            _: &ExecutionCursor,
+        ) -> Result<bool> {
+            Ok(self.wait_on.as_deref() != Some(&stop.name))
+        }
+
         async fn checkpoint(&self, cursor: &ExecutionCursor) -> Result<()> {
             let mut checkpoints = self.checkpoints.lock().unwrap();
             checkpoints.push(cursor.clone());
@@ -430,7 +479,7 @@ mod tests {
             &self,
             skill: &ConcreteSkill,
             ctx: ExecutionContext,
-        ) -> Result<SkillOutcome> {
+        ) -> Result<(SkillOutcome, Option<loopflow_model::id::LfProcessId>)> {
             self.calls
                 .lock()
                 .expect("call mutex")
@@ -446,21 +495,24 @@ mod tests {
                 .get_mut(&skill.skill.name)
                 .and_then(VecDeque::pop_front)
             {
-                return Ok(outcome);
+                return Ok((outcome, None));
             }
             if skill.skill.name == "xor-route" {
                 let mut routes = self.verdicts.lock().unwrap();
-                return Ok(routes
-                    .first()
-                    .cloned()
-                    .map_or(SkillOutcome::Blocked("missing route".into()), |_| {
-                        SkillOutcome::Routed(routes.remove(0))
-                    }));
+                return Ok((
+                    routes
+                        .first()
+                        .cloned()
+                        .map_or(SkillOutcome::Blocked("missing route".into()), |_| {
+                            SkillOutcome::Routed(routes.remove(0))
+                        }),
+                    None,
+                ));
             }
             if self.wait_on.as_deref() == Some(skill.skill.name.as_str()) {
-                Ok(SkillOutcome::Waiting)
+                Ok((SkillOutcome::Waiting, None))
             } else {
-                Ok(SkillOutcome::Completed)
+                Ok((SkillOutcome::Completed, None))
             }
         }
 
@@ -468,11 +520,11 @@ mod tests {
             &self,
             ops: &ConcreteCommand,
             ctx: ExecutionContext,
-        ) -> Result<SkillOutcome> {
+        ) -> Result<(SkillOutcome, Option<loopflow_model::id::LfProcessId>)> {
             let name = format!("op:{}", ops.item.display_name());
             self.contexts.lock().unwrap().push((name.clone(), ctx));
             self.calls.lock().unwrap().push(name);
-            Ok(SkillOutcome::Completed)
+            Ok((SkillOutcome::Completed, None))
         }
     }
 
@@ -537,6 +589,62 @@ mod tests {
             )]),
             sources: vec!["test".to_owned()],
         })
+    }
+
+    #[tokio::test]
+    async fn a_breakpoint_keeps_the_selected_path_and_its_pending_verdict() {
+        let repo = fixture_repo().unwrap();
+        let graphs = repo.path().join(".lf/graphs");
+        std::fs::create_dir_all(&graphs).unwrap();
+        std::fs::write(graphs.join("choices.yaml"), "- xor:\n    paths:\n      selected:\n        description: Compare\n        steps:\n          - loop: [work, break]\n      other:\n        description: Skip\n        steps: [work, break]\n- break: finished\n").unwrap();
+        let graph = crate::task_graph::CapturedGraph::load("choices", repo.path())
+            .unwrap()
+            .unwrap();
+        let executor = RecordingExecutor::new(repo.path().into())
+            .with_verdicts(&["selected"])
+            .with_outcomes(
+                "work",
+                vec![decision(GraphDecision::Blocked, "Which layout?")],
+            )
+            .with_wait("after-work#2");
+        let runner = GraphRunner::new(executor.clone());
+        let mut cursor = ExecutionCursor::default();
+        let parked = runner
+            .run_with_cursor(&graph.steps, &mut cursor)
+            .await
+            .unwrap();
+        assert_eq!(parked, GraphOutcome::StoppedAt("after-work#2".into()));
+        let mut resumed = executor.saved_cursor();
+        assert_eq!(
+            resumed.finish(&graph.steps).unwrap_err().to_string(),
+            "Which layout?"
+        );
+        assert_eq!(resumed, cursor);
+        let verdict = resumed.leaf_mut().progress.verdict.as_mut().unwrap();
+        verdict.decision = GraphDecision::Iterate;
+        verdict.summary = "Use the compact layout".into();
+        assert!(!resumed.finish(&graph.steps).unwrap());
+        assert_eq!(resumed.leaf().progress.repeats["1"], 1);
+        let bypass = RecordingExecutor::new(repo.path().into()).with_outcomes(
+            "work",
+            vec![decision(GraphDecision::Advance, "Comparison complete")],
+        );
+        assert_eq!(
+            GraphRunner::new(bypass.clone())
+                .run_with_cursor(&graph.steps, &mut resumed)
+                .await
+                .unwrap(),
+            GraphOutcome::Completed
+        );
+        assert_eq!(bypass.calls(), ["work"]);
+        assert_eq!(
+            bypass.contexts.lock().unwrap()[0].1.direction.as_deref(),
+            Some("Use the compact layout")
+        );
+        assert_eq!(executor.calls(), ["xor-route", "work"]);
+        let mut jump = graph.find("after-work#2").unwrap().cursor();
+        assert!(!jump.finish(&graph.steps).unwrap());
+        assert_eq!(graph.step_name_of(&jump).as_deref(), Some("finished"));
     }
 
     #[tokio::test]

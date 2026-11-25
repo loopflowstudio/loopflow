@@ -592,6 +592,18 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
 }
 
 #[test]
+fn a_parked_task_names_the_arrival_its_conversation_can_continue() {
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_graph_breakpoint.json"
+    ))
+    .unwrap();
+    let graph: loopflow_execution::task_graph::TaskGraph =
+        serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(graph.step(), "after-research");
+    assert_eq!(serde_json::to_value(graph).unwrap(), wire);
+}
+
+#[test]
 fn task_work_preserves_sessions_graph_runs_and_graph() {
     let input = include_str!("../../../tests/fixtures/dto/task_work.json");
     let work: loopflow_execution::task_work::TaskWork = serde_json::from_str(input).unwrap();

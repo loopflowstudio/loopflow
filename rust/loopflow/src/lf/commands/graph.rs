@@ -382,14 +382,8 @@ pub fn carry_task_run(
     json: bool,
 ) -> Result<()> {
     use loopflow_execution::engine::task::TaskRun;
-    use loopflow_execution::ops::task::{TaskRunMode, TaskRunStart};
-    let mode = if cli.interactive {
-        TaskRunMode::InPlace
-    } else if cli.batch {
-        TaskRunMode::Headless
-    } else {
-        TaskRunMode::Stop
-    };
+    use loopflow_execution::ops::task::TaskRunStart;
+    let mode = cli.task_run_mode();
     let (task, start) = loopflow_execution::ops::task::task_place(
         repo,
         issue,
@@ -655,10 +649,35 @@ fn execute(
                 _ => blocked_at.as_deref(),
             };
             if let Some(step) = step {
-                running
-                    .store
-                    .sqlite
-                    .arrive_task_graph(task, carrier, step)?;
+                let review = if matches!(running.current(), Some(ConcreteStep::Breakpoint(_))) {
+                    let cursor = running
+                        .position
+                        .lock()
+                        .expect("Graph position mutex poisoned")
+                        .clone();
+                    let mut text = running.breakpoint_review(step, &cursor)?;
+                    let deciding = cursor.leaf().progress.verdict.is_some();
+                    text.push_str(&format!("\nPresent the result, links, proposed next action and questions in this conversation. Discuss questions here. When the person chooses, continue with `lf task run --at-arrival {carrier} --reason <their-reply-and-selected-option>`."));
+                    if deciding {
+                        text.push_str(" To change the loop decision, include `--decision advance` or `--decision iterate`.");
+                    }
+                    eprintln!("{text}");
+                    let arrival = loopflow_execution::store::task_work::BreakpointArrival {
+                        id: carrier.clone(),
+                        cursor,
+                    };
+                    Some((serde_json::to_string(&arrival)?, text))
+                } else {
+                    None
+                };
+                running.store.sqlite.arrive_task_graph(
+                    task,
+                    carrier,
+                    step,
+                    review
+                        .as_ref()
+                        .map(|(record, text)| (record.as_str(), text.as_str())),
+                )?;
             }
         }
         // A step that completed its Task could not clean up under its own live
@@ -795,6 +814,7 @@ fn render_pipeline_lines(items: &[ConcreteStep]) -> Vec<String> {
                 Some(_) => lines.push(format!("{} [interactive]", skill.skill.name)),
                 None => lines.push(skill.skill.name.clone()),
             },
+            ConcreteStep::Breakpoint(stop) => lines.push(format!("break: {}", stop.name)),
             ConcreteStep::Command(command) => lines.push(command.item.to_string()),
             ConcreteStep::Xor(branch) => lines.extend(render_branch_lines(branch)),
         }
@@ -1152,6 +1172,41 @@ impl RunningGraph<'_> {
             .map(|(session, input, _)| (session, input)))
     }
 
+    fn breakpoint_review(&self, name: &str, cursor: &ExecutionCursor) -> Result<String> {
+        let mut lines = vec![format!("Breakpoint {name}")];
+        if let Some(verdict) = &cursor.leaf().progress.verdict {
+            lines.push(verdict.summary.clone());
+        } else if let Some(process) = &cursor.producer {
+            let result = match self.captured(Some(process))? {
+                Some((_, input)) => {
+                    match loopflow_execution::transcript::answer::input_final_answer_for_people(
+                        &self.store.sqlite,
+                        &input,
+                    ) {
+                        Ok(Some(answer)) => answer,
+                        Ok(None) => format!("Step {process} finished without a recorded answer."),
+                        Err(error) => format!("Answer unavailable for {input}: {error}"),
+                    }
+                }
+                None => format!("Step {process} completed."),
+            };
+            lines.push(result);
+        }
+        let mut next = cursor.clone();
+        lines.push(match next.finish(self.steps) {
+            Ok(true) => "Continuing finishes the Graph.".into(),
+            Ok(false) => {
+                let (body, leaf) = next.current_body(self.steps);
+                format!(
+                    "Continuing runs {}.",
+                    loopflow_execution::task_graph::step_name(&body[leaf.index])
+                )
+            }
+            Err(error) => format!("Blocked: {error}"),
+        });
+        Ok(lines.join("\n"))
+    }
+
     /// The Session a step's Process opened and the answer its turn returned.
     fn answer(
         &self,
@@ -1222,6 +1277,42 @@ impl RunningGraph<'_> {
 
 #[async_trait]
 impl SkillExecutor for &RunningGraph<'_> {
+    fn continue_at_breakpoint(
+        &self,
+        stop: &loopflow_execution::graph::Breakpoint,
+        cursor: &ExecutionCursor,
+    ) -> Result<bool> {
+        use std::io::IsTerminal;
+        if self.launcher.batch {
+            return Ok(true);
+        }
+        let task = self.task.as_ref().filter(|_| self.task_run.is_some());
+        if let Some(task) = task {
+            if self
+                .store
+                .sqlite
+                .task_auto(task)?
+                .is_some_and(|mark| mark.state == AutoState::On)
+            {
+                return Ok(true);
+            }
+        }
+        if task.is_some() {
+            return Ok(false);
+        }
+        eprintln!("{}", self.breakpoint_review(&stop.name, cursor)?);
+        if !std::io::stdin().is_terminal() {
+            return Ok(false);
+        }
+        eprintln!("Continue? [y/N]");
+        let mut answer = String::new();
+        std::io::stdin().read_line(&mut answer)?;
+        Ok(matches!(
+            answer.trim().to_ascii_lowercase().as_str(),
+            "y" | "yes"
+        ))
+    }
+
     async fn checkpoint(&self, cursor: &ExecutionCursor) -> Result<()> {
         *self.position.lock().expect("Graph position mutex poisoned") = cursor.clone();
         // A Task run that fails starts again here, not where it began. A stale
@@ -1243,14 +1334,14 @@ impl SkillExecutor for &RunningGraph<'_> {
         &self,
         skill: &ConcreteSkill,
         ctx: ExecutionContext,
-    ) -> Result<SkillOutcome> {
+    ) -> Result<(SkillOutcome, Option<loopflow_model::id::LfProcessId>)> {
         let Some(standing_in) = self.stands_in(skill)? else {
             let step = skill.interactive_step().unwrap_or(&skill.skill.name);
             eprintln!("Stopped at {step}; the Task waits there for its conversation.");
-            return Ok(SkillOutcome::StopsAt(step.to_owned()));
+            return Ok((SkillOutcome::StopsAt(step.to_owned()), None));
         };
         if let Some(step) = self.stopped_landing()? {
-            return Ok(SkillOutcome::StopsAt(step));
+            return Ok((SkillOutcome::StopsAt(step), None));
         }
         loopflow_execution::ops::tracker_events::sync_repository(
             &self.store,
@@ -1260,17 +1351,19 @@ impl SkillExecutor for &RunningGraph<'_> {
         let name = &skill.skill.name;
         print_step_progress(ctx.progress, name);
         let mut message = self.message.unwrap_or_default().to_owned();
-        let step = {
+        let (body, index) = {
             let position = self.position.lock().expect("Graph position mutex poisoned");
             let (body, leaf) = position.current_body(self.steps);
-            if let Some(start) = return_target(body, leaf.index) {
-                let traversals = leaf.progress.repeats.get(&leaf.index.to_string());
+            if let Some((edge, start)) = loopflow_execution::graph::decision_edge(body, leaf.index)
+                .and_then(|edge| return_target(body, edge).map(|start| (edge, start)))
+            {
+                let traversals = leaf.progress.repeats.get(&edge.to_string());
                 let pass = u64::from(traversals.copied().unwrap_or(0)) + 1;
                 let steps = leaf.index - start + 1;
                 let target = loopflow_execution::task_graph::step_name(&body[start]);
                 message.push_str(&format!("\n\nDecision pass {pass}. Iterating repeats {steps} steps, back to {target}.\nCompare what the preceding pass set out to do with what changed or was learned. Say when earlier results are missing."));
             }
-            body.get(leaf.index)
+            (body, leaf.index)
         };
         if let Some(direction) = &ctx.direction {
             message.push_str(&format!(
@@ -1282,17 +1375,15 @@ impl SkillExecutor for &RunningGraph<'_> {
             let step = skill.interactive_step().unwrap_or(name);
             message.push_str(&stand_in_message(step, skill.returns.is_some()));
         }
-        let output =
-            step.and_then(|step| GraphOutput::append_step_instructions(step, &mut message));
+        let output = GraphOutput::append_step_instructions(body, index, &mut message);
         let mut step_cli = self.launcher.process_options();
         // spawn carries verbosity for skills, operations, and correction turns.
         step_cli.verbose = false;
         step_cli.output_schema = output.as_ref().map(GraphOutput::schema);
-        // `-i` and `-b` choose for every step. Otherwise a step runs headless,
-        // and an interactive step no one stands in at launches the way
-        // `lf skill` would: with the person at a terminal, else headless.
-        step_cli.interactive = self.launcher.interactive;
-        step_cli.batch = !self.launcher.interactive && (!skill.interactive || standing_in);
+        // Workers run headless. A legacy interactive occurrence still uses
+        // its terminal until the captured Graph is converted (LOO-1100).
+        step_cli.interactive = self.launcher.interactive && skill.interactive;
+        step_cli.batch = !step_cli.interactive && (!skill.interactive || standing_in);
         // The child receives this occurrence's captured source, not a later
         // catalog selection. Keep the file alive through every child/readback.
         let mut input = tempfile::NamedTempFile::new()?;
@@ -1319,18 +1410,18 @@ impl SkillExecutor for &RunningGraph<'_> {
             let (exit, step) = self.spawn(name, StepKind::Agent, &args).await?;
             match exit {
                 StepExit::Finished => {}
-                StepExit::Held => return Ok(SkillOutcome::Waiting),
-                StepExit::Interrupted => return Ok(SkillOutcome::Interrupted),
+                StepExit::Held => return Ok((SkillOutcome::Waiting, None)),
+                StepExit::Interrupted => return Ok((SkillOutcome::Interrupted, None)),
             }
             self.commit_step(name).await;
             let Some(output) = &output else {
-                return Ok(SkillOutcome::Completed);
+                return Ok((SkillOutcome::Completed, step));
             };
             let (conversation, answer) = self.answer(name, step.as_ref())?;
             let error = match answer {
                 None => "final output is absent".to_owned(),
                 Some(text) => match answer_value(&text).and_then(|value| output.decode(&value)) {
-                    Ok(outcome) => return Ok(outcome),
+                    Ok(outcome) => return Ok((outcome, step)),
                     Err(error) => error,
                 },
             };
@@ -1355,9 +1446,9 @@ impl SkillExecutor for &RunningGraph<'_> {
         &self,
         ops: &loopflow_execution::graph::ConcreteCommand,
         _ctx: ExecutionContext,
-    ) -> Result<SkillOutcome> {
+    ) -> Result<(SkillOutcome, Option<loopflow_model::id::LfProcessId>)> {
         if let Some(step) = self.stopped_landing()? {
-            return Ok(SkillOutcome::StopsAt(step));
+            return Ok((SkillOutcome::StopsAt(step), None));
         }
         loopflow_execution::ops::tracker_events::sync_repository(
             &self.store,
@@ -1385,20 +1476,21 @@ impl SkillExecutor for &RunningGraph<'_> {
             _ => None,
         };
         let args: Vec<String> = argv.into_iter().skip(1).collect();
-        match self.spawn(&label, StepKind::Operation, &args).await?.0 {
+        let (exit, process) = self.spawn(&label, StepKind::Operation, &args).await?;
+        match exit {
             StepExit::Finished => {}
-            StepExit::Held => return Ok(SkillOutcome::Waiting),
-            StepExit::Interrupted => return Ok(SkillOutcome::Interrupted),
+            StepExit::Held => return Ok((SkillOutcome::Waiting, None)),
+            StepExit::Interrupted => return Ok((SkillOutcome::Interrupted, None)),
         }
         // Only a nonwaiting land hands delivery off. A recent landing in the
         // same checkout says nothing about an unrelated command's result.
         if let Some(checkout) = handoff_checkout {
             if let Some(landing) = self.store.sqlite.pending_landing_at(&checkout)? {
                 eprintln!("Landing {landing} is still being watched; the Graph stops here.");
-                return Ok(SkillOutcome::Waiting);
+                return Ok((SkillOutcome::Waiting, None));
             }
         }
-        Ok(SkillOutcome::Completed)
+        Ok((SkillOutcome::Completed, process))
     }
 }
 
@@ -1532,7 +1624,7 @@ mod tests {
                         (&running).run_command(&command, ctx).await
                     }
                     .unwrap();
-                    assert_eq!(outcome, SkillOutcome::Completed);
+                    assert_eq!(outcome.0, SkillOutcome::Completed);
                     // One delta, then the Project its changed issue names.
                     assert_eq!(state.lock().await.requests, 2);
                 }
@@ -1667,8 +1759,8 @@ mod tests {
                 .unwrap()
                 .unwrap_or_else(|| panic!("{name} is a builtin graph"));
             assert!(
-                !graph.interactive_steps().is_empty(),
-                "{name} has interactive steps"
+                graph.next_interactive(&Default::default()).is_some(),
+                "{name} has a place to review"
             );
         }
     }

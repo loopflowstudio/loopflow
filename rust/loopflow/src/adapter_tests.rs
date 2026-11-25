@@ -40,9 +40,12 @@ fn previews_without_a_readable_registry_are_unavailable_and_create_nothing() {
         if corrupt {
             fs::write(&database, "not a database").unwrap();
         }
-        let run =
-            crate::lf::commands::context::explain_task_run(Some("UNKNOWN-1"), &options, false)
-                .unwrap();
+        let run = crate::lf::commands::context::explain_task_run(
+            Some("UNKNOWN-1"),
+            &options,
+            loopflow_execution::ops::task::TaskRunMode::Stop,
+        )
+        .unwrap();
         assert!(run.action.is_none());
         assert!(matches!(
             run.resolution.task,
@@ -95,13 +98,18 @@ mod operation_spellings {
         ));
         for populated in [false, true] {
             let optional = |value| populated.then_some(value);
-            let cli = parse(task::spell_run(
-                "LOO-1",
-                optional("implement"),
-                optional("code"),
-                optional("codex"),
-                populated,
-            ));
+            let cli = parse(
+                task::TaskRunRequest {
+                    graph: optional("code").map(str::to_owned),
+                    from: optional("implement").map(str::to_owned),
+                    agent: optional("codex").map(str::to_owned),
+                    approve: populated,
+                    at_arrival: populated.then(loopflow_model::id::LfProcessId::new),
+                    decision: None,
+                    reason: optional("reviewed").map(str::to_owned),
+                }
+                .argv("LOO-1"),
+            );
             assert!(matches!(
                 cli.command,
                 Some(Commands::Task {

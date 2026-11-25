@@ -101,17 +101,10 @@ pub struct Waited {
 pub fn run(
     directory: &Path,
     issue: &str,
-    from: Option<&str>,
-    graph: Option<&str>,
-    agent: Option<&str>,
-    approve: bool,
+    request: &TaskRunRequest,
     environment: &[(String, String)],
 ) -> Result<TaskRun> {
-    launch::start_with(
-        directory,
-        &spell_run(issue, from, graph, agent, approve),
-        environment,
-    )
+    launch::start_with(directory, &request.argv(issue), environment)
 }
 
 /// `task.auto.on`: turn auto on and start the Task's run detached, as
@@ -323,27 +316,44 @@ fn missing(issue: &str) -> Error {
         .with(serde_json::json!({ "task": issue }))
 }
 
-pub fn spell_run(
-    issue: &str,
-    from: Option<&str>,
-    graph: Option<&str>,
-    agent: Option<&str>,
-    approve: bool,
-) -> Vec<String> {
-    let mut args = Vec::new();
-    if approve {
-        args.push("--batch".to_owned());
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TaskRunRequest {
+    pub graph: Option<String>,
+    pub from: Option<String>,
+    pub agent: Option<String>,
+    pub approve: bool,
+    pub at_arrival: Option<LfProcessId>,
+    pub decision: Option<crate::graph::transitions::GraphDecision>,
+    pub reason: Option<String>,
+}
+
+impl TaskRunRequest {
+    pub fn argv(&self, issue: &str) -> Vec<String> {
+        let mut args = Vec::new();
+        if self.approve {
+            args.push("--batch".into());
+        }
+        if let Some(agent) = &self.agent {
+            args.extend(["--agent".into(), agent.clone()]);
+        }
+        args.extend(["task", "run", issue].map(str::to_owned));
+        args.extend(self.graph.iter().cloned());
+        for (flag, value) in [
+            ("--from", self.from.as_deref()),
+            (
+                "--at-arrival",
+                self.at_arrival.as_ref().map(LfProcessId::as_str),
+            ),
+            ("--decision", self.decision.map(|d| d.as_str())),
+            ("--reason", self.reason.as_deref()),
+        ] {
+            if let Some(value) = value {
+                args.extend([flag.into(), value.into()]);
+            }
+        }
+        args.push("--json".into());
+        args
     }
-    if let Some(agent) = agent {
-        args.extend(["--agent".to_owned(), agent.to_owned()]);
-    }
-    args.extend(["task", "run", issue].map(str::to_owned));
-    args.extend(graph.map(str::to_owned));
-    if let Some(from) = from {
-        args.extend(["--from".to_owned(), from.to_owned()]);
-    }
-    args.push("--json".to_owned());
-    args
 }
 
 pub fn spell_auto_on(issue: &str) -> Vec<String> {

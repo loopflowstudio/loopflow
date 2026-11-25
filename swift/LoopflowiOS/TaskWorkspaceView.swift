@@ -179,7 +179,7 @@ struct TaskWorkspaceView: View {
             Menu("Task actions", systemImage: "ellipsis.circle") {
                 if let run = actions.run {
                     item(run.label, symbol: "play.fill", disabled: actions.runRefusal != nil, issue: issue,
-                         write: .taskRun(directory: directory, issue: issue, graph: nil, from: nil, agent: nil, approve: false))
+                         write: .taskRun(directory: directory, issue: issue, graph: nil, from: nil, agent: nil, approve: false, atArrival: run.arrival, decision: nil, reason: nil))
                 }
                 if let auto = actions.auto {
                     item(auto.offer, symbol: auto == .on ? "pause.circle" : "paperplane", disabled: actions.autoRefusal != nil, issue: issue,

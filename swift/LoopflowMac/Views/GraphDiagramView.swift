@@ -284,7 +284,7 @@ struct GraphDiagram: View {
     private func nodeText(_ node: GraphNode) -> String {
         switch node.kind {
         case .xor: "\(node.label) · \(node.paths.count) paths"
-        case .op, .skill: node.label
+        case .breakpoint, .op, .skill: node.label
         }
     }
 
@@ -588,6 +588,7 @@ private struct GraphNodeDetail: View {
         var facts: [String] = []
         switch node.kind {
         case .skill where node.interactive: facts.append("Interactive step")
+        case .breakpoint: facts.append("Breakpoint")
         case .op: facts.append("Operation")
         case .xor: facts.append("Chooses one path")
         case .skill: break

@@ -160,12 +160,9 @@ fn start_stopped(
 
 /// `session.continue`'s held start, unless a held terminal already runs it.
 fn hold(terminals: &Registry, session: &LfSessionId, request: String) -> Result<()> {
-    if terminals.session_terminal(session).is_some() {
-        return Ok(());
-    }
     let start = super::service::continuing(session.clone(), request, 0, 0, None)
         .map_err(|error| anyhow!("{}", error.message))?;
-    terminals.start(start)?;
+    terminals.start_unless_held(start)?;
     Ok(())
 }
 
@@ -189,8 +186,8 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
     let IdleConversation {
         adapter,
         thread,
-        cwd,
         reach,
+        ..
     } = conversation;
     let delivered = (|| -> Result<()> {
         let session = &adapter.session;
@@ -208,13 +205,7 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
             IdleReach::Codex(endpoint) => Reach::Codex(endpoint),
             IdleReach::Inbox(Inbox::Socket(socket)) => Reach::Socket(open_socket(socket)?),
         };
-        let steers = loopflow_execution::steer::claim(
-            store,
-            cwd,
-            adapter,
-            thread,
-            loopflow_execution::steer::NativeBoundary::Turn,
-        )?;
+        let steers = loopflow_execution::steer::claim_complete(store, adapter, thread)?;
         let Some(steers) = steers else {
             return Ok(());
         };

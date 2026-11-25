@@ -435,10 +435,40 @@ impl Registry {
         .map(|(_, terminal)| terminal.clone())
     }
 
+    /// A terminal already kept for this Session, including a holder still
+    /// answering this server's startup inventory.
+    pub fn held_terminal(&self, session: &LfSessionId) -> Option<TerminalId> {
+        self.pending_terminal(session, None)
+            .or_else(|| self.session_terminal(session))
+    }
+
+    /// Reuse a terminal starting for this Session, including one whose holder
+    /// has not answered after a server restart. Check under the same lock as
+    /// a person's start so an automatic wake cannot race it.
+    pub fn start_unless_held(&self, start: Start) -> Result<TerminalId> {
+        let mut started = self.started.lock().expect("registry lock poisoned");
+        if let Some(held) = start
+            .session
+            .as_ref()
+            .and_then(|session| self.held_terminal(session))
+        {
+            return Ok(held);
+        }
+        self.start_locked(start, &mut started)
+    }
+
     /// Start `start`'s command in this build's holder and host it. Repeating a
     /// request answers the terminal it already started.
     pub fn start(&self, start: Start) -> Result<TerminalId> {
         let mut started = self.started.lock().expect("registry lock poisoned");
+        self.start_locked(start, &mut started)
+    }
+
+    fn start_locked(
+        &self,
+        start: Start,
+        started: &mut HashMap<String, TerminalId>,
+    ) -> Result<TerminalId> {
         if let Some(terminal) = started.get(&start.request) {
             return Ok(terminal.clone());
         }

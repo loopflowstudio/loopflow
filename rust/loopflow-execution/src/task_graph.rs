@@ -70,6 +70,7 @@ fn names(step: &ConcreteStep) -> Vec<&str> {
             skill.skill.name.as_str(),
             skill.id.as_deref(),
         ),
+        ConcreteStep::Breakpoint(stop) => (&stop.sources, stop.name.as_str(), None),
         ConcreteStep::Command(command) => (&command.sources, command.item.command.as_str(), None),
         ConcreteStep::Xor(branch) => (&branch.sources, branch.router.name.as_str(), None),
     };
@@ -198,22 +199,37 @@ impl CapturedGraph {
     /// The first interactive step a run from `place` reaches, looking into
     /// every XOR path in name order; `None` when it runs to the end.
     pub fn next_interactive(&self, place: &Place) -> Option<&str> {
-        fn scan(body: &[ConcreteStep], from: usize) -> Option<&str> {
+        self.next_stop(place, true)
+    }
+
+    pub(crate) fn next_stop(
+        &self,
+        place: &Place,
+        include_interactive_skills: bool,
+    ) -> Option<&str> {
+        fn scan(
+            body: &[ConcreteStep],
+            from: usize,
+            include_interactive_skills: bool,
+        ) -> Option<&str> {
             for step in &body[from..] {
                 match step {
-                    ConcreteStep::Skill(skill) => {
+                    ConcreteStep::Skill(skill) if include_interactive_skills => {
                         if let Some(step) = skill.interactive_step() {
                             return Some(step);
                         }
                     }
                     ConcreteStep::Xor(branch) => {
-                        if let Some(step) =
-                            branch.paths.values().find_map(|path| scan(&path.steps, 0))
+                        if let Some(step) = branch
+                            .paths
+                            .values()
+                            .find_map(|path| scan(&path.steps, 0, include_interactive_skills))
                         {
                             return Some(step);
                         }
                     }
-                    ConcreteStep::Command(_) => {}
+                    ConcreteStep::Breakpoint(stop) => return Some(&stop.name),
+                    ConcreteStep::Skill(_) | ConcreteStep::Command(_) => {}
                 }
             }
             None
@@ -221,7 +237,7 @@ impl CapturedGraph {
         let mut path = place.path.clone();
         let mut from = place.index;
         loop {
-            if let Some(step) = scan(body(&self.steps, &path), from) {
+            if let Some(step) = scan(body(&self.steps, &path), from, include_interactive_skills) {
                 return Some(step);
             }
             let (index, _) = path.pop()?;
@@ -333,11 +349,16 @@ fn workflow(steps: &[ConcreteStep]) -> (Vec<WorkflowStep>, Vec<u32>) {
     for step in steps {
         let sources = match step {
             ConcreteStep::Skill(skill) => &skill.sources,
+            ConcreteStep::Breakpoint(stop) => &stop.sources,
             ConcreteStep::Command(command) => &command.sources,
             ConcreteStep::Xor(branch) => &branch.sources,
         };
         let name = sources.get(1).cloned().unwrap_or_else(|| step_name(step));
-        let interactive = !interactive_steps(std::slice::from_ref(step)).is_empty();
+        let mut interactive = false;
+        walk(std::slice::from_ref(step), &[], &mut |_, node| {
+            interactive |= matches!(node, ConcreteStep::Breakpoint(_))
+                || matches!(node, ConcreteStep::Skill(skill) if skill.interactive);
+        });
         match line.last_mut() {
             Some(last) if last.name == name => last.interactive |= interactive,
             _ => line.push(WorkflowStep { name, interactive }),
@@ -371,11 +392,16 @@ impl WorkflowOutline {
     pub fn of(steps: &[ConcreteStep]) -> Self {
         let interactive_steps = interactive_summary(steps);
         let mut names: Vec<&str> = Vec::new();
-        for step in &interactive_steps {
-            if !names.contains(&step.name.as_str()) {
-                names.push(&step.name);
+        walk(steps, &[], &mut |_, step| {
+            let name = match step {
+                ConcreteStep::Breakpoint(stop) => Some(stop.name.as_str()),
+                ConcreteStep::Skill(skill) => skill.interactive_step(),
+                _ => None,
+            };
+            if let Some(name) = name.filter(|name| !names.contains(name)) {
+                names.push(name);
             }
-        }
+        });
         let sentence = match names.as_slice() {
             [] => "Runs on its own.".to_owned(),
             [only] => format!("You take part at {only}."),
@@ -429,6 +455,10 @@ pub enum TaskGraphPosition {
     /// The Task stands at `start`, at `end`, or at this interactive step,
     /// waiting on a person in the Task conversation.
     At { step: String },
+    Breakpoint {
+        step: String,
+        arrival: loopflow_model::id::LfProcessId,
+    },
     /// `lf task run` (`lf_process_id`) carries the Task on from `step`, and
     /// runs `at`. `running` is read from that Process: a run that ended
     /// without arriving stopped, and the next `lf task run` starts it again
@@ -445,7 +475,7 @@ impl TaskGraphPosition {
     /// Where the Task waits, or the step its run left.
     pub fn step(&self) -> &str {
         match self {
-            Self::At { step } | Self::Run { step, .. } => step,
+            Self::Breakpoint { step, .. } | Self::At { step } | Self::Run { step, .. } => step,
         }
     }
 }
@@ -464,6 +494,7 @@ impl TaskGraph {
     pub fn read(
         graph: &CapturedGraph,
         step: String,
+        breakpoint: Option<&crate::store::task_work::BreakpointArrival>,
         run: Option<TaskGraphRun<'_>>,
         auto: Option<AutoState>,
     ) -> Self {
@@ -472,8 +503,25 @@ impl TaskGraph {
             let index = place.path.first().map_or(place.index, |(index, _)| *index);
             indices[index]
         };
-        let (position, current_step, sentence) = match run {
-            None => {
+        let (position, current_step, sentence) = match (breakpoint, run) {
+            (Some(stop), None) => {
+                let place = graph.place_of(&stop.cursor);
+                let mut sentence = format!("At breakpoint {step}.");
+                if let Some(verdict) = &stop.cursor.leaf().progress.verdict {
+                    if verdict.decision == crate::graph::transitions::GraphDecision::Blocked {
+                        sentence.push_str(&format!(" Blocked: {}", verdict.summary));
+                    }
+                }
+                (
+                    TaskGraphPosition::Breakpoint {
+                        step,
+                        arrival: stop.id.clone(),
+                    },
+                    place.as_ref().map(top),
+                    sentence,
+                )
+            }
+            (None, None) => {
                 let (place, sentence) = match step.as_str() {
                     START => (None, "Not started.".to_owned()),
                     END => (None, "At its end.".to_owned()),
@@ -488,7 +536,7 @@ impl TaskGraph {
                     sentence,
                 )
             }
-            Some(run) => {
+            (_, Some(run)) => {
                 let place = graph.place_of(run.cursor);
                 let at = place
                     .as_ref()
@@ -548,7 +596,7 @@ impl TaskGraph {
             TaskGraphPosition::At { step } => {
                 self.interactive_steps.iter().find(|s| &s.name == step)
             }
-            TaskGraphPosition::Run { .. } => None,
+            TaskGraphPosition::Breakpoint { .. } | TaskGraphPosition::Run { .. } => None,
         }
     }
 
@@ -664,7 +712,7 @@ mod tests {
         let graph = CapturedGraph::load("feature", repo.path())
             .unwrap()
             .unwrap();
-        let at = |step: &str| TaskGraph::read(&graph, step.into(), None, None);
+        let at = |step: &str| TaskGraph::read(&graph, step.into(), None, None, None);
         let mark = |state| Auto {
             state,
             at: 0,
@@ -695,6 +743,7 @@ mod tests {
             TaskGraph::read(
                 &graph,
                 step.into(),
+                None,
                 cursor
                     .as_ref()
                     .zip(run)
@@ -769,6 +818,7 @@ mod tests {
                 let line = TaskGraph::read(
                     &graph,
                     "plan".into(),
+                    None,
                     Some(TaskGraphRun {
                         cursor,
                         lf_process_id: "lfp_1".into(),

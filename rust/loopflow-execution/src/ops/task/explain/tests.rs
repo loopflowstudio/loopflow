@@ -130,7 +130,11 @@ impl Table {
             self.repo.path(),
             WorkSelection { task, wave: None },
             options,
-            through,
+            if through {
+                crate::ops::task::TaskRunMode::Headless
+            } else {
+                crate::ops::task::TaskRunMode::Stop
+            },
             |_| false,
         ))
     }

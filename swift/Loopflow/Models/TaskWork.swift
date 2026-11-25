@@ -136,10 +136,11 @@ public struct TaskGraph: Codable, Sendable, Equatable {
     /// longer running stopped, and the next `lf task run` starts it again at `at`.
     public enum Position: Codable, Sendable, Equatable {
         case at(step: String)
+        case breakpoint(step: String, arrival: String)
         case run(step: String, at: String, lfProcessId: String, running: Bool)
 
         enum CodingKeys: String, CodingKey {
-            case kind, step, at, running
+            case kind, step, at, running, arrival
             case lfProcessId = "lf_process_id"
         }
 
@@ -148,6 +149,9 @@ public struct TaskGraph: Codable, Sendable, Equatable {
             switch try container.decode(String.self, forKey: .kind) {
             case "at":
                 self = .at(step: try container.decode(String.self, forKey: .step))
+            case "breakpoint":
+                self = .breakpoint(step: try container.decode(String.self, forKey: .step),
+                                   arrival: try container.decode(String.self, forKey: .arrival))
             case "run":
                 self = .run(
                     step: try container.decode(String.self, forKey: .step),
@@ -166,6 +170,10 @@ public struct TaskGraph: Codable, Sendable, Equatable {
             case .at(let step):
                 try container.encode("at", forKey: .kind)
                 try container.encode(step, forKey: .step)
+            case .breakpoint(let step, let arrival):
+                try container.encode("breakpoint", forKey: .kind)
+                try container.encode(step, forKey: .step)
+                try container.encode(arrival, forKey: .arrival)
             case .run(let step, let at, let lfProcessId, let running):
                 try container.encode("run", forKey: .kind)
                 try container.encode(step, forKey: .step)
@@ -178,7 +186,7 @@ public struct TaskGraph: Codable, Sendable, Equatable {
         /// Where the Task waits, or the step its run left.
         public var step: String {
             switch self {
-            case .at(let step), .run(let step, _, _, _): step
+            case .at(let step), .breakpoint(let step, _), .run(let step, _, _, _): step
             }
         }
     }

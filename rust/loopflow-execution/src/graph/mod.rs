@@ -275,7 +275,16 @@ pub struct ConcreteCommand {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Breakpoint {
+    pub name: String,
+    pub sources: Vec<String>,
+    /// Distance back to the start of the loop reviewed here.
+    pub returns: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ConcreteStep {
+    Breakpoint(Breakpoint),
     Skill(ConcreteSkill),
     Command(ConcreteCommand),
     Xor(ConcreteXor),
@@ -284,6 +293,7 @@ pub enum ConcreteStep {
 /// Resolved template composition. Flattening is the sole execution expansion.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) enum ResolvedGraphItem {
+    Breakpoint(Breakpoint),
     Skill(ConcreteSkill),
     Command(ConcreteCommand),
     Group {
@@ -307,6 +317,7 @@ pub(crate) fn flatten_resolved(items: &[ResolvedGraphItem]) -> Vec<ConcreteStep>
     items
         .iter()
         .flat_map(|item| match item {
+            ResolvedGraphItem::Breakpoint(stop) => vec![ConcreteStep::Breakpoint(stop.clone())],
             ResolvedGraphItem::Skill(skill) => vec![ConcreteStep::Skill(skill.clone())],
             ResolvedGraphItem::Command(op) => vec![ConcreteStep::Command(op.clone())],
             ResolvedGraphItem::Group { items, .. } => flatten_resolved(items),
@@ -561,9 +572,95 @@ fn resolve_graph_with_catalog(
 ) -> Result<Vec<ResolvedGraphItem>, LoadError> {
     let mut resolved = compile_with_sources(graph, catalog, &[])?;
     name_interactive_steps(&mut resolved);
+    name_breakpoints(&mut resolved)?;
     let items = flatten_resolved(&resolved);
     validate_interactive_steps(&items)?;
     Ok(resolved)
+}
+
+// Assign addresses in execution order, including composed groups. Branch bodies
+// have their own predecessor; navigation names are unique across the capture.
+fn name_breakpoints(items: &mut [ResolvedGraphItem]) -> Result<(), LoadError> {
+    fn visit(
+        items: &mut [ResolvedGraphItem],
+        previous: &mut Option<String>,
+        name: &mut impl FnMut(&mut Breakpoint, Option<&str>) -> Result<(), LoadError>,
+    ) -> Result<(), LoadError> {
+        for item in items {
+            let label = match item {
+                ResolvedGraphItem::Group { items, .. } => {
+                    visit(items, previous, name)?;
+                    continue;
+                }
+                ResolvedGraphItem::Breakpoint(stop) => {
+                    name(stop, previous.as_deref())?;
+                    stop.name.clone()
+                }
+                ResolvedGraphItem::Skill(skill) => {
+                    skill.id.as_ref().unwrap_or(&skill.skill.name).clone()
+                }
+                ResolvedGraphItem::Command(op) => op.item.display_name(),
+                ResolvedGraphItem::Xor { paths, router, .. } => {
+                    for path in paths.values_mut() {
+                        visit(&mut path.items, &mut None, name)?;
+                    }
+                    router.name.clone()
+                }
+            };
+            *previous = Some(label);
+        }
+        Ok(())
+    }
+    let mut used = HashSet::from(["start".to_owned(), "end".to_owned()]);
+    fn reserve(items: &[ResolvedGraphItem], used: &mut HashSet<String>) {
+        for item in items {
+            match item {
+                ResolvedGraphItem::Skill(skill) => {
+                    used.insert(skill.skill.name.clone());
+                    used.extend(skill.id.iter().cloned());
+                    used.extend(skill.interactive_step().map(str::to_owned));
+                }
+                ResolvedGraphItem::Command(op) => {
+                    used.insert(op.item.command.clone());
+                    used.insert(op.item.display_name());
+                }
+                ResolvedGraphItem::Group { name, items } => {
+                    used.insert(name.clone());
+                    reserve(items, used);
+                }
+                ResolvedGraphItem::Xor { router, paths, .. } => {
+                    used.insert(router.name.clone());
+                    for path in paths.values() {
+                        reserve(&path.items, used);
+                    }
+                }
+                ResolvedGraphItem::Breakpoint(_) => {}
+            }
+        }
+    }
+    reserve(items, &mut used);
+    visit(items, &mut None, &mut |stop, _| {
+        if !stop.name.is_empty() && !used.insert(stop.name.clone()) {
+            return Err(LoadError::InvalidGraph(format!(
+                "ambiguous breakpoint name {:?}",
+                stop.name
+            )));
+        }
+        Ok(())
+    })?;
+    visit(items, &mut None, &mut |stop, previous| {
+        if stop.name.is_empty() {
+            let base = previous.map_or_else(|| "break".into(), |name| format!("after-{name}"));
+            let mut candidate = base.clone();
+            let mut suffix = 2;
+            while !used.insert(candidate.clone()) {
+                candidate = format!("{base}#{suffix}");
+                suffix += 1;
+            }
+            stop.name = candidate;
+        }
+        Ok(())
+    })
 }
 
 // Settings retain authored IDs; Task navigation names repeated interactive stops
@@ -632,7 +729,7 @@ fn validate_interactive_steps(items: &[ConcreteStep]) -> Result<(), LoadError> {
                     validate_interactive_steps(&path.steps)?;
                 }
             }
-            ConcreteStep::Command(_) => {}
+            ConcreteStep::Breakpoint(_) | ConcreteStep::Command(_) => {}
         }
     }
     Ok(())
@@ -640,12 +737,26 @@ fn validate_interactive_steps(items: &[ConcreteStep]) -> Result<(), LoadError> {
 
 /// Index of the earlier step the deciding skill at `index` returns to.
 pub fn return_target(steps: &[ConcreteStep], index: usize) -> Option<usize> {
+    let distance = match steps.get(index)? {
+        ConcreteStep::Skill(skill) => skill.returns?,
+        ConcreteStep::Breakpoint(stop) => stop.returns?,
+        _ => return None,
+    };
+    index.checked_sub(distance).filter(|target| *target < index)
+}
+
+/// The occurrence that applies this worker's decision. A trailing loop
+/// breakpoint retains the verdict until the review continues.
+pub fn decision_edge(steps: &[ConcreteStep], index: usize) -> Option<usize> {
     let ConcreteStep::Skill(skill) = steps.get(index)? else {
         return None;
     };
-    index
-        .checked_sub(skill.returns?)
-        .filter(|target| *target < index)
+    if skill.returns.is_some() {
+        Some(index)
+    } else {
+        matches!(steps.get(index + 1), Some(ConcreteStep::Breakpoint(stop)) if stop.returns.is_some())
+            .then_some(index + 1)
+    }
 }
 
 pub fn load_skill(name: &str, repo: &Path) -> Result<Skill, LoadError> {
@@ -831,6 +942,7 @@ fn parse_graph_items(
 
 fn parse_graph_item(value: &Value, loader: &mut DefinitionLoader<'_>) -> Result<Step, LoadError> {
     match value {
+        Value::String(name) if name == "break" => Ok(Step::new(Target::Breakpoint(None))),
         Value::String(name) => Ok(Step::new(loader.resolve(name, None)?)),
         Value::Mapping(map) => parse_graph_mapping(map, loader),
         _ => Err(LoadError::InvalidGraph(
@@ -843,6 +955,9 @@ fn parse_graph_mapping(
     map: &serde_yaml_ng::Mapping,
     loader: &mut DefinitionLoader<'_>,
 ) -> Result<Step, LoadError> {
+    if map.contains_key(key("break")) {
+        return parse_breakpoint(map);
+    }
     if let Some(body) = map.get(key("loop")) {
         loop_block(map, body)?;
         return Ok(Step::new(Target::Loop(parse_graph_items(body, loader)?)));
@@ -886,6 +1001,18 @@ fn parse_graph_mapping(
     Err(LoadError::InvalidGraph(
         "graph item mapping must include step, interactive, loop, cmd, graph, or xor".to_string(),
     ))
+}
+
+fn parse_breakpoint(map: &serde_yaml_ng::Mapping) -> Result<Step, LoadError> {
+    let name = map.get(key("break")).and_then(Value::as_str).map(str::trim);
+    match name {
+        Some(name) if !name.is_empty() && map.len() == 1 => {
+            Ok(Step::new(Target::Breakpoint(Some(name.into()))))
+        }
+        _ => Err(LoadError::InvalidGraph(
+            "write `break` or `break: <name>`".into(),
+        )),
+    }
 }
 
 fn parse_command_value(value: &Value) -> Result<Step, LoadError> {
@@ -1095,7 +1222,11 @@ fn parse_path_steps(value: &Value, path_name: &str) -> Result<Vec<Step>, LoadErr
     items
         .iter()
         .map(|item| match item {
+            Value::String(name) if name == "break" => Ok(Step::new(Target::Breakpoint(None))),
             Value::String(_) => parse_skill_value(item, false),
+            Value::Mapping(skill_map) if skill_map.contains_key(key("break")) => {
+                parse_breakpoint(skill_map)
+            }
             Value::Mapping(skill_map) => {
                 if let Some(body) = skill_map.get(key("loop")) {
                     loop_block(skill_map, body)?;
@@ -1207,6 +1338,11 @@ fn compile_steps(
             ));
         }
         match &step.target {
+            Target::Breakpoint(name) => items.push(ResolvedGraphItem::Breakpoint(Breakpoint {
+                name: name.clone().unwrap_or_default(),
+                sources: sources.to_vec(),
+                returns: None,
+            })),
             Target::Command(command) => items.push(ResolvedGraphItem::Command(ConcreteCommand {
                 item: command.clone(),
                 sources: sources.to_vec(),
@@ -1250,7 +1386,11 @@ fn compile_steps(
             Target::Loop(block) => {
                 let mut body = compile_steps(block, catalog, sources)?;
                 let back = flatten_resolved(&body).len().saturating_sub(1);
+                let reviews_skill = matches!(body.as_slice(), [.., ResolvedGraphItem::Skill(skill), ResolvedGraphItem::Breakpoint(_)] if skill.returns.is_none());
                 match body.last_mut() {
+                    Some(ResolvedGraphItem::Breakpoint(stop)) if reviews_skill => {
+                        stop.returns = Some(back);
+                    }
                     Some(ResolvedGraphItem::Skill(decider)) if back > 0 => {
                         decider.returns = Some(back);
                     }
@@ -1943,6 +2083,7 @@ Design the feature.
                         "missing captured skill {}",
                         skill.skill.name,
                     ),
+                    ConcreteStep::Breakpoint(stop) => assert!(!stop.name.is_empty()),
                     ConcreteStep::Command(op) => assert!(!op.item.command.is_empty()),
                     ConcreteStep::Xor(branch) => {
                         assert!(branch.router.content.is_some());

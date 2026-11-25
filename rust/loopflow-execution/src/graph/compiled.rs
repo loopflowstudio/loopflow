@@ -240,6 +240,16 @@ fn nodes(steps: &[ConcreteStep], next: &mut u32) -> Vec<GraphNode> {
                 sources: skill.sources.clone(),
                 paths: Vec::new(),
             },
+            ConcreteStep::Breakpoint(stop) => GraphNode {
+                key,
+                id: Some(stop.name.clone()),
+                label: stop.name.clone(),
+                kind: GraphNodeKind::Breakpoint,
+                interactive: true,
+                returns_to: return_target(steps, index).map(|target| result[target].key),
+                sources: stop.sources.clone(),
+                paths: Vec::new(),
+            },
             ConcreteStep::Command(op) => GraphNode {
                 key,
                 id: None,
@@ -417,7 +427,7 @@ mod tests {
         // A Task that takes the Graph up reads the same steps and stops.
         for name in ["code", "conditional"] {
             let captured = CapturedGraph::load(name, repo.path()).unwrap().unwrap();
-            let task = TaskGraph::read(&captured, "start".into(), None, None);
+            let task = TaskGraph::read(&captured, "start".into(), None, None, None);
             let outline = outline(name).unwrap();
             assert_eq!(task.steps, outline.steps, "{name}");
             assert_eq!(task.interactive_steps, outline.interactive_steps, "{name}");

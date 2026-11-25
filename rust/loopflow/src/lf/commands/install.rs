@@ -334,7 +334,8 @@ fn _validate_executable_steps(steps: &[loopflow_execution::graph::ConcreteStep])
             loopflow_execution::graph::ConcreteStep::Skill(skill) => {
                 _validate_executable_skill(&skill.skill)?;
             }
-            loopflow_execution::graph::ConcreteStep::Command(_) => {}
+            loopflow_execution::graph::ConcreteStep::Breakpoint(_)
+            | loopflow_execution::graph::ConcreteStep::Command(_) => {}
             loopflow_execution::graph::ConcreteStep::Xor(branch) => {
                 _validate_executable_skill(&branch.router)?;
                 for path in branch.paths.values() {

@@ -73,6 +73,9 @@ fn format_written_step(step: &Step) -> String {
 fn format_target(target: &Target) -> String {
     match target {
         Target::Skill(skill) => skill.name.clone(),
+        Target::Breakpoint(name) => name
+            .as_ref()
+            .map_or_else(|| "break".into(), |name| format!("break: {name}")),
         Target::Command(command) => command.to_string(),
         Target::Graph(graph) => format_written_steps(&graph.items),
         Target::Xor(xor) => format_xor(xor.router.as_deref(), &xor.paths),

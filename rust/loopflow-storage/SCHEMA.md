@@ -12,7 +12,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 
 ## Task graph
 
-- `task_graphs`: task_id, graph, step, run_start, lf_process_id, updated_at, run_pid, run_os_started_at, restarts, restarted_at, run_died_at
+- `task_graphs`: task_id, graph, step, run_start, lf_process_id, updated_at, run_pid, run_os_started_at, restarts, restarted_at, run_died_at, breakpoint
 
 ## Wave
 

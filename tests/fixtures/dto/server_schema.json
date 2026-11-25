@@ -3204,6 +3204,14 @@
         }
       ]
     },
+    "GraphDecision": {
+      "enum": [
+        "advance",
+        "iterate",
+        "blocked"
+      ],
+      "type": "string"
+    },
     "GraphDefault": {
       "properties": {
         "name": {
@@ -3281,6 +3289,7 @@
     },
     "GraphNodeKind": {
       "enum": [
+        "breakpoint",
         "skill",
         "op",
         "xor"
@@ -14490,6 +14499,26 @@
           "type": "object"
         },
         {
+          "properties": {
+            "arrival": {
+              "$ref": "#/$defs/LfProcessId"
+            },
+            "kind": {
+              "const": "breakpoint",
+              "type": "string"
+            },
+            "step": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "step",
+            "arrival"
+          ],
+          "type": "object"
+        },
+        {
           "description": "`lf task run` (`lf_process_id`) carries the Task on from `step`, and\nruns `at`. `running` is read from that Process: a run that ended\nwithout arriving stopped, and the next `lf task run` starts it again\nat `at`; the steps before it stay done.",
           "properties": {
             "at": {
@@ -17588,11 +17617,14 @@
             {
               "agent": "claude",
               "approve": false,
+              "at_arrival": null,
+              "decision": null,
               "directory": "/repo",
               "from": "implement",
               "graph": null,
               "issue": "LOO-1",
-              "kind": "task.run"
+              "kind": "task.run",
+              "reason": null
             }
           ],
           "properties": {
@@ -17604,6 +17636,26 @@
             },
             "approve": {
               "type": "boolean"
+            },
+            "at_arrival": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/LfProcessId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "decision": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/GraphDecision"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "directory": {
               "type": "string"
@@ -17626,6 +17678,12 @@
             "kind": {
               "const": "task.run",
               "type": "string"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -17635,7 +17693,10 @@
             "graph",
             "from",
             "agent",
-            "approve"
+            "approve",
+            "at_arrival",
+            "decision",
+            "reason"
           ],
           "type": "object",
           "x-result": {

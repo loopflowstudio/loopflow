@@ -31,9 +31,16 @@ impl GraphOutput {
     }
 
     /// Append the step's output instructions and return the contract used to decode its answer.
-    pub fn append_step_instructions(step: &ConcreteStep, prompt: &mut String) -> Option<Self> {
+    pub fn append_step_instructions(
+        body: &[ConcreteStep],
+        index: usize,
+        prompt: &mut String,
+    ) -> Option<Self> {
+        let step = body.get(index)?;
         let output = match step {
-            ConcreteStep::Skill(skill) if skill.returns.is_some() => Self::Decision,
+            ConcreteStep::Skill(_) if crate::graph::decision_edge(body, index).is_some() => {
+                Self::Decision
+            }
             ConcreteStep::Xor(branch) => Self::Route(branch.paths.keys().cloned().collect()),
             _ => return None,
         };

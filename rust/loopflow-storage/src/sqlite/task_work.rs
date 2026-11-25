@@ -153,6 +153,7 @@ fn completed_graph_steps(
 /// it began, then the step after the last one it finished.
 #[derive(Debug)]
 pub struct SavedTaskGraphRow {
+    pub breakpoint: Option<String>,
     pub graph: String,
     pub step: String,
     pub run: Option<(String, crate::graph_process::TaskCarrier)>,
@@ -165,6 +166,7 @@ pub struct SavedTaskGraphRow {
 /// one. The run's Process stays behind.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SavedTaskGraphRecord {
+    pub breakpoint: Option<String>,
     pub graph: String,
     pub step: String,
     pub run_start: Option<String>,
@@ -174,9 +176,9 @@ fn task_graph_row(
     conn: &rusqlite::Connection,
     task: &TaskId,
 ) -> StoreResult<Option<SavedTaskGraphRow>> {
-    let Some((graph, step, start, carrier)) = conn
+    let Some((graph, step, start, carrier, breakpoint)) = conn
         .query_row(
-            "SELECT graph,step,run_start,lf_process_id,run_pid,run_os_started_at,run_died_at
+            "SELECT graph,step,run_start,lf_process_id,run_pid,run_os_started_at,run_died_at,breakpoint
              FROM task_graphs WHERE task_id=?1",
             [task.as_str()],
             |row| {
@@ -194,6 +196,7 @@ fn task_graph_row(
                             })
                         })
                         .transpose()?,
+                    row.get(7)?,
                 ))
             },
         )
@@ -204,6 +207,7 @@ fn task_graph_row(
     let run = start.zip(carrier);
     let auto = auto_in(conn, task)?.map(|mark| mark.state);
     Ok(Some(SavedTaskGraphRow {
+        breakpoint,
         graph,
         step,
         run,
@@ -217,14 +221,14 @@ fn task_graph_row(
 fn start_run_in(
     tx: &rusqlite::Transaction<'_>,
     task: &TaskId,
-    (step, stopped): (&str, Option<&LfProcessId>),
+    (step, stopped, arrival): (&str, Option<&LfProcessId>, Option<&LfProcessId>),
     cursor: &str,
     (by, start): (&LfProcessId, &ExecutionStart),
 ) -> StoreResult<bool> {
     let left = tx.execute(
-        "UPDATE task_graphs SET run_start=?2,lf_process_id=?3,run_pid=?7,run_os_started_at=?8,
+        "UPDATE task_graphs SET breakpoint=NULL,run_start=?2,lf_process_id=?3,run_pid=?7,run_os_started_at=?8,
             run_died_at=NULL,updated_at=?4
-         WHERE task_id=?1 AND step=?5 AND lf_process_id IS ?6",
+         WHERE task_id=?1 AND step=?5 AND lf_process_id IS ?6 AND json_extract(breakpoint,'$.id') IS ?9",
         rusqlite::params![
             task.as_str(),
             cursor,
@@ -233,7 +237,8 @@ fn start_run_in(
             step,
             stopped.map(LfProcessId::as_str),
             start.pid,
-            start.os_started_at
+            start.os_started_at,
+            arrival.map(LfProcessId::as_str)
         ],
     )?;
     Ok(left > 0)
@@ -359,9 +364,10 @@ fn arrive_in(
     task: &TaskId,
     carrier: &LfProcessId,
     step: &str,
+    breakpoint: Option<(&str, &str)>,
 ) -> StoreResult<bool> {
     let arrived = tx.execute(
-        "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,run_pid=NULL,run_os_started_at=NULL,
+        "UPDATE task_graphs SET breakpoint=?5,step=?2,run_start=NULL,lf_process_id=NULL,run_pid=NULL,run_os_started_at=NULL,
              run_died_at=NULL,
              updated_at=?3,restarts=0,restarted_at=NULL
          WHERE task_id=?1 AND lf_process_id=?4",
@@ -369,9 +375,20 @@ fn arrive_in(
             task.as_str(),
             step,
             crate::rows::now_unix(),
-            carrier.as_str()
+            carrier.as_str(),
+            breakpoint.map(|(record, _)| record)
         ],
     )? > 0;
+    if let Some((_, review)) = breakpoint.filter(|_| arrived) {
+        super::steers::save_in(
+            tx,
+            ("task", task.as_str()),
+            &format!("breakpoint:{task}"),
+            carrier.as_str(),
+            &loopflow_model::durable::Author::Named("Loopflow".into()),
+            review,
+        )?;
+    }
     let ended = arrived && step == END;
     if ended {
         super::children::request_completion_in(tx, task, None)?;
@@ -381,7 +398,7 @@ fn arrive_in(
 
 fn set_step_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, step: &str) -> StoreResult<bool> {
     Ok(tx.execute(
-        "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,run_pid=NULL,run_os_started_at=NULL,
+        "UPDATE task_graphs SET breakpoint=NULL,step=?2,run_start=NULL,lf_process_id=NULL,run_pid=NULL,run_os_started_at=NULL,
              run_died_at=NULL,
              updated_at=?3,restarts=0,restarted_at=NULL WHERE task_id=?1",
         rusqlite::params![task.as_str(), step, crate::rows::now_unix()],
@@ -703,15 +720,16 @@ impl SqliteStore {
     /// The Task's Graph as it moves to another Machine.
     pub fn task_graph_record(&self, task: &TaskId) -> StoreResult<Option<SavedTaskGraphRecord>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let Some((graph, step, run_start)) = conn
+        let Some((graph, step, run_start, breakpoint)) = conn
             .query_row(
-                "SELECT graph,step,run_start FROM task_graphs WHERE task_id=?1",
+                "SELECT graph,step,run_start,breakpoint FROM task_graphs WHERE task_id=?1",
                 [task.as_str()],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, Option<String>>(2)?,
+                        row.get(3)?,
                     ))
                 },
             )
@@ -720,6 +738,7 @@ impl SqliteStore {
             return Ok(None);
         };
         Ok(Some(SavedTaskGraphRecord {
+            breakpoint,
             graph,
             step,
             run_start,
@@ -738,15 +757,16 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let run = record.run_start.as_ref().zip(by);
         conn.execute(
-            "INSERT OR REPLACE INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at)
-             VALUES(?1,?2,?3,?4,?5,?6)",
+            "INSERT OR REPLACE INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at,breakpoint)
+             VALUES(?1,?2,?3,?4,?5,?6,?7)",
             rusqlite::params![
                 task.as_str(),
                 record.graph,
                 record.step,
                 run.map(|(start, _)| start),
                 run.map(|(_, by)| by.as_str()),
-                crate::rows::now_unix()
+                crate::rows::now_unix(),
+                record.breakpoint
             ],
         )?;
         Ok(())
@@ -791,12 +811,13 @@ impl SqliteStore {
         task: &TaskId,
         step: &str,
         stopped: Option<&LfProcessId>,
+        arrival: Option<&LfProcessId>,
         cursor: &str,
         carrier: (&LfProcessId, &ExecutionStart),
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let started = start_run_in(&tx, task, (step, stopped), cursor, carrier)?;
+        let started = start_run_in(&tx, task, (step, stopped, arrival), cursor, carrier)?;
         tx.commit()?;
         Ok(started)
     }
@@ -832,22 +853,27 @@ impl SqliteStore {
         task: &TaskId,
         carrier: &LfProcessId,
         step: &str,
+        breakpoint: Option<(&str, &str)>,
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let ended = arrive_in(&tx, task, carrier, step)?;
+        let ended = arrive_in(&tx, task, carrier, step, breakpoint)?;
         tx.commit()?;
         Ok(ended)
     }
 
     /// Put the Task at `end` with nothing left to run, requesting completion.
     /// Returns whether it reached `end` now.
-    pub fn end_task_graph(&self, task: &TaskId) -> StoreResult<bool> {
+    pub fn end_task_graph(
+        &self,
+        task: &TaskId,
+        arrival: Option<&LfProcessId>,
+    ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let ended = tx.execute(
-            "UPDATE task_graphs SET step=?2,updated_at=?3 WHERE task_id=?1 AND step!=?2 AND lf_process_id IS NULL",
-            rusqlite::params![task.as_str(), END, crate::rows::now_unix()],
+            "UPDATE task_graphs SET breakpoint=NULL,step=?2,updated_at=?3 WHERE task_id=?1 AND step!=?2 AND lf_process_id IS NULL AND json_extract(breakpoint,'$.id') IS ?4",
+            rusqlite::params![task.as_str(), END, crate::rows::now_unix(), arrival.map(LfProcessId::as_str)],
         )? > 0;
         if ended {
             super::children::request_completion_in(&tx, task, None)?;
@@ -1453,12 +1479,12 @@ mod tests {
             };
             {
                 let tx = conn.transaction().unwrap();
-                assert!(super::arrive_in(&tx, &task, &carrier, super::END).is_err());
+                assert!(super::arrive_in(&tx, &task, &carrier, super::END, None).is_err());
             }
             assert!(!at_end(&conn));
             conn.execute_batch("DROP TRIGGER refuse_request").unwrap();
             let tx = conn.transaction().unwrap();
-            assert!(super::arrive_in(&tx, &task, &carrier, super::END).unwrap());
+            assert!(super::arrive_in(&tx, &task, &carrier, super::END, None).unwrap());
             tx.commit().unwrap();
         }
         let (request, _) = store.task_completion_pending(&task).unwrap().unwrap();

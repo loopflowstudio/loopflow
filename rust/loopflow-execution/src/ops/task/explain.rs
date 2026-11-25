@@ -95,7 +95,7 @@ pub async fn explain_task_run(
     cwd: &Path,
     selection: WorkSelection<'_>,
     options: &TaskProcessOptions,
-    through: bool,
+    mode: super::TaskRunMode,
     merges: fn(&[String]) -> bool,
 ) -> TaskRunExplanation {
     let resolution = crate::ops::context::explain_context(store, cwd, selection, None).await;
@@ -105,7 +105,7 @@ pub async fn explain_task_run(
         impediments: Vec::new(),
         unavailable: Vec::new(),
     };
-    if let Err(error) = read_task_run(store, options, through, &mut report, merges).await {
+    if let Err(error) = read_task_run(store, options, mode, &mut report, merges).await {
         report.unavailable.push(error.to_string());
     }
     report
@@ -114,7 +114,7 @@ pub async fn explain_task_run(
 async fn read_task_run(
     store: &SharedStore,
     options: &TaskProcessOptions,
-    through: bool,
+    mode: super::TaskRunMode,
     report: &mut TaskRunExplanation,
     merges: fn(&[String]) -> bool,
 ) -> anyhow::Result<()> {
@@ -156,15 +156,7 @@ async fn read_task_run(
             checkout.display()
         );
     }
-    let choice = match select_task_run(
-        store,
-        &task,
-        checkout,
-        options.graph.as_deref(),
-        options.from.as_deref(),
-        false,
-        merges,
-    ) {
+    let choice = match select_task_run(store, &task, checkout, options, merges) {
         Ok(choice) => choice,
         Err(error) => {
             report.impediments.push(error.to_string());
@@ -186,7 +178,10 @@ async fn read_task_run(
                 take_up,
             }
         }
-        Some(start) => match graph.interactive_at(&start.place).filter(|_| !through) {
+        Some(start) => match graph
+            .interactive_at(&start.place)
+            .filter(|_| !mode.runs_through())
+        {
             Some(step) => TaskRunAction::Wait {
                 graph: name,
                 take_up,
@@ -194,10 +189,7 @@ async fn read_task_run(
             },
             None => TaskRunAction::Run {
                 from: graph.step_name(&start.place),
-                stops_at: (!through)
-                    .then(|| graph.next_interactive(&start.place))
-                    .flatten()
-                    .map(str::to_owned),
+                stops_at: mode.next_stop(&graph, &start.place).map(str::to_owned),
                 graph: name,
                 take_up,
             },

@@ -2525,12 +2525,12 @@ final class WorkModel {
     /// after the step the Task waits at, taking up its Wave's or repository's default first.
     /// The outcome settles only the Task and repository that started it; a
     /// refusal is kept on that Task's draft and changes nothing else.
-    func startTaskFromInput(_ graph: String?, from step: String? = nil, task: RoadmapTask) {
+    func startTaskFromInput(_ graph: String?, from step: String? = nil, arrival: String? = nil, task: RoadmapTask) {
         let owner = navigation.performanceOwner
         Perf.userAction(.startTask, scenario: "start_to_typing", id: task.id, repository: repoPath,
                         machine: machineKind, liveSessions: liveSessionCount, owner: owner) {
             Perf.acknowledged(.startTask, id: task.id, owner: owner)
-            startTask(graph, from: step, task: task) {
+            startTask(graph, from: step, arrival: arrival, task: task) {
                 Perf.finish(.startTask, id: task.id, owner: owner, outcome: .failed)
             }
         }
@@ -2573,9 +2573,9 @@ final class WorkModel {
         }
     }
 
-    func startTask(_ graph: String?, from: String? = nil, task: RoadmapTask, refused: @escaping @MainActor () -> Void = {}) {
+    func startTask(_ graph: String?, from: String? = nil, arrival: String? = nil, task: RoadmapTask, refused: @escaping @MainActor () -> Void = {}) {
         request(task, "Start", .taskRun(directory: directory(task), issue: task.task.identifier, graph: graph,
-                                        from: from, agent: nil, approve: false), refused: refused)
+                                        from: from, agent: nil, approve: false, atArrival: arrival, decision: nil, reason: nil), refused: refused)
     }
 
     /// The graph a new Task in each scope would take up, keyed by repository and

@@ -564,9 +564,7 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
             &fixture.store,
             &fixture.task,
             adopted.path(),
-            None,
-            None,
-            false,
+            &Default::default(),
             |_| false,
         )
         .unwrap_err();
@@ -607,9 +605,7 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
         &fixture.store,
         &fixture.task,
         adopted.path(),
-        None,
-        None,
-        false,
+        &Default::default(),
         |_| false
     )
     .is_ok());
@@ -3076,4 +3072,18 @@ fn pr_mutation_lock_refuses_a_concurrent_writer() {
     let _first = lock_task_pr_mutation(repo.path()).expect("first mutation lock");
     let error = lock_task_pr_mutation(repo.path()).expect_err("second writer must be refused");
     assert!(error.to_string().contains("already running"));
+}
+
+#[test]
+fn breakpoint_in_a_task_terminal_still_waits_for_its_conversation() {
+    let checkout = tempfile::tempdir().unwrap();
+    let graph = crate::task_graph::CapturedGraph::load("research", checkout.path())
+        .unwrap()
+        .unwrap();
+    let start = crate::task_graph::Place::default();
+    assert_eq!(
+        super::TaskRunMode::InPlace.next_stop(&graph, &start),
+        Some("after-research")
+    );
+    assert_eq!(super::TaskRunMode::Headless.next_stop(&graph, &start), None);
 }

@@ -56,6 +56,7 @@ public struct GraphNode: Decodable, Sendable, Hashable {
 }
 
 public enum GraphNodeKind: String, Decodable, Sendable, Hashable {
+    case breakpoint
     case skill
     case op
     case xor

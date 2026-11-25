@@ -47,7 +47,7 @@ Paused sidebar rows may still show `Available · inferred` from the open primary
 ### C1 fixes on the Mac Dev app (`a3e62d706f`, `scratch/qa.html`)
 - In the real window: amber disabled `pause.fill` with `Pausing: forge · help graph`; the drained `cmd:` advanced to `Paused: demo`; ▶ parked at `demo · next: finish` and `forge` ran once; Undo after ✓ reselected the reopened Task; the Paused group held the row.
 - Fixed: status called a drained step that exited 0 "stopped"; it now reads "<step> finished; the Task is paused before its next step" (asserted in `pause_during_land_finishes_the_merge_and_stops_before_the_next_step`).
-- Open: "Paused at <human step>. `lf task unpause --run` resumes it." promises a run that unpause parks instead.
+- Since fixed in 7937008e17: a natural stop under the hold now reads "Paused at <step>. `lf task unpause` lifts the hold." (`task_graph_launch_tests.rs` asserts both wordings).
 
 ### C1 walkthrough on the Mac Dev app (`8ad26dbb89`, `scratch/qa.html`)
 - ▶/⏸, step buttons, narrow fold (1000/700/560 pt), Auto on/off, and ✓ with `completed · Undo` all worked on a private Machine.

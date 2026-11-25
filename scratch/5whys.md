@@ -42,18 +42,10 @@ LOO-1068 wrote the gap down. Nobody owned it.
 
 ## What closes this kind of miss
 
-- One typed table of every behavior a person notices, per `HarnessKind`, with
-  each answer being "supported" or a gap with a reason and owner. Adding a
-  harness or a behavior fails to compile until each cell is filled in.
-- A behavior's test loops over `HarnessKind::ALL` and checks what the table
-  says, both ways: a supported cell must work, and a gap must still be a gap.
-  So closing a gap means updating the table.
-- The README table is generated from that table and checked by a test, so
-  the docs can't drift or keep a dead Task reference.
-- Idle wake is chosen per harness from `Capabilities`, not inferred from
-  whichever store columns happen to be filled. A harness can't leave it out
-  silently.
-
-What this doesn't solve: a gap's owner Task closing while the gap stays open.
-The table needs an owner but can't see Task state offline. `lf` could check
-that at gate later.
+- Each launcher must implement `idle_reach`. Storage returns the recorded
+  endpoints, and the harness chooses the one that reaches its conversation.
+- The harness interface requires the capabilities and operations a provider
+  must supply. The behavior tests cover every member of `HarnessKind::ALL`.
+  A new provider enters the tests as soon as it joins the enum.
+- Already-open Antigravity wake has a named exception pointing to LOO-1099.
+  Reopen has its own test that drives the Task conversation and checks delivery.

@@ -66,3 +66,26 @@ $ lf session steers 23abe82b…   →  0 pending, 6c502afc delivered</pre>
 <li>Two <code>recording gap: session boundary: Loopflow server did not answer within 2s</code> lines. Both came during first launches (07:52 agy, 07:59 Claude), while the private server was busy with migrations and setup. Later boundaries recorded, and <code>yielded</code> reached 1.</li>
 <li>Not run live: OpenCode and Pi idle wake and reopen (covered by <code>server::wake::tests</code>), a second viewer (LOO-1097), and a Machine upgrading from a released <code>lf</code> with steers already waiting.</li>
 </ol>
+
+<h2>Pass 3 · What Antigravity displays</h2>
+<p>Disposable terminal conversations with different markers for the model and
+the reader. The native transcript and the visible pane were checked separately.</p>
+<table>
+<tr><th>PreInvocation reply</th><th>Native result</th></tr>
+<tr><td>A reference step and a steer step carrying <code>metadata.user_markdown</code></td>
+<td>1.5.16 on reopen and 1.5.17 on startup and a later turn logged
+<code>type mismatch: cannot convert string to message</code>. Neither step appeared in the transcript.</td></tr>
+<tr><td>System text “Answer only with MODELWORD.” and a separate <code>renderInfo.markdown</code> marker</td>
+<td>Both versions answered <code>MODELWORD</code>. The display marker was absent from the pane.</td></tr>
+<tr><td>A <code>userMessage</code> containing “Delivery check: user-visible text.”</td>
+<td>1.5.17 displayed the text before the answer and saved it as
+<code>USER_INPUT</code> from <code>SYSTEM_SDK</code> inside <code>&lt;USER_REQUEST&gt;</code>.</td></tr>
+<tr><td>A headless Antigravity worker in a disposable Task on the Pass 2 binary <code>4414e34eb</code></td>
+<td>1.5.16 answered <code>WORKER-OK</code>. The Graph stopped at its interactive demo step.</td></tr>
+</table>
+<p>In the same Task conversation, the next typed turn answered
+<code>MINT</code> from a repository steer. The steer and the Graph completion
+update had delivery receipts. After quitting, a second repository steer
+showed one pending. <code>lf resume --task cfe765</code> answered
+<code>COBALT</code> before any typing and left zero pending. The pane showed
+the answer and the generic reopen prompt, with the original steer body absent.</p>

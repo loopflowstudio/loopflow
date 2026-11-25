@@ -68,8 +68,12 @@ def _hook(event, conversation, **more):
                 timeout=60,
                 check=True,
             ).stdout
-            for step in json.loads(output).get("injectSteps", []):
-                texts.append(step["systemMessage"]["systemMessage"])
+            messages = [step["systemMessage"] for step in json.loads(output).get("injectSteps", [])]
+            # agy 1.5.16 and 1.5.17 discard this hook's entire reply, including
+            # ordinary context steps beside the one requesting inline markdown.
+            if any(isinstance(m.get("metadata", {}).get("user_markdown"), str) for m in messages):
+                continue
+            texts.extend(m["systemMessage"] for m in messages)
     return "\n".join(texts)
 
 

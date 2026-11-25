@@ -15,62 +15,39 @@ Direction from Jack Heart (2026-11-25, `comment:79dd230d-1028-4f14-acb2-90b07b1f
 - `"is this also ging to make it so that agy *displays* the steers it gets"`
 - `"Just go ahead and put this in the task please, lets go back"`
 
-### Experience
+### Result of the native terminal check, 2026-11-25
 
-When an Antigravity (`agy`) conversation receives steers, Task updates, or Task notices — either on reopen (`lf resume --task <id>`) or during a mid-session turn — the person sees them rendered inline in the TUI as clean, readable markdown (no `<lf:steers>` XML tags, no `Complete source: ".lf/prompts/..."` plumbing, no `&#36;` reference escaping), right above the assistant's response. Startup and compaction reference context (Session/Task identity, file listing, scratch/Wave files, active skill) stays collapsed as an ordinary `systemMessage` with no `user_markdown`, so large background context never floods the terminal.
+The proposed hook format loses steers. In a disposable `agy` 1.5.16
+conversation reopened with `--conversation … -i`, the terminal completed the
+turn and the hook log read `type mismatch: cannot convert string to message`.
+The same thing happened on 1.5.17 on startup and on a later typed turn. One
+`systemMessage` with a string at `metadata.user_markdown` discarded every
+step in that hook reply, including the ordinary reference step. lf records
+delivery after printing a hook reply, before the provider parses it.
 
-### Model & changes across layers
+Two other shapes ran in the same terminal:
 
-Antigravity's `PreInvocation` hook contract (`/Users/jack/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/hooks.md`) supports multiple entries in `injectSteps` and an optional `"metadata": {"user_markdown": "..."}` on `systemMessage`: the TUI renders `user_markdown` inline instead of a collapsible "System Message" row while the model reads only `systemMessage`.
+- `systemMessage.renderInfo.markdown` let the model receive the system
+  text. Both versions answered `MODELWORD`. The separate display marker
+  stayed off screen, including with a title and `hidden: false`.
+- A `userMessage` on 1.5.17 showed the marker above the response. The native
+  transcript stored it as `USER_INPUT` from `SYSTEM_SDK`, inside
+  `<USER_REQUEST>`. The lf transcript reader starts a new turn at that row
+  and attributes unwrapped text to the person. Task updates would reach
+  the model as requests.
 
-Today, `emit_block` glues steers and reference context into a single `&str` via `delivery.block_with_prefix`, and `Launcher::hook_reply(event, text)` receives only that string. Split the two concepts cleanly without breaking the 10,000-byte `HOOK_CONTEXT_BYTES` combined budget on single-string harnesses (`Claude`, `Codex`, `OpenCode`, `Pi`):
+The display prototype was withdrawn. The provider fixture now drops the same
+invalid hook reply as the real CLI, so the existing Task reopen contract
+catches this loss. The Pass 2 reopen path still sends plain system messages.
 
-1. **Human-facing steer rendering (`rust/loopflow-execution/src/steer.rs`):**
-   - Extend `ClaimedSteers` with `pub display: String` alongside `pub text: String` (model-facing `<lf:steers>...</lf:steers>` stays unchanged).
-   - Add `render_display(steers: &[Steer], remaining: usize) -> String`:
-     - Ordinary steer: `**Steer** ({author})\n\n{body}`
-     - Task update (`source.starts_with("update:")`): `**Task update**\n\n{body}`
-     - Task notice (`source.starts_with("notice:")`): `**Task notice**\n\n{body}`
-     - Use raw `steer.text.trim()` (no `render_reference` `$` escaping), cap very long individual bodies cleanly at a UTF-8 char boundary (e.g. 2,000 bytes + `\n\n… *(truncated; inspect with `lf session steers <session>`)*`), join multiple items with `\n\n---\n\n`, and append `\n\n*{remaining} more waiting.*` when `remaining > 0`.
-2. **Budget-reserving reference context (`rust/loopflow-execution/src/context_block.rs`):**
-   - Replace `block_with_prefix(&self, moment, prefix)` with `block_reserving(&self, moment: ContextMoment, reserved: usize) -> Result<ContextBlock, CoreError>` (keeping `block(&self, moment)` = `block_reserving(moment, 0)`).
-   - `render_block` computes `budget = HOOK_CONTEXT_BYTES.saturating_sub(reserved)` and ensures the identity + reference context pointer fits within `budget` (failing with the existing budget error when `text.len() > budget`), then fills active skill, manifest listing, whole files, and excerpts up to `budget`.
-   - Update the two callers (`server/boundary.rs` test passes `""` -> call `block`; `context_block.rs` test checks `block_reserving` leaves room for a 3,000-byte steer within `HOOK_CONTEXT_BYTES`).
-3. **Structured hook reply (`rust/loopflow-execution/src/harness/mod.rs` & `antigravity.rs`):**
-   - Change `Launcher::hook_reply` to:
-     ```rust
-     fn hook_reply(
-         &self,
-         event: &str,
-         context: Option<&str>,
-         steers: Option<&crate::steer::ClaimedSteers>,
-     ) -> serde_json::Value
-     ```
-   - Default implementation (Claude, Codex, OpenCode, Pi): joins `steers.text` and `context` into `hookSpecificOutput.additionalContext` (`format!("{}{context}", steers.text)` when both are `Some`, so total bytes stay `<= HOOK_CONTEXT_BYTES`).
-   - `Antigravity::hook_reply`: builds `injectSteps: Vec<Value>`:
-     - If `context` is `Some(ctx)`: push `{"systemMessage": {"systemMessage": ctx}}` (no `metadata`).
-     - If `steers` is `Some(s)`: push `{"systemMessage": {"systemMessage": s.text, "metadata": {"user_markdown": s.display}}}`.
-     - Return `{"injectSteps": steps}`.
-4. **Hook emitter (`rust/loopflow/src/lf/commands/context.rs`):**
-   - In `emit_block`, keep `steers = news.steers.as_ref().map(|(_, s)| s)` separate from reference context:
-     - On `ContextMoment::Start | ContextMoment::Compact`: compute `context = Some(delivery.block_reserving(moment, steers.map_or(0, |s| s.text.len()))?.text)`.
-     - On other moments (`Tool | Steer`): if `steers.is_none()`, return `Ok(())`; else `context = None`.
-   - Call `harness.hook_reply(event, context.as_deref(), steers)`.
-5. **Docs & scratch hygiene:**
-   - Update `rust/loopflow-execution/src/harness/README.md` (`hook_reply` table entry and Antigravity steer-display note).
-   - Update `scratch/5whys.md`'s closing section so it matches the Pass 2 interface-and-tests enforcement model rather than the deleted parity table.
+### Remaining decision
 
-### First slice & verification
-
-Build steps 1–4 first (small, self-contained, directly testable):
-1. Unit tests in `rust/loopflow-execution/src/steer.rs` for `render_display` (ordinary steer with author, Task update, Task notice, multi-item batch + `remaining > 0`, unescaped `$` text, long-body truncation).
-2. Unit tests in `rust/loopflow-execution/src/harness/antigravity.rs` (and `context.rs`) asserting exact `hook_reply` / `emit_block` JSON shape:
-   - `Start` with no steers: 1 `injectSteps` entry, NO `metadata` key.
-   - `Start` with steers: 2 `injectSteps` entries — context entry has NO `metadata`; steers entry has `systemMessage` (model XML) AND `metadata.user_markdown` (clean human markdown, no `<lf:steers>` or reference context).
-   - `Tool`/`Steer` with steers: 1 `injectSteps` entry with `metadata.user_markdown`.
-   - Default `Launcher::hook_reply`: `hookSpecificOutput.additionalContext` combines steers + context within `HOOK_CONTEXT_BYTES`.
-3. Update `rust/loopflow-execution/tests/support/agy_cli.py` to record `displayed` (`metadata.user_markdown` values) alongside `context` in `tui-heard.json`, and assert in `session_launch_contract::a_reopened_antigravity_task_hears_repository_direction_once` that initial start displays nothing inline while reopen with a steer and reopen with a Task update each display their message inline without reference context.
-4. Live QA on real `agy 1.5.16`: verify inline display of steers and Task updates in the TUI on both `lf resume --task` reopen and a mid-session turn, confirm reference context stays collapsed, and confirm headless `agy` worker still passes.
+Inline steer and Task update display still needs a design. A provider-supported
+display-only message would retain today's model input and turn history. Using
+a visible SDK user message changes model input and requires a decision about
+attribution, observations and turn accounting. Verify the chosen shape in the
+native TUI before changing `ClaimedSteers`, the hook interface or the shared
+10,000-byte budget. Check a reopen, a later turn and a headless worker.
 
 ## Acceptance at gate
 

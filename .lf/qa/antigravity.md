@@ -120,6 +120,19 @@ so the server starts the closed conversation itself with the same line.
 While agy is open and idle, a repository steer stays pending until the next
 typed turn (LOO-1099).
 
+# Checking inline steer display
+
+Give a disposable hook two different markers, one in the model text and one
+in the display text. Ask for the model marker and inspect the terminal above
+the reply for the display marker. Check the native transcript for the step
+type and source. A delivered receipt means lf printed the reply.
+
+On `agy` 1.5.16 and 1.5.17, a string at `systemMessage.metadata.user_markdown`
+made the hook parser discard the whole reply. The turn still completed.
+`systemMessage.renderInfo.markdown` delivered the model text with no inline
+display on either version. A 1.5.17 `userMessage` did appear in the terminal
+and wrote a `USER_INPUT` row with source `SYSTEM_SDK`.
+
 # Failures on demand
 
 - Unserved model: `lf set --global agents 'agy:no-such-model-xyz,agy'`,

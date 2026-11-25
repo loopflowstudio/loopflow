@@ -33,9 +33,11 @@ to `c3742012`. That conversation may show those two sends.
 - Jack Heart (`comment:79dd230d-1028-4f14-acb2-90b07b1f3804`):
   - `"is this also ging to make it so that agy *displays* the steers it gets"`
   - `"Just go ahead and put this in the task please, lets go back"`
-- Reversible formatting choice made for Pass 3: render clean markdown in
+- Proposed formatting before the native check: render clean markdown in
   `metadata.user_markdown` (`**Steer** (<author>)`, `**Task update**`,
   `**Task notice**` + raw body, truncated cleanly only above 2 KB, plus quiet
   `N more waiting` footer) rather than echoing raw `<lf:steers>` XML / prompt
   log paths inline.
 
+- Native QA ruled out `metadata.user_markdown` on 1.5.16 and 1.5.17.
+  Kept plain system-message delivery. See the remaining decision in the plan.

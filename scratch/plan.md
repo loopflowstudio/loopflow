@@ -347,3 +347,25 @@ prints the focused-test commands and real crate/Swift map with no
 `scripts/testing.md` attached. Before and after: `wc -c scripts/testing.md`
 (28 KB today) against what `implement` loads (~2 KB inline, 0 attached),
 `ci-fix` loads (~2.6 KB inline, 0 attached), and `gate` loads (~16.3 KB).
+
+## Status
+
+Implemented in one pass (`301c353c14`, `7b89ed9596`, `d3d4485922`); nothing left to build. Ready for gate.
+
+Measured sizes:
+- `scripts/testing.md`: 289 lines, 17,028 B (down from 486 lines, ~28 KB)
+- `scripts/build_cache.md`: 187 lines, 10,515 B (verbatim move of Builds + Shared compilation cache)
+- `.lf/skills/implement.md`: 69 lines, 3,414 B, 0 `docs:` attached (was 29 lines + 28 KB attached)
+- `.lf/skills/ci-fix.md`: 25 lines, 2,789 B, 0 `docs:` attached
+- `.lf/skills/gate.md`: 51 lines, 2,362 B, `docs: scripts/testing.md` attached
+- `.lf/skills/kickoff.md`: 26 lines, 1,179 B
+- `.lf/skills/qa.md`: 42 lines, 1,918 B (down from 64 lines, 3,624 B)
+
+Checks run:
+- `lf help {implement,gate,ci-fix,qa,kickoff}`: all five resolve to `.lf/skills/<name>.md`
+- `docs:` frontmatter check: absent in `implement.md` and `ci-fix.md`, `scripts/testing.md` in `gate.md`
+- `testing.md#` anchor grep: zero remaining
+- `build_cache.md` link grep: all five targets updated (`AGENTS.md`, `scripts/testing.md`, `scripts/README.md`, `rust/loopflow-execution/README.md`, `scripts/benchmarks/crate-rebuild/README.md`)
+- `head -n 1 .lf/qa/*.md`: every file starts with `Read when `
+- `uv run --managed-python python scripts/check_architecture.py`: PASS (zero unexplained items)
+- `cargo test -p loopflow --test integration documented_commands::`: 4 passed, 0 failed

@@ -174,29 +174,28 @@ fn task_graph_row(
     conn: &rusqlite::Connection,
     task: &TaskId,
 ) -> StoreResult<Option<SavedTaskGraphRow>> {
-    let Some((graph, step, start, carrier)) = conn
-        .query_row(
-            "SELECT graph,step,run_start,lf_process_id,run_pid,run_os_started_at,run_died_at
-             FROM task_graphs WHERE task_id=?1",
-            [task.as_str()],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<LfProcessId>>(3)?
-                        .map(|id| -> rusqlite::Result<_> {
-                            Ok(crate::graph_process::TaskCarrier {
-                                id,
-                                pid: row.get(4)?,
-                                os_started_at: row.get(5)?,
-                                died_at: row.get(6)?,
-                            })
+    let mut query = conn.prepare_cached(
+        "SELECT graph,step,run_start,lf_process_id,run_pid,run_os_started_at,run_died_at
+         FROM task_graphs WHERE task_id=?1",
+    )?;
+    let Some((graph, step, start, carrier)) = query
+        .query_row([task.as_str()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<LfProcessId>>(3)?
+                    .map(|id| -> rusqlite::Result<_> {
+                        Ok(crate::graph_process::TaskCarrier {
+                            id,
+                            pid: row.get(4)?,
+                            os_started_at: row.get(5)?,
+                            died_at: row.get(6)?,
                         })
-                        .transpose()?,
-                ))
-            },
-        )
+                    })
+                    .transpose()?,
+            ))
+        })
         .optional()?
     else {
         return Ok(None);
@@ -328,18 +327,16 @@ fn write_auto_in(
 }
 
 pub(super) fn auto_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<Auto>> {
-    let Some((state, at, by)) = conn
-        .query_row(
-            "SELECT state,set_at,set_by FROM task_auto WHERE task_id=?1",
-            [task.as_str()],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            },
-        )
+    let mut query =
+        conn.prepare_cached("SELECT state,set_at,set_by FROM task_auto WHERE task_id=?1")?;
+    let Some((state, at, by)) = query
+        .query_row([task.as_str()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
         .optional()?
     else {
         return Ok(None);

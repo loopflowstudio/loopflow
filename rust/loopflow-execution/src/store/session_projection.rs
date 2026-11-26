@@ -99,13 +99,21 @@ pub fn session_summary(
     id: &str,
     now: i64,
 ) -> StoreResult<Option<crate::session::SessionSummary>> {
+    Ok(session_summary_with_deadline(store, id, now)?.0)
+}
+
+pub fn session_summary_with_deadline(
+    store: &SqliteStore,
+    id: &str,
+    now: i64,
+) -> StoreResult<(Option<crate::session::SessionSummary>, Option<i64>)> {
     let id = loopflow_model::id::canonical_session(id);
     loop {
         let reading = Reading::acquire(store, now, Some(&id))?;
         if let Some(summary) =
             store.projected_session_summary(&id, &reading.inputs, &reading.values)?
         {
-            return Ok(summary);
+            return Ok((summary, reading.inputs.deadlines.first().copied()));
         }
     }
 }

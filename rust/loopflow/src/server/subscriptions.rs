@@ -18,6 +18,7 @@ use loopflow_execution::engine::{Error, ErrorCode};
 use loopflow_execution::machine::{client, wire::Sender};
 use loopflow_execution::read_stream::Subscription;
 use loopflow_model::durable::Machine;
+use loopflow_storage::sqlite::StoreRevisions;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Key {
@@ -30,7 +31,7 @@ struct Key {
 #[derive(Debug, Default)]
 pub(super) struct Subscriptions {
     demands: Mutex<HashMap<Key, Arc<Demand>>>,
-    planning: Mutex<Weak<watch::Receiver<Option<i64>>>>,
+    revisions: Mutex<Weak<watch::Receiver<Option<StoreRevisions>>>>,
 }
 
 #[derive(Debug, Default)]
@@ -134,7 +135,7 @@ impl Subscriptions {
                     .run(
                         query,
                         select,
-                        follow.then(|| self.planning(&key.database)),
+                        follow.then(|| self.revisions(&key.database)),
                     ),
                 );
                 Arc::new(Demand {
@@ -181,12 +182,15 @@ impl Subscriptions {
 
     // Ownership entries and Task moves advance the planning revision. Reuses
     // `read_stream`'s shared store observer without spawning a separate thread.
-    fn planning(&self, database: &std::path::Path) -> Arc<watch::Receiver<Option<i64>>> {
-        let mut shared = lock(&self.planning);
+    fn revisions(
+        &self,
+        database: &std::path::Path,
+    ) -> Arc<watch::Receiver<Option<StoreRevisions>>> {
+        let mut shared = lock(&self.revisions);
         if let Some(revisions) = shared.upgrade() {
             return revisions;
         }
-        let revisions = Arc::new(loopflow_execution::read_stream::watch_planning(database));
+        let revisions = Arc::new(loopflow_execution::read_stream::watch_revisions(database));
         *shared = Arc::downgrade(&revisions);
         revisions
     }
@@ -410,6 +414,20 @@ impl Drop for Release {
     }
 }
 
+async fn wait_planning_change(
+    revisions: &mut watch::Receiver<Option<StoreRevisions>>,
+    last_planning: &mut Option<i64>,
+) -> Result<(), watch::error::RecvError> {
+    loop {
+        revisions.changed().await?;
+        let next = revisions.borrow_and_update().map(|rev| rev.planning);
+        if next != *last_planning {
+            *last_planning = next;
+            return Ok(());
+        }
+    }
+}
+
 #[derive(Debug)]
 struct Producer {
     registry: Weak<Subscriptions>,
@@ -427,9 +445,9 @@ impl Producer {
         self,
         query: Read,
         select: Option<Vec<String>>,
-        planning: Option<Arc<watch::Receiver<Option<i64>>>>,
+        revisions: Option<Arc<watch::Receiver<Option<StoreRevisions>>>>,
     ) {
-        let result = match planning {
+        let result = match revisions {
             Some(revisions) => self.follow(query, select, revisions.as_ref().clone()).await,
             None => self.here(query, select).await,
         };
@@ -468,13 +486,13 @@ impl Producer {
         &self,
         query: Read,
         select: Option<Vec<String>>,
-        mut planning: watch::Receiver<Option<i64>>,
+        mut revisions: watch::Receiver<Option<StoreRevisions>>,
     ) -> Result<()> {
         let resolve = || {
             let mut query = query.clone();
             tokio::task::spawn_blocking(move || query.peer_route())
         };
-        planning.borrow_and_update();
+        let mut last_planning = revisions.borrow_and_update().map(|rev| rev.planning);
         let mut route = resolve().await??;
         loop {
             let generation = lock(&self.requested).generation;
@@ -500,7 +518,7 @@ impl Producer {
             let next = loop {
                 tokio::select! {
                     biased;
-                    changed = planning.changed() => {
+                    changed = wait_planning_change(&mut revisions, &mut last_planning) => {
                         changed?;
                         let next = resolve().await??;
                         if next != route { break next; }
@@ -514,7 +532,7 @@ impl Producer {
                         };
                         self.peer_unavailable(failure, generation).await?;
                         tokio::select! {
-                            changed = planning.changed() => changed?,
+                            changed = wait_planning_change(&mut revisions, &mut last_planning) => changed?,
                             _ = tokio::time::sleep(Duration::from_secs(5)) => {}
                         }
                         break resolve().await??;
@@ -597,11 +615,11 @@ impl Producer {
     // revision, which a recorded checkout advances; the same ID then goes live.
     async fn files(&self, issue: String, select: Option<Vec<String>>) -> Result<()> {
         let wake = self.wake.clone();
-        let mut planning = match self.registry.upgrade() {
-            Some(registry) => registry.planning(&self.key.database).as_ref().clone(),
+        let mut revisions = match self.registry.upgrade() {
+            Some(registry) => registry.revisions(&self.key.database).as_ref().clone(),
             None => return Ok(()),
         };
-        planning.borrow_and_update();
+        let mut last_planning = revisions.borrow_and_update().map(|rev| rev.planning);
         let mut files = tokio::task::spawn_blocking(move || {
             loopflow_execution::ops::task::TaskFilesWatch::open(&issue, move || wake.notify_one())
         })
@@ -628,7 +646,7 @@ impl Producer {
             )?;
             tokio::select! {
                 _ = self.wake.notified() => {}
-                changed = planning.changed() => changed?,
+                changed = wait_planning_change(&mut revisions, &mut last_planning) => changed?,
             }
         }
     }

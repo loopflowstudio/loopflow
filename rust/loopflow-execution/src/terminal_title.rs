@@ -7,16 +7,21 @@
 //! tmux windows follow the Session.
 
 use crate::store::session_projection;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{IsTerminal, Write};
+use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{mpsc, Arc};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::os_process::wait_for_exit;
 use crate::process::SessionAttachment;
 use crate::session::LfSession;
 use crate::store::{sqlite::SqliteStore, StoreResult};
+use loopflow_model::id::TerminalId;
+use loopflow_storage::sqlite::StoreRevisions;
 
 fn display_title(name: &str, task: Option<&str>, standing: Option<&str>) -> String {
     let clean: String = name.chars().filter(|ch| !ch.is_control()).collect();
@@ -55,16 +60,20 @@ pub fn workspace_name(identifier: &str, title: &str) -> String {
 /// Where a Task stands, for terminal titles: `Available` when its
 /// conversation is, then the interactive step where its Graph waits, such as
 /// `Available · Design`. Both come from their shared readers; nothing new is judged.
+/// Also returns the earliest Unix timestamp when `Available` can turn true with no write.
 fn standing(
     store: &SqliteStore,
     task: &loopflow_model::durable::TaskId,
     conversation: Option<&str>,
-) -> StoreResult<Option<String>> {
+) -> StoreResult<(Option<String>, Option<i64>)> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let available = match conversation {
-        Some(id) => session_projection::session_summary(store, id, now)?
-            .is_some_and(|summary| summary.available),
-        None => false,
+    let (available, next_deadline) = match conversation {
+        Some(id) => {
+            let (summary, deadline) =
+                session_projection::session_summary_with_deadline(store, id, now)?;
+            (summary.is_some_and(|summary| summary.available), deadline)
+        }
+        None => (false, None),
     };
     let graph = crate::store::task_work::task_graph(store, task)?;
     let node = graph
@@ -83,7 +92,10 @@ fn standing(
                 .map(|first| first.to_uppercase().chain(letters).collect::<String>()),
         );
     }
-    Ok((!parts.is_empty()).then(|| parts.join(" · ")))
+    Ok((
+        (!parts.is_empty()).then(|| parts.join(" · ")),
+        next_deadline,
+    ))
 }
 
 /// A host whose own names for this terminal Loopflow keeps current.
@@ -389,54 +401,358 @@ pub(crate) struct ViewerTitle {
     checked: Option<Instant>,
 }
 
-/// One worker reading Session names for every terminal a host serves; store reads
-/// must never hold up provider output or terminal input. It ends once its
-/// handle and every `OutputTitle` made from it are gone.
-#[derive(Debug, Clone)]
-pub(crate) struct TitleReader {
-    requests: std::sync::Arc<std::sync::OnceLock<mpsc::SyncSender<TitleRequest>>>,
+/// The three store domains a terminal title reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TitleRevisions {
+    sessions: i64,
+    planning: i64,
+    graphs: i64,
 }
 
-#[derive(Debug)]
-struct TitleRequest {
-    held: loopflow_model::id::TerminalId,
-    answer: mpsc::SyncSender<String>,
-}
-
-/// Requests waiting for the worker; a full queue skips a check until the next tick.
-const TITLE_QUEUE: usize = 64;
-
-impl TitleReader {
-    pub fn spawn() -> Self {
+impl TitleRevisions {
+    fn of(revisions: StoreRevisions) -> Self {
         Self {
-            requests: std::sync::Arc::new(std::sync::OnceLock::new()),
+            sessions: revisions.sessions,
+            planning: revisions.planning,
+            graphs: revisions.graphs,
+        }
+    }
+}
+
+/// Minimum pause between revision- or deadline-driven title sweeps.
+const SWEEP_THROTTLE: Duration = Duration::from_millis(500);
+/// Initial retry wait after a failed sweep; doubles up to [`RETRY_CAP`].
+const RETRY_BASE: Duration = Duration::from_secs(1);
+const RETRY_CAP: Duration = Duration::from_secs(30);
+
+#[derive(Debug, Clone, Copy)]
+struct ReaderConfig {
+    throttle: Duration,
+    retry_base: Duration,
+    retry_cap: Duration,
+}
+
+impl ReaderConfig {
+    fn production() -> Self {
+        Self {
+            throttle: SWEEP_THROTTLE,
+            retry_base: RETRY_BASE,
+            retry_cap: RETRY_CAP,
         }
     }
 
-    fn sender(&self) -> &mpsc::SyncSender<TitleRequest> {
-        self.requests.get_or_init(|| {
-            let path = crate::store::database_path_from_env();
-            let (requests, requested) = mpsc::sync_channel::<TitleRequest>(TITLE_QUEUE);
-            let _ = std::thread::Builder::new()
-                .name("title-reader".into())
-                .spawn(move || {
-                    let Ok(path) = path else { return };
-                    while let Ok(request) = requested.recv() {
-                        let read = SqliteStore::open_read_only(
-                            &path,
-                            crate::store::token_key::encryption_key,
-                        )
-                        .map_err(anyhow::Error::from)
-                        .and_then(|store| output_title(&store, &request.held));
-                        if let Ok(Some(name)) = read.inspect_err(
-                            |error| tracing::debug!(%error, "cannot read output Session name"),
-                        ) {
-                            let _ = request.answer.try_send(name);
+    fn retry_delay(self, failures: u32) -> Duration {
+        self.retry_base
+            .saturating_mul(1 << failures.saturating_sub(1).min(16))
+            .min(self.retry_cap)
+    }
+}
+
+/// One worker reading Session names for every viewed terminal a host serves;
+/// store reads never run while the store is quiet and never hold up provider
+/// output or terminal input. It ends once its handle and every watched
+/// `OutputTitle` are gone.
+#[derive(Debug, Clone)]
+pub(crate) struct TitleReader {
+    messages: mpsc::Sender<TitleMessage>,
+    next: Arc<AtomicU64>,
+}
+
+#[derive(Debug)]
+struct TitleWatch {
+    key: u64,
+    messages: mpsc::Sender<TitleMessage>,
+}
+
+impl Drop for TitleWatch {
+    fn drop(&mut self) {
+        let _ = self.messages.send(TitleMessage::Unwatch(self.key));
+    }
+}
+
+#[derive(Debug)]
+struct WatchedTerminal {
+    held: TerminalId,
+    waker: UnixStream,
+    answer: mpsc::Sender<String>,
+    last_sent: Option<String>,
+    next_deadline: Option<i64>,
+    needs_initial: bool,
+}
+
+#[derive(Debug)]
+enum TitleMessage {
+    Watch(u64, Box<WatchedTerminal>, mpsc::Sender<TitleMessage>),
+    Unwatch(u64),
+    Revisions(Option<TitleRevisions>),
+}
+
+impl TitleReader {
+    pub fn spawn() -> Self {
+        #[cfg(any(test, feature = "test-support"))]
+        let path = crate::journal::test_ledger_path()
+            .map(Ok)
+            .unwrap_or_else(crate::store::database_path_from_env);
+        #[cfg(not(any(test, feature = "test-support")))]
+        let path = crate::store::database_path_from_env();
+        let (messages, received) = mpsc::channel();
+        let _ = std::thread::Builder::new()
+            .name("title-reader".into())
+            .spawn(move || {
+                let Ok(path) = path else { return };
+                run_title_reader(path, received, ReaderConfig::production(), output_title);
+            });
+        Self {
+            messages,
+            next: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    fn watch(
+        &self,
+        held: TerminalId,
+        waker: UnixStream,
+        answer: mpsc::Sender<String>,
+    ) -> TitleWatch {
+        let key = self.next.fetch_add(1, Ordering::Relaxed);
+        let watched = WatchedTerminal {
+            held,
+            waker,
+            answer,
+            last_sent: None,
+            next_deadline: None,
+            needs_initial: true,
+        };
+        let _ = self.messages.send(TitleMessage::Watch(
+            key,
+            Box::new(watched),
+            self.messages.clone(),
+        ));
+        TitleWatch {
+            key,
+            messages: self.messages.clone(),
+        }
+    }
+}
+
+fn duration_until_unix(deadline_secs: i64) -> Duration {
+    if deadline_secs <= 0 {
+        return Duration::ZERO;
+    }
+    let target = UNIX_EPOCH + Duration::from_secs(deadline_secs as u64);
+    target
+        .duration_since(SystemTime::now())
+        .unwrap_or(Duration::ZERO)
+}
+
+fn run_title_reader<F>(
+    path: PathBuf,
+    received: mpsc::Receiver<TitleMessage>,
+    config: ReaderConfig,
+    mut read_title: F,
+) where
+    F: FnMut(&SqliteStore, &TerminalId) -> anyhow::Result<Option<OutputTitleReading>>,
+{
+    let mut watches: HashMap<u64, WatchedTerminal> = HashMap::new();
+    let mut subscription: Option<crate::read_stream::RevisionFollow> = None;
+    let mut seen_revisions: Option<TitleRevisions> = None;
+    let mut dirty = false;
+    let mut last_sweep: Option<Instant> = None;
+    let mut failures: u32 = 0;
+    let mut retry_at: Option<Instant> = None;
+
+    loop {
+        let now_instant = Instant::now();
+        let now_unix = time::OffsetDateTime::now_utc().unix_timestamp();
+
+        let mut sweep_now = false;
+        let mut wait = None;
+        if !watches.is_empty() {
+            if let Some(at) = retry_at {
+                if now_instant < at {
+                    wait = Some(at.saturating_duration_since(now_instant));
+                } else {
+                    sweep_now = true;
+                }
+            } else {
+                let any_initial = watches.values().any(|w| w.needs_initial);
+                let any_deadline_due = watches
+                    .values()
+                    .any(|w| w.next_deadline.is_some_and(|deadline| now_unix >= deadline));
+                if any_initial || dirty || any_deadline_due {
+                    let throttled = !any_initial
+                        && last_sweep.is_some_and(|last| now_instant < last + config.throttle);
+                    if throttled {
+                        let until = last_sweep.expect("checked above") + config.throttle;
+                        wait = Some(until.saturating_duration_since(now_instant));
+                    } else {
+                        sweep_now = true;
+                    }
+                } else if let Some(earliest) =
+                    watches.values().filter_map(|w| w.next_deadline).min()
+                {
+                    let remaining = duration_until_unix(earliest);
+                    // Avoid spinning if SystemTime and unix_timestamp straddle a second edge.
+                    wait = Some(remaining.max(Duration::from_millis(1)));
+                }
+            }
+        }
+
+        if !sweep_now {
+            let message = match wait {
+                Some(timeout) => received.recv_timeout(timeout),
+                None => received
+                    .recv()
+                    .map_err(|_| mpsc::RecvTimeoutError::Disconnected),
+            };
+            match message {
+                Ok(message) => {
+                    apply_title_message(
+                        message,
+                        &path,
+                        &mut watches,
+                        &mut subscription,
+                        &mut seen_revisions,
+                        &mut dirty,
+                        &mut last_sweep,
+                        &mut failures,
+                        &mut retry_at,
+                    );
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+            }
+            for message in received.try_iter() {
+                apply_title_message(
+                    message,
+                    &path,
+                    &mut watches,
+                    &mut subscription,
+                    &mut seen_revisions,
+                    &mut dirty,
+                    &mut last_sweep,
+                    &mut failures,
+                    &mut retry_at,
+                );
+            }
+            continue;
+        }
+
+        // Store file not created yet: the observer retries and will notify us.
+        if !path.exists() {
+            dirty = false;
+            retry_at = None;
+            failures = 0;
+            for watch in watches.values_mut() {
+                watch.needs_initial = false;
+            }
+            continue;
+        }
+
+        let sweep_result = (|| -> anyhow::Result<()> {
+            let store =
+                SqliteStore::open_read_only(&path, crate::store::token_key::encryption_key)?;
+            let current_revisions = TitleRevisions::of(store.revisions()?);
+            let sweep_all = dirty || failures > 0 || seen_revisions != Some(current_revisions);
+            let sweep_unix = time::OffsetDateTime::now_utc().unix_timestamp();
+            for watch in watches.values_mut() {
+                let due = sweep_all
+                    || watch.needs_initial
+                    || watch
+                        .next_deadline
+                        .is_some_and(|deadline| sweep_unix >= deadline);
+                if !due {
+                    continue;
+                }
+                let reading = read_title(&store, &watch.held)?;
+                watch.needs_initial = false;
+                match reading {
+                    Some(OutputTitleReading {
+                        terminal,
+                        next_deadline,
+                    }) => {
+                        watch.next_deadline = next_deadline;
+                        if watch.last_sent.as_deref() != Some(terminal.as_str()) {
+                            watch.last_sent = Some(terminal.clone());
+                            let _ = watch.answer.send(terminal);
+                            let _ = (&watch.waker).write_all(&[1]);
                         }
                     }
+                    None => {
+                        watch.next_deadline = None;
+                    }
+                }
+            }
+            seen_revisions = Some(current_revisions);
+            Ok(())
+        })();
+
+        match sweep_result {
+            Ok(()) => {
+                dirty = false;
+                failures = 0;
+                retry_at = None;
+                last_sweep = Some(Instant::now());
+            }
+            Err(error) => {
+                tracing::debug!(%error, "cannot read output Session name");
+                failures = failures.saturating_add(1);
+                retry_at = Some(Instant::now() + config.retry_delay(failures));
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_title_message(
+    message: TitleMessage,
+    path: &std::path::Path,
+    watches: &mut HashMap<u64, WatchedTerminal>,
+    subscription: &mut Option<crate::read_stream::RevisionFollow>,
+    seen_revisions: &mut Option<TitleRevisions>,
+    dirty: &mut bool,
+    last_sweep: &mut Option<Instant>,
+    failures: &mut u32,
+    retry_at: &mut Option<Instant>,
+) {
+    match message {
+        TitleMessage::Watch(key, watched, wake_tx) => {
+            let was_empty = watches.is_empty();
+            watches.insert(key, *watched);
+            if was_empty && subscription.is_none() {
+                let last_notified = Arc::new(std::sync::Mutex::new(None));
+                let last_cb = Arc::clone(&last_notified);
+                let (initial, follow) = crate::read_stream::follow_revisions(path, move |next| {
+                    let next_title = next.map(TitleRevisions::of);
+                    let mut guard = last_cb.lock().expect("title revision lock poisoned");
+                    if next_title != *guard {
+                        *guard = next_title;
+                        let _ = wake_tx.send(TitleMessage::Revisions(next_title));
+                    }
                 });
-            requests
-        })
+                let mut guard = last_notified.lock().expect("title revision lock poisoned");
+                if guard.is_none() {
+                    *guard = initial.map(TitleRevisions::of);
+                }
+                *subscription = Some(follow);
+            }
+        }
+        TitleMessage::Unwatch(key) => {
+            watches.remove(&key);
+            if watches.is_empty() {
+                *subscription = None;
+                *seen_revisions = None;
+                *dirty = false;
+                *last_sweep = None;
+                *failures = 0;
+                *retry_at = None;
+            }
+        }
+        TitleMessage::Revisions(next) => {
+            if next != *seen_revisions {
+                *dirty = true;
+            }
+        }
     }
 }
 
@@ -444,48 +760,64 @@ impl TitleReader {
 /// Host-specific names remain with each viewer, including remote viewers.
 #[derive(Debug)]
 pub(crate) struct OutputTitle {
-    held: loopflow_model::id::TerminalId,
+    held: TerminalId,
+    waker: UnixStream,
     reader: TitleReader,
-    answer: mpsc::SyncSender<String>,
+    watch: Option<TitleWatch>,
+    answer: mpsc::Sender<String>,
     names: mpsc::Receiver<String>,
-    checked: Option<Instant>,
 }
 
 impl OutputTitle {
-    pub fn new(held: &loopflow_model::id::TerminalId, reader: &TitleReader) -> Self {
-        let (answer, names) = mpsc::sync_channel(1);
+    pub fn new(held: TerminalId, waker: UnixStream, reader: TitleReader) -> Self {
+        let (answer, names) = mpsc::channel();
         Self {
-            held: held.clone(),
-            reader: reader.clone(),
+            held,
+            waker,
+            reader,
+            watch: None,
             answer,
             names,
-            checked: None,
+        }
+    }
+
+    pub fn set_viewed(&mut self, viewed: bool) {
+        match (viewed, self.watch.is_some()) {
+            (true, false) => {
+                if let Ok(waker) = self.waker.try_clone() {
+                    self.watch = Some(self.reader.watch(
+                        self.held.clone(),
+                        waker,
+                        self.answer.clone(),
+                    ));
+                }
+            }
+            (false, true) => {
+                self.watch = None;
+            }
+            _ => {}
         }
     }
 
     pub fn tick(&mut self) -> Option<String> {
-        if self
-            .checked
-            .is_none_or(|checked| checked.elapsed() >= Duration::from_millis(500))
-        {
-            self.checked = Some(Instant::now());
-            let _ = self.reader.sender().try_send(TitleRequest {
-                held: self.held.clone(),
-                answer: self.answer.clone(),
-            });
+        let mut latest = None;
+        while let Ok(name) = self.names.try_recv() {
+            latest = Some(name);
         }
-        self.names.try_recv().ok()
+        latest
     }
+}
 
-    pub fn deadline(&self) -> Instant {
-        self.checked.unwrap_or_else(Instant::now) + Duration::from_millis(500)
-    }
+#[derive(Debug, PartialEq, Eq)]
+struct OutputTitleReading {
+    terminal: String,
+    next_deadline: Option<i64>,
 }
 
 fn output_title(
     store: &SqliteStore,
-    held: &loopflow_model::id::TerminalId,
-) -> anyhow::Result<Option<String>> {
+    held: &TerminalId,
+) -> anyhow::Result<Option<OutputTitleReading>> {
     let Some(id) = store.terminal_session(held)? else {
         return Ok(None);
     };
@@ -499,7 +831,11 @@ fn output_title(
     {
         return Ok(None);
     }
-    Ok(Some(session_title(store, &session)?.names.terminal))
+    let title = session_title(store, &session)?;
+    Ok(Some(OutputTitleReading {
+        terminal: title.names.terminal,
+        next_deadline: title.next_deadline,
+    }))
 }
 
 impl ViewerTitle {
@@ -534,6 +870,8 @@ struct SessionTitle {
     provider: String,
     /// That name and where its Task stands now, with the Task's workspace name.
     names: Names,
+    /// Earliest Unix timestamp when `Available` may turn true with no write.
+    next_deadline: Option<i64>,
 }
 
 fn session_title(store: &SqliteStore, session: &LfSession) -> StoreResult<SessionTitle> {
@@ -543,11 +881,10 @@ fn session_title(store: &SqliteStore, session: &LfSession) -> StoreResult<Sessio
         .map(|id| store.task(id))
         .transpose()?
         .flatten();
-    let standing = task
-        .as_ref()
-        .map(|task| standing(store, &task.id, Some(&session.id)))
-        .transpose()?
-        .flatten();
+    let (standing, next_deadline) = match task.as_ref() {
+        Some(task) => standing(store, &task.id, Some(&session.id))?,
+        None => (None, None),
+    };
     let identifier = task.as_ref().map(|task| task.identifier.as_str());
     Ok(SessionTitle {
         provider: display_title(&session.title, identifier, None),
@@ -557,6 +894,7 @@ fn session_title(store: &SqliteStore, session: &LfSession) -> StoreResult<Sessio
                 .map(|task| WorkspaceName::new(&task.identifier, &task.title)),
             terminal: display_title(&session.title, identifier, standing.as_deref()),
         },
+        next_deadline,
     })
 }
 
@@ -665,7 +1003,9 @@ mod tests {
             Some("Release notes".to_string())
         );
         assert_eq!(
-            super::output_title(&title.store, &terminal).unwrap(),
+            super::output_title(&title.store, &terminal)
+                .unwrap()
+                .map(|reading| reading.terminal),
             Some("Release notes".into())
         );
         attachment::claim_session_attachment(
@@ -761,5 +1101,484 @@ mod tests {
             "Name workspaces · LOO-609"
         );
         assert_eq!(workspace_name("LOO-609", " \x07"), "LOO-609");
+    }
+
+    struct TitleFixture {
+        _home: tempfile::TempDir,
+        path: std::path::PathBuf,
+        store: crate::store::sqlite::SqliteStore,
+        task_id: loopflow_model::durable::TaskId,
+        task_identifier: String,
+        session_id: String,
+        attachment: crate::process::SessionAttachment,
+        terminal: loopflow_model::id::TerminalId,
+    }
+
+    impl TitleFixture {
+        fn new() -> Self {
+            let home = tempfile::tempdir().unwrap();
+            let path = home.path().join("loopflow.db");
+            let store = crate::store::opening::open_ephemeral(&path).unwrap();
+            let repo = loopflow_storage::test_fixture::repository(&store, "/repo");
+            let task = store
+                .create_task(&loopflow_storage::work::task::NewTask {
+                    parent_task_id: None,
+                    repository_id: repo,
+                    id: loopflow_model::durable::TaskId::new(),
+                    project_id: None,
+                    title: "Title fixture".into(),
+                    description: "Brief".into(),
+                    due_date: None,
+                })
+                .unwrap();
+            let session =
+                store.test_session("work-session", &crate::session_record::new_artifact_key());
+            crate::store::sessions::rename_session(
+                &store,
+                &session.id,
+                "work session",
+                crate::session::TitleSource::Human,
+            )
+            .unwrap();
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE agent_sessions SET task_id=?1 WHERE id=?2",
+                    rusqlite::params![task.id.as_str(), session.id.as_str()],
+                )
+                .unwrap();
+            let process = store.test_lf_process();
+            let attachment =
+                attachment::claim_session_attachment(&store, &session.id, None, &process).unwrap();
+            let pid = std::process::id();
+            let started = crate::process::os_process::process_started_at(pid)
+                .unwrap()
+                .unwrap();
+            store
+                .record_agent_process_identity(&session.id, &attachment, pid, started)
+                .unwrap();
+            let terminal = loopflow_model::id::TerminalId::new();
+            store.create_terminal(&terminal, "build").unwrap();
+            store
+                .bind_session_terminal(&session.id, &attachment, &terminal)
+                .unwrap();
+            Self {
+                _home: home,
+                path,
+                store,
+                task_id: task.id,
+                task_identifier: task.identifier,
+                session_id: session.id.to_string(),
+                attachment,
+                terminal,
+            }
+        }
+
+        fn record_activity(&self, observed_at: i64, yielded: bool) {
+            self.store
+                .record_session_activity(
+                    &self.session_id,
+                    &self.attachment,
+                    &crate::session::SessionActivity {
+                        preview: None,
+                        observed_at,
+                        open_tools: 0,
+                        pending_input: 0,
+                        yielded,
+                    },
+                )
+                .unwrap();
+        }
+
+        fn put_at_design_step(&self) {
+            let graph = crate::task_graph::CapturedGraph {
+                name: "code".into(),
+                steps: vec![crate::graph::ConcreteStep::Skill(
+                    crate::graph::ConcreteSkill {
+                        skill: crate::graph::Skill::named("design"),
+                        id: None,
+                        interactive: true,
+                        interactive_name: None,
+                        returns: None,
+                        sources: Vec::new(),
+                    },
+                )],
+            };
+            crate::store::task_work::take_up_task_graph(&self.store, &self.task_id, &graph)
+                .unwrap();
+            self.store
+                .set_task_graph_step(&self.task_id, "design")
+                .unwrap();
+        }
+    }
+
+    fn spawn_test_reader<F>(
+        path: std::path::PathBuf,
+        config: super::ReaderConfig,
+        read: F,
+    ) -> (super::TitleReader, std::thread::JoinHandle<()>)
+    where
+        F: FnMut(
+                &crate::store::sqlite::SqliteStore,
+                &loopflow_model::id::TerminalId,
+            ) -> anyhow::Result<Option<super::OutputTitleReading>>
+            + Send
+            + 'static,
+    {
+        let (messages, received) = std::sync::mpsc::channel();
+        let handle = std::thread::Builder::new()
+            .name("title-reader-test".into())
+            .spawn(move || super::run_title_reader(path, received, config, read))
+            .unwrap();
+        (
+            super::TitleReader {
+                messages,
+                next: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            },
+            handle,
+        )
+    }
+
+    fn recv_title(
+        output: &mut super::OutputTitle,
+        wake: &mut std::os::unix::net::UnixStream,
+        timeout: std::time::Duration,
+    ) -> Option<String> {
+        let deadline = std::time::Instant::now() + timeout;
+        wake.set_nonblocking(true).unwrap();
+        let mut buf = [0u8; 64];
+        while std::time::Instant::now() < deadline {
+            let _ = std::io::Read::read(wake, &mut buf);
+            if let Some(name) = output.tick() {
+                return Some(name);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        output.tick()
+    }
+
+    #[test]
+    fn reader_stays_quiet_when_idle_and_follows_rename_step_and_yield() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let fixture = TitleFixture::new();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&reads);
+        let config = super::ReaderConfig {
+            throttle: Duration::from_millis(40),
+            retry_base: Duration::from_millis(40),
+            retry_cap: Duration::from_millis(200),
+        };
+        let (reader, handle) = spawn_test_reader(fixture.path.clone(), config, move |store, id| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            super::output_title(store, id)
+        });
+        let (mut wake, waker) = std::os::unix::net::UnixStream::pair().unwrap();
+        let mut output = super::OutputTitle::new(fixture.terminal.clone(), waker, reader);
+        output.set_viewed(true);
+
+        let initial = recv_title(&mut output, &mut wake, Duration::from_secs(3)).unwrap();
+        assert_eq!(initial, format!("{} work session", fixture.task_identifier));
+        let after_initial = reads.load(Ordering::SeqCst);
+        assert_eq!(after_initial, 1);
+
+        // Idle across several throttle periods: zero additional reads.
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(reads.load(Ordering::SeqCst), after_initial);
+
+        // Unrelated domain (`processes`) moves: zero additional reads.
+        fixture.store.test_lf_process();
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(reads.load(Ordering::SeqCst), after_initial);
+
+        // Rename the Session: receives the new name.
+        crate::store::sessions::rename_session(
+            &fixture.store,
+            &fixture.session_id,
+            "Fresh title",
+            crate::session::TitleSource::Human,
+        )
+        .unwrap();
+        let renamed = recv_title(&mut output, &mut wake, Duration::from_secs(3)).unwrap();
+        assert_eq!(renamed, format!("{} Fresh title", fixture.task_identifier));
+
+        // Put the Task at interactive step `design`: receives `· Design`.
+        fixture.put_at_design_step();
+        let stepped = recv_title(&mut output, &mut wake, Duration::from_secs(3)).unwrap();
+        assert_eq!(
+            stepped,
+            format!("{} Fresh title · Design", fixture.task_identifier)
+        );
+
+        // Record a yield: receives `· Available · Design`.
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        fixture.record_activity(now, true);
+        let yielded = recv_title(&mut output, &mut wake, Duration::from_secs(3)).unwrap();
+        assert_eq!(
+            yielded,
+            format!(
+                "{} Fresh title · Available · Design",
+                fixture.task_identifier
+            )
+        );
+
+        drop(output);
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn reader_marks_available_when_quiet_deadline_passes_with_no_write() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let fixture = TitleFixture::new();
+        // 2 s left so initial read never straddles a second boundary into availability.
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        fixture.record_activity(now - 118, false);
+
+        let reads = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&reads);
+        let config = super::ReaderConfig {
+            throttle: Duration::from_millis(40),
+            retry_base: Duration::from_millis(40),
+            retry_cap: Duration::from_millis(200),
+        };
+        let (reader, handle) = spawn_test_reader(fixture.path.clone(), config, move |store, id| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            super::output_title(store, id)
+        });
+        let (mut wake, waker) = std::os::unix::net::UnixStream::pair().unwrap();
+        let mut output = super::OutputTitle::new(fixture.terminal.clone(), waker, reader);
+        output.set_viewed(true);
+
+        let initial = recv_title(&mut output, &mut wake, Duration::from_secs(3)).unwrap();
+        assert_eq!(initial, format!("{} work session", fixture.task_identifier));
+
+        // No writes: availability arrives once the 120 s quiet window elapses.
+        let available = recv_title(&mut output, &mut wake, Duration::from_secs(5)).unwrap();
+        assert_eq!(
+            available,
+            format!("{} work session · Available", fixture.task_identifier)
+        );
+
+        // Once available with no further deadlines, read count stays fixed.
+        let after_available = reads.load(Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(reads.load(Ordering::SeqCst), after_available);
+
+        drop(output);
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn reader_rearms_deadline_when_observed_at_bumps_without_revision_move() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let fixture = TitleFixture::new();
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        fixture.record_activity(now - 118, false);
+
+        let reads = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&reads);
+        let config = super::ReaderConfig {
+            throttle: Duration::from_millis(40),
+            retry_base: Duration::from_millis(40),
+            retry_cap: Duration::from_millis(200),
+        };
+        let (reader, handle) = spawn_test_reader(fixture.path.clone(), config, move |store, id| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            super::output_title(store, id)
+        });
+        let (mut wake, waker) = std::os::unix::net::UnixStream::pair().unwrap();
+        let mut output = super::OutputTitle::new(fixture.terminal.clone(), waker, reader);
+        output.set_viewed(true);
+
+        let initial = recv_title(&mut output, &mut wake, Duration::from_secs(3)).unwrap();
+        assert_eq!(initial, format!("{} work session", fixture.task_identifier));
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+
+        // Bump `observed_at` forward by 2 s without moving `sessions`.
+        let before_rev = fixture.store.revisions().unwrap().sessions;
+        fixture.record_activity(now - 116, false);
+        assert_eq!(fixture.store.revisions().unwrap().sessions, before_rev);
+
+        // Wait past the first deadline (`now + 2`) while still before the bumped deadline (`now + 4`).
+        let past_first = super::duration_until_unix(now + 2) + Duration::from_millis(300);
+        assert_eq!(recv_title(&mut output, &mut wake, past_first), None);
+        assert!(
+            reads.load(Ordering::SeqCst) >= 2,
+            "first deadline should have fired and re-armed"
+        );
+
+        // Later deadline (`now + 4`) arrives and publishes `· Available`.
+        let available = recv_title(&mut output, &mut wake, Duration::from_secs(5)).unwrap();
+        assert_eq!(
+            available,
+            format!("{} work session · Available", fixture.task_identifier)
+        );
+
+        drop(output);
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn reader_retries_after_failed_sweep_and_lands_rename() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let fixture = TitleFixture::new();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&attempts);
+        let config = super::ReaderConfig {
+            throttle: Duration::from_millis(40),
+            retry_base: Duration::from_millis(50),
+            retry_cap: Duration::from_millis(200),
+        };
+        let (reader, handle) = spawn_test_reader(fixture.path.clone(), config, move |store, id| {
+            let n = counted.fetch_add(1, Ordering::SeqCst) + 1;
+            if n == 2 {
+                anyhow::bail!("simulated SQLITE_BUSY");
+            }
+            super::output_title(store, id)
+        });
+        let (mut wake, waker) = std::os::unix::net::UnixStream::pair().unwrap();
+        let mut output = super::OutputTitle::new(fixture.terminal.clone(), waker, reader);
+        output.set_viewed(true);
+
+        let initial = recv_title(&mut output, &mut wake, Duration::from_secs(3)).unwrap();
+        assert_eq!(initial, format!("{} work session", fixture.task_identifier));
+
+        crate::store::sessions::rename_session(
+            &fixture.store,
+            &fixture.session_id,
+            "After busy",
+            crate::session::TitleSource::Human,
+        )
+        .unwrap();
+
+        let renamed = recv_title(&mut output, &mut wake, Duration::from_secs(3)).unwrap();
+        assert_eq!(renamed, format!("{} After busy", fixture.task_identifier));
+        assert!(attempts.load(Ordering::SeqCst) >= 3);
+
+        drop(output);
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn unviewed_terminal_does_no_reads_until_viewer_attaches() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let fixture = TitleFixture::new();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&reads);
+        let config = super::ReaderConfig {
+            throttle: Duration::from_millis(40),
+            retry_base: Duration::from_millis(40),
+            retry_cap: Duration::from_millis(200),
+        };
+        let (reader, handle) = spawn_test_reader(fixture.path.clone(), config, move |store, id| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            super::output_title(store, id)
+        });
+        let (mut wake, waker) = std::os::unix::net::UnixStream::pair().unwrap();
+        let mut output = super::OutputTitle::new(fixture.terminal.clone(), waker, reader);
+
+        // No viewer attached: renames and elapsed time trigger zero reads.
+        crate::store::sessions::rename_session(
+            &fixture.store,
+            &fixture.session_id,
+            "While unviewed",
+            crate::session::TitleSource::Human,
+        )
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(reads.load(Ordering::SeqCst), 0);
+        assert_eq!(output.tick(), None);
+
+        // Viewer attaches: one immediate read delivers the current name.
+        output.set_viewed(true);
+        let attached = recv_title(&mut output, &mut wake, Duration::from_secs(3)).unwrap();
+        assert_eq!(
+            attached,
+            format!("{} While unviewed", fixture.task_identifier)
+        );
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+
+        // Viewer detaches: subsequent renames trigger zero reads.
+        output.set_viewed(false);
+        std::thread::sleep(Duration::from_millis(50));
+        crate::store::sessions::rename_session(
+            &fixture.store,
+            &fixture.session_id,
+            "After detach",
+            crate::session::TitleSource::Human,
+        )
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+
+        drop(output);
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn output_title_warm_statement_throughput() {
+        let fixture = TitleFixture::new();
+        fixture.put_at_design_step();
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        fixture.record_activity(now, false);
+
+        // Warm the pooled read-only connection and its statement cache.
+        let store = crate::store::sqlite::SqliteStore::open_read_only(
+            &fixture.path,
+            crate::store::token_key::encryption_key,
+        )
+        .unwrap();
+        let first = super::output_title(&store, &fixture.terminal)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            first.terminal,
+            format!("{} work session · Design", fixture.task_identifier)
+        );
+
+        let started = std::time::Instant::now();
+        for _ in 0..1000 {
+            let reading = super::output_title(&store, &fixture.terminal)
+                .unwrap()
+                .unwrap();
+            assert_eq!(reading.terminal, first.terminal);
+        }
+        let same_store_elapsed = started.elapsed();
+        drop(store);
+
+        let started_pooled = std::time::Instant::now();
+        for _ in 0..1000 {
+            let store = crate::store::sqlite::SqliteStore::open_read_only(
+                &fixture.path,
+                crate::store::token_key::encryption_key,
+            )
+            .unwrap();
+            let reading = super::output_title(&store, &fixture.terminal)
+                .unwrap()
+                .unwrap();
+            assert_eq!(reading.terminal, first.terminal);
+        }
+        let pooled_elapsed = started_pooled.elapsed();
+        eprintln!(
+            "output_title x1000: same-store={same_store_elapsed:?} ({:.3} ms/read), pooled-borrow={pooled_elapsed:?} ({:.3} ms/read)",
+            same_store_elapsed.as_secs_f64(),
+            pooled_elapsed.as_secs_f64(),
+        );
     }
 }

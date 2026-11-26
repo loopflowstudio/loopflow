@@ -40,12 +40,9 @@ pub(crate) fn latest_in(
     conn: &Connection,
     session: &str,
 ) -> StoreResult<Option<ProviderTransition>> {
-    let transition: Option<String> = conn
-        .query_row(
-            "SELECT transition FROM agent_sessions WHERE id=?1",
-            [session],
-            |row| row.get(0),
-        )
+    let mut query = conn.prepare_cached("SELECT transition FROM agent_sessions WHERE id=?1")?;
+    let transition: Option<String> = query
+        .query_row([session], |row| row.get(0))
         .optional()?
         .flatten();
     Ok(transition

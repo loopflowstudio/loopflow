@@ -213,7 +213,8 @@ at once.
    batched title query comes next.
 2. **Viewer and benchmark.** `TerminalTitle::refresh` on the same gate. Add a
    held-terminal phase to `scripts/benchmarks/server_idle.py` (30 Sessions
-   seeded with held terminals, hosted by the server) with a CPU budget in its
+   seeded with held terminals, hosted by the server; idle, then with one
+   writer) with a CPU budget in its
    budgets file; if hosting held terminals headless from the script is not
    possible, the phase is left out and the reason noted in the PR.
 

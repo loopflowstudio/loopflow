@@ -328,9 +328,16 @@ fn render_diff_block(
             };
             let old_str = dl.old_line.map(|n| n.to_string()).unwrap_or_default();
             let new_str = dl.new_line.map(|n| n.to_string()).unwrap_or_default();
+            let mut row_attrs = String::new();
+            if let Some(o) = dl.old_line {
+                let _ = write!(row_attrs, " data-old-line=\"{o}\"");
+            }
+            if let Some(n) = dl.new_line {
+                let _ = write!(row_attrs, " data-line=\"{n}\"");
+            }
             let _ = writeln!(
                 rows,
-                "<tr class=\"{cls}\"><td class=\"lf-ln\">{old_str}</td><td class=\"lf-ln\">{new_str}</td><td class=\"lf-sign\">{sign}</td><td>{}</td></tr>",
+                "<tr class=\"{cls} lf-code-row\"{row_attrs}><td class=\"lf-ln lf-ln-old\">{old_str}</td><td class=\"lf-ln lf-ln-new\">{new_str}</td><td class=\"lf-sign\">{sign}</td><td>{}</td></tr>",
                 escape_html(&dl.text)
             );
             for (idx, note) in notes.iter().enumerate() {
@@ -411,7 +418,7 @@ fn render_file_block(
         let text = all_lines.get(line_no - 1).copied().unwrap_or("");
         let _ = writeln!(
             rows,
-            "<tr><td class=\"lf-ln\">{line_no}</td><td>{}</td></tr>",
+            "<tr class=\"lf-code-row\" data-line=\"{line_no}\"><td class=\"lf-ln lf-ln-single\">{line_no}</td><td>{}</td></tr>",
             escape_html(text)
         );
         for (idx, note) in notes.iter().enumerate() {
@@ -469,7 +476,7 @@ fn wrap_codeblock(
 
 #[cfg(test)]
 mod tests {
-    use super::parse_unified_diff;
+    use super::{parse_unified_diff, render_diff_block, render_file_block};
 
     #[test]
     fn unified_diff_parser_tracks_old_and_new_line_numbers() {
@@ -496,5 +503,17 @@ diff --git a/src/a.rs b/src/a.rs
         assert_eq!(lines[3].new_line, Some(12));
         assert_eq!(lines[4].old_line, Some(12));
         assert_eq!(lines[4].new_line, Some(13));
+
+        let html = render_diff_block("src/a.rs", None, &parsed, &[], 1).unwrap();
+        assert!(html.contains(r#"data-path="src/a.rs""#));
+        assert!(html.contains(r#"class="lf-ctx lf-code-row" data-old-line="10" data-line="10""#));
+        assert!(html.contains(r#"class="lf-del lf-code-row" data-old-line="11""#));
+        assert!(!html.contains(r#"class="lf-del lf-code-row" data-old-line="11" data-line="#));
+        assert!(html.contains(r#"class="lf-add lf-code-row" data-line="11""#));
+
+        let file_html = render_file_block("src/a.rs", "one\ntwo\n", Some((1, 2)), &[], 1).unwrap();
+        assert!(file_html.contains(r#"data-path="src/a.rs""#));
+        assert!(file_html.contains(r#"<tr class="lf-code-row" data-line="1">"#));
+        assert!(file_html.contains(r#"<tr class="lf-code-row" data-line="2">"#));
     }
 }

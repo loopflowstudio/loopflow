@@ -442,6 +442,18 @@ fn page_build_expands_diffs_components_data_lf_and_rejects_broken_references() {
     );
     assert!(html.contains("let old = 1;"), "missing deleted diff line");
     assert!(
+        html.contains(r#"class="lf-add lf-code-row" data-line="2""#),
+        "missing new-line metadata on diff row"
+    );
+    assert!(
+        html.contains(r#"class="lf-del lf-code-row" data-old-line="2""#),
+        "missing old-line metadata on deleted diff row"
+    );
+    assert!(
+        html.contains(r#"<tr class="lf-code-row" data-line="1">"#),
+        "missing line metadata on file row"
+    );
+    assert!(
         html.contains("Removed legacy constant."),
         "missing old-line note"
     );

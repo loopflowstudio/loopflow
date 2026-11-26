@@ -554,56 +554,46 @@ button).
    - Rebuilt `scratch/ship-review.html` and `scratch/concept-review.html` with
      the branch `lf` binary.
 
-6. **Next — Note-taking UI upgrade (1c + 2a + 3b; prototype in `scratch/explore.html`).**
-   Upgrade the compiled review page interaction UX (`builtins/page/runtime.js`,
-   `builtins/page/base.css`, and line metadata in `lf/commands/page/diff.rs`)
-   while preserving the existing wire protocol, `TaskHTMLBridge` contract, and
-   one-line steer format:
-   - **Notion floating selection bubble, cross-element hover highlights, and
-     slide-over Comments sidebar (1c):**
-     - Drag-selecting text pops a compact elevated floating pill above the
-       selection (`Comment (c)` · `Flag` · `Copy`) instead of the 260px `Note`
-       box. Clicking `Comment` or pressing `c` while selected opens a compact
-       floating composer anchored to the selection (`⌘↩` saves, `Esc` cancels).
-     - Anchor and render prose highlights cleanly across inline tags such as
-       `<code>` (no silent miss when a quote spans multiple text nodes). Replace
-       the bottom `Your notes` tray with a calm unbroken reading surface: saved
-       notes appear as warm-underlined highlights that reveal a floating hover
-       card with inline **Edit** and **Delete**, and a top-right `Comments (N)`
-       pill toggles a collapsible slide-over sidebar listing all notes in
-       document order with click-to-jump/pulse, edit, and delete/resolve.
-   - **Diff & file gutter `+` and `Shift+click` line ranges (2a):**
-     - Ensure `lf/commands/page/diff.rs` emits clean path/line attributes on
-       `<lf-diff>` and `<lf-file>` code rows so the runtime adds a hover `+`
-       gutter button (and clickable line-number cell).
-     - Clicking `+` opens the floating composer anchored to `<path>:<line>`;
-       `Shift+click` on a second line anchors a multi-line range
-       `<path>:<start>–<end>` and highlights the range. Saved line notes join
-       the Comments sidebar, highlight their lines, and serialize into the same
-       one-line steer (`\`<page>\` § <path>:<line[-end]> — <note>`).
-   - **T3 Code attached-chip composer dock + overall direction input in browser (3b):**
-     - Replace the bare browser `.lf-strip` with a T3 Code-style fixed bottom
-       composer dock (hidden in Loopflow Desktop, where `ReviewCommentsStrip` +
-       Desktop's native conversation input stay the one strip):
-       - Displays every queued note, diff line/range, choice, multiselect,
-         question, and offline action as a clickable removable chip (click to
-         jump/pulse its anchor, `×` to remove), plus `Clear` (`markReported: false`
-         so unreported `data-lf` receipts survive).
-       - Includes an optional single-line overall direction input
-         (`state.overall`, persisted across reloads and cleared on send/Clear)
-         whose text rides into the formatted steer message.
-       - Includes a toggleable steer preview showing the exact formatted
-         one-line message, status/`delivery.sentence` (cleared on edit), and the
-         `Steer <target> ⌘↩` / `Copy reply ⌘↩` button.
-     - Keep Desktop completely intact: 1c (floating bubble, hover highlights,
-       slide-over sidebar) and 2a (diff gutter `+` and `Shift+click` ranges)
-       work inside Desktop's `TaskHTMLView` and sync through `TaskHTMLBridge`
-       into `ReviewCommentsStrip`, while the browser dock stays hidden in
-       Desktop.
-   - Update `docs/surfaces.md` and `.lf/qa/review-pages.md` for the upgraded
-     note-taking controls, add/update Rust tests for diff row line metadata,
-     verify in Chrome QA, and rebuild `scratch/ship-review.html` and
-     `scratch/concept-review.html`.
+6. **Done — Note-taking UI upgrade (1c + 2a + 3b; prototype in `scratch/explore.html`).**
+   Upgraded the compiled review page interaction UX across `builtins/page/runtime.js`,
+   `builtins/page/base.css`, `builtins/page/theme.css`, `.lf/theme.css`, and
+   `lf/commands/page/diff.rs` while keeping the existing wire protocol,
+   `TaskHTMLBridge` contract, and one-line steer format:
+   - **1c (Notion bubble + cross-element hover highlights + slide-over sidebar):**
+     replaced the 260px `Note` popover and bottom `Your notes` tray with a
+     high-contrast floating selection pill (`Comment (c)` · `Flag` · `Copy`),
+     `c` hotkey, floating comment composer (`⌘↩`/`Esc`), normalized cross-element
+     text anchoring and `.lf-hl` warm-underlined highlights that span inline
+     `<code>` tags and survive reload, hover edit/delete cards, and a top-right
+     `Comments (N)` button toggling a slide-over sidebar sorted in document
+     order with click-to-jump pulse, inline edit, and delete.
+   - **2a (Diff & file gutter `+` and `Shift+click` line ranges):**
+     emitted `lf-code-row`, `data-line`, and `data-old-line` attributes on
+     `<lf-diff>` and `<lf-file>` rows in `diff.rs` (covered by unit + integration
+     tests), wired hover `+` gutter buttons and `Shift+click` multi-line range
+     selection (`<path>:<start>–<end>`), highlighted annotated rows, added them
+     to the hover card and Comments sidebar, and serialized them as
+     `` `<page>` § <path>:<line[-end]> — <note> ``.
+   - **3b (T3 Code attached-chip composer dock + overall direction input):**
+     replaced `.lf-strip` in browsers with `.lf-dock` (kept hidden in Loopflow
+     Desktop, where `ReviewCommentsStrip` + native conversation input remain the
+     single strip, while 1c + 2a work inside `TaskHTMLView`), showing removable
+     jump-to-anchor chips for every queued note, line range, choice, multiselect,
+     question, and offline action, a persisted optional overall direction input,
+     toggleable steer preview, `Clear` (`markReported: false`), and live
+     `delivery.sentence` status.
+   - Updated `docs/surfaces.md` and `.lf/qa/review-pages.md`, rebuilt
+     `scratch/ship-review.html` and `scratch/concept-review.html`, and verified
+     end-to-end in Chrome (light + dark mode, cross-`<code>` highlight, `c`
+     hotkey, `Flag`, hover edit, sidebar delete, `Shift+click` diff range, file
+     line note, `data-lf` receipt, reload persistence, `⌘↩` `task.steer`
+     delivery to SQLite, and `Clear` keeping receipts).
+   - *What this slice taught:* opening a code-row floating composer at the row's
+     left edge covered lower line-number gutter cells and blocked `Shift+click`
+     range extension — anchoring code-row composers to the code cell's left edge
+     keeps the entire gutter column unobstructed; and `button.lf-btn-quiet`
+     needed an explicit `.is-selected` override so the active `Preview` toggle
+     keeps high contrast in both light and dark modes.
 
 ### Remaining (later Graph steps)
 

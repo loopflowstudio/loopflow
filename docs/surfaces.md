@@ -72,22 +72,31 @@ lf page open scratch/ship-review.html --host browser   # force browser (or --hos
 
 On the page:
 
-- **Highlight to comment.** Drag across any text, click **Note**, and write your
-  comment. The runtime highlights the quote and anchors it to the nearest
-  heading.
+- **Highlight to comment.** Drag across any text (including across inline
+  `<code>` spans) to open a floating pill (**Comment (c)** · **Flag** ·
+  **Copy**), or press `c` while selected. Saved notes appear as warm-underlined
+  highlights (hover to **Edit** or **Delete**), and the top-right **Comments**
+  button opens a slide-over sidebar listing all notes in document order with
+  click-to-jump, edit, and delete.
+- **Diff and file line notes.** Hover any `<lf-diff>` or `<lf-file>` row and
+  click `+` (or the line number) to comment on that line; `Shift+click` a
+  second line to anchor a multi-line range (`<path>:<start>–<end>`). Line notes
+  highlight their rows and join the **Comments** sidebar.
 - **Choices and questions.** Click single-select choices (`Fix here`,
   `File Task`, `Drop`), multi-select options, or type into numbered question
   fields. Every selection queues into one reply.
-- **Send once (`⌘↩`).** All queued notes, choices, and answers format onto one
-  line identically across hosts:
+- **Send once (`⌘↩`).** All queued notes, line ranges, choices, and answers
+  format onto one line identically across hosts:
   ``(1) `scratch/ship-review.html` § <section> › "<quote>" <words> (2) …``
-  In a browser, the bottom strip shows the server's delivery sentence and clears
-  the queue only on success (even when a headless Graph worker built the page,
+  In a browser, the bottom composer dock shows each queued item as a removable
+  chip (click to jump, `×` to remove), an optional overall direction input, a
+  toggleable steer preview, and the server's delivery sentence, clearing the
+  queue only on success (even when a headless Graph worker built the page,
   `task.steer` reaches the Task's active work or primary interactive Session).
-  In Desktop, the page's own bottom strip stays hidden so Desktop's comments
-  strip is the single queue; drafts survive switching to code files (including
-  for [Tasks on another Machine](#a-task-on-another-machine)) and clear when
-  sent. Side-by-side HTML diffs in **Diff** stay read-only.
+  In Desktop, the browser dock stays hidden so Desktop's comments strip and
+  conversation input remain the single queue; drafts survive switching to code
+  files (including for [Tasks on another Machine](#a-task-on-another-machine))
+  and clear when sent. Side-by-side HTML diffs in **Diff** stay read-only.
 - **Direct action buttons.** A button wired to a Loopflow operation (for
   example, **File Task now**) is separate from the reply queue. Clicking it
   opens an inline confirmation showing the operation kind and fields, runs the

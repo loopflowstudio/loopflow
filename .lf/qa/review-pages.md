@@ -40,7 +40,22 @@ before a first-visit check. Dismissing Chrome's debugging bar closes the
 
 Write each check's page into the fragment: a rich prompt (`<p>` or `<label>`
 child) beside bare `data-label` controls, and a `decision` card, whose title
-must appear once.
+must appear once. Verify the upgraded note-taking UI in both light and dark
+mode:
+- Drag across text spanning an inline `<code>` element → floating pill
+  (`Comment (c)` · `Flag` · `Copy`) appears above the selection; `c` or
+  `Comment (c)` opens the floating composer and saves a warm-underlined
+  highlight across the `<code>` span; `Flag` saves immediately without typing.
+- Hover a saved highlight → floating hover card offers **Edit** and **Delete**;
+  the top-right `Comments (N)` button opens the slide-over sidebar listing
+  notes in document order with click-to-jump pulse, inline edit, and delete.
+- On `<lf-diff>` and `<lf-file>` blocks, click `+` on a line and `Shift+click`
+  a second line to save a multi-line range (`<path>:<start>–<end>`); confirm
+  the lines highlight, join the Comments sidebar, and appear as a `diff` chip.
+- In the browser bottom dock, verify removable chips (click to jump, `×` to
+  remove), the optional overall direction input (persists across reload, rides
+  into the steer, clears on send and **Clear**), toggleable **Preview**, and
+  that **Clear** keeps unreported `data-lf` receipts intact.
 
 The `.lf/qa/claude-standin.py` stand-in can't answer `-p` batches, so a
 headless `lf -b` that runs `lf page open` fails before reaching it;

@@ -27,7 +27,14 @@
   --lf-failure-fill: #ecd9d5;
   --lf-success-ink: #386c48;
   --lf-success-fill: #d7dfd6;
-  --lf-highlight: rgba(114, 47, 55, 0.16);
+  --lf-highlight: rgba(114, 47, 55, 0.14);
+  --lf-highlight-active: rgba(114, 47, 55, 0.28);
+  --lf-highlight-line: rgba(114, 47, 55, 0.45);
+  --lf-shadow: 0 8px 26px rgba(42, 38, 36, 0.14);
+  --lf-shadow-sm: 0 3px 12px rgba(42, 38, 36, 0.08);
+  --lf-bubble-bg: #24201e;
+  --lf-bubble-text: #faf8f5;
+  --lf-bubble-border: #3a3430;
   --lf-font-serif: "Old Standard TT", Georgia, "Times New Roman", serif;
   --lf-font-sans: "Atkinson Hyperlegible Next", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --lf-font-mono: "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
@@ -55,7 +62,14 @@
     --lf-failure-fill: #452422;
     --lf-success-ink: #7cc490;
     --lf-success-fill: #213828;
-    --lf-highlight: rgba(201, 107, 118, 0.28);
+    --lf-highlight: rgba(201, 107, 118, 0.22);
+    --lf-highlight-active: rgba(201, 107, 118, 0.38);
+    --lf-highlight-line: rgba(201, 107, 118, 0.65);
+    --lf-shadow: 0 10px 30px rgba(0, 0, 0, 0.44);
+    --lf-shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.30);
+    --lf-bubble-bg: #efeae4;
+    --lf-bubble-text: #181615;
+    --lf-bubble-border: #d6ccc0;
   }
 }
 
@@ -76,7 +90,7 @@ html, body {
 main.lf-page {
   max-width: 860px;
   margin: 0 auto;
-  padding: 36px 24px 120px;
+  padding: 44px 24px 168px;
 }
 
 h1 {
@@ -151,10 +165,6 @@ th {
   color: var(--lf-text-secondary);
   font-weight: 600;
   font-size: 12.5px;
-}
-
-::highlight(lf-note) {
-  background-color: var(--lf-highlight);
 }
 
 /* Meta bar */
@@ -237,6 +247,58 @@ th {
   user-select: none;
   border-right: 1px solid var(--lf-border);
   font-variant-numeric: tabular-nums;
+  position: relative;
+}
+
+.lf-code-table tr.lf-code-row td.lf-ln {
+  cursor: pointer;
+}
+
+.lf-code-table tr.lf-code-row td.lf-ln-old,
+.lf-code-table tr.lf-code-row td.lf-ln-single {
+  min-width: 52px;
+  padding-left: 24px;
+}
+
+.lf-code-table .lf-gutter-plus {
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border-radius: 4px;
+  border: none;
+  background: var(--lf-accent);
+  color: var(--lf-accent-text);
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.lf-code-table tr.lf-code-row:hover .lf-gutter-plus,
+.lf-code-table tr.lf-code-row.lf-row-has-note .lf-gutter-plus,
+.lf-code-table .lf-gutter-plus:focus-visible {
+  opacity: 1;
+}
+
+.lf-code-table tr.lf-code-row.lf-row-has-note td {
+  background: var(--lf-highlight);
+}
+
+.lf-code-table tr.lf-code-row.lf-row-has-note td.lf-ln:first-child {
+  box-shadow: inset 3px 0 0 var(--lf-accent);
+}
+
+.lf-code-table tr.lf-code-row.lf-row-selecting td {
+  background: var(--lf-working-fill);
 }
 
 .lf-code-table td.lf-sign {
@@ -390,6 +452,13 @@ button.lf-btn-quiet {
   color: var(--lf-text-secondary);
 }
 
+button.lf-btn-quiet.is-selected,
+button.lf-btn-quiet[aria-pressed="true"] {
+  background: var(--lf-accent);
+  border-color: var(--lf-accent);
+  color: var(--lf-accent-text);
+}
+
 [data-question] {
   margin: 14px 0;
 }
@@ -450,89 +519,404 @@ button.lf-btn-quiet {
   font-size: 13px;
 }
 
-/* Highlight-to-comment popover */
-.lf-note-popover {
-  position: fixed;
-  z-index: 900;
-  background: var(--lf-surface);
-  border: 1px solid var(--lf-border-strong);
-  border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 260px;
-  max-width: 360px;
+/* Warm-underlined cross-element note highlights */
+.lf-hl {
+  background: var(--lf-highlight);
+  border-bottom: 2px solid var(--lf-highlight-line, var(--lf-accent));
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background 0.12s ease;
 }
 
-.lf-note-popover textarea {
+.lf-hl:hover,
+.lf-hl.is-active {
+  background: var(--lf-highlight-active, var(--lf-highlight));
+}
+
+.lf-pulse-ring {
+  outline: 2px solid var(--lf-accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* Notion-style floating selection bubble */
+.lf-float-pill {
+  position: fixed;
+  z-index: 960;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px;
+  border-radius: 8px;
+  background: var(--lf-bubble-bg, var(--lf-text));
+  color: var(--lf-bubble-text, var(--lf-bg));
+  border: 1px solid var(--lf-bubble-border, var(--lf-border-strong));
+  box-shadow: var(--lf-shadow, 0 8px 26px rgba(0, 0, 0, 0.2));
+  font-size: 12px;
+}
+
+.lf-float-pill button {
+  background: transparent;
+  border: none;
+  color: var(--lf-bubble-text, var(--lf-bg));
+  padding: 4px 8px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.lf-float-pill button:hover {
+  background: rgba(128, 128, 128, 0.24);
+}
+
+.lf-float-pill-sep {
+  width: 1px;
+  height: 14px;
+  background: rgba(128, 128, 128, 0.35);
+}
+
+/* Floating comment composer (prose selection, diff gutter, or edit) */
+.lf-float-composer {
+  position: fixed;
+  z-index: 970;
+  width: min(320px, calc(100vw - 16px));
+  padding: 10px;
+  border-radius: 9px;
+  background: var(--lf-surface);
+  border: 1px solid var(--lf-border-strong);
+  box-shadow: var(--lf-shadow, 0 8px 26px rgba(0, 0, 0, 0.18));
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.lf-anchor-quote {
+  font-size: 11.5px;
+  color: var(--lf-text-secondary);
+  border-left: 2px solid var(--lf-border-strong);
+  padding-left: 7px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lf-float-composer textarea {
   width: 100%;
-  min-height: 54px;
+  min-height: 58px;
   padding: 6px 8px;
   border: 1px solid var(--lf-border-strong);
-  border-radius: 4px;
+  border-radius: 5px;
   background: var(--lf-bg);
   color: var(--lf-text);
   font-family: var(--lf-font-sans);
   font-size: 13px;
+  resize: vertical;
 }
 
-.lf-note-popover-actions {
+.lf-float-composer-actions {
   display: flex;
   justify-content: flex-end;
   gap: 6px;
 }
 
-.lf-notes-tray {
-  margin-top: 24px;
-  padding-top: 12px;
-  border-top: 1px solid var(--lf-border);
-}
-
-.lf-note-chip {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 6px 10px;
-  border: 1px solid var(--lf-border);
-  border-radius: 6px;
-  background: var(--lf-surface);
-  margin-bottom: 6px;
-  font-size: 13px;
-}
-
-/* Fixed reply strip (hidden in Loopflow Desktop) */
-.lf-strip {
+/* Hover card for saved highlights and line notes */
+.lf-hover-card {
   position: fixed;
-  left: 50%;
-  bottom: 16px;
-  transform: translateX(-50%);
-  z-index: 1000;
+  z-index: 950;
+  width: min(290px, calc(100vw - 16px));
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-surface);
+  box-shadow: var(--lf-shadow, 0 8px 26px rgba(0, 0, 0, 0.18));
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.lf-hover-card-body {
+  color: var(--lf-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lf-hover-card-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* Top-right Comments toggle + collapsible slide-over sidebar */
+.lf-comments-toggle {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  z-index: 920;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  font-size: 12.5px;
+  font-weight: 500;
+  box-shadow: var(--lf-shadow-sm, 0 3px 12px rgba(0, 0, 0, 0.08));
+}
+
+.lf-comments-toggle.has-notes {
+  border-color: var(--lf-accent);
+}
+
+.lf-comments-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--lf-accent);
+  color: var(--lf-accent-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.lf-sidebar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(340px, 92vw);
+  z-index: 940;
+  background: var(--lf-surface);
+  border-left: 1px solid var(--lf-border-strong);
+  box-shadow: var(--lf-shadow, 0 8px 26px rgba(0, 0, 0, 0.18));
+  display: flex;
+  flex-direction: column;
+  transform: translateX(104%);
+  transition: transform 0.18s ease;
+}
+
+.lf-sidebar.is-open {
+  transform: translateX(0);
+}
+
+.lf-sidebar-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  max-width: min(820px, calc(100vw - 24px));
-  padding: 8px 12px;
-  background: var(--lf-surface);
-  border: 1px solid var(--lf-border-strong);
-  border-radius: 10px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
-  font-size: 13px;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--lf-border);
+  font-weight: 600;
+  font-size: 13.5px;
 }
 
-.lf-strip[hidden] { display: none; }
+.lf-sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
-.lf-strip-status {
+.lf-sidebar-empty {
+  font-size: 13px;
+  color: var(--lf-text-tertiary);
+  padding: 6px 2px;
+}
+
+.lf-sidebar-item {
+  padding: 9px 11px;
+  border: 1px solid var(--lf-border);
+  border-radius: 7px;
+  background: var(--lf-bg);
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lf-sidebar-item:hover {
+  border-color: var(--lf-accent);
+}
+
+.lf-sidebar-item-text {
+  color: var(--lf-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lf-sidebar-item textarea {
+  width: 100%;
+  min-height: 54px;
+  padding: 6px 8px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 5px;
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  resize: vertical;
+}
+
+.lf-sidebar-item-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* Fixed T3 Code-style attached-chip composer dock (hidden in Loopflow Desktop) */
+.lf-dock {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 1000;
+  width: min(820px, calc(100vw - 24px));
+  padding: 9px 12px;
+  background: var(--lf-surface);
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 11px;
+  box-shadow: var(--lf-shadow, 0 8px 28px rgba(0, 0, 0, 0.16));
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lf-dock[hidden] { display: none; }
+
+.lf-dock-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  max-height: 92px;
+  overflow-y: auto;
+}
+
+.lf-dock-chips[hidden] { display: none; }
+
+.lf-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-bg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.lf-chip:hover {
+  border-color: var(--lf-accent);
+}
+
+.lf-chip-tag {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--lf-surface-element);
+  color: var(--lf-text-secondary);
+  flex-shrink: 0;
+}
+
+.lf-chip-tag.tag-note { background: var(--lf-highlight); color: var(--lf-accent); }
+.lf-chip-tag.tag-diff { background: var(--lf-working-fill); color: var(--lf-working-ink); }
+.lf-chip-tag.tag-choice { background: var(--lf-success-fill); color: var(--lf-success-ink); }
+.lf-chip-tag.tag-answer { background: var(--lf-warning-fill); color: var(--lf-warning-ink); }
+.lf-chip-tag.tag-run { background: var(--lf-failure-fill); color: var(--lf-failure-ink); }
+
+.lf-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+}
+
+.lf-chip-x {
+  border: none;
+  background: transparent;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--lf-text-tertiary);
+}
+
+.lf-chip-x:hover {
+  background: transparent;
+  color: var(--lf-failure-ink);
+}
+
+.lf-dock-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.lf-dock-input {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 6px;
+  background: var(--lf-bg);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 13.5px;
+}
+
+.lf-dock-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.lf-dock-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.lf-dock-preview {
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: var(--lf-bg);
+  border: 1px solid var(--lf-border);
+  font-family: var(--lf-font-mono);
+  font-size: 11.5px;
+  color: var(--lf-text-secondary);
+  word-break: break-word;
+  max-height: 84px;
+  overflow-y: auto;
+}
+
+.lf-dock-preview[hidden] { display: none; }
+
+.lf-dock-status {
+  font-size: 12.5px;
   color: var(--lf-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.lf-strip-status.is-error { color: var(--lf-failure-ink); }
-.lf-strip-status.is-ok { color: var(--lf-success-ink); }
+.lf-dock-status[hidden] { display: none; }
+.lf-dock-status.is-error { color: var(--lf-failure-ink); }
+.lf-dock-status.is-ok { color: var(--lf-success-ink); }
 
 </style>
 </head>
@@ -670,120 +1054,120 @@ button.lf-btn-quiet {
 
 <div class="lf-codeblock" data-path="rust/loopflow/src/server/loopback.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow/src/server/loopback.rs:108-147</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
 <tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,740 @@</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">108</td><td class="lf-sign">+</td><td>/// A port in the dynamic range (49152–65535) derived from the server&#39;s socket path,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">109</td><td class="lf-sign">+</td><td>/// so each lf home asks for the same one every start.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">110</td><td class="lf-sign">+</td><td>fn preferred_port(socket: &amp;Path) -&gt; u16 {</td></tr>
+<tr class="lf-add lf-code-row" data-line="108"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">108</td><td class="lf-sign">+</td><td>/// A port in the dynamic range (49152–65535) derived from the server&#39;s socket path,</td></tr>
+<tr class="lf-add lf-code-row" data-line="109"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">109</td><td class="lf-sign">+</td><td>/// so each lf home asks for the same one every start.</td></tr>
+<tr class="lf-add lf-code-row" data-line="110"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">110</td><td class="lf-sign">+</td><td>fn preferred_port(socket: &amp;Path) -&gt; u16 {</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Derives one stable port in 49152–65535 per server socket so browser localStorage survives lf server restarts.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">111</td><td class="lf-sign">+</td><td>    use sha2::{Digest, Sha256};</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">112</td><td class="lf-sign">+</td><td>    let digest = Sha256::digest(socket.as_os_str().as_encoded_bytes());</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">113</td><td class="lf-sign">+</td><td>    49152 + u16::from_be_bytes([digest[0], digest[1]]) % 16384</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">114</td><td class="lf-sign">+</td><td>}</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">115</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">116</td><td class="lf-sign">+</td><td>/// Bound loopback TCP listener ready to serve pages and WebSocket sessions.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">117</td><td class="lf-sign">+</td><td>pub(super) struct Loopback {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">118</td><td class="lf-sign">+</td><td>    listener: TcpListener,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">119</td><td class="lf-sign">+</td><td>    handle: Arc&lt;Handle&gt;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">120</td><td class="lf-sign">+</td><td>}</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">121</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">122</td><td class="lf-sign">+</td><td>impl Loopback {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">123</td><td class="lf-sign">+</td><td>    /// Bind the loopback port this server&#39;s socket prefers, with a fresh 32-byte random token.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">124</td><td class="lf-sign">+</td><td>    /// A stable port keeps an open page&#39;s origin, and with it the drafts and `data-lf`</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">125</td><td class="lf-sign">+</td><td>    /// receipts it holds in `localStorage`, across server restarts. When something else</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">126</td><td class="lf-sign">+</td><td>    /// holds that port, an ephemeral one serves instead.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">127</td><td class="lf-sign">+</td><td>    pub(super) async fn bind(socket: &amp;Path) -&gt; Result&lt;(Self, Arc&lt;Handle&gt;)&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">128</td><td class="lf-sign">+</td><td>        let preferred = SocketAddr::from(([127, 0, 0, 1], preferred_port(socket)));</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">129</td><td class="lf-sign">+</td><td>        let listener = match TcpListener::bind(preferred).await {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">130</td><td class="lf-sign">+</td><td>            Ok(listener) =&gt; listener,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">131</td><td class="lf-sign">+</td><td>            Err(_) =&gt; TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))</td></tr>
+<tr class="lf-add lf-code-row" data-line="111"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">111</td><td class="lf-sign">+</td><td>    use sha2::{Digest, Sha256};</td></tr>
+<tr class="lf-add lf-code-row" data-line="112"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">112</td><td class="lf-sign">+</td><td>    let digest = Sha256::digest(socket.as_os_str().as_encoded_bytes());</td></tr>
+<tr class="lf-add lf-code-row" data-line="113"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">113</td><td class="lf-sign">+</td><td>    49152 + u16::from_be_bytes([digest[0], digest[1]]) % 16384</td></tr>
+<tr class="lf-add lf-code-row" data-line="114"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">114</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add lf-code-row" data-line="115"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">115</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="116"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">116</td><td class="lf-sign">+</td><td>/// Bound loopback TCP listener ready to serve pages and WebSocket sessions.</td></tr>
+<tr class="lf-add lf-code-row" data-line="117"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">117</td><td class="lf-sign">+</td><td>pub(super) struct Loopback {</td></tr>
+<tr class="lf-add lf-code-row" data-line="118"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">118</td><td class="lf-sign">+</td><td>    listener: TcpListener,</td></tr>
+<tr class="lf-add lf-code-row" data-line="119"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">119</td><td class="lf-sign">+</td><td>    handle: Arc&lt;Handle&gt;,</td></tr>
+<tr class="lf-add lf-code-row" data-line="120"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">120</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add lf-code-row" data-line="121"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">121</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="122"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">122</td><td class="lf-sign">+</td><td>impl Loopback {</td></tr>
+<tr class="lf-add lf-code-row" data-line="123"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">123</td><td class="lf-sign">+</td><td>    /// Bind the loopback port this server&#39;s socket prefers, with a fresh 32-byte random token.</td></tr>
+<tr class="lf-add lf-code-row" data-line="124"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">124</td><td class="lf-sign">+</td><td>    /// A stable port keeps an open page&#39;s origin, and with it the drafts and `data-lf`</td></tr>
+<tr class="lf-add lf-code-row" data-line="125"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">125</td><td class="lf-sign">+</td><td>    /// receipts it holds in `localStorage`, across server restarts. When something else</td></tr>
+<tr class="lf-add lf-code-row" data-line="126"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">126</td><td class="lf-sign">+</td><td>    /// holds that port, an ephemeral one serves instead.</td></tr>
+<tr class="lf-add lf-code-row" data-line="127"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">127</td><td class="lf-sign">+</td><td>    pub(super) async fn bind(socket: &amp;Path) -&gt; Result&lt;(Self, Arc&lt;Handle&gt;)&gt; {</td></tr>
+<tr class="lf-add lf-code-row" data-line="128"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">128</td><td class="lf-sign">+</td><td>        let preferred = SocketAddr::from(([127, 0, 0, 1], preferred_port(socket)));</td></tr>
+<tr class="lf-add lf-code-row" data-line="129"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">129</td><td class="lf-sign">+</td><td>        let listener = match TcpListener::bind(preferred).await {</td></tr>
+<tr class="lf-add lf-code-row" data-line="130"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">130</td><td class="lf-sign">+</td><td>            Ok(listener) =&gt; listener,</td></tr>
+<tr class="lf-add lf-code-row" data-line="131"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">131</td><td class="lf-sign">+</td><td>            Err(_) =&gt; TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Falls back to an ephemeral port if another process holds the preferred port, so the server never refuses to start.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">132</td><td class="lf-sign">+</td><td>                .await</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">133</td><td class="lf-sign">+</td><td>                .context(&quot;Could not bind loopback review page listener&quot;)?,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">134</td><td class="lf-sign">+</td><td>        };</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">135</td><td class="lf-sign">+</td><td>        let port = listener.local_addr()?.port();</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">136</td><td class="lf-sign">+</td><td>        let handle = Arc::new(Handle {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">137</td><td class="lf-sign">+</td><td>            port,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">138</td><td class="lf-sign">+</td><td>            token: random_token(),</td></tr>
+<tr class="lf-add lf-code-row" data-line="132"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">132</td><td class="lf-sign">+</td><td>                .await</td></tr>
+<tr class="lf-add lf-code-row" data-line="133"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">133</td><td class="lf-sign">+</td><td>                .context(&quot;Could not bind loopback review page listener&quot;)?,</td></tr>
+<tr class="lf-add lf-code-row" data-line="134"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">134</td><td class="lf-sign">+</td><td>        };</td></tr>
+<tr class="lf-add lf-code-row" data-line="135"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">135</td><td class="lf-sign">+</td><td>        let port = listener.local_addr()?.port();</td></tr>
+<tr class="lf-add lf-code-row" data-line="136"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">136</td><td class="lf-sign">+</td><td>        let handle = Arc::new(Handle {</td></tr>
+<tr class="lf-add lf-code-row" data-line="137"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">137</td><td class="lf-sign">+</td><td>            port,</td></tr>
+<tr class="lf-add lf-code-row" data-line="138"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">138</td><td class="lf-sign">+</td><td>            token: random_token(),</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Always mints a fresh 32-byte random in-memory token per start, invalidating old URLs.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">139</td><td class="lf-sign">+</td><td>        });</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">140</td><td class="lf-sign">+</td><td>        Ok((</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">141</td><td class="lf-sign">+</td><td>            Self {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">142</td><td class="lf-sign">+</td><td>                listener,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">143</td><td class="lf-sign">+</td><td>                handle: handle.clone(),</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">144</td><td class="lf-sign">+</td><td>            },</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">145</td><td class="lf-sign">+</td><td>            handle,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">146</td><td class="lf-sign">+</td><td>        ))</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">147</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add lf-code-row" data-line="139"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">139</td><td class="lf-sign">+</td><td>        });</td></tr>
+<tr class="lf-add lf-code-row" data-line="140"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">140</td><td class="lf-sign">+</td><td>        Ok((</td></tr>
+<tr class="lf-add lf-code-row" data-line="141"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">141</td><td class="lf-sign">+</td><td>            Self {</td></tr>
+<tr class="lf-add lf-code-row" data-line="142"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">142</td><td class="lf-sign">+</td><td>                listener,</td></tr>
+<tr class="lf-add lf-code-row" data-line="143"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">143</td><td class="lf-sign">+</td><td>                handle: handle.clone(),</td></tr>
+<tr class="lf-add lf-code-row" data-line="144"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">144</td><td class="lf-sign">+</td><td>            },</td></tr>
+<tr class="lf-add lf-code-row" data-line="145"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">145</td><td class="lf-sign">+</td><td>            handle,</td></tr>
+<tr class="lf-add lf-code-row" data-line="146"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">146</td><td class="lf-sign">+</td><td>        ))</td></tr>
+<tr class="lf-add lf-code-row" data-line="147"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">147</td><td class="lf-sign">+</td><td>    }</td></tr>
 </tbody></table></div></div>
 
 <div class="lf-codeblock" data-path="rust/loopflow/src/lf/commands/page.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow/src/lf/commands/page.rs:70-134</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
 <tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,279 @@</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">70</td><td class="lf-sign">+</td><td>fn decide_open_route(host: PageHost) -&gt; OpenRoute {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">71</td><td class="lf-sign">+</td><td>    match host {</td></tr>
+<tr class="lf-add lf-code-row" data-line="70"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">70</td><td class="lf-sign">+</td><td>fn decide_open_route(host: PageHost) -&gt; OpenRoute {</td></tr>
+<tr class="lf-add lf-code-row" data-line="71"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">71</td><td class="lf-sign">+</td><td>    match host {</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Explicit --host desktop|browser short-circuits before touching SQLite or placement state.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">72</td><td class="lf-sign">+</td><td>        PageHost::Desktop =&gt; return OpenRoute::Desktop,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">73</td><td class="lf-sign">+</td><td>        PageHost::Browser =&gt; return OpenRoute::Browser,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">74</td><td class="lf-sign">+</td><td>        PageHost::Auto =&gt; {}</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">75</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">76</td><td class="lf-sign">+</td><td>    let caller = loopflow_execution::journal::agent_caller();</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">77</td><td class="lf-sign">+</td><td>    let in_desktop_env = std::env::var_os(&quot;LF_DESKTOP&quot;).is_some_and(|value| !value.is_empty());</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">78</td><td class="lf-sign">+</td><td>    let session_interactive = caller</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">79</td><td class="lf-sign">+</td><td>        .as_ref()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">80</td><td class="lf-sign">+</td><td>        .and_then(|c| load_session(&amp;c.session_id))</td></tr>
+<tr class="lf-add lf-code-row" data-line="72"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">72</td><td class="lf-sign">+</td><td>        PageHost::Desktop =&gt; return OpenRoute::Desktop,</td></tr>
+<tr class="lf-add lf-code-row" data-line="73"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">73</td><td class="lf-sign">+</td><td>        PageHost::Browser =&gt; return OpenRoute::Browser,</td></tr>
+<tr class="lf-add lf-code-row" data-line="74"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">74</td><td class="lf-sign">+</td><td>        PageHost::Auto =&gt; {}</td></tr>
+<tr class="lf-add lf-code-row" data-line="75"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">75</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add lf-code-row" data-line="76"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">76</td><td class="lf-sign">+</td><td>    let caller = loopflow_execution::journal::agent_caller();</td></tr>
+<tr class="lf-add lf-code-row" data-line="77"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">77</td><td class="lf-sign">+</td><td>    let in_desktop_env = std::env::var_os(&quot;LF_DESKTOP&quot;).is_some_and(|value| !value.is_empty());</td></tr>
+<tr class="lf-add lf-code-row" data-line="78"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">78</td><td class="lf-sign">+</td><td>    let session_interactive = caller</td></tr>
+<tr class="lf-add lf-code-row" data-line="79"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">79</td><td class="lf-sign">+</td><td>        .as_ref()</td></tr>
+<tr class="lf-add lf-code-row" data-line="80"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">80</td><td class="lf-sign">+</td><td>        .and_then(|c| load_session(&amp;c.session_id))</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Reads session.interactive via shared load_session() so plain-terminal interactive sessions open the browser while headless workers stay quiet.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">81</td><td class="lf-sign">+</td><td>        .map(|session| session.interactive);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">82</td><td class="lf-sign">+</td><td>    let placement = caller</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">83</td><td class="lf-sign">+</td><td>        .as_ref()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">84</td><td class="lf-sign">+</td><td>        .and_then(|_| viewed_placement())</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">85</td><td class="lf-sign">+</td><td>        .map(|(host, _)| host);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">86</td><td class="lf-sign">+</td><td>    route_for(</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">87</td><td class="lf-sign">+</td><td>        host,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">88</td><td class="lf-sign">+</td><td>        caller.is_some(),</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">89</td><td class="lf-sign">+</td><td>        in_desktop_env,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">90</td><td class="lf-sign">+</td><td>        session_interactive,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">91</td><td class="lf-sign">+</td><td>        placement,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">92</td><td class="lf-sign">+</td><td>    )</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">93</td><td class="lf-sign">+</td><td>}</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">94</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">95</td><td class="lf-sign">+</td><td>pub(super) fn load_session(</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">96</td><td class="lf-sign">+</td><td>    session_id: &amp;loopflow_model::id::LfSessionId,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">97</td><td class="lf-sign">+</td><td>) -&gt; Option&lt;loopflow_execution::session::LfSession&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">98</td><td class="lf-sign">+</td><td>    let store = loopflow_execution::store::read_existing_registry()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">99</td><td class="lf-sign">+</td><td>        .ok()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">100</td><td class="lf-sign">+</td><td>        .flatten()?;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">101</td><td class="lf-sign">+</td><td>    store.sqlite.session(session_id).ok().flatten()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">102</td><td class="lf-sign">+</td><td>}</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">103</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">104</td><td class="lf-sign">+</td><td>fn route_for(</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">105</td><td class="lf-sign">+</td><td>    host: PageHost,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">106</td><td class="lf-sign">+</td><td>    has_agent_caller: bool,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">107</td><td class="lf-sign">+</td><td>    in_desktop_env: bool,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">108</td><td class="lf-sign">+</td><td>    session_interactive: Option&lt;bool&gt;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">109</td><td class="lf-sign">+</td><td>    viewed_host: Option&lt;OpenHost&gt;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">110</td><td class="lf-sign">+</td><td>) -&gt; OpenRoute {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">111</td><td class="lf-sign">+</td><td>    match (host, has_agent_caller) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">112</td><td class="lf-sign">+</td><td>        (PageHost::Desktop, _) =&gt; OpenRoute::Desktop,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">113</td><td class="lf-sign">+</td><td>        (PageHost::Browser, _) =&gt; OpenRoute::Browser,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">114</td><td class="lf-sign">+</td><td>        (PageHost::Auto, false) =&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">115</td><td class="lf-sign">+</td><td>            if in_desktop_env {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">116</td><td class="lf-sign">+</td><td>                OpenRoute::Desktop</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">117</td><td class="lf-sign">+</td><td>            } else {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">118</td><td class="lf-sign">+</td><td>                OpenRoute::Browser</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">119</td><td class="lf-sign">+</td><td>            }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">120</td><td class="lf-sign">+</td><td>        }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">121</td><td class="lf-sign">+</td><td>        (PageHost::Auto, true) =&gt; match session_interactive {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">122</td><td class="lf-sign">+</td><td>            Some(false) =&gt; OpenRoute::PrintQuiet,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">123</td><td class="lf-sign">+</td><td>            Some(true) if in_desktop_env || viewed_host == Some(OpenHost::Desktop) =&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">124</td><td class="lf-sign">+</td><td>                OpenRoute::Desktop</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">125</td><td class="lf-sign">+</td><td>            }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">126</td><td class="lf-sign">+</td><td>            Some(true) =&gt; OpenRoute::Browser,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">127</td><td class="lf-sign">+</td><td>            None =&gt; match viewed_host {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">128</td><td class="lf-sign">+</td><td>                Some(OpenHost::Desktop) =&gt; OpenRoute::Desktop,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">129</td><td class="lf-sign">+</td><td>                Some(_) =&gt; OpenRoute::Browser,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">130</td><td class="lf-sign">+</td><td>                None =&gt; OpenRoute::PrintQuiet,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">131</td><td class="lf-sign">+</td><td>            },</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">132</td><td class="lf-sign">+</td><td>        },</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">133</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">134</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add lf-code-row" data-line="81"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">81</td><td class="lf-sign">+</td><td>        .map(|session| session.interactive);</td></tr>
+<tr class="lf-add lf-code-row" data-line="82"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">82</td><td class="lf-sign">+</td><td>    let placement = caller</td></tr>
+<tr class="lf-add lf-code-row" data-line="83"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">83</td><td class="lf-sign">+</td><td>        .as_ref()</td></tr>
+<tr class="lf-add lf-code-row" data-line="84"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">84</td><td class="lf-sign">+</td><td>        .and_then(|_| viewed_placement())</td></tr>
+<tr class="lf-add lf-code-row" data-line="85"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">85</td><td class="lf-sign">+</td><td>        .map(|(host, _)| host);</td></tr>
+<tr class="lf-add lf-code-row" data-line="86"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">86</td><td class="lf-sign">+</td><td>    route_for(</td></tr>
+<tr class="lf-add lf-code-row" data-line="87"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">87</td><td class="lf-sign">+</td><td>        host,</td></tr>
+<tr class="lf-add lf-code-row" data-line="88"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">88</td><td class="lf-sign">+</td><td>        caller.is_some(),</td></tr>
+<tr class="lf-add lf-code-row" data-line="89"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">89</td><td class="lf-sign">+</td><td>        in_desktop_env,</td></tr>
+<tr class="lf-add lf-code-row" data-line="90"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">90</td><td class="lf-sign">+</td><td>        session_interactive,</td></tr>
+<tr class="lf-add lf-code-row" data-line="91"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">91</td><td class="lf-sign">+</td><td>        placement,</td></tr>
+<tr class="lf-add lf-code-row" data-line="92"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">92</td><td class="lf-sign">+</td><td>    )</td></tr>
+<tr class="lf-add lf-code-row" data-line="93"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">93</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add lf-code-row" data-line="94"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">94</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="95"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">95</td><td class="lf-sign">+</td><td>pub(super) fn load_session(</td></tr>
+<tr class="lf-add lf-code-row" data-line="96"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">96</td><td class="lf-sign">+</td><td>    session_id: &amp;loopflow_model::id::LfSessionId,</td></tr>
+<tr class="lf-add lf-code-row" data-line="97"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">97</td><td class="lf-sign">+</td><td>) -&gt; Option&lt;loopflow_execution::session::LfSession&gt; {</td></tr>
+<tr class="lf-add lf-code-row" data-line="98"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">98</td><td class="lf-sign">+</td><td>    let store = loopflow_execution::store::read_existing_registry()</td></tr>
+<tr class="lf-add lf-code-row" data-line="99"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">99</td><td class="lf-sign">+</td><td>        .ok()</td></tr>
+<tr class="lf-add lf-code-row" data-line="100"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">100</td><td class="lf-sign">+</td><td>        .flatten()?;</td></tr>
+<tr class="lf-add lf-code-row" data-line="101"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">101</td><td class="lf-sign">+</td><td>    store.sqlite.session(session_id).ok().flatten()</td></tr>
+<tr class="lf-add lf-code-row" data-line="102"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">102</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add lf-code-row" data-line="103"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">103</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="104"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">104</td><td class="lf-sign">+</td><td>fn route_for(</td></tr>
+<tr class="lf-add lf-code-row" data-line="105"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">105</td><td class="lf-sign">+</td><td>    host: PageHost,</td></tr>
+<tr class="lf-add lf-code-row" data-line="106"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">106</td><td class="lf-sign">+</td><td>    has_agent_caller: bool,</td></tr>
+<tr class="lf-add lf-code-row" data-line="107"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">107</td><td class="lf-sign">+</td><td>    in_desktop_env: bool,</td></tr>
+<tr class="lf-add lf-code-row" data-line="108"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">108</td><td class="lf-sign">+</td><td>    session_interactive: Option&lt;bool&gt;,</td></tr>
+<tr class="lf-add lf-code-row" data-line="109"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">109</td><td class="lf-sign">+</td><td>    viewed_host: Option&lt;OpenHost&gt;,</td></tr>
+<tr class="lf-add lf-code-row" data-line="110"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">110</td><td class="lf-sign">+</td><td>) -&gt; OpenRoute {</td></tr>
+<tr class="lf-add lf-code-row" data-line="111"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">111</td><td class="lf-sign">+</td><td>    match (host, has_agent_caller) {</td></tr>
+<tr class="lf-add lf-code-row" data-line="112"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">112</td><td class="lf-sign">+</td><td>        (PageHost::Desktop, _) =&gt; OpenRoute::Desktop,</td></tr>
+<tr class="lf-add lf-code-row" data-line="113"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">113</td><td class="lf-sign">+</td><td>        (PageHost::Browser, _) =&gt; OpenRoute::Browser,</td></tr>
+<tr class="lf-add lf-code-row" data-line="114"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">114</td><td class="lf-sign">+</td><td>        (PageHost::Auto, false) =&gt; {</td></tr>
+<tr class="lf-add lf-code-row" data-line="115"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">115</td><td class="lf-sign">+</td><td>            if in_desktop_env {</td></tr>
+<tr class="lf-add lf-code-row" data-line="116"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">116</td><td class="lf-sign">+</td><td>                OpenRoute::Desktop</td></tr>
+<tr class="lf-add lf-code-row" data-line="117"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">117</td><td class="lf-sign">+</td><td>            } else {</td></tr>
+<tr class="lf-add lf-code-row" data-line="118"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">118</td><td class="lf-sign">+</td><td>                OpenRoute::Browser</td></tr>
+<tr class="lf-add lf-code-row" data-line="119"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">119</td><td class="lf-sign">+</td><td>            }</td></tr>
+<tr class="lf-add lf-code-row" data-line="120"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">120</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add lf-code-row" data-line="121"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">121</td><td class="lf-sign">+</td><td>        (PageHost::Auto, true) =&gt; match session_interactive {</td></tr>
+<tr class="lf-add lf-code-row" data-line="122"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">122</td><td class="lf-sign">+</td><td>            Some(false) =&gt; OpenRoute::PrintQuiet,</td></tr>
+<tr class="lf-add lf-code-row" data-line="123"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">123</td><td class="lf-sign">+</td><td>            Some(true) if in_desktop_env || viewed_host == Some(OpenHost::Desktop) =&gt; {</td></tr>
+<tr class="lf-add lf-code-row" data-line="124"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">124</td><td class="lf-sign">+</td><td>                OpenRoute::Desktop</td></tr>
+<tr class="lf-add lf-code-row" data-line="125"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">125</td><td class="lf-sign">+</td><td>            }</td></tr>
+<tr class="lf-add lf-code-row" data-line="126"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">126</td><td class="lf-sign">+</td><td>            Some(true) =&gt; OpenRoute::Browser,</td></tr>
+<tr class="lf-add lf-code-row" data-line="127"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">127</td><td class="lf-sign">+</td><td>            None =&gt; match viewed_host {</td></tr>
+<tr class="lf-add lf-code-row" data-line="128"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">128</td><td class="lf-sign">+</td><td>                Some(OpenHost::Desktop) =&gt; OpenRoute::Desktop,</td></tr>
+<tr class="lf-add lf-code-row" data-line="129"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">129</td><td class="lf-sign">+</td><td>                Some(_) =&gt; OpenRoute::Browser,</td></tr>
+<tr class="lf-add lf-code-row" data-line="130"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">130</td><td class="lf-sign">+</td><td>                None =&gt; OpenRoute::PrintQuiet,</td></tr>
+<tr class="lf-add lf-code-row" data-line="131"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">131</td><td class="lf-sign">+</td><td>            },</td></tr>
+<tr class="lf-add lf-code-row" data-line="132"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">132</td><td class="lf-sign">+</td><td>        },</td></tr>
+<tr class="lf-add lf-code-row" data-line="133"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">133</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add lf-code-row" data-line="134"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">134</td><td class="lf-sign">+</td><td>}</td></tr>
 </tbody></table></div></div>
 
 <h2>Open product choices (built, reversible, waiting for review)</h2>
@@ -813,7 +1197,7 @@ button.lf-btn-quiet {
   <textarea rows="3" placeholder="Optional notes…"></textarea>
 </div>
 </main>
-<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1109"},"directory":"/Users/jack/src/loopflow.loo-1109-human-comprehension-review","base":"6d617de68638439a144601b3cb8cbaf6ec678630","head":"5706b81f39","path":"scratch/concept-review.html","build_id":"b48268dfcf987521","protocol":{"revision":10,"min_revision":10}}</script>
+<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1109"},"directory":"/Users/jack/src/loopflow.loo-1109-human-comprehension-review","base":"d8b2afebd9d7148d6db9a520f2f7216da3a76f63","head":"f834a3d552","path":"scratch/concept-review.html","build_id":"dbef803d9119d54e","protocol":{"revision":10,"min_revision":10}}</script>
 <script>
 (function () {
   "use strict";
@@ -836,6 +1220,7 @@ button.lf-btn-quiet {
   const protocolRevision = Number(protocol && protocol.revision);
   const protocolMinRevision = Number(protocol && protocol.min_revision);
   const storageKey = "lf-page:" + pagePath + ":" + buildId;
+  const mainEl = document.querySelector("main.lf-page") || document.querySelector("main") || document.body;
 
   const desktopHandler =
     window.webkit &&
@@ -849,7 +1234,8 @@ button.lf-btn-quiet {
   let serverDisconnected = false;
 
   // Draft & receipt state.
-  // Notes, choices, multiselects, questions, and offline actions enter the reply queue.
+  // Notes (prose & diff/file lines), choices, multiselects, questions, offline actions,
+  // and optional browser overall direction enter the reply queue.
   // Executed direct `data-lf` receipts stay separate and only ride as a suffix on ⌘↩.
   function emptyState() {
     return {
@@ -858,6 +1244,7 @@ button.lf-btn-quiet {
       multiselects: {},
       questions: {},
       offlineActions: [],
+      overall: "",
       receipts: [],
     };
   }
@@ -899,6 +1286,16 @@ button.lf-btn-quiet {
     return "lf-" + Math.random().toString(16).slice(2) + "-" + Date.now().toString(16);
   }
 
+  function shortPath(path) {
+    const parts = String(path || "").split("/");
+    return parts[parts.length - 1] || path;
+  }
+
+  function truncate(text, max) {
+    const s = oneLine(text);
+    return s.length > max ? s.slice(0, max - 1) + "…" : s;
+  }
+
   function nearestSection(node) {
     let el = node && node.nodeType === 1 ? node : node && node.parentElement;
     while (el && el !== document.body) {
@@ -913,36 +1310,184 @@ button.lf-btn-quiet {
     return h1 ? oneLine(h1.textContent) : "Top";
   }
 
-  function queueItems() {
-    const items = [];
-    for (const note of state.notes) {
-      items.push(
-        "`" +
+  function formatLineSpan(note) {
+    const start = Number(note.lineStart);
+    const end = Number(note.lineEnd || note.lineStart);
+    const span = start === end ? String(start) : start + "–" + end;
+    return note.side === "old" ? "old:" + span : span;
+  }
+
+  function formatLineAnchor(note) {
+    return oneLine(note.path) + ":" + formatLineSpan(note);
+  }
+
+  function formatNoteAnchorLabel(note) {
+    if (note.kind === "line") return formatLineAnchor(note);
+    return "§ " + oneLine(note.section) + ' · "' + truncate(note.quote, 46) + '"';
+  }
+
+  function pulseElement(el) {
+    if (!el) return;
+    try {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    } catch (_) {}
+    el.classList.add("lf-pulse-ring");
+    setTimeout(() => el.classList.remove("lf-pulse-ring"), 950);
+  }
+
+  function noteAnchorElement(note) {
+    if (note.kind === "line") {
+      const blocks = mainEl.querySelectorAll(".lf-codeblock[data-path]");
+      const attr = note.side === "old" ? "data-old-line" : "data-line";
+      const start = Number(note.lineStart);
+      for (const block of blocks) {
+        if (block.getAttribute("data-path") !== note.path) continue;
+        const row = block.querySelector('tr.lf-code-row[' + attr + '="' + start + '"]');
+        if (row) return row;
+      }
+      return null;
+    }
+    return mainEl.querySelector('.lf-hl[data-lf-note-id="' + CSS.escape(note.id) + '"]');
+  }
+
+  function notesInDocumentOrder() {
+    if (state.notes.length <= 1) return state.notes.slice();
+    const indexed = state.notes.map((note, idx) => ({
+      note,
+      idx,
+      el: noteAnchorElement(note),
+    }));
+    indexed.sort((a, b) => {
+      if (a.el && b.el && a.el !== b.el) {
+        const pos = a.el.compareDocumentPosition(b.el);
+        if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+        if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+      }
+      if (a.el && !b.el) return -1;
+      if (!a.el && b.el) return 1;
+      return a.idx - b.idx;
+    });
+    return indexed.map((entry) => entry.note);
+  }
+
+  function deleteNote(id) {
+    state.notes = state.notes.filter((n) => n.id !== id);
+    if (sidebarEditingId === id) sidebarEditingId = null;
+    hideHoverCard();
+    refresh(true);
+  }
+
+  function queueEntries() {
+    const entries = [];
+    for (const note of notesInDocumentOrder()) {
+      if (note.kind === "line") {
+        const anchor = formatLineAnchor(note);
+        const ref = "`" + pagePath + "` § " + anchor + " — " + oneLine(note.text);
+        entries.push({
+          tag: "diff",
+          summary: shortPath(note.path) + ":" + formatLineSpan(note) + " — " + oneLine(note.text),
+          title: anchor + " — " + oneLine(note.text),
+          ref,
+          jump: () => pulseElement(noteAnchorElement(note)),
+          remove: () => deleteNote(note.id),
+        });
+      } else {
+        const ref =
+          "`" +
           pagePath +
           "` § " +
           oneLine(note.section) +
           ' › "' +
           oneLine(note.quote) +
           '" ' +
-          oneLine(note.text)
-      );
+          oneLine(note.text);
+        entries.push({
+          tag: "note",
+          summary: '"' + truncate(note.quote, 26) + '" — ' + oneLine(note.text),
+          title: oneLine(note.section) + ' › "' + oneLine(note.quote) + '" — ' + oneLine(note.text),
+          ref,
+          jump: () => pulseElement(noteAnchorElement(note)),
+          remove: () => deleteNote(note.id),
+        });
+      }
     }
     for (const [group, entry] of Object.entries(state.choices)) {
       if (!entry || !entry.value) continue;
-      items.push("`" + pagePath + "` § " + oneLine(entry.label || group) + ": " + oneLine(entry.value));
+      const label = oneLine(entry.label || group);
+      const val = oneLine(entry.value);
+      const ref = "`" + pagePath + "` § " + label + ": " + val;
+      entries.push({
+        tag: "choice",
+        summary: label + ": " + val,
+        title: label + ": " + val,
+        ref,
+        jump: () => pulseElement(document.querySelector('[data-choice="' + CSS.escape(group) + '"]')),
+        remove: () => {
+          delete state.choices[group];
+          refresh(true);
+        },
+      });
     }
     for (const [group, entry] of Object.entries(state.multiselects)) {
       if (!entry || !Array.isArray(entry.values) || entry.values.length === 0) continue;
-      items.push(
-        "`" + pagePath + "` § " + oneLine(entry.label || group) + ": " + entry.values.map(oneLine).join(", ")
-      );
+      const label = oneLine(entry.label || group);
+      const vals = entry.values.map(oneLine).join(", ");
+      const ref = "`" + pagePath + "` § " + label + ": " + vals;
+      entries.push({
+        tag: "choice",
+        summary: label + ": " + vals,
+        title: label + ": " + vals,
+        ref,
+        jump: () => pulseElement(document.querySelector('[data-multiselect="' + CSS.escape(group) + '"]')),
+        remove: () => {
+          delete state.multiselects[group];
+          refresh(true);
+        },
+      });
     }
     for (const [qid, entry] of Object.entries(state.questions)) {
       if (!entry || !oneLine(entry.answer)) continue;
-      items.push("`" + pagePath + "` § " + oneLine(entry.label || qid) + ": " + oneLine(entry.answer));
+      const label = oneLine(entry.label || qid);
+      const ans = oneLine(entry.answer);
+      const ref = "`" + pagePath + "` § " + label + ": " + ans;
+      entries.push({
+        tag: "answer",
+        summary: label + ": " + ans,
+        title: label + ": " + ans,
+        ref,
+        jump: () => pulseElement(document.querySelector('[data-question="' + CSS.escape(qid) + '"]')),
+        remove: () => {
+          delete state.questions[qid];
+          refresh(true);
+        },
+      });
     }
     for (const act of state.offlineActions) {
-      items.push("`" + pagePath + "` Run: " + oneLine(act.summary));
+      const summary = oneLine(act.summary);
+      const ref = "`" + pagePath + "` Run: " + summary;
+      entries.push({
+        tag: "run",
+        summary,
+        title: "Run: " + summary,
+        ref,
+        jump: () => {
+          const found = actions.find((a) => a.key === act.key);
+          if (found) pulseElement(found.slot);
+        },
+        remove: () => {
+          state.offlineActions = state.offlineActions.filter((a) => a.id !== act.id);
+          refresh(true);
+        },
+      });
+    }
+    return entries;
+  }
+
+  function queueItems() {
+    const items = queueEntries().map((e) => e.ref);
+    const overall = oneLine(state.overall);
+    if (!desktopHandler && overall) {
+      items.push("`" + pagePath + "` Overall: " + overall);
     }
     return items;
   }
@@ -998,10 +1543,10 @@ button.lf-btn-quiet {
       stripStatusKind = "";
     }
     syncControlsFromState();
-    renderNotesTray();
     renderHighlights();
+    renderSidebar();
     if (persist) saveState();
-    renderStrip();
+    renderDock();
   }
 
   function applyState(loaded) {
@@ -1015,6 +1560,7 @@ button.lf-btn-quiet {
           loaded.multiselects && typeof loaded.multiselects === "object" ? loaded.multiselects : {},
         questions: loaded.questions && typeof loaded.questions === "object" ? loaded.questions : {},
         offlineActions: Array.isArray(loaded.offlineActions) ? loaded.offlineActions : [],
+        overall: typeof loaded.overall === "string" ? loaded.overall : "",
         receipts: Array.isArray(loaded.receipts) ? loaded.receipts : [],
       };
     }
@@ -1045,7 +1591,7 @@ button.lf-btn-quiet {
     hostMode = "clipboard";
     serverDisconnected = true;
     showBanner(reason || "Loopflow server disconnected — run lf page open " + pagePath);
-    renderStrip();
+    renderDock();
   }
 
   function connectLoopback() {
@@ -1092,7 +1638,7 @@ button.lf-btn-quiet {
         hostMode = "loopback";
         serverDisconnected = false;
         hideBanner();
-        renderStrip();
+        renderDock();
         return;
       }
       if (msg.type === "error" && !msg.id) {
@@ -1167,8 +1713,7 @@ button.lf-btn-quiet {
     if (!bannerEl) {
       bannerEl = document.createElement("div");
       bannerEl.className = "lf-banner";
-      const main = document.querySelector("main") || document.body;
-      main.insertBefore(bannerEl, main.firstChild);
+      mainEl.insertBefore(bannerEl, mainEl.firstChild);
     }
     bannerEl.textContent = text;
     bannerEl.hidden = false;
@@ -1236,8 +1781,9 @@ button.lf-btn-quiet {
         if (!oneLine(answer)) delete state.questions[qid];
         else state.questions[qid] = { label, answer };
         stripStatusText = "";
+        stripStatusKind = "";
         saveState();
-        renderStrip();
+        renderDock();
       });
     });
 
@@ -1387,148 +1933,852 @@ button.lf-btn-quiet {
     }
   }
 
-  // --- Highlight-to-comment ---
+  // --- Cross-element prose highlight anchoring ---
 
-  let popover = null;
+  const EXCLUDED_TEXT_SELECTOR =
+    "button, textarea, input, script, style, .lf-gutter-plus, .lf-ln, .lf-sign, " +
+    ".lf-float-pill, .lf-float-composer, .lf-hover-card, .lf-sidebar, .lf-dock, " +
+    ".lf-comments-toggle, .lf-banner, .lf-action-confirm, .lf-action-receipt, .lf-action-error";
 
-  function dismissPopover() {
-    if (popover) {
-      popover.remove();
-      popover = null;
+  const BLOCK_TAGS = new Set([
+    "P", "DIV", "LI", "TR", "TD", "TH", "H1", "H2", "H3", "H4", "H5", "H6",
+    "PRE", "BLOCKQUOTE", "SECTION", "ARTICLE", "ASIDE", "HEADER", "FOOTER", "DT", "DD",
+  ]);
+
+  function nearestBlock(node) {
+    let el = node && node.nodeType === 1 ? node : node && node.parentElement;
+    while (el && el !== mainEl) {
+      if (BLOCK_TAGS.has(el.tagName)) return el;
+      el = el.parentElement;
     }
+    return mainEl;
+  }
+
+  function isExcludedTextNode(node) {
+    const parent = node.parentElement;
+    if (!parent) return true;
+    if (parent.closest(EXCLUDED_TEXT_SELECTOR)) return true;
+    if (parent.closest("[hidden]")) return true;
+    if (parent.closest(".lf-notes-hidden .lf-line-note")) return true;
+    return false;
+  }
+
+  function buildNormalizedIndex(root) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let flat = "";
+    const starts = [];
+    const ends = [];
+    let lastWasSpace = true;
+    let lastBlock = null;
+    let node;
+    while ((node = walker.nextNode())) {
+      if (!node.nodeValue || isExcludedTextNode(node)) continue;
+      const block = nearestBlock(node);
+      if (lastBlock && block !== lastBlock && !lastWasSpace) {
+        flat += " ";
+        starts.push(null);
+        ends.push(null);
+        lastWasSpace = true;
+      }
+      lastBlock = block;
+      const val = node.nodeValue;
+      for (let i = 0; i < val.length; i++) {
+        const ch = val[i];
+        if (/\s/.test(ch)) {
+          if (!lastWasSpace) {
+            flat += " ";
+            starts.push({ node, offset: i });
+            ends.push({ node, offset: i + 1 });
+            lastWasSpace = true;
+          }
+        } else {
+          flat += ch;
+          starts.push({ node, offset: i });
+          ends.push({ node, offset: i + 1 });
+          lastWasSpace = false;
+        }
+      }
+    }
+    while (flat.length > 0 && flat[flat.length - 1] === " ") {
+      flat = flat.slice(0, -1);
+      starts.pop();
+      ends.pop();
+    }
+    return { flat, starts, ends };
+  }
+
+  function findOccurrenceForRange(range, needle) {
+    if (!needle) return 0;
+    const index = buildNormalizedIndex(mainEl);
+    let rangeFlatPos = -1;
+    for (let i = 0; i < index.starts.length; i++) {
+      const p = index.starts[i];
+      if (!p) continue;
+      try {
+        if (range.comparePoint(p.node, p.offset) === 0) {
+          rangeFlatPos = i;
+          break;
+        }
+      } catch (_) {}
+    }
+    if (rangeFlatPos < 0) return 0;
+    let count = 0;
+    let from = 0;
+    while (from < rangeFlatPos) {
+      const hit = index.flat.indexOf(needle, from);
+      if (hit < 0 || hit >= rangeFlatPos) break;
+      count++;
+      from = hit + 1;
+    }
+    return count;
+  }
+
+  function findNormalizedRange(needle, occurrence) {
+    if (!needle) return null;
+    const index = buildNormalizedIndex(mainEl);
+    let hit = -1;
+    let from = 0;
+    const targetOcc = Math.max(0, Number(occurrence) || 0);
+    for (let occ = 0; occ <= targetOcc; occ++) {
+      const next = index.flat.indexOf(needle, from);
+      if (next < 0) break;
+      hit = next;
+      from = next + 1;
+    }
+    if (hit < 0) return null;
+    let s = hit;
+    let e = hit + needle.length - 1;
+    while (s <= e && !index.starts[s]) s++;
+    while (e >= s && !index.ends[e]) e--;
+    if (s > e || !index.starts[s] || !index.ends[e]) return null;
+    try {
+      const range = document.createRange();
+      range.setStart(index.starts[s].node, index.starts[s].offset);
+      range.setEnd(index.ends[e].node, index.ends[e].offset);
+      return range;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function wrapRange(range, noteId) {
+    const walker = document.createTreeWalker(mainEl, NodeFilter.SHOW_TEXT);
+    const hits = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      if (!node.nodeValue || isExcludedTextNode(node)) continue;
+      let intersects = false;
+      try {
+        intersects = range.intersectsNode(node);
+      } catch (_) {
+        continue;
+      }
+      if (!intersects) continue;
+      const start = node === range.startContainer ? range.startOffset : 0;
+      const end = node === range.endContainer ? range.endOffset : node.nodeValue.length;
+      if (end > start && node.nodeValue.slice(start, end).trim()) {
+        hits.push({ node, start, end });
+      }
+    }
+    for (let i = hits.length - 1; i >= 0; i--) {
+      const { node: tn, start, end } = hits[i];
+      const text = tn.nodeValue;
+      const before = text.slice(0, start);
+      const mid = text.slice(start, end);
+      const after = text.slice(end);
+      const frag = document.createDocumentFragment();
+      if (before) frag.appendChild(document.createTextNode(before));
+      const span = document.createElement("span");
+      span.className = "lf-hl";
+      span.setAttribute("data-lf-note-id", noteId);
+      span.textContent = mid;
+      frag.appendChild(span);
+      if (after) frag.appendChild(document.createTextNode(after));
+      if (tn.parentNode) tn.parentNode.replaceChild(frag, tn);
+    }
+  }
+
+  function unwrapAllHighlights() {
+    const spans = Array.from(mainEl.querySelectorAll("span.lf-hl[data-lf-note-id]"));
+    const parents = new Set();
+    for (let i = spans.length - 1; i >= 0; i--) {
+      const span = spans[i];
+      const parent = span.parentNode;
+      if (!parent) continue;
+      parents.add(parent);
+      while (span.firstChild) parent.insertBefore(span.firstChild, span);
+      parent.removeChild(span);
+    }
+    for (const parent of parents) {
+      if (parent.isConnected) parent.normalize();
+    }
+  }
+
+  function highlightSignature() {
+    return JSON.stringify(
+      state.notes.map((n) =>
+        n.kind === "line"
+          ? [n.id, "line", n.path, n.side, n.lineStart, n.lineEnd]
+          : [n.id, "prose", n.match || n.quote, n.occurrence || 0]
+      )
+    );
+  }
+
+  let lastHighlightSig = "";
+
+  function renderHighlights() {
+    const sig = highlightSignature();
+    if (sig === lastHighlightSig) return;
+    lastHighlightSig = sig;
+
+    unwrapAllHighlights();
+
+    // Clear existing line-note markers on diff/file rows
+    mainEl.querySelectorAll("tr.lf-code-row.lf-row-has-note").forEach((tr) => {
+      tr.classList.remove("lf-row-has-note");
+      tr.removeAttribute("data-lf-line-note-ids");
+    });
+
+    for (const note of state.notes) {
+      if (note.kind === "line") {
+        markLineNoteRows(note);
+      } else {
+        const needle = oneLine(note.match || note.quote);
+        const range = findNormalizedRange(needle, note.occurrence || 0);
+        if (range) wrapRange(range, note.id);
+      }
+    }
+  }
+
+  function rowsForLineNote(note) {
+    const matched = [];
+    const blocks = mainEl.querySelectorAll(".lf-codeblock[data-path]");
+    const attr = note.side === "old" ? "data-old-line" : "data-line";
+    const start = Number(note.lineStart);
+    const end = Number(note.lineEnd || note.lineStart);
+    for (const block of blocks) {
+      if (block.getAttribute("data-path") !== note.path) continue;
+      block.querySelectorAll("tr.lf-code-row[" + attr + "]").forEach((tr) => {
+        const ln = Number(tr.getAttribute(attr));
+        if (ln >= start && ln <= end) matched.push(tr);
+      });
+    }
+    return matched;
+  }
+
+  function markLineNoteRows(note) {
+    for (const tr of rowsForLineNote(note)) {
+      tr.classList.add("lf-row-has-note");
+      const existing = tr.getAttribute("data-lf-line-note-ids");
+      const list = existing ? existing.split(",") : [];
+      if (!list.includes(note.id)) list.push(note.id);
+      tr.setAttribute("data-lf-line-note-ids", list.join(","));
+    }
+  }
+
+  // --- Floating selection pill, composer, and hover cards (1c) ---
+
+  let floatPill = null;
+  let floatComposer = null;
+  let pendingSelection = null; // { range, rect, section, quote, match }
+  let hoverCardEl = null;
+  let hoverHideTimer = null;
+
+  function clearSelectingRows() {
+    mainEl.querySelectorAll("tr.lf-code-row.lf-row-selecting").forEach((tr) => {
+      tr.classList.remove("lf-row-selecting");
+    });
+  }
+
+  function dismissFloatPill() {
+    if (floatPill) {
+      floatPill.remove();
+      floatPill = null;
+    }
+  }
+
+  function dismissFloatComposer() {
+    if (floatComposer) {
+      floatComposer.remove();
+      floatComposer = null;
+    }
+    clearSelectingRows();
+  }
+
+  function dismissFloats() {
+    dismissFloatPill();
+    dismissFloatComposer();
+  }
+
+  function hideHoverCard() {
+    clearTimeout(hoverHideTimer);
+    if (hoverCardEl) {
+      hoverCardEl.remove();
+      hoverCardEl = null;
+    }
+  }
+
+  function clampFixedBox(el, rect, preferAbove) {
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const dockAllowance = desktopHandler ? 12 : 96;
+    let top;
+    if (preferAbove) {
+      top = rect.top - h - 8;
+      if (top < 8) top = Math.min(window.innerHeight - h - dockAllowance, rect.bottom + 8);
+    } else {
+      top = rect.bottom + 8;
+      if (top + h > window.innerHeight - dockAllowance) {
+        top = Math.max(8, rect.top - h - 8);
+      }
+    }
+    top = Math.max(8, Math.min(window.innerHeight - h - 8, top));
+    const centered = preferAbove ? rect.left + rect.width / 2 - w / 2 : rect.left;
+    const left = Math.max(8, Math.min(window.innerWidth - w - 8, centered));
+    el.style.top = top + "px";
+    el.style.left = left + "px";
+  }
+
+  function showFloatPill(rect, buttons) {
+    dismissFloatPill();
+    floatPill = document.createElement("div");
+    floatPill.className = "lf-float-pill";
+    buttons.forEach((b, idx) => {
+      if (idx > 0) {
+        const sep = document.createElement("span");
+        sep.className = "lf-float-pill-sep";
+        floatPill.appendChild(sep);
+      }
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = b.label;
+      btn.addEventListener("mousedown", (e) => e.preventDefault());
+      btn.addEventListener("click", () => {
+        dismissFloatPill();
+        b.onClick();
+      });
+      floatPill.appendChild(btn);
+    });
+    document.body.appendChild(floatPill);
+    clampFixedBox(floatPill, rect, true);
+  }
+
+  function saveProseNote(selInfo, text) {
+    const needle = selInfo.match;
+    const occurrence = findOccurrenceForRange(selInfo.range, needle);
+    state.notes.push({
+      id: randomId(),
+      kind: "prose",
+      section: selInfo.section,
+      quote: selInfo.quote.slice(0, 140),
+      match: needle,
+      occurrence,
+      text: oneLine(text),
+    });
+    pendingSelection = null;
+    try {
+      window.getSelection().removeAllRanges();
+    } catch (_) {}
+    refresh(true);
+  }
+
+  function openFloatingComposer(rect, opts) {
+    dismissFloats();
+    hideHoverCard();
+
+    if (opts.selectedRows) {
+      for (const tr of opts.selectedRows) tr.classList.add("lf-row-selecting");
+    }
+
+    floatComposer = document.createElement("div");
+    floatComposer.className = "lf-float-composer";
+
+    const quoteEl = document.createElement("div");
+    quoteEl.className = "lf-anchor-quote";
+    quoteEl.textContent = opts.anchorLabel;
+
+    const ta = document.createElement("textarea");
+    ta.rows = 2;
+    ta.placeholder = opts.placeholder || "Add comment… (⌘↩ to save)";
+    ta.value = opts.initialText || "";
+
+    const acts = document.createElement("div");
+    acts.className = "lf-float-composer-actions";
+
+    function commit() {
+      const val = oneLine(ta.value);
+      if (!val) return;
+      dismissFloatComposer();
+      opts.onSave(val);
+    }
+
+    ta.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+        commit();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        dismissFloatComposer();
+      }
+    });
+
+    acts.append(
+      makeButton("Cancel", dismissFloatComposer, "lf-btn-quiet"),
+      makeButton("Save ⌘↩", commit, "lf-btn-accent")
+    );
+    floatComposer.append(quoteEl, ta, acts);
+    document.body.appendChild(floatComposer);
+    clampFixedBox(floatComposer, rect, false);
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  }
+
+  function showHoverCard(targetEl, note) {
+    if (floatComposer) return;
+    clearTimeout(hoverHideTimer);
+    hideHoverCard();
+
+    hoverCardEl = document.createElement("div");
+    hoverCardEl.className = "lf-hover-card";
+
+    const quoteEl = document.createElement("div");
+    quoteEl.className = "lf-anchor-quote";
+    quoteEl.textContent = formatNoteAnchorLabel(note);
+
+    const body = document.createElement("div");
+    body.className = "lf-hover-card-body";
+    body.textContent = note.text;
+
+    const foot = document.createElement("div");
+    foot.className = "lf-hover-card-foot";
+    const editBtn = makeButton("Edit", () => {
+      const r = targetEl.getBoundingClientRect();
+      hideHoverCard();
+      openFloatingComposer(r, {
+        anchorLabel: formatNoteAnchorLabel(note),
+        initialText: note.text,
+        onSave: (val) => {
+          note.text = val;
+          refresh(true);
+        },
+      });
+    }, "lf-btn-quiet");
+    const delBtn = makeButton("Delete", () => {
+      deleteNote(note.id);
+    }, "lf-btn-quiet");
+
+    foot.append(editBtn, delBtn);
+    hoverCardEl.append(quoteEl, body, foot);
+    document.body.appendChild(hoverCardEl);
+    clampFixedBox(hoverCardEl, targetEl.getBoundingClientRect(), false);
+
+    hoverCardEl.addEventListener("mouseenter", () => clearTimeout(hoverHideTimer));
+    hoverCardEl.addEventListener("mouseleave", () => {
+      hoverHideTimer = setTimeout(hideHoverCard, 200);
+    });
   }
 
   function wireSelectionNotes() {
     document.addEventListener("mouseup", (event) => {
-      if (popover && popover.contains(event.target)) return;
-      if (stripEl && stripEl.contains(event.target)) return;
-      if (event.target.closest("button, textarea, input, .lf-action-confirm")) return;
+      if (event.target.closest(".lf-float-pill, .lf-float-composer, .lf-hover-card, .lf-sidebar, .lf-dock, .lf-comments-toggle")) {
+        return;
+      }
+      if (event.target.closest("button, textarea, input, .lf-action-confirm, td.lf-ln")) {
+        return;
+      }
 
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed) {
-        dismissPopover();
+        pendingSelection = null;
+        dismissFloatPill();
         return;
       }
       const quote = oneLine(sel.toString());
       if (!quote) {
-        dismissPopover();
+        pendingSelection = null;
+        dismissFloatPill();
         return;
       }
       const range = sel.getRangeAt(0).cloneRange();
+      const containerEl =
+        range.commonAncestorContainer.nodeType === 1
+          ? range.commonAncestorContainer
+          : range.commonAncestorContainer.parentElement;
+      if (!containerEl || !mainEl.contains(containerEl)) {
+        pendingSelection = null;
+        dismissFloatPill();
+        return;
+      }
       const rect = range.getBoundingClientRect();
-      const section = nearestSection(range.commonAncestorContainer);
-      showNoteTrigger(rect, section, quote);
+      const section = nearestSection(containerEl);
+      const selInfo = {
+        range,
+        rect,
+        section,
+        quote: quote.slice(0, 140),
+        match: quote.slice(0, 240),
+      };
+      pendingSelection = selInfo;
+
+      showFloatPill(rect, [
+        {
+          label: "Comment (c)",
+          onClick: () => {
+            openFloatingComposer(selInfo.rect, {
+              anchorLabel: "§ " + selInfo.section + ' · "' + truncate(selInfo.quote, 46) + '"',
+              onSave: (val) => saveProseNote(selInfo, val),
+            });
+          },
+        },
+        {
+          label: "Flag",
+          onClick: () => saveProseNote(selInfo, "Flagged for follow-up"),
+        },
+        {
+          label: "Copy",
+          onClick: () => {
+            copyText(quote).catch(() => {});
+            pendingSelection = null;
+            try {
+              window.getSelection().removeAllRanges();
+            } catch (_) {}
+          },
+        },
+      ]);
+    });
+
+    document.addEventListener("mousedown", (event) => {
+      if (
+        floatComposer &&
+        !floatComposer.contains(event.target) &&
+        !event.target.closest(".lf-float-pill, .lf-gutter-plus, td.lf-ln")
+      ) {
+        dismissFloatComposer();
+      }
+    });
+
+    // Hover & click on warm-underlined prose highlights and annotated code rows
+    mainEl.addEventListener("mouseover", (event) => {
+      const hl = event.target.closest(".lf-hl[data-lf-note-id]");
+      if (hl) {
+        const id = hl.getAttribute("data-lf-note-id");
+        const note = state.notes.find((n) => n.id === id);
+        if (note) showHoverCard(hl, note);
+        return;
+      }
+      const lnCell = event.target.closest("tr.lf-code-row.lf-row-has-note td.lf-ln");
+      if (lnCell) {
+        const tr = lnCell.closest("tr.lf-code-row");
+        const ids = (tr.getAttribute("data-lf-line-note-ids") || "").split(",").filter(Boolean);
+        const note = ids.length ? state.notes.find((n) => n.id === ids[0]) : null;
+        if (note) showHoverCard(lnCell, note);
+      }
+    });
+
+    mainEl.addEventListener("mouseout", (event) => {
+      if (event.target.closest(".lf-hl[data-lf-note-id], tr.lf-code-row.lf-row-has-note td.lf-ln")) {
+        hoverHideTimer = setTimeout(hideHoverCard, 220);
+      }
+    });
+
+    mainEl.addEventListener("click", (event) => {
+      const hl = event.target.closest(".lf-hl[data-lf-note-id]");
+      if (!hl) return;
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) return;
+      openSidebar(hl.getAttribute("data-lf-note-id"));
     });
   }
 
-  function showNoteTrigger(rect, section, quote) {
-    dismissPopover();
-    popover = document.createElement("div");
-    popover.className = "lf-note-popover";
-    popover.style.top = Math.max(8, Math.min(window.innerHeight - 120, rect.bottom + 8)) + "px";
-    popover.style.left = Math.max(8, Math.min(window.innerWidth - 280, rect.left)) + "px";
+  // --- Diff & file gutter `+` and Shift+click line ranges (2a) ---
 
-    const trigger = makeButton("Note", () => {
-      popover.innerHTML = "";
-      const ta = document.createElement("textarea");
-      ta.placeholder = "Add note…";
-      const actions = document.createElement("div");
-      actions.className = "lf-note-popover-actions";
-      function commit() {
-        const text = oneLine(ta.value);
-        if (!text) return;
-        state.notes.push({ id: randomId(), section, quote: quote.slice(0, 140), text });
-        dismissPopover();
-        try {
-          window.getSelection().removeAllRanges();
-        } catch (_) {}
-        refresh(true);
-      }
-      ta.addEventListener("keydown", (e) => {
-        if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-          e.preventDefault();
-          commit();
-        } else if (e.key === "Escape") {
-          dismissPopover();
+  let lastGutterAnchor = null; // { block, path, side, lineNo, oldLine }
+
+  function rowLineInfo(tr) {
+    const newAttr = tr.getAttribute("data-line");
+    const oldAttr = tr.getAttribute("data-old-line");
+    if (newAttr !== null && newAttr !== "") {
+      return {
+        side: "new",
+        lineNo: Number(newAttr),
+        oldLine: oldAttr !== null && oldAttr !== "" ? Number(oldAttr) : null,
+      };
+    }
+    if (oldAttr !== null && oldAttr !== "") {
+      return { side: "old", lineNo: Number(oldAttr), oldLine: Number(oldAttr) };
+    }
+    return null;
+  }
+
+  function wireCodeBlocks() {
+    mainEl.querySelectorAll(".lf-codeblock[data-path]").forEach((block) => {
+      const path = block.getAttribute("data-path") || "";
+      if (!path) return;
+      block.querySelectorAll("tr.lf-code-row").forEach((tr) => {
+        const info = rowLineInfo(tr);
+        if (!info) return;
+        const firstLn = tr.querySelector("td.lf-ln");
+        if (!firstLn || firstLn.querySelector(".lf-gutter-plus")) return;
+        const label = info.side === "old" ? "old line " + info.lineNo : "line " + info.lineNo;
+        const plus = document.createElement("button");
+        plus.type = "button";
+        plus.className = "lf-gutter-plus";
+        plus.textContent = "+";
+        plus.title = "Comment on " + label + " (Shift+click for range)";
+        plus.setAttribute("aria-label", "Comment on " + path + " " + label);
+        firstLn.insertBefore(plus, firstLn.firstChild);
+      });
+
+      block.addEventListener("mousedown", (event) => {
+        if (event.shiftKey && event.target.closest("td.lf-ln")) {
+          event.preventDefault();
         }
       });
-      actions.append(makeButton("Cancel", dismissPopover), makeButton("Save note", commit, "lf-btn-accent"));
-      popover.append(ta, actions);
-      ta.focus();
-    }, "lf-btn-accent");
-    popover.append(trigger);
-    document.body.append(popover);
-  }
 
-  let trayEl = null;
-  function renderNotesTray() {
-    if (!state.notes.length) {
-      if (trayEl) trayEl.remove();
-      trayEl = null;
-      return;
-    }
-    if (!trayEl) {
-      trayEl = document.createElement("section");
-      trayEl.className = "lf-notes-tray";
-      const main = document.querySelector("main") || document.body;
-      main.append(trayEl);
-    }
-    trayEl.innerHTML = "";
-    const heading = document.createElement("h3");
-    heading.textContent = "Your notes";
-    trayEl.append(heading);
-    for (const note of state.notes) {
-      const chip = document.createElement("div");
-      chip.className = "lf-note-chip";
-      const body = document.createElement("span");
-      body.textContent = note.section + ' › "' + note.quote + '" — ' + note.text;
-      const del = makeButton("Remove", () => {
-        state.notes = state.notes.filter((n) => n.id !== note.id);
-        refresh(true);
-      }, "lf-btn-quiet");
-      chip.append(body, del);
-      trayEl.append(chip);
-    }
-  }
+      block.addEventListener("click", (event) => {
+        const trigger = event.target.closest(".lf-gutter-plus, td.lf-ln");
+        if (!trigger) return;
+        const tr = trigger.closest("tr.lf-code-row");
+        if (!tr) return;
+        const info = rowLineInfo(tr);
+        if (!info) return;
+        event.preventDefault();
+        dismissFloatPill();
+        hideHoverCard();
 
-  function renderHighlights() {
-    if (typeof Highlight === "undefined" || !CSS || !CSS.highlights) return;
-    if (!state.notes.length) {
-      CSS.highlights.delete("lf-note");
-      return;
-    }
-    const ranges = [];
-    const main = document.querySelector("main") || document.body;
-    const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
-    const textNodes = [];
-    let n;
-    while ((n = walker.nextNode())) {
-      if (n.parentElement && n.parentElement.closest(".lf-notes-tray, .lf-strip, .lf-note-popover")) {
-        continue;
-      }
-      textNodes.push(n);
-    }
-    for (const note of state.notes) {
-      const needle = note.quote;
-      if (!needle) continue;
-      for (const node of textNodes) {
-        const idx = node.nodeValue.indexOf(needle);
-        if (idx >= 0) {
-          const r = document.createRange();
-          r.setStart(node, idx);
-          r.setEnd(node, idx + needle.length);
-          ranges.push(r);
-          break;
+        let rangeSide = info.side;
+        let lineStart = info.lineNo;
+        let lineEnd = info.lineNo;
+
+        if (event.shiftKey && lastGutterAnchor && lastGutterAnchor.block === block) {
+          if (lastGutterAnchor.side === info.side) {
+            rangeSide = info.side;
+            lineStart = Math.min(lastGutterAnchor.lineNo, info.lineNo);
+            lineEnd = Math.max(lastGutterAnchor.lineNo, info.lineNo);
+          } else if (info.side === "old" && lastGutterAnchor.oldLine !== null) {
+            rangeSide = "old";
+            lineStart = Math.min(lastGutterAnchor.oldLine, info.lineNo);
+            lineEnd = Math.max(lastGutterAnchor.oldLine, info.lineNo);
+          } else if (lastGutterAnchor.side === "old" && info.oldLine !== null) {
+            rangeSide = "old";
+            lineStart = Math.min(lastGutterAnchor.lineNo, info.oldLine);
+            lineEnd = Math.max(lastGutterAnchor.lineNo, info.oldLine);
+          }
         }
-      }
-    }
-    if (ranges.length) CSS.highlights.set("lf-note", new Highlight(...ranges));
-    else CSS.highlights.delete("lf-note");
+        lastGutterAnchor = { block, path, side: info.side, lineNo: info.lineNo, oldLine: info.oldLine };
+
+        const previewNote = { kind: "line", path, side: rangeSide, lineStart, lineEnd };
+        const selectedRows = rowsForLineNote(previewNote);
+        const anchorRow = selectedRows[selectedRows.length - 1] || tr;
+        const anchorLabel = formatLineAnchor(previewNote);
+        const rowRect = anchorRow.getBoundingClientRect();
+        const codeCell = anchorRow.lastElementChild;
+        const codeLeft = codeCell ? codeCell.getBoundingClientRect().left : rowRect.left + 110;
+        const composerRect = {
+          top: rowRect.top,
+          bottom: rowRect.bottom,
+          left: codeLeft + 12,
+          right: rowRect.right,
+          width: Math.max(0, rowRect.right - codeLeft - 12),
+        };
+
+        openFloatingComposer(composerRect, {
+          anchorLabel,
+          placeholder:
+            lineStart === lineEnd
+              ? "Add comment… (Shift+click another line for range, ⌘↩ to save)"
+              : "Add comment… (⌘↩ to save)",
+          selectedRows: selectedRows.length ? selectedRows : [tr],
+          onSave: (val) => {
+            state.notes.push({
+              id: randomId(),
+              kind: "line",
+              path,
+              side: rangeSide,
+              lineStart,
+              lineEnd,
+              section: nearestSection(block),
+              text: val,
+            });
+            refresh(true);
+          },
+        });
+      });
+    });
   }
 
-  // --- Bottom reply strip ---
+  // --- Collapsible slide-over Comments sidebar (1c) ---
 
-  let stripEl = null;
+  let commentsToggleBtn = null;
+  let sidebarEl = null;
+  let sidebarTitleEl = null;
+  let sidebarListEl = null;
+  let sidebarOpen = false;
+  let sidebarEditingId = null;
+
+  function ensureSidebar() {
+    if (sidebarEl) return;
+
+    commentsToggleBtn = document.createElement("button");
+    commentsToggleBtn.type = "button";
+    commentsToggleBtn.className = "lf-comments-toggle";
+    commentsToggleBtn.addEventListener("click", () => {
+      sidebarOpen = !sidebarOpen;
+      renderSidebar();
+    });
+    document.body.appendChild(commentsToggleBtn);
+
+    sidebarEl = document.createElement("aside");
+    sidebarEl.className = "lf-sidebar";
+    sidebarEl.setAttribute("aria-label", "Comments sidebar");
+
+    const head = document.createElement("div");
+    head.className = "lf-sidebar-head";
+    sidebarTitleEl = document.createElement("span");
+    const closeBtn = makeButton("Close", () => {
+      sidebarOpen = false;
+      sidebarEditingId = null;
+      renderSidebar();
+    }, "lf-btn-quiet");
+    head.append(sidebarTitleEl, closeBtn);
+
+    sidebarListEl = document.createElement("div");
+    sidebarListEl.className = "lf-sidebar-list";
+
+    sidebarEl.append(head, sidebarListEl);
+    document.body.appendChild(sidebarEl);
+  }
+
+  function openSidebar(focusNoteId) {
+    ensureSidebar();
+    sidebarOpen = true;
+    renderSidebar();
+    if (focusNoteId && sidebarListEl) {
+      const card = sidebarListEl.querySelector('[data-lf-sidebar-note="' + CSS.escape(focusNoteId) + '"]');
+      if (card) pulseElement(card);
+    }
+  }
+
+  function renderSidebar() {
+    ensureSidebar();
+    const ordered = notesInDocumentOrder();
+    const count = ordered.length;
+
+    commentsToggleBtn.innerHTML = "";
+    const labelSpan = document.createElement("span");
+    labelSpan.textContent = "Comments";
+    commentsToggleBtn.appendChild(labelSpan);
+    if (count > 0) {
+      const badge = document.createElement("span");
+      badge.className = "lf-comments-count";
+      badge.textContent = String(count);
+      commentsToggleBtn.appendChild(badge);
+    }
+    commentsToggleBtn.classList.toggle("has-notes", count > 0);
+    commentsToggleBtn.setAttribute("aria-expanded", sidebarOpen ? "true" : "false");
+
+    sidebarEl.classList.toggle("is-open", sidebarOpen);
+    sidebarTitleEl.textContent = count > 0 ? "Comments (" + count + ")" : "Comments";
+
+    sidebarListEl.innerHTML = "";
+    if (!count) {
+      const empty = document.createElement("div");
+      empty.className = "lf-sidebar-empty";
+      empty.textContent = "No comments yet. Drag across text or click + on a code line to leave one.";
+      sidebarListEl.appendChild(empty);
+      return;
+    }
+
+    for (const note of ordered) {
+      const item = document.createElement("div");
+      item.className = "lf-sidebar-item";
+      item.setAttribute("data-lf-sidebar-note", note.id);
+
+      const q = document.createElement("div");
+      q.className = "lf-anchor-quote";
+      q.textContent = formatNoteAnchorLabel(note);
+      item.appendChild(q);
+
+      if (sidebarEditingId === note.id) {
+        const ta = document.createElement("textarea");
+        ta.value = note.text;
+        ta.placeholder = "Edit comment… (⌘↩ to save)";
+        const foot = document.createElement("div");
+        foot.className = "lf-sidebar-item-foot";
+        const cancelBtn = makeButton("Cancel", (e) => {
+          e.stopPropagation();
+          sidebarEditingId = null;
+          renderSidebar();
+        }, "lf-btn-quiet");
+        const commit = () => {
+          const val = oneLine(ta.value);
+          if (!val) return;
+          note.text = val;
+          sidebarEditingId = null;
+          refresh(true);
+        };
+        const saveBtn = makeButton("Save ⌘↩", (e) => {
+          e.stopPropagation();
+          commit();
+        }, "lf-btn-accent");
+        ta.addEventListener("keydown", (e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+            e.preventDefault();
+            e.stopPropagation();
+            commit();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            sidebarEditingId = null;
+            renderSidebar();
+          }
+        });
+        foot.append(cancelBtn, saveBtn);
+        item.append(ta, foot);
+        setTimeout(() => {
+          ta.focus();
+          ta.setSelectionRange(ta.value.length, ta.value.length);
+        }, 0);
+      } else {
+        const body = document.createElement("div");
+        body.className = "lf-sidebar-item-text";
+        body.textContent = note.text;
+        const foot = document.createElement("div");
+        foot.className = "lf-sidebar-item-foot";
+        const editBtn = makeButton("Edit", (e) => {
+          e.stopPropagation();
+          sidebarEditingId = note.id;
+          renderSidebar();
+        }, "lf-btn-quiet");
+        const delBtn = makeButton("Delete", (e) => {
+          e.stopPropagation();
+          deleteNote(note.id);
+        }, "lf-btn-quiet");
+        foot.append(editBtn, delBtn);
+        item.append(body, foot);
+      }
+
+      item.addEventListener("click", (e) => {
+        if (e.target.closest("button, textarea")) return;
+        pulseElement(noteAnchorElement(note));
+      });
+      sidebarListEl.appendChild(item);
+    }
+  }
+
+  // --- Browser T3 Code attached-chip composer dock (3b; hidden in Desktop) ---
+
+  let dockEl = null;
+  let dockChipsEl = null;
+  let dockPreviewEl = null;
+  let dockStatusEl = null;
+  let dockOverallInput = null;
+  let dockPreviewBtn = null;
+  let dockClearBtn = null;
+  let dockSendBtn = null;
+  let dockPreviewOpen = false;
   let stripStatusText = "";
   let stripStatusKind = "";
 
@@ -1588,6 +2838,8 @@ button.lf-btn-quiet {
       : state.receipts.slice();
     state = emptyState();
     state.receipts = receipts;
+    sidebarEditingId = null;
+    hideHoverCard();
     refresh(persist);
   }
 
@@ -1600,7 +2852,7 @@ button.lf-btn-quiet {
     if (hostMode === "loopback") {
       stripStatusText = "Sending…";
       stripStatusKind = "";
-      renderStrip();
+      renderDock();
       const op = buildSteerOperation(message);
       sendOperation(op, randomId()).then(
         (result) => {
@@ -1610,12 +2862,12 @@ button.lf-btn-quiet {
           clearDrafts({ markReported: true });
           stripStatusText = sentence;
           stripStatusKind = "ok";
-          renderStrip();
+          renderDock();
         },
         (err) => {
           stripStatusText = errorMessage(err);
           stripStatusKind = "error";
-          renderStrip();
+          renderDock();
         }
       );
       return;
@@ -1627,76 +2879,198 @@ button.lf-btn-quiet {
           ? "Copied reply (server disconnected)"
           : "Copied reply";
         stripStatusKind = "ok";
-        renderStrip();
+        renderDock();
       },
       (err) => {
         stripStatusText = "Copy failed: " + errorMessage(err);
         stripStatusKind = "error";
-        renderStrip();
+        renderDock();
       }
     );
   }
 
-  function renderStrip() {
-    if (desktopHandler) {
-      if (stripEl) stripEl.hidden = true;
-      return;
-    }
+  function ensureDock() {
+    if (desktopHandler || dockEl) return;
+
+    dockEl = document.createElement("div");
+    dockEl.className = "lf-dock";
+
+    dockChipsEl = document.createElement("div");
+    dockChipsEl.className = "lf-dock-chips";
+
+    dockPreviewEl = document.createElement("div");
+    dockPreviewEl.className = "lf-dock-preview";
+    dockPreviewEl.hidden = true;
+
+    dockStatusEl = document.createElement("div");
+    dockStatusEl.className = "lf-dock-status";
+    dockStatusEl.hidden = true;
+
+    const row = document.createElement("div");
+    row.className = "lf-dock-row";
+
+    dockOverallInput = document.createElement("input");
+    dockOverallInput.type = "text";
+    dockOverallInput.className = "lf-dock-input";
+    dockOverallInput.placeholder = "Overall direction (optional)…";
+    dockOverallInput.setAttribute("aria-label", "Overall direction");
+    dockOverallInput.addEventListener("input", () => {
+      state.overall = dockOverallInput.value;
+      stripStatusText = "";
+      stripStatusKind = "";
+      saveState();
+      updateDockMeta();
+    });
+
+    const acts = document.createElement("div");
+    acts.className = "lf-dock-actions";
+
+    dockPreviewBtn = makeButton("Preview", () => {
+      dockPreviewOpen = !dockPreviewOpen;
+      updateDockMeta();
+    }, "lf-btn-quiet");
+
+    dockClearBtn = makeButton("Clear", () => {
+      clearDrafts({ markReported: false });
+    }, "lf-btn-quiet");
+
+    dockSendBtn = makeButton("", submitReply, "lf-btn-accent");
+
+    acts.append(dockPreviewBtn, dockClearBtn, dockSendBtn);
+    row.append(dockOverallInput, acts);
+    dockEl.append(dockChipsEl, dockPreviewEl, dockStatusEl, row);
+    document.body.appendChild(dockEl);
+  }
+
+  function updateDockMeta() {
+    if (desktopHandler || !dockEl) return;
     const items = queueItems();
-    if (!items.length && !stripStatusText) {
-      if (stripEl) stripEl.hidden = true;
-      return;
-    }
-    if (!stripEl) {
-      stripEl = document.createElement("div");
-      stripEl.className = "lf-strip";
-      document.body.append(stripEl);
-    }
-    stripEl.hidden = false;
-    stripEl.innerHTML = "";
+    const hasItems = items.length > 0;
 
-    const count = document.createElement("span");
-    count.textContent =
-      items.length === 1 ? "1 item" : items.length + " items";
-    if (items.length > 0) stripEl.append(count);
+    if (dockOverallInput.value !== state.overall) {
+      dockOverallInput.value = state.overall;
+    }
 
+    dockPreviewBtn.hidden = !hasItems;
+    dockPreviewBtn.classList.toggle("is-selected", dockPreviewOpen && hasItems);
+    dockPreviewBtn.setAttribute("aria-pressed", dockPreviewOpen && hasItems ? "true" : "false");
+
+    dockClearBtn.hidden = !hasItems;
+
+    dockSendBtn.disabled = !hasItems;
+    dockSendBtn.textContent =
+      hostMode === "loopback"
+        ? "Steer " + steerTargetLabel() + " ⌘↩"
+        : "Copy reply ⌘↩";
+
+    dockPreviewEl.hidden = !(dockPreviewOpen && hasItems);
+    if (dockPreviewOpen && hasItems) {
+      dockPreviewEl.textContent = formatReplyMessage(items);
+    }
+
+    dockStatusEl.hidden = !stripStatusText;
     if (stripStatusText) {
-      const status = document.createElement("span");
-      status.className =
-        "lf-strip-status" +
+      dockStatusEl.textContent = stripStatusText;
+      dockStatusEl.className =
+        "lf-dock-status" +
         (stripStatusKind === "error"
           ? " is-error"
           : stripStatusKind === "ok"
           ? " is-ok"
           : "");
-      status.textContent = stripStatusText;
-      stripEl.append(status);
-    }
-
-    if (items.length > 0) {
-      const clearBtn = makeButton("Clear", () => {
-        clearDrafts({ markReported: false });
-      }, "lf-btn-quiet");
-      const sendLabel =
-        hostMode === "loopback"
-          ? "Steer " + steerTargetLabel() + " ⌘↩"
-          : "Copy reply ⌘↩";
-      stripEl.append(clearBtn, makeButton(sendLabel, submitReply, "lf-btn-accent"));
     }
   }
 
+  function renderDock() {
+    if (desktopHandler) {
+      if (dockEl) dockEl.hidden = true;
+      return;
+    }
+    ensureDock();
+    dockEl.hidden = false;
+
+    const entries = queueEntries();
+    dockChipsEl.innerHTML = "";
+    dockChipsEl.hidden = entries.length === 0;
+    for (const entry of entries) {
+      const chip = document.createElement("span");
+      chip.className = "lf-chip";
+      chip.title = entry.title;
+
+      const tag = document.createElement("span");
+      tag.className = "lf-chip-tag tag-" + entry.tag;
+      tag.textContent = entry.tag;
+
+      const txt = document.createElement("span");
+      txt.className = "lf-chip-text";
+      txt.textContent = entry.summary;
+
+      const x = document.createElement("button");
+      x.type = "button";
+      x.className = "lf-chip-x";
+      x.textContent = "×";
+      x.title = "Remove";
+      x.setAttribute("aria-label", "Remove " + entry.tag);
+      x.addEventListener("click", (e) => {
+        e.stopPropagation();
+        entry.remove();
+      });
+
+      chip.append(tag, txt, x);
+      chip.addEventListener("click", () => entry.jump());
+      dockChipsEl.appendChild(chip);
+    }
+
+    updateDockMeta();
+  }
+
+  // --- Global keyboard shortcuts ---
+
   document.addEventListener("keydown", (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-      if (popover && popover.contains(document.activeElement)) return;
+      if (floatComposer && floatComposer.contains(document.activeElement)) return;
+      if (sidebarEl && sidebarEl.contains(document.activeElement) && document.activeElement.tagName === "TEXTAREA") return;
       if (!desktopHandler && queueItems().length > 0) {
         event.preventDefault();
         submitReply();
       }
+      return;
+    }
+
+    if (event.key === "Escape") {
+      if (floatComposer || floatPill || hoverCardEl) {
+        dismissFloats();
+        hideHoverCard();
+      } else if (sidebarOpen) {
+        sidebarOpen = false;
+        sidebarEditingId = null;
+        renderSidebar();
+      }
+      return;
+    }
+
+    if (
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      event.key.toLowerCase() === "c" &&
+      pendingSelection &&
+      !(document.activeElement && document.activeElement.closest("input, textarea"))
+    ) {
+      event.preventDefault();
+      const selInfo = pendingSelection;
+      dismissFloatPill();
+      openFloatingComposer(selInfo.rect, {
+        anchorLabel: "§ " + selInfo.section + ' · "' + truncate(selInfo.quote, 46) + '"',
+        onSave: (val) => saveProseNote(selInfo, val),
+      });
     }
   });
 
   wireControls();
+  wireCodeBlocks();
   wireSelectionNotes();
+  renderSidebar();
 
   if (desktopHandler) {
     try {
@@ -1710,6 +3084,7 @@ button.lf-btn-quiet {
       }
     } catch (_) {}
   } else {
+    renderDock();
     loadBrowserState();
     connectLoopback();
   }

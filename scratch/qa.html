@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>LOO-1110 QA: an idle lf server does no work</title>
+<style>
+  :root { color-scheme: light dark; --fg:#1d1d1f; --bg:#fbfbfa; --mute:#6b6b70; --line:#e2e2e0; --ok:#1f7a3a; --bad:#b3261e; --fix:#8a5a00; --code:#f1f1ee; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#e8e8e6; --bg:#161617; --mute:#9a9aa0; --line:#2c2c2f; --ok:#5cc47a; --bad:#ff7a70; --fix:#e0b050; --code:#202023; } }
+  body { font: 15px/1.55 -apple-system, "SF Pro Text", system-ui, sans-serif; color: var(--fg); background: var(--bg); max-width: 920px; margin: 2.5rem auto; padding: 0 1.25rem; }
+  h1 { font-size: 1.6rem; margin-bottom: .2rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.2rem; border-top: 1px solid var(--line); padding-top: 1.2rem; }
+  p.sub { color: var(--mute); margin-top: 0; }
+  pre, code { font: 12.5px/1.45 "SF Mono", ui-monospace, Menlo, monospace; background: var(--code); }
+  pre { padding: .75rem .9rem; overflow-x: auto; border-radius: 6px; }
+  code { padding: 0 .25rem; border-radius: 3px; }
+  table { border-collapse: collapse; width: 100%; margin: .6rem 0; font-size: 14px; }
+  th, td { text-align: left; padding: .35rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .ok { color: var(--ok); font-weight: 600; }
+  .bad { color: var(--bad); font-weight: 600; }
+  .fix { color: var(--fix); font-weight: 600; }
+  ol li, ul li { margin: .3rem 0; }
+</style>
+
+<h1>LOO-1110 QA: an idle <code>lf server</code> does no work</h1>
+<p class="sub">2026-11-25 · branch build <code>fc18edde9</code> plus this step's fixes · 16-core M4 Max · private Machines under <code>/tmp/lf-qa-1110</code> with a stand-in <code>claude</code>, a local bare origin and Git planning</p>
+
+<h2>What works now</h2>
+<table>
+  <tr><th>Scenario</th><th>Result</th></tr>
+  <tr><td>Fresh private Machine: <code>lf task create '…' --run</code></td><td class="ok">Task at <code>demo</code>; detached <code>lf server run</code> (parent 1); no launchd job</td></tr>
+  <tr><td>Quiet server, Desktop-like <code>plan.list</code> + <code>task.get</code> subscriptions, 60 s</td><td class="ok">0.05% CPU, 17 threads, 0 store opens, 0 frames</td></tr>
+  <tr><td>Edit a tracked file in the Task's checkout</td><td class="ok"><code>dirty: true</code> after 0.20 s, 1 spawn; revert seen after 3.1 s (throttle)</td></tr>
+  <tr><td>Held-terminal echo with <code>loopflow.db</code> under <code>BEGIN EXCLUSIVE</code></td><td class="ok">22–29 ms (unlocked: 29 ms)</td></tr>
+  <tr><td>Shell A <code>exit 7</code> under the lock while shell B types</td><td class="ok">B echoes 22–30 ms throughout; A's view exits 7 at once; <code>held_terminals.exit_code = 7</code> after <code>COMMIT</code></td></tr>
+  <tr><td>Three Graph steps started back to back</td><td class="ok"><code>CARGO_BUILD_JOBS</code>/<code>NEXTEST_TEST_THREADS</code>/<code>LF_JOBS</code> = 16, 8, 5; <code>MAKEFLAGS=-j16/-j8/-j5</code>; nice 5. Primary conversations stay at nice 0</td></tr>
+  <tr><td>Server CPU with three live Graphs, 60 s</td><td class="ok">0.07% CPU, 17 threads</td></tr>
+  <tr><td>Returning home made by the released <code>lf</code> (0.16.0+6d617de68), which registered <code>com.loopflow.server.d9060732361e547f</code></td><td class="ok"><code>lf install server</code> from the branch replaces the server and boots the job out; plist gone</td></tr>
+  <tr><td>Delete that home with a branch server, holder and held shell</td><td class="ok">All three gone within 1 s; shell's <code>HUP</code> trap ran; directory stays deleted</td></tr>
+  <tr><td>Leave a custom home with no client</td><td class="ok">Server exits at 10 min ("exiting after idling"); next <code>lf task create --run</code> starts it again</td></tr>
+  <tr><td>Release <code>server_idle.py --seconds 60</code></td><td>see the table below</td></tr>
+</table>
+
+<table>
+  <tr><th>Phase (60 s, release)</th><th class="num">CPU</th><th class="num">Threads</th><th class="num">Spawns before</th><th class="num">Spawns after fix</th><th class="num">Opens</th></tr>
+  <tr><td>quiet</td><td class="num">0.08%</td><td class="num">18</td><td class="num">12</td><td class="num">12 <span class="bad">(budget 0)</span></td><td class="num">0</td></tr>
+  <tr><td>file_edits</td><td class="num">0.17%</td><td class="num">17</td><td class="num">32</td><td class="num">20</td><td class="num">0</td></tr>
+  <tr><td>db_writes</td><td class="num">0.05%</td><td class="num">17</td><td class="num">12</td><td class="num">0</td><td class="num">0</td></tr>
+</table>
+
+<h2>What I fixed</h2>
+<ol>
+  <li><span class="fix">Deleting a custom home recreated it.</span> The server noticed the removal and exited, but its exit line went through <code>tracing</code> into <code>$LF_HOME/logs/lf.log</code>, and <code>DiagnosticLog</code> runs <code>create_dir_all</code>. After the delete, <code>lfhome/logs/lf.log</code> held a single line:
+<pre>INFO loopflow::server::service: Custom-home Loopflow server exiting instance=7e3da0f9-… reason=HomeRemoved pid=16419</pre>
+  The <code>HomeRemoved</code> line now goes to the server's stderr, which is already open (detached servers write it to the unlinked <code>server.log</code>). The idle exit still logs. <code>server/service.rs</code>.</li>
+  <li><span class="fix">A custom home with a claimed Task never idle-exited.</span> At 12m48s with no client the server was still up. <code>has_unfinished_execution</code> was false, but <code>loopflow.db-wal</code> changed every 30 s (<code>planning_scope_checks</code> <code>plan:/private/tmp/lf-qa-1110/repo</code>, written by the server's own owner poll). <code>watch_custom_home</code> reset the idle window whenever the DB/WAL stat stamp moved, so the deadline kept slipping. The deadline check already asks the store about unfinished Graphs and agents, so I deleted the stamp (<code>FileStamp</code>, <code>store_activity_stamp</code>, <code>IdleWindow</code>). New test: <code>custom_home_watcher_exits_idle_while_the_store_keeps_being_written</code>. Live: exited at 10 min.</li>
+  <li><span class="fix">The minute exchange forked <code>git remote</code> for every active repository every minute.</span> I traced this with a logging <code>git</code> on <code>PATH</code>. Each minute brought 12 forks, one per fixture repository, none of which has a remote. 10-second benchmark runs never saw them. <code>plan_git::remote</code> is now an <code>observe::derived</code> value (<code>Derived::GitRemote</code>) that depends on the repository's Git <code>config</code>. It runs uncached <code>git remote</code> only when that file changes, and counts that spawn. New test: <code>a_remote_added_after_the_first_lookup_is_seen_at_once</code>.</li>
+  <li>QA notes: <code>lf desktop shell</code> no longer takes <code>--checkout</code> (<code>server.md</code>, <code>held-terminals.md</code>, <code>task-conversations.md</code>). Added "Idle server work" to <code>server.md</code>: diagnostics, the <code>git</code> tracer, lock/echo, lifetimes.</li>
+</ol>
+
+<h2>Still wrong or open, worst first</h2>
+<ol>
+  <li><span class="bad">A quiet Machine with claimed Git-planned work still forks every 30 s.</span> The server's <code>watch_owned_work</code> re-reads the plan for repositories with a claim: <code>git remote</code>, <code>fetch … +refs/loopflow/plan/*</code>, two <code>for-each-ref</code>, <code>cat-file</code>, so 10 forks a minute per repository.
+<pre>15:32:00 ppid=16419 … fetch --quiet --no-tags --prune --no-write-fetch-head --no-recurse-submodules origin +refs/loopflow/plan/*:refs/loopflow/plan-seen/*
+15:32:30 ppid=16419 … (same five)
+15:33:00 ppid=16419 … (same five)</pre>
+  This predates the branch, and the plan never names it. Linear-planned repositories make HTTP calls here instead. Polling a remote is a timer by nature. Whether 30 s is the right latency for incoming direction is a product question.</li>
+  <li><span class="bad">The gate benchmark's <code>quiet</code> budget (0 spawns) fails at 60 s.</span> The phase crosses the server's first minute exchange, which fills the <code>remote</code> cache once per repository (12). Later minutes fork nothing. A warm-up past the first exchange or a one-time allowance would settle it; I didn't change the budget.</li>
+  <li>Graph processes outlive their deleted home. <code>lf task run</code> carriers, <code>graph run</code>, the batch step and its agent are neither server nor holder, so they keep running, and their own log lines recreate <code>logs/lf.log</code> ("record interrupted Session exit … No such file or directory"). A real agent ends its turn and the step fails. The stand-in never ends, so I stopped those 12 by PID.</li>
+  <li>A returning home's legacy <code>com.loopflow.server.&lt;hash&gt;</code> job stays while the release server keeps answering. Branch launches reuse a ready server, so only <code>lf install server</code>, or the old server going down, retires the job. If someone deletes that home first, the release server is the one launchd keeps restarting. That only lasts until the next install replaces it.</li>
+</ol>
+
+<h2>Not reached</h2>
+<ul>
+  <li>Hourly file retention (log rotation at 32 MB, pruning terminal and graph logs, context deliveries, backups and lock files). It runs at server start and then hourly, and these homes were too new for any of it to qualify. Unit tests cover it (<code>store::file_retention::tests</code>).</li>
+  <li>Desktop. The subscriptions were driven over the socket with the benchmark's peer; no window opened.</li>
+  <li>Thirteen concurrent Graphs and <code>sample</code> on the live Machine. Both belong to gate and post-merge per the plan; this run had three.</li>
+  <li>Linux: the inotify home watch, <code>SO_PEERCRED</code> replacement and the Git timer.</li>
+</ul>
+
+<h2>How</h2>
+<pre>. /tmp/lf-qa-1110/env.sh   # HOME, LF_HOME, LF_BIN=branch lf, PATH with stand-in claude; LF_*/REX_* unset
+$LF_BIN task create 'Check the idle server on a fresh Machine' --run --json &lt; /dev/null
+python3 -I probe.py &lt;server pid&gt; &lt;repo&gt; &lt;task&gt; &lt;checkout&gt; 60      # subscriptions + diagnostics deltas + edit
+python3 -I echo.py / echo2.py                                       # PTY views, BEGIN EXCLUSIVE, exit under lock
+$LF_BIN task create "Env probe $i" --run --graph live               # stand-in claude dumps job env + nice
+uv run python scripts/benchmarks/server_idle.py target/release/lf --seconds 60</pre>
+</html>

@@ -243,8 +243,17 @@ To name what a quiet server forks, put a `git` script first on the private
 `PATH` that appends `$(date +%T) ppid=$PPID cwd=$PWD $*` to a file and execs
 the real Git: Command lookups read `PATH` on each spawn, so it works on a
 server already running. Group by timestamp. A Git-planned repository with a
-claimed Task fetches its plan every 30 s (`watch_owned_work`); the minute
-exchange covers the other active repositories. `scripts/benchmarks/server_idle.py
+claimed Task fetches its plan every 30 s (`watch_owned_work`): a quiet tick is
+`fetch` and `for-each-ref`, plus one `cat-file -p` after the tip moves. A
+claimed repository with no remote forks nothing; one whose remote comes from
+an `[include]` runs `git remote` once. The minute exchange covers the other
+active repositories. A claimed Task alone does not keep a custom home's server
+up: it idle-exits after 10 minutes and the polls stop, so hold a socket client
+(`hello` as `desktop`, then sit) for any watch longer than that. To check the
+Git backoff, `git remote set-url origin /missing.git` until one server fetch
+fails (next try 2 min later, then 4), restore it and run `lf task sync <id>`
+from the CLI: the server's next 30 s tick fetches again, and a comment made on
+another Machine meanwhile arrives with it. `scripts/benchmarks/server_idle.py
 <lf> --seconds 60` crosses the first minute exchange in `quiet`; 10-second runs
 miss anything slower than ten seconds.
 

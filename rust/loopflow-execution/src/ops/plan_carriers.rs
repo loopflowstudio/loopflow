@@ -90,7 +90,7 @@ where
         return Ok(None);
     }
     let git_due = super::plan_git::remote(Path::new(repo)).is_some()
-        && !super::plan_git::is_backed_off(repo, now);
+        && !super::plan_git::is_backed_off(&store.sqlite, repo, now);
     if !has_hub && !git_due {
         return Ok(None);
     }

@@ -317,7 +317,10 @@ Becomes:
   background `poll_owned` share `plan_git`'s exponential backoff (2 min → 1 h
   on failure), while keeping hub exchanges independent of Git backoff. Explicit
   command-driven exchanges (`sync`, `send`, `before_claim`) bypass backoff and
-  clear it on success.
+  clear it on success. The backoff lives in the server's memory, so a wait
+  holds only while `plan_carriers` still records the Git carrier failing: a
+  command in another process that exchanged since ends it. A read with
+  records not taken is no carrier failure and does not back off.
 - **Quiet-poll `publish` deduplication**: pass `mine` from `seen_refs()` into
   `publish()` (avoiding the duplicate `for-each-ref`; `send()` still reads
   `for-each-ref` once) and remember verified `(commit_oid, repository_id)`
@@ -668,6 +671,8 @@ then-current budgets.
 - Focused tests passed in Pass 5: `loopflow-execution::ops::plan_git::tests::` (13, including `remote_parses_git_config_without_spawning_and_falls_back_when_needed` and `quiet_exchange_reuses_seen_refs_and_skips_repeated_cat_file`), `loopflow-execution::ops::plan_carriers::tests::` (2, `poll_owned_skips_local_only_repository_without_writing_scope_check` and `poll_owned_backs_off_unreachable_git_without_blocking_hub`), `cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`, and release `server_idle.py target/release/lf --seconds 60` (exit 0, strict budgets enforced).
 - `sample 77346 3` on the live server, 2026-11-25 — run at kickoff, results above.
 - QA, 2026-11-25 (`scratch/qa.html`): release `server_idle.py --seconds 60` → `quiet` 0.08% / 18 th / 12 spawns (first exchange) / 0 opens; `file_edits` 0.17% / 17 th / 20 spawns; `db_writes` 0.05% / 17 th / 0 spawns. Before QA's `remote` cache: 12 spawns in `quiet` and `db_writes` each. Live private Machine: held-terminal echo 22–30 ms under `BEGIN EXCLUSIVE`; job budget 16/8/5 at nice 5 for three steps; home deletion stops server + holder in < 1 s; idle exit at 10 min. `cargo test -p loopflow-execution --lib ops::plan_git::` (11), `cargo test -p loopflow --lib server::service::tests::custom_home_watcher` (3), `cargo clippy -p loopflow -p loopflow-execution --all-targets -- -D warnings`.
+
+- QA after Pass 5, 2026-11-25 (`scratch/qa.html`): release `server_idle.py --seconds 60` → `quiet` 0.05–0.12% / 19 th / 0 spawns / 0 opens (before and after the fix). Live private Machines on one bare origin: quiet claimed poll 2 forks/30 s, local-only claimed repo 0; steer from a second Machine arrives in ≤ 30 s; `[include]` remote runs `git remote` once; a remote added or removed is seen on the next tick. Fixed: after `lf task sync` from the CLI the server still waited out its backoff (steer 118 s → 27 s). `cargo test -p loopflow-execution --lib ops::plan_` (16), `cargo clippy -p loopflow-execution --all-targets -- -D warnings`.
 
 ## User docs written before implementation
 

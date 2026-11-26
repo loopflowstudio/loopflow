@@ -21,68 +21,67 @@
   .fix { color: var(--fix); font-weight: 600; }
   ol li, ul li { margin: .3rem 0; }
 </style>
-
-<h1>LOO-1110 QA: an idle <code>lf server</code> does no work</h1>
-<p class="sub">2026-11-25 · branch build <code>fc18edde9</code> plus this step's fixes · 16-core M4 Max · private Machines under <code>/tmp/lf-qa-1110</code> with a stand-in <code>claude</code>, a local bare origin and Git planning</p>
+</head>
+<body>
+<h1>LOO-1110 QA after Pass 5: background plan sync</h1>
+<p class="sub">2026-11-25 · release build of 6e0ca1d3d, then with this step's fix · 16-core M4 Max · private Machines A, B, C under <code>/tmp/lf-qa-p5</code> sharing one bare origin, a logging <code>git</code> first on <code>PATH</code>. The earlier run (Passes 1–4) is <code>scratch/qa.html</code> at 44298478.</p>
 
 <h2>What works now</h2>
 <table>
-  <tr><th>Scenario</th><th>Result</th></tr>
-  <tr><td>Fresh private Machine: <code>lf task create '…' --run</code></td><td class="ok">Task at <code>demo</code>; detached <code>lf server run</code> (parent 1); no launchd job</td></tr>
-  <tr><td>Quiet server, Desktop-like <code>plan.list</code> + <code>task.get</code> subscriptions, 60 s</td><td class="ok">0.05% CPU, 17 threads, 0 store opens, 0 frames</td></tr>
-  <tr><td>Edit a tracked file in the Task's checkout</td><td class="ok"><code>dirty: true</code> after 0.20 s, 1 spawn; revert seen after 3.1 s (throttle)</td></tr>
-  <tr><td>Held-terminal echo with <code>loopflow.db</code> under <code>BEGIN EXCLUSIVE</code></td><td class="ok">22–29 ms (unlocked: 29 ms)</td></tr>
-  <tr><td>Shell A <code>exit 7</code> under the lock while shell B types</td><td class="ok">B echoes 22–30 ms throughout; A's view exits 7 at once; <code>held_terminals.exit_code = 7</code> after <code>COMMIT</code></td></tr>
-  <tr><td>Three Graph steps started back to back</td><td class="ok"><code>CARGO_BUILD_JOBS</code>/<code>NEXTEST_TEST_THREADS</code>/<code>LF_JOBS</code> = 16, 8, 5; <code>MAKEFLAGS=-j16/-j8/-j5</code>; nice 5. Primary conversations stay at nice 0</td></tr>
-  <tr><td>Server CPU with three live Graphs, 60 s</td><td class="ok">0.07% CPU, 17 threads</td></tr>
-  <tr><td>Returning home made by the released <code>lf</code> (0.16.0+6d617de68), which registered <code>com.loopflow.server.d9060732361e547f</code></td><td class="ok"><code>lf install server</code> from the branch replaces the server and boots the job out; plist gone</td></tr>
-  <tr><td>Delete that home with a branch server, holder and held shell</td><td class="ok">All three gone within 1 s; shell's <code>HUP</code> trap ran; directory stays deleted</td></tr>
-  <tr><td>Leave a custom home with no client</td><td class="ok">Server exits at 10 min ("exiting after idling"); next <code>lf task create --run</code> starts it again</td></tr>
-  <tr><td>Release <code>server_idle.py --seconds 60</code></td><td>see the table below</td></tr>
+<tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>Release <code>server_idle.py --seconds 60</code></td><td class="ok">exit 0; table below. The quiet phase now crosses the first minute exchange with 0 spawns (the last run saw 12)</td></tr>
+<tr><td>Machine A, claimed Task in a repo with a reachable origin, server quiet</td><td class="ok">2 forks per 30 s (<code>fetch</code>, <code>for-each-ref</code>), plus one <code>cat-file -p</code> after the tip moves. Was 5 per tick before Pass 5</td></tr>
+<tr><td>Machine A, claimed Task in a repo with no remote</td><td class="ok">0 forks across the server's 10 minutes</td></tr>
+<tr><td>Machine B (fresh clone) <code>lf task list</code></td><td class="ok">Lists A's Task at once; no server started</td></tr>
+<tr><td>B comments on A's claimed Task</td><td class="ok">A's server takes it on its next tick (7 s) and publishes back</td></tr>
+<tr><td>A's origin pointed at a missing path</td><td class="ok">Retries at +2 min, then +4 min, not every 30 s; <code>lf repo tracker</code> reads "Plan: Git origin, failing since 17:26." with Git's reason</td></tr>
+<tr><td>Machine C, origin defined through <code>[include] path=…</code></td><td class="ok"><code>git remote</code> once at start, never again over 3.5 min; quiet ticks 2 forks</td></tr>
+<tr><td>Remote added to A's local-only repo while the server runs</td><td class="ok">Fetched on the next tick (18 s) and the whole plan pushed to the new remote</td></tr>
+<tr><td>Origin removed from A's repo while the server runs</td><td class="ok">No more fetches for it over 65 s; 0 <code>git remote</code> forks from the server in the whole run</td></tr>
 </table>
 
 <table>
-  <tr><th>Phase (60 s, release)</th><th class="num">CPU</th><th class="num">Threads</th><th class="num">Spawns before</th><th class="num">Spawns after fix</th><th class="num">Opens</th></tr>
-  <tr><td>quiet</td><td class="num">0.08%</td><td class="num">18</td><td class="num">12</td><td class="num">12 <span class="bad">(budget 0)</span></td><td class="num">0</td></tr>
-  <tr><td>file_edits</td><td class="num">0.17%</td><td class="num">17</td><td class="num">32</td><td class="num">20</td><td class="num">0</td></tr>
-  <tr><td>db_writes</td><td class="num">0.05%</td><td class="num">17</td><td class="num">12</td><td class="num">0</td><td class="num">0</td></tr>
+<tr><th>Phase (60 s, release)</th><th>CPU</th><th>Threads</th><th>Spawns</th><th>Opens</th></tr>
+<tr><td>quiet</td><td class="num">0.05% / 0.12%</td><td class="num">19</td><td class="num">0</td><td class="num">0</td></tr>
+<tr><td>file_edits</td><td class="num">0.15% / 0.17%</td><td class="num">17 / 18</td><td class="num">20</td><td class="num">0</td></tr>
+<tr><td>db_writes</td><td class="num">0.05% / 0.07%</td><td class="num">17 / 18</td><td class="num">0</td><td class="num">0</td></tr>
 </table>
+<p class="sub">Before / after this step's fix.</p>
 
 <h2>What I fixed</h2>
-<ol>
-  <li><span class="fix">Deleting a custom home recreated it.</span> The server noticed the removal and exited, but its exit line went through <code>tracing</code> into <code>$LF_HOME/logs/lf.log</code>, and <code>DiagnosticLog</code> runs <code>create_dir_all</code>. After the delete, <code>lfhome/logs/lf.log</code> held a single line:
-<pre>INFO loopflow::server::service: Custom-home Loopflow server exiting instance=7e3da0f9-… reason=HomeRemoved pid=16419</pre>
-  The <code>HomeRemoved</code> line now goes to the server's stderr, which is already open (detached servers write it to the unlinked <code>server.log</code>). The idle exit still logs. <code>server/service.rs</code>.</li>
-  <li><span class="fix">A custom home with a claimed Task never idle-exited.</span> At 12m48s with no client the server was still up. <code>has_unfinished_execution</code> was false, but <code>loopflow.db-wal</code> changed every 30 s (<code>planning_scope_checks</code> <code>plan:/private/tmp/lf-qa-1110/repo</code>, written by the server's own owner poll). <code>watch_custom_home</code> reset the idle window whenever the DB/WAL stat stamp moved, so the deadline kept slipping. The deadline check already asks the store about unfinished Graphs and agents, so I deleted the stamp (<code>FileStamp</code>, <code>store_activity_stamp</code>, <code>IdleWindow</code>). New test: <code>custom_home_watcher_exits_idle_while_the_store_keeps_being_written</code>. Live: exited at 10 min.</li>
-  <li><span class="fix">The minute exchange forked <code>git remote</code> for every active repository every minute.</span> I traced this with a logging <code>git</code> on <code>PATH</code>. Each minute brought 12 forks, one per fixture repository, none of which has a remote. 10-second benchmark runs never saw them. <code>plan_git::remote</code> is now an <code>observe::derived</code> value (<code>Derived::GitRemote</code>) that depends on the repository's Git <code>config</code>. It runs uncached <code>git remote</code> only when that file changes, and counts that spawn. New test: <code>a_remote_added_after_the_first_lookup_is_seen_at_once</code>.</li>
-  <li>QA notes: <code>lf desktop shell</code> no longer takes <code>--checkout</code> (<code>server.md</code>, <code>held-terminals.md</code>, <code>task-conversations.md</code>). Added "Idle server work" to <code>server.md</code>: diagnostics, the <code>git</code> tracer, lock/echo, lifetimes.</li>
-</ol>
+<p><span class="fix">The server ignored a successful sync from the CLI and kept waiting out its Git backoff.</span> The backoff Pass 5 shared with the owner poll lives in the server's memory. <code>lf task sync</code> runs in its own process, so its success cleared nothing there. Live, with one failure behind it:</p>
+<pre>before  remote away 17:46:42 ; failing fetch 17:47:12
+        remote back + lf task sync 17:47:15 exit 0
+        B commented 17:47:15
+        server's next fetch 17:49:12      ← steer arrives 118 s later
+after   remote away 17:49:42 ; failing fetch 17:50:12
+        remote back + lf task sync 17:50:15 exit 0
+        B commented 17:50:15
+        server's next fetch 17:50:42      ← 27 s, the next tick</pre>
+<p>After a long outage the wait reaches an hour, and the person's other Machine's direction waits with it. A backoff now holds only while <code>plan_carriers</code> still records the Git carrier failing; a command that exchanged since ends it.</p>
+<p><span class="fix">A read that brought records it could not take counted as a carrier failure.</span> <code>exchange</code> returns <code>NotTaken</code> as an error (a Wave made on two Machines), and the backoff took any error, so one such record would slow every incoming steer for that repository to hourly. <code>lf repo tracker</code> already treats it as the carrier working; the backoff now does too. Found reading the code, not live; covered by the new test.</p>
+<p>Both in <code>ops/plan_git.rs</code>; test <code>background_backoff_ends_when_another_process_exchanges_or_a_record_is_not_taken</code> (fails on either half without the fix). QA note: <code>.lf/qa/server.md</code> "Idle server work" now says what a quiet claimed poll forks, that a custom home's server idle-exits even with a claimed Task (hold a client for long watches), and how to drive the backoff.</p>
 
 <h2>Still wrong or open, worst first</h2>
 <ol>
-  <li><span class="bad">A quiet Machine with claimed Git-planned work still forks every 30 s.</span> The server's <code>watch_owned_work</code> re-reads the plan for repositories with a claim: <code>git remote</code>, <code>fetch … +refs/loopflow/plan/*</code>, two <code>for-each-ref</code>, <code>cat-file</code>, so 10 forks a minute per repository.
-<pre>15:32:00 ppid=16419 … fetch --quiet --no-tags --prune --no-write-fetch-head --no-recurse-submodules origin +refs/loopflow/plan/*:refs/loopflow/plan-seen/*
-15:32:30 ppid=16419 … (same five)
-15:33:00 ppid=16419 … (same five)</pre>
-  This predates the branch, and the plan never names it. Linear-planned repositories make HTTP calls here instead. Polling a remote is a timer by nature. Whether 30 s is the right latency for incoming direction is a product question.</li>
-  <li><span class="bad">The gate benchmark's <code>quiet</code> budget (0 spawns) fails at 60 s.</span> The phase crosses the server's first minute exchange, which fills the <code>remote</code> cache once per repository (12). Later minutes fork nothing. A warm-up past the first exchange or a one-time allowance would settle it; I didn't change the budget.</li>
-  <li>Graph processes outlive their deleted home. <code>lf task run</code> carriers, <code>graph run</code>, the batch step and its agent are neither server nor holder, so they keep running, and their own log lines recreate <code>logs/lf.log</code> ("record interrupted Session exit … No such file or directory"). A real agent ends its turn and the step fails. The stand-in never ends, so I stopped those 12 by PID.</li>
-  <li>A returning home's legacy <code>com.loopflow.server.&lt;hash&gt;</code> job stays while the release server keeps answering. Branch launches reuse a ready server, so only <code>lf install server</code>, or the old server going down, retires the job. If someone deletes that home first, the release server is the one launchd keeps restarting. That only lasts until the next install replaces it.</li>
+<li>A claimed Task does not keep a custom home's server up, so on a private Machine incoming direction stops 10 minutes after the last client. This is the lifetime rule from Pass 3 (questions.md); the default <code>~/.lf</code> Machine is unaffected.</li>
+<li>The Machine that creates a Task first, then runs <code>lf task list</code>, does not read the others' plans: the create registers the clone, so <code>before_first_read</code> skips its first fetch. C listed only its own Task. Predates the branch.</li>
+<li>After each publish the next quiet tick runs one <code>cat-file -p</code> to verify its own new tip (one fork per publish).</li>
 </ol>
 
 <h2>Not reached</h2>
 <ul>
-  <li>Hourly file retention (log rotation at 32 MB, pruning terminal and graph logs, context deliveries, backups and lock files). It runs at server start and then hourly, and these homes were too new for any of it to qualify. Unit tests cover it (<code>store::file_retention::tests</code>).</li>
-  <li>Desktop. The subscriptions were driven over the socket with the benchmark's peer; no window opened.</li>
-  <li>Thirteen concurrent Graphs and <code>sample</code> on the live Machine. Both belong to gate and post-merge per the plan; this run had three.</li>
-  <li>Linux: the inotify home watch, <code>SO_PEERCRED</code> replacement and the Git timer.</li>
+<li>A hub (<code>plan_hub</code>) beside an unreachable Git remote: covered by <code>poll_owned_backs_off_unreachable_git_without_blocking_hub</code>, not driven live.</li>
+<li>A real split Wave producing <code>NotTaken</code> live; the unit test covers the backoff.</li>
+<li>Desktop, Linux, and thirteen live Graphs on the real Machine: gate and post-merge, as in the plan.</li>
 </ul>
 
 <h2>How</h2>
-<pre>. /tmp/lf-qa-1110/env.sh   # HOME, LF_HOME, LF_BIN=branch lf, PATH with stand-in claude; LF_*/REX_* unset
-$LF_BIN task create 'Check the idle server on a fresh Machine' --run --json &lt; /dev/null
-python3 -I probe.py &lt;server pid&gt; &lt;repo&gt; &lt;task&gt; &lt;checkout&gt; 60      # subscriptions + diagnostics deltas + edit
-python3 -I echo.py / echo2.py                                       # PTY views, BEGIN EXCLUSIVE, exit under lock
-$LF_BIN task create "Env probe $i" --run --graph live               # stand-in claude dumps job env + nice
+<pre>. /tmp/lf-qa-p5/env.sh a|b|c   # HOME, LF_HOME, LF_BIN, logging git, stand-in claude/codex; LF_*/REX_* unset
+$LF_BIN task create '…' --json; $LF_BIN task claim &lt;id&gt;
+python3 -I start_server.py a; python3 -I hold.py 600           # server + a held desktop client
+python3 -I backoff.py &lt;lf&gt; &lt;tag&gt;                            # failure, restore, CLI sync, steer from B
+python3 -I remotes.py &lt;lf&gt;                                   # add / remove remotes under a live server
 uv run python scripts/benchmarks/server_idle.py target/release/lf --seconds 60</pre>
+</body>
 </html>

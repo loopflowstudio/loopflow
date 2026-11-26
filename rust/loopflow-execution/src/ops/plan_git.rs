@@ -50,26 +50,53 @@ impl RepoBackoff {
 struct Backoffs(Mutex<HashMap<String, RepoBackoff>>);
 
 impl Backoffs {
-    fn is_backed_off(&self, repo: &str, now: SystemTime) -> bool {
-        self.0
+    /// A failure waits out its delay only while the store still records the
+    /// Git carrier failing: a command in another process that exchanged
+    /// since then ends the wait here too.
+    fn is_backed_off(&self, store: &SqliteStore, repo: &str, now: SystemTime) -> bool {
+        let waiting = self
+            .0
             .lock()
             .expect("plan-git backoff lock")
             .get(repo)
-            .is_some_and(|state| now < state.next_attempt)
+            .is_some_and(|state| now < state.next_attempt);
+        if !waiting {
+            return false;
+        }
+        let recovered = store
+            .plan_carrier(repo, Carrier::Git)
+            .ok()
+            .flatten()
+            .is_some_and(|held| held.error.is_none());
+        if recovered {
+            self.clear(repo);
+        }
+        !recovered
     }
 
     fn clear(&self, repo: &str) {
         self.0.lock().expect("plan-git backoff lock").remove(repo);
     }
 
-    fn run(&self, repo: &str, now: SystemTime, op: impl FnOnce() -> Result<()>) -> Result<()> {
-        if self.is_backed_off(repo, now) {
+    fn run(
+        &self,
+        store: &SqliteStore,
+        repo: &str,
+        now: SystemTime,
+        op: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
+        if self.is_backed_off(store, repo, now) {
             return Ok(());
         }
         let result = op();
         let mut backoffs = self.0.lock().expect("plan-git backoff lock");
         match &result {
             Ok(()) => {
+                backoffs.remove(repo);
+            }
+            // A record the carrier brought that could not be written here is
+            // no failure of the carrier, and the next read may take it.
+            Err(error) if error.is::<NotTaken>() => {
                 backoffs.remove(repo);
             }
             Err(error) => {
@@ -104,8 +131,8 @@ static BACKOFFS: LazyLock<Backoffs> = LazyLock::new(Backoffs::default);
 static VERIFIED_TIP_REPOS: LazyLock<Mutex<HashSet<(String, String)>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
 
-pub(super) fn is_backed_off(repo: &str, now: SystemTime) -> bool {
-    BACKOFFS.is_backed_off(repo, now)
+pub(super) fn is_backed_off(store: &SqliteStore, repo: &str, now: SystemTime) -> bool {
+    BACKOFFS.is_backed_off(store, repo, now)
 }
 
 /// The remote a repository's plan travels by: `origin`, else the first by
@@ -285,7 +312,7 @@ pub(super) fn exchange_background_at(
     until: Option<Instant>,
     now: SystemTime,
 ) -> Result<()> {
-    BACKOFFS.run(repo, now, || exchange(store, repo, until))
+    BACKOFFS.run(store, repo, now, || exchange(store, repo, until))
 }
 
 fn exchange_unowned_at(
@@ -301,7 +328,7 @@ fn exchange_unowned_at(
         {
             continue;
         }
-        let _ = backoffs.run(&repo, now, || run_exchange(&repo));
+        let _ = backoffs.run(store, &repo, now, || run_exchange(&repo));
     }
     Ok(())
 }
@@ -974,7 +1001,7 @@ fn git_until(
 mod tests {
     use super::{exchange, first_exchange, remote, send};
     use loopflow_model::durable::RepositoryId;
-    use loopflow_storage::sqlite::plan_carriers::Carrier;
+    use loopflow_storage::sqlite::plan_carriers::{Carrier, NotTaken};
     use loopflow_storage::sqlite::SqliteStore;
     use loopflow_storage::work::task::{NewTask, TaskUpdate};
     use loopflow_test_support::TestRepo;
@@ -1611,6 +1638,56 @@ mod tests {
         .unwrap();
         assert_eq!(attempts, 3);
         assert!(backoffs.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn background_backoff_ends_when_another_process_exchanges_or_a_record_is_not_taken() {
+        use std::time::{Duration, SystemTime};
+        let (_root, _origin, _sender, repo) = machines();
+        repo.task("Work");
+        let (store, path) = (&repo.store, repo.repo.as_str());
+        store.select_carrier(path, Carrier::Git, "origin").unwrap();
+        let backoffs = super::Backoffs::default();
+        let t0 = SystemTime::now();
+        let mut attempts = 0usize;
+        let mut fail = |_: &str| {
+            attempts += 1;
+            store
+                .record_carrier_exchange(path, Carrier::Git, Some("offline"))
+                .unwrap();
+            anyhow::bail!("offline")
+        };
+        super::exchange_unowned_at(store, t0, &backoffs, &mut fail).unwrap();
+        super::exchange_unowned_at(store, t0 + Duration::from_secs(30), &backoffs, &mut fail)
+            .unwrap();
+        assert_eq!(attempts, 1, "a recorded failure backs off");
+
+        // `lf task sync` in another process exchanged and recorded success.
+        store
+            .record_carrier_exchange(path, Carrier::Git, None)
+            .unwrap();
+        let mut retried = 0usize;
+        let mut not_taken = |_: &str| {
+            retried += 1;
+            Err(NotTaken {
+                count: 1,
+                reason: "a Wave of that name exists here".into(),
+            }
+            .into())
+        };
+        let t1 = t0 + Duration::from_secs(60);
+        super::exchange_unowned_at(store, t1, &backoffs, &mut not_taken).unwrap();
+        super::exchange_unowned_at(
+            store,
+            t1 + Duration::from_secs(30),
+            &backoffs,
+            &mut not_taken,
+        )
+        .unwrap();
+        assert_eq!(
+            retried, 2,
+            "a read with records not taken is no carrier failure"
+        );
     }
 
     #[test]

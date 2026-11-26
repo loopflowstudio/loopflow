@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1113 Concept Review — Trackerless Plan Arrival &amp; Carrier Read-State</title>
+<style>
+  /* Loopflow Light (website/static/theme.css) */
+  :root {
+    --bg: #faf8f5;
+    --surface: #fffdf9;
+    --surface-muted: #f3eee7;
+    --surface-element: #ece6dd;
+    --border: #e6dfd6;
+    --border-strong: #d6ccc0;
+    --border-active: #8b8277;
+    --text: #2a2624;
+    --text-secondary: #5f5752;
+    --text-tertiary: #65605d;
+    --accent: #722f37;
+    --accent-ink: #722f37;
+    --accent-soft: #f5ebe9;
+    --working-ink: #2f629f;
+    --working-fill: #d5dde6;
+    --warning-ink: #7f5a19;
+    --warning-fill: #e4dccd;
+    --failure-ink: #a64038;
+    --failure-fill: #ecd9d5;
+    --success-ink: #386c48;
+    --success-fill: #d7dfd6;
+    --term-bg: #262321;
+    --term-fg: #f5f1ea;
+    --term-muted: #a9a199;
+    --term-ok: #90cfa2;
+    --term-err: #f6a493;
+    --term-warn: #dab979;
+    --term-cmd: #95c1f7;
+    --shadow: 0 1px 2px rgba(42, 38, 36, 0.06);
+    --font-serif: "Old Standard TT", Georgia, "Times New Roman", serif;
+    --font-sans: "Atkinson Hyperlegible Next", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-mono: "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  /* Loopflow Dark (swift/Loopflow/Themes/Catalogue/Loopflow Dark) */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #2b2d30;
+      --surface: #323437;
+      --surface-muted: #383a3d;
+      --surface-element: #3e4144;
+      --border: #4b4c4d;
+      --border-strong: #646464;
+      --border-active: #8c8c8b;
+      --text: #f5f1ea;
+      --text-secondary: #c9c6c1;
+      --text-tertiary: #bab9b7;
+      --accent: #8a3a44;
+      --accent-ink: #eba8ac;
+      --accent-soft: #433235;
+      --working-ink: #95c1f7;
+      --working-fill: #3e4854;
+      --warning-ink: #dab979;
+      --warning-fill: #4b463d;
+      --failure-ink: #f6a493;
+      --failure-fill: #504242;
+      --success-ink: #90cfa2;
+      --success-fill: #37483d;
+      --term-bg: #1e2022;
+      --term-fg: #f5f1ea;
+      --term-muted: #9b9791;
+      --term-ok: #90cfa2;
+      --term-err: #f6a493;
+      --term-warn: #dab979;
+      --term-cmd: #95c1f7;
+      --shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { color-scheme: light dark; }
+  body {
+    margin: 0;
+    padding: 2.25rem 1.25rem 4.5rem;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.6 var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  main { max-width: 1080px; margin: 0 auto; }
+
+  header {
+    border-bottom: 1px solid var(--border-strong);
+    padding-bottom: 1.5rem;
+    margin-bottom: 2rem;
+  }
+
+  .eyebrow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+  }
+
+  h1 {
+    font-family: var(--font-serif);
+    font-size: clamp(28px, 3.2vw, 38px);
+    font-weight: 400;
+    line-height: 1.15;
+    color: var(--accent-ink);
+    margin: 0 0 0.75rem;
+  }
+
+  h2 {
+    font-family: var(--font-serif);
+    font-size: 24px;
+    font-weight: 400;
+    color: var(--accent-ink);
+    margin: 2.5rem 0 0.85rem;
+    padding-bottom: 0.35rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    margin: 1.35rem 0 0.5rem;
+  }
+
+  p { margin: 0.45rem 0 0.85rem; max-width: 82ch; }
+  ul, ol { margin: 0.4rem 0 0.9rem; padding-left: 1.35rem; }
+  li { margin-bottom: 0.35rem; }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 12.8px;
+    background: var(--surface-element);
+    padding: 0.12em 0.38em;
+    border-radius: 4px;
+    color: var(--text);
+  }
+
+  .area-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent-ink);
+    border-radius: 8px;
+    padding: 0.95rem 1.15rem;
+    margin: 1rem 0 1.15rem;
+    box-shadow: var(--shadow);
+  }
+  .area-box strong { color: var(--accent-ink); }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem 0.9rem;
+    align-items: center;
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    margin-top: 0.9rem;
+  }
+
+  .badge {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 0.14rem 0.54rem;
+    border-radius: 999px;
+    letter-spacing: 0.02em;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+  .b-yes { background: var(--success-fill); color: var(--success-ink); }
+  .b-no { background: var(--failure-fill); color: var(--failure-ink); }
+  .b-existing { background: var(--surface-element); color: var(--text-secondary); border: 1px solid var(--border-strong); }
+  .b-proposed { background: var(--working-fill); color: var(--working-ink); }
+  .b-rec { background: var(--success-fill); color: var(--success-ink); }
+  .b-separate { background: var(--warning-fill); color: var(--warning-ink); }
+  .b-this { background: var(--accent-soft); color: var(--accent-ink); border: 1px solid var(--border); }
+
+  /* Terminal & state strips */
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+    gap: 1rem;
+    margin: 0.9rem 0 1.25rem;
+  }
+
+  .grid-3 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+    gap: 1rem;
+    margin: 0.9rem 0 1.25rem;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.15rem;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+  .card.existing { border-top: 3px solid var(--failure-ink); }
+  .card.proposed { border-top: 3px solid var(--working-ink); }
+  .card.recommended { border-top: 3px solid var(--success-ink); }
+  .card.warn { border-top: 3px solid var(--warning-ink); }
+
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .card-title { font-weight: 600; font-size: 14.5px; }
+
+  .term {
+    background: var(--term-bg);
+    color: var(--term-fg);
+    font-family: var(--font-mono);
+    font-size: 12.2px;
+    line-height: 1.5;
+    padding: 0.85rem 1rem;
+    border-radius: 8px;
+    overflow-x: auto;
+    white-space: pre;
+    margin: 0.25rem 0;
+  }
+  .t-muted { color: var(--term-muted); }
+  .t-cmd { color: var(--term-cmd); }
+  .t-ok { color: var(--term-ok); }
+  .t-err { color: var(--term-err); }
+  .t-warn { color: var(--term-warn); }
+
+  .db-strip {
+    background: var(--surface-muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.55rem 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 11.8px;
+    line-height: 1.45;
+    color: var(--text-secondary);
+    overflow-x: auto;
+  }
+  .db-strip strong { color: var(--text); }
+
+  /* Alignment table */
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    margin: 1rem 0 1.4rem;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.6px;
+  }
+
+  thead th {
+    background: var(--surface-muted);
+    color: var(--text-secondary);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    text-align: left;
+    padding: 0.72rem 0.85rem;
+    border-bottom: 1px solid var(--border-strong);
+  }
+
+  tbody td {
+    padding: 0.78rem 0.85rem;
+    vertical-align: top;
+    border-bottom: 1px solid var(--border);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+
+  .mismatch-tag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--failure-ink);
+    background: var(--failure-fill);
+    padding: 0.08rem 0.42rem;
+    border-radius: 4px;
+    margin-bottom: 0.3rem;
+  }
+
+  /* Matrix for read surfaces */
+  .matrix td, .matrix th { padding: 0.58rem 0.75rem; font-size: 13px; }
+  .cell-yes { color: var(--success-ink); font-weight: 600; }
+  .cell-no { color: var(--failure-ink); font-weight: 600; }
+  .cell-warn { color: var(--warning-ink); font-weight: 600; }
+
+  /* Biggest mismatch callout */
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--failure-ink);
+    border-radius: 8px;
+    padding: 1.05rem 1.25rem;
+    margin: 1rem 0 1.35rem;
+    box-shadow: var(--shadow);
+  }
+  .callout.rec { border-left-color: var(--success-ink); }
+
+  /* Architecture flow diagram */
+  .flow-box {
+    background: var(--surface-muted);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    font-size: 13px;
+    margin: 0.5rem 0;
+  }
+  .flow-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0.4rem 0;
+  }
+  .node {
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 0.25rem 0.55rem;
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+  .node.bad { border-color: var(--failure-ink); color: var(--failure-ink); }
+  .node.good { border-color: var(--success-ink); color: var(--success-ink); }
+  .node.prop { border-color: var(--working-ink); color: var(--working-ink); }
+  .arrow { color: var(--text-tertiary); font-weight: 600; }
+
+  /* Findings list */
+  .finding {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+    margin: 0.85rem 0;
+    box-shadow: var(--shadow);
+  }
+  .finding-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.45rem;
+  }
+  .finding-title { font-weight: 600; font-size: 15px; }
+  .finding-meta { font-size: 12.5px; color: var(--text-secondary); margin-top: 0.4rem; }
+
+  /* Questions */
+  .question {
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    padding: 1.05rem 1.25rem;
+    margin: 1rem 0;
+    box-shadow: var(--shadow);
+  }
+  .q-title {
+    font-weight: 600;
+    font-size: 15.5px;
+    margin-bottom: 0.35rem;
+    color: var(--text);
+  }
+  .q-context {
+    font-size: 13.8px;
+    color: var(--text-secondary);
+    margin-bottom: 0.75rem;
+  }
+  .opt-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .opt {
+    background: var(--surface-muted);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.65rem 0.85rem;
+    font-size: 13.8px;
+  }
+  .opt.rec {
+    border-color: var(--success-ink);
+    background: color-mix(in srgb, var(--success-fill) 45%, var(--surface));
+  }
+  .opt-key {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    color: var(--accent-ink);
+    margin-right: 0.4rem;
+  }
+
+  footer {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    font-size: 12.5px;
+    color: var(--text-tertiary);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">
+      <span>LOO-1113</span>
+      <span>·</span>
+      <span>Concept Review</span>
+      <span>·</span>
+      <span class="badge b-proposed">Pre-Build Plan Review</span>
+    </div>
+    <h1>Trackerless Plan Arrival &amp; Carrier Read-State</h1>
+    <div class="area-box">
+      <strong>Area reviewed:</strong> How a repository without Linear or Asana discovers, fetches, and remembers whether it has read its shared plan across carriers (<code>plan_git</code>, <code>plan_hub</code>, <code>plan_carriers</code>, <code>sqlite::plan_carriers</code>) and across plan-reading commands.
+      <br>
+      <strong>Why this whole area:</strong> LOO-1113's bug (<code>lf task create</code> suppressing <code>lf task list</code>'s first fetch) is one symptom of a wider split: "has this clone read its remote?" is conflated with local checkout registration, wired into only two CLI commands, implemented for Git alone, and missing cross-process failure throttling.
+    </div>
+    <p>
+      Nothing in <code>rust/</code> has been edited yet (<code>HEAD 91531a9eb2</code> holds only <code>scratch/plan.md</code> and <code>scratch/questions.md</code> over <code>origin/main 6c2560bd0f</code>). This review checks whether <code>scratch/plan.md</code> fixes the underlying model or patches one corner of it.
+    </p>
+    <div class="legend">
+      <span>Markers:</span>
+      <span class="badge b-existing">Existing (main)</span>
+      <span class="badge b-proposed">Proposed (plan.md)</span>
+      <span class="badge b-rec">Recommended</span>
+      <span class="badge b-this">This work (LOO-1113)</span>
+      <span class="badge b-separate">Separate outcome</span>
+    </div>
+  </header>
+
+  <!-- 1. CONCRETE INTERACTIONS -->
+  <h2>1. Concrete Walkthroughs: Normal, Failure &amp; Counterexamples</h2>
+  <p>
+    The promise in <code>docs/work.md</code> is simple: <em>"Without Linear or Asana, the plan travels with the repository. Clone it on a second Machine and the plan is there, with nothing to set up."</em> Walking four real sequences exposes where <code>main</code> breaks and where <code>scratch/plan.md</code> still leaves surprises.
+  </p>
+
+  <h3>Path A — Fresh clone, create first, then list (the LOO-1113 trigger)</h3>
+  <div class="grid-3">
+    <div class="card existing">
+      <div class="card-head">
+        <span class="card-title">Today on <code>main</code></span>
+        <span class="badge b-existing">Existing</span>
+      </div>
+      <div class="term"><span class="t-muted"># Machine A already pushed "made on A"</span>
+<span class="t-cmd">c$ git clone origin repo &amp;&amp; cd repo</span>
+<span class="t-cmd">c$ lf task create 'made on C'</span>
+made on C · 8f4a21c
+<span class="t-cmd">c$ lf task list</span>
+<span class="t-err">8f4a21c · unstarted · made on C</span>
+<span class="t-muted"># "made on A" is missing until lf task sync
+# or the server's 60 s background tick</span></div>
+      <div class="db-strip">
+        <strong>repository_plans:</strong> row exists (from <code>create</code>)<br>
+        <strong>first_exchange check:</strong> <code>repository_id.is_some()</code> → skips fetch
+      </div>
+    </div>
+
+    <div class="card proposed">
+      <div class="card-head">
+        <span class="card-title">With <code>scratch/plan.md</code></span>
+        <span class="badge b-proposed">Proposed</span>
+      </div>
+      <div class="term"><span class="t-muted"># Machine A already pushed "made on A"</span>
+<span class="t-cmd">c$ git clone origin repo &amp;&amp; cd repo</span>
+<span class="t-cmd">c$ lf task create 'made on C'</span>
+made on C · 8f4a21c
+<span class="t-cmd">c$ lf task list</span>
+<span class="t-ok">3e1c9a0 · unstarted · made on A
+8f4a21c · unstarted · made on C</span>
+<span class="t-cmd">c$ lf task list</span>  <span class="t-muted"># instant, 0 fetches</span></div>
+      <div class="db-strip">
+        <strong>plan_carriers (git):</strong> <code>seen_seq</code> NULL → <code>0</code> after fetch<br>
+        <strong>first_exchange check:</strong> <code>has_read()</code> → fetches once, then skips
+      </div>
+    </div>
+
+    <div class="card recommended">
+      <div class="card-head">
+        <span class="card-title">Recommended</span>
+        <span class="badge b-rec">Recommended</span>
+      </div>
+      <div class="term"><span class="t-muted"># Works for lf task list AND lf plan list,
+# lf wave list, lf wave status, hub-only</span>
+<span class="t-cmd">c$ lf task create 'made on C'</span>
+made on C · 8f4a21c
+<span class="t-cmd">c$ lf plan list</span>   <span class="t-muted"># or lf task list</span>
+<span class="t-ok">3e1c9a0 · unstarted · made on A
+8f4a21c · unstarted · made on C</span></div>
+      <div class="db-strip">
+        <strong>One first-read gate</strong> in <code>plan_carriers::before_first_read</code> for every CLI plan read and both carriers (Git + Hub)
+      </div>
+    </div>
+  </div>
+
+  <h3>Path B — Failure &amp; recovery: fresh clone while offline, then back online</h3>
+  <div class="grid-3">
+    <div class="card existing">
+      <div class="card-head">
+        <span class="card-title">Today on <code>main</code></span>
+        <span class="badge b-existing">Existing</span>
+      </div>
+      <div class="term"><span class="t-muted"># Wi-Fi off</span>
+<span class="t-cmd">c$ lf task list</span>  <span class="t-warn"># stalls 5 s, fails</span>
+<span class="t-muted">(empty)</span>
+<span class="t-cmd">c$ lf task list</span>  <span class="t-muted"># 0 ms (already registered!)</span>
+<span class="t-muted"># Wi-Fi comes back on</span>
+<span class="t-cmd">c$ lf task list</span>
+<span class="t-err">(still empty forever)</span></div>
+      <p style="font-size:13px; color:var(--text-secondary); margin:0;">
+        <code>exchange</code> registered <code>repository_plans</code> <em>before</em> the fetch failed. Worse: LOO-1110 narrowed the server's 60 s <code>exchange_unowned</code> to repos with an open Task or Wave, so an empty clone is <strong>never</strong> polled in the background either.
+      </p>
+    </div>
+
+    <div class="card proposed">
+      <div class="card-head">
+        <span class="card-title">With <code>scratch/plan.md</code></span>
+        <span class="badge b-proposed">Proposed</span>
+      </div>
+      <div class="term"><span class="t-muted"># Wi-Fi off</span>
+<span class="t-cmd">c$ lf task list</span>  <span class="t-warn"># stalls 5 s, fails</span>
+<span class="t-cmd">c$ lf task list</span>  <span class="t-err"># stalls 5 s AGAIN</span>
+<span class="t-cmd">c$ lf repo tracker</span> <span class="t-err"># stalls 5 s AGAIN</span>
+<span class="t-muted"># Wi-Fi comes back on</span>
+<span class="t-cmd">c$ lf task list</span>
+<span class="t-ok">3e1c9a0 · unstarted · made on A</span></div>
+      <p style="font-size:13px; color:var(--text-secondary); margin:0;">
+        Heals automatically when back online, but every read in an offline fresh clone stalls up to 5 s because <code>plan_git::BACKOFFS</code> lives only in process RAM. Skipping while <code>error IS NOT NULL</code> (in <code>questions.md</code>) fixes the stall but brings back the "empty forever online" bug.
+      </p>
+    </div>
+
+    <div class="card recommended">
+      <div class="card-head">
+        <span class="card-title">With 60 s failure cooldown</span>
+        <span class="badge b-rec">Recommended</span>
+      </div>
+      <div class="term"><span class="t-muted"># Wi-Fi off</span>
+<span class="t-cmd">c$ lf task list</span>  <span class="t-warn"># stalls 5 s, fails once</span>
+<span class="t-cmd">c$ lf task list</span>  <span class="t-ok"># 1 ms (cooldown active)</span>
+<span class="t-cmd">c$ lf repo tracker</span> <span class="t-ok"># 1 ms, shows error</span>
+<span class="t-muted"># Wi-Fi back on (+60 s, or lf task sync now)</span>
+<span class="t-cmd">c$ lf task list</span>
+<span class="t-ok">3e1c9a0 · unstarted · made on A</span></div>
+      <p style="font-size:13px; color:var(--text-secondary); margin:0;">
+        Reuses existing SQLite <code>planning_scope_checks</code> (written <em>only</em> when a first read fails — zero extra writes on success). Offline reads stay fast; online recovery stays automatic.
+      </p>
+    </div>
+  </div>
+
+  <h3>Path C — Three counterexamples that still break under <code>scratch/plan.md</code></h3>
+  <div class="grid-3">
+    <div class="card warn">
+      <div class="card-head">
+        <span class="card-title">1. Running <code>lf wave list</code> or <code>lf plan list</code> first</span>
+        <span class="badge b-this">This work</span>
+      </div>
+      <div class="term"><span class="t-cmd">c$ git clone origin repo &amp;&amp; cd repo</span>
+<span class="t-cmd">c$ lf wave list</span>
+<span class="t-err">(empty — no fetch attempted)</span>
+<span class="t-cmd">c$ lf plan list</span>
+<span class="t-err">[]  # no fetch attempted</span>
+<span class="t-cmd">c$ lf task list</span>
+<span class="t-ok">3e1c9a0 · unstarted · made on A</span></div>
+      <p style="font-size:13px; color:var(--text-secondary); margin:0;">
+        Only <code>lf task list</code> and <code>lf repo tracker</code> call <code>before_first_read</code>. People have to learn a hidden distinction between read commands.
+      </p>
+    </div>
+
+    <div class="card warn">
+      <div class="card-head">
+        <span class="card-title">2. Hub-only repo after <code>lf config repo --bind</code></span>
+        <span class="badge b-this">This work</span>
+      </div>
+      <div class="term"><span class="t-muted"># Documented flow in docs/work.md:419</span>
+<span class="t-cmd">b$ lf machine hub mini</span>
+<span class="t-cmd">b$ lf config repo --bind repo_a1b2...</span>
+<span class="t-cmd">b$ lf task list</span>
+<span class="t-err">(empty — before_first_read only runs Git)</span>
+<span class="t-cmd">b$ lf task sync</span>
+<span class="t-ok">3e1c9a0 · unstarted · made on mini</span></div>
+      <p style="font-size:13px; color:var(--text-secondary); margin:0;">
+        <code>before_first_read</code> hard-codes <code>plan_git::first_exchange</code> and skips <code>plan_hub</code>, even when the clone already knows its bound repository ID.
+      </p>
+    </div>
+
+    <div class="card warn">
+      <div class="card-head">
+        <span class="card-title">3. Empty remote today, Task added tomorrow</span>
+        <span class="badge b-separate">Separate outcome</span>
+      </div>
+      <div class="term"><span class="t-muted"># Day 1: origin has 0 Tasks</span>
+<span class="t-cmd">c$ lf task list</span>   <span class="t-muted"># fetches, marks seen_seq=0</span>
+<span class="t-muted"># Day 2: Machine A creates &amp; pushes Task A</span>
+<span class="t-muted"># Wait 5 minutes with lf server running...</span>
+<span class="t-cmd">c$ lf task list</span>
+<span class="t-err">(still empty — neither first_exchange nor
+ exchange_unowned will ever fetch again)</span></div>
+      <p style="font-size:13px; color:var(--text-secondary); margin:0;">
+        LOO-1110 restricted <code>exchange_unowned</code> to repos that already hold a local open Task or Wave. Comments in <code>plan_git.rs:337</code> and <code>docs/dev/planning.md:284</code> still falsely promise the opposite.
+      </p>
+    </div>
+  </div>
+
+  <!-- 2. DOMAIN VS CODE ALIGNMENT -->
+  <h2>2. Do Domain Concepts and Code Concepts Line Up?</h2>
+  <p>
+    Every concept a person interacts with when sharing a trackerless plan, paired with the types, tables, and call sites behind it.
+  </p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:23%">Domain concept (what a person knows &amp; does)</th>
+          <th style="width:29%">Code concept (types, records, APIs)</th>
+          <th style="width:11%">Lines up?</th>
+          <th style="width:37%">What is wrong (where No) / Counterexamples</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>"Has this clone read its remote plan yet?"</strong><br>Whether a clone has completed an initial pull from its peer.</td>
+          <td>
+            <span class="badge b-existing">Existing</span> <code>store.repository_id(repo).is_some()</code> (<code>repository_plans</code>)<br><br>
+            <span class="badge b-proposed">Proposed</span> <code>PlanCarrier::has_read()</code> → <code>plan_carriers.seen_seq.is_some()</code> (writes <code>0</code> for Git via <code>plan_read</code>)
+          </td>
+          <td>
+            <span class="badge b-no">NO</span> <span style="font-size:11.5px; color:var(--text-tertiary)">existing</span><br><br>
+            <span class="badge b-no">NO</span> <span style="font-size:11.5px; color:var(--text-tertiary)">partial</span>
+          </td>
+          <td>
+            <span class="mismatch-tag">One idea conflated with another</span><br>
+            <strong>Existing:</strong> <code>repository_plans</code> means "this directory has a local ID" — written by <code>lf task create</code>, <code>lf wt create</code>, launches, and even a <em>failed</em> first fetch.<br>
+            <span class="mismatch-tag" style="margin-top:0.45rem">One column, two meanings</span><br>
+            <strong>Proposed:</strong> Fixes the conflation without a migration, but overloads <code>seen_seq</code>: for Hub it is a peer sequence watermark (<code>i64</code>); for Git (whose watermarks live in <code>plan_refs</code>) it becomes a magic-zero boolean (<code>NULL</code> vs <code>0</code>). Acceptable internally if hidden behind <code>has_read()</code> and documented honestly, so no caller treats Git's <code>0</code> as a sequence.
+          </td>
+        </tr>
+
+        <tr>
+          <td><strong>"First time I look at the plan in a fresh clone, fetch it"</strong><br>Any plan-reading CLI command: <code>lf task list</code>, <code>lf plan list</code>, <code>lf plan board</code>, <code>lf wave list</code>, <code>lf wave status</code>, <code>lf repo tracker</code>.</td>
+          <td>
+            <code>plan_carriers::before_first_read(repo)</code><br>
+            Called only in:<br>
+            • <code>bin/lf.rs:999</code> (<code>TaskCommand::List</code>)<br>
+            • <code>commands/tracker.rs:71</code> (bare <code>lf repo tracker</code>)
+          </td>
+          <td><span class="badge b-no">NO</span></td>
+          <td>
+            <span class="mismatch-tag">No single owner</span><br>
+            <code>lf plan list</code>, <code>lf wave list</code>, <code>lf wave status</code>, <code>lf wave plan</code>, and CLI-direct <code>lf plan board</code> all read the same SQLite store and skip <code>before_first_read</code>. Even <code>lf task list --subscribe</code> calls it while <code>lf plan list --subscribe</code> and <code>lf repo tracker --subscribe</code> do not.
+          </td>
+        </tr>
+
+        <tr>
+          <td><strong>"Git and Hub are two carriers of the same plan"</strong><br>A hub speeds up Git, or carries the plan alone when there is no Git remote (<code>lf config repo --bind &lt;id&gt;</code>).</td>
+          <td>
+            <code>before_first_read</code> → <code>plan_git::first_exchange</code> only.<br>
+            <code>plan_carriers::send</code> → <code>plan_hub::exchange(Why::Save)</code> (sends <em>and</em> reads) + <code>plan_git::send</code> (pushes only, unless <code>not_taken</code>).
+          </td>
+          <td><span class="badge b-no">NO</span></td>
+          <td>
+            <span class="mismatch-tag">Asymmetric carriers</span> <span class="mismatch-tag">Misleading name</span><br>
+            The two carriers have inverted first-contact rules: Hub reads on first <em>save</em> and never on first <em>read</em>; Git reads on first <em>read</em> and never on first <em>save</em>. Result: a hub-only repo bound with <code>lf config repo --bind</code> prints an empty <code>lf task list</code>. Also, <code>plan_carriers::send</code>'s doc says "reads only what was not taken", which is false for Hub.
+          </td>
+        </tr>
+
+        <tr>
+          <td><strong>"Offline, reads stay fast; back online, they catch up"</strong><br>No 5-second stalls on every list when a remote is unreachable.</td>
+          <td>
+            <code>plan_git::BACKOFFS</code>: in-memory <code>LazyLock&lt;Mutex&lt;HashMap&gt;&gt;</code> (server-only).<br>
+            <code>plan_carriers.error</code> / <code>failing_since</code> in SQLite.<br>
+            <code>planning_scope_checks</code> in SQLite (used by <code>poll_owned</code>).
+          </td>
+          <td><span class="badge b-no">NO</span></td>
+          <td>
+            <span class="mismatch-tag">Hidden process boundary</span><br>
+            Exponential backoff only lives in a long-running process's RAM. Short-lived CLI calls don't see it: <code>scratch/plan.md</code> stalls ≤5 s on <em>every</em> offline <code>lf task list</code>; gating on <code>error IS NULL</code> stalls 0 s offline but leaves an empty clone empty forever once back online.
+          </td>
+        </tr>
+
+        <tr>
+          <td><strong>"Once I've looked at a clone, background sync keeps it current"</strong><br><code>docs/work.md:325</code>: another Machine's Task appears within a minute.</td>
+          <td>
+            <code>plan_git::exchange_unowned</code> → <code>store.active_plan_repository_paths()</code> (requires ≥1 local open Task or non-retired Wave).
+          </td>
+          <td><span class="badge b-no">NO</span></td>
+          <td>
+            <span class="mismatch-tag">Stale promise</span><br>
+            Before LOO-1110, <code>exchange_unowned</code> polled every registered repo. Now it skips repos with zero local Tasks and Waves. So a clone whose first read saw an empty remote is marked <code>has_read() == true</code> and dropped from background polling — never seeing future remote Tasks automatically. Comments in <code>plan_git.rs:337</code> and <code>docs/dev/planning.md:284</code> still claim it is registered.
+          </td>
+        </tr>
+
+        <tr>
+          <td><strong>"Saving a Task is local-first; pushing never blocks on a remote fetch"</strong></td>
+          <td><code>planning_sync::sync_after_save</code> → <code>plan_carriers::send</code> → <code>plan_git::send</code> (push-only, 5 s cap, unsent past <code>sent_seq</code>)</td>
+          <td><span class="badge b-yes">YES</span></td>
+          <td>
+            Clean match. Keeping <code>plan_git::send</code> push-only preserves fast saves and avoids burning the 5 s save budget on a fetch. Unsent records wait safely past <code>sent_seq</code>.
+          </td>
+        </tr>
+
+        <tr>
+          <td><strong>"A naming clash (e.g. two Waves with the same name) doesn't block the rest of the plan"</strong></td>
+          <td><code>plan_carriers.not_taken</code> / <code>not_taken_reason</code>; <code>plan_refs</code> holds back the skipped ref; <code>plan_read</code> still marks the fetch complete.</td>
+          <td><span class="badge b-yes">YES</span></td>
+          <td>
+            Good call in <code>scratch/plan.md</code>: marking read on <code>failed.is_none()</code> before <code>publish</code> means a refused push or a colliding Wave does not force every future <code>lf task list</code> to re-fetch for 5 s. (Minor asymmetry: Hub's <code>apply_plan_records</code> leaves <code>seen_seq</code> unchanged when <code>skipped</code> is non-empty, which is required for Hub because Hub replays from <code>seen_seq</code>.)
+          </td>
+        </tr>
+
+        <tr>
+          <td><strong>"Pointing a clone at a different remote reads the new remote's plan"</strong></td>
+          <td><code>select_carrier(repo, Carrier::Git, remote_name)</code> resets <code>sent_seq=0, seen_seq=NULL</code> when <code>peer</code> changes.</td>
+          <td><span class="badge b-yes">YES</span> <span style="font-size:11.5px; color:var(--text-tertiary)">mostly</span></td>
+          <td>
+            Works when the remote's <em>name</em> changes (e.g. adding <code>origin</code> over <code>upstream</code>). Subtle edge case: <code>git remote set-url origin &lt;new-url&gt;</code> keeps <code>peer == "origin"</code> so <code>seen_seq</code> is not reset. Rare today; separate if ever needed.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Read-Surface Matrix: Where "First Read" Actually Runs</h3>
+  <div class="table-wrap">
+    <table class="matrix">
+      <thead>
+        <tr>
+          <th>Command / Surface</th>
+          <th>Reads plan via</th>
+          <th>Today (<code>main</code>)</th>
+          <th><code>scratch/plan.md</code></th>
+          <th>Recommended</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>lf task list</code></td>
+          <td>Direct SQLite</td>
+          <td class="cell-warn">Git only, broken after save</td>
+          <td class="cell-yes">Git (fixed after save)</td>
+          <td class="cell-yes">Git + Hub (cooldown on fail)</td>
+        </tr>
+        <tr>
+          <td><code>lf repo tracker</code></td>
+          <td>Direct SQLite</td>
+          <td class="cell-warn">Git only, broken after save</td>
+          <td class="cell-yes">Git (fixed after save)</td>
+          <td class="cell-yes">Git + Hub (cooldown on fail)</td>
+        </tr>
+        <tr>
+          <td><code>lf plan list</code> / <code>lf wave list</code> / <code>lf wave status</code> / <code>lf wave plan</code></td>
+          <td>Direct SQLite</td>
+          <td class="cell-no">Never fetches</td>
+          <td class="cell-no">Never fetches</td>
+          <td class="cell-yes">Same <code>before_first_read</code></td>
+        </tr>
+        <tr>
+          <td><code>lf plan board</code> (no server)</td>
+          <td>Direct SQLite</td>
+          <td class="cell-no">Never fetches</td>
+          <td class="cell-no">Never fetches</td>
+          <td class="cell-yes">Same <code>before_first_read</code></td>
+        </tr>
+        <tr>
+          <td>Desktop / served reads</td>
+          <td><code>lf server</code></td>
+          <td class="cell-yes">Answers once, then <code>after_command</code> exchanges both carriers</td>
+          <td class="cell-yes">Same (marks <code>seen_seq=0</code>)</td>
+          <td class="cell-yes">Same (live subscription updates)</td>
+        </tr>
+        <tr>
+          <td><code>lf task status &lt;id&gt;</code> / <code>show</code></td>
+          <td><code>find_task</code></td>
+          <td class="cell-yes">Exchanges both carriers on miss</td>
+          <td class="cell-yes">Same</td>
+          <td class="cell-yes">Same</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 3. THE BIGGEST MISMATCH -->
+  <h2>3. The Biggest Mismatch — Before &amp; After</h2>
+  <div class="callout">
+    <strong>The core mismatch:</strong> There is no single concept of <em>"ensure this clone has done its first read from its carriers."</em> Instead, <code>main</code> abuses checkout registration (<code>repository_plans</code>) as a proxy for "fetched", runs it only for Git, wires it into only two CLI commands, and drops failure throttling across CLI invocations. <code>scratch/plan.md</code> fixes the proxy bug cleanly for Git, but leaves the other three halves of the mismatch intact.
+  </div>
+
+  <div class="grid-3">
+    <div class="card existing">
+      <div class="card-head">
+        <span class="card-title">Before (<code>main</code>)</span>
+        <span class="badge b-existing">Existing</span>
+      </div>
+      <div class="flow-box">
+        <div class="flow-row">
+          <span class="node">lf task list</span>
+          <span class="node">lf repo tracker</span>
+          <span class="arrow">→</span>
+          <span class="node bad">before_first_read</span>
+        </div>
+        <div class="flow-row">
+          <span class="node bad">lf plan list / wave list</span>
+          <span class="arrow">→</span>
+          <span class="node bad">(skipped)</span>
+        </div>
+        <div class="flow-row">
+          <span class="node bad">plan_git::first_exchange</span>
+          <span class="arrow">checks</span>
+          <span class="node bad">repository_plans</span>
+        </div>
+        <div class="flow-row">
+          <span class="node bad">plan_hub</span>
+          <span class="arrow">→</span>
+          <span class="node bad">(ignored on read)</span>
+        </div>
+      </div>
+      <p style="font-size:13px; color:var(--text-secondary); margin:0;">
+        Any save, worktree creation, or failed fetch writes <code>repository_plans</code> and permanently turns off first reads.
+      </p>
+    </div>
+
+    <div class="card proposed">
+      <div class="card-head">
+        <span class="card-title">Plan (<code>scratch/plan.md</code>)</span>
+        <span class="badge b-proposed">Proposed</span>
+      </div>
+      <div class="flow-box">
+        <div class="flow-row">
+          <span class="node">lf task list</span>
+          <span class="node">lf repo tracker</span>
+          <span class="arrow">→</span>
+          <span class="node prop">before_first_read</span>
+        </div>
+        <div class="flow-row">
+          <span class="node bad">lf plan list / wave list</span>
+          <span class="arrow">→</span>
+          <span class="node bad">(still skipped)</span>
+        </div>
+        <div class="flow-row">
+          <span class="node prop">plan_git::first_exchange</span>
+          <span class="arrow">checks</span>
+          <span class="node prop">plan_carriers.seen_seq</span>
+        </div>
+        <div class="flow-row">
+          <span class="node bad">offline retry</span>
+          <span class="arrow">→</span>
+          <span class="node bad">≤5 s every read</span>
+        </div>
+      </div>
+      <p style="font-size:13px; color:var(--text-secondary); margin:0;">
+        Fixes <code>lf task create</code> → <code>lf task list</code> with zero migration, but leaves read-command inconsistency, hub-only omission, and repeated 5 s offline stalls.
+      </p>
+    </div>
+
+    <div class="card recommended">
+      <div class="card-head">
+        <span class="card-title">After (Recommended)</span>
+        <span class="badge b-rec">Recommended</span>
+      </div>
+      <div class="flow-box">
+        <div class="flow-row">
+          <span class="node good">All CLI plan reads</span>
+          <span class="arrow">→</span>
+          <span class="node good">before_first_read</span>
+        </div>
+        <div class="flow-row">
+          <span class="node good">before_first_read</span>
+          <span class="arrow">checks</span>
+          <span class="node good">has_read() per carrier</span>
+        </div>
+        <div class="flow-row">
+          <span class="node good">Hub (if bound)</span>
+          <span class="arrow">+</span>
+          <span class="node good">Git (if remote)</span>
+        </div>
+        <div class="flow-row">
+          <span class="node good">if error.is_some()</span>
+          <span class="arrow">→</span>
+          <span class="node good">60 s scope cooldown</span>
+        </div>
+      </div>
+      <p style="font-size:13px; color:var(--text-secondary); margin:0;">
+        One rule a person can hold in one sentence: <em>the first time you view a clone's plan, Loopflow reads its carriers once (with a 60 s retry cooldown if offline).</em>
+      </p>
+    </div>
+  </div>
+
+  <!-- 4. FINDINGS & DESIGN CHOICES -->
+  <h2>4. All Findings, Scope &amp; Design Choices</h2>
+
+  <div class="finding">
+    <div class="finding-head">
+      <span class="finding-title">F1. Track "carrier has read this peer" separately from checkout registration</span>
+      <span class="badge b-this">This work (LOO-1113)</span>
+    </div>
+    <p>
+      <code>scratch/plan.md</code>'s core fix is right: replace <code>store.repository_id(repo).is_some()</code> with <code>PlanCarrier::has_read()</code>, and record read completion inside <code>exchange_with</code> when <code>failed.is_none()</code>, <em>before</em> <code>publish</code> (so a refused push or <code>not_taken</code> Wave clash doesn't undo a completed read).
+    </p>
+    <p class="finding-meta">
+      <strong>Design choice (internal, reversible):</strong> Reuse <code>plan_carriers.seen_seq</code> (setting <code>0</code> for Git via <code>plan_read</code>, hidden behind <code>PlanCarrier::has_read()</code>) vs. adding a <code>first_read_at INTEGER</code> column in a new migration. <strong>Recommendation:</strong> Keep <code>seen_seq = 0</code> as proposed — it needs no migration, gets <code>select_carrier</code>'s peer-change reset for free, preserves LOO-1110's zero-idle-revision trigger, and is completely internal (not on the wire, reversible if a read timestamp is ever needed). Update the field doc and <code>SCHEMA.md</code> so the dual meaning is explicit.
+    </p>
+  </div>
+
+  <div class="finding">
+    <div class="finding-head">
+      <span class="finding-title">F2. Give every CLI plan-reading command the same first-read gate</span>
+      <span class="badge b-this">This work (LOO-1113)</span>
+    </div>
+    <p>
+      Call <code>plan_carriers::before_first_read(repo)</code> from <code>lf plan list</code>, <code>lf plan board</code> (direct path), <code>lf wave list</code>, <code>lf wave status</code>, and <code>lf wave plan</code> alongside <code>lf task list</code> and <code>lf repo tracker</code>. On an already-read clone, the cost is one primary-key lookup in <code>plan_carriers</code> (~0.1 ms, zero subprocesses — <code>plan_git::remote</code> reads <code>.git/config</code> without forking since LOO-1110).
+    </p>
+    <p class="finding-meta">
+      <strong>Passed over:</strong> Keeping <code>before_first_read</code> on only two commands. That leaves an arbitrary distinction between <code>lf task list</code> and <code>lf plan list</code> / <code>lf wave list</code>.
+    </p>
+  </div>
+
+  <div class="finding">
+    <div class="finding-head">
+      <span class="finding-title">F3. Throttle failed first-read retries across CLI processes (60 s cooldown)</span>
+      <span class="badge b-this">This work (LOO-1113)</span>
+    </div>
+    <p>
+      When a first fetch fails, <code>plan_carriers.error</code> is non-null and <code>seen_seq</code> stays <code>NULL</code>. Check <code>planning_scope_checks</code> (key <code>plan-first-read:&lt;repo&gt;</code>, 60 s window) <em>only when <code>held.error.is_some()</code></em> (and record the attempt timestamp on failure). Happy-path first reads write nothing to <code>planning_scope_checks</code>; offline repeated reads finish in milliseconds; coming back online heals automatically on the next read after 60 s (or immediately on <code>lf task sync</code>).
+    </p>
+    <p class="finding-meta">
+      <strong>Passed over:</strong> (1) Retrying on every read (up to 5 s stall every offline command); (2) Skipping whenever <code>error IS NOT NULL</code> (strands an empty clone online forever because LOO-1110's <code>exchange_unowned</code> skips empty repos). Both choices are reversible.
+    </p>
+  </div>
+
+  <div class="finding">
+    <div class="finding-head">
+      <span class="finding-title">F4. Let <code>before_first_read</code> read an unread Hub when the clone has a repository ID</span>
+      <span class="badge b-this">This work (LOO-1113)</span>
+    </div>
+    <p>
+      Move the "has read?" check from Git-only <code>plan_git::first_exchange</code> up into <code>plan_carriers::before_first_read</code> so it handles both carriers symmetrically: if a Hub is configured, <code>store.repository_id(repo)</code> is <code>Some</code> (e.g. after <code>lf config repo --bind &lt;id&gt;</code> or <code>lf wt create</code>), and Hub's carrier row does not satisfy <code>has_read()</code>, run <code>plan_hub::exchange(store, repo, Why::Read(until))</code> too.
+    </p>
+    <p class="finding-meta">
+      <strong>Passed over:</strong> Keeping <code>before_first_read</code> Git-only. That breaks the documented hub-only setup (<code>lf config repo --bind &lt;id&gt;</code> → <code>lf task list</code>) and skips the faster hub on a fresh clone. Reversible.
+    </p>
+  </div>
+
+  <div class="finding">
+    <div class="finding-head">
+      <span class="finding-title">F5. Clean up stale comments &amp; docs that contradict actual carrier behavior</span>
+      <span class="badge b-this">This work (LOO-1113)</span>
+    </div>
+    <p>
+      Fix three false statements uncovered in this area: (1) <code>plan_git.rs:337</code> and <code>docs/dev/planning.md:284</code> still say <code>first_exchange</code> "registers the clone for <code>exchange_unowned</code>" (false for empty clones since LOO-1110); (2) <code>plan_carriers.rs:3,165</code> says <code>send</code> "reads only what was not taken" (false for Hub, whose <code>Why::Save</code> always calls <code>PlanChanges</code>).
+    </p>
+  </div>
+
+  <div class="finding">
+    <div class="finding-head">
+      <span class="finding-title">F6. Discovering the very first remote Task in a previously-empty clone</span>
+      <span class="badge b-separate">Separate outcome</span>
+    </div>
+    <p>
+      If Machine C clones an empty repo and runs <code>lf task list</code> (marking <code>has_read = true</code>), and Machine A creates the repo's first Task later, Machine C's <code>lf server</code> will not poll that repo (<code>active_plan_repository_paths</code> requires an open Task or active Wave) and <code>lf task list</code> will not fetch again.
+    </p>
+    <p class="finding-meta">
+      <strong>What it would take:</strong> Decide whether empty clones should stay quiet (zero idle Git forks, matching LOO-1110, requiring <code>lf task sync</code> once) or receive a low-frequency/on-read refresh when a clone has 0 Tasks/Waves and hasn't checked recently. Kept separate so LOO-1113 does not regress LOO-1110's idle-server budget.
+    </p>
+  </div>
+
+  <div class="finding">
+    <div class="finding-head">
+      <span class="finding-title">F7. Repointing <code>origin</code>'s URL in place (<code>git remote set-url origin …</code>)</span>
+      <span class="badge b-separate">Separate outcome</span>
+    </div>
+    <p>
+      <code>plan_carriers.peer</code> stores the remote name (<code>"origin"</code>), not its URL. Switching a remote's URL under the same name does not reset <code>sent_seq</code> or <code>seen_seq</code>.
+    </p>
+    <p class="finding-meta">
+      <strong>What it would take:</strong> Include or track the resolved remote URL (or remote identity) alongside the remote name in <code>plan_carriers.peer</code>, updating <code>lf repo tracker</code> display to keep showing the short remote name. Rare in practice; separate unless it comes up.
+    </p>
+  </div>
+
+  <!-- 5. OPEN QUESTIONS -->
+  <h2>5. Questions to Decide</h2>
+  <p>
+    All four choices are reversible after shipping. Reply with numbers and letters (for example, <code>1a 2a 3a 4a</code>).
+  </p>
+
+  <div class="question">
+    <div class="q-title">1. Which commands should fetch the remote plan on your first look in a fresh clone?</div>
+    <div class="q-context">
+      Right now, only <code>lf task list</code> and <code>lf repo tracker</code> fetch on first read. If you clone a repo and start with <code>lf plan list</code>, <code>lf wave list</code>, or <code>lf wave status</code>, you see an empty plan.
+    </div>
+    <ul class="opt-list">
+      <li class="opt rec">
+        <span class="opt-key">1a</span> <strong>(Recommended) Every plan-reading command</strong> — <code>lf task list</code>, <code>lf plan list</code>, <code>lf plan board</code>, <code>lf wave list</code>, <code>lf wave status</code>, and <code>lf repo tracker</code> all do the one-time fetch if this clone has never read its remote yet. Later runs stay instant.
+      </li>
+      <li class="opt">
+        <span class="opt-key">1b</span> <strong>Only <code>lf task list</code> and <code>lf repo tracker</code></strong> (as in <code>scratch/plan.md</code>) — other list commands never hit the network; if you run <code>lf wave list</code> first in a fresh clone, you see empty until you run <code>lf task list</code> or <code>lf task sync</code>.
+      </li>
+    </ul>
+  </div>
+
+  <div class="question">
+    <div class="q-title">2. If your first <code>lf task list</code> fails offline, what should the next <code>lf task list</code> do?</div>
+    <div class="q-context">
+      Suppose you clone a repo and run <code>lf task list</code> with no network (it waits up to 5 s and falls back to the local plan). Then you run <code>lf task list</code> a few more times while still offline, and later reconnect.
+    </div>
+    <ul class="opt-list">
+      <li class="opt rec">
+        <span class="opt-key">2a</span> <strong>(Recommended) Retry after a 60-second cooldown</strong> — immediate repeat reads while offline are instant (no repeated 5 s hangs); once you're back online, a read a minute later (or <code>lf task sync</code> anytime) automatically fetches the remote plan.
+      </li>
+      <li class="opt">
+        <span class="opt-key">2b</span> <strong>Retry on every read</strong> (as in <code>scratch/plan.md</code>) — as soon as you're back online, the very next <code>lf task list</code> fetches immediately, but every read while offline stalls up to 5 seconds.
+      </li>
+      <li class="opt">
+        <span class="opt-key">2c</span> <strong>Don't auto-retry after a failed first read</strong> — offline reads are always instant, but an empty clone won't pull remote Tasks when you reconnect until you run <code>lf task sync</code>.
+      </li>
+    </ul>
+  </div>
+
+  <div class="question">
+    <div class="q-title">3. Should a first read also check your Hub when one is configured?</div>
+    <div class="q-context">
+      If you use a Hub without a Git remote and run <code>lf config repo --bind &lt;id&gt;</code> (the documented setup), running <code>lf task list</code> right afterward currently shows nothing because first-read only talks to Git. With both Git and a Hub, first-read also skips the faster Hub.
+    </div>
+    <ul class="opt-list">
+      <li class="opt rec">
+        <span class="opt-key">3a</span> <strong>(Recommended) Yes, read both carriers on first read</strong> — Hub-only clones show their Tasks right after <code>lf config repo --bind</code>, and clones with both carriers read from the Hub as well as Git.
+      </li>
+      <li class="opt">
+        <span class="opt-key">3b</span> <strong>Keep first-read Git-only in LOO-1113</strong> (as in <code>scratch/plan.md</code>) — Hub-only clones need <code>lf task sync</code> (or a save) first; file Hub first-read as a separate Task.
+      </li>
+    </ul>
+  </div>
+
+  <div class="question">
+    <div class="q-title">4. If a clone first reads an <em>empty</em> remote and a teammate adds the first Task later, should the background server keep polling that empty clone?</div>
+    <div class="q-context">
+      To keep idle Machines quiet, LOO-1110 stopped the server from polling repositories that have zero open Tasks and zero active Waves locally. That means a clone whose first read saw nothing will not notice a teammate's later first Task until you run <code>lf task sync</code> (or look up that Task by ID).
+    </div>
+    <ul class="opt-list">
+      <li class="opt rec">
+        <span class="opt-key">4a</span> <strong>(Recommended) Keep empty clones quiet on the background server</strong> — preserve LOO-1110's idle-server budget, fix the stale docs/comments that promise background polling for empty clones, and only revisit if this comes up in daily use.
+      </li>
+      <li class="opt">
+        <span class="opt-key">4b</span> <strong>Poll previously-read empty clones too</strong> — file a separate Task to include empty-plan clones in periodic sync (or re-check on read) so a teammate's first Task appears automatically, at the cost of periodic background <code>git fetch</code> on idle repos.
+      </li>
+    </ul>
+  </div>
+
+  <footer>
+    <span>Generated from commit <code>91531a9eb2</code> (base <code>6c2560bd0f</code>) · <code>scratch/concept-review.html</code></span>
+    <span>No source files, migrations, or plans modified.</span>
+  </footer>
+</main>
+</body>
+</html>

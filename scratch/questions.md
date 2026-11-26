@@ -1,9 +1,7 @@
 # Questions
 
-- LOO-1113 assumes a failed first fetch should be retried by the next
-  `lf task list` (≤ 5 s each) rather than skipped while the carrier records an
-  error. If an unreachable remote makes lists slow in a never-fetched clone,
-  gate the read on `error IS NULL` instead.
-- `before_first_read` reads Git only. A hub-only clone registered without a
-  save (`lf wt create`, a launch) lists without a first hub read unless the
-  server answered a command there. Not in LOO-1113.
+- LOO-1113 adopted the concept review's recommendations headless (1a 2a 3a
+  4a): every plan-reading command does the first read, a failed one retries
+  after 60 s, the hub is read too, empty clones stay quiet on the server. All
+  reversible; `scratch/plan.md` "Choices made for review" lists what was
+  passed over.

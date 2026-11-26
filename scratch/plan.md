@@ -72,9 +72,9 @@ starts using it.
   - Every plan-reading CLI command calls it (review F2): `lf task list`
     (`lf.rs:999`), bare `lf repo tracker` (`tracker.rs:71`), and the
     direct-store paths of `lf plan list`, `lf plan board`, `lf wave list`,
-    `lf wave status` and `lf wave plan` (`lf.rs:863`, `:915`, `:3253`–`:3297`;
-    find the store-reading entry for each). On a read clone it costs two
-    primary-key reads of `plan_carriers`.
+    `lf wave show`, `lf wave status` and `lf wave plan` (`lf.rs:863`, `:915`,
+    `:3253`–`:3367`; `lf wave show` shares `waves::show` with `lf plan list`).
+    On a read clone it costs two primary-key reads of `plan_carriers`.
   - Doc comments say "a clone that has not read its carriers' plan" instead
     of "a clone this Machine has not met".
 
@@ -117,16 +117,17 @@ reported state heal on that list.
 ## Affected surfaces
 
 - `lf task list`, `lf repo tracker`, `lf plan list`, `lf plan board`,
-  `lf wave list`, `lf wave status`, `lf wave plan`: callers of
+  `lf wave list`, `lf wave show`, `lf wave status`, `lf wave plan`: callers of
   `before_first_read`.
 - Hub repositories: the first read asks the hub too.
 - Linear/Asana repositories: unchanged, `carried` returns `None`.
-- `docs/work.md:325` ("the first `lf task list` in a fresh clone reads the
-  remote before it answers") becomes true; widen it to the plan-reading
-  commands. `docs/dev/planning.md:284` says the first read "registers the
-  clone for the server's minute", false since LOO-1110 for a clone with no
-  open Task or Wave (review F5): rewrite that sentence to name the commands,
-  both carriers and the 60 s cooldown.
+- Docs written (next step should read them):
+  - `docs/work.md` ("Through Git" example and first-read/offline/server-poll prose; "Seconds, not a minute: a hub" post-bind read example).
+  - `docs/dev/planning.md` (`plan_carriers` `seen_seq` note; "When they run" first-read commands, both carriers, 60 s cooldown, and empty-clone server behavior).
+
+### Open question from writing docs
+
+- Should `--subscribe` variants of plan-reading commands (`lf task list --subscribe`, `lf wave show --subscribe`, `lf wave status --subscribe`, `lf plan list --subscribe`) all skip `before_first_read` so they read the store alone like `lf repo tracker --subscribe`, or should `lf task list --subscribe` keep running `before_first_read` first (as `lf.rs:999` does today)?
 
 ## Absent and error states
 

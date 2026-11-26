@@ -169,26 +169,25 @@ pub(crate) fn registered_task(
     repo: &Path,
     issue: &str,
 ) -> Result<(loopflow_execution::store::SharedStore, Task)> {
-    let mut store = loopflow_execution::store::read_existing_registry()?.map(Arc::new);
-    let mut task = match &store {
-        Some(store) => {
-            let id = match loopflow_execution::store::children::resolve_task_id(
-                &store.sqlite,
-                issue,
-                Some(&repo.to_string_lossy()),
-            )? {
-                Some(id) => Some(id),
-                None => loopflow_execution::store::children::resolve_task_id(
-                    &store.sqlite,
-                    issue,
-                    None,
-                )?,
-            };
-            id.map(|id| store.sqlite.task(&id)).transpose()?.flatten()
+    let store = loopflow_execution::store::read_existing_registry()?.map(Arc::new);
+    if let Some(store) = &store {
+        let id = match loopflow_execution::store::children::resolve_task_id(
+            &store.sqlite,
+            issue,
+            Some(&repo.to_string_lossy()),
+        )? {
+            Some(id) => Some(id),
+            None => {
+                loopflow_execution::store::children::resolve_task_id(&store.sqlite, issue, None)?
+            }
+        };
+        if let Some(task) = id.map(|id| store.sqlite.task(&id)).transpose()?.flatten() {
+            return Ok((Arc::clone(store), task));
         }
-        None => None,
-    };
-    if task.is_none() && !loopflow_execution::journal::request::active() {
+    }
+    if loopflow_execution::journal::request::active() {
+        store.context("no Loopflow store exists on this Machine")?;
+    } else {
         let main = loopflow_execution::git::worktrees::main_repo_root(repo)
             .unwrap_or_else(|_| repo.to_path_buf());
         let (writable, found) = loopflow_execution::runtime::block_on(async {
@@ -201,18 +200,16 @@ pub(crate) fn registered_task(
             .await?;
             Ok::<_, anyhow::Error>((Arc::new(writable), found))
         })?;
-        store = Some(writable);
-        task = found;
+        if let Some(task) = found {
+            return Ok((writable, task));
+        }
     }
-    let store = store.context("no Loopflow store exists on this Machine")?;
-    let task = task.ok_or_else(|| {
-        loopflow_execution::engine::Error::new(
-            loopflow_execution::engine::ErrorCode::NotFound,
-            format!("Task {issue} is not registered"),
-        )
-        .with(serde_json::json!({ "issue": issue }))
-    })?;
-    Ok((store, task))
+    Err(loopflow_execution::engine::Error::new(
+        loopflow_execution::engine::ErrorCode::NotFound,
+        format!("Task {issue} is not registered"),
+    )
+    .with(serde_json::json!({ "issue": issue }))
+    .into())
 }
 
 pub fn task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {

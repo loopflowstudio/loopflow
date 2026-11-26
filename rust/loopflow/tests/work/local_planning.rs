@@ -3037,38 +3037,37 @@ fn task_creation_defaults_to_standalone_in_bound_contexts() {
     assert_eq!(retained.worktree.as_deref(), Some(checkout));
 }
 
+fn clone_origin(origin: &TestRepo, dir: &Path) -> std::path::PathBuf {
+    let output = Command::new("git")
+        .args([
+            "clone",
+            "-q",
+            origin.bare_path().to_str().unwrap(),
+            dir.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git clone: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(Command::new("git")
+        .current_dir(dir)
+        .args(["config", "user.email", "fixture@example.test"])
+        .status()
+        .unwrap()
+        .success());
+    dir.canonicalize().unwrap()
+}
+
 #[test]
-fn fresh_clone_reads_remote_plan_after_task_create_and_on_first_wave_list() {
+fn fresh_clone_reads_remote_plan_after_task_create_and_on_first_wave_show() {
     let origin = TestRepo::new();
     let home_a = tempfile::tempdir().unwrap();
     let home_b = tempfile::tempdir().unwrap();
     let home_c = tempfile::tempdir().unwrap();
     let clones = tempfile::tempdir().unwrap();
-
-    let clone_origin = |name: &str| {
-        let dir = clones.path().join(name);
-        let output = Command::new("git")
-            .args([
-                "clone",
-                "-q",
-                origin.bare_path().to_str().unwrap(),
-                dir.to_str().unwrap(),
-            ])
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "git clone: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(Command::new("git")
-            .current_dir(&dir)
-            .args(["config", "user.email", "fixture@example.test"])
-            .status()
-            .unwrap()
-            .success());
-        dir.canonicalize().unwrap()
-    };
 
     // Home A creates a Wave and a Task, pushing them to the bare origin.
     lf(
@@ -3081,7 +3080,7 @@ fn fresh_clone_reads_remote_plan_after_task_create_and_on_first_wave_list() {
 
     // Home B clones, saves locally first (`lf task create`), then runs `lf task list`:
     // it must still fetch A's plan on that first list.
-    let clone_b = clone_origin("b");
+    let clone_b = clone_origin(&origin, &clones.path().join("b"));
     lf(
         &clone_b,
         home_b.path(),
@@ -3100,7 +3099,7 @@ fn fresh_clone_reads_remote_plan_after_task_create_and_on_first_wave_list() {
     // Home C is a brand-new Machine with no store yet. `lf wave show` is its
     // very first command and skips process admission: it must still fetch the
     // remote plan and show Wave `alpha` with A's and B's Tasks.
-    let clone_c = clone_origin("c");
+    let clone_c = clone_origin(&origin, &clones.path().join("c"));
     let shown = lf(&clone_c, home_c.path(), &["wave", "show", "--json"]);
     let names: Vec<&str> = shown["waves"]
         .as_array()
@@ -3134,22 +3133,7 @@ fn fresh_clone_task_detail_and_show_find_remote_task() {
         .clone();
     let id = created["id"].as_str().unwrap();
 
-    let clone_b = clones.path().join("b");
-    let output = Command::new("git")
-        .args([
-            "clone",
-            "-q",
-            origin.bare_path().to_str().unwrap(),
-            clone_b.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "git clone: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let clone_b = clone_b.canonicalize().unwrap();
+    let clone_b = clone_origin(&origin, &clones.path().join("b"));
 
     let detail = lf(&clone_b, home_b.path(), &["task", "detail", id, "--json"]);
     assert_eq!(detail["task"]["id"], id);

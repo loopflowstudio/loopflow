@@ -13,7 +13,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, bail, Result};
 
 use loopflow_model::durable::{RepositoryId, TaskId};
-use loopflow_storage::sqlite::plan_carriers::{Carrier, NotTaken};
+use loopflow_storage::sqlite::plan_carriers::{Carrier, NotTaken, PlanCarrier};
 use loopflow_storage::sqlite::planning_scope_checks::ScopeCheck;
 use loopflow_storage::sqlite::SqliteStore;
 
@@ -95,10 +95,7 @@ where
     if !has_hub && !git_due {
         return Ok(None);
     }
-    let now_ts = now
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    let now_ts = unix_secs(now);
     let scope = format!("plan:{repo}");
     if let ScopeCheck::Recent { attempted_at } =
         store.sqlite.begin_scope_check(&scope, now_ts, window)?
@@ -239,12 +236,14 @@ pub async fn before_first_read(directory: &Path) {
         return;
     };
     let until = Instant::now() + WAIT;
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    let exchanged = first_read_at(&store, &repo, until, now).await;
+    let exchanged = first_read_at(&store, &repo, until, unix_secs(SystemTime::now())).await;
     went_on(&repo, exchanged.map(drop));
+}
+
+fn unix_secs(time: SystemTime) -> i64 {
+    time.duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 pub(super) async fn first_read_at(
@@ -292,41 +291,39 @@ where
     FG: std::future::Future<Output = Result<()>>,
     FH: std::future::Future<Output = Result<()>>,
 {
-    let remote = super::plan_git::remote(Path::new(repo));
-    let git_row = match &remote {
-        Some(peer) => store
-            .plan_carrier(repo, Carrier::Git)?
-            .filter(|held| held.peer == *peer),
-        None => None,
-    };
-    let hub = match super::plan_hub::hub(store) {
-        Ok(hub) => hub,
+    let git_peer = super::plan_git::remote(Path::new(repo));
+    let hub_peer = match super::plan_hub::hub(store) {
+        Ok(Some(hub)) => store.repository_id(repo)?.map(|_| hub.id),
+        Ok(None) => None,
         Err(error) => {
             tracing::debug!(%repo, error = %format!("{error:#}"), "first read hub lookup failed");
             None
         }
     };
-    let has_hub = hub.is_some() && store.repository_id(repo)?.is_some();
-    let hub_row = match &hub {
-        Some(hub) if has_hub => store
-            .plan_carrier(repo, Carrier::Hub)?
-            .filter(|held| held.peer == hub.id.as_str()),
-        _ => None,
+    let current_row = |carrier, peer: Option<&str>| -> Result<Option<PlanCarrier>> {
+        let Some(peer) = peer else {
+            return Ok(None);
+        };
+        Ok(store
+            .plan_carrier(repo, carrier)?
+            .filter(|held| held.peer == peer))
     };
-    let has_git = remote.is_some();
+    let git_row = current_row(Carrier::Git, git_peer.as_deref())?;
+    let hub_row = current_row(Carrier::Hub, hub_peer.as_ref().map(|id| id.as_str()))?;
+    let (has_git, has_hub) = (git_peer.is_some(), hub_peer.is_some());
 
     if (!has_git && !has_hub)
-        || git_row.as_ref().is_some_and(|held| held.has_read())
-        || hub_row.as_ref().is_some_and(|held| held.has_read())
+        || git_row.as_ref().is_some_and(PlanCarrier::has_read)
+        || hub_row.as_ref().is_some_and(PlanCarrier::has_read)
     {
         return Ok(false);
     }
 
     let scope = format!("plan-first-read:{repo}");
-    let errored = (!has_git || git_row.as_ref().is_some_and(|held| held.error.is_some()))
+    let all_errored = (!has_git || git_row.as_ref().is_some_and(|held| held.error.is_some()))
         && (!has_hub || hub_row.as_ref().is_some_and(|held| held.error.is_some()));
     let mut stamped = false;
-    if errored {
+    if all_errored {
         match store.begin_scope_check(&scope, now, FIRST_READ_COOLDOWN_SECS)? {
             ScopeCheck::Recent { .. } => return Ok(false),
             ScopeCheck::Started { .. } => stamped = true,
@@ -350,38 +347,33 @@ where
     let (git, hub) = tokio::join!(git, hub);
 
     let mut succeeded = false;
-    let mut carrier_failed = false;
     let mut first_error = None;
     for result in [git, hub].into_iter().flatten() {
         match result {
             Ok(()) => succeeded = true,
+            Err(error) if error.is::<NotTaken>() => {
+                succeeded = true;
+                went_on(repo, Err(error));
+            }
             Err(error) => {
-                if error.is::<NotTaken>() {
-                    succeeded = true;
-                } else {
-                    carrier_failed = true;
-                }
                 if first_error.is_none() {
                     first_error = Some(error);
                 } else {
-                    tracing::debug!(%repo, error = %format!("{error:#}"), "going on without the plan exchange");
+                    went_on(repo, Err(error));
                 }
             }
         }
     }
     if succeeded {
         if let Some(error) = first_error {
-            tracing::debug!(%repo, error = %format!("{error:#}"), "going on without the plan exchange");
+            went_on(repo, Err(error));
         }
         return Ok(true);
     }
-    if carrier_failed && !stamped {
+    if !stamped {
         let _ = store.begin_scope_check(&scope, now, 0);
     }
-    match first_error {
-        Some(error) => Err(error),
-        None => Ok(false),
-    }
+    Err(first_error.expect("at least one carrier ran"))
 }
 
 /// The store and repository of `directory` when the repository has no Linear

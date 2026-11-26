@@ -657,7 +657,7 @@ then-current budgets.
 
 ## Checks
 
-- `scratch/concept-review.html` — post-build concept review rewritten at HEAD `44298478` against base `d8b2afeb`; Pass 5 reconciled into this plan.
+- `scratch/concept-review.html` — post-build concept review (Pass 2) rewritten at HEAD `86624c0f` against base `d8b2afeb`; all 10 Machine Runtime pairings aligned after Pass 5 and QA.
 - `uv run python scripts/benchmarks/server_idle.py`:
   - Baseline (`target/debug/lf --seconds 10 --no-fail`, before Pass 1): `quiet` 0.60% CPU / 69 th / 36 spawns / 0 opens; `file_edits` 1.00% CPU / 69 th / 36 spawns / 0 opens; `db_writes` 0.60% CPU / 69 th / 48 spawns / 1 open.
   - After Pass 1 (`target/debug/lf --seconds 10 --no-fail`): `quiet` 0.50% CPU / 69 th / 36 spawns / 0 opens; `file_edits` 1.00% CPU / 69 th / 36 spawns / 0 opens; `db_writes` 0.60% CPU / 69 th / 37 spawns / 0 opens.

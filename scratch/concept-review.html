@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-1110 Concept Review — The Machine Runtime (Post-Build)</title>
+<title>LOO-1110 Concept Review — The Machine Runtime (Pass 2, Post-Build)</title>
 <style>
   :root {
     --bg: #ffffff;
@@ -65,7 +65,7 @@
   h2 { margin: 2.25rem 0 0.75rem; font-size: 1.25rem; letter-spacing: -0.01em; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
   h3 { margin: 1.25rem 0 0.45rem; font-size: 1rem; }
   p { margin: 0.5rem 0 0.85rem; }
-  .lead { font-size: 1.02rem; color: var(--muted); max-width: 80ch; }
+  .lead { font-size: 1.02rem; color: var(--muted); max-width: 82ch; }
   code {
     font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     background: var(--code-bg); padding: 0.12em 0.35em; border-radius: 4px;
@@ -77,21 +77,19 @@
   .b-yes { background: var(--yes-bg); color: var(--yes); }
   .b-no { background: var(--no-bg); color: var(--no); }
   .b-built { background: var(--yes-bg); color: var(--yes); }
-  .b-proposed { background: var(--prop-bg); color: var(--prop); }
-  .b-existing { background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
-  .b-warn { background: var(--warn-bg); color: var(--warn); }
+  .b-before { background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
+  .b-outside { background: var(--warn-bg); color: var(--warn); }
 
   .callout {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-left: 4px solid var(--no);
+    border-left: 4px solid var(--yes);
     border-radius: 8px;
     padding: 1rem 1.2rem;
     margin: 1.25rem 0;
     box-shadow: var(--shadow);
   }
-  .callout.proposed { border-left-color: var(--prop); }
-  .callout.ok { border-left-color: var(--yes); }
+  .callout.before { border-left-color: var(--no); }
 
   .grid-2 {
     display: grid;
@@ -106,8 +104,7 @@
     padding: 1rem 1.15rem;
     box-shadow: var(--shadow);
   }
-  .card.existing { border-top: 3px solid var(--no); }
-  .card.proposed { border-top: 3px solid var(--prop); }
+  .card.before { border-top: 3px solid var(--no); }
   .card.built { border-top: 3px solid var(--yes); }
   .card-head {
     display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
@@ -125,7 +122,6 @@
   }
   th { background: var(--surface-2); font-weight: 650; font-size: 12.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
   tr:last-child td { border-bottom: 0; }
-  tr.row-no { background: var(--no-bg); }
 
   .metric-strip {
     display: grid;
@@ -141,11 +137,10 @@
   .metric .sub { font-size: 12px; color: var(--muted); margin-top: 0.2rem; }
   .before-val { color: var(--no); text-decoration: line-through; font-weight: 500; font-size: 0.88rem; margin-right: 0.35rem; }
   .after-val { color: var(--yes); }
-  .warn-val { color: var(--no); }
 
   .trace { display: grid; gap: 0.45rem; font-size: 13.5px; }
   .step {
-    display: grid; grid-template-columns: 105px 1fr; gap: 0.65rem;
+    display: grid; grid-template-columns: 112px 1fr; gap: 0.65rem;
     padding: 0.45rem 0.6rem; border-radius: 6px; background: var(--bg); border: 1px solid var(--border);
   }
   .step .who { font-weight: 650; color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; padding-top: 2px; }
@@ -154,10 +149,17 @@
 
   .counterexamples { display: grid; gap: 0.75rem; margin: 0.85rem 0; }
   .ce {
-    background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--warn);
+    background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--yes);
     border-radius: 8px; padding: 0.8rem 1rem;
   }
   .ce strong { display: block; margin-bottom: 0.25rem; }
+
+  .outside-list { display: grid; gap: 0.65rem; margin: 0.85rem 0; }
+  .outside {
+    background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--warn);
+    border-radius: 8px; padding: 0.75rem 1rem; font-size: 14px;
+  }
+  .outside strong { display: block; margin-bottom: 0.2rem; }
 
   .questions { display: grid; gap: 0.9rem; margin-top: 1rem; }
   .q {
@@ -168,7 +170,6 @@
   .q ul { margin: 0.55rem 0 0; padding-left: 1.25rem; }
   .q li { margin: 0.35rem 0; }
   .choice-tag { font-size: 11.5px; font-weight: 600; color: var(--yes); background: var(--yes-bg); padding: 0.1rem 0.45rem; border-radius: 999px; margin-left: 0.4rem; }
-  .choice-tag.prop { color: var(--prop); background: var(--prop-bg); }
   footer { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
 </style>
 </head>
@@ -177,27 +178,32 @@
 
 <header>
   <div class="eyebrow">
-    <span>LOO-1110 Post-Build Concept Review</span>
-    <span class="badge b-existing">Base: d8b2afeb</span>
-    <span class="badge b-built">HEAD: 44298478 (Passes 1–4 + compress + QA)</span>
-    <span class="badge b-proposed">Pass 5 added to scratch/plan.md</span>
+    <span>LOO-1110 Post-Build Concept Review (Pass 2)</span>
+    <span class="badge b-before">Base: d8b2afeb</span>
+    <span class="badge b-built">HEAD: 86624c0f (Passes 1–5 + compress + QA)</span>
+    <span class="badge b-yes">10 / 10 concepts aligned</span>
   </div>
-  <h1>The Machine Runtime: What Now Lines Up, and the One Split Still Left</h1>
+  <h1>The Machine Runtime: All Ten Concepts Now Line Up</h1>
   <p class="lead">
-    <strong>Area taken:</strong> the whole <strong>Machine Runtime</strong> — how a Loopflow Machine hosts itself (<code>lf server</code>, <code>lf holder</code>, <code>~/.lf</code> vs disposable <code>LF_HOME</code>, local store access, live view updates, held terminals, background plan sync &amp; file upkeep, runtime diagnostics, and concurrent Graph build budgets). Reviewed fresh across all 161 changed files against base <code>d8b2afeb</code>.
+    <strong>Area taken:</strong> the whole <strong>Machine Runtime</strong> — how a Loopflow Machine hosts itself (<code>lf server</code>, <code>lf holder</code>, <code>~/.lf</code> vs. disposable <code>LF_HOME</code>, local store access, live view updates, held terminals, background plan sync &amp; file upkeep, runtime diagnostics, and concurrent Graph build budgets). Reviewed fresh across all 162 changed files against base <code>d8b2afeb</code>; nothing remains proposed or unbuilt.
   </p>
 </header>
 
 <div class="metric-strip">
   <div class="metric">
     <div class="label">Quiet server CPU (60 s release)</div>
-    <div class="val"><span class="before-val">40–100%</span><span class="after-val">0.08%</span></div>
-    <div class="sub">Measured in QA (budget &lt; 1%)</div>
+    <div class="val"><span class="before-val">40–100%</span><span class="after-val">0.05–0.12%</span></div>
+    <div class="sub">Budget &lt; 1% (strict pass)</div>
   </div>
   <div class="metric">
     <div class="label">Server threads</div>
-    <div class="val"><span class="before-val">77–180</span><span class="after-val">17–18</span></div>
+    <div class="val"><span class="before-val">77–180</span><span class="after-val">17–19</span></div>
     <div class="sub">1 runtime, 1 watcher, 2 loops</div>
+  </div>
+  <div class="metric">
+    <div class="label">Quiet 60 s spawns</div>
+    <div class="val"><span class="before-val">~168–558</span><span class="after-val">0</span></div>
+    <div class="sub">Was 12 before Pass 5</div>
   </div>
   <div class="metric">
     <div class="label">Store opens (all 3 phases)</div>
@@ -209,16 +215,11 @@
     <div class="val"><span class="before-val">frozen (err 35)</span><span class="after-val">22–30 ms</span></div>
     <div class="sub">Under <code>BEGIN EXCLUSIVE</code></div>
   </div>
-  <div class="metric">
-    <div class="label">Quiet 60 s spawns (gate check)</div>
-    <div class="val"><span class="warn-val">12 (fails 0)</span></div>
-    <div class="sub">Fixed in Pass 5 → 0</div>
-  </div>
 </div>
 
-<h2>1. Product Concepts vs. Code Concepts at HEAD (<code>44298478</code>)</h2>
+<h2>1. Product Concepts vs. Code Concepts at HEAD (<code>86624c0f</code>)</h2>
 <p>
-  Nine of ten pairings now line up cleanly and are <span class="badge b-built">Built &amp; committed</span>. One pairing — <strong>Background plan sync</strong> — is still split across two conflicting rules and causes the 60 s acceptance benchmark to fail its <code>quiet: 0 spawns</code> budget; its fix is <span class="badge b-proposed">Proposed for Pass 5</span> in <code>scratch/plan.md</code>.
+  All ten pairings now line up and are <span class="badge b-built">Built &amp; committed</span>. Pass 5 and its QA pass closed the last split — <strong>Background plan sync</strong> — bringing the 60 s release benchmark to zero quiet spawns, zero store opens, and 17–19 threads.
 </p>
 
 <table>
@@ -226,8 +227,8 @@
     <tr>
       <th style="width:20%">Product concept</th>
       <th style="width:10%">Lines up?</th>
-      <th style="width:36%">Code at HEAD <code>44298478</code></th>
-      <th style="width:34%">Assessment / Next step</th>
+      <th style="width:38%">Code at HEAD <code>86624c0f</code></th>
+      <th style="width:32%">Verified behavior</th>
     </tr>
   </thead>
   <tbody>
@@ -236,11 +237,11 @@
       <td><span class="badge b-yes">Yes</span></td>
       <td>
         <span class="badge b-built">Built</span>
-        <code>observe.rs</code> holds facts with RAII refcounts; one <code>observe-refresh</code> thread parks when idle; one shared <code>FsWatcher</code> covers transcripts, macOS checkouts, and <code>TaskFilesWatch</code>.
-        <code>read_stream.rs</code> + <code>changes.rs</code> share one <code>store-observer</code> (domain-filtered, watching <code>history.db-wal</code> only on demand) and one <code>subscription-waker</code>; fallback <code>CHECK</code> = 30 s.
+        <code>observe.rs</code> refcounts held facts with RAII <code>Hold</code>s; one <code>observe-refresh</code> thread parks when idle; one shared <code>FsWatcher</code> covers transcripts, macOS checkouts, and <code>TaskFilesWatch</code>.
+        <code>read_stream.rs</code> + <code>changes.rs</code> share one domain-filtered <code>store-observer</code> (watching <code>history.db-wal</code> only on demand) and one <code>subscription-waker</code>; fallback <code>CHECK</code> = 30 s.
       </td>
       <td>
-        Quiet 60 s run: 0.08% CPU, 0 frames, 0 checkout Git spawns; edits arrive in 0.2 s and throttle to ≤ 1/3 s.
+        Quiet 60 s run: 0.05–0.12% CPU, 0 frames, 0 checkout Git spawns; edits arrive in 0.2 s and throttle to ≤ 1/3 s (20 spawns/60 s).
       </td>
     </tr>
     <tr>
@@ -248,10 +249,10 @@
       <td><span class="badge b-yes">Yes</span></td>
       <td>
         <span class="badge b-built">Built</span>
-        Process-wide pool in <code>loopflow-storage/src/pool.rs</code> keyed by <code>(canonical path, dev, ino, mode)</code>; per-caller <code>token_key</code>; fast checkout check via <code>PRAGMA data_version</code> + <code>(schema_version, schema_migrations)</code> + <code>shared_checked</code>; 256-stmt LRU cache + <code>prepare_cached</code>; <code>Reader</code> borrows per <code>step()</code>.
+        Process-wide pool in <code>loopflow-storage/src/pool.rs</code> keyed by <code>(canonical path, dev, ino, mode)</code>; per-caller <code>token_key</code>; fast checkout check via <code>PRAGMA data_version</code> → <code>(schema_version, schema_migrations count &amp; max rowid)</code>; 256-stmt LRU cache + <code>prepare_cached</code>; <code>Reader</code> borrows per <code>step()</code>.
       </td>
       <td>
-        0 store opens across all 3 phases. Behind-store refusal, DDL and data-only migration detection, and per-caller key isolation all preserved.
+        0 store opens across all 3 phases. Behind-store refusal, DDL and data-only migration detection, and per-caller key isolation preserved.
       </td>
     </tr>
     <tr>
@@ -259,7 +260,7 @@
       <td><span class="badge b-yes">Yes</span></td>
       <td>
         <span class="badge b-built">Built</span>
-        <code>held-terminals</code> relay loop never touches SQLite or transcript files. <code>Hosted::pass</code> directory confirmation (once per terminal), <code>end_jobs</code>, <code>release_viewer_hold</code>, pre-encoded leave snapshots, and <code>settle(exit)</code> run on <code>held-status</code>. Settling IDs answer <code>Waiting</code> until committed.
+        <code>held-terminals</code> relay loop never touches SQLite or transcript files. <code>Hosted::pass</code> directory confirmation (at most once per terminal), <code>end_jobs</code>, <code>release_viewer_hold</code>, pre-encoded leave snapshots, and <code>settle(exit)</code> run on <code>held-status</code>. Settling IDs answer <code>Waiting</code> until committed.
       </td>
       <td>
         QA verified 22–30 ms echo under <code>BEGIN EXCLUSIVE</code> while another shell exited 7 and persisted <code>exit_code = 7</code> on commit.
@@ -270,10 +271,10 @@
       <td><span class="badge b-yes">Yes</span></td>
       <td>
         <span class="badge b-built">Built</span>
-        Only <code>~/.lf</code> registers with SMAppService / systemd. Custom homes start detached (<code>detached.rs</code>), retire legacy hashed jobs, watch home deletion via zero-thread kernel <code>HomeRemovalWatcher</code> (<code>kqueue</code>/<code>inotify</code>) in both server and holder, idle-exit at 10 min, and log <code>HomeRemoved</code> to stderr so the deleted folder stays gone.
+        Only <code>~/.lf</code> registers with SMAppService / systemd. Custom homes start detached (<code>detached.rs</code>), retire legacy hashed jobs, watch deletion via zero-thread kernel <code>HomeRemovalWatcher</code> (<code>kqueue</code>/<code>inotify</code>) in both server and holder, idle-exit at 10 min, and log <code>HomeRemoved</code> to stderr so the deleted folder stays gone.
       </td>
       <td>
-        QA verified server + holder + held shell gone in &lt; 1 s on <code>rm -rf</code>, directory stays deleted, idle exit at 10 min. (Standalone <code>lf graph run</code> processes are not daemons and end when their agent turn ends.)
+        QA verified server + holder + held shell exit in &lt; 1 s on <code>rm -rf</code>, directory stays deleted, and idle exit fires at 10 min.
       </td>
     </tr>
     <tr>
@@ -292,26 +293,21 @@
       <td><span class="badge b-yes">Yes</span></td>
       <td>
         <span class="badge b-built">Built</span>
-        One bounded Tokio runtime (4 workers, 12 blocking, 2 s keep-alive) installed via <code>runtime::install</code>; all sync callers (including <code>read_stream</code> and <code>harness/drive.rs</code>) share <code>runtime::block_on</code> with inline <code>run_sqlite</code>; merged <code>store-maintenance</code>+<code>plan-git</code> and <code>recovery</code>+<code>wake</code>; debounced <code>after_command</code>; <code>poll(2)</code> in <code>git_until</code>.
+        One bounded Tokio runtime (4 workers, 12 blocking, 2 s keep-alive) installed via <code>runtime::install</code>; sync callers (including <code>read_stream</code> and <code>harness/drive.rs</code>) share <code>runtime::block_on</code> with inline <code>run_sqlite</code>; merged <code>store-maintenance</code>+<code>plan-git</code> and <code>recovery</code>+<code>wake</code>; debounced <code>after_command</code>; <code>poll(2)</code> in <code>git_until</code>.
       </td>
       <td>
-        17–18 threads steady state (down from 77–180). Zero runtime-per-subscription spawns.
+        17–19 threads steady state (down from 77–180). Zero runtime-per-subscription spawns.
       </td>
     </tr>
-    <tr class="row-no">
+    <tr>
       <td><strong>Background plan sync</strong><br>Active repos with a remote or hub sync in the background; local-only repos and offline remotes do no needless writes or forks.</td>
-      <td><span class="badge b-no">No</span></td>
+      <td><span class="badge b-yes">Yes</span></td>
       <td>
-        <strong>Two inconsistent rules + thrown-away config reads:</strong><br>
-        1. <code>plan_git::remote</code> reads <code>.git/config</code> via <code>observe::read_to_string</code>, discards it, and forks <code>git remote</code> once per active repo on the first minute exchange (<strong>12 spawns in 60 s quiet benchmark</strong>).<br>
-        2. <code>plan_carriers::poll_owned</code> (30 s, for claimed Tasks) writes <code>planning_scope_checks</code> to SQLite <em>before</em> checking if a directory, hub, or Git remote exists — waking <code>store-observer</code> and <code>recovery-wake</code> every 30 s on local-only repos — and has no backoff on unreachable remotes.<br>
-        3. <code>exchange_with</code> → <code>publish()</code> runs a second <code>for-each-ref</code> and <code>cat-file -p</code> on every quiet poll even when nothing changed (5 forks/30 s).
+        <span class="badge b-built">Built (Pass 5 + QA)</span>
+        One rule across <code>plan_git::exchange_unowned</code> (60 s) and <code>plan_carriers::poll_owned</code> (30 s): missing dir, connected tracker, or no carrier → 0 SQLite writes and 0 forks. <code>plan_git::remote</code> parses <code>.git/config</code> directly (falling back to <code>git remote</code> only for <code>[include]</code>/<code>worktreeConfig</code>/legacy dirs/exotic syntax). Shared <code>SystemTime</code> backoff (2 min → 1 h) clears across processes when <code>plan_carriers</code> records success, ignores <code>NotTaken</code>, and leaves hub sync independent. <code>publish()</code> reuses <code>seen_refs</code>'s <code>mine</code> and caches verified <code>(oid, repo_id)</code> tips.
       </td>
       <td>
-        <span class="badge b-proposed">Proposed (Pass 5)</span><br>
-        1. Parse <code>[remote "&lt;name&gt;"]</code> directly from the already-read <code>.git/config</code> (fallback to <code>git remote</code> only for <code>[include]</code> or <code>.git/remotes</code>/<code>branches</code>) → <strong>0 cold spawns</strong>.<br>
-        2. Gate <code>poll_owned</code> on dir + carrier presence before writing <code>planning_scope_checks</code>, and share <code>plan_git</code>'s exponential backoff (2 min → 1 h) across owned &amp; unowned Git exchanges.<br>
-        3. Pass <code>mine</code> into <code>publish()</code> and cache verified <code>(oid, repo_id)</code> → quiet claimed Git poll drops 5 → 2 forks.
+        Quiet 60 s benchmark: <strong>0 spawns</strong>. Live QA: local-only claimed repo 0 forks/10 min; remote claimed repo 2 forks/30 s (down from 5); CLI <code>lf task sync</code> ends server backoff immediately (steer arrived in 27 s vs. 118 s); remote add/remove seen on next tick.
       </td>
     </tr>
     <tr>
@@ -322,7 +318,7 @@
         <code>RunningGraph::spawn</code> divides cores across <code>running_graph_step_count()</code> (floor 2, overridden by host-local <code>machine.jobs</code>), exports <code>CARGO_BUILD_JOBS</code>, <code>NEXTEST_TEST_THREADS</code>, <code>MAKEFLAGS</code>, <code>LF_JOBS</code> (leaving preset env untouched, forwarded to Codex), and sets <code>nice 5</code>. Preserves <code>machine: mini</code> shorthand.
       </td>
       <td>
-        QA verified 16 / 8 / 5 at nice 5 across 3 concurrent steps while interactive conversations stay at nice 0. (Host-local policy confirmed by Jack Heart.)
+        QA verified 16 / 8 / 5 at nice 5 across 3 concurrent steps while interactive terminals stay at nice 0. (Host-local policy confirmed by Jack Heart.)
       </td>
     </tr>
     <tr>
@@ -350,130 +346,154 @@
   </tbody>
 </table>
 
-<h2>2. The Biggest Remaining Mismatch</h2>
+<h2>2. The Redesign Across the Branch — Before vs. After</h2>
+<div class="callout before">
+  <strong>Before this branch (base <code>d8b2afeb</code>):</strong>
+  <p style="margin-bottom:0">
+    Every subsystem kept its own private timer, store open, watcher, runtime, or permanent OS registration. An idle Machine ran three 250 ms polling loops, four transcript watcher threads, a 16-worker Tokio runtime per subscription, thousands of fresh SQLite opens re-parsing 402 triggers, per-key YAML <code>Config</code> deserializations outside any cache, permanent launchd jobs for temporary <code>LF_HOME</code>s, unguarded SQLite calls on the held-terminal relay thread, and split background plan sync loops that hammered dead or local-only repos.
+  </p>
+</div>
+
 <div class="callout">
-  <strong>Background plan sync still has two halves that disagree — and one of them reads <code>.git/config</code> only to throw it away and fork <code>git</code>.</strong>
+  <strong>At HEAD (<code>86624c0f</code>) <span class="badge b-built">Built &amp; committed</span>:</strong>
   <p style="margin-bottom:0">
-    Passes 1–4 unified observation, pooling, terminal relay, runtime threads, custom-home lifetimes, build budgets, and file retention — but left background Git plan sync split between <code>plan_git::exchange_unowned</code> (60 s, active-work scoped, <code>is_dir()</code> guarded, backed off) and <code>plan_carriers::poll_owned</code> (30 s, writes <code>planning_scope_checks</code> to SQLite even for local-only repos with no hub and no remote, no <code>is_dir()</code> guard, no backoff). Meanwhile <code>plan_git::remote</code> reads <code>.git/config</code> via <code>observe</code> for invalidation, discards the file text, and forks <code>git remote</code> on every active repo at minute 1 — failing the branch's own 60 s acceptance check (12 spawns vs. budget 0).
+    One rule governs every layer: <strong>work happens on a change or a request, never on an idle timer</strong>, and each process owns <strong>one</strong> of each shared resource (one store pool, one bounded async runtime, one observation cache with one filesystem watcher). The terminal relay thread owns only terminal I/O; background plan sync follows one carrier-first rule across owned and unowned repos; only <code>~/.lf</code> is an OS-registered service.
   </p>
 </div>
 
-<div class="callout proposed">
-  <strong>Pass 5 unification <span class="badge b-proposed">Proposed in scratch/plan.md</span></strong>
-  <p style="margin-bottom:0">
-    One rule for every background plan sync: <strong>no carrier (no remote, no hub, or missing directory) means zero SQLite writes and zero subprocess forks</strong>; remote discovery reads the <code>.git/config</code> already in memory (forking <code>git remote</code> only for <code>[include]</code> or legacy <code>.git/remotes</code>/<code>branches</code>); owned and unowned Git exchanges share exponential backoff on failure; and quiet Git polls skip redundant <code>for-each-ref</code> and <code>cat-file</code> calls.
-  </p>
-</div>
+<h2>3. Concrete Interaction — Normal Path, Failure, and Recovery</h2>
 
-<h2>3. Concrete Interaction — Before and After Pass 5</h2>
-
-<h3>A quiet Machine with 12 local repos (1 with a claimed Task, no remote, no hub) and 1 remote-backed repo</h3>
+<h3>A Machine with 12 local repos (1 claimed, no remote), 1 remote-backed claimed repo, a live terminal, and a temporary network outage</h3>
 <div class="grid-2">
-  <div class="card existing">
+  <div class="card before">
     <div class="card-head">
-      <span class="card-title">At HEAD <code>44298478</code></span>
-      <span class="badge b-no">Current mismatch</span>
+      <span class="card-title">Before (base <code>d8b2afeb</code>)</span>
+      <span class="badge b-before">Old model</span>
     </div>
     <div class="trace">
-      <div class="step bad"><div class="who">Minute 1 (unowned)</div><div><code>plan_git::remote</code> reads each repo's <code>.git/config</code>, discards it, and forks <code>git remote</code> × 12 → <strong>fails 60 s quiet budget (12 &gt; 0)</strong>.</div></div>
-      <div class="step bad"><div class="who">Every 30 s (claimed local)</div><div><code>poll_owned</code> writes <code>planning_scope_checks</code> to SQLite before checking for a carrier → WAL write wakes <code>store-observer</code> (20 Hz × 1 s) and <code>recovery-wake</code> forever.</div></div>
-      <div class="step bad"><div class="who">Every 30 s (claimed remote)</div><div><code>exchange_with</code> runs <code>fetch</code> + <code>for-each-ref</code> + duplicate <code>for-each-ref</code> + <code>cat-file -p</code> even with 0 changes; if offline, hammers <code>git fetch</code> every 30 s with no backoff.</div></div>
+      <div class="step bad"><div class="who">Quiet minute</div><div>250 ms timers re-run Git diffs across idle checkouts; <code>plan_git</code> walks 70 rows including deleted temp repos; <code>poll_owned</code> writes <code>planning_scope_checks</code> every 30 s for local-only repos.</div></div>
+      <div class="step bad"><div class="who">Remote offline</div><div><code>poll_owned</code> hammers <code>git fetch</code> every 30 s forever with no backoff, opening fresh SQLite connections and re-parsing YAML on every tick.</div></div>
+      <div class="step bad"><div class="who">DB locked</div><div><code>Hosted::pass</code> calls <code>open_sqlite()</code> on every PTY output chunk — freezing <code>held.sock</code> across every terminal until restart (<code>os error 35</code>).</div></div>
+      <div class="step bad"><div class="who">Delete custom home</div><div>Server stays registered as <code>KeepAlive</code> in launchd and crash-loops; <code>lf holder run</code> lingers for days holding orphaned child shells.</div></div>
     </div>
   </div>
-  <div class="card proposed">
+  <div class="card built">
     <div class="card-head">
-      <span class="card-title">After Pass 5</span>
-      <span class="badge b-proposed">Proposed</span>
+      <span class="card-title">At HEAD (<code>86624c0f</code>)</span>
+      <span class="badge b-built">Built &amp; verified</span>
     </div>
     <div class="trace">
-      <div class="step good"><div class="who">Minute 1 (unowned)</div><div><code>plan_git::remote</code> parses <code>[remote "..."]</code> directly from the already-read <code>.git/config</code> → <strong>0 forks</strong>. 60 s release <code>server_idle.py</code> passes <code>quiet: 0 spawns</code> strictly.</div></div>
-      <div class="step good"><div class="who">Every 30 s (claimed local)</div><div><code>poll_owned</code> sees no hub and no remote (inline <code>stat</code> check) and returns immediately → <strong>0 SQLite writes, 0 WAL wakes, 0 forks</strong>. Adding a remote or hub later is picked up on the next tick.</div></div>
-      <div class="step good"><div class="who">Every 30 s (claimed remote)</div><div><code>exchange_with</code> passes <code>mine</code> to <code>publish</code> and caches verified <code>(oid, repo_id)</code> → <strong>2 forks</strong> (<code>fetch</code> + <code>for-each-ref</code>) when quiet; backs off 2 min → 1 h if offline (leaving hub sync unblocked).</div></div>
+      <div class="step good"><div class="who">Quiet minute</div><div>0 spawns, 0 store opens, 0.05–0.12% CPU, 17–19 threads. Local-only claimed repo does 0 SQLite writes and 0 forks; remote claimed repo takes 2 forks/30 s (<code>fetch</code> + <code>for-each-ref</code>).</div></div>
+      <div class="step good"><div class="who">Remote offline → sync</div><div>Git backs off 2 min → 4 min → 1 h (leaving hub sync independent). When the network returns and you run <code>lf task sync</code> in the CLI, the store clears the carrier error and the server resumes on the very next 30 s tick (27 s in live QA).</div></div>
+      <div class="step good"><div class="who">DB locked</div><div>Relay loop touches zero SQLite or transcript files; keystrokes echo in 22–30 ms under <code>BEGIN EXCLUSIVE</code>, while exiting terminals answer <code>Waiting</code> until <code>held-status</code> commits the exit code.</div></div>
+      <div class="step good"><div class="who">Delete custom home</div><div>Kernel <code>HomeRemovalWatcher</code> wakes both server and holder in &lt; 1 s: server logs to stderr without recreating the folder and exits; holder closes PTYs (children get <code>SIGHUP</code>) and exits.</div></div>
     </div>
   </div>
 </div>
 
-<h2>4. Counterexamples Tested Against Pass 5</h2>
+<h2>4. Counterexamples Verified</h2>
 <div class="counterexamples">
   <div class="ce">
-    <strong>1. What if a repository defines a remote via <code>[include]</code>/<code>[includeIf]</code> or legacy <code>.git/remotes/</code>?</strong>
-    Pure <code>.git/config</code> parsing would miss it.
-    <br><em>Handling:</em> If <code>.git/config</code> contains an <code>[include</code> header or <code>common_dir/{remotes,branches}</code> exists, fall back to <code>git remote</code> (still cached under <code>Derived::GitRemote</code>). Also ignore empty <code>[remote "x"]</code> stanzas with no keys, matching Git's behavior.
+    <strong>1. A CLI <code>lf task sync</code> recovers an unreachable remote while the server is mid-backoff.</strong>
+    Because backoff lives in the server's memory, a separate CLI process cannot mutate it directly. <em>Verified in live QA:</em> <code>is_backed_off</code> checks <code>plan_carriers</code> in SQLite; once the CLI clears the carrier error, the server drops its backoff and picks up a steer from another Machine on the next 30 s tick (27 s instead of 118 s).
   </div>
   <div class="ce">
-    <strong>2. What if a claimed local-only repo later gets a remote (<code>git remote add origin …</code>) or a hub (<code>lf machine hub mini</code>)?</strong>
-    Because <code>poll_owned</code> skips writing <code>planning_scope_checks</code>, it must still notice the new carrier automatically.
-    <br><em>Handling:</em> <code>plan_git::remote</code> and <code>plan_hub::hub</code> both go through <code>observe::derived</code>, which validates <code>.git/config</code> and <code>~/.lf/config.yaml</code> inline via <code>stat_stamp</code> (~5 µs). The very next 30 s tick detects the new carrier and begins syncing immediately.
+    <strong>2. A split-Wave conflict (<code>NotTaken</code>) arrives over a working Git remote.</strong>
+    <code>NotTaken</code> means the carrier succeeded but a record conflicted locally. <em>Verified by unit test:</em> <code>Backoffs::run</code> clears backoff on <code>NotTaken</code> instead of throttling every steer on that repo to hourly.
   </div>
   <div class="ce">
-    <strong>3. What if a repo has both a hub and an offline Git remote?</strong>
-    Sharing backoff across the whole <code>poll_owned</code> call would starve the reachable hub when Git is down.
-    <br><em>Handling:</em> Backoff lives inside <code>plan_git</code> (per repository, for background exchanges only), never gating <code>plan_hub::exchange</code> or explicit user commands (<code>sync</code>, <code>send</code>, <code>before_claim</code>).
+    <strong>3. A repo defines remotes via <code>[include]</code>, <code>extensions.worktreeConfig</code>, legacy <code>.git/remotes</code>, or adds/removes a remote live.</strong>
+    <em>Verified in live QA and unit tests:</em> exotic configs fall back to <code>git remote</code> once (cached under <code>Derived::GitRemote</code>); adding or removing a remote in <code>.git/config</code> is picked up on the next tick via inline <code>stat_stamp</code> validation with 0 <code>git remote</code> forks.
   </div>
   <div class="ce">
-    <strong>4. Could caching <code>(oid, repository_id)</code> in <code>publish()</code> hide a repo-id mismatch?</strong>
-    Git commit OIDs are content-addressed and immutable: once commit <code>oid</code> is verified to contain <code>repository == repository_id</code>, that pair can never change. Any new commit has a new OID and is checked once.
+    <strong>4. A client attaches to a held terminal milliseconds after its process exits while SQLite is locked.</strong>
+    <em>Verified in live QA and unit tests:</em> the relay loop keeps the terminal ID in <code>settling</code> and answers <code>Waiting</code> on <code>held.sock</code> until <code>held-status</code> finishes writing <code>exit_code</code>, so neither typing in other terminals nor exit-code visibility breaks.
   </div>
 </div>
 
-<h2>5. Open Questions (Choices Built or Proposed for Review)</h2>
+<h2>5. Outside This Work</h2>
+<p>Separate outcomes noted during kickoff and QA — not part of LOO-1110's Machine Runtime scope:</p>
+<div class="outside-list">
+  <div class="outside">
+    <span class="badge b-outside">Staged migrations (LOO-965, LOO-938)</span>
+    <strong>Reclaiming 271 MB from <code>processes</code> and leaving sync tables; collapsing 402 SQLite triggers.</strong>
+    Those tables are already marked leaving; their staged drops reclaim the space after the migration window. With connection pooling, trigger parsing is paid once per process instead of per request.
+  </div>
+  <div class="outside">
+    <span class="badge b-outside">Separate refactor</span>
+    <strong>Moving per-Graph <code>watch_owned_work</code> polling into the server.</strong>
+    Pooled connections make each 30 s Graph check cheap; centralizing Graph ownership polling into the server is its own lifecycle change.
+  </div>
+  <div class="outside">
+    <span class="badge b-outside">Pre-existing plan-sync bug</span>
+    <strong>Fresh clone that runs <code>lf task create</code> before its first <code>lf task list</code>.</strong>
+    QA observed that creating a Task registers the clone first, so <code>before_first_read</code> skips the initial fetch from other Machines until an explicit sync or background tick. Predates this branch; requires separating "known locally" from "ever fetched from remote" in <code>plan_git</code>.
+  </div>
+  <div class="outside">
+    <span class="badge b-outside">Minor optimization</span>
+    <strong>One <code>cat-file -p</code> verification on the tick immediately after a publish.</strong>
+    Each actual publish moves the tip OID, so the next quiet tick verifies it once (then 0 times thereafter). Recording the newly pushed commit OID in <code>VERIFIED_TIP_REPOS</code> at push time would save that single fork per publish.
+  </div>
+</div>
+
+<h2>6. Open Questions (Reversible Product Choices Built for Review)</h2>
 <p>
-  Resolved since the pre-implementation review: <strong><code>machine.jobs</code> stays host-local</strong> (confirmed by Jack Heart; implemented in Pass 4).
-  The remaining choices below are all reversible and have been implemented (or scoped for Pass 5) using the simpler option. Reply with e.g. <code>2b</code> or <code>6b</code> to change course.
+  Resolved during implementation: <strong><code>machine.jobs</code> stays host-local</strong> (confirmed by Jack Heart; built in Pass 4).
+  All six choices below are <strong>already built and committed</strong> using option <code>a</code>, and every one is reversible. Reply with e.g. <code>1b</code> or <code>6b</code> if you want any of them changed.
 </p>
 
 <div class="questions">
   <div class="q">
-    <div><span class="q-num">1.</span><strong>Should a custom <code>LF_HOME</code> ever stay registered to restart after a reboot?</strong><span class="choice-tag">Built: 1a</span></div>
+    <div><span class="q-num">1.</span><strong>Should a custom <code>LF_HOME</code> stay alive in the background without an open client or running agent, or restart after a reboot?</strong><span class="choice-tag">Built: 1a</span></div>
     <ul>
-      <li><strong>1a (built):</strong> Only your main <code>~/.lf</code> Machine restarts on login. A custom <code>LF_HOME</code> runs as a normal detached process and exits automatically when you delete its folder or leave it idle for 10 minutes with no clients, terminals, or unfinished work.</li>
-      <li><strong>1b:</strong> Keep OS background-service registration for custom <code>LF_HOME</code>s unless explicitly flagged temporary.</li>
+      <li><strong>1a (built):</strong> Only your main <code>~/.lf</code> Machine restarts on login and stays up indefinitely. A custom <code>LF_HOME</code> runs as a normal background process and exits automatically when you delete its folder or 10 minutes after its last open client, terminal, and running agent finish — even if it still has a claimed Task waiting. Running any <code>lf</code> command there starts it again.</li>
+      <li><strong>1b:</strong> Keep custom <code>LF_HOME</code> servers running whenever they have a claimed Task (or register them as persistent login services unless flagged temporary), so a secondary custom-home Machine keeps receiving remote steers indefinitely without a client connected.</li>
     </ul>
   </div>
 
   <div class="q">
-    <div><span class="q-num">2.</span><strong>When you delete a custom <code>LF_HOME</code> folder while agents are still running inside it, should its terminal holder stop those agents?</strong><span class="choice-tag">Built: 2a</span></div>
+    <div><span class="q-num">2.</span><strong>When you delete a custom <code>LF_HOME</code> folder while agents are still running inside it, should Loopflow stop those agents?</strong><span class="choice-tag">Built: 2a</span></div>
     <ul>
-      <li><strong>2a (built):</strong> Yes — once the folder is deleted, no server can ever reconnect to those terminals, so the holder closes them (sending hangup to its children) and exits within a second. Live homes are unchanged: agents still survive server restarts and <code>lf install</code>.</li>
-      <li><strong>2b:</strong> Leave agents running until stopped manually by PID.</li>
+      <li><strong>2a (built):</strong> Yes — once the folder is deleted, no server or view can ever reconnect to those terminals, so the terminal holder closes them (sending hangup to its children) and exits within a second. Live homes are unchanged: agents still survive server restarts and <code>lf install</code>.</li>
+      <li><strong>2b:</strong> Leave those agents running in the background until you stop them manually by PID.</li>
     </ul>
   </div>
 
   <div class="q">
     <div><span class="q-num">3.</span><strong>How should concurrent Graphs share your Machine's CPU cores during local builds and tests?</strong><span class="choice-tag">Built: 3a</span></div>
     <ul>
-      <li><strong>3a (built):</strong> Automatically divide cores across running Graph steps (floor 2, at lower scheduling priority <code>nice 5</code>, overridable per Machine with <code>machine.jobs</code>), leaving interactive terminals unthrottled and never stalling an agent mid-turn.</li>
-      <li><strong>3b:</strong> Make builds wait in a server-managed slot queue until an earlier build finishes.</li>
+      <li><strong>3a (built):</strong> Automatically divide cores across running Graph steps (floor 2, at lower scheduling priority <code>nice 5</code>, overridable per Machine with <code>machine.jobs</code>), leaving your interactive terminals at normal priority and never pausing an agent mid-turn.</li>
+      <li><strong>3b:</strong> Queue builds in a server-managed slot semaphore so later builds wait until earlier ones finish.</li>
     </ul>
   </div>
 
   <div class="q">
     <div><span class="q-num">4.</span><strong>Where should live server counters (threads, database opens, spawned commands, watched facts) live?</strong><span class="choice-tag">Built: 4a</span></div>
     <ul>
-      <li><strong>4a (built):</strong> Separate <code>lf server diagnostics --json</code>, keeping <code>lf server status</code> a pure readiness check that stays compatible across old and new builds during upgrades.</li>
-      <li><strong>4b:</strong> Combine them into <code>lf server status --json</code> by opening a second versioned session whenever the server is ready.</li>
+      <li><strong>4a (built):</strong> Separate <code>lf server diagnostics --json</code>, keeping <code>lf server status</code> a fast, unversioned readiness check that stays compatible across old and new builds during upgrades.</li>
+      <li><strong>4b:</strong> Fold them into <code>lf server status --json</code> by opening a second versioned connection whenever the server is ready.</li>
     </ul>
   </div>
 
   <div class="q">
     <div><span class="q-num">5.</span><strong>Should repositories with no active Waves and no unfinished Tasks still sync Git plans every minute?</strong><span class="choice-tag">Built: 5a</span></div>
     <ul>
-      <li><strong>5a (built):</strong> No — only repositories with an unfinished Task or an active Wave on this Machine sync in the background. Quiet repositories still sync automatically the next time you run a command in them.</li>
-      <li><strong>5b:</strong> Sync every existing repository on disk every minute and prune stale repository records instead.</li>
+      <li><strong>5a (built):</strong> No — only repositories with an unfinished Task or an active Wave on this Machine sync automatically in the background. Quiet repositories still sync the next time you run a command in them.</li>
+      <li><strong>5b:</strong> Sync every existing repository on disk every minute and automatically prune stale repository records instead.</li>
     </ul>
   </div>
 
   <div class="q">
-    <div><span class="q-num">6.</span><strong>When you have a claimed Task in a Git-only repository (no Linear/Asana, with a remote), how often should Loopflow check the remote for new direction while idle?</strong><span class="choice-tag prop">Pass 5 keeps 6a</span></div>
+    <div><span class="q-num">6.</span><strong>When you have a claimed Task in a Git-only repository (no Linear/Asana, with a remote), how often should Loopflow check the remote for new direction while idle?</strong><span class="choice-tag">Built: 6a</span></div>
     <ul>
-      <li><strong>6a (kept, slimmed to 2 forks/check in Pass 5):</strong> Every 30 seconds — incoming steers from another Machine or phone arrive within 30 s, and offline remotes back off up to an hour.</li>
+      <li><strong>6a (built, slimmed to 2 forks/check):</strong> Every 30 seconds — incoming steers from another Machine or phone arrive within 30 s, and offline remotes back off up to an hour (ending immediately if you run <code>lf task sync</code>).</li>
       <li><strong>6b:</strong> Match the 60-second unowned cadence (halving idle remote fetches when no turn is running, at the cost of up to 60 s delay for remote steers).</li>
     </ul>
   </div>
 </div>
 
 <footer>
-  Generated by post-build <code>lf concept-review</code> · Matches HEAD <code>44298478</code> against base <code>d8b2afeb</code> · Pass 5 recorded in <code>scratch/plan.md</code> · No code modified.
+  Generated by post-build <code>lf concept-review</code> (Pass 2) · Matches HEAD <code>86624c0f</code> against base <code>d8b2afeb</code> · All 10 concepts aligned; nothing left proposed · No code modified.
 </footer>
 
 </main>

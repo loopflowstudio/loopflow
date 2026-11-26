@@ -204,19 +204,8 @@ at once.
 
 ## Passes
 
-1. **Gate and measure.** `watch_revisions`, the viewed-only reader registry,
-   deadline re-arming, retry backoff, host wake-up, `now` bound and the title
-   and revision paths on `prepare_cached`, the tests above. Shows: read count
-   flat while idle; per-read cost with warm statements (time 1,000
-   `output_title` calls in a test and note it here); whether a sweep of the
-   viewed set twice a second fits under 1% of a core. If it does not, the
-   batched title query comes next.
-2. **Viewer and benchmark.** `TerminalTitle::refresh` on the same gate. Add a
-   held-terminal phase to `scripts/benchmarks/server_idle.py` (30 Sessions
-   seeded with held terminals, hosted by the server; idle, then with one
-   writer) with a CPU budget in its
-   budgets file; if hosting held terminals headless from the script is not
-   possible, the phase is left out and the reason noted in the PR.
+1. **Gate and measure.** Done (`17f3997d5d`). Warm `output_title` ×1,000 in debug: 151 ms same-store (0.151 ms/read), 163 ms pooled-borrow (0.163 ms/read) — 2 sweeps/s across 5 viewed tabs is ~0.16% of a core (well under 1%), so the per-Session cached read stays and no batched title query is needed.
+2. **Viewer and benchmark.** Done. `TerminalTitle::refresh` uses the same `(TitleRevisions, next_deadline)` gate; `scripts/benchmarks/server_idle.py` adds `held_idle` and `held_writes` (30 hosted held terminals, 5 viewed + 25 unviewed) with budgets in `scripts/performance-budgets.json` (10 s debug run: `held_idle` 0.10% CPU / 0 opens, `held_writes` 0.39% CPU / 0 opens).
 
 Done when an idle server with held terminals shows no `title-reader` SQLite
 work, and a rename, a waiting step and availability each change the tab title

@@ -238,6 +238,15 @@ pub(crate) struct TerminalTitle {
     provider_name: String,
     host: Option<HostNames>,
     checked: Instant,
+    seen_revisions: Option<TitleRevisions>,
+    next_deadline: Option<i64>,
+}
+
+#[derive(Debug, PartialEq)]
+enum ViewerPoll {
+    Unchanged,
+    Read(Names),
+    Detached,
 }
 
 impl TerminalTitle {
@@ -312,11 +321,14 @@ impl TerminalTitle {
     }
 
     fn from_session(store: SqliteStore, session: LfSession) -> anyhow::Result<Self> {
+        let seen_revisions = Some(TitleRevisions::of(store.revisions()?));
         let name = session_title(&store, &session)?;
         Ok(Self {
             attachment: store.session_attachment(&session.id)?,
             provider_name: name.provider,
             names: name.names,
+            next_deadline: name.next_deadline,
+            seen_revisions,
             store,
             session: session.id.to_string(),
             host: HostNames::current(),
@@ -329,13 +341,14 @@ impl TerminalTitle {
             return;
         }
         self.checked = Instant::now();
-        match self.read_names() {
-            Ok(Some(names)) => {
+        match self.poll_names() {
+            Ok(ViewerPoll::Unchanged) => {}
+            Ok(ViewerPoll::Read(names)) => {
                 let previous = std::mem::replace(&mut self.names, names);
                 self.publish(Some(&previous));
             }
             // A replaced or released attachment must stop changing the old terminal's names.
-            Ok(None) => self.host = None,
+            Ok(ViewerPoll::Detached) => self.host = None,
             Err(error) => {
                 tracing::warn!(%error, "cannot refresh terminal Session name");
                 self.host = None;
@@ -343,13 +356,35 @@ impl TerminalTitle {
         }
     }
 
-    fn read_names(&self) -> StoreResult<Option<Names>> {
+    fn poll_names(&mut self) -> StoreResult<ViewerPoll> {
+        let current_revisions = TitleRevisions::of(self.store.revisions()?);
+        let now_unix = time::OffsetDateTime::now_utc().unix_timestamp();
+        let revision_moved = self.seen_revisions != Some(current_revisions);
+        let deadline_due = self
+            .next_deadline
+            .is_some_and(|deadline| now_unix >= deadline);
+        if !revision_moved && !deadline_due {
+            return Ok(ViewerPoll::Unchanged);
+        }
+        match self.read_names_with_deadline()? {
+            Some((names, next_deadline)) => {
+                self.seen_revisions = Some(current_revisions);
+                self.next_deadline = next_deadline;
+                Ok(ViewerPoll::Read(names))
+            }
+            None => Ok(ViewerPoll::Detached),
+        }
+    }
+
+    fn read_names_with_deadline(&self) -> StoreResult<Option<(Names, Option<i64>)>> {
         if self.store.session_attachment(&self.session)? != self.attachment {
             return Ok(None);
         }
         self.store
             .session(&self.session)?
-            .map(|session| session_title(&self.store, &session).map(|name| name.names))
+            .map(|session| {
+                session_title(&self.store, &session).map(|title| (title.names, title.next_deadline))
+            })
             .transpose()
     }
 
@@ -990,6 +1025,8 @@ mod tests {
             provider_name: session.title,
             host: None,
             checked: std::time::Instant::now(),
+            seen_revisions: None,
+            next_deadline: None,
         };
         crate::store::sessions::rename_session(
             &title.store,
@@ -999,7 +1036,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            title.read_names().unwrap().map(|names| names.terminal),
+            title
+                .read_names_with_deadline()
+                .unwrap()
+                .map(|(names, _)| names.terminal),
             Some("Release notes".to_string())
         );
         assert_eq!(
@@ -1015,7 +1055,7 @@ mod tests {
             &process,
         )
         .unwrap();
-        assert_eq!(title.read_names().unwrap(), None);
+        assert_eq!(title.read_names_with_deadline().unwrap(), None);
     }
 
     #[test]
@@ -1580,5 +1620,85 @@ mod tests {
             same_store_elapsed.as_secs_f64(),
             pooled_elapsed.as_secs_f64(),
         );
+    }
+
+    #[test]
+    fn viewer_gate_skips_full_reads_until_revision_or_deadline() {
+        let fixture = TitleFixture::new();
+        let store = crate::store::sqlite::SqliteStore::open_read_only(
+            &fixture.path,
+            crate::store::token_key::encryption_key,
+        )
+        .unwrap();
+        let session = store.session(&fixture.session_id).unwrap().unwrap();
+        let mut title = TerminalTitle::from_session(store, session).unwrap();
+
+        // Quiet store: revision gate short-circuits without re-reading names.
+        assert_eq!(title.poll_names().unwrap(), super::ViewerPoll::Unchanged);
+
+        // Unrelated domain (`processes`) does not open the gate.
+        fixture.store.test_lf_process();
+        assert_eq!(title.poll_names().unwrap(), super::ViewerPoll::Unchanged);
+
+        // Rename moves `sessions` and reads the new title once.
+        crate::store::sessions::rename_session(
+            &fixture.store,
+            &fixture.session_id,
+            "Viewer renamed",
+            crate::session::TitleSource::Human,
+        )
+        .unwrap();
+        match title.poll_names().unwrap() {
+            super::ViewerPoll::Read(names) => {
+                assert_eq!(
+                    names.terminal,
+                    format!("{} Viewer renamed", fixture.task_identifier)
+                );
+            }
+            other => panic!("expected Read after rename, got {other:?}"),
+        }
+        assert_eq!(title.poll_names().unwrap(), super::ViewerPoll::Unchanged);
+
+        // Quiet deadline fires with no write once 120 s elapses.
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        fixture.record_activity(now - 118, false);
+        match title.poll_names().unwrap() {
+            super::ViewerPoll::Read(names) => {
+                assert_eq!(
+                    names.terminal,
+                    format!("{} Viewer renamed", fixture.task_identifier)
+                );
+            }
+            other => panic!("expected Read after activity record, got {other:?}"),
+        }
+        assert_eq!(title.poll_names().unwrap(), super::ViewerPoll::Unchanged);
+
+        let wait = super::duration_until_unix(now + 2) + std::time::Duration::from_millis(50);
+        std::thread::sleep(wait);
+        match title.poll_names().unwrap() {
+            super::ViewerPoll::Read(names) => {
+                assert_eq!(
+                    names.terminal,
+                    format!("{} Viewer renamed · Available", fixture.task_identifier)
+                );
+            }
+            other => panic!("expected Available after deadline, got {other:?}"),
+        }
+        assert_eq!(title.poll_names().unwrap(), super::ViewerPoll::Unchanged);
+
+        // Replacing attachment detaches the viewer.
+        fixture
+            .store
+            .record_agent_process_exit(&fixture.session_id, &fixture.attachment, true)
+            .unwrap();
+        let process = fixture.store.test_lf_process();
+        attachment::claim_session_attachment(
+            &fixture.store,
+            &fixture.session_id,
+            Some(&fixture.attachment),
+            &process,
+        )
+        .unwrap();
+        assert_eq!(title.poll_names().unwrap(), super::ViewerPoll::Detached);
     }
 }

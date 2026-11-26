@@ -18,6 +18,11 @@ use crate::ops::task::TaskFileInventory;
 use crate::process::OsProcess;
 
 static SPAWNS: AtomicU64 = AtomicU64::new(0);
+static NEXT_READING: AtomicU64 = AtomicU64::new(1);
+
+fn next_reading_id() -> u64 {
+    NEXT_READING.fetch_add(1, Ordering::Relaxed)
+}
 
 #[cfg(test)]
 thread_local! {
@@ -277,6 +282,7 @@ struct Entry {
     used: SystemTime,
     hinted_due: Option<SystemTime>,
     dirty: bool,
+    observed_by_reading: u64,
 }
 
 impl Entry {
@@ -289,6 +295,7 @@ impl Entry {
             used: now,
             hinted_due: None,
             dirty: false,
+            observed_by_reading: 0,
         }
     }
 
@@ -922,6 +929,7 @@ impl Cache {
             Some(Reading {
                 cache: self.clone(),
                 dependencies: None,
+                id: next_reading_id(),
             }),
             read,
         )
@@ -949,6 +957,7 @@ impl Cache {
             Some(Reading {
                 cache: self.clone(),
                 dependencies: Some(dependencies.clone()),
+                id: next_reading_id(),
             }),
             read,
         );
@@ -988,7 +997,7 @@ impl Cache {
         (result, dependencies)
     }
 
-    fn read(&self, fact: Fact, dependencies: Option<&Dependencies>) -> Answer {
+    fn read(&self, fact: Fact, reading_id: u64, dependencies: Option<&Dependencies>) -> Answer {
         let now = SystemTime::now();
         let slot = self
             .entries
@@ -1007,6 +1016,12 @@ impl Cache {
                     (false, None)
                 }
                 Some(current) => (true, Some(current)),
+                // Unheld Git facts are not background-refreshed or FS-watched;
+                // observe fresh once per reading so explicit diffs/changes
+                // never return a stale answer after a file write.
+                None if matches!(fact, Fact::Git(..)) => {
+                    (observed.observed_by_reading != reading_id, None)
+                }
                 None => (
                     now.duration_since(observed.checked).unwrap_or_default() >= fact.interval(),
                     None,
@@ -1018,6 +1033,7 @@ impl Cache {
         if must_observe {
             let answer = fact.observe();
             observed.update(answer, stat, now);
+            observed.observed_by_reading = reading_id;
         }
         observed.used = now;
         let revision = observed.revision;
@@ -1557,6 +1573,7 @@ fn dispatch_fs_event(routes: &Mutex<FsWatchRoutes>, event: notify::Result<notify
 struct Reading {
     cache: Arc<Cache>,
     dependencies: Option<Dependencies>,
+    id: u64,
 }
 thread_local! {
     static READING: RefCell<Option<Reading>> = const { RefCell::new(None) };
@@ -1681,6 +1698,7 @@ pub fn derived<T: Send + Sync + 'static>(key: Derived, compute: impl FnOnce() ->
             Some(Reading {
                 cache: cache.clone(),
                 dependencies: Some(dependencies.clone()),
+                id: reading.as_ref().map_or_else(next_reading_id, |r| r.id),
             }),
             compute,
         );
@@ -1715,7 +1733,9 @@ pub fn derived<T: Send + Sync + 'static>(key: Derived, compute: impl FnOnce() ->
 fn read(fact: Fact) -> Answer {
     let reading = READING.with(|reading| reading.borrow().clone());
     match reading {
-        Some(reading) => reading.cache.read(fact, reading.dependencies.as_ref()),
+        Some(reading) => reading
+            .cache
+            .read(fact, reading.id, reading.dependencies.as_ref()),
         None => fact.observe(),
     }
 }
@@ -2432,8 +2452,15 @@ mod tests {
         let repo = loopflow_test_support::TestRepo::new();
         let cache = Arc::new(Cache::default());
         let status = || git(repo.path(), &["status", "--porcelain"]).unwrap().stdout;
-        let first = cache.read_once(status);
+        let spawns_before = super::thread_spawns();
+        let (first, repeated) = cache.read_once(|| (status(), status()));
         assert!(first.is_empty());
+        assert_eq!(repeated, first);
+        assert_eq!(
+            super::thread_spawns() - spawns_before,
+            1,
+            "one read_once deduplicates repeated unheld Git calls"
+        );
         assert_eq!(cache.held_facts(), 0);
         let revision_before = cache
             .entries
@@ -2466,11 +2493,8 @@ mod tests {
             revision_after, revision_before,
             "unheld Git fact must not re-run in background refresh"
         );
-        // Next inline read past the interval observes the fresh state on use.
-        for slot in cache.entries.lock().unwrap().values() {
-            slot.entry.lock().unwrap().checked =
-                std::time::SystemTime::now() - std::time::Duration::from_secs(10);
-        }
+        // The next one-shot read observes the fresh Git state immediately without
+        // waiting out the 3 s held throttle.
         let fresh = cache.read_once(status);
         assert!(String::from_utf8_lossy(&fresh).contains("unheld.txt"));
     }

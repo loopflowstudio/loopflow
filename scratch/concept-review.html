@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1114 Concept Review — Terminal Titles &amp; Store-Driven Reactivity (Pre-Build)</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --surface: #f7f8fa;
+    --surface-2: #eef1f5;
+    --border: #d8dee6;
+    --text: #161b22;
+    --muted: #57606a;
+    --accent: #0969da;
+    --accent-bg: #ddf4ff;
+    --yes: #1a7f37;
+    --yes-bg: #dafbe1;
+    --no: #cf222e;
+    --no-bg: #ffebe9;
+    --prop: #8250df;
+    --prop-bg: #fbefff;
+    --warn: #9a6700;
+    --warn-bg: #fff8c5;
+    --code-bg: #f0f3f6;
+    --shadow: 0 1px 2px rgba(27,31,36,0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface-2: #1f2630;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-bg: rgba(56, 139, 253, 0.15);
+      --yes: #3fb950;
+      --yes-bg: rgba(46, 160, 67, 0.18);
+      --no: #f85149;
+      --no-bg: rgba(248, 81, 73, 0.18);
+      --prop: #bc8cff;
+      --prop-bg: rgba(163, 113, 247, 0.18);
+      --warn: #d29922;
+      --warn-bg: rgba(210, 153, 34, 0.18);
+      --code-bg: #21262d;
+      --shadow: 0 1px 3px rgba(0,0,0,0.35);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2rem 1.25rem 4rem;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 1080px; margin: 0 auto; }
+  header { margin-bottom: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 1.25rem; }
+  .eyebrow {
+    font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--muted); display: flex; gap: 0.55rem; align-items: center; flex-wrap: wrap;
+  }
+  h1 { margin: 0.35rem 0 0.5rem; font-size: 1.85rem; line-height: 1.2; letter-spacing: -0.02em; }
+  h2 { margin: 2.25rem 0 0.75rem; font-size: 1.25rem; letter-spacing: -0.01em; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+  h3 { margin: 1.25rem 0 0.45rem; font-size: 1rem; }
+  p { margin: 0.5rem 0 0.85rem; }
+  ul { margin: 0.4rem 0 0.85rem; padding-left: 1.25rem; }
+  li { margin: 0.3rem 0; }
+  .lead { font-size: 1.02rem; color: var(--muted); max-width: 84ch; }
+  code {
+    font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    background: var(--code-bg); padding: 0.12em 0.35em; border-radius: 4px;
+  }
+
+  .badge {
+    display: inline-block; font-size: 11.5px; font-weight: 600; padding: 0.14rem 0.52rem;
+    border-radius: 999px; letter-spacing: 0.02em; vertical-align: middle; white-space: nowrap;
+  }
+  .b-yes { background: var(--yes-bg); color: var(--yes); }
+  .b-no { background: var(--no-bg); color: var(--no); }
+  .b-existing { background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
+  .b-plan { background: var(--accent-bg); color: var(--accent); }
+  .b-prop { background: var(--prop-bg); color: var(--prop); }
+  .b-warn { background: var(--warn-bg); color: var(--warn); }
+
+  .legend {
+    display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center;
+    margin-top: 0.9rem; font-size: 12.5px; color: var(--muted);
+  }
+
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--prop);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin: 1.25rem 0;
+    box-shadow: var(--shadow);
+  }
+  .callout.danger { border-left-color: var(--no); }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout-title { font-weight: 700; margin-bottom: 0.35rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+
+  .metric-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0 1.4rem;
+  }
+  .metric {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem 0.95rem;
+  }
+  .metric .label { font-size: 12px; color: var(--muted); margin-bottom: 0.25rem; }
+  .metric .val { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.02em; }
+  .metric .sub { font-size: 12px; color: var(--muted); margin-top: 0.22rem; }
+  .before-val { color: var(--no); text-decoration: line-through; font-weight: 500; font-size: 0.88rem; margin-right: 0.35rem; }
+  .plan-val { color: var(--accent); }
+  .prop-val { color: var(--prop); }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1rem;
+    margin: 0.9rem 0 1.25rem;
+  }
+  .grid-3 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 0.9rem;
+    margin: 0.9rem 0 1.25rem;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.15rem;
+    box-shadow: var(--shadow);
+  }
+  .card.existing { border-top: 3px solid var(--no); }
+  .card.plan { border-top: 3px solid var(--accent); }
+  .card.proposed { border-top: 3px solid var(--prop); }
+  .card-head {
+    display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
+    margin-bottom: 0.65rem; flex-wrap: wrap;
+  }
+  .card-title { font-weight: 650; font-size: 0.96rem; }
+
+  table {
+    width: 100%; border-collapse: collapse; margin: 0.85rem 0 1.25rem;
+    font-size: 13.7px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+  }
+  th, td {
+    text-align: left; vertical-align: top; padding: 0.68rem 0.78rem;
+    border-bottom: 1px solid var(--border);
+  }
+  th { background: var(--surface-2); font-weight: 650; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  tr:last-child td { border-bottom: 0; }
+  .pair-meta { margin-top: 0.35rem; font-size: 12.5px; color: var(--muted); }
+
+  .flow-box {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 0.75rem 0.9rem; font: 12.8px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    overflow-x: auto; white-space: pre;
+  }
+  .flow-bad { color: var(--no); }
+  .flow-plan { color: var(--accent); }
+  .flow-good { color: var(--prop); }
+  .flow-muted { color: var(--muted); }
+
+  .trace { display: grid; gap: 0.45rem; font-size: 13.5px; }
+  .step {
+    display: grid; grid-template-columns: 118px 1fr; gap: 0.65rem;
+    padding: 0.48rem 0.65rem; border-radius: 6px; background: var(--bg); border: 1px solid var(--border);
+  }
+  .step .who { font-weight: 650; color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; padding-top: 2px; }
+  .step.bad { border-color: var(--no); background: var(--no-bg); }
+  .step.plan { border-color: var(--accent); background: var(--accent-bg); }
+  .step.good { border-color: var(--prop); background: var(--prop-bg); }
+
+  .counterexamples { display: grid; gap: 0.75rem; margin: 0.85rem 0; }
+  .ce {
+    background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--prop);
+    border-radius: 8px; padding: 0.8rem 1rem;
+  }
+  .ce.trap { border-left-color: var(--no); }
+  .ce strong { display: block; margin-bottom: 0.25rem; }
+
+  .outside-list { display: grid; gap: 0.65rem; margin: 0.85rem 0; }
+  .outside {
+    background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--warn);
+    border-radius: 8px; padding: 0.75rem 1rem; font-size: 14px;
+  }
+  .outside strong { margin-left: 0.35rem; }
+
+  .questions { display: grid; gap: 0.9rem; margin: 0.9rem 0 1.5rem; }
+  .q {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 0.95rem 1.15rem; box-shadow: var(--shadow);
+  }
+  .q-head { display: flex; align-items: baseline; gap: 0.45rem; flex-wrap: wrap; margin-bottom: 0.45rem; }
+  .q-num { font-weight: 800; color: var(--prop); }
+  .q ul { margin: 0.35rem 0 0.2rem; }
+  .q li { margin: 0.4rem 0; }
+
+  footer {
+    margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--border);
+    font-size: 12.8px; color: var(--muted);
+  }
+  @media (max-width: 640px) {
+    .step { grid-template-columns: 1fr; gap: 0.2rem; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <div class="eyebrow">
+    <span>LOO-1114 Concept Review</span>
+    <span class="badge b-prop">Pre-build · Plan review</span>
+    <span class="badge b-existing">HEAD <code>54232097</code> · Base <code>6c2560bd</code></span>
+  </div>
+  <h1>Terminal Title Projection &amp; Store-Driven Reactivity</h1>
+  <p class="lead">
+    <strong>Area reviewed:</strong> how a Session's live terminal title is computed from SQLite and delivered to held terminals and viewers, plus the shared store-change plumbing inside <code>lf server</code> (<code>terminal_title.rs</code>, <code>transport/hosted.rs</code>, <code>transport/wire.rs</code>, <code>read_stream.rs</code>, <code>session_projection.rs</code>, <code>sqlite/sessions.rs</code>, <code>sqlite/revisions.rs</code>).
+    Widened beyond <code>title-reader</code>'s 500 ms loop because the plan keeps the underlying model that made title reads expensive in the first place.
+  </p>
+  <div class="legend">
+    <span>Markers:</span>
+    <span class="badge b-existing">Existing (base <code>6c2560bd</code>)</span>
+    <span class="badge b-plan">Kickoff plan (<code>scratch/plan.md</code>)</span>
+    <span class="badge b-prop">Proposed revision</span>
+    <span class="badge b-warn">Separate outcome</span>
+  </div>
+</header>
+
+<div class="metric-strip">
+  <div class="metric">
+    <div class="label">Idle server (30 held terminals)</div>
+    <div class="val"><span class="before-val">~900 stmt/s</span><span class="prop-val">0 stmt/s</span></div>
+    <div class="sub">Both plan and proposal hit 0 when store is quiet</div>
+  </div>
+  <div class="metric">
+    <div class="label">Working Machine (30 held, 2 viewed)</div>
+    <div class="val"><span class="before-val">~900 stmt/s</span><span class="prop-val">~6 stmt/s</span></div>
+    <div class="sub">Plan still sweeps all 30 × ~15 stmts at 2 Hz (~900/s)</div>
+  </div>
+  <div class="metric">
+    <div class="label">SQLite reads per cmux/tmux viewer</div>
+    <div class="val"><span class="before-val">~30 stmt/s</span><span class="prop-val">0 stmt/s</span></div>
+    <div class="sub">If server pushes titles over the view stream (Q1)</div>
+  </div>
+  <div class="metric">
+    <div class="label">Concept pairs aligned</div>
+    <div class="val">3 / 8 <span class="badge b-no">5 mismatches</span></div>
+    <div class="sub">4 in this work · 1 protocol choice · 3 outside scope</div>
+  </div>
+</div>
+
+<h2>1. Do Domain Concepts and Code Concepts Line Up?</h2>
+<p>
+  Every row pairs what a person understands about terminal titles with what the code does at base <code>6c2560bd</code> and under <code>scratch/plan.md</code>.
+</p>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width: 19%">Domain concept</th>
+      <th style="width: 31%">Code concept (existing &amp; plan)</th>
+      <th style="width: 10%">Aligned?</th>
+      <th style="width: 40%">What is wrong / proposed fix</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Terminal title text</strong><br><span class="pair-meta"><code>LOO-1114 plan titles · Available · Design</code></span></td>
+      <td>
+        <span class="badge b-existing">Existing</span> <code>output_title</code> → <code>session_title</code> → <code>standing</code> calls <code>terminal_session</code>, <code>session</code>, <code>session_attachment</code>, <code>task</code>, full 47-column <code>session_summary</code> (3+3 pinned <code>session_projection_inputs</code> + 7-table <code>summary_query</code> + <code>latest_in</code> + <code>short_task_id</code> + OS syscalls), and <code>task_graph</code> (~15 statements per terminal; 46 of 47 summary fields discarded).<br>
+        <span class="badge b-plan">Plan</span> Keeps the same N-times loop, adds <code>prepare_cached</code> + bound <code>now</code>.
+      </td>
+      <td><span class="badge b-no">No</span><div class="pair-meta">Wrong abstraction</div></td>
+      <td>
+        <strong>This work (Q3):</strong> A 4-field label shouldn't run a full 47-column Session inventory projection per terminal. Keep <code>available_sql</code> (bound <code>now</code>) and <code>session_agent_evidence</code> as the single availability rule, but read all watched terminals in one slim batched pass (1 savepoint, ~3 cached statements total instead of N × 15).
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Who sees a title</strong><br><span class="pair-meta">Only terminals with an open tab or pane</span></td>
+      <td>
+        <span class="badge b-existing">Existing</span> &amp; <span class="badge b-plan">Plan</span> <code>Hosted</code> registers an <code>OutputTitle</code> for every hosted terminal unconditionally, even when <code>self.viewers</code> is empty. Any unrelated <code>sessions</code> write sweeps all 30 terminals.
+      </td>
+      <td><span class="badge b-no">No</span><div class="pair-meta">Invisible code concept</div></td>
+      <td>
+        <strong>This work (Q2):</strong> A detached terminal has no tab to rename. <code>Hosted</code> already computes <code>viewed</code> on every pass (<code>hosted.rs:223</code>). Watch titles only while <code>viewed</code> is true, triggering one immediate read on 0 → 1 viewer attach. 25 parked background conversations cost zero title work even on a busy Machine.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Tab, window &amp; workspace names on a held terminal</strong><br><span class="pair-meta">OSC 0 + cmux tab/workspace + tmux window (local &amp; remote)</span></td>
+      <td>
+        <span class="badge b-existing">Existing</span> Split across two processes: <code>lf server</code> reads SQLite, computes <code>Names { workspace, terminal }</code>, throws away <code>workspace</code>, and emits OSC 0; each local viewer's <code>ViewerTitle</code> opens its own SQLite connection and polls every 500 ms to compute the same <code>Names</code> again for cmux/tmux. Remote viewers (<code>lf --machine</code>) look up a remote <code>TerminalId</code> in local SQLite and get nothing.<br>
+        <span class="badge b-plan">Plan</span> Leaves both readers; gates viewer on 500 ms <code>store.revisions()</code>.
+      </td>
+      <td><span class="badge b-no">No</span><div class="pair-meta">Two owners, one job</div></td>
+      <td>
+        <strong>Decision (Q1):</strong> Carry <code>Event::Title { terminal, workspace }</code> on the view stream (like <code>Event::Directory</code> and <code>Event::ProgramStatus</code>). Viewers stop touching SQLite completely — zero viewer polls, zero kqueue threads — and remote cmux/tmux viewers start working identically to local ones. Direct non-held chats keep <code>TerminalTitle::refresh</code> with the inline revision gate.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Shared store-change feed in <code>lf server</code></strong><br><span class="pair-meta">"Wake me when domains I read commit"</span></td>
+      <td>
+        <span class="badge b-existing">Existing</span> <code>read_stream::ObserverEntry</code> has <code>followers</code> plus a single-domain special case <code>planning: Vec&lt;watch::Sender&lt;Option&lt;i64&gt;&gt;&gt;</code>. Separately, <code>recovery-wake</code> runs a second <code>StoreChanges</code> thread on the same DB.<br>
+        <span class="badge b-plan">Plan</span> Adds another title-specific hook onto <code>store-observer</code>.
+      </td>
+      <td><span class="badge b-no">No</span><div class="pair-meta">One idea, N bespoke lists</div></td>
+      <td>
+        <strong>This work:</strong> Replace <code>watch_planning</code> with one domain-agnostic <code>read_stream::watch_revisions(database)</code> returning <code>StoreRevisions</code>. Both <code>subscriptions</code> and <code>TitleReader</code> filter their own domains without teaching <code>read_stream</code> about titles. Subscribe only while ≥1 terminal is watched.<br>
+        <span class="badge b-warn">Separate outcome</span> Move <code>recovery-wake</code> onto the same observer.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Warm SQLite connection &amp; statement cache</strong><br><span class="pair-meta">Reuse prepared SQL without leaking fds</span></td>
+      <td>
+        <span class="badge b-existing">Existing</span> <code>SqliteStore::open_read_only</code> <em>already</em> leases from <code>pool.rs</code> (256-entry statement cache, inode-checked on return). SQL reparsed because queries used <code>prepare(&amp;format!())</code> / bare <code>query_row</code> (including <code>history.history_revision</code> in <code>revisions.rs:115</code>).<br>
+        <span class="badge b-plan">Plan</span> Pins one dedicated <code>SqliteStore</code> in <code>TitleReader</code> "so its statement cache stays warm".
+      </td>
+      <td><span class="badge b-no">No</span><div class="pair-meta">Plan fights existing pool</div></td>
+      <td>
+        <strong>This work:</strong> Do <em>not</em> pin a private connection outside <code>pool.rs</code> — a pinned connection holds an extra idle fd and stays stuck on an unlinked inode if the DB is replaced. Borrow one pooled read-only store <em>per sweep</em> (0 borrows while idle), bind <code>now</code>, and switch hot queries plus <code>history.history_revision</code> to <code>prepare_cached</code>.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Quiet availability (120 s with no write)</strong><br><span class="pair-meta">Session turns <code>Available</code> after 2 quiet minutes</span></td>
+      <td>
+        <span class="badge b-existing">Existing</span> <code>SessionProjectionInputs.deadlines</code> computes this exact timestamp, but <code>terminal_title.rs</code> ignored it.<br>
+        <span class="badge b-plan">Plan</span> Returns the earliest deadline beside the title and arms a wait on it.
+      </td>
+      <td><span class="badge b-yes">Yes</span><div class="pair-meta">With one invariant</div></td>
+      <td>
+        <strong>Invariant (Counterexample #1):</strong> Because streaming text updates <code>observed_at</code> without advancing <code>sessions</code>, <code>TitleReader</code> must overwrite a terminal's stored deadline on <em>every</em> read — even when the title text is unchanged — so pushed-out deadlines re-arm themselves.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Unexpected agent or Graph death</strong><br><span class="pair-meta">Stale <code>Available</code> / waiting step clears</span></td>
+      <td>
+        <span class="badge b-existing">Existing</span> Checked OS PIDs every 500 ms.<br>
+        <span class="badge b-plan">Plan</span> Accepts brief staleness; <code>questions.md</code> asks if a slow clock is needed.
+      </td>
+      <td><span class="badge b-yes">Yes</span><div class="pair-meta">No second clock needed</div></td>
+      <td>
+        Direct children settle through <code>Hosted</code> → <code>Settling</code> immediately on exit. Silent crashes of external agents (e.g. Codex app-server) or Graph carriers are already swept every 60 s by <code>recovery-wake</code>, whose SQLite writes move <code>sessions</code>/<code>graphs</code> and wake <code>TitleReader</code>. Don't add a second liveness timer.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Relay loop idle sleep</strong><br><span class="pair-meta"><code>held-terminals</code> waits on I/O, not a 500 ms clock</span></td>
+      <td>
+        <span class="badge b-existing">Existing</span> <code>Hosted::deadline</code> chains 500 ms <code>title.deadline()</code> and a 10 s fallback (<code>hosted.rs:874</code>).<br>
+        <span class="badge b-plan">Plan</span> Removes <code>title.deadline()</code>; wakes via <code>waker</code> only when a name changes.
+      </td>
+      <td><span class="badge b-yes">Yes</span><div class="pair-meta">Note 10 s floor</div></td>
+      <td>
+        Removing <code>self.title.deadline()</code> drops <code>held-terminals</code> idle wakeups 20× (from 2 Hz to 0.1 Hz via the existing 10 s fallback). Negligible CPU; just note it so tests don't assume literally zero <code>poll</code> returns per minute.
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>2. The Biggest Mismatch — Before, Kickoff Plan, and Recommended</h2>
+
+<div class="callout danger">
+  <div class="callout-title">
+    <span class="badge b-no">Biggest mismatch</span>
+    <span>The kickoff plan silences an idle server, but on a working Machine it still re-runs 30 × 15-statement inventory projections twice a second — including for 25+ terminals nobody is looking at.</span>
+  </div>
+  <p style="margin-bottom: 0;">
+    <code>scratch/plan.md</code>'s own measurement on a live working Machine shows <code>sessions</code> advancing ~2 times/second (<code>+20</code> in 10 s) whenever even a handful of agents are running. Because the plan sweeps <em>every</em> hosted terminal (viewed or not) one by one through <code>output_title</code> → <code>session_summary</code>, normal work still triggers ~60 full <code>SessionSummary</code> reads/sec (~900 SQL statements/sec) — and each local cmux/tmux viewer still opens its own SQLite connection to compute the same title again.
+  </p>
+</div>
+
+<div class="grid-3">
+  <div class="card existing">
+    <div class="card-head">
+      <span class="card-title">Today (<code>6c2560bd</code>)</span>
+      <span class="badge b-existing">Existing</span>
+    </div>
+    <div class="flow-box"><span class="flow-bad">30 hosted terminals (2 viewed)</span>
+  └─ every 500 ms, idle or busy:
+     ├─ Hosted wakes poll() (2 Hz)
+     ├─ TitleReader opens pooled RO
+     ├─ runs 15 uncached stmts × 30
+     │  (47-col SessionSummary!)
+     └─ emits OSC 0 only
+
+<span class="flow-bad">Each cmux/tmux viewer</span>
+  └─ every 500 ms:
+     ├─ opens local SQLite
+     ├─ runs same 15 stmts again
+     └─ remote viewer: broken</div>
+  </div>
+
+  <div class="card plan">
+    <div class="card-head">
+      <span class="card-title">Kickoff Plan (<code>plan.md</code>)</span>
+      <span class="badge b-plan">Plan</span>
+    </div>
+    <div class="flow-box"><span class="flow-plan">Idle: 0 reads/sec (fixed)</span>
+<span class="flow-bad">Busy (1 active agent, 30 hosted):</span>
+  └─ store-observer wakes 2×/sec
+     ├─ pinned private RO conn
+     ├─ sweeps ALL 30 terminals
+     │  (28 detached, nobody looking)
+     ├─ 30 × 15 cached stmts = 450/sweep
+     └─ bespoke hook in read_stream
+
+<span class="flow-plan">Each cmux/tmux viewer</span>
+  └─ every 500 ms: revisions() poll
+     └─ remote viewer: still broken</div>
+  </div>
+
+  <div class="card proposed">
+    <div class="card-head">
+      <span class="card-title">Recommended Model</span>
+      <span class="badge b-prop">Proposed</span>
+    </div>
+    <div class="flow-box"><span class="flow-good">Idle: 0 reads/sec, 0 pinned conns</span>
+<span class="flow-good">Busy (1 active agent, 2 viewed):</span>
+  └─ watch_revisions wakes 2×/sec
+     ├─ borrows 1 pooled RO / sweep
+     ├─ watches ONLY 2 viewed terms
+     │  (28 detached: 0 work)
+     ├─ 1 batched slim read (~3 stmts)
+     └─ pushes OSC 0 + Event::Title
+
+<span class="flow-good">Every cmux/tmux viewer (Q1a)</span>
+  └─ 0 SQLite, 0 polls, works remote</div>
+  </div>
+</div>
+
+<h2>3. Walkthrough: Normal, Failure &amp; Recovery Paths</h2>
+<p>
+  Trace one concrete setup: <strong>25 parked Task conversations + 2 open tabs</strong> (one local cmux, one remote SSH), while one agent is actively running tools.
+</p>
+
+<div class="grid-2">
+  <div class="card plan">
+    <div class="card-head">
+      <span class="card-title">Under <code>scratch/plan.md</code> as written</span>
+      <span class="badge b-plan">Kickoff plan</span>
+    </div>
+    <div class="trace">
+      <div class="step bad"><div class="who">Busy Machine</div><div>One agent writes activity → <code>sessions</code> moves → <code>TitleReader</code> sweeps all 27 hosted terminals through <code>session_summary</code> (47 columns × 27) twice a second.</div></div>
+      <div class="step plan"><div class="who">Rename / quiet</div><div>Rename reaches local OSC 0 in &lt;500 ms. Remote cmux tab gets OSC 0 only — cmux tab/workspace commands never run.</div></div>
+      <div class="step bad"><div class="who">DB locked</div><div>Plan drops connection and "tries on the next look": if the rename already moved <code>sessions</code> and nothing writes again, the tab stays stale until an unrelated write.</div></div>
+      <div class="step plan"><div class="who">DB replaced</div><div>Pinned <code>SqliteStore</code> stays open on the unlinked inode until an error forces a reopen.</div></div>
+    </div>
+  </div>
+
+  <div class="card proposed">
+    <div class="card-head">
+      <span class="card-title">Under recommended revision</span>
+      <span class="badge b-prop">Proposed</span>
+    </div>
+    <div class="trace">
+      <div class="step good"><div class="who">Busy Machine</div><div>25 detached terminals aren't registered. One batched read (~3 cached statements on 1 pooled borrow) refreshes the 2 viewed tabs at most every 500 ms.</div></div>
+      <div class="step good"><div class="who">Reattach</div><div>Opening a parked tab transitions 0 → 1 viewers: <code>paint</code> sends screen immediately, <code>TitleReader</code> reads once off-loop and emits fresh title in milliseconds.</div></div>
+      <div class="step good"><div class="who">DB locked</div><div>Byte path never stalls. Reader keeps its old <code>seen_revisions</code> and retries with bounded backoff (1 s → 2 s → … → 30 s) so a missed rename still lands once SQLite clears.</div></div>
+      <div class="step good"><div class="who">Restart / move</div><div>Adopted terminals do 0 title work until viewed. Replaced attachment clears <code>held_terminal_id</code> / <code>attached_lf_process_id</code> → old terminal stops publishing.</div></div>
+    </div>
+  </div>
+</div>
+
+<h2>4. Counterexamples &amp; Failure Modes Checked</h2>
+<div class="counterexamples">
+  <div class="ce trap">
+    <strong>1. Continuous text streaming delays the 120 s quiet deadline without moving <code>sessions</code>.</strong>
+    <code>store_revision_session_activity_update</code> deliberately ignores <code>observed_at</code> bumps while <code>open_tools = 0</code> and delta &lt; 120 s (<code>0.14.7.001_release.sql:12</code>). If an agent starts streaming at <code>t = 1000</code> and finishes at <code>t = 1030</code>, <code>TitleReader</code>'s initial deadline is <code>1120</code>. When <code>1120</code> fires, <code>1120 - 1030 = 90 &lt; 120</code>, so the title string does <em>not</em> change — but the new deadline is <code>1150</code>. <strong>Rule:</strong> <code>TitleReader</code> must update each terminal's stored <code>next_deadline</code> on every successful read, even when the title text is unchanged.
+  </div>
+  <div class="ce trap">
+    <strong>2. Transient SQLite lock or error during a rename leaves the tab stale forever if <code>look</code> is consumed.</strong>
+    If <code>store-observer</code> notifies <code>TitleReader</code> that <code>sessions</code> moved 41 → 42 and the read fails with <code>SQLITE_BUSY</code>, dropping the error and waiting for "the next look" loses the rename if the Machine then goes quiet. <strong>Rule:</strong> advance <code>seen_revisions</code> only after a sweep succeeds; on error, retry on bounded backoff (1 s → 30 s) without holding any connection open.
+  </div>
+  <div class="ce">
+    <strong>3. A fresh terminal starts before its child calls <code>bind_session_terminal</code>.</strong>
+    When <code>Hosted::new</code> runs, <code>agent_sessions.held_terminal_id</code> is not yet linked. The first read returns <code>None</code>; moments later <code>bind_session_terminal</code> updates <code>agent_sessions</code>, firing <code>store_revision_agent_sessions_update</code> (<code>OLD.fence_locator IS NOT NULL</code>), which moves <code>sessions</code> and wakes <code>TitleReader</code> to publish the first title.
+  </div>
+  <div class="ce">
+    <strong>4. Fresh server with no <code>loopflow.db</code> yet must not spin <code>StoreChanges</code> at 100 ms.</strong>
+    When the WAL file doesn't exist, <code>StoreChanges::wait_with_history</code> sleeps 100 ms per loop (<code>changes.rs:123</code>). Keeping <code>TitleReader</code> unsubscribed from <code>store-observer</code> until ≥1 terminal is actually watched avoids waking an empty server 10×/sec (and creating any held terminal already initializes <code>loopflow.db</code>).
+  </div>
+  <div class="ce">
+    <strong>5. <code>revision_map()</code> reparses <code>history.history_revision</code> on every wake.</strong>
+    <code>sqlite/revisions.rs:110</code> uses <code>prepare_cached</code> for <code>store_revisions</code>, but line 115 uses uncached <code>conn.query_row</code> for <code>SELECT revision FROM history.history_revision</code>. Switching that one query to <code>prepare_cached</code> removes reparsing from every <code>store-observer</code>, <code>recovery-wake</code>, and viewer revision check.
+  </div>
+</div>
+
+<h2>5. Is the Plan's First Slice the Right One?</h2>
+<div class="callout">
+  <div class="callout-title">
+    <span class="badge b-prop">First-slice verdict</span>
+    <span>Pass 1 has the right boundary, but four details should change before coding starts.</span>
+  </div>
+  <ul>
+    <li><strong>Keep in Pass 1:</strong> event-driven <code>TitleReader</code> registry + <code>store-observer</code> wake + quiet availability deadline + host <code>waker</code> + bound <code>now</code> in <code>available_sql</code> + <code>prepare_cached</code> across the title and revision paths + focused tests (including the streaming-deadline and lock-recovery counterexamples).</li>
+    <li><strong>Change in Pass 1:</strong> (1) borrow 1 pooled read-only store per sweep instead of pinning a private connection; (2) generalize <code>watch_planning</code> to <code>watch_revisions</code> instead of adding a title-specific list to <code>read_stream</code>; (3) watch viewed terminals only (if Q2a) and batch the slim title read (if Q3a) so busy-Machine sweeps don't stay at 30 × 15 statements; (4) cache <code>history.history_revision</code> in <code>revision_map()</code>.</li>
+    <li><strong>Pass 2:</strong> viewer titles (either server-pushed <code>Event::Title</code> if Q1a, or inline revision gate on <code>TerminalTitle::refresh</code> if Q1b) plus the held-terminal phase in <code>scripts/benchmarks/server_idle.py</code> covering <em>both</em> idle detached terminals and a busy-write sweep.</li>
+  </ul>
+</div>
+
+<h2>6. Outside This Work</h2>
+<p>Real issues seen in the same neighborhood that belong to separate outcomes:</p>
+<div class="outside-list">
+  <div class="outside">
+    <span class="badge b-warn">Separate outcome</span>
+    <strong>Merge <code>recovery-wake</code> onto <code>store-observer</code> (<code>rust/loopflow/src/server/recovery.rs</code>).</strong>
+    <code>recovery-wake</code> currently runs a second <code>StoreChanges::watch</code> thread on <code>loopflow.db</code>. Once <code>read_stream::watch_revisions</code> exists, folding <code>recovery-wake</code> onto it drops one kqueue thread per server, but touches recovery/steer wake scheduling.
+  </div>
+  <div class="outside">
+    <span class="badge b-warn">Separate outcome</span>
+    <strong>Replace <code>lifetime::Watcher</code>'s 2 s native-client poll (<code>transport/lifetime.rs</code>).</strong>
+    When an exec'd Codex client is attached, <code>lifetime</code> polls <code>session_attachment</code> every 2 s. Driving it from <code>sessions</code> revision moves is clean, already excluded in <code>scratch/plan.md</code>, and can follow on the same <code>watch_revisions</code> feed.
+  </div>
+  <div class="outside">
+    <span class="badge b-warn">Separate outcome</span>
+    <strong>Convert remaining uncached <code>prepare</code> / <code>query_row</code> calls outside the title and revision paths.</strong>
+    Repository-wide storage cleanup; no impact on LOO-1114's hotspot.
+  </div>
+</div>
+
+<h2>7. Open Questions</h2>
+<p>
+  Every question below can be answered directly (e.g. <code>1a, 2a, 3a</code>). Nothing here has been built yet; all choices are reversible, except <strong>1a</strong> includes a one-time held-terminal protocol revision bump (existing views reconnect automatically after upgrade).
+</p>
+
+<div class="questions">
+  <div class="q">
+    <div class="q-head">
+      <span class="q-num">1.</span>
+      <strong>When you view a held terminal in cmux or tmux — locally or on a remote Machine — should the server send its tab and workspace titles over the terminal stream instead of each viewer reading the local database?</strong>
+    </div>
+    <ul>
+      <li><strong>1a (Recommended):</strong> Yes — the server computes the title once and sends it to attached viewers alongside terminal output. Local cmux/tmux tabs stop touching SQLite completely (zero per-tab polling), and remote <code>lf --machine</code> sessions in cmux/tmux gain live tab and workspace renames too. <em>Trade-off:</em> bumps the held-terminal wire protocol version once (4 → 5), so open views re-exec once after installing the new build.</li>
+      <li><strong>1b (Kickoff plan):</strong> Keep local cmux/tmux viewers checking SQLite's revision counter every 500 ms (lightweight when quiet, skips full reads unless something moved), leave remote cmux/tmux renames unsupported for now, and avoid a wire protocol version bump in this PR.</li>
+    </ul>
+  </div>
+
+  <div class="q">
+    <div class="q-head">
+      <span class="q-num">2.</span>
+      <strong>When dozens of background conversations are running with no tab or pane open on them, should Loopflow skip refreshing their titles until you open one?</strong>
+    </div>
+    <ul>
+      <li><strong>2a (Recommended):</strong> Yes — refresh titles only for terminals that currently have at least one viewer attached, and fetch the fresh title immediately when a viewer opens a parked conversation. Active work in one tab never triggers title reads for 25 hidden ones; opening any parked tab still shows its up-to-date title within a fraction of a second.</li>
+      <li><strong>2b (Kickoff plan):</strong> Refresh titles for every hosted terminal on any Session, Task, or Graph change even while no viewer is attached, so the server's retained screen always carries the latest title before a viewer connects.</li>
+    </ul>
+  </div>
+
+  <div class="q">
+    <div class="q-head">
+      <span class="q-num">3.</span>
+      <strong>During active work with multiple open tabs, how far should this PR slim down the title database read itself?</strong>
+    </div>
+    <ul>
+      <li><strong>3a (Recommended):</strong> Add one focused, batched title query that reads only the four fields a title uses (Session name, Task label, availability + quiet deadline, waiting Graph step) across all watched tabs in a single pass — sharing the exact same availability rule so labels never drift, while cutting busy-Machine database work by ~10–50×.</li>
+      <li><strong>3b (Kickoff plan):</strong> Keep calling the existing per-Session full summary reader in a loop with cached SQL statements, measure whether 30 terminals × 2 sweeps/sec stays under 1% CPU, and slow title updates from 500 ms to 1 s if it doesn't.</li>
+    </ul>
+  </div>
+</div>
+
+<footer>
+  Generated by pre-build <code>lf concept-review</code> · Reviews <code>scratch/plan.md</code> at HEAD <code>54232097</code> against base <code>6c2560bd</code> · No code, plan, or docs modified.
+</footer>
+
+</main>
+</body>
+</html>

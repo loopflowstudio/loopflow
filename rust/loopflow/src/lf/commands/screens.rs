@@ -164,28 +164,50 @@ pub fn board(
 
 pub fn task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {
     let repo = loopflow_execution::repo::working_directory_in(directory)?;
-    let store = loopflow_execution::store::read_existing_registry()?
-        .map(Arc::new)
-        .context("no Loopflow store exists on this Machine")?;
-    let id = match loopflow_execution::store::children::resolve_task_id(
-        &store.sqlite,
-        issue,
-        Some(&repo.to_string_lossy()),
-    )? {
-        Some(id) => Some(id),
-        None => loopflow_execution::store::children::resolve_task_id(&store.sqlite, issue, None)?,
+    let mut store = loopflow_execution::store::read_existing_registry()?.map(Arc::new);
+    let mut task = match &store {
+        Some(store) => {
+            let id = match loopflow_execution::store::children::resolve_task_id(
+                &store.sqlite,
+                issue,
+                Some(&repo.to_string_lossy()),
+            )? {
+                Some(id) => Some(id),
+                None => loopflow_execution::store::children::resolve_task_id(
+                    &store.sqlite,
+                    issue,
+                    None,
+                )?,
+            };
+            id.map(|id| store.sqlite.task(&id)).transpose()?.flatten()
+        }
+        None => None,
+    };
+    if task.is_none() && !loopflow_execution::journal::request::active() {
+        let main = loopflow_execution::git::worktrees::main_repo_root(&repo)
+            .unwrap_or_else(|_| repo.clone());
+        let (writable, found) = loopflow_execution::runtime::block_on(async {
+            let writable = loopflow_execution::ops::planning_sync::planning_store().await?;
+            let found = loopflow_execution::ops::planning_sync::find_task(
+                &writable,
+                &main.to_string_lossy(),
+                issue,
+            )
+            .await?;
+            Ok::<_, anyhow::Error>((Arc::new(writable), found))
+        })?;
+        store = Some(writable);
+        task = found;
     }
-    .ok_or_else(|| {
+    let store = store.context("no Loopflow store exists on this Machine")?;
+    let task = task.ok_or_else(|| {
         loopflow_execution::engine::Error::new(
             loopflow_execution::engine::ErrorCode::NotFound,
             format!("Task {issue} is not registered"),
         )
         .with(serde_json::json!({ "issue": issue }))
     })?;
-    let task = store
-        .sqlite
-        .task(&id)?
-        .context("Task is no longer recorded")?;
+    let id = task.id.clone();
     let pane = loopflow_execution::runtime::block_on(async {
         let status = loopflow_execution::ops::task::registered_task_status(&store, task).await?;
         super::waves::task_pane(&store, status).await

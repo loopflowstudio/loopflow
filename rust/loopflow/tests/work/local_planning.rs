@@ -3109,3 +3109,40 @@ fn fresh_clone_reads_remote_plan_after_task_create_and_on_first_wave_list() {
         .collect();
     assert!(names.contains(&"alpha"), "expected wave alpha in {waves}");
 }
+
+#[test]
+fn fresh_clone_task_detail_finds_remote_task() {
+    let origin = TestRepo::new();
+    let home_a = tempfile::tempdir().unwrap();
+    let home_b = tempfile::tempdir().unwrap();
+    let clones = tempfile::tempdir().unwrap();
+
+    let created = lf(
+        origin.path(),
+        home_a.path(),
+        &["task", "create", "--title", "From A", "--json"],
+    )["task"]
+        .clone();
+    let id = created["id"].as_str().unwrap();
+
+    let clone_b = clones.path().join("b");
+    let output = Command::new("git")
+        .args([
+            "clone",
+            "-q",
+            origin.bare_path().to_str().unwrap(),
+            clone_b.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git clone: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let clone_b = clone_b.canonicalize().unwrap();
+
+    let detail = lf(&clone_b, home_b.path(), &["task", "detail", id, "--json"]);
+    assert_eq!(detail["task"]["id"], id);
+    assert_eq!(detail["task"]["name"], "From A");
+}

@@ -535,6 +535,9 @@ fn scope_waves_to_repo(waves: Vec<Wave>, directory: &Path, all: bool) -> Result<
 
 pub fn ls(json: bool, all: bool) -> Result<()> {
     loopflow_execution::runtime::block_on(async {
+        if let Ok(directory) = std::env::current_dir() {
+            loopflow_execution::ops::plan_carriers::before_first_read(&directory).await;
+        }
         let Some(snapshots) = list(all).await? else {
             return no_registry(json, "[]");
         };
@@ -579,6 +582,7 @@ pub(crate) async fn wave_snapshots(store: &SharedStore, all: bool) -> Result<Vec
 pub fn status(wave: Option<&str>, json: bool, observe: bool) -> Result<()> {
     let directory = std::env::current_dir()?;
     loopflow_execution::runtime::block_on(async {
+        loopflow_execution::ops::plan_carriers::before_first_read(&directory).await;
         let Some(status) = read_status(&directory, wave, observe).await? else {
             return no_registry(json, "null");
         };
@@ -729,6 +733,7 @@ pub(crate) fn show_snapshot(
     observe: bool,
 ) -> Result<RoadmapSnapshot> {
     loopflow_execution::runtime::block_on(async {
+        loopflow_execution::ops::plan_carriers::before_first_read(directory).await;
         let store = loopflow_execution::store::read_existing_registry()?.map(std::sync::Arc::new);
         show_roadmap(store.as_ref(), directory, wave, task, all, observe).await
     })
@@ -887,6 +892,7 @@ pub struct TaskListArgs {
 /// gives them.
 pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
     loopflow_execution::runtime::block_on(async {
+        loopflow_execution::ops::plan_carriers::before_first_read(repo).await;
         let store = loopflow_execution::store::read_existing_registry()?.map(std::sync::Arc::new);
         let tasks = match &store {
             Some(store) => open_tasks(store, repo, query).await?,
@@ -1654,6 +1660,7 @@ pub fn list_closed_tasks(
     json: bool,
 ) -> Result<()> {
     loopflow_execution::runtime::block_on(async {
+        loopflow_execution::ops::plan_carriers::before_first_read(repo).await;
         let store = loopflow_execution::store::read_existing_registry()?.map(std::sync::Arc::new);
         let page = closed_task_page(store.as_ref(), repo, wave, since, after, limit).await?;
         if json {

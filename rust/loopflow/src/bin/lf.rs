@@ -950,18 +950,6 @@ fn task_read<T: serde::de::DeserializeOwned>(read: Read) -> anyhow::Result<T> {
     Ok(serde_json::from_value(read.read()?)?)
 }
 
-fn before_first_read(directory: &Path) {
-    loopflow_execution::runtime::block_on(
-        loopflow_execution::ops::plan_carriers::before_first_read(directory),
-    );
-}
-
-fn before_first_read_cwd() {
-    if let Ok(directory) = std::env::current_dir() {
-        before_first_read(&directory);
-    }
-}
-
 fn read_task_draft() -> anyhow::Result<String> {
     loopflow::lf::commands::mutation::read_task_draft(&mut std::io::stdin().lock())
 }
@@ -1007,9 +995,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             use loopflow::lf::commands::waves::{
                 list_closed_tasks, list_tasks, subscribe_tasks, TaskListArgs,
             };
-            if !*subscribe {
-                before_first_read(repo);
-            }
             let args = TaskListArgs {
                 query: query.clone(),
                 wave: wave.clone(),
@@ -3263,10 +3248,7 @@ fn execute_command(
         }) => loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune, *repo),
         Some(Commands::Wave {
             cmd: WaveCommand::List { json, all },
-        }) => {
-            before_first_read_cwd();
-            loopflow::lf::commands::waves::ls(*json, *all)
-        }
+        }) => loopflow::lf::commands::waves::ls(*json, *all),
         Some(Commands::Wave {
             cmd:
                 WaveCommand::Status {
@@ -3277,10 +3259,7 @@ fn execute_command(
         }) => loopflow::lf::commands::waves::subscribe_status(wave.clone()),
         Some(Commands::Wave {
             cmd: WaveCommand::Status { wave, json, .. },
-        }) => {
-            before_first_read_cwd();
-            loopflow::lf::commands::waves::status(wave.as_deref(), *json, true)
-        }
+        }) => loopflow::lf::commands::waves::status(wave.as_deref(), *json, true),
         Some(Commands::Wave {
             cmd: WaveCommand::Sync { wave, json },
         }) => {
@@ -3298,25 +3277,18 @@ fn execute_command(
             cmd: WaveCommand::Plan {
                 wave, cmd: None, ..
             },
-        }) => {
-            before_first_read_cwd();
-            loopflow::lf::commands::waves::status(wave.as_deref(), true, false)
-        }
+        }) => loopflow::lf::commands::waves::status(wave.as_deref(), true, false),
         Some(Commands::Plan {
             cmd:
                 loopflow::lf::PlanCommand::Board {
                     wave, task, all, ..
                 },
-        }) => {
-            let directory = std::env::current_dir()?;
-            before_first_read(&directory);
-            loopflow::lf::commands::screens::print(Read::PlanBoard {
-                directory,
-                wave: wave.clone(),
-                task: task.clone(),
-                all: *all,
-            })
-        }
+        }) => loopflow::lf::commands::screens::print(Read::PlanBoard {
+            directory: std::env::current_dir()?,
+            wave: wave.clone(),
+            task: task.clone(),
+            all: *all,
+        }),
         Some(Commands::Plan {
             cmd:
                 loopflow::lf::PlanCommand::List {
@@ -3337,7 +3309,6 @@ fn execute_command(
                 )
                 .map(drop)
             } else {
-                before_first_read_cwd();
                 loopflow::lf::commands::waves::show(
                     wave.as_deref(),
                     task.as_deref(),
@@ -3389,7 +3360,6 @@ fn execute_command(
                     ..
                 },
         }) => {
-            before_first_read_cwd();
             loopflow::lf::commands::waves::show(wave.as_deref(), task.as_deref(), *json, *all, true)
         }
         Some(Commands::Wave { cmd }) => in_repo_runtime(args, |repo| run_wave_command(repo, cmd)),

@@ -391,4 +391,175 @@ mod tests {
         assert!(!run(1_001).await.unwrap());
         assert_eq!(hub_calls.load(Ordering::SeqCst), 1);
     }
+
+    #[tokio::test]
+    async fn git_and_hub_fresh_clone_reads_git_once_and_skips_hub_on_second_read() {
+        let root = tempfile::tempdir().unwrap();
+        let origin = loopflow_test_support::TestRepo::new();
+        let clone_dir = root.path().join("clone");
+        git(
+            root.path(),
+            &[
+                "clone",
+                "-q",
+                origin.bare_path().to_str().unwrap(),
+                clone_dir.to_str().unwrap(),
+            ],
+        );
+        let clone_repo = clone_dir
+            .canonicalize()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+
+        let hub_store =
+            crate::store::opening::open_ephemeral(&root.path().join("hub/loopflow.db")).unwrap();
+        let clone_store =
+            crate::store::opening::open_ephemeral(&root.path().join("clone/loopflow.db")).unwrap();
+        let hub_machine = crate::store::machines::local_machine(&hub_store).unwrap();
+        crate::store::machines::add_machine(&clone_store, &hub_machine.id, "hub", "hub").unwrap();
+        set_hub(&clone_store, Some(&hub_machine.id)).unwrap();
+
+        let git_calls = Arc::new(AtomicUsize::new(0));
+        let hub_calls = Arc::new(AtomicUsize::new(0));
+        let run = |now: i64| {
+            let clone_store = &clone_store;
+            let clone_repo = clone_repo.as_str();
+            let git_calls = Arc::clone(&git_calls);
+            let hub_calls = Arc::clone(&hub_calls);
+            let until = Instant::now() + Duration::from_secs(60);
+            async move {
+                first_read_with(
+                    clone_store,
+                    clone_repo,
+                    until,
+                    now,
+                    |store, repo, until| {
+                        git_calls.fetch_add(1, Ordering::SeqCst);
+                        let res = super::super::plan_git::exchange(store, repo, Some(until));
+                        async move { res }
+                    },
+                    |store, repo, until| {
+                        hub_calls.fetch_add(1, Ordering::SeqCst);
+                        let res = exchange_with(store, repo, Why::Read(until), |_, _, _, _| {
+                            Err(anyhow::anyhow!("hub does not know this repository id"))
+                        });
+                        async move { res }
+                    },
+                )
+                .await
+            }
+        };
+
+        // Read #1: no repository id yet, so only Git runs, minting a local id and marking Git read.
+        assert!(run(1_000).await.unwrap());
+        assert_eq!(git_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(hub_calls.load(Ordering::SeqCst), 0);
+        assert!(clone_store.repository_id(&clone_repo).unwrap().is_some());
+        assert!(clone_store
+            .plan_carrier(&clone_repo, Carrier::Git)
+            .unwrap()
+            .unwrap()
+            .has_read());
+
+        // Read #2: Git already marked the clone read, so neither carrier runs and no hub error is recorded.
+        assert!(!run(1_001).await.unwrap());
+        assert_eq!(git_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(hub_calls.load(Ordering::SeqCst), 0);
+        assert!(clone_store
+            .plan_carrier(&clone_repo, Carrier::Hub)
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn bound_clone_with_unreachable_hub_marks_via_git_and_skips_second_read() {
+        let root = tempfile::tempdir().unwrap();
+        let origin = loopflow_test_support::TestRepo::new();
+        let clone_dir = root.path().join("clone");
+        git(
+            root.path(),
+            &[
+                "clone",
+                "-q",
+                origin.bare_path().to_str().unwrap(),
+                clone_dir.to_str().unwrap(),
+            ],
+        );
+        let clone_repo = clone_dir
+            .canonicalize()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+
+        let hub_store =
+            crate::store::opening::open_ephemeral(&root.path().join("hub/loopflow.db")).unwrap();
+        let clone_store =
+            crate::store::opening::open_ephemeral(&root.path().join("clone/loopflow.db")).unwrap();
+        let hub_machine = crate::store::machines::local_machine(&hub_store).unwrap();
+        crate::store::machines::add_machine(&clone_store, &hub_machine.id, "hub", "hub").unwrap();
+        set_hub(&clone_store, Some(&hub_machine.id)).unwrap();
+        crate::repository::location::ensure_repository(&clone_store, &clone_repo).unwrap();
+
+        let git_calls = Arc::new(AtomicUsize::new(0));
+        let hub_calls = Arc::new(AtomicUsize::new(0));
+        let run = |now: i64| {
+            let clone_store = &clone_store;
+            let clone_repo = clone_repo.as_str();
+            let git_calls = Arc::clone(&git_calls);
+            let hub_calls = Arc::clone(&hub_calls);
+            let until = Instant::now() + Duration::from_secs(60);
+            async move {
+                first_read_with(
+                    clone_store,
+                    clone_repo,
+                    until,
+                    now,
+                    |store, repo, until| {
+                        git_calls.fetch_add(1, Ordering::SeqCst);
+                        let res = super::super::plan_git::exchange(store, repo, Some(until));
+                        async move { res }
+                    },
+                    |store, repo, until| {
+                        hub_calls.fetch_add(1, Ordering::SeqCst);
+                        let res = exchange_with(store, repo, Why::Read(until), |_, _, _, _| {
+                            Err(anyhow::anyhow!("hub unreachable"))
+                        });
+                        async move { res }
+                    },
+                )
+                .await
+            }
+        };
+
+        // Read #1: both carriers run; Git succeeds and marks the clone read while the hub fails.
+        assert!(run(1_000).await.unwrap());
+        assert_eq!(git_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(hub_calls.load(Ordering::SeqCst), 1);
+        assert!(clone_store
+            .plan_carrier(&clone_repo, Carrier::Git)
+            .unwrap()
+            .unwrap()
+            .has_read());
+        assert!(clone_store
+            .plan_carrier(&clone_repo, Carrier::Hub)
+            .unwrap()
+            .unwrap()
+            .error
+            .is_some());
+        assert_eq!(
+            clone_store
+                .last_scope_attempt(&format!("plan-first-read:{clone_repo}"))
+                .unwrap(),
+            None
+        );
+
+        // Read #2 (immediately and after the 60 s window): neither carrier runs again.
+        assert!(!run(1_001).await.unwrap());
+        assert!(!run(1_061).await.unwrap());
+        assert_eq!(git_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(hub_calls.load(Ordering::SeqCst), 1);
+    }
 }

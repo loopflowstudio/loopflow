@@ -283,24 +283,27 @@ Tasks, the server and running Graph steps share one background attempt per
 repository every 30 s. The hub and Git run concurrently, each with a five-second
 deadline. The server fetches Git refs every minute for repositories with an open
 Task or a non-retired Wave and no local claims; empty clones stay quiet.
-Before a plan-reading CLI command (`lf task list`, `lf repo tracker`,
-`lf plan list`, `lf plan board`, `lf wave list`, `lf wave show`,
-`lf wave status`, `lf wave plan`) opens the store, `before_first_read` checks
-each configured carrier (Git remote, and hub when the clone has a repository
-id): any carrier whose row has not recorded a read (`seen_seq IS NULL`, or whose
-remote name changed) runs one exchange, each up to five seconds. A clone that
-already saved locally still reads on its first list because `plan_git::send`
-pushes without fetching and leaves `seen_seq` NULL; any full exchange marks it
-once every ref reads cleanly. If an unread carrier fails or times out, its row
-stays unread and `plan-first-read:<repo>` in `planning_scope_checks` skips
-retries for 60 s so offline reads do not stall every time. A served read of an
-unread clone answers from the store once and exchanges after its reply. Task
-creation reads nothing first: the send after its save takes in what changed at
-the hub. A provider exit reads the hub only; `--subscribe` commands read the
-store alone. Every exchange a command waits on without asking for it (a
-save, a claim, a first read, a read of the hub) is stopped at five seconds: Git
-is killed and the hub's answer is waited for until then, and the next exchange
-carries the rest. `lf task sync` waits as long as the carriers take.
+Before a non-subscribing plan-reading CLI command (`lf task list`,
+`lf repo tracker`, `lf plan list`, `lf plan board`, `lf wave list`,
+`lf wave show`, `lf wave status`, `lf wave plan`) opens the store,
+`before_first_read` checks whether this clone has read from either current
+carrier (the Git remote's row or, when a hub is set and the clone has a
+repository id, the hub's row has `seen_seq` set). Once either has read, later
+reads skip it. Otherwise it runs the eligible carriers together, each up to
+five seconds. A clone that already saved locally still reads on its first list
+because `plan_git::send` pushes without fetching and leaves `seen_seq` NULL;
+any full exchange marks it once every ref reads cleanly. If every carrier that
+ran fails or times out, the clone stays unread and `plan-first-read:<repo>` in
+`planning_scope_checks` skips retries for 60 s so offline reads do not stall
+every time. A served request for an unread clone answers from the store once
+and exchanges after its reply; subscriptions (both served and `--subscribe`)
+read the store alone and do not trigger an exchange. Task creation reads
+nothing first: the send after its save takes in what changed at the hub. A
+provider exit reads the hub only. Every exchange a command waits on without
+asking for it (a save, a claim, a first read, a read of the hub) is stopped at
+five seconds: Git is killed and the hub's answer is waited for until then, and
+the next exchange carries the rest. `lf task sync` waits as long as the
+carriers take.
 
 A change costs one small commit per Machine on the remote; sized for about ten
 Machines per repository. Tracker repositories use none of this:

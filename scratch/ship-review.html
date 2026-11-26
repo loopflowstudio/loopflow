@@ -542,15 +542,19 @@ button.lf-btn-quiet {
 
 <div class="lf-meta">
   <span>Task <code>LOO-1109</code></span>
-  <span>Passes 1–5 complete</span>
-  <span>Built with <code>lf page build</code></span>
+  <span>Built through <code>5706b81f39</code> (synced with <code>main</code> at <code>ff7ae3bc65</code>)</span>
+  <span>Compiled with <code>lf page build</code></span>
 </div>
 
 <h2>What was built</h2>
 
 <p>Review skills (<code>ship-review</code>, <code>explore</code>, <code>concept-review</code>, <code>qa</code>, <code>demo</code>) now write short body-only fragments (<code>scratch/&lt;name&gt;.page.html</code>) and compile them with <code>lf page build</code> into one self-contained HTML file (<code>scratch/&lt;name&gt;.html</code>). Every compiled page carries the same interaction runtime: drag across text to leave a note, pick choices or answer numbered questions, and press <code>⌘↩</code> once to deliver one formatted line across every host.</p>
 
-<p><strong>Try it:</strong> <code>lf page build scratch/ship-review.page.html &amp;&amp; lf page open scratch/ship-review.html</code></p>
+<p><strong>How to try it:</strong> <code>lf page build scratch/ship-review.page.html &amp;&amp; lf page open scratch/ship-review.html</code></p>
+
+<p>Real steer row recorded by <code>lf server</code> during Chrome QA (highlighted note + choice + receipt suffix from a confirmed <code>data-lf</code> action):</p>
+
+<pre><code>(1) `scratch/ship-review.html` § What was built › "The farewell now says goodbye with a" why a comma here? (2) `scratch/ship-review.html` § 1. Keep the comma?: yes [already ran: task.create → b51c7c]</code></pre>
 
 <table>
   <thead>
@@ -584,43 +588,70 @@ button.lf-btn-quiet {
   </tbody>
 </table>
 
-<p>Direct action buttons (<code>data-lf</code>) stay separate from the reply queue: clicking opens an inline confirmation showing the operation kind and fields, executes immediately with a fresh per-confirm <code>request_id</code>, and replaces the button with an in-place receipt (for example, <code>Filed LOO-1200</code>). If you later send queued notes with <code>⌘↩</code>, a short <code>[already ran: …]</code> suffix rides along so the agent does not repeat it.</p>
+<p>Direct action buttons (<code>data-lf</code>) stay separate from the reply queue: clicking opens an inline confirmation showing the operation kind and fields, executes immediately with a fresh per-confirm <code>request_id</code>, and replaces the button with an in-place receipt (for example, <code>Filed b51c7c</code>). Clicking <strong>Clear</strong> drops unsent drafts while keeping unreported receipts; when you later send queued notes with <code>⌘↩</code>, a short <code>[already ran: …]</code> suffix rides along once so the agent does not repeat it.</p>
 
 <h2>How it works</h2>
 
-<p>The loopback carrier in <code>lf server</code> reuses the existing Machine WebSocket protocol (<code>Messages&lt;S&gt;</code> and <code>service::session</code>) behind a per-server 32-byte random in-memory token, exact <code>Host</code> verification, and same-origin <code>Origin</code> verification on upgrades:</p>
+<p>The loopback carrier in <code>lf server</code> binds a deterministic port per server socket (yielding to an ephemeral port if occupied) with a fresh 32-byte random in-memory token, so drafts and receipts in browser <code>localStorage</code> survive <code>lf install</code> restarts while old URLs return 404:</p>
 
-<div class="lf-codeblock" data-path="rust/loopflow/src/server/loopback.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow/src/server/loopback.rs:209-264</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<div class="lf-codeblock" data-path="rust/loopflow/src/server/loopback.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow/src/server/loopback.rs:108-147</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
 <tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,740 @@</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">209</td><td class="lf-sign">+</td><td>    executable: Arc&lt;String&gt;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">210</td><td class="lf-sign">+</td><td>    slots: Arc&lt;Semaphore&gt;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">211</td><td class="lf-sign">+</td><td>    clients: Clients,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">212</td><td class="lf-sign">+</td><td>    tickets: Arc&lt;Tickets&gt;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">213</td><td class="lf-sign">+</td><td>    subscriptions: Arc&lt;Subscriptions&gt;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">214</td><td class="lf-sign">+</td><td>    terminals: Option&lt;Arc&lt;Registry&gt;&gt;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">215</td><td class="lf-sign">+</td><td>}</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">216</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">217</td><td class="lf-sign">+</td><td>fn empty(status: StatusCode) -&gt; Response&lt;Full&lt;Bytes&gt;&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">218</td><td class="lf-sign">+</td><td>    Response::builder()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">219</td><td class="lf-sign">+</td><td>        .status(status)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">220</td><td class="lf-sign">+</td><td>        .body(Full::new(Bytes::new()))</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">221</td><td class="lf-sign">+</td><td>        .expect(&quot;empty HTTP response is valid&quot;)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">222</td><td class="lf-sign">+</td><td>}</td></tr>
-<tr class="lf-line-note" data-notes><td colspan="4">DNS rebinding defense: every request must carry Host: 127.0.0.1:&lt;port&gt;, otherwise 404 with empty body.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">223</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">224</td><td class="lf-sign">+</td><td>fn header_str(req: &amp;Request&lt;Incoming&gt;, name: hyper::header::HeaderName) -&gt; Option&lt;&amp;str&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">225</td><td class="lf-sign">+</td><td>    req.headers()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">226</td><td class="lf-sign">+</td><td>        .get(name)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">227</td><td class="lf-sign">+</td><td>        .and_then(|value| value.to_str().ok())</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">228</td><td class="lf-sign">+</td><td>}</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">229</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">108</td><td class="lf-sign">+</td><td>/// A port in the dynamic range (49152–65535) derived from the server&#39;s socket path,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">109</td><td class="lf-sign">+</td><td>/// so each lf home asks for the same one every start.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">110</td><td class="lf-sign">+</td><td>fn preferred_port(socket: &amp;Path) -&gt; u16 {</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Derives one stable port in 49152–65535 from the server socket path so browser localStorage survives server restarts.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">111</td><td class="lf-sign">+</td><td>    use sha2::{Digest, Sha256};</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">112</td><td class="lf-sign">+</td><td>    let digest = Sha256::digest(socket.as_os_str().as_encoded_bytes());</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">113</td><td class="lf-sign">+</td><td>    49152 + u16::from_be_bytes([digest[0], digest[1]]) % 16384</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">114</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">115</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">116</td><td class="lf-sign">+</td><td>/// Bound loopback TCP listener ready to serve pages and WebSocket sessions.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">117</td><td class="lf-sign">+</td><td>pub(super) struct Loopback {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">118</td><td class="lf-sign">+</td><td>    listener: TcpListener,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">119</td><td class="lf-sign">+</td><td>    handle: Arc&lt;Handle&gt;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">120</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">121</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">122</td><td class="lf-sign">+</td><td>impl Loopback {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">123</td><td class="lf-sign">+</td><td>    /// Bind the loopback port this server&#39;s socket prefers, with a fresh 32-byte random token.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">124</td><td class="lf-sign">+</td><td>    /// A stable port keeps an open page&#39;s origin, and with it the drafts and `data-lf`</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">125</td><td class="lf-sign">+</td><td>    /// receipts it holds in `localStorage`, across server restarts. When something else</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">126</td><td class="lf-sign">+</td><td>    /// holds that port, an ephemeral one serves instead.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">127</td><td class="lf-sign">+</td><td>    pub(super) async fn bind(socket: &amp;Path) -&gt; Result&lt;(Self, Arc&lt;Handle&gt;)&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">128</td><td class="lf-sign">+</td><td>        let preferred = SocketAddr::from(([127, 0, 0, 1], preferred_port(socket)));</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">129</td><td class="lf-sign">+</td><td>        let listener = match TcpListener::bind(preferred).await {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">130</td><td class="lf-sign">+</td><td>            Ok(listener) =&gt; listener,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">131</td><td class="lf-sign">+</td><td>            Err(_) =&gt; TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Falls back to an ephemeral port if another process holds the preferred port.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">132</td><td class="lf-sign">+</td><td>                .await</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">133</td><td class="lf-sign">+</td><td>                .context(&quot;Could not bind loopback review page listener&quot;)?,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">134</td><td class="lf-sign">+</td><td>        };</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">135</td><td class="lf-sign">+</td><td>        let port = listener.local_addr()?.port();</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">136</td><td class="lf-sign">+</td><td>        let handle = Arc::new(Handle {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">137</td><td class="lf-sign">+</td><td>            port,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">138</td><td class="lf-sign">+</td><td>            token: random_token(),</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Mints a fresh 32-byte random in-memory token on every start; old URLs immediately 404.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">139</td><td class="lf-sign">+</td><td>        });</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">140</td><td class="lf-sign">+</td><td>        Ok((</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">141</td><td class="lf-sign">+</td><td>            Self {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">142</td><td class="lf-sign">+</td><td>                listener,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">143</td><td class="lf-sign">+</td><td>                handle: handle.clone(),</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">144</td><td class="lf-sign">+</td><td>            },</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">145</td><td class="lf-sign">+</td><td>            handle,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">146</td><td class="lf-sign">+</td><td>        ))</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">147</td><td class="lf-sign">+</td><td>    }</td></tr>
+</tbody></table></div></div>
+
+<p>Every loopback request reuses the existing Machine WebSocket protocol (<code>Messages&lt;S&gt;</code> and <code>service::session</code>) behind exact <code>Host</code>, constant-time token, and same-origin <code>Origin</code> checks:</p>
+
+<div class="lf-codeblock" data-path="rust/loopflow/src/server/loopback.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow/src/server/loopback.rs:230-270</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,740 @@</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">230</td><td class="lf-sign">+</td><td>async fn handle_request(req: Request&lt;Incoming&gt;, state: Arc&lt;State&gt;) -&gt; Response&lt;Full&lt;Bytes&gt;&gt; {</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">231</td><td class="lf-sign">+</td><td>    if req.method() != Method::GET {</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">232</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">233</td><td class="lf-sign">+</td><td>    }</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">234</td><td class="lf-sign">+</td><td>    // DNS rebinding defense: Host must be exactly `127.0.0.1:&lt;port&gt;`.</td></tr>
-<tr class="lf-line-note" data-notes><td colspan="4">Constant-time token check; the token lives only in memory and is never printed by lf server status.</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">235</td><td class="lf-sign">+</td><td>    if header_str(&amp;req, HOST) != Some(state.handle.expected_host().as_str()) {</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">DNS rebinding defense: every request must carry Host: 127.0.0.1:&lt;port&gt;, otherwise 404 with empty body.</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">236</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">237</td><td class="lf-sign">+</td><td>    }</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">238</td><td class="lf-sign">+</td><td></td></tr>
@@ -633,6 +664,7 @@ button.lf-btn-quiet {
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">245</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">246</td><td class="lf-sign">+</td><td>    };</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">247</td><td class="lf-sign">+</td><td>    if !state.handle.matches_token(token) {</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Constant-time token check; the token lives only in memory and is never printed by lf server status.</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">248</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">249</td><td class="lf-sign">+</td><td>    }</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">250</td><td class="lf-sign">+</td><td></td></tr>
@@ -647,26 +679,33 @@ button.lf-btn-quiet {
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">259</td><td class="lf-sign">+</td><td>}</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">260</td><td class="lf-sign">+</td><td></td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">261</td><td class="lf-sign">+</td><td>fn handle_websocket(req: Request&lt;Incoming&gt;, state: Arc&lt;State&gt;) -&gt; Response&lt;Full&lt;Bytes&gt;&gt; {</td></tr>
-<tr class="lf-line-note" data-notes><td colspan="4">Browser cross-origin WebSocket defense: foreign origins cannot upgrade even if they guess a port.</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">262</td><td class="lf-sign">+</td><td>    if req.uri().query().is_some() {</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">263</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">264</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">265</td><td class="lf-sign">+</td><td>    // Browser cross-origin WebSocket defense: Origin must be exact same-origin.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">266</td><td class="lf-sign">+</td><td>    if header_str(&amp;req, ORIGIN) != Some(state.handle.expected_origin().as_str()) {</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Browser cross-origin WebSocket defense: foreign origins cannot upgrade even if they guess a port.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">267</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">268</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">269</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">270</td><td class="lf-sign">+</td><td>    let is_upgrade =</td></tr>
 </tbody></table></div></div>
 
-<p><code>lf page open</code> routes by caller context so headless Graph steps never pop browser windows while interactive Rex and Desktop sessions land where you already work:</p>
+<p><code>lf page open</code> routes by caller context so headless Graph steps never pop browser windows while interactive Rex, plain-terminal, and Desktop sessions land where you already work:</p>
 
-<div class="lf-codeblock" data-path="rust/loopflow/src/lf/commands/page.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow/src/lf/commands/page.rs:70-135</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<div class="lf-codeblock" data-path="rust/loopflow/src/lf/commands/page.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow/src/lf/commands/page.rs:70-134</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
 <tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,279 @@</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">70</td><td class="lf-sign">+</td><td>fn decide_open_route(host: PageHost) -&gt; OpenRoute {</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">71</td><td class="lf-sign">+</td><td>    match host {</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Explicit --host desktop|browser short-circuits before touching SQLite or placement state.</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">72</td><td class="lf-sign">+</td><td>        PageHost::Desktop =&gt; return OpenRoute::Desktop,</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">73</td><td class="lf-sign">+</td><td>        PageHost::Browser =&gt; return OpenRoute::Browser,</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">74</td><td class="lf-sign">+</td><td>        PageHost::Auto =&gt; {}</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">75</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-line-note" data-notes><td colspan="4">Reads session.interactive from SQLite so interactive plain-terminal sessions (Ghostty/iTerm/Terminal) open the browser instead of falling into PrintQuiet.</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">76</td><td class="lf-sign">+</td><td>    let caller = loopflow_execution::journal::agent_caller();</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">77</td><td class="lf-sign">+</td><td>    let in_desktop_env = std::env::var_os(&quot;LF_DESKTOP&quot;).is_some_and(|value| !value.is_empty());</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">78</td><td class="lf-sign">+</td><td>    let session_interactive = caller</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Reads session.interactive from SQLite so interactive plain-terminal sessions (Ghostty/iTerm/Terminal) open the browser instead of falling into PrintQuiet.</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">79</td><td class="lf-sign">+</td><td>        .as_ref()</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">80</td><td class="lf-sign">+</td><td>        .and_then(|c| load_session(&amp;c.session_id))</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">81</td><td class="lf-sign">+</td><td>        .map(|session| session.interactive);</td></tr>
@@ -707,16 +746,16 @@ button.lf-btn-quiet {
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">116</td><td class="lf-sign">+</td><td>                OpenRoute::Desktop</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">117</td><td class="lf-sign">+</td><td>            } else {</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">118</td><td class="lf-sign">+</td><td>                OpenRoute::Browser</td></tr>
-<tr class="lf-line-note" data-notes><td colspan="4">Headless agents (session.interactive == false) always print the URL quietly and never invoke the OS browser opener.</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">119</td><td class="lf-sign">+</td><td>            }</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">120</td><td class="lf-sign">+</td><td>        }</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">121</td><td class="lf-sign">+</td><td>        (PageHost::Auto, true) =&gt; match session_interactive {</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">122</td><td class="lf-sign">+</td><td>            Some(false) =&gt; OpenRoute::PrintQuiet,</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Headless agents (session.interactive == false) always print the URL quietly, even if LF_DESKTOP is inherited.</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">123</td><td class="lf-sign">+</td><td>            Some(true) if in_desktop_env || viewed_host == Some(OpenHost::Desktop) =&gt; {</td></tr>
-<tr class="lf-line-note" data-notes><td colspan="4">Interactive agents outside Desktop (Rex, tmux, or plain terminal) open the loopback URL in the browser.</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">124</td><td class="lf-sign">+</td><td>                OpenRoute::Desktop</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">125</td><td class="lf-sign">+</td><td>            }</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">126</td><td class="lf-sign">+</td><td>            Some(true) =&gt; OpenRoute::Browser,</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Interactive agents outside Desktop (Rex, tmux, or plain terminal) open the loopback URL in the browser.</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">127</td><td class="lf-sign">+</td><td>            None =&gt; match viewed_host {</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">128</td><td class="lf-sign">+</td><td>                Some(OpenHost::Desktop) =&gt; OpenRoute::Desktop,</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">129</td><td class="lf-sign">+</td><td>                Some(_) =&gt; OpenRoute::Browser,</td></tr>
@@ -725,12 +764,11 @@ button.lf-btn-quiet {
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">132</td><td class="lf-sign">+</td><td>        },</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">133</td><td class="lf-sign">+</td><td>    }</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">134</td><td class="lf-sign">+</td><td>}</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">135</td><td class="lf-sign">+</td><td></td></tr>
 </tbody></table></div></div>
 
 <p>In Loopflow Desktop, <code>TaskFileReadingView</code> attaches <code>TaskHTMLBridge</code> (a reply-capable <code>WKScriptMessageHandlerWithReply</code> named <code>loopflow</code>), while side-by-side HTML diffs in <code>ReviewRenderedView</code> leave it unset so historical commits stay read-only:</p>
 
-<div class="lf-codeblock" data-path="swift/LoopflowMac/Views/TaskHTMLView.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/Views/TaskHTMLView.swift:23-76</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<div class="lf-codeblock" data-path="swift/LoopflowMac/Views/TaskHTMLView.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/Views/TaskHTMLView.swift:23-72</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
 <tr class="lf-hunk"><td colspan="4">@@ -1,14 +1,114 @@</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">23</td><td class="lf-sign">+</td><td>    func handle(_ body: Any) async -&gt; (Any?, String?) {</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">24</td><td class="lf-sign">+</td><td>        guard let payload = body as? [String: Any],</td></tr>
@@ -769,8 +807,8 @@ button.lf-btn-quiet {
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">56</td><td class="lf-sign">+</td><td>               fields[&quot;directory&quot;] != nil,</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">57</td><td class="lf-sign">+</td><td>               let localDirectory = store.localRepository ?? store.measurementRepository {</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">58</td><td class="lf-sign">+</td><td>                fields[&quot;directory&quot;] = .string(localDirectory)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">59</td><td class="lf-sign">+</td><td>            }</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Peer-Machine pages swap the stamped remote checkout path for Desktop's local repository directory before forwarding to ServerClient.rawOperation.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">59</td><td class="lf-sign">+</td><td>            }</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">60</td><td class="lf-sign">+</td><td>            let requestID = payload[&quot;request_id&quot;] as? String</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">61</td><td class="lf-sign">+</td><td>            do {</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">62</td><td class="lf-sign">+</td><td>                let raw = try await store.sendPageOperation(.object(fields), requestID)</td></tr>
@@ -784,10 +822,6 @@ button.lf-btn-quiet {
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">70</td><td class="lf-sign">+</td><td>            return (nil, &quot;Unknown bridge message type: \(type)&quot;)</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">71</td><td class="lf-sign">+</td><td>        }</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">72</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">73</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">74</td><td class="lf-sign">+</td><td>    private static func jsonValue(from object: Any) throws -&gt; JSONValue {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">75</td><td class="lf-sign">+</td><td>        guard JSONSerialization.isValidJSONObject(object) else {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">76</td><td class="lf-sign">+</td><td>            throw RegistryQueryError(&quot;Expected a JSON object or array&quot;)</td></tr>
 <tr class="lf-hunk"><td colspan="4">@@ -39,6 +139,12 @@ struct TaskHTMLView: View {</td></tr>
 <tr class="lf-ctx"><td class="lf-ln">39</td><td class="lf-ln">139</td><td class="lf-sign"> </td><td>            }</td></tr>
 <tr class="lf-ctx"><td class="lf-ln">40</td><td class="lf-ln">140</td><td class="lf-sign"> </td><td>        }</td></tr>
@@ -797,17 +831,19 @@ button.lf-btn-quiet {
 <tr class="lf-ctx"><td class="lf-ln">44</td><td class="lf-ln">150</td><td class="lf-sign"> </td><td>            let needle = find?.query ?? &quot;&quot;</td></tr>
 </tbody></table></div></div>
 
-<p><code>ReviewComments</code> stores page drafts alongside line-anchored Diff comments, skips line reconciliation for <code>.page</code> anchors, and clears both stored state and any mounted <code>WebPage</code> when sending succeeds:</p>
+<p><code>ReviewComments</code> stores page drafts alongside line-anchored Diff comments, skips line reconciliation for <code>.page</code> anchors, and retains receipts marked <code>reported: true</code> when sending succeeds:</p>
 
-<div class="lf-codeblock" data-path="swift/LoopflowMac/ReviewDiff.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/ReviewDiff.swift:880-957</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<div class="lf-codeblock" data-path="swift/LoopflowMac/ReviewDiff.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/ReviewDiff.swift:878-947</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
 <tr class="lf-hunk"><td colspan="4">@@ -808,9 +872,42 @@ final class ReviewComments {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">878</td><td class="lf-sign">+</td><td>    func pageReady(path: String, buildID: String) -&gt; JSONValue? {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">879</td><td class="lf-sign">+</td><td>        if let saved = pageStates[PageKey(path: path, buildID: buildID)] { return saved }</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">880</td><td class="lf-sign">+</td><td>        if removeStalePageStates(for: path, keeping: buildID) {</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">A rebuild bumps build_id and automatically drops stale drafts and items from the earlier build of the same path.</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">881</td><td class="lf-sign">+</td><td>            items.removeAll { $0.isPage(path) }</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">882</td><td class="lf-sign">+</td><td>        }</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">883</td><td class="lf-sign">+</td><td>        return nil</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">884</td><td class="lf-sign">+</td><td>    }</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">885</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-line-note" data-notes><td colspan="4">A rebuild bumps build_id and automatically drops stale drafts and items from the earlier build of the same path.</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">886</td><td class="lf-sign">+</td><td>    /// Store `state` for `(path, buildID)` and replace `path`&#39;s `.page` entries in `items`.</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">887</td><td class="lf-sign">+</td><td>    func syncPage(path: String, buildID: String, state: JSONValue, items references: [String]) {</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">888</td><td class="lf-sign">+</td><td>        _ = removeStalePageStates(for: path, keeping: buildID)</td></tr>
@@ -851,12 +887,12 @@ button.lf-btn-quiet {
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">930</td><td class="lf-sign">+</td><td>        guard conversation(ReviewComment.message(items, receipts: pageReceipts())) else { return }</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">931</td><td class="lf-sign">+</td><td>        items.removeAll()</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">932</td><td class="lf-sign">+</td><td>        pageStates = pageStates.compactMapValues(Self.sentPageState)</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Sending clears unsent drafts, keeps receipts marked reported: true so remounted pages keep "Filed …" in place, and bumps pageClearGeneration.</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">933</td><td class="lf-sign">+</td><td>        pageClearGeneration += 1</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">934</td><td class="lf-sign">+</td><td>    }</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">935</td><td class="lf-sign">+</td><td></td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">936</td><td class="lf-sign">+</td><td>    /// What a page keeps once its items are sent: its receipts, marked reported, so a</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">937</td><td class="lf-sign">+</td><td>    /// remounted page still shows &quot;Filed …&quot; in place of the button.</td></tr>
-<tr class="lf-line-note" data-notes><td colspan="4">Clearing pageStates and bumping pageClearGeneration prevents notes from resurrecting if the person sent comments while viewing a source file.</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">938</td><td class="lf-sign">+</td><td>    private static func sentPageState(_ state: JSONValue) -&gt; JSONValue? {</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">939</td><td class="lf-sign">+</td><td>        guard case .object(let fields) = state, case .array(let receipts) = fields[&quot;receipts&quot;],</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">940</td><td class="lf-sign">+</td><td>              !receipts.isEmpty else { return nil }</td></tr>
@@ -867,16 +903,6 @@ button.lf-btn-quiet {
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">945</td><td class="lf-sign">+</td><td>        }</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">946</td><td class="lf-sign">+</td><td>        return .object([&quot;receipts&quot;: .array(reported)])</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">947</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">948</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">949</td><td class="lf-sign">+</td><td>    private func pageReceipts() -&gt; [String] {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">950</td><td class="lf-sign">+</td><td>        var ran: [String] = []</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">951</td><td class="lf-sign">+</td><td>        for key in pageStates.keys.sorted(by: { $0.path &lt; $1.path }) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">952</td><td class="lf-sign">+</td><td>            guard case .object(let fields) = pageStates[key],</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">953</td><td class="lf-sign">+</td><td>                  case .array(let receipts) = fields[&quot;receipts&quot;] else { continue }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">954</td><td class="lf-sign">+</td><td>            for entry in receipts {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">955</td><td class="lf-sign">+</td><td>                guard case .object(let receipt) = entry,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">956</td><td class="lf-sign">+</td><td>                      case .string(let kind) = receipt[&quot;kind&quot;],</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">957</td><td class="lf-sign">+</td><td>                      receipt[&quot;reported&quot;] != .bool(true) else { continue }</td></tr>
 </tbody></table></div></div>
 
 <h2>Key data structures and APIs</h2>
@@ -893,7 +919,7 @@ button.lf-btn-quiet {
     <tr>
       <td>Loopback listener &amp; URL minting</td>
       <td><code data-path="rust/loopflow/src/server/loopback.rs">server/loopback.rs</code>, <code data-path="rust/loopflow/src/server/service.rs">server/service.rs</code></td>
-      <td><code>127.0.0.1:0</code> TCP listener; <code>GET /&lt;token&gt;/f/&lt;abs-path&gt;</code> (CSP, <code>no-referrer</code>, <code>no-store</code>, <code>nosniff</code>); <code>GET /&lt;token&gt;/machine</code> WebSocket (<code>Admission::Local</code>, <code>local_authority: None</code>); local-Unix-socket-only <code>ServerOperation::PageUrl</code> (<code>page.url</code>)</td>
+      <td>Deterministic per-socket TCP port in 49152–65535 (ephemeral fallback); <code>GET /&lt;token&gt;/f/&lt;abs-path&gt;</code> (CSP, <code>no-referrer</code>, <code>no-store</code>, <code>nosniff</code>); <code>GET /&lt;token&gt;/machine</code> WebSocket (<code>Admission::Local</code>, <code>local_authority: None</code>); local-Unix-socket-only <code>ServerOperation::PageUrl</code> (<code>page.url</code>)</td>
     </tr>
     <tr>
       <td>Page compiler</td>
@@ -908,7 +934,7 @@ button.lf-btn-quiet {
     <tr>
       <td>Desktop bridge &amp; comments</td>
       <td><code data-path="swift/LoopflowMac/Views/TaskHTMLView.swift">TaskHTMLView.swift</code>, <code data-path="swift/LoopflowMac/ReviewDiff.swift">ReviewDiff.swift</code>, <code data-path="swift/Loopflow/Services/ServerLink.swift">ServerLink.swift</code></td>
-      <td><code>TaskHTMLBridge</code> (<code>ready</code> / <code>sync</code> / <code>operation</code>); <code>ReviewComment.Anchor</code> (<code>.lines</code> | <code>.page</code>); <code>ServerClient.rawOperation</code> / <code>ServerLink.sendRawOperation</code> without adding a new <code>ServerOperation</code> case</td>
+      <td><code>TaskHTMLBridge</code> (<code>ready</code> / <code>sync</code> / <code>operation</code>); <code>ReviewComment.Anchor</code> (<code>.lines</code> | <code>.page</code>); plain-string page items; <code>ServerClient.rawOperation</code> / <code>ServerLink.sendRawOperation</code> without adding a new <code>ServerOperation</code> case</td>
     </tr>
     <tr>
       <td>Skills &amp; authoring contract</td>
@@ -922,11 +948,12 @@ button.lf-btn-quiet {
 
 <ul>
   <li><strong>Any Machine <code>Operation</code> is allowed over the loopback WebSocket</strong> (no allowlist), guarded by the 32-byte in-memory token, exact <code>Host</code> check, and same-origin <code>Origin</code> check. <code>page.url</code> and <code>mobile.*</code> remain local-Unix-socket-only, and no <code>/ticket</code> route is exposed on loopback.</li>
-  <li><strong>The loopback token is never written to disk.</strong> Stopping or restarting <code>lf server</code> closes the socket or rotates port and token; open browser tabs detect any disconnect or handshake mismatch, show <code>Loopflow server disconnected — run lf page open &lt;path&gt;</code> (or the server error), and fall back to clipboard copy.</li>
+  <li><strong>The loopback token lives only in memory, while the port stays stable per server socket.</strong> Restarting <code>lf server</code> rotates the token (old URLs 404; open tabs show <code>Loopflow server disconnected — run lf page open &lt;path&gt;</code> and fall back to clipboard copy), and reopening via <code>lf page open</code> lands on the same browser origin so <code>localStorage</code> drafts and <code>Filed …</code> receipts survive <code>lf install</code>.</li>
   <li><strong>Task pages always steer via <code>task.steer</code>, never the building worker's <code>session.steer</code>.</strong> Headless Graph workers exit after building the page, and <code>session.steer</code> silently queues onto finished Sessions; <code>task.steer</code> reaches the Task's active work or primary interactive Session and returns <code>delivery.sentence</code>.</li>
-  <li><strong>Desktop never touches <code>localStorage</code> for review pages.</strong> <code>ReviewComments</code> owns draft state keyed by <code>(path, build_id)</code>, preventing <code>SecurityError</code> on peer-Machine <code>about:blank</code> pages and preventing resurrection after sending from another file.</li>
+  <li><strong>Desktop never touches <code>localStorage</code> for review pages.</strong> <code>ReviewComments</code> owns draft and receipt state keyed by <code>(path, build_id)</code>, preventing <code>SecurityError</code> on peer-Machine <code>about:blank</code> pages and preventing note resurrection after sending from another file.</li>
   <li><strong><code>*.page.html</code> sources are excluded from <code>is_scratch_page</code></strong> in both Rust (<code>ops/task/find.rs</code>) and Swift (<code>TaskFilesStore.swift</code>), and <code>lf page open</code> refuses raw <code>.page.html</code> files with the exact <code>lf page build</code> command.</li>
   <li><strong>Opening beside Rex uses the OS default browser.</strong> Rex currently exposes no browser block (<code>onboarding</code>, <code>terminal.shell</code>, <code>tunnel</code>) and <code>agent-browser</code> is not installed on this Machine.</li>
+  <li><strong>Not clicked through live in Dev Desktop yet.</strong> Chrome QA exercised the loopback carrier, notes, choices, receipts, disconnects, restarts, and offline copy end-to-end; the Desktop bridge was verified by headless Swift tests (<code>TaskFilesTests</code>, <code>ReviewDiffTests</code>, <code>ServerClientTests</code>) because QA ran headless on a Machine in use.</li>
 </ul>
 
 <h2>Findings</h2>
@@ -948,26 +975,64 @@ button.lf-btn-quiet {
 </div>
 
 
+<div class="lf-decision" data-decision-id="f2">
+  <div class="lf-decision-head">
+    <span class="lf-decision-title">Server task.steer delivery.sentence shows a raw UUID</span>
+    <span class="lf-decision-rec">Recommended: Drop</span>
+  </div>
+  <div class="lf-decision-body">
+  <p>After <code>⌘↩</code>, the browser strip prints the server's <code>delivery.sentence</code> verbatim, e.g. <code data-no-check>Saved de2b2b3a-…; nothing reads it until c56843 runs</code>. That string comes from server steer presentation outside the page kit.</p>
+</div>
+  <div data-choice="f2" data-label="Server task.steer delivery.sentence shows a raw UUID">
+    <button type="button" data-value="Fix here">Fix here</button>
+    <button type="button" data-value="File Task">File Task</button>
+    <button type="button" data-value="Drop">Drop</button>
+  </div>
+</div>
+
+
+<div class="lf-decision" data-decision-id="f3">
+  <div class="lf-decision-head">
+    <span class="lf-decision-title">No live storage sync between two open browser tabs on the same page</span>
+    <span class="lf-decision-rec">Recommended: Drop</span>
+  </div>
+  <div class="lf-decision-body">
+  <p>Two tabs opened on the same page share <code>localStorage</code>, so a receipt filed in one tab shows in the other only after reload rather than via a live <code>storage</code> event listener.</p>
+</div>
+  <div data-choice="f3" data-label="No live storage sync between two open browser tabs on the same page">
+    <button type="button" data-value="Fix here">Fix here</button>
+    <button type="button" data-value="File Task">File Task</button>
+    <button type="button" data-value="Drop">Drop</button>
+  </div>
+</div>
+
+
 <h2>Questions</h2>
 
 <div data-choice="q1" data-label="1. Browser host beside Rex">
-  <p><strong>1.</strong> When opening a review page beside Rex, is opening the OS default browser the right default for now, or did you have a specific browser/split tool in mind?</p>
-  <button type="button" data-value="1a: Keep OS default browser">1a. Keep OS default browser</button>
+  <p><strong>1.</strong> When opening a review page beside Rex, keep the OS default browser for now or wire a specific browser/split tool?</p>
+  <button type="button" data-value="1a: Keep OS default browser">1a. Keep OS default browser (built)</button>
   <button type="button" data-value="1b: Wire a specific browser split">1b. Wire a specific browser split (add note)</button>
 </div>
 
 <div data-choice="q2" data-label="2. Direct data-lf actions vs reply queue">
-  <p><strong>2.</strong> Direct <code>data-lf</code> buttons confirm inline, execute immediately with an in-place receipt, and stay out of the <code>⌘↩</code> queue (only appending <code>[already ran: …]</code> if you also send notes). Keep that split, or queue them into <code>⌘↩</code>?</p>
-  <button type="button" data-value="2a: Keep immediate confirm + in-place receipt">2a. Keep immediate confirm + receipt</button>
+  <p><strong>2.</strong> Direct <code>data-lf</code> buttons confirm inline, execute immediately with an in-place receipt, and stay out of the <code>⌘↩</code> queue (only appending <code>[already ran: …]</code> once if you also send notes). Keep that split, or queue them into <code>⌘↩</code>?</p>
+  <button type="button" data-value="2a: Keep immediate confirm + in-place receipt">2a. Keep immediate confirm + receipt (built)</button>
   <button type="button" data-value="2b: Queue data-lf into ⌘↩">2b. Queue into ⌘↩ instead</button>
 </div>
 
-<div data-question="q3" data-label="3. Anything else on page layout or skills">
-  <p><strong>3.</strong> Anything missing from the review page layout, <code>lf help page</code> contract, or the five updated skills?</p>
+<div data-choice="q3" data-label="3. Browser ⌘↩ delivery beside Rex">
+  <p><strong>3.</strong> Pressing <code>⌘↩</code> in a browser beside Rex sends your reply straight to the Task via <code>task.steer</code> so the agent acts right away. Keep immediate steering, or paste the reply into your terminal's unsent input box?</p>
+  <button type="button" data-value="3a: Send straight to the Task">3a. Send straight to the Task (built)</button>
+  <button type="button" data-value="3b: Paste into unsent terminal input">3b. Paste into unsent terminal input</button>
+</div>
+
+<div data-question="q4" data-label="4. Anything else on page layout, Dev Desktop, or skills">
+  <p><strong>4.</strong> Anything missing from the review page layout, <code>lf help page</code> contract, Dev Desktop live verification, or the five updated skills?</p>
   <textarea rows="3" placeholder="Optional notes…"></textarea>
 </div>
 </main>
-<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1109"},"directory":"/Users/jack/src/loopflow.loo-1109-human-comprehension-review","base":"6d617de68638439a144601b3cb8cbaf6ec678630","head":"7f5a53a745","path":"scratch/ship-review.html","build_id":"24c6b4da38dd190d","protocol":{"revision":10,"min_revision":10}}</script>
+<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1109"},"directory":"/Users/jack/src/loopflow.loo-1109-human-comprehension-review","base":"d8b2afebd9d7148d6db9a520f2f7216da3a76f63","head":"ff7ae3bc65","path":"scratch/ship-review.html","build_id":"9aba52dadc1ff67b","protocol":{"revision":10,"min_revision":10}}</script>
 <script>
 (function () {
   "use strict";

@@ -21,14 +21,21 @@ Working notes for `/explore` on review sheets and reusable human-comprehension i
 - **Jack Heart:** "1b probably, but open to either 2b -- what does verify even do"
 - **Jack Heart:** "verify: yeah, and run it on auto mode"
 - **Jack Heart:** "1b: yes, and open it in rex / 1b should be stacked on 1104 / maybe both should"
+- **Jack Heart:** "/explore some better UIs for the note taking. take inspiration from things like t3 code, google docs, notion"
+- **Jack Heart:** "1c: Notion bubble + hover + sidebar | 2a: Yes, gutter + and Shift+click ranges | 3b: T3 Code chip dock + overall direction input | 4a: Build it in LOO-1109 now"
 
 ## Chosen direction
 
 - Vision A's simple technical flow (what was built, how it works, key data structures & APIs, technical design going forward; no passing test counts or routine CI checks).
 - Shared global interaction runtime (highlight-to-comment + `data-choice` / `data-multiselect` / `data-question` / `data-lf`) + `lf page build` kit with real `git diff` injection, repo tokens, and `.lf/components/` overrides.
 - Host-agnostic transport: loopback-only HTTP/WS `Carrier` in `lf server` exposing the Machine server `Operation` interface for Rex agent-browser splits (capability token + same-origin check), plus Desktop `TaskHTMLView` bridge into `ReviewCommentsStrip` / `addToConversation` without degrading Desktop, plus offline `file://` clipboard fallback.
-- Latest prototype: `scratch/explore.html` (round 3).
+- Note-taking UI (round 4 exploration, `scratch/explore.html`):
+  - **1c:** Notion-style floating selection bubble (`Comment (c)` · `Flag` · `Copy`), warm-underlined cross-element highlights with hover edit/delete cards, and a collapsible slide-over `Comments` sidebar (replacing the bottom `Your notes` tray).
+  - **2a:** First-class `<lf-diff>` / `<lf-file>` gutter `+` and `Shift+click` multi-line range comments.
+  - **3b:** T3 Code-style attached-chip composer dock + optional overall direction input in the browser (Desktop keeps its native `ReviewCommentsStrip` + conversation input while getting 1c + 2a inside `TaskHTMLView`).
+  - **4a:** Build into LOO-1109 now before delivery.
+- Latest prototype: `scratch/explore.html` (note-taking UI exploration).
 
 ## Current exploration page
 
-- `scratch/explore.html` (round 3: host-agnostic loopback `lf server` transport for Rex agent-browser split + Desktop `TaskHTMLView` bridge + offline `file://` fallback, with live host switcher in the prototype and steer-only vs allowlisted-actions fork)
+- `scratch/explore.html` (note-taking UI exploration: Vision A Google Docs margin rail, Vision B T3 Code / GitHub inline threads, Vision C Notion floating bubble + hover + sidebar, Vision D agent steer composer + suggest edit)

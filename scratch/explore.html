@@ -1,1221 +1,2744 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Host-agnostic review pages: Rex split, Desktop, and browser (Round 3)</title>
+<title>LOO-1109 Explore — Note-taking UI for review pages</title>
 <style>
-  /* Loopflow Light palette (website/static/theme.css) */
+/* Loopflow Light & Dark tokens (.lf/theme.css) */
+:root {
+  --lf-bg: #faf8f5;
+  --lf-surface: #fffdf9;
+  --lf-surface-muted: #f3eee7;
+  --lf-surface-element: #ece6dd;
+  --lf-border: #e6dfd6;
+  --lf-border-strong: #d6ccc0;
+  --lf-text: #2a2624;
+  --lf-text-secondary: #5f5752;
+  --lf-text-tertiary: #756e69;
+  --lf-accent: #722f37;
+  --lf-accent-hover: #5e2630;
+  --lf-accent-text: #faf8f5;
+  --lf-working-ink: #2f629f;
+  --lf-working-fill: #e3ebf4;
+  --lf-warning-ink: #7f5a19;
+  --lf-warning-fill: #f2ead9;
+  --lf-failure-ink: #a64038;
+  --lf-failure-fill: #f4e2de;
+  --lf-success-ink: #386c48;
+  --lf-success-fill: #e1ebe0;
+  --lf-highlight: rgba(114, 47, 55, 0.14);
+  --lf-highlight-active: rgba(114, 47, 55, 0.28);
+  --lf-highlight-line: rgba(114, 47, 55, 0.45);
+  --lf-shadow: 0 8px 26px rgba(42, 38, 36, 0.12);
+  --lf-shadow-sm: 0 3px 12px rgba(42, 38, 36, 0.08);
+  --lf-bubble-bg: #24201e;
+  --lf-bubble-text: #faf8f5;
+  --lf-bubble-border: #3a3430;
+  --lf-font-serif: "Old Standard TT", Georgia, "Times New Roman", serif;
+  --lf-font-sans: "Atkinson Hyperlegible Next", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --lf-font-mono: "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
   :root {
-    --background: #faf8f5;
-    --surface: #fffdf9;
-    --surface-muted: #f3eee7;
-    --surface-element: #ece6dd;
-    --border: #e6dfd6;
-    --border-strong: #d6ccc0;
-    --border-active: #8b8277;
-    --text: #2a2624;
-    --text-secondary: #5f5752;
-    --text-tertiary: #65605d;
-    --accent: #722f37;
-    --accent-hover: #5e2630;
-    --accent-text: #faf8f5;
-    --accent-soft: #f3e8e9;
-    --working-ink: #2f629f;
-    --working-fill: #e2eaf2;
-    --warning-ink: #7f5a19;
-    --warning-fill: #efe7d8;
-    --failure-ink: #a64038;
-    --failure-fill: #f3e2df;
-    --success-ink: #386c48;
-    --success-fill: #e1ebe3;
-    --diff-add-bg: #e7f0e8;
-    --diff-del-bg: #f4e3e1;
-    --mark-bg: #efe3c8;
-    --serif: "Old Standard TT", Georgia, "Times New Roman", serif;
-    --sans: "Atkinson Hyperlegible Next", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    --mono: "Spline Sans Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --lf-bg: #181615;
+    --lf-surface: #201d1b;
+    --lf-surface-muted: #282422;
+    --lf-surface-element: #312c29;
+    --lf-border: #38322e;
+    --lf-border-strong: #4a423d;
+    --lf-text: #efeae4;
+    --lf-text-secondary: #b9afa6;
+    --lf-text-tertiary: #8f857d;
+    --lf-accent: #c96b76;
+    --lf-accent-hover: #d8838d;
+    --lf-accent-text: #181615;
+    --lf-working-ink: #7eb2f0;
+    --lf-working-fill: #203147;
+    --lf-warning-ink: #e0b25c;
+    --lf-warning-fill: #3d311c;
+    --lf-failure-ink: #e67c73;
+    --lf-failure-fill: #452422;
+    --lf-success-ink: #7cc490;
+    --lf-success-fill: #213828;
+    --lf-highlight: rgba(201, 107, 118, 0.20);
+    --lf-highlight-active: rgba(201, 107, 118, 0.36);
+    --lf-highlight-line: rgba(201, 107, 118, 0.65);
+    --lf-shadow: 0 10px 30px rgba(0, 0, 0, 0.42);
+    --lf-shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.3);
+    --lf-bubble-bg: #efeae4;
+    --lf-bubble-text: #181615;
+    --lf-bubble-border: #d6ccc0;
   }
+}
 
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --background: #161413;
-      --surface: #1e1b19;
-      --surface-muted: #26221f;
-      --surface-element: #302b27;
-      --border: #322d29;
-      --border-strong: #463f3a;
-      --border-active: #968b80;
-      --text: #ede9e3;
-      --text-secondary: #b0a79f;
-      --text-tertiary: #8f867e;
-      --accent: #c46b75;
-      --accent-hover: #d4828b;
-      --accent-text: #161413;
-      --accent-soft: #2e1d20;
-      --working-ink: #7bb0eb;
-      --working-fill: #1f2b38;
-      --warning-ink: #dfb464;
-      --warning-fill: #302819;
-      --failure-ink: #e07b72;
-      --failure-fill: #331e1c;
-      --success-ink: #79b88b;
-      --success-fill: #1c2c21;
-      --diff-add-bg: #1c2a20;
-      --diff-del-bg: #321d1b;
-      --mark-bg: #3d331d;
-    }
-  }
-  :root[data-theme="dark"] {
-    --background: #161413;
-    --surface: #1e1b19;
-    --surface-muted: #26221f;
-    --surface-element: #302b27;
-    --border: #322d29;
-    --border-strong: #463f3a;
-    --border-active: #968b80;
-    --text: #ede9e3;
-    --text-secondary: #b0a79f;
-    --text-tertiary: #8f867e;
-    --accent: #c46b75;
-    --accent-hover: #d4828b;
-    --accent-text: #161413;
-    --accent-soft: #2e1d20;
-    --working-ink: #7bb0eb;
-    --working-fill: #1f2b38;
-    --warning-ink: #dfb464;
-    --warning-fill: #302819;
-    --failure-ink: #e07b72;
-    --failure-fill: #331e1c;
-    --success-ink: #79b88b;
-    --success-fill: #1c2c21;
-    --diff-add-bg: #1c2a20;
-    --diff-del-bg: #321d1b;
-    --mark-bg: #3d331d;
-  }
+*, *::before, *::after { box-sizing: border-box; }
 
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body {
-    margin: 0;
-    background: var(--background);
-    color: var(--text);
-    font-family: var(--sans);
-    font-size: 15px;
-    line-height: 1.58;
-    -webkit-font-smoothing: antialiased;
-  }
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--lf-bg);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
 
-  .column {
-    max-width: 840px;
-    margin: 0 auto;
-    padding: 36px 20px 96px;
-  }
+.page-wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 40px 24px 140px;
+}
 
-  .page-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 16px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 22px;
-  }
-  h1 {
-    margin: 0 0 10px;
-    font-family: var(--serif);
-    font-weight: 400;
-    font-size: 34px;
-    line-height: 1.14;
-    letter-spacing: -0.03em;
-    font-variant-ligatures: none;
-  }
-  .lede {
-    margin: 0;
-    font-size: 15.5px;
-    color: var(--text-secondary);
-    max-width: 66ch;
-  }
+.reading-col {
+  max-width: 800px;
+}
 
-  h2 {
-    margin: 44px 0 10px;
-    font-family: var(--sans);
-    font-weight: 600;
-    font-size: 20px;
-    line-height: 1.3;
-    letter-spacing: -0.01em;
-    padding-bottom: 6px;
-    border-bottom: 1px solid var(--border);
-  }
-  h3 {
-    margin: 22px 0 6px;
-    font-family: var(--sans);
-    font-weight: 600;
-    font-size: 15.5px;
-    line-height: 1.35;
-  }
-  p { margin: 0 0 12px; }
-  ul, ol { margin: 0 0 14px; padding-left: 20px; }
-  li { margin-bottom: 6px; }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .small { font-size: 13.5px; color: var(--text-secondary); }
-  code {
-    font-family: var(--mono);
-    font-size: 12.5px;
-    background: var(--surface-muted);
-    padding: 1px 4px;
-    border-radius: 3px;
-  }
-  pre {
-    margin: 8px 0 12px;
-    font-family: var(--mono);
-    font-size: 12.5px;
-    line-height: 1.5;
-    background: var(--surface-muted);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 10px 12px;
-    overflow-x: auto;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
+h1 {
+  font-family: var(--lf-font-serif);
+  font-size: 34px;
+  font-weight: 400;
+  line-height: 1.14;
+  letter-spacing: -0.025em;
+  margin: 0 0 12px;
+}
 
-  button {
-    font-family: var(--sans);
-    font-size: 13px;
-    line-height: 1.2;
-    padding: 6px 11px;
-    border-radius: 4px;
-    border: 1px solid var(--border-strong);
-    background: var(--surface);
-    color: var(--text);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  button:hover { background: var(--surface-muted); border-color: var(--border-active); }
-  button:disabled { opacity: 0.45; cursor: default; }
-  button.accent {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--accent-text);
-    font-weight: 600;
-  }
-  button.accent:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
-  button[aria-pressed="true"] {
-    background: var(--accent-soft);
-    border-color: var(--accent);
-    color: var(--accent);
-    font-weight: 600;
-  }
+h2 {
+  font-family: var(--lf-font-serif);
+  font-size: 25px;
+  font-weight: 400;
+  line-height: 1.2;
+  margin: 0 0 6px;
+}
 
-  .status {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-  .status::before {
-    content: "";
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: currentColor;
-    flex-shrink: 0;
-  }
-  .status.ok { color: var(--success-ink); }
-  .status.warn { color: var(--warning-ink); }
-  .status.fail { color: var(--failure-ink); }
-  .status.work { color: var(--working-ink); }
-  .status.proposed { color: var(--accent); }
-  .status.existing { color: var(--text-secondary); }
+h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 16px 0 6px;
+}
 
-  .jump-bar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 14px;
-    font-size: 13.5px;
-    margin: 0 0 22px;
-    color: var(--text-secondary);
-  }
-  .jump-bar a { color: var(--text-secondary); border-bottom: 1px solid var(--border-strong); padding-bottom: 1px; }
-  .jump-bar a:hover { color: var(--accent); border-bottom-color: var(--accent); text-decoration: none; }
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 20px; }
+li { margin-bottom: 5px; }
 
-  .split-band {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 18px;
-    margin: 14px 0 22px;
-    padding: 15px 18px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    font-size: 14px;
-  }
-  @media (max-width: 680px) { .split-band { grid-template-columns: 1fr; } }
-  .split-band > div + div { border-left: 1px solid var(--border); padding-left: 18px; }
-  @media (max-width: 680px) { .split-band > div + div { border-left: none; padding-left: 0; border-top: 1px solid var(--border); padding-top: 14px; } }
-  .split-band ul { margin: 8px 0 0; padding-left: 18px; }
+code {
+  font-family: var(--lf-font-mono);
+  font-size: 12.5px;
+  background: var(--lf-surface-muted);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
 
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 12px 0 20px;
-    font-size: 14px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-  th, td {
-    text-align: left;
-    vertical-align: top;
-    padding: 9px 12px;
-    border-bottom: 1px solid var(--border);
-  }
-  th {
-    background: var(--surface-muted);
-    font-weight: 600;
-    font-size: 13px;
-    color: var(--text-secondary);
-  }
-  tr:last-child td { border-bottom: none; }
-  .table-wrap { overflow-x: auto; }
+.meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  font-size: 12.5px;
+  color: var(--lf-text-secondary);
+  margin-bottom: 24px;
+}
 
-  /* ==================== REX AGENT-BROWSER SPLIT DIAGRAM ==================== */
-  .rex-split {
-    display: grid;
-    grid-template-columns: 1fr 1.25fr;
-    gap: 0;
-    margin: 16px 0 22px;
-    background: var(--surface);
-    border: 1px solid var(--border-strong);
-    border-radius: 8px;
-    overflow: hidden;
-    font-size: 13.5px;
-  }
-  @media (max-width: 680px) { .rex-split { grid-template-columns: 1fr; } }
-  .rex-pane { padding: 14px 16px; }
-  .rex-pane + .rex-pane { border-left: 1px solid var(--border-strong); }
-  @media (max-width: 680px) { .rex-pane + .rex-pane { border-left: none; border-top: 1px solid var(--border-strong); } }
-  .rex-pane-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px;
-    padding-bottom: 8px;
-    margin-bottom: 10px;
-    border-bottom: 1px solid var(--border);
-    font-weight: 600;
-  }
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-surface-muted);
+  color: var(--lf-text-secondary);
+}
 
-  /* ==================== LIVE PROTOTYPE FRAME ==================== */
-  .host-bar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    margin: 12px 0 14px;
-    padding: 10px 14px;
-    background: var(--surface-muted);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font-size: 13.5px;
-  }
-  .proto-shell {
-    position: relative;
-    margin: 14px 0 28px;
-    background: var(--surface);
-    border: 1px solid var(--border-strong);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-  .proto-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px 14px;
-    padding: 10px 16px;
-    background: var(--surface-muted);
-    border-bottom: 1px solid var(--border);
-    font-size: 13px;
-  }
+.badge.is-proposed {
+  background: var(--lf-working-fill);
+  color: var(--lf-working-ink);
+  border-color: transparent;
+}
 
-  .feedback-strip {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px 12px;
-    padding: 8px 16px;
-    background: var(--accent-soft);
-    border-bottom: 1px solid var(--border);
-    font-size: 13px;
-  }
-  .feedback-strip.empty {
-    background: var(--surface-muted);
-    color: var(--text-secondary);
-  }
-  .feedback-strip-count { font-weight: 600; color: var(--accent); }
-  .feedback-strip.empty .feedback-strip-count { font-weight: 400; color: var(--text-secondary); }
+.badge.is-radical {
+  background: var(--lf-accent);
+  color: var(--lf-accent-text);
+  border-color: transparent;
+}
 
-  .proto-body { padding: 18px 18px 20px; }
-  .proto-section {
-    padding: 16px 0;
-    border-top: 1px solid var(--border);
-  }
-  .proto-section:first-child { padding-top: 0; border-top: none; }
-  .proto-section:last-child { padding-bottom: 0; }
-  .proto-title {
-    margin: 0 0 6px;
-    font-size: 18px;
-    font-weight: 600;
-    line-height: 1.28;
-    letter-spacing: -0.01em;
-  }
+.badge.is-existing {
+  background: var(--lf-surface-element);
+  color: var(--lf-text-secondary);
+}
 
-  .hazard-band {
-    padding: 11px 14px;
-    background: var(--failure-fill);
-    border: 1px solid var(--border-strong);
-    border-left: 3px solid var(--failure-ink);
-    border-radius: 4px;
-    margin: 12px 0;
-    font-size: 14px;
-  }
+.decision-lead {
+  padding: 16px 18px;
+  border: 1px solid var(--lf-border-strong);
+  border-left: 3px solid var(--lf-accent);
+  border-radius: 8px;
+  background: var(--lf-surface);
+  margin-bottom: 28px;
+}
 
-  .code-block {
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    overflow: hidden;
-    margin: 10px 0 12px;
-    font-family: var(--mono);
-    font-size: 12.5px;
-    line-height: 1.55;
-  }
-  .code-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-    padding: 7px 12px;
-    background: var(--surface-muted);
-    border-bottom: 1px solid var(--border);
-    font-family: var(--sans);
-    font-size: 12.5px;
-    color: var(--text-secondary);
-  }
-  .code-lines { overflow-x: auto; background: var(--surface); }
-  .code-line {
-    display: grid;
-    grid-template-columns: 44px 1fr;
-    padding: 1px 12px 1px 0;
-    white-space: pre;
-  }
-  .code-line.add { background: var(--diff-add-bg); }
-  .code-line.del { background: var(--diff-del-bg); }
-  .code-line.bug { background: var(--failure-fill); }
-  .ln {
-    text-align: right;
-    padding-right: 10px;
-    color: var(--text-tertiary);
-    user-select: none;
-  }
-  .line-note {
-    grid-column: 1 / -1;
-    margin: 2px 12px 6px 44px;
-    padding: 6px 10px;
-    background: var(--surface-muted);
-    border-left: 2px solid var(--accent);
-    font-family: var(--sans);
-    font-size: 13px;
-    white-space: normal;
-  }
-  .line-note.hidden { display: none; }
+.decision-lead strong {
+  color: var(--lf-text);
+}
 
-  .choice-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 12px;
-    flex-wrap: wrap;
-    padding: 11px 0;
-    border-top: 1px solid var(--border);
-  }
-  .choice-row:first-of-type { border-top: none; padding-top: 4px; }
-  .choice-text { flex: 1 1 310px; font-size: 14px; }
-  .choice-controls { display: flex; flex-wrap: wrap; gap: 6px; }
+.baseline-box {
+  padding: 14px 16px;
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  background: var(--lf-surface-muted);
+  margin-bottom: 36px;
+  font-size: 14px;
+}
 
-  .open-q { margin-top: 12px; }
-  .open-q textarea {
-    width: 100%;
-    min-height: 52px;
-    margin-top: 6px;
-    font-family: var(--sans);
-    font-size: 14px;
-    padding: 8px 10px;
-    border: 1px solid var(--border-strong);
-    border-radius: 4px;
-    background: var(--surface);
-    color: var(--text);
-    resize: vertical;
-  }
+.baseline-box .baseline-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
 
-  .comment-list {
-    margin-top: 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .comment-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 9px 12px;
-    background: var(--surface-muted);
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--accent);
-    border-radius: 4px;
-    font-size: 13.5px;
-  }
-  .comment-quote {
-    display: inline-block;
-    background: var(--mark-bg);
-    padding: 1px 5px;
-    border-radius: 3px;
-    font-size: 12.5px;
-    margin-bottom: 4px;
-  }
+.jump-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 36px;
+}
 
-  /* Floating highlight-to-comment popover */
-  .sel-popover {
-    position: fixed;
-    z-index: 40;
-    width: min(340px, calc(100vw - 24px));
-    padding: 10px 12px;
-    background: var(--surface);
-    border: 1px solid var(--border-active);
-    border-radius: 6px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+.jump-nav a {
+  text-decoration: none;
+  color: var(--lf-text);
+  font-size: 13px;
+  padding: 5px 11px;
+  border-radius: 6px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-surface);
+}
+
+.jump-nav a:hover {
+  border-color: var(--lf-accent);
+  color: var(--lf-accent);
+}
+
+/* Vision sections */
+.vision {
+  padding-top: 32px;
+  margin-top: 40px;
+  border-top: 1px solid var(--lf-border-strong);
+}
+
+.vision-header {
+  max-width: 820px;
+  margin-bottom: 16px;
+}
+
+.vision-kicker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12.5px;
+  color: var(--lf-text-secondary);
+}
+
+.vision-truth {
+  font-size: 15.5px;
+  color: var(--lf-text-secondary);
+  margin: 4px 0 12px;
+}
+
+.vision-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px;
+  max-width: 860px;
+  margin-top: 16px;
+}
+
+.vision-meta-card {
+  padding: 12px 14px;
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  background: var(--lf-surface);
+  font-size: 13.5px;
+}
+
+.vision-meta-card .label {
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--lf-text-tertiary);
+  margin-bottom: 4px;
+}
+
+/* Interactive playground shell */
+.playground {
+  position: relative;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 12px;
+  background: var(--lf-surface);
+  box-shadow: var(--lf-shadow-sm);
+  overflow: visible;
+  margin: 16px 0 8px;
+}
+
+.pg-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 14px;
+  background: var(--lf-surface-muted);
+  border-bottom: 1px solid var(--lf-border);
+  border-radius: 12px 12px 0 0;
+  font-size: 12.5px;
+  color: var(--lf-text-secondary);
+}
+
+.pg-toolbar-left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.pg-hint {
+  color: var(--lf-text-secondary);
+}
+
+.pg-hint kbd {
+  font-family: var(--lf-font-mono);
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-surface);
+  color: var(--lf-text);
+}
+
+/* Buttons */
+button {
+  appearance: none;
+  font-family: var(--lf-font-sans);
+  font-size: 12.5px;
+  line-height: 1.25;
+  padding: 5px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--lf-surface-muted);
+}
+
+button.btn-accent {
+  background: var(--lf-accent);
+  border-color: var(--lf-accent);
+  color: var(--lf-accent-text);
+}
+
+button.btn-accent:hover {
+  background: var(--lf-accent-hover);
+  border-color: var(--lf-accent-hover);
+}
+
+button.btn-quiet {
+  border-color: var(--lf-border);
+  background: transparent;
+  color: var(--lf-text-secondary);
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+button.btn-quiet:hover {
+  background: var(--lf-surface-muted);
+  color: var(--lf-text);
+}
+
+button.is-active, button.is-selected {
+  background: var(--lf-accent);
+  border-color: var(--lf-accent);
+  color: var(--lf-accent-text);
+}
+
+/* Shared sample document styles inside playgrounds */
+.doc-sample {
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+
+.doc-sample h4 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.doc-sample p {
+  margin: 0 0 12px;
+}
+
+.codeblock {
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  background: var(--lf-bg);
+  margin: 12px 0 4px;
+  overflow: hidden;
+}
+
+.codeblock-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 10px;
+  background: var(--lf-surface-muted);
+  border-bottom: 1px solid var(--lf-border);
+  font-family: var(--lf-font-mono);
+  font-size: 11.5px;
+  color: var(--lf-text-secondary);
+}
+
+.diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--lf-font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.diff-table tr.diff-line {
+  position: relative;
+}
+
+.diff-table tr.diff-line:hover td {
+  background: var(--lf-surface-muted);
+}
+
+.diff-table tr.diff-add td {
+  background: var(--lf-success-fill);
+}
+
+.diff-table tr.diff-add:hover td {
+  filter: brightness(0.97);
+}
+
+.diff-table tr.diff-selected td {
+  background: var(--lf-working-fill) !important;
+}
+
+.diff-table td {
+  padding: 1px 8px;
+  vertical-align: top;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff-table td.ln {
+  width: 48px;
+  min-width: 48px;
+  text-align: right;
+  color: var(--lf-text-tertiary);
+  border-right: 1px solid var(--lf-border);
+  user-select: none;
+  padding-right: 8px;
+  position: relative;
+}
+
+.diff-table td.sign {
+  width: 18px;
+  text-align: center;
+  color: var(--lf-success-ink);
+  user-select: none;
+  padding: 1px 2px;
+}
+
+.diff-table .gutter-plus {
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 4px;
+  border: none;
+  background: var(--lf-accent);
+  color: var(--lf-accent-text);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.diff-table tr.diff-line:hover .gutter-plus,
+.diff-table tr.diff-line.has-note .gutter-plus,
+.diff-table .gutter-plus:focus {
+  opacity: 1;
+}
+
+/* Highlight spans */
+.hl-span {
+  background: var(--lf-highlight);
+  border-bottom: 2px solid var(--lf-highlight-line);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.hl-span.is-active,
+.hl-span:hover {
+  background: var(--lf-highlight-active);
+}
+
+/* =========================================================
+   VISION A: Google Docs Margin Rail
+   ========================================================= */
+.va-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 290px;
+  gap: 24px;
+  padding: 20px 20px 24px;
+  position: relative;
+  transition: max-width 0.18s ease;
+}
+
+.va-layout.is-narrow {
+  max-width: 680px;
+  grid-template-columns: minmax(0, 1fr);
+  margin: 0 auto;
+  border-left: 1px dashed var(--lf-border-strong);
+  border-right: 1px dashed var(--lf-border-strong);
+}
+
+.va-layout.is-narrow .va-rail {
+  display: none;
+}
+
+.va-doc {
+  position: relative;
+  min-width: 0;
+}
+
+.va-rail {
+  position: relative;
+  min-height: 360px;
+  border-left: 1px solid var(--lf-border);
+  padding-left: 16px;
+}
+
+.va-rail-empty {
+  font-size: 12.5px;
+  color: var(--lf-text-tertiary);
+  padding-top: 8px;
+}
+
+.va-card {
+  position: absolute;
+  left: 16px;
+  right: 0;
+  background: var(--lf-bg);
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 8px;
+  padding: 10px 11px;
+  font-size: 13px;
+  box-shadow: var(--lf-shadow-sm);
+  transition: top 0.16s ease, transform 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+  cursor: pointer;
+}
+
+.va-card::before {
+  content: "";
+  position: absolute;
+  left: -17px;
+  top: 14px;
+  width: 16px;
+  height: 1px;
+  background: var(--lf-border-strong);
+  transition: background 0.14s ease;
+}
+
+.va-card.is-active {
+  border-color: var(--lf-accent);
+  transform: translateX(-6px);
+  box-shadow: var(--lf-shadow);
+  z-index: 4;
+}
+
+.va-card.is-active::before {
+  background: var(--lf-accent);
+  height: 2px;
+}
+
+.va-card-quote {
+  font-size: 11.5px;
+  color: var(--lf-text-secondary);
+  border-left: 2px solid var(--lf-border-strong);
+  padding-left: 7px;
+  margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.va-card-body {
+  margin-bottom: 8px;
+  color: var(--lf-text);
+  white-space: pre-wrap;
+}
+
+.va-card-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--lf-text-tertiary);
+}
+
+.va-card textarea {
+  width: 100%;
+  min-height: 54px;
+  padding: 6px 8px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 5px;
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  resize: vertical;
+  margin-bottom: 6px;
+}
+
+.va-narrow-badge {
+  display: none;
+  margin-left: 6px;
+  vertical-align: middle;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--lf-accent);
+  color: var(--lf-accent-text);
+  border: none;
+}
+
+.va-layout.is-narrow .va-narrow-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.va-narrow-popover {
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--lf-accent);
+  border-radius: 8px;
+  background: var(--lf-bg);
+  font-size: 13px;
+}
+
+@media (max-width: 960px) {
+  .va-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .va-rail {
     display: none;
   }
-  .sel-popover.open { display: block; }
-  .sel-popover-quote {
-    font-size: 12.5px;
-    color: var(--text-secondary);
-    background: var(--mark-bg);
-    padding: 3px 6px;
-    border-radius: 3px;
-    margin-bottom: 8px;
-    max-height: 46px;
-    overflow: hidden;
-  }
-  .sel-popover input {
-    width: 100%;
-    font-family: var(--sans);
-    font-size: 13.5px;
-    padding: 6px 8px;
-    border: 1px solid var(--border-strong);
-    border-radius: 4px;
-    background: var(--surface);
-    color: var(--text);
-    margin-bottom: 8px;
-  }
-  .sel-popover-actions {
-    display: flex;
-    justify-content: space-between;
+  .va-narrow-badge {
+    display: inline-flex;
     align-items: center;
-    gap: 8px;
   }
+}
 
-  .dispatch-drawer {
-    padding: 12px 16px;
-    background: var(--surface-muted);
-    border-top: 1px solid var(--border-strong);
-  }
-  .dispatch-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 6px;
-    font-size: 13px;
-  }
+/* =========================================================
+   VISION B: T3 Code / GitHub Inline Thread Composer
+   ========================================================= */
+.vb-body {
+  padding: 20px 24px 16px;
+  max-width: 820px;
+}
 
-  .option-block {
-    padding: 16px 0;
-    border-top: 1px solid var(--border);
-  }
-  .option-block:first-of-type { border-top: none; padding-top: 6px; }
-  .option-meta {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px 18px;
-    margin-top: 10px;
-    padding: 12px 14px;
-    background: var(--surface-muted);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font-size: 13.5px;
-  }
-  @media (max-width: 680px) { .option-meta { grid-template-columns: 1fr; } }
+.vb-block {
+  position: relative;
+  padding-left: 26px;
+  margin-left: -26px;
+}
 
-  .q-list { list-style: none; padding: 0; margin: 14px 0 0; }
-  .q-item {
-    padding: 14px 0;
-    border-top: 1px solid var(--border);
-  }
-  .q-item:first-child { border-top: none; padding-top: 4px; }
-  .q-title { font-weight: 600; margin-bottom: 6px; }
-  .q-opts { list-style: none; padding: 0; margin: 6px 0 0; }
-  .q-opts li { margin-bottom: 5px; font-size: 14px; }
-  .q-key { font-family: var(--mono); font-weight: 600; color: var(--accent); margin-right: 6px; }
+.vb-block-plus {
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 4px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-surface);
+  color: var(--lf-text-secondary);
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.1s ease;
+}
+
+.vb-block:hover > .vb-block-plus,
+.vb-block-plus:focus {
+  opacity: 1;
+}
+
+.vb-block-plus:hover {
+  background: var(--lf-accent);
+  border-color: var(--lf-accent);
+  color: var(--lf-accent-text);
+}
+
+.vb-thread-box {
+  margin: 8px 0 14px;
+  border: 1px solid var(--lf-border-strong);
+  border-left: 3px solid var(--lf-accent);
+  border-radius: 8px;
+  background: var(--lf-bg);
+  padding: 10px 12px;
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: normal;
+}
+
+.vb-thread-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--lf-text-secondary);
+}
+
+.vb-anchor-pill {
+  font-family: var(--lf-font-mono);
+  font-size: 11.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--lf-surface-muted);
+  color: var(--lf-text);
+}
+
+.vb-thread-box textarea {
+  width: 100%;
+  min-height: 54px;
+  padding: 7px 9px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 5px;
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  margin-bottom: 7px;
+  resize: vertical;
+}
+
+.vb-thread-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.diff-table tr.vb-inline-row td {
+  padding: 8px 10px;
+  background: var(--lf-surface);
+  border-top: 1px solid var(--lf-border);
+  border-bottom: 1px solid var(--lf-border);
+}
+
+.vb-footer {
+  border-top: 1px solid var(--lf-border);
+  background: var(--lf-surface-muted);
+  border-radius: 0 0 12px 12px;
+  padding: 10px 16px;
+}
+
+.vb-footer-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.vb-drawer {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 8px;
+  background: var(--lf-surface);
+  font-size: 12.5px;
+}
+
+.vb-drawer-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--lf-border);
+}
+
+.vb-drawer-item:last-child { border-bottom: 0; }
+
+.steer-preview {
+  margin-top: 8px;
+  padding: 7px 9px;
+  border-radius: 5px;
+  background: var(--lf-bg);
+  border: 1px solid var(--lf-border);
+  font-family: var(--lf-font-mono);
+  font-size: 11.5px;
+  color: var(--lf-text-secondary);
+  word-break: break-word;
+}
+
+/* =========================================================
+   VISION C: Notion Floating Bubble + Hover + Sidebar
+   ========================================================= */
+.vc-shell {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0 0 12px 12px;
+}
+
+.vc-body {
+  padding: 20px 24px 24px;
+  max-width: 820px;
+}
+
+.vc-sidebar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(320px, 90%);
+  background: var(--lf-surface);
+  border-left: 1px solid var(--lf-border-strong);
+  box-shadow: var(--lf-shadow);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(102%);
+  transition: transform 0.18s ease;
+  z-index: 20;
+}
+
+.vc-sidebar.is-open {
+  transform: translateX(0);
+}
+
+.vc-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--lf-border);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.vc-sidebar-list {
+  padding: 10px 12px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.vc-comment-item {
+  padding: 9px 10px;
+  border: 1px solid var(--lf-border);
+  border-radius: 7px;
+  background: var(--lf-bg);
+  margin-bottom: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.vc-comment-item:hover {
+  border-color: var(--lf-accent);
+}
+
+.vc-hover-card {
+  position: fixed;
+  z-index: 950;
+  width: 280px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-surface);
+  box-shadow: var(--lf-shadow);
+  font-size: 13px;
+}
+
+/* =========================================================
+   VISION D: Radical Success — Agent Steer Composer + Suggest Edit
+   ========================================================= */
+.vd-body {
+  padding: 20px 24px 16px;
+  max-width: 820px;
+}
+
+.vd-suggest-del {
+  background: var(--lf-failure-fill);
+  color: var(--lf-failure-ink);
+  text-decoration: line-through;
+  padding: 0 3px;
+  border-radius: 3px;
+}
+
+.vd-suggest-ins {
+  background: var(--lf-success-fill);
+  color: var(--lf-success-ink);
+  font-weight: 600;
+  padding: 0 4px;
+  border-radius: 3px;
+  margin-left: 2px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.vd-dock {
+  border-top: 1px solid var(--lf-border-strong);
+  background: var(--lf-surface-muted);
+  border-radius: 0 0 12px 12px;
+  padding: 12px 16px;
+}
+
+.vd-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 9px;
+}
+
+.vd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-surface);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.vd-chip:hover {
+  border-color: var(--lf-accent);
+}
+
+.vd-chip-tag {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--lf-surface-element);
+  color: var(--lf-text-secondary);
+}
+
+.vd-chip-tag.tag-suggest { background: var(--lf-success-fill); color: var(--lf-success-ink); }
+.vd-chip-tag.tag-question { background: var(--lf-working-fill); color: var(--lf-working-ink); }
+.vd-chip-tag.tag-change { background: var(--lf-warning-fill); color: var(--lf-warning-ink); }
+.vd-chip-tag.tag-task { background: var(--lf-failure-fill); color: var(--lf-failure-ink); }
+
+.vd-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 280px;
+}
+
+.vd-chip-x {
+  border: none;
+  background: transparent;
+  padding: 0 2px;
+  font-size: 13px;
+  color: var(--lf-text-tertiary);
+}
+
+.vd-chip-x:hover {
+  background: transparent;
+  color: var(--lf-failure-ink);
+}
+
+.vd-composer-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.vd-composer-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 6px;
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 13.5px;
+}
+
+.vd-intent-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 7px;
+}
+
+.vd-intent-btn {
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.vd-toast {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--lf-success-ink);
+  font-weight: 500;
+}
+
+/* Shared floating selection bubble */
+.float-pill {
+  position: fixed;
+  z-index: 960;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px;
+  border-radius: 8px;
+  background: var(--lf-bubble-bg);
+  color: var(--lf-bubble-text);
+  border: 1px solid var(--lf-bubble-border);
+  box-shadow: var(--lf-shadow);
+  font-size: 12px;
+}
+
+.float-pill button {
+  background: transparent;
+  border: none;
+  color: var(--lf-bubble-text);
+  padding: 4px 8px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.float-pill button:hover {
+  background: rgba(128, 128, 128, 0.25);
+}
+
+.float-pill .pill-sep {
+  width: 1px;
+  height: 14px;
+  background: rgba(128, 128, 128, 0.35);
+}
+
+.float-composer {
+  position: fixed;
+  z-index: 970;
+  width: 310px;
+  padding: 10px;
+  border-radius: 9px;
+  background: var(--lf-surface);
+  border: 1px solid var(--lf-border-strong);
+  box-shadow: var(--lf-shadow);
+  font-size: 13px;
+}
+
+.float-composer textarea,
+.float-composer input[type="text"] {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 5px;
+  background: var(--lf-bg);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  margin-bottom: 7px;
+}
+
+/* Questions section */
+.questions {
+  margin-top: 48px;
+  padding-top: 28px;
+  border-top: 1px solid var(--lf-border-strong);
+  max-width: 820px;
+}
+
+.q-group {
+  margin: 18px 0;
+}
+
+.q-label {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.q-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.q-textarea {
+  width: 100%;
+  min-height: 70px;
+  padding: 8px 10px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 6px;
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 14px;
+  resize: vertical;
+}
+
+.q-copy-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.pulse-ring {
+  outline: 2px solid var(--lf-accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
 </style>
 </head>
 <body>
-<div class="column">
-
-  <header class="page-head">
-    <div>
-      <h1>Host-agnostic review pages: Rex split, Desktop, and browser</h1>
-      <p class="lede">
-        Round 3: keeping Vision A's technical flow and highlight-to-comment + global <code>data-choice</code> controls, and making the HTML speak directly to <code>lf server</code> over localhost so the entire review loop works in a Rex agent-browser split with no Desktop required.
-      </p>
+<main class="page-wrap">
+  <div class="reading-col">
+    <h1>Note-taking UI for review pages</h1>
+    <div class="meta-row">
+      <span>Task <code>LOO-1109</code></span>
+      <span>Exploration round 1</span>
+      <span>File: <code>scratch/explore.html</code></span>
     </div>
-    <button id="theme-toggle" type="button" aria-label="Toggle color theme">Dark</button>
-  </header>
 
-  <nav class="jump-bar" aria-label="Sections">
-    <a href="#rex-flow">Rex agent-browser split</a>
-    <a href="#live-demo">Try all 3 hosts live</a>
-    <a href="#transport">One transport, three hosts</a>
-    <a href="#safety">Steer-only vs allowlisted commands</a>
-    <a href="#questions">Open questions</a>
-  </nav>
+    <div class="decision-lead">
+      <strong>Decision needed:</strong> Pick the interaction mechanism for leaving, reading, and editing notes on compiled review pages (<code>runtime.js</code> + <code>base.css</code>). Every vision below keeps the same wire contract (<code>task.steer</code> / <code>session.steer</code> and Desktop's <code>ReviewCommentsStrip</code>) — only how you capture, see, and refine notes changes.
+    </div>
 
-  <section id="rex-flow">
-    <p>
-      Right now, <code>lf open --file</code> refuses any host other than Loopflow Desktop (<code>rust/loopflow/src/lf/commands/open/files.rs:19</code>), and <code>lf server</code> already embeds <code>axum</code> for transport. Adding a tiny loopback-only HTTP route in <code>lf server</code> lets the exact same compiled HTML page drive a live agent in Rex, feed Desktop's <code>ReviewCommentsStrip</code>, or degrade to clipboard copy offline.
-    </p>
-
-    <div class="rex-split">
-      <div class="rex-pane">
-        <div class="rex-pane-head">
-          <span>Left pane: live agent in Rex</span>
-          <span class="status work">Waiting at ship-review</span>
-        </div>
-        <pre style="margin: 0;">$ lf task run LOO-1097
-ship-review wrote scratch/ship-review.html
-Serving at http://127.0.0.1:49218/p/t_9f4a/ship-review.html
-
-# When you press Cmd+Enter on the right pane:
-# lf server delivers your steer + choices straight here
-# and the agent acts in front of you.</pre>
+    <div class="baseline-box">
+      <div class="baseline-head">
+        <span class="badge is-existing">Existing in branch</span>
+        <span>What <code>runtime.js</code> does today</span>
       </div>
-      <div class="rex-pane">
-        <div class="rex-pane-head">
-          <span>Right pane: browser split (Rex or system browser)</span>
-          <span class="status proposed">Same-origin loopback</span>
+      Dragging text pops a 260px box with a single <code>Note</code> button; clicking it opens a textarea; saving dumps notes into a flat <em>Your notes</em> list at the bottom of the page (no edit, no click-to-jump, no diff-line gutter <code>+</code>, and highlights across inline <code>&lt;code&gt;</code> tags silently drop).
+    </div>
+
+    <nav class="jump-nav" aria-label="Visions">
+      <a href="#vision-a">A. Google Docs margin rail</a>
+      <a href="#vision-b">B. T3 Code / GitHub inline threads</a>
+      <a href="#vision-c">C. Notion bubble + sidebar</a>
+      <a href="#vision-d">D. Agent steer composer + suggest edit</a>
+      <a href="#questions">Questions</a>
+    </nav>
+  </div>
+
+  <!-- =======================================================
+       VISION A: GOOGLE DOCS MARGIN RAIL
+       ======================================================= -->
+  <section class="vision" id="vision-a">
+    <div class="vision-header">
+      <div class="vision-kicker">
+        <span class="badge is-proposed">Proposed · Vision A</span>
+        <span>Inspired by Google Docs / Figma</span>
+      </div>
+      <h2>A. Spatial margin rail (collapses to badges when narrow)</h2>
+      <p class="vision-truth">Notes sit directly beside the exact sentence or diff line they belong to — never at the bottom of the page — and fold into inline paragraph badges when the viewport narrows.</p>
+    </div>
+
+    <div class="playground" id="pg-a">
+      <div class="pg-toolbar">
+        <div class="pg-toolbar-left">
+          <span class="pg-hint">Try: <strong>drag text</strong> then click <code>Comment</code> (or press <kbd>c</kbd>) · <strong>hover a diff line</strong> and click <code>+</code> · click a highlight or margin card</span>
         </div>
-        <ul style="margin: 0; padding-left: 18px;">
-          <li>Served from <code>127.0.0.1</code> with an unguessable per-session capability token in the URL (zero CORS; external websites cannot reach it).</li>
-          <li>Drag-highlight any text, type, or diff line to comment.</li>
-          <li>Click global <code>data-choice</code> / <code>data-multiselect</code> buttons.</li>
-          <li>Press <strong><code>⌘↩</code></strong> to POST straight to <code>lf server</code> (steer the agent in the left pane, or run allowlisted <code>lf</code> actions).</li>
-        </ul>
+        <div>
+          <button type="button" id="va-width-toggle">Simulate narrow Desktop pane (680px)</button>
+        </div>
+      </div>
+
+      <div class="va-layout" id="va-layout">
+        <div class="va-doc doc-sample" id="va-doc">
+          <h4>How the loopback listener survives restarts</h4>
+          <p data-block-id="a-p1">The loopback carrier in <code>lf server</code> binds a deterministic port per server socket with a fresh <span class="hl-span" data-va-id="va-seed-1">32-byte random in-memory token</span>, so drafts and receipts in browser <code>localStorage</code> survive <code>lf install</code> restarts while old URLs return 404.<button type="button" class="va-narrow-badge" data-va-badge="va-seed-1">1 note</button></p>
+          <p data-block-id="a-p2">Task pages always steer via <code>task.steer</code>, never the building worker's <code>session.steer</code>, because headless Graph workers exit right after building the page.</p>
+
+          <div class="codeblock">
+            <div class="codeblock-head">
+              <span>rust/loopflow/src/server/loopback.rs</span>
+              <span>lines 110–116</span>
+            </div>
+            <table class="diff-table" id="va-diff">
+              <tr class="diff-line diff-add" data-line="110"><td class="ln"><button type="button" class="gutter-plus" title="Comment on line 110">+</button>110</td><td class="sign">+</td><td>fn preferred_port(socket: &amp;Path) -&gt; u16 {</td></tr>
+              <tr class="diff-line diff-add" data-line="111"><td class="ln"><button type="button" class="gutter-plus" title="Comment on line 111">+</button>111</td><td class="sign">+</td><td>    use sha2::{Digest, Sha256};</td></tr>
+              <tr class="diff-line diff-add" data-line="112"><td class="ln"><button type="button" class="gutter-plus" title="Comment on line 112">+</button>112</td><td class="sign">+</td><td>    let digest = Sha256::digest(socket.as_os_str().as_encoded_bytes());</td></tr>
+              <tr class="diff-line diff-add" data-line="113"><td class="ln"><button type="button" class="gutter-plus" title="Comment on line 113">+</button>113</td><td class="sign">+</td><td>    49152 + u16::from_be_bytes([digest[0], digest[1]]) % 16384</td></tr>
+              <tr class="diff-line diff-add" data-line="114"><td class="ln"><button type="button" class="gutter-plus" title="Comment on line 114">+</button>114</td><td class="sign">+</td><td>}</td></tr>
+            </table>
+          </div>
+          <div id="va-narrow-slot"></div>
+        </div>
+
+        <aside class="va-rail" id="va-rail" aria-label="Margin notes"></aside>
+      </div>
+    </div>
+
+    <div class="vision-meta-grid">
+      <div class="vision-meta-card">
+        <div class="label">First slice demo</div>
+        Open <code>ship-review.html</code> wide beside Rex: drag across a phrase, hit <code>c</code>, type a note, <code>⌘↩</code> — the card slides into the right margin aligned to that line with a hairline connector. Resize narrow (or open in Desktop Files): cards fold into inline paragraph badges with zero horizontal scroll.
+      </div>
+      <div class="vision-meta-card">
+        <div class="label">Appeal</div>
+        Zero layout shift while reading, immediate spatial memory ("my comment about the token is right beside the token paragraph"), and full inline edit/delete without scrolling away.
+      </div>
+      <div class="vision-meta-card">
+        <div class="label">Cost &amp; risk</div>
+        ~280 lines of JS/CSS (cross-element range anchoring + vertical collision stacking on resize). In Loopflow Desktop's Files pane (often 650–850px wide), the narrow-mode badge fallback is what Desktop users actually see most of the time.
       </div>
     </div>
   </section>
 
-  <!-- ==================== LIVE PROTOTYPE WITH HOST SWITCHER ==================== -->
-  <section id="live-demo">
-    <h2>Try it across all three hosts (prototype on <code>LOO-1097</code>)</h2>
-    <p class="small">
-      Switch the simulated host below, then highlight any sentence or Rust line and click decision buttons to see the exact dispatch behavior for Rex, Desktop, and offline <code>file://</code>.
-    </p>
-
-    <div class="host-bar" role="group" aria-label="Simulated host">
-      <strong>Simulated host:</strong>
-      <button type="button" class="host-btn" data-host="rex" aria-pressed="true">Rex agent-browser split (loopback HTTP)</button>
-      <button type="button" class="host-btn" data-host="desktop" aria-pressed="false">Loopflow Desktop (TaskHTMLView)</button>
-      <button type="button" class="host-btn" data-host="offline" aria-pressed="false">Offline browser (file://)</button>
+  <!-- =======================================================
+       VISION B: T3 CODE / GITHUB INLINE THREAD COMPOSER
+       ======================================================= -->
+  <section class="vision" id="vision-b">
+    <div class="vision-header">
+      <div class="vision-kicker">
+        <span class="badge is-proposed">Proposed · Vision B</span>
+        <span>Inspired by T3 Code / GitHub PR review</span>
+      </div>
+      <h2>B. Inline thread composer (gutter <code>+</code> on every diff line &amp; paragraph)</h2>
+      <p class="vision-truth">Comments live right where code reviews put them — inserted directly beneath a diff line range or paragraph — working identically at 600px in Desktop and 1400px in Chrome.</p>
     </div>
 
-    <div class="proto-shell" id="proto-root">
-      <div class="proto-header">
-        <span id="proto-url"><code>http://127.0.0.1:49218/p/t_9f4a/scratch/ship-review.html</code></span>
-        <span class="status ok" id="proto-conn">Connected to lf server (LOO-1097)</span>
-      </div>
-
-      <div class="feedback-strip" id="feedback-strip">
-        <span class="feedback-strip-count" id="strip-count">0 items pending</span>
-        <div style="display: flex; gap: 8px; align-items: center;">
-          <button type="button" id="strip-clear" style="display: none;">Clear</button>
-          <button type="button" class="accent" id="strip-send" disabled>Steer agent in Rex ⌘↩</button>
+    <div class="playground" id="pg-b">
+      <div class="pg-toolbar">
+        <div class="pg-toolbar-left">
+          <span class="pg-hint">Try: <strong>click <code>+</code> on a diff line</strong> (or <strong>Shift+click</strong> a second line for a range) · <strong>hover a paragraph</strong> for its left <code>+</code> or drag-select text</span>
+        </div>
+        <div>
+          <span id="vb-range-hint" style="font-size:12px;">Tip: Shift+click line numbers for multi-line range</span>
         </div>
       </div>
 
-      <div class="proto-body" id="commentable-area">
+      <div class="vb-body doc-sample" id="vb-doc">
+        <h4>How the loopback listener survives restarts</h4>
+        <div class="vb-block" data-vb-block="b-p1">
+          <button type="button" class="vb-block-plus" title="Add note to this paragraph">+</button>
+          <p>The loopback carrier in <code>lf server</code> binds a deterministic port per server socket with a fresh 32-byte random in-memory token, so drafts and receipts in browser <code>localStorage</code> survive <code>lf install</code> restarts while old URLs return 404.</p>
+          <div class="vb-block-threads"></div>
+        </div>
+        <div class="vb-block" data-vb-block="b-p2">
+          <button type="button" class="vb-block-plus" title="Add note to this paragraph">+</button>
+          <p>Task pages always steer via <code>task.steer</code>, never the building worker's <code>session.steer</code>, because headless Graph workers exit right after building the page.</p>
+          <div class="vb-block-threads"></div>
+        </div>
 
-        <div class="proto-section" data-section="What we built">
-          <div class="proto-title">What we built: hold direct chats in <code>lf holder run</code> and split session endings</div>
-          <p>
-            Whenever <code>lf server</code> is running, interactive <code>lf</code>, <code>lf -a agy</code>, and <code>lf &lt;skill&gt;</code> launches now run inside <code>lf holder run</code> instead of directly in Rex's PTY. Opening the same conversation in Desktop or another Rex tab attaches as a second viewer instead of killing and restarting the provider. Standalone chats idle with zero viewers for 15 minutes retire cleanly without auto-committing worktree edits.
-          </p>
+        <div class="codeblock">
+          <div class="codeblock-head">
+            <span>rust/loopflow/src/server/loopback.rs</span>
+            <span>click + or Shift+click a range</span>
+          </div>
+          <table class="diff-table" id="vb-diff">
+            <tr class="diff-line diff-add" data-line="110"><td class="ln"><button type="button" class="gutter-plus" title="Comment on line 110">+</button>110</td><td class="sign">+</td><td>fn preferred_port(socket: &amp;Path) -&gt; u16 {</td></tr>
+            <tr class="diff-line diff-add" data-line="111"><td class="ln"><button type="button" class="gutter-plus" title="Comment on line 111">+</button>111</td><td class="sign">+</td><td>    use sha2::{Digest, Sha256};</td></tr>
+            <tr class="diff-line diff-add" data-line="112"><td class="ln"><button type="button" class="gutter-plus" title="Comment on line 112">+</button>112</td><td class="sign">+</td><td>    let digest = Sha256::digest(socket.as_os_str().as_encoded_bytes());</td></tr>
+            <tr class="diff-line diff-add" data-line="113"><td class="ln"><button type="button" class="gutter-plus" title="Comment on line 113">+</button>113</td><td class="sign">+</td><td>    49152 + u16::from_be_bytes([digest[0], digest[1]]) % 16384</td></tr>
+            <tr class="diff-line diff-add" data-line="114"><td class="ln"><button type="button" class="gutter-plus" title="Comment on line 114">+</button>114</td><td class="sign">+</td><td>}</td></tr>
+          </table>
+        </div>
+      </div>
 
-          <div class="hazard-band">
-            <span class="status fail">Technical hazard surfaced in <code>qa</code></span>
-            <p style="margin: 6px 0 0;">
-              <strong>Copied-DB demos sent <code>SIGTERM</code> to production's live <code>agy</code> PIDs.</strong> A snapshot of prod's store under <code>LF_HOME=/tmp/lf-demo-1063</code> cleared <code>held_terminals</code> on startup while retaining prod's <code>agent_pid</code> column, so opening a Task fell through to <code>TakeOver</code> and signaled live prod processes.
-            </p>
+      <div class="vb-footer">
+        <div id="vb-drawer" class="vb-drawer" hidden></div>
+        <div class="vb-footer-row">
+          <button type="button" class="btn-quiet" id="vb-drawer-toggle">1 queued ▴</button>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <span id="vb-status" style="font-size:12px;color:var(--lf-success-ink);"></span>
+            <button type="button" class="btn-accent" id="vb-send">Steer LOO-1109 ⌘↩</button>
           </div>
         </div>
+      </div>
+    </div>
 
-        <div class="proto-section" data-section="Key data structures and APIs">
-          <h3 style="margin-top: 0;">Key data structures and APIs</h3>
-          <div class="table-wrap">
-            <table style="margin: 8px 0 4px;">
-              <thead>
-                <tr>
-                  <th style="width: 26%;">Type / table / API</th>
-                  <th style="width: 34%;">Shape &amp; location</th>
-                  <th style="width: 40%;">Ownership &amp; invariant going forward</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><code>HeldTerminal</code></td>
-                  <td><code>held_terminals(id, session_id, pid, viewers)</code></td>
-                  <td>Owns the live PTY and viewer count. Cleared on server restart; any new surface attaches by <code>held_terminal_id</code>.</td>
-                </tr>
-                <tr>
-                  <td><code>ResumeIntent</code></td>
-                  <td><code>Attach { terminal_id } | TakeOver { pid } | FreshStart</code><br><code>session/resume.rs:142</code></td>
-                  <td>Single decision seam for every viewer. Prefers live <code>Attach</code> before legacy raw-PID <code>TakeOver</code>.</td>
-                </tr>
-                <tr>
-                  <td><code>EndReason</code></td>
-                  <td><code>Quit | Idle | TaskCompleted | Died</code><br><code>migrations/agent_end_reason.sql</code></td>
-                  <td>Additive nullable column wired into <code>store_revisions</code> triggers. Reopening a completed Task stays <code>closed</code>.</td>
-                </tr>
-              </tbody>
+    <div class="vision-meta-grid">
+      <div class="vision-meta-card">
+        <div class="label">First slice demo</div>
+        Click <code>+</code> on line <code>113</code> (or Shift+click <code>110–113</code>) inside a real <code>&lt;lf-diff&gt;</code>: an inline thread opens directly under that line, stamps <code>loopback.rs:110–113</code>, and joins the collapsible queue bar below. Same exact layout in Desktop Files and Chrome.
+      </div>
+      <div class="vision-meta-card">
+        <div class="label">Appeal</div>
+        Zero width dependency, natural muscle memory for code review (multi-line diff ranges!), no floating boxes blocking code you are trying to read, and you can inspect the exact one-line steer before sending.
+      </div>
+      <div class="vision-meta-card">
+        <div class="label">Cost &amp; risk</div>
+        ~200 lines of JS/CSS (simplest geometry; no collision solver). Inserting cards inline shifts text down while reading, and long reviews require opening the queue drawer to see all notes at once.
+      </div>
+    </div>
+  </section>
+
+  <!-- =======================================================
+       VISION C: NOTION FLOATING BUBBLE + HOVER + SIDEBAR
+       ======================================================= -->
+  <section class="vision" id="vision-c">
+    <div class="vision-header">
+      <div class="vision-kicker">
+        <span class="badge is-proposed">Proposed · Vision C</span>
+        <span>Inspired by Notion</span>
+      </div>
+      <h2>C. Calm reading surface: floating bubble, hover highlights, slide-over sidebar</h2>
+      <p class="vision-truth">The page never shifts or splits into columns; selecting text floats a tight action pill, saved notes stay as quiet underlined highlights you hover to read, and a slide-over sidebar shows everything on demand.</p>
+    </div>
+
+    <div class="playground" id="pg-c">
+      <div class="pg-toolbar">
+        <div class="pg-toolbar-left">
+          <span class="pg-hint">Try: <strong>hover the highlighted phrase</strong> to read/edit · <strong>drag any text</strong> for the Notion pill (or press <kbd>c</kbd>) · toggle the sidebar</span>
+        </div>
+        <div>
+          <button type="button" id="vc-sidebar-btn">Comments (1)</button>
+        </div>
+      </div>
+
+      <div class="vc-shell">
+        <div class="vc-body doc-sample" id="vc-doc">
+          <h4>How the loopback listener survives restarts</h4>
+          <p>The loopback carrier in <code>lf server</code> binds a <span class="hl-span" data-vc-id="vc-seed-1">deterministic port per server socket</span> with a fresh 32-byte random in-memory token, so drafts and receipts in browser <code>localStorage</code> survive <code>lf install</code> restarts while old URLs return 404.</p>
+          <p>Task pages always steer via <code>task.steer</code>, never the building worker's <code>session.steer</code>, because headless Graph workers exit right after building the page.</p>
+
+          <div class="codeblock">
+            <div class="codeblock-head">
+              <span>rust/loopflow/src/server/loopback.rs</span>
+              <span>select any code or prose to comment</span>
+            </div>
+            <table class="diff-table" id="vc-diff">
+              <tr class="diff-line diff-add" data-line="110"><td class="ln">110</td><td class="sign">+</td><td>fn preferred_port(socket: &amp;Path) -&gt; u16 {</td></tr>
+              <tr class="diff-line diff-add" data-line="111"><td class="ln">111</td><td class="sign">+</td><td>    use sha2::{Digest, Sha256};</td></tr>
+              <tr class="diff-line diff-add" data-line="112"><td class="ln">112</td><td class="sign">+</td><td>    let digest = Sha256::digest(socket.as_os_str().as_encoded_bytes());</td></tr>
+              <tr class="diff-line diff-add" data-line="113"><td class="ln">113</td><td class="sign">+</td><td>    49152 + u16::from_be_bytes([digest[0], digest[1]]) % 16384</td></tr>
+              <tr class="diff-line diff-add" data-line="114"><td class="ln">114</td><td class="sign">+</td><td>}</td></tr>
             </table>
           </div>
         </div>
 
-        <div class="proto-section" data-section="How it works (resume.rs)">
-          <h3 style="margin-top: 0;">How it works: the attachment seam</h3>
-          <div class="code-block">
-            <div class="code-head">
-              <span><code>rust/loopflow-execution/src/session/resume.rs</code> · lines 142-150</span>
-              <button type="button" id="notes-toggle" aria-pressed="true">Hide line notes</button>
-            </div>
-            <div class="code-lines">
-              <div class="code-line"><span class="ln">142</span><span>pub fn resolve_resume_intent(session: &amp;SessionRow, holder: Option&lt;&amp;HeldTerminal&gt;) -&gt; ResumeIntent {</span></div>
-              <div class="code-line add"><span class="ln">143</span><span>+    if let Some(h) = holder.filter(|h| h.is_alive()) {</span></div>
-              <div class="code-line add"><span class="ln">144</span><span>+        return ResumeIntent::Attach { terminal_id: h.id.clone() };</span></div>
-              <div class="code-line add"><span class="ln">145</span><span>+    }</span></div>
-              <div class="line-note seam-note"><strong>Why this order matters:</strong> Every surface hits this branch first, making multi-viewer opens lossless across Rex and Desktop.</div>
-              <div class="code-line add bug"><span class="ln">146</span><span>+    if let Some(pid) = session.agent_pid {</span></div>
-              <div class="code-line add bug"><span class="ln">147</span><span>+        return ResumeIntent::TakeOver { pid };</span></div>
-              <div class="code-line add bug"><span class="ln">148</span><span>+    }</span></div>
-              <div class="line-note seam-note"><strong>Where F1 enters:</strong> Legacy unheld rows carry only a raw PID with no store ID, so a copied DB signals another <code>LF_HOME</code>'s process.</div>
-              <div class="code-line"><span class="ln">149</span><span>    ResumeIntent::FreshStart</span></div>
-              <div class="code-line"><span class="ln">150</span><span>}</span></div>
-            </div>
+        <aside class="vc-sidebar" id="vc-sidebar" aria-label="Comments sidebar">
+          <div class="vc-sidebar-head">
+            <span id="vc-sidebar-title">Comments (1)</span>
+            <button type="button" class="btn-quiet" id="vc-sidebar-close">Close</button>
           </div>
+          <div class="vc-sidebar-list" id="vc-sidebar-list"></div>
+        </aside>
+      </div>
+    </div>
+
+    <div class="vision-meta-grid">
+      <div class="vision-meta-card">
+        <div class="label">First slice demo</div>
+        Drag across any text: a tight dark/light pill floats above it (<code>Comment</code> · <code>Flag</code> · <code>Copy</code>). Press <code>c</code>, type, <code>⌘↩</code> — the box disappears, leaving only a warm underline. Hover the underline to edit/delete, or open the slide-over <code>Comments</code> drawer to skim all notes.
+      </div>
+      <div class="vision-meta-card">
+        <div class="label">Appeal</div>
+        Calmest reading experience; zero layout jump, works at every width (overlay drawer fits inside Desktop Files), and feels immediately familiar from Notion.
+      </div>
+      <div class="vision-meta-card">
+        <div class="label">Cost &amp; risk</div>
+        ~220 lines of JS/CSS. Notes are hidden until you hover or open the drawer (easier to forget what you already noted while scanning a long review page), and hover popovers can feel twitchy when scrolling.
+      </div>
+    </div>
+  </section>
+
+  <!-- =======================================================
+       VISION D: RADICAL SUCCESS — AGENT STEER COMPOSER + SUGGEST EDIT
+       ======================================================= -->
+  <section class="vision" id="vision-d">
+    <div class="vision-header">
+      <div class="vision-kicker">
+        <span class="badge is-radical">Radical success · Vision D</span>
+        <span>Built for steering an agent (T3 Code composer + Docs Suggest-edit)</span>
+      </div>
+      <h2>D. The review <em>is</em> a live steer composer (with inline Suggest-edit)</h2>
+      <p class="vision-truth">Stop modeling agent review as human comment threads: every highlight, diff line, and inline text suggestion attaches as a live chip to a T3 Code-style steer box at the bottom of the page.</p>
+    </div>
+
+    <div class="playground" id="pg-d">
+      <div class="pg-toolbar">
+        <div class="pg-toolbar-left">
+          <span class="pg-hint">Try: <strong>drag prose</strong> → <code>Suggest edit</code> (<kbd>s</kbd>) or <code>Note</code> (<kbd>c</kbd>) · <strong>click diff <code>+</code></strong> with intent chips · edit overall direction below</span>
         </div>
-
-        <div class="proto-section" data-section="Decisions">
-          <h3 style="margin-top: 0;">Decisions (<code>data-choice</code> + optional <code>data-action</code>)</h3>
-
-          <div class="choice-row" data-choice="f1" data-label="F1 (copied-DB PID kill)">
-            <div class="choice-text">
-              <strong>F1. Scope PID signaling to <code>LF_HOME</code> store identity</strong><br>
-              <span class="small">~25 lines in <code>process/signal.rs</code>, no schema change.</span>
-            </div>
-            <div class="choice-controls">
-              <button type="button" data-value="Fix here" data-action="steer">Fix here</button>
-              <button type="button" data-value="File Task" data-action="task-create">File Task</button>
-              <button type="button" data-value="Drop">Drop</button>
-            </div>
-          </div>
-
-          <div class="choice-row" data-choice="f2" data-label="F2 (Desktop Open here button)">
-            <div class="choice-text">
-              <strong>F2. Desktop "Open here" placeholder on ended panes</strong><br>
-              <span class="small">Zero Swift files touched in PR #2043.</span>
-            </div>
-            <div class="choice-controls">
-              <button type="button" data-value="Fix here" data-action="steer">Fix here</button>
-              <button type="button" data-value="File Task" data-action="task-create">File Task</button>
-              <button type="button" data-value="Drop">Drop</button>
-            </div>
-          </div>
-
-          <div class="choice-row" data-choice="direction" data-label="Next step">
-            <div class="choice-text">
-              <strong>Overall call on PR #2043</strong>
-            </div>
-            <div class="choice-controls">
-              <button type="button" data-value="Move on to delivery">Move on</button>
-              <button type="button" data-value="Iterate on this branch">Iterate</button>
-            </div>
-          </div>
-
-          <div class="open-q" data-question="note" data-label="Additional direction">
-            <strong style="font-size: 14px;">Any other direction (<code>data-question</code>)</strong>
-            <textarea placeholder="Optional note or question to send with your choices..."></textarea>
-          </div>
-
-          <div id="attached-comments-wrap" style="margin-top: 14px; display: none;">
-            <strong style="font-size: 14px;">Highlighted comments attached to this sheet</strong>
-            <div class="comment-list" id="comment-list"></div>
-          </div>
+        <div>
+          <button type="button" class="btn-quiet" id="vd-preview-toggle">Preview steer</button>
         </div>
       </div>
 
-      <div class="dispatch-drawer">
-        <div class="dispatch-head">
-          <strong id="dispatch-title">Loopback POST to lf server (Rex agent-browser split)</strong>
-          <span class="small" id="dispatch-status">Waiting for Submit ⌘↩</span>
+      <div class="vd-body doc-sample" id="vd-doc">
+        <h4>How the loopback listener survives restarts</h4>
+        <p>The loopback carrier in <code>lf server</code> binds <span class="vd-suggestion" data-vd-id="vd-seed-1"><del class="vd-suggest-del">127.0.0.1:0</del><ins class="vd-suggest-ins" title="Click to remove suggestion">a stable per-socket port</ins></span> with a fresh 32-byte random in-memory token, so drafts and receipts in browser <code>localStorage</code> survive <code>lf install</code> restarts while old URLs return 404.</p>
+        <p>Task pages always steer via <code>task.steer</code>, never the building worker's <code>session.steer</code>, because headless Graph workers exit right after building the page.</p>
+
+        <div class="codeblock">
+          <div class="codeblock-head">
+            <span>rust/loopflow/src/server/loopback.rs</span>
+            <span>click + for quick Change / Question / File Task</span>
+          </div>
+          <table class="diff-table" id="vd-diff">
+            <tr class="diff-line diff-add" data-line="110"><td class="ln"><button type="button" class="gutter-plus" title="Attach line 110">+</button>110</td><td class="sign">+</td><td>fn preferred_port(socket: &amp;Path) -&gt; u16 {</td></tr>
+            <tr class="diff-line diff-add" data-line="111"><td class="ln"><button type="button" class="gutter-plus" title="Attach line 111">+</button>111</td><td class="sign">+</td><td>    use sha2::{Digest, Sha256};</td></tr>
+            <tr class="diff-line diff-add" data-line="112"><td class="ln"><button type="button" class="gutter-plus" title="Attach line 112">+</button>112</td><td class="sign">+</td><td>    let digest = Sha256::digest(socket.as_os_str().as_encoded_bytes());</td></tr>
+            <tr class="diff-line diff-add" data-line="113"><td class="ln"><button type="button" class="gutter-plus" title="Attach line 113">+</button>113</td><td class="sign">+</td><td>    49152 + u16::from_be_bytes([digest[0], digest[1]]) % 16384</td></tr>
+            <tr class="diff-line diff-add" data-line="114"><td class="ln"><button type="button" class="gutter-plus" title="Attach line 114">+</button>114</td><td class="sign">+</td><td>}</td></tr>
+          </table>
         </div>
-        <pre id="dispatch-out" style="margin: 0;">Highlight text or click a choice above, then hit ⌘↩ to preview what the page dispatches.</pre>
+      </div>
+
+      <div class="vd-dock">
+        <div class="vd-chips" id="vd-chips"></div>
+        <div class="vd-composer-row">
+          <input type="text" class="vd-composer-input" id="vd-overall" placeholder="Add overall direction (optional) — e.g. 'Fix line 113, otherwise deliver'">
+          <button type="button" class="btn-accent" id="vd-send">Steer LOO-1109 ⌘↩</button>
+        </div>
+        <div id="vd-preview" class="steer-preview" hidden></div>
+        <div id="vd-toast" class="vd-toast" hidden></div>
+      </div>
+    </div>
+
+    <div class="vision-meta-grid">
+      <div class="vision-meta-card">
+        <div class="label">First slice demo</div>
+        Select a phrase, press <code>s</code>, tweak two words → inline <s>old</s> <strong>new</strong> appears and attaches as a chip in the bottom composer; click diff line <code>113</code>, tap <code>Question</code>, type <code>"collision retry?"</code>; add <code>"otherwise ship it"</code> in the composer bar and press <code>⌘↩</code>.
+      </div>
+      <div class="vision-meta-card">
+        <div class="label">Appeal</div>
+        Purpose-built for human→agent review: surgical Suggest-edits cut typing in half, the bottom dock lets you see/edit every attached anchor AND write overall direction in one place, and Desktop's existing conversation input already acts as this dock natively.
+      </div>
+      <div class="vision-meta-card">
+        <div class="label">Cost &amp; risk</div>
+        ~400 lines of JS/CSS. More surface area to keep understated; inline <code>&lt;del&gt;/&lt;ins&gt;</code> wrapping needs a clean fallback when selections cross nested tags; browser gets the composer dock while Desktop keeps its native <code>ReviewCommentsStrip</code> + conversation input.
       </div>
     </div>
   </section>
 
-  <!-- ==================== ONE TRANSPORT, THREE HOSTS ==================== -->
-  <section id="transport">
-    <h2>One page runtime, three hosts (zero Desktop lock-in)</h2>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th style="width: 20%;">Host</th>
-            <th style="width: 30%;">How the page opens</th>
-            <th style="width: 50%;">What <code>Submit ⌘↩</code> does</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><strong>Rex split or browser</strong><br><span class="status proposed">New</span></td>
-            <td><code>lf server</code> serves <code>scratch/*.html</code> on <code>http://127.0.0.1:&lt;port&gt;/p/&lt;token&gt;/...</code>; <code>lf open --file</code> opens it in a Rex browser split or default browser.</td>
-            <td>Same-origin <code>POST /p/&lt;token&gt;/submit</code> to <code>lf server</code>. Delivers your choices + highlight comments straight to the Task/Session (via <code>lf steer</code> or active session input), and optionally runs allowlisted <code>lf</code> mutations.</td>
-          </tr>
-          <tr>
-            <td><strong>Loopflow Desktop</strong><br><span class="status existing">Extends TaskHTMLView</span></td>
-            <td>Opened in <code>TaskHTMLView</code> (offline <code>WKContentRuleList</code> stays untouched).</td>
-            <td>Detects <code>window.loopflow</code> (<code>WKScriptMessageHandler</code>) and feeds straight into <code>ReviewCommentsStrip</code> / <code>addToConversation</code> beside your Diff comments (sending stays yours).</td>
-          </tr>
-          <tr>
-            <td><strong>Offline <code>file://</code></strong><br><span class="status existing">Fallback</span></td>
-            <td>Double-clicked or opened when <code>lf server</code> is stopped.</td>
-            <td>Neither <code>window.loopflow</code> nor loopback endpoint exists; button becomes <strong>Copy reply ⌘↩</strong> and copies the exact same formatted text.</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </section>
+  <!-- =======================================================
+       NUMBERED QUESTIONS
+       ======================================================= -->
+  <section class="questions" id="questions">
+    <h2>Questions</h2>
+    <p style="color:var(--lf-text-secondary);font-size:14px;">Reply in chat with codes like <code>1b, 2a, 3b</code> (or mix pieces, e.g. <code>B + D's suggest-edit</code>), or pick below and copy.</p>
 
-  <!-- ==================== SAFETY & ACTION SCOPE ==================== -->
-  <section id="safety">
-    <h2>Key design fork: what should the HTML be allowed to trigger?</h2>
-    <p class="small">
-      Both options use the exact same loopback server route (bound strictly to <code>127.0.0.1</code>, capability token per session, zero CORS, same-origin check). They differ on whether the page only steers the agent or also invokes <code>lf</code> commands directly.
-    </p>
-
-    <div class="option-block">
-      <h3>Option A: Steer-only (smallest surface, agent acts in the Rex left pane)</h3>
-      <p>
-        <strong>How it works:</strong> Submitting the page does exactly one thing: calls <code>lf steer</code> (or delivers input to the active Session) with your clicked choices, free-form direction, and anchored highlight comments. The live agent sitting in your Rex left pane receives that message immediately and executes whatever you asked (fixing F1, calling <code>lf task create</code> for F2, answering your highlighted questions, or advancing).
-      </p>
-      <div class="option-meta">
-        <div><strong>Appeal:</strong> Tiny server endpoint (one route: <code>POST /p/:token/steer</code>). Zero command-execution policy to maintain, zero risk of an HTML artifact silently running mutations, and every decision stays visible in the Session transcript.</div>
-        <div><strong>Trade-off:</strong> Simple mechanical actions (like "File Task for F2" or "Move on to delivery") still cost one LLM turn in the left pane instead of firing instantly.</div>
+    <div class="q-group" data-q="1" data-q-label="1. Primary note-taking mechanism">
+      <div class="q-label">1. Which base mechanism feels best to use?</div>
+      <div class="q-choices">
+        <button type="button" data-val="1a: Google Docs margin rail">1a. Google Docs margin rail</button>
+        <button type="button" data-val="1b: T3 Code / GitHub inline threads">1b. T3 Code / GitHub inline threads</button>
+        <button type="button" data-val="1c: Notion bubble + hover + sidebar">1c. Notion bubble + hover + sidebar</button>
+        <button type="button" data-val="1d: Agent steer composer + suggest edit">1d. Agent steer composer + suggest edit</button>
+        <button type="button" data-val="1e: Hybrid (describe below)">1e. Hybrid (mix pieces)</button>
       </div>
     </div>
 
-    <div class="option-block">
-      <h3>Option B: Steer + narrow allowlisted <code>lf</code> actions</h3>
-      <p>
-        <strong>How it works:</strong> Submit always previews the exact actions before sending. Choices and highlight comments go to <code>lf steer</code>; explicit structured button intents (strictly allowlisted in Rust: <code>task.create</code>, <code>task.advance</code>, <code>task.land</code>, <code>steer</code>) can also execute directly in <code>lf server</code> with zero LLM latency. Arbitrary shell commands are never accepted.
-      </p>
-      <div class="option-meta">
-        <div><strong>Appeal:</strong> Clicking <code>File Task</code> on F2 + <code>Move on</code> executes deterministically in milliseconds, even if no interactive agent is currently attached to the Task.</div>
-        <div><strong>Trade-off:</strong> Larger server contract (typed action schema + preview UI + error handling when an action fails mid-batch).</div>
+    <div class="q-group" data-q="2" data-q-label="2. Diff line commenting">
+      <div class="q-label">2. On <code>&lt;lf-diff&gt;</code> and <code>&lt;lf-file&gt;</code> blocks, should gutter <code>+</code> clicks (and Shift+click ranges) be first-class?</div>
+      <div class="q-choices">
+        <button type="button" data-val="2a: Yes, gutter + and Shift+click ranges">2a. Yes — gutter <code>+</code> and Shift+click line ranges</button>
+        <button type="button" data-val="2b: Gutter + single line only">2b. Gutter <code>+</code> single line only</button>
+        <button type="button" data-val="2c: Text drag selection only">2c. Keep text drag selection only</button>
       </div>
     </div>
-  </section>
 
-  <!-- ==================== NUMBERED QUESTIONS ==================== -->
-  <section id="questions">
-    <h2>Open questions</h2>
-    <p class="small">Reply with codes like <code>1a, 2b, 3a</code>, or say "build this" with your picks.</p>
-
-    <ol class="q-list">
-      <li class="q-item">
-        <div class="q-title">1. When you submit from the HTML page in a Rex split, what should it execute?</div>
-        <ul class="q-opts">
-          <li><span class="q-key">1a.</span> Steer-only (Option A): always sends one structured <code>lf steer</code> / session message to the agent in the left pane, and the agent runs <code>lf task create</code> or iterates in front of you.</li>
-          <li><span class="q-key">1b.</span> Steer + narrow allowlisted <code>lf</code> actions (Option B): highlights/notes steer the agent, while explicit buttons can also trigger <code>task create</code> / <code>advance</code> / <code>land</code> directly through <code>lf server</code> after previewing.</li>
-        </ul>
-      </li>
-
-      <li class="q-item">
-        <div class="q-title">2. In Rex, should submit fire the steer immediately, or type into the agent's unsent input (like Desktop)?</div>
-        <ul class="q-opts">
-          <li><span class="q-key">2a.</span> Fire <code>lf steer</code> immediately on <code>⌘↩</code> (works identically whether the agent is running, idle, or headless, and needs no PTY key-injection).</li>
-          <li><span class="q-key">2b.</span> Type into the active terminal without pressing Enter when an interactive agent is attached in Rex (matches Desktop's "sending stays yours"), falling back to <code>lf steer</code> otherwise.</li>
-        </ul>
-      </li>
-
-      <li class="q-item">
-        <div class="q-title">3. How should the page kit ship in the first slice stacked after <code>LOO-1104</code>?</div>
-        <ul class="q-opts">
-          <li><span class="q-key">3a.</span> End-to-end thin slice: <code>lf server</code> loopback page host + one shared runtime (highlight-to-comment + <code>data-choice</code>/<code>data-multiselect</code>/<code>data-question</code>) + <code>TaskHTMLView</code> bridge + updated <code>ship-review</code>/<code>explore</code>/<code>concept-review</code>/<code>qa</code> skills (and fold in <code>9da7f05a58</code>'s visual-language &amp; "system" cleanup).</li>
-          <li><span class="q-key">3b.</span> Same as 3a, plus a full <code>lf page build</code> compiler with real <code>git diff</code> injection and <code>.lf/components/</code> overrides in the same Task.</li>
-          <li><span class="q-key">3c.</span> Split into two Tasks: (1) interactive loopback/Desktop review runtime + skill prompt upgrade (folding in <code>9da7f05a58</code>), then (2) <code>lf page build</code> component compiler once the live loop feels right.</li>
-        </ul>
-      </li>
-    </ol>
-  </section>
-
-</div>
-
-<!-- Floating highlight-to-comment popover -->
-<div class="sel-popover" id="sel-popover" role="dialog" aria-label="Comment on highlighted text">
-  <div class="sel-popover-quote" id="sel-quote-preview"></div>
-  <input type="text" id="sel-comment-input" placeholder="Ask a question or leave a comment..." autocomplete="off">
-  <div class="sel-popover-actions">
-    <span class="small" id="sel-section-label"></span>
-    <div style="display: flex; gap: 6px;">
-      <button type="button" id="sel-cancel">Cancel</button>
-      <button type="button" class="accent" id="sel-save">Add</button>
+    <div class="q-group" data-q="3" data-q-label="3. Bottom bar in browser">
+      <div class="q-label">3. In the browser (outside Desktop), what should the bottom bar be?</div>
+      <div class="q-choices">
+        <button type="button" data-val="3a: Compact count + collapsible queue preview">3a. Compact count + expandable queue preview (Vision B)</button>
+        <button type="button" data-val="3b: T3 Code chip dock + overall direction input">3b. Attached-chip composer dock + overall direction input (Vision D)</button>
+        <button type="button" data-val="3c: Minimal count + Steer button as today">3c. Minimal count + Steer button as today</button>
+      </div>
     </div>
-  </div>
-</div>
+
+    <div class="q-group" data-q="4" data-q-label="4. Scope for LOO-1109">
+      <div class="q-label">4. Should we fold the chosen note-taking upgrade into LOO-1109 now, or land LOO-1109 as-is and build this as a follow-up Task?</div>
+      <div class="q-choices">
+        <button type="button" data-val="4a: Build it in LOO-1109 now">4a. Build it in LOO-1109 before landing</button>
+        <button type="button" data-val="4b: Land LOO-1109 first, file follow-up Task">4b. Land LOO-1109 first, build in a follow-up Task</button>
+      </div>
+    </div>
+
+    <div class="q-group">
+      <div class="q-label">5. Mix-and-match or reactions</div>
+      <textarea class="q-textarea" id="q-notes" placeholder="e.g. 'Love B's diff gutter + D's bottom composer dock + A's margin cards when wide…'"></textarea>
+    </div>
+
+    <div class="q-copy-bar">
+      <button type="button" class="btn-accent" id="q-copy">Copy answers</button>
+      <span id="q-copy-status" style="font-size:12.5px;color:var(--lf-success-ink);"></span>
+    </div>
+  </section>
+</main>
 
 <script>
 (function () {
-  const root = document.documentElement;
-  const toggleBtn = document.getElementById("theme-toggle");
-  function isDark() {
-    const t = root.getAttribute("data-theme");
-    if (t === "dark") return true;
-    if (t === "light") return false;
-    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-  }
-  function syncThemeLabel() { toggleBtn.textContent = isDark() ? "Light" : "Dark"; }
-  syncThemeLabel();
-  toggleBtn.addEventListener("click", function () {
-    root.setAttribute("data-theme", isDark() ? "light" : "dark");
-    syncThemeLabel();
-  });
+  "use strict";
 
-  const notesBtn = document.getElementById("notes-toggle");
-  let notesOn = true;
-  notesBtn.addEventListener("click", function () {
-    notesOn = !notesOn;
-    document.querySelectorAll(".seam-note").forEach(function (el) { el.classList.toggle("hidden", !notesOn); });
-    notesBtn.setAttribute("aria-pressed", String(notesOn));
-    notesBtn.textContent = notesOn ? "Hide line notes" : "Show line notes";
-  });
+  // =========================================================
+  // Shared helpers (safe DOM highlight across inline <code>)
+  // =========================================================
+  let uid = 1;
+  function nextId(prefix) { return prefix + "-" + (uid++); }
+  function oneLine(s) { return String(s || "").replace(/\s+/g, " ").trim(); }
 
-  const protoRoot = document.getElementById("proto-root");
-  const commentArea = document.getElementById("commentable-area");
-  const strip = document.getElementById("feedback-strip");
-  const stripCount = document.getElementById("strip-count");
-  const stripSend = document.getElementById("strip-send");
-  const stripClear = document.getElementById("strip-clear");
-  const commentWrap = document.getElementById("attached-comments-wrap");
-  const commentList = document.getElementById("comment-list");
-  const protoUrl = document.getElementById("proto-url");
-  const protoConn = document.getElementById("proto-conn");
-  const dispatchTitle = document.getElementById("dispatch-title");
-  const dispatchStatus = document.getElementById("dispatch-status");
-  const dispatchOut = document.getElementById("dispatch-out");
-
-  let activeHost = "rex";
-  const state = { choices: {}, questions: {}, comments: [] };
-  let nextCommentId = 1;
-
-  const hostMeta = {
-    rex: {
-      url: "http://127.0.0.1:49218/p/t_9f4a/scratch/ship-review.html",
-      connClass: "status ok",
-      connText: "Connected to lf server (LOO-1097)",
-      btn: "Steer agent in Rex ⌘↩",
-      title: "Loopback POST to lf server (Rex agent-browser split)"
-    },
-    desktop: {
-      url: "TaskHTMLView · scratch/ship-review.html (offline)",
-      connClass: "status work",
-      connText: "Desktop bridge (window.loopflow)",
-      btn: "Send to conversation ⌘↩",
-      title: "Desktop ReviewCommentsStrip -> addToConversation (unsent input)"
-    },
-    offline: {
-      url: "file:///Users/jack/src/loopflow.../scratch/ship-review.html",
-      connClass: "status existing",
-      connText: "Offline fallback (no server)",
-      btn: "Copy reply ⌘↩",
-      title: "Clipboard fallback (paste into any chat)"
+  // Wrap text-node segments inside `range` with `<span class="hl-span">` so
+  // highlights work cleanly even across inline `<code>` elements.
+  function wrapRange(range, dataAttr, id, root) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const hits = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      if (!node.nodeValue || !node.nodeValue.trim()) continue;
+      if (node.parentElement && node.parentElement.closest("button, textarea, input, .gutter-plus, .vb-thread-box, .va-narrow-badge")) continue;
+      if (!range.intersectsNode(node)) continue;
+      const start = node === range.startContainer ? range.startOffset : 0;
+      const end = node === range.endContainer ? range.endOffset : node.nodeValue.length;
+      if (end > start) hits.push({ node, start, end });
     }
-  };
-
-  function syncHostUI() {
-    const m = hostMeta[activeHost];
-    protoUrl.innerHTML = "<code>" + m.url + "</code>";
-    protoConn.className = m.connClass;
-    protoConn.textContent = m.connText;
-    stripSend.textContent = m.btn;
-    dispatchTitle.textContent = m.title;
+    const created = [];
+    for (let i = hits.length - 1; i >= 0; i--) {
+      const { node: tn, start, end } = hits[i];
+      const text = tn.nodeValue;
+      const before = text.slice(0, start);
+      const mid = text.slice(start, end);
+      const after = text.slice(end);
+      const frag = document.createDocumentFragment();
+      if (before) frag.appendChild(document.createTextNode(before));
+      const span = document.createElement("span");
+      span.className = "hl-span";
+      span.setAttribute(dataAttr, id);
+      span.textContent = mid;
+      frag.appendChild(span);
+      if (after) frag.appendChild(document.createTextNode(after));
+      tn.parentNode.replaceChild(frag, tn);
+      created.push(span);
+    }
+    return created;
   }
 
-  document.querySelectorAll(".host-btn").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      activeHost = btn.getAttribute("data-host");
-      document.querySelectorAll(".host-btn").forEach(function (b) {
-        b.setAttribute("aria-pressed", String(b === btn));
+  function unwrapSpans(root, dataAttr, id) {
+    root.querySelectorAll("[" + dataAttr + '="' + id + '"]').forEach((span) => {
+      const parent = span.parentNode;
+      while (span.firstChild) parent.insertBefore(span.firstChild, span);
+      parent.removeChild(span);
+      parent.normalize();
+    });
+  }
+
+  // Global floating pill & composer manager (one active at a time)
+  let floatPill = null;
+  let floatComposer = null;
+  let pendingSelection = null; // { panel, range, rect, quote }
+
+  function dismissFloatPill() {
+    if (floatPill) { floatPill.remove(); floatPill = null; }
+  }
+  function dismissFloatComposer() {
+    if (floatComposer) { floatComposer.remove(); floatComposer = null; }
+  }
+  function dismissFloats() {
+    dismissFloatPill();
+    dismissFloatComposer();
+  }
+
+  function showFloatPill(rect, buttons) {
+    dismissFloatPill();
+    floatPill = document.createElement("div");
+    floatPill.className = "float-pill";
+    buttons.forEach((b, idx) => {
+      if (idx > 0) {
+        const sep = document.createElement("span");
+        sep.className = "pill-sep";
+        floatPill.appendChild(sep);
+      }
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = b.label;
+      btn.addEventListener("mousedown", (e) => e.preventDefault());
+      btn.addEventListener("click", () => {
+        dismissFloatPill();
+        b.onClick();
       });
-      syncHostUI();
-      if (totalCount() > 0) renderDispatch(false);
+      floatPill.appendChild(btn);
     });
-  });
-
-  function totalCount() {
-    const c = Object.keys(state.choices).length;
-    const q = Object.values(state.questions).filter(function (x) { return x.text.trim().length > 0; }).length;
-    return c + q + state.comments.length;
+    document.body.appendChild(floatPill);
+    const pw = floatPill.offsetWidth;
+    const top = Math.max(8, rect.top - 40);
+    const left = Math.max(8, Math.min(window.innerWidth - pw - 8, rect.left + rect.width / 2 - pw / 2));
+    floatPill.style.top = top + "px";
+    floatPill.style.left = left + "px";
   }
 
-  function buildMessage() {
-    const lines = ["Review feedback on scratch/ship-review.html (LOO-1097 @ ff1e5d9):"];
-    Object.values(state.choices).forEach(function (item) {
-      lines.push("- " + item.label + ": " + item.value);
-    });
-    Object.values(state.questions).forEach(function (item) {
-      if (item.text.trim()) lines.push("- " + item.label + ": " + item.text.trim());
-    });
-    state.comments.forEach(function (cm, idx) {
-      lines.push("(" + (idx + 1) + ') [' + cm.section + '] "' + cm.quote + '" -> ' + cm.text);
-    });
-    return lines.join("\n");
-  }
+  // =========================================================
+  // VISION A: Google Docs Margin Rail
+  // =========================================================
+  const vaLayout = document.getElementById("va-layout");
+  const vaDoc = document.getElementById("va-doc");
+  const vaRail = document.getElementById("va-rail");
+  const vaNarrowSlot = document.getElementById("va-narrow-slot");
+  const vaWidthToggle = document.getElementById("va-width-toggle");
 
-  function renderDispatch(submitted) {
-    const msg = buildMessage();
-    if (activeHost === "rex") {
-      const actions = [];
-      Object.values(state.choices).forEach(function (item) {
-        if (item.action === "task-create") {
-          actions.push({ kind: "task.create", title: item.label + " (follow-up from LOO-1097)" });
-        }
-      });
-      const payload = {
-        endpoint: "POST /p/t_9f4a/submit",
-        target: "LOO-1097",
-        steer: msg,
-        optional_allowlisted_actions: actions
-      };
-      dispatchOut.textContent = JSON.stringify(payload, null, 2);
-      dispatchStatus.textContent = submitted ? "Dispatched to lf server -> agent in Rex left pane woken" : "Preview ready (press ⌘↩ to dispatch)";
-    } else if (activeHost === "desktop") {
-      dispatchOut.textContent = "window.loopflow.addToConversation(\n" + JSON.stringify(msg) + "\n)\n// Placed in Task conversation unsent input; sending stays yours.";
-      dispatchStatus.textContent = submitted ? "Typed into Desktop conversation input" : "Preview ready (press ⌘↩)";
-    } else {
-      dispatchOut.textContent = msg;
-      dispatchStatus.textContent = submitted ? "Copied to clipboard (offline fallback)" : "Preview ready (press ⌘↩ to copy)";
+  let vaActiveId = "va-seed-1";
+  let vaEditingId = null;
+  let vaNarrowOpenId = null;
+  const vaNotes = [
+    {
+      id: "va-seed-1",
+      anchorLabel: '§ Restart · "32-byte random in-memory token"',
+      quote: "32-byte random in-memory token",
+      text: "Should we also log a warning if the preferred port is occupied and falls back to :0?",
+      line: null,
+    },
+  ];
+
+  function vaAnchorElement(note) {
+    if (note.line) {
+      return vaDoc.querySelector('#va-diff tr[data-line="' + note.line + '"]');
     }
+    return vaDoc.querySelector('[data-va-id="' + note.id + '"]');
   }
 
-  function syncStrip() {
-    const choiceCount = Object.keys(state.choices).length +
-      Object.values(state.questions).filter(function (x) { return x.text.trim().length > 0; }).length;
-    const cmCount = state.comments.length;
-    const total = choiceCount + cmCount;
-
-    if (total === 0) {
-      strip.classList.add("empty");
-      stripCount.textContent = "No choices or comments yet (highlight text or click a button below)";
-      stripSend.disabled = true;
-      stripClear.style.display = "none";
-      dispatchStatus.textContent = "Waiting for Submit ⌘↩";
-      dispatchOut.textContent = "Highlight text or click a choice above, then hit ⌘↩ to preview what the page dispatches.";
-    } else {
-      strip.classList.remove("empty");
-      const parts = [];
-      if (choiceCount > 0) parts.push(choiceCount + (choiceCount === 1 ? " choice" : " choices"));
-      if (cmCount > 0) parts.push(cmCount + (cmCount === 1 ? " comment" : " comments"));
-      stripCount.textContent = parts.join(" · ");
-      stripSend.disabled = false;
-      stripClear.style.display = "";
-      renderDispatch(false);
-    }
-    renderComments();
+  function vaSetActive(id) {
+    vaActiveId = id;
+    vaDoc.querySelectorAll("[data-va-id]").forEach((el) => {
+      el.classList.toggle("is-active", el.getAttribute("data-va-id") === id);
+    });
+    vaRender();
   }
 
-  function renderComments() {
-    if (state.comments.length === 0) {
-      commentWrap.style.display = "none";
-      commentList.innerHTML = "";
+  function vaRender() {
+    vaRail.innerHTML = "";
+    vaNarrowSlot.innerHTML = "";
+
+    // Update narrow badges on seed/created paragraphs
+    vaDoc.querySelectorAll(".va-narrow-badge").forEach((b) => {
+      const bid = b.getAttribute("data-va-badge");
+      const exists = vaNotes.some((n) => n.id === bid);
+      b.style.display = exists ? "" : "none";
+    });
+
+    if (!vaNotes.length) {
+      const empty = document.createElement("div");
+      empty.className = "va-rail-empty";
+      empty.textContent = "Drag across any phrase or click + on a diff line to place a margin card here.";
+      vaRail.appendChild(empty);
       return;
     }
-    commentWrap.style.display = "";
-    commentList.innerHTML = "";
-    state.comments.forEach(function (cm) {
-      const row = document.createElement("div");
-      row.className = "comment-item";
-      const body = document.createElement("div");
-      const quoteEl = document.createElement("div");
-      quoteEl.className = "comment-quote";
-      quoteEl.textContent = '[' + cm.section + '] "' + cm.quote + '"';
-      const txt = document.createElement("div");
-      txt.textContent = cm.text;
-      body.appendChild(quoteEl);
-      body.appendChild(txt);
-      const rm = document.createElement("button");
-      rm.type = "button";
-      rm.textContent = "Remove";
-      rm.addEventListener("click", function () {
-        state.comments = state.comments.filter(function (x) { return x.id !== cm.id; });
-        syncStrip();
-      });
-      row.appendChild(body);
-      row.appendChild(rm);
-      commentList.appendChild(row);
-    });
-  }
 
-  protoRoot.querySelectorAll("[data-choice]").forEach(function (group) {
-    const id = group.getAttribute("data-choice");
-    const label = group.getAttribute("data-label") || id;
-    group.querySelectorAll("button[data-value]").forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        const val = btn.getAttribute("data-value");
-        const action = btn.getAttribute("data-action") || null;
-        const already = state.choices[id] && state.choices[id].value === val;
-        if (already) {
-          delete state.choices[id];
-          btn.setAttribute("aria-pressed", "false");
-        } else {
-          state.choices[id] = { label: label, value: val, action: action };
-          group.querySelectorAll("button[data-value]").forEach(function (b) {
-            b.setAttribute("aria-pressed", String(b === btn));
-          });
+    const railRect = vaRail.getBoundingClientRect();
+    const positioned = vaNotes.map((note) => {
+      const anchor = vaAnchorElement(note);
+      const y = anchor ? Math.max(0, anchor.getBoundingClientRect().top - railRect.top - 6) : 0;
+      return { note, y };
+    }).sort((a, b) => a.y - b.y);
+
+    // Render cards first to measure heights, then run collision-avoidance pass
+    const cardEntries = [];
+    for (const entry of positioned) {
+      const { note } = entry;
+      const card = document.createElement("div");
+      card.className = "va-card" + (note.id === vaActiveId ? " is-active" : "");
+      card.addEventListener("click", (e) => {
+        if (e.target.closest("button, textarea")) return;
+        vaActiveId = note.id;
+        vaDoc.querySelectorAll("[data-va-id]").forEach((el) => {
+          el.classList.toggle("is-active", el.getAttribute("data-va-id") === note.id);
+        });
+        vaRender();
+      });
+
+      const q = document.createElement("div");
+      q.className = "va-card-quote";
+      q.textContent = note.anchorLabel;
+      card.appendChild(q);
+
+      if (vaEditingId === note.id) {
+        const ta = document.createElement("textarea");
+        ta.value = note.text;
+        ta.placeholder = "Write note… (⌘↩ to save)";
+        const foot = document.createElement("div");
+        foot.className = "va-card-foot";
+        const cancelBtn = document.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.className = "btn-quiet";
+        cancelBtn.textContent = "Cancel";
+        cancelBtn.addEventListener("click", () => {
+          if (!note.text.trim()) {
+            vaDelete(note.id);
+          } else {
+            vaEditingId = null;
+            vaRender();
+          }
+        });
+        const saveBtn = document.createElement("button");
+        saveBtn.type = "button";
+        saveBtn.className = "btn-accent";
+        saveBtn.textContent = "Save ⌘↩";
+        function commit() {
+          const val = oneLine(ta.value);
+          if (!val) return;
+          note.text = val;
+          vaEditingId = null;
+          vaRender();
         }
-        syncStrip();
+        saveBtn.addEventListener("click", commit);
+        ta.addEventListener("keydown", (e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); commit(); }
+          if (e.key === "Escape") { cancelBtn.click(); }
+        });
+        foot.append(cancelBtn, saveBtn);
+        card.append(ta, foot);
+        setTimeout(() => { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 0);
+      } else {
+        const body = document.createElement("div");
+        body.className = "va-card-body";
+        body.textContent = note.text;
+        const foot = document.createElement("div");
+        foot.className = "va-card-foot";
+        const editBtn = document.createElement("button");
+        editBtn.type = "button";
+        editBtn.className = "btn-quiet";
+        editBtn.textContent = "Edit";
+        editBtn.addEventListener("click", () => { vaEditingId = note.id; vaRender(); });
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "btn-quiet";
+        delBtn.textContent = "Delete";
+        delBtn.addEventListener("click", () => vaDelete(note.id));
+        const leftLabel = document.createElement("span");
+        leftLabel.textContent = note.line ? "loopback.rs:" + note.line : "Prose note";
+        const btns = document.createElement("span");
+        btns.style.display = "inline-flex";
+        btns.style.gap = "4px";
+        btns.append(editBtn, delBtn);
+        foot.append(leftLabel, btns);
+        card.append(body, foot);
+      }
+
+      card.style.top = entry.y + "px";
+      vaRail.appendChild(card);
+      cardEntries.push({ card, targetY: entry.y });
+    }
+
+    let cursorY = 0;
+    for (const item of cardEntries) {
+      const top = Math.max(item.targetY, cursorY);
+      item.card.style.top = top + "px";
+      cursorY = top + item.card.offsetHeight + 10;
+    }
+    vaRail.style.minHeight = Math.max(340, cursorY + 12) + "px";
+
+    // Narrow mode inline card viewer
+    if (vaLayout.classList.contains("is-narrow") && (vaNarrowOpenId || vaEditingId)) {
+      const openNote = vaNotes.find((n) => n.id === (vaEditingId || vaNarrowOpenId));
+      if (openNote) {
+        const box = document.createElement("div");
+        box.className = "va-narrow-popover";
+        box.innerHTML = '<div class="va-card-quote"></div>';
+        box.querySelector(".va-card-quote").textContent = openNote.anchorLabel;
+        if (vaEditingId === openNote.id) {
+          const ta = document.createElement("textarea");
+          ta.style.width = "100%";
+          ta.style.minHeight = "54px";
+          ta.style.marginBottom = "6px";
+          ta.value = openNote.text;
+          ta.placeholder = "Write note… (⌘↩ to save)";
+          const saveBtn = document.createElement("button");
+          saveBtn.type = "button";
+          saveBtn.className = "btn-accent";
+          saveBtn.textContent = "Save ⌘↩";
+          const commit = () => {
+            const val = oneLine(ta.value);
+            if (!val) return;
+            openNote.text = val;
+            vaEditingId = null;
+            vaNarrowOpenId = openNote.id;
+            vaRender();
+          };
+          saveBtn.addEventListener("click", commit);
+          ta.addEventListener("keydown", (e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); commit(); }
+          });
+          box.append(ta, saveBtn);
+          setTimeout(() => ta.focus(), 0);
+        } else {
+          const p = document.createElement("div");
+          p.style.marginBottom = "8px";
+          p.textContent = openNote.text;
+          const row = document.createElement("div");
+          row.style.display = "flex";
+          row.style.gap = "6px";
+          const editBtn = document.createElement("button");
+          editBtn.type = "button";
+          editBtn.className = "btn-quiet";
+          editBtn.textContent = "Edit";
+          editBtn.addEventListener("click", () => { vaEditingId = openNote.id; vaRender(); });
+          const delBtn = document.createElement("button");
+          delBtn.type = "button";
+          delBtn.className = "btn-quiet";
+          delBtn.textContent = "Delete";
+          delBtn.addEventListener("click", () => vaDelete(openNote.id));
+          const closeBtn = document.createElement("button");
+          closeBtn.type = "button";
+          closeBtn.className = "btn-quiet";
+          closeBtn.textContent = "Close";
+          closeBtn.addEventListener("click", () => { vaNarrowOpenId = null; vaRender(); });
+          row.append(editBtn, delBtn, closeBtn);
+          box.append(p, row);
+        }
+        vaNarrowSlot.appendChild(box);
+      }
+    }
+  }
+
+  function vaDelete(id) {
+    const idx = vaNotes.findIndex((n) => n.id === id);
+    if (idx >= 0) vaNotes.splice(idx, 1);
+    unwrapSpans(vaDoc, "data-va-id", id);
+    if (vaEditingId === id) vaEditingId = null;
+    if (vaNarrowOpenId === id) vaNarrowOpenId = null;
+    vaRender();
+  }
+
+  function vaStartFromSelection(selInfo) {
+    const id = nextId("va");
+    wrapRange(selInfo.range, "data-va-id", id, vaDoc);
+    try { window.getSelection().removeAllRanges(); } catch (_) {}
+    vaNotes.push({
+      id,
+      anchorLabel: '"' + selInfo.quote.slice(0, 60) + '"',
+      quote: selInfo.quote.slice(0, 120),
+      text: "",
+      line: null,
+    });
+    vaActiveId = id;
+    vaEditingId = id;
+    vaNarrowOpenId = id;
+    vaRender();
+  }
+
+  vaDoc.addEventListener("click", (e) => {
+    const hl = e.target.closest("[data-va-id]");
+    if (hl) {
+      const id = hl.getAttribute("data-va-id");
+      vaNarrowOpenId = id;
+      vaSetActive(id);
+      return;
+    }
+    const badge = e.target.closest("[data-va-badge]");
+    if (badge) {
+      const id = badge.getAttribute("data-va-badge");
+      vaNarrowOpenId = vaNarrowOpenId === id ? null : id;
+      vaSetActive(id);
+      return;
+    }
+    const plus = e.target.closest(".gutter-plus");
+    if (plus) {
+      const tr = plus.closest("tr[data-line]");
+      const line = tr.getAttribute("data-line");
+      const id = nextId("va");
+      vaNotes.push({
+        id,
+        anchorLabel: "loopback.rs:" + line,
+        quote: "line " + line,
+        text: "",
+        line,
+      });
+      vaActiveId = id;
+      vaEditingId = id;
+      vaNarrowOpenId = id;
+      vaRender();
+    }
+  });
+
+  vaWidthToggle.addEventListener("click", () => {
+    const narrow = vaLayout.classList.toggle("is-narrow");
+    vaWidthToggle.textContent = narrow
+      ? "Back to wide Docs rail (1120px)"
+      : "Simulate narrow Desktop pane (680px)";
+    vaWidthToggle.classList.toggle("is-active", narrow);
+    if (narrow && !vaNarrowOpenId && vaNotes.length) vaNarrowOpenId = vaNotes[0].id;
+    vaRender();
+  });
+
+  vaRender();
+
+  // =========================================================
+  // VISION B: T3 Code / GitHub Inline Thread Composer
+  // =========================================================
+  const vbDoc = document.getElementById("vb-doc");
+  const vbDiff = document.getElementById("vb-diff");
+  const vbDrawer = document.getElementById("vb-drawer");
+  const vbDrawerToggle = document.getElementById("vb-drawer-toggle");
+  const vbSend = document.getElementById("vb-send");
+  const vbStatus = document.getElementById("vb-status");
+
+  let vbLastLine = null;
+  let vbDrawerOpen = false;
+  let vbEditingId = null;
+
+  const vbThreads = [
+    {
+      id: "vb-seed-1",
+      kind: "diff",
+      lineStart: 113,
+      lineEnd: 113,
+      anchor: "loopback.rs:113",
+      text: "Check whether two worktrees sharing one lf home ever race on this port.",
+    },
+  ];
+
+  function vbFormatSteer() {
+    return vbThreads
+      .filter((t) => t.text.trim())
+      .map((t, i) => "(" + (i + 1) + ") `scratch/ship-review.html` § " + t.anchor + " — " + oneLine(t.text))
+      .join(" ");
+  }
+
+  function vbBuildThreadCard(t) {
+    const box = document.createElement("div");
+    box.className = "vb-thread-box";
+    const head = document.createElement("div");
+    head.className = "vb-thread-head";
+    const pill = document.createElement("span");
+    pill.className = "vb-anchor-pill";
+    pill.textContent = t.anchor;
+    head.appendChild(pill);
+
+    if (vbEditingId === t.id) {
+      box.appendChild(head);
+      const ta = document.createElement("textarea");
+      ta.value = t.text;
+      ta.placeholder = "Add review note… (⌘↩ to save)";
+      const acts = document.createElement("div");
+      acts.className = "vb-thread-actions";
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "btn-quiet";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", () => {
+        if (!t.text.trim()) vbRemove(t.id);
+        else { vbEditingId = null; vbRender(); }
+      });
+      const save = document.createElement("button");
+      save.type = "button";
+      save.className = "btn-accent";
+      save.textContent = "Add comment ⌘↩";
+      const commit = () => {
+        const val = oneLine(ta.value);
+        if (!val) return;
+        t.text = val;
+        vbEditingId = null;
+        vbRender();
+      };
+      save.addEventListener("click", commit);
+      ta.addEventListener("keydown", (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); commit(); }
+        if (e.key === "Escape") cancel.click();
+      });
+      acts.append(cancel, save);
+      box.append(ta, acts);
+      setTimeout(() => ta.focus(), 0);
+    } else {
+      const btns = document.createElement("span");
+      btns.style.display = "inline-flex";
+      btns.style.gap = "4px";
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "btn-quiet";
+      edit.textContent = "Edit";
+      edit.addEventListener("click", () => { vbEditingId = t.id; vbRender(); });
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "btn-quiet";
+      del.textContent = "Delete";
+      del.addEventListener("click", () => vbRemove(t.id));
+      btns.append(edit, del);
+      head.appendChild(btns);
+
+      const body = document.createElement("div");
+      body.textContent = t.text;
+      box.append(head, body);
+    }
+    return box;
+  }
+
+  function vbRemove(id) {
+    const idx = vbThreads.findIndex((t) => t.id === id);
+    if (idx >= 0) vbThreads.splice(idx, 1);
+    if (vbEditingId === id) vbEditingId = null;
+    vbRender();
+  }
+
+  function vbRender() {
+    // Clear previous inline diff rows & highlights
+    vbDiff.querySelectorAll("tr.vb-inline-row").forEach((r) => r.remove());
+    vbDiff.querySelectorAll("tr.diff-line").forEach((r) => r.classList.remove("diff-selected"));
+    vbDoc.querySelectorAll(".vb-block-threads").forEach((c) => (c.innerHTML = ""));
+
+    // Place diff threads right beneath their ending line
+    for (const t of vbThreads.filter((x) => x.kind === "diff")) {
+      for (let ln = t.lineStart; ln <= t.lineEnd; ln++) {
+        const tr = vbDiff.querySelector('tr[data-line="' + ln + '"]');
+        if (tr) tr.classList.add("diff-selected");
+      }
+      const endTr = vbDiff.querySelector('tr[data-line="' + t.lineEnd + '"]');
+      if (endTr) {
+        const row = document.createElement("tr");
+        row.className = "vb-inline-row";
+        const td = document.createElement("td");
+        td.colSpan = 3;
+        td.appendChild(vbBuildThreadCard(t));
+        row.appendChild(td);
+        endTr.parentNode.insertBefore(row, endTr.nextSibling);
+      }
+    }
+
+    // Place prose threads right beneath their block
+    for (const t of vbThreads.filter((x) => x.kind === "prose")) {
+      const slot = vbDoc.querySelector('[data-vb-block="' + t.blockId + '"] .vb-block-threads');
+      if (slot) slot.appendChild(vbBuildThreadCard(t));
+    }
+
+    // Update queue bar & drawer
+    const saved = vbThreads.filter((t) => t.text.trim());
+    vbDrawerToggle.textContent = saved.length + " queued " + (vbDrawerOpen ? "▾" : "▴");
+    vbDrawer.hidden = !vbDrawerOpen;
+    if (vbDrawerOpen) {
+      vbDrawer.innerHTML = "";
+      if (!saved.length) {
+        vbDrawer.textContent = "No queued notes yet.";
+      } else {
+        for (const t of saved) {
+          const row = document.createElement("div");
+          row.className = "vb-drawer-item";
+          const txt = document.createElement("span");
+          txt.textContent = t.anchor + " — " + t.text;
+          const del = document.createElement("button");
+          del.type = "button";
+          del.className = "btn-quiet";
+          del.textContent = "×";
+          del.addEventListener("click", () => vbRemove(t.id));
+          row.append(txt, del);
+          vbDrawer.appendChild(row);
+        }
+        const prev = document.createElement("div");
+        prev.className = "steer-preview";
+        prev.textContent = vbFormatSteer();
+        vbDrawer.appendChild(prev);
+      }
+    }
+  }
+
+  vbDiff.addEventListener("click", (e) => {
+    const plus = e.target.closest(".gutter-plus");
+    const lnCell = e.target.closest("td.ln");
+    if (!plus && !lnCell) return;
+    const tr = e.target.closest("tr[data-line]");
+    if (!tr) return;
+    const line = Number(tr.getAttribute("data-line"));
+    let start = line;
+    let end = line;
+    if (e.shiftKey && vbLastLine !== null) {
+      start = Math.min(vbLastLine, line);
+      end = Math.max(vbLastLine, line);
+    }
+    vbLastLine = line;
+    const id = nextId("vb");
+    vbThreads.push({
+      id,
+      kind: "diff",
+      lineStart: start,
+      lineEnd: end,
+      anchor: start === end ? "loopback.rs:" + start : "loopback.rs:" + start + "–" + end,
+      text: "",
+    });
+    vbEditingId = id;
+    vbRender();
+  });
+
+  vbDoc.addEventListener("click", (e) => {
+    const plus = e.target.closest(".vb-block-plus");
+    if (!plus) return;
+    const block = plus.closest("[data-vb-block]");
+    const blockId = block.getAttribute("data-vb-block");
+    const id = nextId("vb");
+    vbThreads.push({
+      id,
+      kind: "prose",
+      blockId,
+      anchor: '§ Restart › "' + oneLine(block.querySelector("p").textContent).slice(0, 42) + '…"',
+      text: "",
+    });
+    vbEditingId = id;
+    vbRender();
+  });
+
+  function vbStartFromSelection(selInfo) {
+    const block = selInfo.range.commonAncestorContainer.nodeType === 1
+      ? selInfo.range.commonAncestorContainer.closest("[data-vb-block]")
+      : selInfo.range.commonAncestorContainer.parentElement.closest("[data-vb-block]");
+    const blockId = block ? block.getAttribute("data-vb-block") : "b-p1";
+    try { window.getSelection().removeAllRanges(); } catch (_) {}
+    const id = nextId("vb");
+    vbThreads.push({
+      id,
+      kind: "prose",
+      blockId,
+      anchor: '§ Restart › "' + selInfo.quote.slice(0, 56) + '"',
+      text: "",
+    });
+    vbEditingId = id;
+    vbRender();
+  }
+
+  vbDrawerToggle.addEventListener("click", () => {
+    vbDrawerOpen = !vbDrawerOpen;
+    vbRender();
+  });
+
+  vbSend.addEventListener("click", () => {
+    const msg = vbFormatSteer();
+    if (!msg) return;
+    vbStatus.textContent = "Simulated steer sent (" + vbThreads.filter((t) => t.text.trim()).length + " items)";
+    setTimeout(() => { vbStatus.textContent = ""; }, 3000);
+  });
+
+  vbRender();
+
+  // =========================================================
+  // VISION C: Notion Floating Bubble + Hover + Sidebar
+  // =========================================================
+  const vcDoc = document.getElementById("vc-doc");
+  const vcSidebar = document.getElementById("vc-sidebar");
+  const vcSidebarBtn = document.getElementById("vc-sidebar-btn");
+  const vcSidebarClose = document.getElementById("vc-sidebar-close");
+  const vcSidebarTitle = document.getElementById("vc-sidebar-title");
+  const vcSidebarList = document.getElementById("vc-sidebar-list");
+
+  const vcNotes = [
+    {
+      id: "vc-seed-1",
+      quote: "deterministic port per server socket",
+      text: "Nice — keeping the port stable across lf install so drafts survive is huge.",
+    },
+  ];
+
+  let vcHoverEl = null;
+  let vcHoverTimer = null;
+
+  function vcHideHover() {
+    if (vcHoverEl) { vcHoverEl.remove(); vcHoverEl = null; }
+  }
+
+  function vcShowHover(targetEl, note) {
+    clearTimeout(vcHoverTimer);
+    vcHideHover();
+    vcHoverEl = document.createElement("div");
+    vcHoverEl.className = "vc-hover-card";
+    const q = document.createElement("div");
+    q.className = "va-card-quote";
+    q.textContent = '"' + note.quote + '"';
+    const body = document.createElement("div");
+    body.style.marginBottom = "8px";
+    body.textContent = note.text;
+    const foot = document.createElement("div");
+    foot.style.display = "flex";
+    foot.style.justifyContent = "flex-end";
+    foot.style.gap = "6px";
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "btn-quiet";
+    edit.textContent = "Edit";
+    edit.addEventListener("click", () => {
+      const r = targetEl.getBoundingClientRect();
+      vcHideHover();
+      vcOpenFloatingComposer(r, note.quote, note);
+    });
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "btn-quiet";
+    del.textContent = "Delete";
+    del.addEventListener("click", () => {
+      vcHideHover();
+      vcDelete(note.id);
+    });
+    foot.append(edit, del);
+    vcHoverEl.append(q, body, foot);
+    document.body.appendChild(vcHoverEl);
+
+    const rect = targetEl.getBoundingClientRect();
+    const top = Math.min(window.innerHeight - vcHoverEl.offsetHeight - 10, rect.bottom + 8);
+    const left = Math.max(8, Math.min(window.innerWidth - 290, rect.left));
+    vcHoverEl.style.top = top + "px";
+    vcHoverEl.style.left = left + "px";
+
+    vcHoverEl.addEventListener("mouseenter", () => clearTimeout(vcHoverTimer));
+    vcHoverEl.addEventListener("mouseleave", () => {
+      vcHoverTimer = setTimeout(vcHideHover, 180);
+    });
+  }
+
+  function vcOpenFloatingComposer(rect, quote, existingNote, rangeToWrap) {
+    dismissFloats();
+    floatComposer = document.createElement("div");
+    floatComposer.className = "float-composer";
+    const q = document.createElement("div");
+    q.className = "va-card-quote";
+    q.textContent = '"' + quote.slice(0, 64) + '"';
+    const ta = document.createElement("textarea");
+    ta.rows = 2;
+    ta.placeholder = "Add comment… (⌘↩ to save)";
+    ta.value = existingNote ? existingNote.text : "";
+    const acts = document.createElement("div");
+    acts.style.display = "flex";
+    acts.style.justifyContent = "flex-end";
+    acts.style.gap = "6px";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "btn-quiet";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", dismissFloatComposer);
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "btn-accent";
+    save.textContent = "Save ⌘↩";
+    const commit = () => {
+      const val = oneLine(ta.value);
+      if (!val) return;
+      if (existingNote) {
+        existingNote.text = val;
+      } else {
+        const id = nextId("vc");
+        if (rangeToWrap) wrapRange(rangeToWrap, "data-vc-id", id, vcDoc);
+        vcNotes.push({ id, quote: quote.slice(0, 100), text: val });
+      }
+      dismissFloatComposer();
+      try { window.getSelection().removeAllRanges(); } catch (_) {}
+      vcRender();
+    };
+    save.addEventListener("click", commit);
+    ta.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); commit(); }
+      if (e.key === "Escape") dismissFloatComposer();
+    });
+    acts.append(cancel, save);
+    floatComposer.append(q, ta, acts);
+    document.body.appendChild(floatComposer);
+    const top = Math.max(8, Math.min(window.innerHeight - 160, rect.bottom + 8));
+    const left = Math.max(8, Math.min(window.innerWidth - 320, rect.left));
+    floatComposer.style.top = top + "px";
+    floatComposer.style.left = left + "px";
+    ta.focus();
+  }
+
+  function vcDelete(id) {
+    const idx = vcNotes.findIndex((n) => n.id === id);
+    if (idx >= 0) vcNotes.splice(idx, 1);
+    unwrapSpans(vcDoc, "data-vc-id", id);
+    vcRender();
+  }
+
+  function vcRender() {
+    vcSidebarBtn.textContent = "Comments (" + vcNotes.length + ")";
+    vcSidebarTitle.textContent = "Comments (" + vcNotes.length + ")";
+    vcSidebarList.innerHTML = "";
+    if (!vcNotes.length) {
+      vcSidebarList.innerHTML = '<div style="font-size:12.5px;color:var(--lf-text-tertiary);">No comments yet. Drag across any text to leave one.</div>';
+      return;
+    }
+    for (const note of vcNotes) {
+      const item = document.createElement("div");
+      item.className = "vc-comment-item";
+      const q = document.createElement("div");
+      q.className = "va-card-quote";
+      q.textContent = '"' + note.quote + '"';
+      const body = document.createElement("div");
+      body.style.marginBottom = "6px";
+      body.textContent = note.text;
+      const foot = document.createElement("div");
+      foot.style.display = "flex";
+      foot.style.justifyContent = "flex-end";
+      foot.style.gap = "5px";
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "btn-quiet";
+      del.textContent = "Resolve";
+      del.addEventListener("click", (e) => { e.stopPropagation(); vcDelete(note.id); });
+      foot.appendChild(del);
+      item.append(q, body, foot);
+      item.addEventListener("click", () => {
+        const span = vcDoc.querySelector('[data-vc-id="' + note.id + '"]');
+        if (span) {
+          span.classList.add("pulse-ring");
+          setTimeout(() => span.classList.remove("pulse-ring"), 900);
+        }
+      });
+      vcSidebarList.appendChild(item);
+    }
+  }
+
+  vcDoc.addEventListener("mouseover", (e) => {
+    const span = e.target.closest("[data-vc-id]");
+    if (!span) return;
+    const note = vcNotes.find((n) => n.id === span.getAttribute("data-vc-id"));
+    if (note) vcShowHover(span, note);
+  });
+
+  vcDoc.addEventListener("mouseout", (e) => {
+    if (e.target.closest("[data-vc-id]")) {
+      vcHoverTimer = setTimeout(vcHideHover, 220);
+    }
+  });
+
+  vcDoc.addEventListener("click", (e) => {
+    if (e.target.closest("[data-vc-id]")) {
+      vcSidebar.classList.add("is-open");
+    }
+  });
+
+  vcSidebarBtn.addEventListener("click", () => vcSidebar.classList.toggle("is-open"));
+  vcSidebarClose.addEventListener("click", () => vcSidebar.classList.remove("is-open"));
+  vcRender();
+
+  // =========================================================
+  // VISION D: Radical Success — Agent Steer Composer + Suggest Edit
+  // =========================================================
+  const vdDoc = document.getElementById("vd-doc");
+  const vdDiff = document.getElementById("vd-diff");
+  const vdChips = document.getElementById("vd-chips");
+  const vdOverall = document.getElementById("vd-overall");
+  const vdSend = document.getElementById("vd-send");
+  const vdPreviewToggle = document.getElementById("vd-preview-toggle");
+  const vdPreview = document.getElementById("vd-preview");
+  const vdToast = document.getElementById("vd-toast");
+
+  let vdPreviewOpen = false;
+  const vdItems = [
+    {
+      id: "vd-seed-1",
+      tag: "suggest",
+      anchor: "§ Restart",
+      summary: 'Replace "127.0.0.1:0" → "a stable per-socket port"',
+      full: '§ Restart › change "127.0.0.1:0" to "a stable per-socket port"',
+    },
+    {
+      id: "vd-seed-2",
+      tag: "question",
+      anchor: "loopback.rs:113",
+      summary: "loopback.rs:113 — Retry if preferred port collides?",
+      full: "loopback.rs:113 [Question] Retry if preferred port collides?",
+    },
+  ];
+
+  function vdFormatSteer() {
+    const parts = vdItems.map((it) => "`scratch/ship-review.html` " + it.full);
+    const overall = oneLine(vdOverall.value);
+    if (overall) parts.push("Overall: " + overall);
+    return parts.map((p, i) => "(" + (i + 1) + ") " + p).join(" ");
+  }
+
+  function vdRemove(id) {
+    const idx = vdItems.findIndex((x) => x.id === id);
+    if (idx >= 0) vdItems.splice(idx, 1);
+    // Restore suggestion DOM if it was an inline suggest edit
+    const sug = vdDoc.querySelector('[data-vd-id="' + id + '"]');
+    if (sug) {
+      const del = sug.querySelector("del");
+      if (del) sug.replaceWith(document.createTextNode(del.textContent));
+      else unwrapSpans(vdDoc, "data-vd-id", id);
+    }
+    vdRender();
+  }
+
+  function vdRender() {
+    vdChips.innerHTML = "";
+    if (!vdItems.length) {
+      const hint = document.createElement("span");
+      hint.style.fontSize = "12px";
+      hint.style.color = "var(--lf-text-tertiary)";
+      hint.textContent = "No attached anchors yet — drag prose (c = Note, s = Suggest edit) or click + on any diff line.";
+      vdChips.appendChild(hint);
+    } else {
+      for (const it of vdItems) {
+        const chip = document.createElement("span");
+        chip.className = "vd-chip";
+        const tag = document.createElement("span");
+        tag.className = "vd-chip-tag tag-" + it.tag;
+        tag.textContent = it.tag;
+        const txt = document.createElement("span");
+        txt.className = "vd-chip-text";
+        txt.textContent = it.summary;
+        const x = document.createElement("button");
+        x.type = "button";
+        x.className = "vd-chip-x";
+        x.textContent = "×";
+        x.title = "Remove";
+        x.addEventListener("click", (e) => { e.stopPropagation(); vdRemove(it.id); });
+        chip.append(tag, txt, x);
+        chip.addEventListener("click", () => {
+          const el = vdDoc.querySelector('[data-vd-id="' + it.id + '"]') ||
+            (it.anchor.startsWith("loopback.rs:") && vdDiff.querySelector('tr[data-line="' + it.anchor.split(":")[1] + '"]'));
+          if (el) {
+            el.classList.add("pulse-ring");
+            setTimeout(() => el.classList.remove("pulse-ring"), 900);
+          }
+        });
+        vdChips.appendChild(chip);
+      }
+    }
+    vdPreview.hidden = !vdPreviewOpen;
+    if (vdPreviewOpen) {
+      vdPreview.textContent = vdFormatSteer() || "(empty steer)";
+    }
+  }
+
+  function vdOpenComposer(rect, opts) {
+    dismissFloats();
+    floatComposer = document.createElement("div");
+    floatComposer.className = "float-composer";
+
+    let intent = opts.mode === "suggest" ? "suggest" : "change";
+    const head = document.createElement("div");
+    head.className = "va-card-quote";
+    head.textContent = opts.mode === "suggest"
+      ? 'Suggest replacement for "' + opts.quote.slice(0, 48) + '"'
+      : opts.anchorLabel;
+    floatComposer.appendChild(head);
+
+    if (opts.mode !== "suggest") {
+      const intents = document.createElement("div");
+      intents.className = "vd-intent-row";
+      [["change", "Change"], ["question", "Question"], ["task", "File Task"], ["note", "Note"]].forEach(([k, label]) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "vd-intent-btn" + (k === intent ? " is-active" : "");
+        b.textContent = label;
+        b.addEventListener("click", () => {
+          intent = k;
+          intents.querySelectorAll("button").forEach((x) => x.classList.remove("is-active"));
+          b.classList.add("is-active");
+        });
+        intents.appendChild(b);
+      });
+      floatComposer.appendChild(intents);
+    }
+
+    const input = document.createElement(opts.mode === "suggest" ? "input" : "textarea");
+    if (opts.mode === "suggest") {
+      input.type = "text";
+      input.value = opts.quote;
+      input.placeholder = "Replacement wording…";
+    } else {
+      input.rows = 2;
+      input.placeholder = "What should the agent do? (⌘↩ to attach)";
+    }
+
+    const acts = document.createElement("div");
+    acts.style.display = "flex";
+    acts.style.justifyContent = "flex-end";
+    acts.style.gap = "6px";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "btn-quiet";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", dismissFloatComposer);
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "btn-accent";
+    save.textContent = opts.mode === "suggest" ? "Apply suggestion ⌘↩" : "Attach chip ⌘↩";
+
+    const commit = () => {
+      const val = oneLine(input.value);
+      if (!val) return;
+      const id = nextId("vd");
+      if (opts.mode === "suggest") {
+        // Inline <del><ins> when selection is inside one text node; otherwise highlight fallback
+        let inlineApplied = false;
+        if (opts.range && opts.range.startContainer === opts.range.endContainer && opts.range.startContainer.nodeType === 3) {
+          try {
+            const wrap = document.createElement("span");
+            wrap.className = "vd-suggestion";
+            wrap.setAttribute("data-vd-id", id);
+            const del = document.createElement("del");
+            del.className = "vd-suggest-del";
+            del.textContent = opts.quote;
+            const ins = document.createElement("ins");
+            ins.className = "vd-suggest-ins";
+            ins.textContent = val;
+            wrap.append(del, ins);
+            opts.range.deleteContents();
+            opts.range.insertNode(wrap);
+            inlineApplied = true;
+          } catch (_) {}
+        }
+        if (!inlineApplied && opts.range) {
+          wrapRange(opts.range, "data-vd-id", id, vdDoc);
+        }
+        vdItems.push({
+          id,
+          tag: "suggest",
+          anchor: "§ Restart",
+          summary: 'Replace "' + opts.quote.slice(0, 26) + '" → "' + val.slice(0, 26) + '"',
+          full: '§ Restart › change "' + opts.quote + '" to "' + val + '"',
+        });
+      } else {
+        if (opts.range) wrapRange(opts.range, "data-vd-id", id, vdDoc);
+        vdItems.push({
+          id,
+          tag: intent,
+          anchor: opts.anchorShort,
+          summary: opts.anchorShort + " — " + val,
+          full: opts.anchorShort + " [" + intent + "] " + val,
+        });
+      }
+      dismissFloatComposer();
+      try { window.getSelection().removeAllRanges(); } catch (_) {}
+      vdRender();
+    };
+
+    save.addEventListener("click", commit);
+    input.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); commit(); }
+      if (opts.mode === "suggest" && e.key === "Enter") { e.preventDefault(); commit(); }
+      if (e.key === "Escape") dismissFloatComposer();
+    });
+    acts.append(cancel, save);
+    floatComposer.append(input, acts);
+    document.body.appendChild(floatComposer);
+    const top = Math.max(8, Math.min(window.innerHeight - 180, rect.bottom + 8));
+    const left = Math.max(8, Math.min(window.innerWidth - 320, rect.left));
+    floatComposer.style.top = top + "px";
+    floatComposer.style.left = left + "px";
+    input.focus();
+    if (opts.mode === "suggest") input.select();
+  }
+
+  vdDiff.addEventListener("click", (e) => {
+    const plus = e.target.closest(".gutter-plus");
+    if (!plus) return;
+    const tr = plus.closest("tr[data-line]");
+    const line = tr.getAttribute("data-line");
+    vdOpenComposer(tr.getBoundingClientRect(), {
+      mode: "note",
+      anchorLabel: "Attach loopback.rs:" + line + " to steer",
+      anchorShort: "loopback.rs:" + line,
+      range: null,
+    });
+  });
+
+  vdOverall.addEventListener("input", () => {
+    if (vdPreviewOpen) vdRender();
+  });
+
+  vdOverall.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      vdSend.click();
+    }
+  });
+
+  vdPreviewToggle.addEventListener("click", () => {
+    vdPreviewOpen = !vdPreviewOpen;
+    vdPreviewToggle.classList.toggle("is-active", vdPreviewOpen);
+    vdRender();
+  });
+
+  vdSend.addEventListener("click", () => {
+    const msg = vdFormatSteer();
+    if (!msg) return;
+    vdToast.hidden = false;
+    vdToast.textContent = "Simulated steer delivered: " + msg;
+    setTimeout(() => { vdToast.hidden = true; }, 5000);
+  });
+
+  vdRender();
+
+  // =========================================================
+  // Unified mouseup + keyboard handler scoped per playground
+  // =========================================================
+  document.addEventListener("mouseup", (e) => {
+    if (e.target.closest(".float-pill, .float-composer, button, textarea, input")) return;
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) {
+      pendingSelection = null;
+      dismissFloatPill();
+      return;
+    }
+    const quote = oneLine(sel.toString());
+    if (!quote) {
+      pendingSelection = null;
+      dismissFloatPill();
+      return;
+    }
+    const range = sel.getRangeAt(0).cloneRange();
+    const containerEl = range.commonAncestorContainer.nodeType === 1
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+
+    let panel = null;
+    if (vaDoc.contains(containerEl)) panel = "a";
+    else if (vbDoc.contains(containerEl)) panel = "b";
+    else if (vcDoc.contains(containerEl)) panel = "c";
+    else if (vdDoc.contains(containerEl)) panel = "d";
+
+    if (!panel) {
+      pendingSelection = null;
+      dismissFloatPill();
+      return;
+    }
+
+    const rect = range.getBoundingClientRect();
+    pendingSelection = { panel, range, rect, quote };
+
+    if (panel === "a") {
+      showFloatPill(rect, [
+        { label: "Comment (c)", onClick: () => vaStartFromSelection(pendingSelection) },
+      ]);
+    } else if (panel === "b") {
+      showFloatPill(rect, [
+        { label: "Add inline thread (c)", onClick: () => vbStartFromSelection(pendingSelection) },
+      ]);
+    } else if (panel === "c") {
+      showFloatPill(rect, [
+        { label: "Comment (c)", onClick: () => vcOpenFloatingComposer(rect, quote, null, range) },
+        {
+          label: "Flag",
+          onClick: () => {
+            const id = nextId("vc");
+            wrapRange(range, "data-vc-id", id, vcDoc);
+            vcNotes.push({ id, quote: quote.slice(0, 100), text: "Flagged for follow-up" });
+            try { window.getSelection().removeAllRanges(); } catch (_) {}
+            vcRender();
+          },
+        },
+        {
+          label: "Copy",
+          onClick: () => { try { navigator.clipboard.writeText(quote); } catch (_) {} },
+        },
+      ]);
+    } else if (panel === "d") {
+      showFloatPill(rect, [
+        {
+          label: "Note (c)",
+          onClick: () => vdOpenComposer(rect, {
+            mode: "note",
+            anchorLabel: '§ Restart › "' + quote.slice(0, 48) + '"',
+            anchorShort: '"' + quote.slice(0, 32) + '"',
+            range,
+          }),
+        },
+        {
+          label: "Suggest edit (s)",
+          onClick: () => vdOpenComposer(rect, { mode: "suggest", quote, range }),
+        },
+      ]);
+    }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.target.closest("input, textarea")) return;
+    if (!pendingSelection) return;
+    const key = e.key.toLowerCase();
+    if (key === "c") {
+      e.preventDefault();
+      const s = pendingSelection;
+      dismissFloatPill();
+      if (s.panel === "a") vaStartFromSelection(s);
+      else if (s.panel === "b") vbStartFromSelection(s);
+      else if (s.panel === "c") vcOpenFloatingComposer(s.rect, s.quote, null, s.range);
+      else if (s.panel === "d") {
+        vdOpenComposer(s.rect, {
+          mode: "note",
+          anchorLabel: '§ Restart › "' + s.quote.slice(0, 48) + '"',
+          anchorShort: '"' + s.quote.slice(0, 32) + '"',
+          range: s.range,
+        });
+      }
+    } else if (key === "s" && pendingSelection.panel === "d") {
+      e.preventDefault();
+      const s = pendingSelection;
+      dismissFloatPill();
+      vdOpenComposer(s.rect, { mode: "suggest", quote: s.quote, range: s.range });
+    } else if (key === "escape") {
+      dismissFloats();
+    }
+  });
+
+  document.addEventListener("mousedown", (e) => {
+    if (floatComposer && !floatComposer.contains(e.target) && !e.target.closest(".float-pill")) {
+      dismissFloatComposer();
+    }
+  });
+
+  // =========================================================
+  // Numbered questions copy helper
+  // =========================================================
+  const answers = {};
+  document.querySelectorAll(".q-group[data-q]").forEach((group) => {
+    const qnum = group.getAttribute("data-q");
+    const label = group.getAttribute("data-q-label");
+    group.querySelectorAll("button[data-val]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const val = btn.getAttribute("data-val");
+        if (answers[qnum] && answers[qnum].val === val) {
+          delete answers[qnum];
+          btn.classList.remove("is-selected");
+        } else {
+          answers[qnum] = { label, val };
+          group.querySelectorAll("button[data-val]").forEach((b) => b.classList.remove("is-selected"));
+          btn.classList.add("is-selected");
+        }
       });
     });
   });
 
-  protoRoot.querySelectorAll("[data-question]").forEach(function (group) {
-    const id = group.getAttribute("data-question");
-    const label = group.getAttribute("data-label") || id;
-    const field = group.querySelector("textarea, input");
-    if (!field) return;
-    field.addEventListener("input", function () {
-      state.questions[id] = { label: label, text: field.value };
-      syncStrip();
+  document.getElementById("q-copy").addEventListener("click", () => {
+    const parts = Object.keys(answers).sort().map((k) => answers[k].val);
+    const notes = oneLine(document.getElementById("q-notes").value);
+    if (notes) parts.push("Notes: " + notes);
+    const text = parts.join(" | ");
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      const st = document.getElementById("q-copy-status");
+      st.textContent = "Copied: " + text;
+      setTimeout(() => { st.textContent = ""; }, 4000);
     });
   });
-
-  /* Highlight-to-comment popover */
-  const popover = document.getElementById("sel-popover");
-  const popQuote = document.getElementById("sel-quote-preview");
-  const popSection = document.getElementById("sel-section-label");
-  const popInput = document.getElementById("sel-comment-input");
-  const popSave = document.getElementById("sel-save");
-  const popCancel = document.getElementById("sel-cancel");
-  let pendingSelection = null;
-
-  function closePopover() {
-    popover.classList.remove("open");
-    pendingSelection = null;
-    popInput.value = "";
-  }
-  function sectionForNode(node) {
-    let el = node && node.nodeType === 1 ? node : node && node.parentElement;
-    while (el && el !== commentArea) {
-      if (el.hasAttribute("data-section")) return el.getAttribute("data-section");
-      el = el.parentElement;
-    }
-    return "Page";
-  }
-
-  commentArea.addEventListener("mouseup", function () {
-    setTimeout(function () {
-      const sel = window.getSelection();
-      if (!sel || sel.isCollapsed) return;
-      const text = sel.toString().replace(/\s+/g, " ").trim();
-      if (text.length < 2) return;
-      const range = sel.getRangeAt(0);
-      if (!commentArea.contains(range.commonAncestorContainer)) return;
-      const rect = range.getBoundingClientRect();
-      const clipped = text.length > 120 ? text.slice(0, 117) + "..." : text;
-      pendingSelection = { section: sectionForNode(range.commonAncestorContainer), quote: clipped };
-      popQuote.textContent = '"' + clipped + '"';
-      popSection.textContent = pendingSelection.section;
-      popover.style.top = Math.min(window.innerHeight - 150, Math.max(12, rect.bottom + 8)) + "px";
-      popover.style.left = Math.min(window.innerWidth - 356, Math.max(12, rect.left)) + "px";
-      popover.classList.add("open");
-      popInput.focus();
-    }, 10);
-  });
-
-  function savePopoverComment() {
-    if (!pendingSelection) return;
-    const text = popInput.value.trim();
-    if (!text) return;
-    state.comments.push({ id: nextCommentId++, section: pendingSelection.section, quote: pendingSelection.quote, text: text });
-    closePopover();
-    if (window.getSelection) window.getSelection().removeAllRanges();
-    syncStrip();
-  }
-
-  popSave.addEventListener("click", savePopoverComment);
-  popCancel.addEventListener("click", closePopover);
-  popInput.addEventListener("keydown", function (e) {
-    if (e.key === "Enter") { e.preventDefault(); savePopoverComment(); }
-    if (e.key === "Escape") { e.preventDefault(); closePopover(); }
-  });
-  document.addEventListener("mousedown", function (e) {
-    if (popover.classList.contains("open") && !popover.contains(e.target)) closePopover();
-  });
-
-  function doSubmit() {
-    if (totalCount() === 0) return;
-    renderDispatch(true);
-    if (activeHost === "offline" && navigator.clipboard) {
-      navigator.clipboard.writeText(buildMessage()).catch(function () {});
-    }
-  }
-  stripSend.addEventListener("click", doSubmit);
-  document.addEventListener("keydown", function (e) {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && totalCount() > 0 && !popover.classList.contains("open")) {
-      e.preventDefault();
-      doSubmit();
-    }
-  });
-
-  stripClear.addEventListener("click", function () {
-    state.choices = {};
-    state.questions = {};
-    state.comments = [];
-    protoRoot.querySelectorAll("button[data-value]").forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
-    protoRoot.querySelectorAll("[data-question] textarea, [data-question] input").forEach(function (f) { f.value = ""; });
-    syncStrip();
-  });
-
-  syncHostUI();
-  syncStrip();
 })();
 </script>
 </body>

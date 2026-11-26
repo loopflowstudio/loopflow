@@ -1,4 +1,4 @@
-at: 89be14c594f3972c92ba41f216b02b8aa8caf481
+at: ff7ae3bc65c692f1bdc592af8eb80cf20c0b06b9
 first:
   - path: docs/surfaces.md
     why: Review page UX across browser, Desktop, headless, and offline
@@ -9,7 +9,7 @@ first:
   - path: docs/security.md
     why: Loopback admission checks, CSP, and page.url boundary
   - path: rust/loopflow/src/server/loopback.rs
-    why: Loopback HTTP/WebSocket carrier, Host/Origin/token admission
+    why: Loopback HTTP/WS carrier, stable port, Host/Origin/token checks
   - path: rust/loopflow/src/server/service.rs
     why: Shared Messages carrier and local-only page.url dispatch
   - path: rust/loopflow/src/lf/commands/page.rs

@@ -333,16 +333,6 @@ fn exchange_unowned_at(
     Ok(())
 }
 
-/// [`exchange`] for a clone this Machine has saved nothing in and never read
-/// a plan for, which registers it for [`exchange_unowned`]. `false` when the
-/// Machine already knows the clone, or it has no remote.
-pub fn first_exchange(store: &SqliteStore, repo: &str, until: Instant) -> Result<bool> {
-    if store.repository_id(repo)?.is_some() || remote(Path::new(repo)).is_none() {
-        return Ok(false);
-    }
-    exchange(store, repo, Some(until)).map(|()| true)
-}
-
 /// Fetch every Machine's plan ref, take in what changed in the others', then
 /// commit the records changed here onto this Machine's ref and push it. The
 /// outcome is recorded for `lf repo tracker`. A repository with no remote
@@ -357,6 +347,46 @@ pub fn exchange(store: &SqliteStore, repo: &str, until: Option<Instant>) -> Resu
     let repository = crate::repository::location::ensure_repository(store, repo)?;
     turn(store, repo, &remote, &repository, until, |sent_seq| {
         exchange_with(store, repo, &remote, &repository, sent_seq, until)
+    })
+}
+
+/// Fetch `remote`'s plan refs without opening a store, returning the fetched
+/// `(machine_id, commit_oid)` tips. Used before creating a store on a fresh
+/// Machine so a repository with no remote plan leaves the registry absent.
+pub(super) fn fetch_seen(
+    path: &Path,
+    remote: &str,
+    until: Option<Instant>,
+) -> Result<HashMap<String, String>> {
+    git_until(
+        path,
+        &[
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            "--prune",
+            "--no-write-fetch-head",
+            "--no-recurse-submodules",
+            remote,
+            &format!("+{OWN}*:{SEEN}*"),
+        ],
+        None,
+        until,
+    )?;
+    seen_refs(path, until)
+}
+
+/// Complete an exchange from refs already fetched by [`fetch_seen`].
+pub(super) fn exchange_seen(
+    store: &SqliteStore,
+    repo: &str,
+    remote: &str,
+    seen: &HashMap<String, String>,
+    until: Option<Instant>,
+) -> Result<()> {
+    let repository = crate::repository::location::ensure_repository(store, repo)?;
+    turn(store, repo, remote, &repository, until, |sent_seq| {
+        exchange_with_seen(store, repo, remote, &repository, sent_seq, seen, until)
     })
 }
 
@@ -426,24 +456,21 @@ fn exchange_with(
     sent_seq: i64,
     until: Option<Instant>,
 ) -> Result<()> {
+    let seen = fetch_seen(Path::new(repo), remote, until)?;
+    exchange_with_seen(store, repo, remote, repository, sent_seq, &seen, until)
+}
+
+fn exchange_with_seen(
+    store: &SqliteStore,
+    repo: &str,
+    remote: &str,
+    repository: &RepositoryId,
+    sent_seq: i64,
+    seen: &HashMap<String, String>,
+    until: Option<Instant>,
+) -> Result<()> {
     let path = Path::new(repo);
-    git_until(
-        path,
-        &[
-            "fetch",
-            "--quiet",
-            "--no-tags",
-            "--prune",
-            "--no-write-fetch-head",
-            "--no-recurse-submodules",
-            remote,
-            &format!("+{OWN}*:{SEEN}*"),
-        ],
-        None,
-        until,
-    )?;
     let me = crate::store::machines::local_machine(store)?.id;
-    let seen = seen_refs(path, until)?;
     let mine = seen.get(me.as_str());
 
     // A ref that cannot be read does not stop the others or this Machine's push.
@@ -451,7 +478,7 @@ fn exchange_with(
     let mut not_taken = Vec::new();
     let taken = store.plan_ref_tips(repo)?;
     let names = crate::store::ownership::machine_names(store)?;
-    for (machine, tip) in &seen {
+    for (machine, tip) in seen {
         if machine == me.as_str() || taken.get(machine) == Some(tip) {
             continue;
         }
@@ -485,6 +512,9 @@ fn exchange_with(
         }
     }
     store.record_not_taken(repo, Carrier::Git, &not_taken)?;
+    if failed.is_none() {
+        store.plan_read(repo, Carrier::Git)?;
+    }
     publish(
         store,
         path,
@@ -999,7 +1029,8 @@ fn git_until(
 
 #[cfg(test)]
 mod tests {
-    use super::{exchange, first_exchange, remote, send};
+    use super::{exchange, remote, send};
+    use crate::ops::plan_carriers::first_read_at;
     use loopflow_model::durable::RepositoryId;
     use loopflow_storage::sqlite::plan_carriers::{Carrier, NotTaken};
     use loopflow_storage::sqlite::SqliteStore;
@@ -1056,6 +1087,18 @@ mod tests {
         fn task(&self, title: &str) -> loopflow_model::durable::TaskId {
             let project =
                 crate::test_support::seed_wave_project(&self.store, &self.repo, "plan").unwrap();
+            self.create_task(Some(project.id), title)
+        }
+
+        fn standalone_task(&self, title: &str) -> loopflow_model::durable::TaskId {
+            self.create_task(None, title)
+        }
+
+        fn create_task(
+            &self,
+            project_id: Option<loopflow_model::durable::ProjectId>,
+            title: &str,
+        ) -> loopflow_model::durable::TaskId {
             self.store
                 .create_task(&NewTask {
                     parent_task_id: None,
@@ -1065,7 +1108,7 @@ mod tests {
                     )
                     .unwrap(),
                     id: loopflow_model::durable::TaskId::new(),
-                    project_id: Some(project.id),
+                    project_id,
                     title: title.into(),
                     description: String::new(),
                     due_date: None,
@@ -1194,8 +1237,8 @@ mod tests {
         assert_eq!(owner.title(&task).as_deref(), Some("Second edit"));
     }
 
-    #[test]
-    fn a_task_made_on_one_clone_is_on_another_and_the_later_title_wins_on_both() {
+    #[tokio::test]
+    async fn a_task_made_on_one_clone_is_on_another_and_the_later_title_wins_on_both() {
         let (_root, origin, laptop, mini) = machines();
         let task = laptop.task("x");
         assert!(laptop.unsent() > 0);
@@ -1206,10 +1249,14 @@ mod tests {
         assert!(!git(Path::new(&laptop.repo), &["branch", "-a"]).contains("loopflow"));
 
         // mini was never told about the laptop: the remote is what they share,
-        // and the first read of a fresh clone fetches it, once.
+        // and the first read of an unread clone fetches it, once.
         let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
-        assert!(first_exchange(&mini.store, &mini.repo, until).unwrap());
-        assert!(!first_exchange(&mini.store, &mini.repo, until).unwrap());
+        assert!(first_read_at(&mini.store, &mini.repo, until, 1_000)
+            .await
+            .unwrap());
+        assert!(!first_read_at(&mini.store, &mini.repo, until, 1_001)
+            .await
+            .unwrap());
         assert_eq!(mini.title(&task).as_deref(), Some("x"));
         assert_eq!(mini.listed(), ["x"]);
         // Each clone keeps its own repository id and answers to the other's,
@@ -1805,5 +1852,108 @@ mod tests {
         // Verify the plan still round-trips to another clone.
         mini.exchange();
         assert_eq!(mini.title(&task).as_deref(), Some("quiet poll"));
+    }
+
+    #[tokio::test]
+    async fn a_clone_that_saved_before_it_read_still_reads_on_its_first_list() {
+        let (_root, _origin, laptop, mini) = machines();
+        laptop.task("x");
+        laptop.exchange();
+        mini.standalone_task("made on mini");
+        mini.send().unwrap();
+
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        assert!(first_read_at(&mini.store, &mini.repo, until, 1_000)
+            .await
+            .unwrap());
+        let mut titles = mini.listed();
+        titles.sort();
+        assert_eq!(titles, ["made on mini", "x"]);
+        assert_eq!(
+            mini.store
+                .last_scope_attempt(&format!("plan-first-read:{}", mini.repo))
+                .unwrap(),
+            None,
+            "a successful first read writes nothing to planning_scope_checks"
+        );
+
+        let before = crate::observe::thread_spawns();
+        assert!(!first_read_at(&mini.store, &mini.repo, until, 1_001)
+            .await
+            .unwrap());
+        assert_eq!(
+            crate::observe::thread_spawns() - before,
+            0,
+            "a second list on a read clone must not fetch"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_remote_with_no_plan_is_read_once() {
+        let (_root, _origin, _laptop, mini) = machines();
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        assert!(first_read_at(&mini.store, &mini.repo, until, 1_000)
+            .await
+            .unwrap());
+        assert!(mini
+            .store
+            .plan_carrier(&mini.repo, Carrier::Git)
+            .unwrap()
+            .unwrap()
+            .has_read());
+        assert!(!first_read_at(&mini.store, &mini.repo, until, 1_001)
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn an_offline_first_read_waits_60_seconds() {
+        let (_root, origin, _laptop, mini) = machines();
+        let away = origin.bare_path().with_extension("away");
+        std::fs::rename(origin.bare_path(), &away).unwrap();
+
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let scope = format!("plan-first-read:{}", mini.repo);
+
+        // First attempt fails, leaves the carrier unread, and stamps the cooldown scope.
+        assert!(first_read_at(&mini.store, &mini.repo, until, 1_000)
+            .await
+            .is_err());
+        let held = mini
+            .store
+            .plan_carrier(&mini.repo, Carrier::Git)
+            .unwrap()
+            .unwrap();
+        assert!(!held.has_read());
+        assert!(held.error.is_some());
+        assert_eq!(mini.store.last_scope_attempt(&scope).unwrap(), Some(1_000));
+
+        // 1 s later: skipped without touching Git.
+        let before = crate::observe::thread_spawns();
+        assert!(!first_read_at(&mini.store, &mini.repo, until, 1_001)
+            .await
+            .unwrap());
+        assert_eq!(crate::observe::thread_spawns() - before, 0);
+
+        // 61 s later: retries (and fails while still offline, advancing the stamp).
+        assert!(first_read_at(&mini.store, &mini.repo, until, 1_061)
+            .await
+            .is_err());
+        assert_eq!(mini.store.last_scope_attempt(&scope).unwrap(), Some(1_061));
+
+        // Once the remote returns and another 60 s pass, the read succeeds and marks it.
+        std::fs::rename(&away, origin.bare_path()).unwrap();
+        assert!(first_read_at(&mini.store, &mini.repo, until, 1_122)
+            .await
+            .unwrap());
+        assert!(mini
+            .store
+            .plan_carrier(&mini.repo, Carrier::Git)
+            .unwrap()
+            .unwrap()
+            .has_read());
+        assert!(!first_read_at(&mini.store, &mini.repo, until, 1_123)
+            .await
+            .unwrap());
     }
 }

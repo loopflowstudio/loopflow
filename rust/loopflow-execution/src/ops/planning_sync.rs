@@ -24,7 +24,7 @@ fn message(error: impl std::fmt::Display) -> OpsError {
 
 /// Saved Tasks need no network before a read or local save. On a cache miss,
 /// read the hub and the remote once, without allocating execution.
-pub(crate) async fn find_task(
+pub async fn find_task(
     store: &Store,
     repo: &str,
     selector: &str,

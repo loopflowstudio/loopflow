@@ -995,9 +995,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             use loopflow::lf::commands::waves::{
                 list_closed_tasks, list_tasks, subscribe_tasks, TaskListArgs,
             };
-            loopflow_execution::runtime::block_on(
-                loopflow_execution::ops::plan_carriers::before_first_read(repo),
-            );
             let args = TaskListArgs {
                 query: query.clone(),
                 wave: wave.clone(),

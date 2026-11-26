@@ -1287,18 +1287,10 @@ mod tests {
     fn prepared_task_resume_holds_recovery_off() {
         let _lock = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir_in("/tmp").unwrap();
-        let saved = std::env::var_os("LF_HOME");
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         std::env::set_var("LF_HOME", home.path());
-        struct Restore(Option<std::ffi::OsString>);
-        impl Drop for Restore {
-            fn drop(&mut self) {
-                match self.0.take() {
-                    Some(value) => std::env::set_var("LF_HOME", value),
-                    None => std::env::remove_var("LF_HOME"),
-                }
-            }
-        }
-        let _restore = Restore(saved);
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
 
         let repo = loopflow_test_support::TestRepo::new();
         let checkout = repo.path().canonicalize().unwrap();

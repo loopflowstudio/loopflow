@@ -19,7 +19,10 @@ questions in `scratch/concept-review.html`.
   mutating the unversioned `wire::Status` probe (which uses
   `deny_unknown_fields` and would break older `lf` binaries during upgrades).
 - **Minute Git plan exchange scopes to repos with an unfinished Task or active
-  Wave on this Machine**; repos with neither still exchange on command.
+  Wave on this Machine**; repos with neither still exchange on command. Claimed
+  Git-only repos with a reachable remote keep polling every 30 s for incoming
+  direction (now 2 forks/30 s after Pass 5 instead of 5, with shared backoff
+  on failure and 0 writes/forks when no carrier exists).
 - **`processes` rows are not pruned here**; LOO-965's staged drop reclaims the
   271 MB. Same for the LOO-938 tables.
 - **No `gix`.** Idle forks go to zero via event-driven watching; forks after

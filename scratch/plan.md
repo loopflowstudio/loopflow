@@ -271,18 +271,59 @@ Becomes:
   with zero delay; an attaching view of the just-ended terminal waits cleanly
   until its exit code is in the store.
 
-### 7. The minute exchange covers repositories with work in them
+### 7. Background plan sync: one rule for owned and unowned repositories
 
-`plan_git::exchange_unowned` walks every `repository_plans` row
-(`ops/plan_git.rs:44`): 70 on this Machine, 54 of them deleted/temp/demo paths,
-and `plan_carriers::before_first_read` registers any clone with a remote on any
-read.
+Before this branch, `plan_git::exchange_unowned` walked every `repository_plans`
+row (`ops/plan_git.rs:44`: 70 on this Machine, 54 of them deleted/temp/demo
+paths), and QA after Pass 4 revealed three remaining leaks in background Git
+plan sync:
 
-Chosen for review: the minute loop takes only existing directories that have an
-unfinished Task or a non-retired Wave on this Machine; a repository with
-neither still exchanges on its next command (`before_first_read`,
-`after_command`), as it does today. No row is deleted and no path is classified
-as temporary. A repository whose exchange fails doubles its wait up to an hour.
+1. `plan_git::remote(repo)` reads `.git/config` via `observe::read_to_string`,
+   discards the text, and still forks `git remote` once per active repository
+   on the server's first minute exchange (12 cold spawns in `server_idle.py --seconds 60`,
+   failing the `quiet: 0 spawns` budget).
+2. `plan_carriers::poll_owned` (30 s, for repositories with a claimed Task)
+   writes `planning_scope_checks` *before* checking whether the repository
+   exists or has any carrier (hub or Git remote) — waking `store-observer` and
+   `recovery-wake` every 30 s on local-only repositories — and has no backoff
+   when a Git remote is unreachable.
+3. `plan_git::exchange_with` already reads `mine` from `seen_refs()` yet
+   `publish()` runs a second `for-each-ref` and `cat-file -p {mine}:repository`
+   on every quiet poll even when `mine` is unchanged and nothing is unsent.
+
+Becomes:
+
+- **Unowned minute exchange** (`plan_git::exchange_unowned`): takes only
+  existing directories that have an unfinished Task or a non-retired Wave on
+  this Machine; a repository with neither still exchanges on its next command
+  (`before_first_read`, `after_command`), as it does today. No row is deleted
+  and no path is classified as temporary.
+- **Zero-fork remote lookup** (`plan_git::remote`): parse `[remote "<name>"]`
+  sections directly from the `.git/config` text already read through
+  `observe::read_to_string(&layout.common_dir.join("config"))` (selecting
+  `origin`, else first sorted by name, counting only sections that declare a
+  key). Fall back to `git remote` (still cached under `Derived::GitRemote`)
+  only when `.git/config` contains an `[include]`/`[includeIf]` section or a
+  legacy `.git/remotes/` or `.git/branches/` directory exists. Plain repos
+  with or without remotes fork nothing on cold start or minute ticks.
+- **Carrier-first owned polling** (`plan_carriers::poll_owned`): before
+  writing `planning_scope_checks`, check that the repository directory exists
+  and has at least one carrier (`plan_hub::hub` or `plan_git::remote`). A
+  claimed local-only repository with neither hub nor Git remote does zero
+  SQLite writes and zero forks; adding a remote or configuring a hub is seen
+  immediately on the next 30 s tick via `observe::derived`'s inline `stat`
+  checks.
+- **Shared per-repository Git backoff**: both `exchange_unowned` and
+  background `poll_owned` share `plan_git`'s exponential backoff (2 min → 1 h
+  on failure), while keeping hub exchanges independent of Git backoff. Explicit
+  command-driven exchanges (`sync`, `send`, `before_claim`) bypass backoff and
+  clear it on success.
+- **Quiet-poll `publish` deduplication**: pass `mine` from `seen_refs()` into
+  `publish()` (avoiding the duplicate `for-each-ref`; `send()` still reads
+  `for-each-ref` once) and remember verified `(commit_oid, repository_id)`
+  pairs in memory (commit OIDs are immutable), so a quiet poll with no unsent
+  records skips `cat-file -p {mine}:repository` as well. A quiet claimed
+  Git-remote poll drops from 5 forks to 2 (`fetch` + `for-each-ref`).
 
 ### 8. A custom-home server is an ordinary process
 
@@ -480,6 +521,14 @@ Focused tests that fail if the feature breaks:
   receives SIGHUP (and does not exit on a live home).
 - `graph`: two Graph steps started together on a 16-core fixture each see
   `CARGO_BUILD_JOBS=8` and `nice >= 5`; a preset value is left alone.
+- `plan_git` / `plan_carriers`: `plan_git::remote` resolves ordinary `.git/config`
+  repos (with or without remotes) with zero `observe::spawns()` increments and
+  still falls back to `git remote` for `[include]`/`.git/remotes`; `poll_owned`
+  on a claimed local-only repository (no hub, no Git remote) writes no
+  `planning_scope_checks` row and spawns nothing; an unreachable Git remote in
+  `poll_owned` backs off exponentially without blocking hub sync; a quiet
+  `exchange_with` with no unsent records reuses `seen_refs`'s `mine` and skips
+  repeating `cat-file` for an already-verified tip.
 
 After merge, on the live Machine: `sample <server pid> 3` shows no
 `serde_yaml_ng`, `sqlite3InitOne` or `posix_spawn` frames with Desktop open and
@@ -565,36 +614,44 @@ threads, `spawns` unchanged across two calls a minute apart. Then
      - **`machine: mini` shorthand vs host-local `machine.jobs`:** `remote::project` descends into mappings when `has_child_settings("machine")` is true, so shorthand string values had to expand before projection and `replace_projection`, and `Placement` fields use `skip_serializing_if = "Option::is_none"` so repo-level `machine: mini` never emits `jobs: null` over global `machine.jobs`.
      - **macOS nested `kqueue` in Tokio:** `AsyncFd::new` registers both `EVFILT_READ` and `EVFILT_WRITE`, which fails with `EINVAL` on a nested `kqueue` fd; `AsyncFd::with_interest(watcher, Interest::READABLE)` is required and wakes immediately on `rm -rf` / `rename`.
 
+5. **Unify background Git plan sync and eliminate cold/quiet sync forks.** *(next)*
+   - Parse `[remote "<name>"]` directly from `.git/config` in `plan_git::remote`
+     (falling back to `git remote` only for `[include]`/`[includeIf]` or legacy
+     `.git/remotes`/`.git/branches`), eliminating the 12 cold `git remote` forks
+     on the server's first minute exchange so `server_idle.py target/release/lf
+     --seconds 60` passes `quiet: 0 spawns` with the strict budget unchanged.
+   - Gate `plan_carriers::poll_owned` on directory existence and carrier
+     presence (`plan_hub::hub` or `plan_git::remote`) before writing
+     `planning_scope_checks`, and share `plan_git`'s exponential backoff
+     (`BACKOFFS`, 2 min → 1 h) across both owned and unowned background Git
+     exchanges (keeping hub exchanges independent and explicit commands
+     unthrottled).
+   - Pass `mine` from `seen_refs()` into `plan_git::publish()` and remember
+     verified `(commit_oid, repository_id)` pairs so quiet polls with no unsent
+     records drop from 5 forks to 2 (`fetch` + `for-each-ref`).
+   - Add focused unit tests for each of the above and re-run release
+     `server_idle.py target/release/lf --seconds 60` to confirm `quiet` hits 0
+     spawns under the strict budget.
+
 Each pass deletes what it replaces and leaves the benchmark passing its
 then-current budgets.
 
 ## Remaining
 
-No implementation pass remains; every section §1–§11 is built.
-
-- **Gate:** release build `server_idle.py target/release/lf --seconds 60`;
-  after merge, `sample <server pid> 3` and `lf server diagnostics --json` on the
-  live Machine with Desktop open and Graphs running; base-commit numbers beside
-  the branch's in the PR body.
-- **Gate benchmark, `quiet` spawns:** the 60 s release run's `quiet` phase
-  crosses the server's first minute exchange, which runs `git remote` once per
-  active repository to fill `plan_git::remote`'s cache (12 on the fixture).
-  Later minutes fork nothing (`db_writes` 0). Decide at gate: a warm-up past
-  the first exchange, or a one-time allowance in the budget.
-- **Owned-work poll forks (pre-existing, not in this plan):** a Git-planned
-  repository with a claimed Task fetches its plan every 30 s from the server's
-  `watch_owned_work` (`git remote`, `fetch`, two `for-each-ref`, `cat-file`).
-  Linear repositories make HTTP calls instead. It is what a quiet private
-  Machine with claimed work still forks.
-- **Compress candidates** (shape reads, not required for acceptance):
-  `observe.rs` `read_once` vs the inline stat path for unheld reads (one path?);
-  `harness/drive.rs:19` per-turn `current_thread` runtime → `runtime::block_on`.
+- **Pass 5 (above):** zero-fork `.git/config` remote discovery, carrier-gated
+  `poll_owned` with shared Git backoff, and quiet-poll `publish` fork
+  deduplication — bringing background plan sync onto one model and making the
+  60 s release benchmark pass `quiet: 0 spawns` without weakening any budget.
+- **Gate:** release build `server_idle.py target/release/lf --seconds 60`
+  (budgets enforced, 0 violations); after merge, `sample <server pid> 3` and
+  `lf server diagnostics --json` on the live Machine with Desktop open and
+  Graphs running; base-commit numbers beside the branch's in the PR body.
 - If the PR is too large to review, it splits as stacked Tasks: lifetimes
   (Pass 3) and job budget + file bounds (Pass 4).
 
 ## Checks
 
-- `scratch/concept-review.html` — pre-implementation concept review written and reconciled into this plan.
+- `scratch/concept-review.html` — post-build concept review rewritten at HEAD `44298478` against base `d8b2afeb`; Pass 5 reconciled into this plan.
 - `uv run python scripts/benchmarks/server_idle.py target/debug/lf --seconds 10 --no-fail`:
   - Baseline (before Pass 1 pool/settings/relay): `quiet` 0.60% CPU / 69 th / 36 spawns / 0 opens; `file_edits` 1.00% CPU / 69 th / 36 spawns / 0 opens; `db_writes` 0.60% CPU / 69 th / 48 spawns / 1 open.
   - After Pass 1: `quiet` 0.50% CPU / 69 th / 36 spawns / 0 opens; `file_edits` 1.00% CPU / 69 th / 36 spawns / 0 opens; `db_writes` 0.60% CPU / 69 th / 37 spawns / 0 opens.

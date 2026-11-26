@@ -107,6 +107,14 @@ reversible and none was answered by a person.
   fetch costs more, and the read path covers it. Passed over: making
   `plan_git::send` fetch when `!has_read()`.
 
+- **`--subscribe` reads the store alone** (post-build F3, review 2a), all
+  five commands, including `lf task list --subscribe`, which waited for the
+  first read on main. A fresh clone opened only by subscription stays empty
+  until a one-shot read or `lf task sync`. Passed over: a background first
+  read after frame 1 (2b), blocking like main (2c).
+- **Any carrier read means the clone is read** (post-build F1, review 1a);
+  pass 2 builds it.
+
 ### Effect on installed Machines
 
 Every Git-carried repository's row has `seen_seq` NULL today. After upgrade
@@ -117,17 +125,13 @@ reported state heal on that list.
 ## Affected surfaces
 
 - `lf task list`, `lf repo tracker`, `lf plan list`, `lf plan board`,
-  `lf wave list`, `lf wave show`, `lf wave status`, `lf wave plan`: callers of
-  `before_first_read`.
+  `lf wave list`, `lf wave show`, `lf wave status`, `lf wave plan`, and (pass
+  2) `lf task detail`.
 - Hub repositories: the first read asks the hub too.
 - Linear/Asana repositories: unchanged, `carried` returns `None`.
-- Docs written (next step should read them):
-  - `docs/work.md` ("Through Git" example and first-read/offline/server-poll prose; "Seconds, not a minute: a hub" post-bind read example).
-  - `docs/dev/planning.md` (`plan_carriers` `seen_seq` note; "When they run" first-read commands, both carriers, 60 s cooldown, and empty-clone server behavior).
-
-### Open question from writing docs
-
-- Should `--subscribe` variants of plan-reading commands (`lf task list --subscribe`, `lf wave show --subscribe`, `lf wave status --subscribe`, `lf plan list --subscribe`) all skip `before_first_read` so they read the store alone like `lf repo tracker --subscribe`, or should `lf task list --subscribe` keep running `before_first_read` first (as `lf.rs:999` does today)?
+- Docs: `docs/work.md` ("Through Git", "Seconds, not a minute: a hub") and
+  `docs/dev/planning.md` ("When they run", `plan_carriers` `seen_seq` note).
+- `--subscribe` (all five) reads the store alone; see choices below.
 
 ## Absent and error states
 
@@ -153,38 +157,82 @@ reported state heal on that list.
 - `plan_hub.rs:93`'s direct `seen_seq.is_some()` (becomes `has_read()`).
 - `plan_git::first_exchange`; its one caller was `before_first_read`.
 
-## One pass
+## Built (ba211424c3)
 
-Nothing in `rust/` is built yet. One end-to-end pass: storage
-(`has_read`, `plan_read`), `exchange_with` marks, `before_first_read` takes
-both carriers and the cooldown, the five new callers, docs. It teaches
-whether the cooldown and the hub branch fit in `before_first_read` without a
-second resolver.
+Storage `has_read`/`plan_read`; `exchange_with` marks Git read before
+`publish`; `before_first_read` runs both carriers with the 60 s cooldown;
+eight CLI callers; every `--subscribe` store-only; docs; tests 1–4 below and
+the CLI check. The post-build review (`scratch/concept-review.html`,
+a00847808a) walked it: Git-only clones read once, offline waits once a
+minute.
 
-Tests, in `plan_git.rs`'s module beside
-`a_task_made_on_one_clone_is_on_another_and_the_later_title_wins_on_both`
-(move its `first_exchange` true-then-false assertion onto whatever replaces
-it):
+## Pass 2: one clone-level gate, one owner
 
-1. *A clone that saved before it read still reads on its first list*:
-   `laptop.task("x")`, `laptop.exchange()`; `mini.task("made on mini")`,
-   `mini.send()`; the first read runs, `mini.listed()` holds both titles, a
-   second does not fetch. Fails on main: `listed()` is `["made on mini"]`.
-2. *A remote with no plan is read once*: fresh `mini`, read then no read.
-3. *An offline first read waits 60 s*: a remote path that does not exist;
-   the first read fails and stamps; a second at `now + 1` is skipped; one at
-   `now + 61` runs. Use a `now` parameter, not a sleep.
-4. *A hub-only clone reads the hub on its first list*: in `plan_hub`'s test
-   module, a bound clone with no Git remote lists the hub's Task after
-   `before_first_read`.
+What the build taught: "has this clone read its plan" is one fact per clone,
+not one per carrier. Per-carrier AND breaks on any Machine with a hub
+(review F1, confirmed in `first_read_with`, `plan_carriers.rs:279`):
 
-And the CLI check, in `rust/loopflow/tests/work/local_planning.rs` with its
-`lf(repo, home, args)` helper: one `TestRepo` bare origin, two homes. Home A
-runs `lf task create --title A --json` in the `TestRepo` checkout. A second
-`git clone` of `bare_path()` (repository-local `user.email` set, path
-canonicalized) under home B runs `lf task create --title B --json`, then
-`lf task list --json`, which names both A and B. A third home, `git clone`
-then `lf wave list --json` first, names a Wave made on A.
+- Read #1 has no `repository_id`, so only Git runs, and its exchange mints a
+  fresh local id. Read #2 sees an id and an unread hub row and asks the hub
+  about an id it has never seen; that fails, records a hub error in
+  `lf repo tracker`, and retries every 60 s forever.
+- Git online, hub offline: every read stalls ≤ 5 s once a minute, against
+  `docs/work.md`'s "a hub that is off costs only the speed".
+
+Build:
+
+1. **Gate** (F1, adopted for review: 1a). In `first_read_with`: if the
+   current Git row (`peer == remote`) or the current hub row
+   (`peer == hub.id`) `has_read()`, return `Ok(false)`. Otherwise, if either
+   eligible row has an `error`, consult `plan-first-read:<repo>` (60 s);
+   then run the eligible carriers together (Git when there is a remote, hub
+   when configured and `repository_id` is `Some`); stamp the scope if all
+   that ran failed. Drop the `git_needed/hub_needed/git_errored/hub_errored/
+   do_*` matrix. Passed over: keep per-carrier AND (the bug above).
+   Open in the build: when one carrier succeeds and the other fails, return
+   `Ok(true)` (the clone is read) and log the other.
+2. **One owner** (F2). Move the call out of `lf.rs`'s seven dispatch arms
+   and `tracker.rs:71` into the non-subscribing plan-read entry points
+   (`waves::ls`, `waves::status`, `waves::show`, `waves::list_tasks`,
+   `waves::list_closed_tasks`, the PlanBoard screen, `tracker::run_async`)
+   or one CLI read gate, never in served requests
+   (`!journal::request::active()`). Delete `lf.rs`'s `before_first_read`/
+   `before_first_read_cwd` wrappers if nothing else needs them.
+3. **`lf task detail <id>`** (F2): on a miss in `screens::task_detail`
+   (`screens.rs:165`), go through `planning_sync::find_task` like
+   `lf task status <id>`.
+4. **Docs**: `docs/dev/planning.md` "When they run" (lines ~286–299) says
+   "each configured carrier ... any carrier whose row has not recorded a
+   read runs"; rewrite for the clone-level rule, and say served requests
+   (not subscriptions) exchange after their reply (F3). Check `docs/work.md`
+   hub prose still holds.
+
+Tests to add (`plan_carriers` or `plan_hub` test module, closures for
+`run_git`/`run_hub` already exist in `first_read_with`):
+
+5. Git + hub, fresh clone: read #1 runs Git (and the hub only if an id
+   exists); read #2 runs neither, no hub error recorded.
+6. Bound clone, Git reachable, hub failing: read #1 marks via Git; read #2
+   runs neither.
+7. `lf task detail <id>` on a clone that has not read finds a Task made on
+   another home (in `local_planning.rs` beside the existing CLI check).
+
+What it teaches: whether the gate fits in ~40 lines and whether moving the
+calls into the command modules leaves `lf.rs` with no plan-read knowledge.
+
+## Earlier tests (built)
+
+In `plan_git.rs`'s module beside
+`a_task_made_on_one_clone_is_on_another_and_the_later_title_wins_on_both`:
+
+1. A clone that saved before it read still reads on its first list.
+2. A remote with no plan is read once.
+3. An offline first read waits 60 s (`now` parameter, no sleep).
+4. A hub-only clone reads the hub on its first list (`plan_hub` module).
+
+CLI check in `rust/loopflow/tests/work/local_planning.rs`: two homes on one
+bare origin; B's create-then-list names A and B; a third home's first
+`lf wave list` names A's Wave.
 
 ## Acceptance check
 
@@ -218,6 +266,9 @@ The last list shows `made on A` and `made on C`. On main it shows only
 - `lf wave list` / `lf plan list` first in a fresh clone shows the remote's
   plan; a hub-only clone lists the hub's Tasks right after binding.
 - Offline, only the first read in a minute waits.
+- On a Machine with a hub, a fresh Git clone's second read touches no
+  carrier; an offline hub never stalls a clone Git has read.
+- `lf task detail <id>` on a fresh clone finds a remote Task.
 - Existing `plan_git` and `planning_sync` tests pass.
 
 ## Deferred findings
@@ -235,6 +286,10 @@ The last list shows `made on A` and `made on C`. On main it shows only
 
 ## Review notes
 
-`scratch/concept-review.html` (from 91531a9eb2): F1–F4 adopted above as
-choices made for review; F5's `send` doc fix (hub reads on a save) is done in
-`plan_carriers.rs`, its first-read doc fixes are in this pass; F6, F7 deferred.
+First review (91531a9eb2): F1–F4 adopted as choices above, F5's doc fixes
+done, F6–F7 deferred. Post-build review (a00847808a): F1 (clone-level gate)
+and F2 (one owner, `lf task detail`) are pass 2; F3 (`--subscribe`
+store-only, review 2a) kept as built, its doc note is pass 2 step 4; F4
+(empty clones) and F5 (`set-url`) are the deferred findings above. Its
+questions 3 and 4 restate choices already made for review (60 s cooldown,
+quiet empty clones).

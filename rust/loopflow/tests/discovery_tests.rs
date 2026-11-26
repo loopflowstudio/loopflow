@@ -101,12 +101,12 @@ fn discover_repo_graphs() {
     let repo = TempDir::new().expect("repo");
     let graphs_dir = repo.path().join(".lf/graphs");
     std::fs::create_dir_all(&graphs_dir).expect("create graphs dir");
-    std::fs::write(graphs_dir.join("ship.yaml"), "- implement\n- gate\n").expect("write graph");
+    std::fs::write(graphs_dir.join("ship.yaml"), "- implement\n- qa\n").expect("write graph");
 
     let graphs =
         loopflow::lf::commands::list::list_children(&["graph".to_string()], repo.path()).unwrap();
     let graph = graphs.iter().find(|f| f.name == "ship").expect("graph");
-    assert_eq!(graph.description, "implement → gate");
+    assert_eq!(graph.description, "implement → qa");
 }
 
 #[test]

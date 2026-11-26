@@ -934,7 +934,8 @@ async fn select(
     launch: bool,
 ) -> anyhow::Result<String> {
     let selected =
-        loopflow_execution::ops::human_session::select_connection(store, directory, target).await?;
+        loopflow_execution::ops::human_session::select_connection(store, directory, target, launch)
+            .await?;
     if selected.started {
         loopflow_execution::journal::request::diagnostic(format_args!(
             "Nothing to resume here; starting a new conversation."
@@ -1077,7 +1078,8 @@ async fn restarted(
     agent: Option<&str>,
 ) -> anyhow::Result<Opening> {
     let selected =
-        loopflow_execution::ops::human_session::select_connection(store, directory, target).await?;
+        loopflow_execution::ops::human_session::select_connection(store, directory, target, launch)
+            .await?;
     let request_id = request_id
         .map(str::to_owned)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());

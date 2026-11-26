@@ -51,7 +51,7 @@ with what you passed over.
 Cover these where they matter and skip the rest:
 
 - **User-visible outcome** — whose behavior changes and what they see.
-- **Acceptance check at gate** — one scenario through the source of truth and
+- **Acceptance check** — one scenario through the source of truth and
   every affected consumer, as a headless command and its expected result.
 - **Source of truth** — the record, model or API everything else derives from.
 - **Affected surfaces and consumers** — every CLI, wire type, app or reader
@@ -60,6 +60,10 @@ Cover these where they matter and skip the rest:
   at each consumer.
 - **Operational boundary** — latency, scale, network or recovery limits the
   code must hold.
+- **Security and privacy** — when the change touches auth, credentials or
+  secrets, telemetry or outbound data, untrusted input, or deployment, state
+  what must stay protected and note whether `lf security-review` should run
+  before delivery.
 - **Exclusions** — nearby behavior left out.
 - **What goes** — the files, symbols, tests and fixtures this change removes,
   and the behavior and data that must survive. Never plan repairs to them.

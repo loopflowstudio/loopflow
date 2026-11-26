@@ -796,8 +796,25 @@ pub(super) async fn session<C: Carrier>(
                     cols,
                     placement,
                 };
-                send(lines, &start_held(id, terminals.clone(), Ok(start)).await).await?;
-                continue;
+                let (request_id, outgoing, terminals, uploaded_reservation) = (
+                    id.clone(),
+                    outgoing.clone(),
+                    terminals.clone(),
+                    uploaded_reservation.take(),
+                );
+                let task = tasks.spawn(async move {
+                    let Some(reservation) =
+                        reserve_answer(&outgoing, uploaded_reservation, (slot, None)).await
+                    else {
+                        return;
+                    };
+                    let message = start_held(request_id, terminals, Ok(start)).await;
+                    let _ = outgoing.deliver(message, reservation).await;
+                });
+                Inflight {
+                    task,
+                    checkpoints: None,
+                }
             }
             Start::Request(
                 Operation::Server(ServerOperation::SessionContinue {
@@ -812,38 +829,55 @@ pub(super) async fn session<C: Carrier>(
                 None,
                 _,
             ) => {
-                let message = match terminal_machine(peers.is_some(), &session, task, machine).await
-                {
-                    Err(refusal) => ServerMessage::error(Some(id), refusal),
-                    Ok(Some(machine)) => {
-                        let peers = peers.expect("only a local client's request is sent on");
-                        let operation = ServerOperation::SessionContinue {
-                            session,
-                            request: request.clone(),
-                            rows,
-                            cols,
-                            task: None,
-                            machine: None,
-                            agent,
-                        };
-                        // Repeating `request` starts nothing, so a lost pipe retries once.
-                        answered(
-                            id,
-                            ask_there(peers, machine, None, operation, Some(request)).await,
-                        )
-                    }
-                    Ok(None) => {
-                        let start = tokio::task::spawn_blocking(move || {
-                            continuing(session, request, rows, cols, agent)
-                        })
+                let (request_id, outgoing, terminals, uploaded_reservation) = (
+                    id.clone(),
+                    outgoing.clone(),
+                    terminals.clone(),
+                    uploaded_reservation.take(),
+                );
+                let task = tasks.spawn(async move {
+                    let Some(reservation) =
+                        reserve_answer(&outgoing, uploaded_reservation, (slot, None)).await
+                    else {
+                        return;
+                    };
+                    let message = match terminal_machine(peers.is_some(), &session, task, machine)
                         .await
-                        .map_err(unavailable)
-                        .and_then(|start| start);
-                        start_held(id, terminals.clone(), start).await
-                    }
-                };
-                send(lines, &message).await?;
-                continue;
+                    {
+                        Err(refusal) => ServerMessage::error(Some(request_id), refusal),
+                        Ok(Some(machine)) => {
+                            let peers = peers.expect("only a local client's request is sent on");
+                            let operation = ServerOperation::SessionContinue {
+                                session,
+                                request: request.clone(),
+                                rows,
+                                cols,
+                                task: None,
+                                machine: None,
+                                agent,
+                            };
+                            // Repeating `request` starts nothing, so a lost pipe retries once.
+                            answered(
+                                request_id,
+                                ask_there(peers, machine, None, operation, Some(request)).await,
+                            )
+                        }
+                        Ok(None) => {
+                            let start = tokio::task::spawn_blocking(move || {
+                                continuing(session, request, rows, cols, agent)
+                            })
+                            .await
+                            .map_err(unavailable)
+                            .and_then(|start| start);
+                            start_held(request_id, terminals, start).await
+                        }
+                    };
+                    let _ = outgoing.deliver(message, reservation).await;
+                });
+                Inflight {
+                    task,
+                    checkpoints: None,
+                }
             }
             Start::Request(
                 Operation::Server(ServerOperation::SessionAttach {
@@ -855,56 +889,97 @@ pub(super) async fn session<C: Carrier>(
                 None,
                 _,
             ) => {
-                match terminal_machine(peers.is_some(), &session, task, machine).await {
-                    Err(refusal) => {
-                        send(lines, &ServerMessage::error(Some(id), refusal)).await?;
-                        continue;
-                    }
-                    Ok(Some(machine)) => {
-                        let peers = peers.expect("only a local client's request is sent on");
-                        let operation = ServerOperation::SessionAttach {
-                            session,
-                            terminal_id,
-                            task: None,
-                            machine: None,
-                        };
-                        let message =
-                            attach_there(id, peers, machine, None, operation, &tickets, &admission)
-                                .await;
-                        send(lines, &message).await?;
-                        continue;
-                    }
-                    Ok(None) => {}
-                }
-                let held = terminals
-                    .as_ref()
-                    .and_then(|terminals| terminals.session_terminal(&session));
-                // A terminal whose holder has not answered this server yet.
-                let pending = terminals.as_ref().and_then(|terminals| {
-                    terminals.pending_terminal(&session, terminal_id.as_ref())
+                let (request_id, outgoing, terminals, tickets, admission, uploaded_reservation) = (
+                    id.clone(),
+                    outgoing.clone(),
+                    terminals.clone(),
+                    tickets.clone(),
+                    admission.clone(),
+                    uploaded_reservation.take(),
+                );
+                let task = tasks.spawn(async move {
+                    let Some(reservation) =
+                        reserve_answer(&outgoing, uploaded_reservation, (slot, None)).await
+                    else {
+                        return;
+                    };
+                    let message = match terminal_machine(peers.is_some(), &session, task, machine)
+                        .await
+                    {
+                        Err(refusal) => ServerMessage::error(Some(request_id), refusal),
+                        Ok(Some(machine)) => {
+                            let peers = peers.expect("only a local client's request is sent on");
+                            let operation = ServerOperation::SessionAttach {
+                                session,
+                                terminal_id,
+                                task: None,
+                                machine: None,
+                            };
+                            attach_there(
+                                request_id, peers, machine, None, operation, &tickets, &admission,
+                            )
+                            .await
+                        }
+                        Ok(None) => {
+                            let held = terminals.as_ref().and_then(|terminals| {
+                                terminals.session_terminal_for(&session, terminal_id.as_ref())
+                            });
+                            // A terminal whose holder has not answered this server yet.
+                            let pending = terminals.as_ref().and_then(|terminals| {
+                                terminals.pending_terminal(&session, terminal_id.as_ref())
+                            });
+                            match (terminal_id, held, pending) {
+                                (wanted, Some(held), _)
+                                    if wanted.as_ref().is_none_or(|wanted| *wanted == held) =>
+                                {
+                                    let ticket = tickets
+                                        .issue(admission.clone(), Purpose::Terminal(held.clone()));
+                                    response(
+                                        request_id,
+                                        serde_json::to_value(SessionAttached {
+                                            ticket,
+                                            terminal_id: held,
+                                            expires_in_ms: TICKET_LIFETIME.as_millis() as u64,
+                                        })
+                                        .expect("a ticket serializes"),
+                                    )
+                                }
+                                // Nothing ended; asking again later attaches.
+                                (_, _, Some(pending)) => ServerMessage::error(
+                                    Some(request_id),
+                                    loopflow_execution::transport::registry::waiting(&pending),
+                                ),
+                                (None, None, None) => ServerMessage::error(
+                                    Some(request_id),
+                                    Error::new(
+                                        ErrorCode::NotFound,
+                                        format!(
+                                            "Session {} has no running terminal; nothing was started",
+                                            session.as_str()
+                                        ),
+                                    )
+                                    .with(serde_json::json!({ "session": session })),
+                                ),
+                                (wanted, current, None) => ServerMessage::error(
+                                    Some(request_id),
+                                    Error::new(
+                                        ErrorCode::NotFound,
+                                        "terminal has ended; nothing was started and no input replayed",
+                                    )
+                                    .with(serde_json::json!({
+                                        "terminal_id": wanted,
+                                        "current_terminal_id": current
+                                    })),
+                                ),
+                            }
+                        }
+                    };
+                    let _ = outgoing.deliver(message, reservation).await;
                 });
-                let message = match (terminal_id, held, pending) {
-                    (wanted, Some(held), _) if wanted.as_ref().is_none_or(|wanted| *wanted == held) => {
-                        let ticket = tickets.issue(admission.clone(), Purpose::Terminal(held.clone()));
-                        response(id, serde_json::to_value(SessionAttached {
-                            ticket,
-                            terminal_id: held,
-                            expires_in_ms: TICKET_LIFETIME.as_millis() as u64,
-                        })
-                        .expect("a ticket serializes"))
-                    }
-                    // Nothing ended; asking again later attaches.
-                    (_, _, Some(pending)) => ServerMessage::error(Some(id), loopflow_execution::transport::registry::waiting(&pending)),
-                    (None, None, None) => ServerMessage::error(Some(id), Error::new(
-                        ErrorCode::NotFound,
-                        format!("Session {} has no running terminal; nothing was started", session.as_str()),
-                    ).with(serde_json::json!({ "session": session }))),
-                    (wanted, current, None) => ServerMessage::error(Some(id), Error::new(ErrorCode::NotFound,
-                        "terminal has ended; nothing was started and no input replayed",
-                    ).with(serde_json::json!({ "terminal_id": wanted, "current_terminal_id": current }))),
-                };
-                send(lines, &message).await?;
-                continue;
+                Inflight {
+                    task,
+                    checkpoints: None,
+                }
             }
             Start::Request(
                 Operation::Server(
@@ -916,10 +991,29 @@ pub(super) async fn session<C: Carrier>(
                 _,
             ) => {
                 let origin = origin.expect("a Task shell request carries its sender");
-                let message =
-                    task_shell(id, shell, origin, terminals.clone(), &tickets, &admission).await;
-                send(lines, &message).await?;
-                continue;
+                let (request_id, outgoing, terminals, tickets, admission, uploaded_reservation) = (
+                    id.clone(),
+                    outgoing.clone(),
+                    terminals.clone(),
+                    tickets.clone(),
+                    admission.clone(),
+                    uploaded_reservation.take(),
+                );
+                let task = tasks.spawn(async move {
+                    let Some(reservation) =
+                        reserve_answer(&outgoing, uploaded_reservation, (slot, None)).await
+                    else {
+                        return;
+                    };
+                    let message =
+                        task_shell(request_id, shell, origin, terminals, &tickets, &admission)
+                            .await;
+                    let _ = outgoing.deliver(message, reservation).await;
+                });
+                Inflight {
+                    task,
+                    checkpoints: None,
+                }
             }
             Start::Request(
                 Operation::Server(ServerOperation::RequestUpload { bytes }),
@@ -1012,17 +1106,11 @@ pub(super) async fn session<C: Carrier>(
                 );
                 let uploaded_reservation = uploaded_reservation.take();
                 let task = tasks.spawn(async move {
-                    // Keep admission bounded while waiting for producer headroom.
-                    // Cancellation before capacity is available performs no work.
-                    let slots = (slot, write);
-                    let reservation = match uploaded_reservation {
-                        Some(reservation) => reservation,
-                        None => match outgoing.wait().await {
-                            Ok(reservation) => reservation,
-                            Err(_) => return,
-                        },
+                    let Some(reservation) =
+                        reserve_answer(&outgoing, uploaded_reservation, (slot, write)).await
+                    else {
+                        return;
                     };
-                    reservation.hold(slots);
                     request(
                         request_id,
                         operation,
@@ -1046,9 +1134,26 @@ pub(super) async fn session<C: Carrier>(
     }
 }
 
+/// Keep admission bounded while waiting for producer headroom. Cancellation
+/// before capacity is available performs no work.
+async fn reserve_answer(
+    outgoing: &Outbox,
+    uploaded: Option<Arc<Reservation>>,
+    slots: (
+        tokio::sync::OwnedSemaphorePermit,
+        Option<tokio::sync::OwnedSemaphorePermit>,
+    ),
+) -> Option<Arc<Reservation>> {
+    let reservation = match uploaded {
+        Some(reservation) => reservation,
+        None => outgoing.wait().await.ok()?,
+    };
+    reservation.hold(slots);
+    Some(reservation)
+}
+
 /// Start a held terminal and answer `{terminal_id}`. Starting a holder can
-/// take seconds; nothing else on this connection waits on it but its own
-/// requests.
+/// take seconds; nothing else on this connection waits on it.
 async fn start_held(
     id: String,
     terminals: Option<Arc<Registry>>,

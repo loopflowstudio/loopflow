@@ -23,6 +23,7 @@ def find(sel):
     for pr in st["prs"]:
         if str(pr["number"]) == sel or pr["head"] == sel: return pr
 sub = " ".join(args[:2])
+target = args[2] if len(args) > 2 and not args[2].startswith("-") else branch()
 if sub == "pr list":
     h = opt("--head"); state = opt("--state", "open").upper()
     prs = [p for p in st["prs"] if (h is None or p["head"] == h) and (state == "ALL" or p["state"] == state)]
@@ -36,17 +37,16 @@ elif sub == "pr create":
 elif sub == "pr edit" and "--base" in args and os.path.exists(S + ".fail-edit"):
     print("GraphQL: Resource not accessible by integration (updatePullRequest)", file=sys.stderr); sys.exit(1)
 elif sub == "pr edit":
-    pr = find(args[2])
+    pr = find(target)
     for k, f in (("title", "--title"), ("body", "--body"), ("base", "--base")):
         if f in args: pr[k] = opt(f)
     save(); print("https://github.com/qa/repo/pull/%d" % pr["number"])
 elif sub == "pr close":
-    find(args[2])["state"] = "CLOSED"; save()
+    find(target)["state"] = "CLOSED"; save()
 elif sub == "pr ready":
-    find(args[2])["draft"] = False; save()
+    find(target)["draft"] = False; save()
 elif sub == "pr view":
-    sel = args[2] if len(args) > 2 and not args[2].startswith("-") else branch()
-    pr = find(sel)
+    pr = find(target)
     if pr is None: print("no pull requests found", file=sys.stderr); sys.exit(1)
     if "-q" in args:
         print(view(pr, "")[opt("-q").lstrip(".")])
@@ -61,6 +61,17 @@ elif args[0] == "api" and any("/pulls/" in a for a in args):
         "merged_at": "2026-11-18T16:00:00Z" if pr["state"] == "MERGED" else None, "mergeable_state": "clean",
         "html_url": "https://github.com/qa/repo/pull/%d" % pr["number"], "head": {"sha": pr.get("merged_head") or head(pr["head"])},
         "base": {"ref": pr["base"]}}))
+elif sub == "pr merge" and "--disable-auto" in args:
+    find(target).pop("auto", None); save()
+elif sub == "pr merge" and "--auto" in args:
+    find(target)["auto"] = opt("--match-head-commit"); save()
+elif sub == "api graphql" and any("LoopflowPrMerge" in a for a in args):
+    pr = find([a for a in args if a.startswith("number=")][0].split("=", 1)[1])
+    print(json.dumps({"data": {"repository": {"mergeCommitAllowed": True, "squashMergeAllowed": True, "rebaseMergeAllowed": True,
+        "pullRequest": {"id": "pr-%d" % pr["number"], "number": pr["number"], "url": "https://github.com/qa/repo/pull/%d" % pr["number"],
+        "state": pr["state"], "isDraft": pr["draft"], "headRefName": pr["head"], "headRefOid": head(pr["head"]),
+        "mergedAt": None, "mergeCommit": None, "mergeStateStatus": "CLEAN", "isMergeQueueEnabled": False, "isInMergeQueue": False,
+        "autoMergeRequest": {"enabledAt": "2026-11-25T00:00:00Z"} if pr.get("auto") else None, "mergeQueueEntry": None}}}}))
 elif sub == "api graphql":
     import re
     q = [a for a in args if a.startswith("query=")][0]

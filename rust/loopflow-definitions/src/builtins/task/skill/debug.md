@@ -26,9 +26,9 @@ the cause behind it and replace it with the real fix.
 3. **Fix the cause,** within the scope asked. Add a diagnostic or regression
    test when it makes this failure easier to read or stops it coming back.
    Asked only for a diagnosis, explain the cause and the fix without editing.
-4. **Rerun the same command** and nearby regressions. Follow any newly
-   exposed failure until the workflow succeeds. One green check is not enough
-   while other counterexamples exist.
+4. **Rerun the same command** and its immediate test; defer broad suites and
+   release builds to CI. Follow any newly exposed failure until the workflow
+   succeeds. One green check is not enough while other counterexamples exist.
 
 Report the cause, the change, and the same command failing before and passing
 after, with the output of both. If the cause is

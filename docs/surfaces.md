@@ -302,7 +302,6 @@ times it stops for you:
   deep-clean              Delete what an area no longer needs        never stops
   incident                Restore first, then fix the cause          never stops
   optimize                Move one number                            never stops
-  queue                   Compress, integrate upstream changes       never stops
   quick                   Build a small, clear change and land it    merges without asking
   task-design             Draft the Task design                      never stops
 ```

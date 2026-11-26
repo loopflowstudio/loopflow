@@ -357,7 +357,7 @@ are the execution owners; Run has no separate lifecycle.
 
 ```bash
 lf debug -c
-lf gate --diff files
+lf qa --diff files
 ```
 
 These commands need the execution area only: discover, prompt, route, launch,

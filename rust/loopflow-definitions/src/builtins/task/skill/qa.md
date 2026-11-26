@@ -26,6 +26,12 @@ no route exists, make one. Hand back only what truly needs a person (their own
 credentials, a physical device, a payment, a production approval) and say
 exactly what that left unchecked.
 
+Many agents share this Machine: use a debug build of this change (skip
+`--release` or full packaging unless performance or packaging is under test),
+focus on the journeys this change affects rather than unrelated regression
+suites, and stop every server, browser or watcher you started (by its own PID)
+when finished.
+
 - Arrive the way a person arrives: a fresh install or first visit, then a
   returning user with data from before this change.
 - Do the main job end to end, then what people actually do: wrong input, empty

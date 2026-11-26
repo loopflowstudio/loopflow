@@ -3180,9 +3180,15 @@ pub fn prepare_conversation_beside(task: &Task) {
     let prepared = block_on_task(async {
         let store = task_store().await?;
         let worktree = task.worktree().map_err(task_error)?.clone();
-        crate::ops::human_session::primary::ensure_task(&store, &worktree, task.id.as_str(), None)
-            .await
-            .map_err(task_error)?;
+        crate::ops::human_session::primary::ensure_task(
+            &store,
+            &worktree,
+            task.id.as_str(),
+            None,
+            false,
+        )
+        .await
+        .map_err(task_error)?;
         Ok(())
     });
     if let Err(error) = prepared {

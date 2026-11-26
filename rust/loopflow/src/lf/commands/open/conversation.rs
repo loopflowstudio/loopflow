@@ -408,7 +408,7 @@ pub(super) fn resolve(target: &mut Resolved, prepare: bool) -> Result<()> {
             _ => SessionTarget::Repository,
         };
         let id = if prepare {
-            select_connection(&store, &target.repository_path, selector)
+            select_connection(&store, &target.repository_path, selector, true)
                 .await?
                 .id
         } else {

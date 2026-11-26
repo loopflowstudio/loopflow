@@ -299,7 +299,7 @@ Loopflow runs locally on macOS or Linux (or over SSH / rented Daytona, Modal, Ru
 
 Key capabilities:
 - **Multi-harness + failover:** Mix Claude Code, Codex, OpenCode, Pi, and Antigravity per repo, Wave, Skill, or Graph step; configure `agents: [claude, codex]` for automatic usage-limit failover and backoff.
-- **Version-controlled workflows:** Markdown Skills (extend builtins with `extends: builtin`) and YAML Graphs with loops, `xor` branches, `write-docs`, repo-local `.lf/qa/` playbooks, one-page `human-review`, `reflect`, and `gate` (publishes PR first so CI runs during review).
+- **Version-controlled workflows:** Markdown Skills (extend builtins with `extends: builtin`) and YAML Graphs with loops, `xor` branches, `write-docs`, repo-local `.lf/qa/` playbooks, one-page `ship-review`, and `deliver` (`reflect` + `lf land --wait-and-fix`).
 - **Durable Tasks & Sessions:** Isolated worktrees, stacked PRs (`lf sync <parent-ID>`), auto-merge with CI repair (`lf land --wait-and-fix`), and persistent conversations that survive terminal close, `lf install` updates, crashes, and reboots.
 - **Team-native planning:** Syncs via a Git ref on `origin` by default, or two-way with Linear or Asana; coworkers comment in Linear/Asana and review on GitHub without installing `lf`. Waves group Tasks with shared `GOAL.md`, `MEMORY.md`, KRs, and defaults.
 - **Surface-agnostic + Agent API:** Loopflow Desktop (macOS + phone over Tailscale), Rex, cmux, Herdr, tmux, or any terminal. Every read supports `--json` and `--subscribe`. Install: `curl -fsSL https://loopflow.studio/install.sh | sh && lf init`.

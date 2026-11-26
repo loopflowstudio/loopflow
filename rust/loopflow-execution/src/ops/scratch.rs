@@ -1,21 +1,56 @@
 //! Explicit delivery cleanup; ordinary launches and Git operations keep scratch.
 use std::path::Path;
 
-use crate::ops::error::OpsResult;
+use crate::ops::error::{OpsError, OpsResult};
 
-/// Clear committed additions only. Checkpoint intended notes before calling this.
+/// Clear committed additions relative to the Task's recorded base (keeping a
+/// live stack parent's notes out of the child's diff), else the integration
+/// merge-base. Checkpoint intended notes before calling this.
 pub fn clear(repo: &Path) -> OpsResult<usize> {
     let base = match crate::ops::task::task_diff_base(repo)? {
         Some(base) => base,
         None => crate::git::scratch::base(repo)?,
     };
-    let paths = crate::git::scratch::added(repo, &base, "HEAD")?;
+    clear_against(repo, &base)
+}
+
+/// Clear committed additions against delivery's integration base and refuse
+/// when clearing leaves no authored changes.
+pub(crate) fn clear_for_delivery(repo: &Path, base: &str) -> OpsResult<usize> {
+    let added = crate::git::scratch::added(repo, base, "HEAD")?;
+    let changed = crate::git::git_stdout(repo, &["diff", "--name-only", "-z", base, "HEAD"])?;
+    let has_authored = changed
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .any(|path| !added.iter().any(|candidate| candidate == path));
+    if !has_authored {
+        return Err(OpsError::Message(
+            "no authored changes remain after integration; refusing to publish an empty PR"
+                .to_string(),
+        ));
+    }
+    let cleared = remove_and_commit(repo, &added)?;
+    if crate::git::rev_parse(repo, "HEAD^{tree}")?
+        == crate::git::rev_parse(repo, &format!("{base}^{{tree}}"))?
+    {
+        return Err(OpsError::Message(
+            "no authored changes remain after integration; refusing to publish an empty PR"
+                .to_string(),
+        ));
+    }
+    Ok(cleared)
+}
+
+fn clear_against(repo: &Path, base: &str) -> OpsResult<usize> {
+    let paths = crate::git::scratch::added(repo, base, "HEAD")?;
+    remove_and_commit(repo, &paths)
+}
+
+fn remove_and_commit(repo: &Path, paths: &[String]) -> OpsResult<usize> {
     if paths.is_empty() {
         return Ok(0);
     }
-    let mut args = vec!["--literal-pathspecs", "rm", "-f", "--"];
-    args.extend(paths.iter().map(String::as_str));
-    crate::git::git_stdout(repo, &args)?;
-    crate::ops::commit_selected(repo, &paths, Some("Clear added scratch files"))?;
+    crate::git::scratch::remove(repo, paths)?;
+    crate::ops::commit_selected(repo, paths, Some("Clear added scratch files"))?;
     Ok(paths.len())
 }

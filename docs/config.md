@@ -98,7 +98,7 @@ Give a Graph step an `id:` to configure that occurrence independently:
 ```yaml
 # .lf/graphs/release.yaml
 - step: {name: implement, id: write-code}
-- gate
+- qa
 - step: {name: implement, id: fix-review}
 ```
 
@@ -384,8 +384,9 @@ What enters a launch:
 - On a branch with no commits beyond its base, `--diff patch` shows
   uncommitted changes and lists untracked files for the agent to read directly.
 - `scratch/` notes written during a branch are cleaned up automatically by
-  `lf pr submit` and `lf land` (`lf scratch clear` removes added files while
-  keeping pre-existing files, edits, and `.gitkeep`).
+  `lf pr submit`, `lf pr arm`, and `lf land` once right before pushing
+  (`lf scratch clear` removes added files while keeping pre-existing files,
+  edits, and `.gitkeep`).
 
 ## Skill and Graph discovery
 

@@ -892,3 +892,31 @@ fn attaching_during_in_flight_exit_settlement_waits_then_sees_exit_code() {
     assert_eq!(exit_code, Some(42));
     registry.close();
 }
+
+#[test]
+fn session_terminal_for_prefers_the_requested_live_terminal() {
+    let _ledger = TestLedgerGuard::new();
+    let registry = Registry::open(BUILD).unwrap();
+    let place = holder();
+    let session = LfSessionId::from("session_overlap");
+    let first = registry
+        .start(shell(Some(&session), "request-1", "read line"))
+        .unwrap();
+    let second = registry
+        .start(shell(Some(&session), "request-2", "read line"))
+        .unwrap();
+    assert_eq!(
+        registry.session_terminal_for(&session, Some(&first)),
+        Some(first.clone())
+    );
+    assert_eq!(
+        registry.session_terminal_for(&session, Some(&second)),
+        Some(second.clone())
+    );
+    kill(&place, &first);
+    wait_until("the first terminal to end", || {
+        registry.session_terminal_for(&session, Some(&first)) == Some(second.clone())
+    });
+    registry.close();
+    kill(&place, &second);
+}

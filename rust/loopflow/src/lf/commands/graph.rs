@@ -1714,7 +1714,7 @@ mod tests {
     #[test]
     fn builtin_task_graphs_compile_and_name_their_interactive_steps() {
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        for name in ["task-design", "pursue", "queue", "deliver", "quick"] {
+        for name in ["task-design", "pursue", "deliver", "quick"] {
             let graph = loopflow_execution::graph::load_graph(name, &repo).unwrap();
             let items = loopflow_execution::graph::compile_graph(&graph, &repo).unwrap();
             assert!(

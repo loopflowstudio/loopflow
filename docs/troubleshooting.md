@@ -137,7 +137,7 @@ through your `agents` list; once exhausted, Graph steps wait 5, 15, 30, then
 
 ```bash
 lf set --global agents claude,codex
-lf config settings --skill gate --explain
+lf config settings --skill qa --explain
 ```
 
 Sign in again natively on the execution Machine if credentials expired, then

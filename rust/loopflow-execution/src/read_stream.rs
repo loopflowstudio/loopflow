@@ -896,12 +896,12 @@ struct Follower {
     last_seen: Option<StoreRevisions>,
 }
 
-type RevisionCallback = Arc<Mutex<Box<dyn FnMut(Option<StoreRevisions>) + Send>>>;
+type RevisionCallback = Arc<Mutex<dyn FnMut(Option<StoreRevisions>) + Send>>;
 
 enum RevisionSink {
     Watch(tokio::sync::watch::Sender<Option<StoreRevisions>>),
     Notify {
-        callback: Weak<Mutex<Box<dyn FnMut(Option<StoreRevisions>) + Send>>>,
+        callback: Weak<Mutex<dyn FnMut(Option<StoreRevisions>) + Send>>,
         last_seen: Option<StoreRevisions>,
     },
 }
@@ -946,6 +946,12 @@ struct ObserverEntry {
     waker: StoreWaker,
 }
 
+impl ObserverEntry {
+    fn is_empty(&self) -> bool {
+        self.followers.is_empty() && self.revisions.is_empty()
+    }
+}
+
 fn ensure_observer<'a>(
     observers: &'a mut HashMap<PathBuf, ObserverEntry>,
     database: &Path,
@@ -984,7 +990,7 @@ pub(crate) fn follow_revisions(
     on_change: impl FnMut(Option<StoreRevisions>) + Send + 'static,
 ) -> RevisionFollow {
     let initial = read_store_revisions(database);
-    let callback: RevisionCallback = Arc::new(Mutex::new(Box::new(on_change)));
+    let callback: RevisionCallback = Arc::new(Mutex::new(on_change));
     let mut observers = observers();
     let entry = ensure_observer(&mut observers, database);
     entry.revisions.retain(RevisionSink::is_live);
@@ -1085,7 +1091,7 @@ fn observe(database: &Path, mut store: StoreChanges) {
                 .followers
                 .retain(|follower| follower.inbox.strong_count() > 0);
             entry.revisions.retain(RevisionSink::is_live);
-            if entry.followers.is_empty() && entry.revisions.is_empty() {
+            if entry.is_empty() {
                 observers.remove(database);
                 return;
             }
@@ -1142,12 +1148,11 @@ fn observe(database: &Path, mut store: StoreChanges) {
                     true
                 }
             });
-            if entry.followers.is_empty() && entry.revisions.is_empty() {
+            let empty = entry.is_empty();
+            if empty {
                 observers.remove(database);
-                true
-            } else {
-                false
             }
+            empty
         };
         for callback in notifications {
             if let Ok(mut cb) = callback.lock() {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -362,6 +363,31 @@ def _writer_loop(db_path: Path, stop_file: Path, rate_hz: float) -> None:
         conn.close()
 
 
+@contextlib.contextmanager
+def _background_writer(binary: Path, db_path: Path, stop_file: Path):
+    writer = subprocess.Popen(
+        [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            str(binary),
+            "--_writer-db",
+            str(db_path),
+            "--_writer-stop",
+            str(stop_file),
+        ],
+        stdin=subprocess.DEVNULL,
+    )
+    try:
+        yield
+    finally:
+        stop_file.write_text("stop")
+        try:
+            writer.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            writer.terminate()
+            writer.wait(timeout=5)
+
+
 def _measure_phase(
     name: str,
     pid: int,
@@ -472,7 +498,6 @@ def main() -> int:
                 stderr=subprocess.STDOUT,
             )
             peer: ServerPeer | None = None
-            writer: subprocess.Popen | None = None
             viewers: list[HeldViewer] = []
             stop_terminals = home / "stop-terminals"
             try:
@@ -558,27 +583,10 @@ def main() -> int:
                 time.sleep(3.5)
                 peer.drain_nonblocking()
 
-                stop_file = home / "stop-writer"
-                writer = subprocess.Popen(
-                    [
-                        sys.executable,
-                        str(Path(__file__).resolve()),
-                        str(binary),
-                        "--_writer-db",
-                        str(db_path),
-                        "--_writer-stop",
-                        str(stop_file),
-                    ],
-                    stdin=subprocess.DEVNULL,
-                )
-                try:
+                with _background_writer(binary, db_path, home / "stop-writer"):
                     results["db_writes"] = _measure_phase(
                         "db_writes", server.pid, peer, args.seconds, lambda _t, _e: None
                     )
-                finally:
-                    stop_file.write_text("stop")
-                    writer.wait(timeout=10)
-                    writer = None
 
                 viewers = _start_held_terminals(
                     peer, db_path, home / ".lf", repo0, stop_terminals
@@ -598,27 +606,10 @@ def main() -> int:
                     "held_idle", server.pid, peer, args.seconds, _keep_viewers
                 )
 
-                stop_held_writer = home / "stop-held-writer"
-                writer = subprocess.Popen(
-                    [
-                        sys.executable,
-                        str(Path(__file__).resolve()),
-                        str(binary),
-                        "--_writer-db",
-                        str(db_path),
-                        "--_writer-stop",
-                        str(stop_held_writer),
-                    ],
-                    stdin=subprocess.DEVNULL,
-                )
-                try:
+                with _background_writer(binary, db_path, home / "stop-held-writer"):
                     results["held_writes"] = _measure_phase(
                         "held_writes", server.pid, peer, args.seconds, _keep_viewers
                     )
-                finally:
-                    stop_held_writer.write_text("stop")
-                    writer.wait(timeout=10)
-                    writer = None
             finally:
                 stop_terminals.write_text("stop")
                 for viewer in viewers:
@@ -628,9 +619,6 @@ def main() -> int:
                     time.sleep(1.5)
                 if peer is not None:
                     peer.close()
-                if writer is not None and writer.poll() is None:
-                    writer.terminate()
-                    writer.wait(timeout=5)
                 server.terminate()
                 try:
                     server.wait(timeout=10)

@@ -490,9 +490,9 @@ button).
    tickets without adding a `ServerOperation` case or touching `ServerProtocolTests`;
    and `TaskFilesStore.isScratchPage` also needed the `*.page.html` filter so local
    FSEvents match Rust's `ops/task/find.rs`.
-   Open shape questions for compress: `page_build.rs` is 1434 lines in one
-   file; `TaskFilesTests/reviewPageBridgeOwnsStateClearsAfterSendAndForwardsOperations`
+   Open shape question for compress: `TaskFilesTests/reviewPageBridgeOwnsStateClearsAfterSendAndForwardsOperations`
    checks eight behaviors in one test and could split along its numbered steps.
+   (`page_build.rs` has since split into `page/{build,components,diff,html,operations}.rs`.)
    Deferred to qa: the runtime against `__lfDesktopApplyState` in Dev Desktop
    (switch files before sending, click a `data-lf` button); no JS runs in CI.
 4. **Done — Skills and docs (`929e95f0a6`).** Rewrote `explore`, `concept-review`, `qa`,
@@ -597,12 +597,20 @@ button).
 
 ### Remaining (later Graph steps)
 
-- **Dev Desktop live run:** not reached by qa pass 2 (headless). Chrome pass 2
-  (`scratch/qa.html`) verified the Pass 5 fixes and fixed three more: decision
-  title drawn twice (CSS specificity), restarts losing drafts and receipts
-  (loopback port now stable per lf home), and a stale "Saved …" strip sentence.
-- **gate:** `cargo test -p loopflow --test page_tests` and the `page.rs` unit
-  tests added in Pass 5 were not rerun at realign; gate/CI runs them.
+All six implementation passes are done; what remains belongs to qa, gate and
+compress.
+
+- **qa — Dev Desktop live run (never reached).** Chrome covered Passes 5–6;
+  Desktop has not run the runtime at all. Check there: switching files before
+  sending, a `data-lf` button, and Pass 6's 1c + 2a inside `TaskHTMLView` with
+  `.lf-dock` hidden (Desktop sync sends each note, line range and choice as a
+  ref string in `items`; the browser-only `Overall:` line is never sent).
+- **gate:** `cargo test -p loopflow --test page_tests` and the `page.rs` /
+  `diff.rs` unit tests (including Pass 6's `lf-code-row` rows) were not rerun
+  at realign; gate/CI runs them.
+- **compress:** `runtime.js` grew to 1890 lines and `base.css` to 844 in
+  Pass 6; look for duplicated anchor/serialization paths between prose notes,
+  line ranges and the sidebar/dock renderers.
 - Open questions 1–8 in `scratch/questions.md` stay for review (notably which
   browser "an agent-browser split" meant).
 

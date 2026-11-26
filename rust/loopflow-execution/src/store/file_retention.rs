@@ -131,9 +131,10 @@ fn process_id_active(stem: &str, active: &HashSet<String>) -> bool {
         return true;
     }
     // Graph logs can carry a prefix before the UUID, e.g. `repository-release-<uuid>`.
-    if stem.len() > 36 {
+    // Check the ASCII `-` byte before slicing so non-ASCII filenames cannot split a UTF-8 char.
+    if stem.len() > 36 && stem.as_bytes()[stem.len() - 37] == b'-' {
         let tail = &stem[stem.len() - 36..];
-        if stem.as_bytes()[stem.len() - 37] == b'-' && active.contains(tail) {
+        if active.contains(tail) {
             return true;
         }
     }
@@ -509,11 +510,13 @@ mod tests {
         let recent_ended_log = logs.join(format!("terminal-{ended_graph}.log"));
         let old_prefixed_active_log =
             logs.join(format!("graph-repository-release-{active_graph}.log"));
+        let old_non_ascii_log = logs.join("graph-日本語ログファイル名テスト用の長い名前.log");
         for p in [
             &old_ended_log,
             &old_active_log,
             &recent_ended_log,
             &old_prefixed_active_log,
+            &old_non_ascii_log,
         ] {
             fs::write(p, "log\n").unwrap();
         }
@@ -523,6 +526,7 @@ mod tests {
             &old_prefixed_active_log,
             now - PROCESS_LOG_MAX_AGE_SECS - 60,
         );
+        set_mtime(&old_non_ascii_log, now - PROCESS_LOG_MAX_AGE_SECS - 60);
         set_mtime(&recent_ended_log, now - 60);
 
         // 2. Context deliveries (7-day threshold + live launch guard + keep .thread / .store-gap).
@@ -611,12 +615,13 @@ mod tests {
         set_mtime(&active_admission, now - 600);
 
         let report = prune(&db, now).unwrap();
-        assert_eq!(report.process_logs_removed, 1);
+        assert_eq!(report.process_logs_removed, 2);
         assert_eq!(report.deliveries_removed, 1);
         assert_eq!(report.backups_removed, 1);
         assert_eq!(report.lock_files_removed, 4);
 
         assert!(!old_ended_log.exists());
+        assert!(!old_non_ascii_log.exists());
         assert!(old_active_log.exists());
         assert!(old_prefixed_active_log.exists());
         assert!(recent_ended_log.exists());

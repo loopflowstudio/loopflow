@@ -70,6 +70,7 @@ fn label(home: &Path, namespace: &str) -> String {
     format!("com.loopflow.{namespace}.{}", &digest[..16])
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn is_legacy_custom_label(name: &str) -> bool {
     ["com.loopflow.server.", "com.loopflow.machine."]
         .iter()

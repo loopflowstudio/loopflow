@@ -2,7 +2,9 @@
 //! inline; only a bounded reading scope retains answers and dependencies.
 use std::any::Any;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap, HashSet};
+#[cfg(target_os = "macos")]
+use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -188,6 +190,7 @@ impl Fact {
         }
     }
 
+    #[cfg(target_os = "macos")]
     fn checkout_root(&self) -> Option<&Path> {
         match self {
             Self::Git(path, _) | Self::CheckoutFiles(path) => Some(path.as_path()),
@@ -373,6 +376,7 @@ type SharedSlot = Arc<FactSlot>;
 /// RAII hold that keeps observed facts refreshing while a `Dependencies` lives,
 /// and releases checkout filesystem watches when dropped.
 struct Hold {
+    #[cfg(target_os = "macos")]
     cache: Weak<Cache>,
     slots: Vec<SharedSlot>,
     #[cfg(target_os = "macos")]
@@ -555,7 +559,7 @@ impl Cache {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     pub(crate) fn with_fs_watcher() -> Arc<Self> {
         Arc::new(Self::new(true))
     }
@@ -974,6 +978,7 @@ impl Cache {
             self.acquire_checkout_watch(checkout);
         }
         dependencies.0.lock().expect("observed dependencies").hold = Some(Hold {
+            #[cfg(target_os = "macos")]
             cache: Arc::downgrade(self),
             slots,
             #[cfg(target_os = "macos")]

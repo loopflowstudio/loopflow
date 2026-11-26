@@ -7,7 +7,6 @@ use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
-#[cfg(target_os = "macos")]
 use std::time::{Duration, Instant};
 
 pub(super) fn start(home: &Path, executable: &Path, replace: bool) -> Result<()> {
@@ -237,19 +236,29 @@ fn retire_server(path: &Path) -> Result<()> {
     if result < 0 {
         return Err(io::Error::last_os_error().into());
     }
-    let mut poll = libc::pollfd {
-        fd: fd.as_raw_fd(),
-        events: libc::POLLIN,
-        revents: 0,
-    };
-    // SAFETY: poll has one initialized descriptor and a bounded wait.
-    let result = unsafe { libc::poll(&raw mut poll, 1, 10_000) };
-    if result < 0 {
-        return Err(io::Error::last_os_error().into());
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            anyhow::bail!("previous Loopflow server did not exit within 10s");
+        }
+        let mut poll = libc::pollfd {
+            fd: fd.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let timeout_ms = remaining.as_millis().clamp(1, i32::MAX as u128) as libc::c_int;
+        // SAFETY: poll has one initialized descriptor and a bounded wait.
+        let result = unsafe { libc::poll(&raw mut poll, 1, timeout_ms) };
+        if result > 0 {
+            return Ok(());
+        }
+        if result == 0 {
+            anyhow::bail!("previous Loopflow server did not exit within 10s");
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(error.into());
+        }
     }
-    ensure!(
-        result > 0,
-        "previous Loopflow server did not exit within 10s"
-    );
-    Ok(())
 }

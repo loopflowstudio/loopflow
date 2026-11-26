@@ -906,6 +906,15 @@ enum RevisionSink {
     },
 }
 
+impl RevisionSink {
+    fn is_live(&self) -> bool {
+        match self {
+            Self::Watch(tx) => !tx.is_closed(),
+            Self::Notify { callback, .. } => callback.strong_count() > 0,
+        }
+    }
+}
+
 /// Keeps a synchronous revision listener attached to the shared `store-observer`
 /// thread until dropped.
 pub struct RevisionFollow {
@@ -963,40 +972,30 @@ pub fn watch_revisions(database: &Path) -> tokio::sync::watch::Receiver<Option<S
     let (send, receive) = tokio::sync::watch::channel(initial);
     let mut observers = observers();
     let entry = ensure_observer(&mut observers, database);
-    entry.revisions.retain(|sink| match sink {
-        RevisionSink::Watch(tx) => !tx.is_closed(),
-        RevisionSink::Notify { callback, .. } => callback.strong_count() > 0,
-    });
+    entry.revisions.retain(RevisionSink::is_live);
     entry.revisions.push(RevisionSink::Watch(send));
     receive
 }
 
 /// Call `on_change` on the shared `store-observer` thread whenever `database`'s
-/// revisions move. Returns the revisions observed at registration and a guard
-/// that unsubscribes on drop.
+/// revisions move after registration, until the returned guard drops.
 pub(crate) fn follow_revisions(
     database: &Path,
     on_change: impl FnMut(Option<StoreRevisions>) + Send + 'static,
-) -> (Option<StoreRevisions>, RevisionFollow) {
+) -> RevisionFollow {
     let initial = read_store_revisions(database);
     let callback: RevisionCallback = Arc::new(Mutex::new(Box::new(on_change)));
     let mut observers = observers();
     let entry = ensure_observer(&mut observers, database);
-    entry.revisions.retain(|sink| match sink {
-        RevisionSink::Watch(tx) => !tx.is_closed(),
-        RevisionSink::Notify { callback, .. } => callback.strong_count() > 0,
-    });
+    entry.revisions.retain(RevisionSink::is_live);
     entry.revisions.push(RevisionSink::Notify {
         callback: Arc::downgrade(&callback),
         last_seen: initial,
     });
-    (
-        initial,
-        RevisionFollow {
-            database: database.to_owned(),
-            callback: Some(callback),
-        },
-    )
+    RevisionFollow {
+        database: database.to_owned(),
+        callback: Some(callback),
+    }
 }
 
 /// Every subscription of a store in this process shares one observer of it, so an
@@ -1075,6 +1074,22 @@ fn observe(database: &Path, mut store: StoreChanges) {
             )
         };
         store.wait_with_history(wait_timeout, watch_history);
+        // A listener that left woke the observer; with none left it ends without
+        // reading the store.
+        {
+            let mut observers = observers();
+            let entry = observers
+                .get_mut(database)
+                .expect("a store's followers outlive its observer");
+            entry
+                .followers
+                .retain(|follower| follower.inbox.strong_count() > 0);
+            entry.revisions.retain(RevisionSink::is_live);
+            if entry.followers.is_empty() && entry.revisions.is_empty() {
+                observers.remove(database);
+                return;
+            }
+        }
         let current = parent_process();
         let current_revisions = read_store_revisions(database);
         let mut notifications = Vec::new();

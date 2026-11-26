@@ -207,20 +207,37 @@ at once.
 1. **Gate and measure.** Done (`17f3997d5d`). Warm `output_title` ×1,000 in debug: 151 ms same-store (0.151 ms/read), 163 ms pooled-borrow (0.163 ms/read) — 2 sweeps/s across 5 viewed tabs is ~0.16% of a core (well under 1%), so the per-Session cached read stays and no batched title query is needed.
 2. **Viewer and benchmark.** Done. `TerminalTitle::refresh` uses the same `(TitleRevisions, next_deadline)` gate; `scripts/benchmarks/server_idle.py` adds `held_idle` and `held_writes` (30 hosted held terminals, 5 viewed + 25 unviewed) with budgets in `scripts/performance-budgets.json` (10 s debug run: `held_idle` 0.10% CPU / 0 opens, `held_writes` 0.39% CPU / 0 opens).
 
+3. **Review fixes.** Done. Viewer survives store errors and borrows per check;
+   observer skips its read on the last listener's exit; reader dedup collapsed.
+   `cargo test -p loopflow-execution --lib -- terminal_title:: read_stream::`:
+   33 passed.
+
+Remaining: installed-Machine checks in the acceptance section (`sample`,
+`server_idle.py` against the installed build) belong to QA after install.
+
 Done when an idle server with held terminals shows no `title-reader` SQLite
 work, and a rename, a waiting step and availability each change the tab title
 without a keystroke.
 
-## Concept review (pre-build, a82a7cc0)
+## Concept review (post-build, 3e7cf7d1)
 
-- Batched four-field title query: not adopted; measured in pass 1 (choices).
-- Viewed-only titles, pooled borrow per sweep, `watch_revisions`, deadline
-  re-arm on every read, retry after a failed sweep, subscribe only while a
-  terminal is watched, cached `history_revision`, the 10 s host fallback: in
-  Design and pass 1.
-- A terminal linked after `Hosted::new`: `bind_session_terminal` moves
-  `sessions`; the first read finding nothing is correct.
-- `Event::Title` on the view stream: deferred.
+- Viewer dropped cmux/tmux renaming for good on one store error and pinned a
+  private connection: fixed in pass 3. `TerminalTitle` holds the database path,
+  borrows a pooled store per check, and on an error logs at debug and reads
+  again on the next 500 ms check (seen revisions advance only on success).
+- `observe()` read the store before pruning a departed listener: fixed in pass
+  3; it prunes first and ends without a read when none remain.
+- Duplicate revision dedup in the reader's `follow_revisions` callback: removed;
+  the reader compares against its last sweep. `follow_revisions` no longer
+  returns the registration-time revisions. Two subscribe APIs stay
+  (`watch_revisions` for async subscriptions, `follow_revisions` for the
+  reader's std channel).
+- Q1, `Event::Title` on the view stream (review recommends 1a, in this PR):
+  kept deferred, as decided before build. It bumps the held-terminal protocol,
+  which can't be taken back once released; open in `scratch/questions.md`.
+- Q2, keep the shared summary read: as built (pass 1 measurement).
+- Viewer cost (2 cached revision reads/s per local cmux/tmux tab) is not in
+  `server_idle.py`; it is in the viewer process, not the server.
 
 ## Deferred findings
 

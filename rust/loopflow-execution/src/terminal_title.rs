@@ -231,7 +231,9 @@ fn renames_due<'a>(previous: Option<&Names>, current: &'a Names) -> Vec<HostRena
 
 #[derive(Debug)]
 pub(crate) struct TerminalTitle {
-    store: SqliteStore,
+    /// Borrowed from the pool per check: a pinned connection would keep a replaced
+    /// database's unlinked inode.
+    database: PathBuf,
     session: String,
     attachment: Option<SessionAttachment>,
     names: Names,
@@ -289,17 +291,16 @@ impl TerminalTitle {
 
     fn viewing(held: &loopflow_model::id::TerminalId) -> Option<Self> {
         let load = || -> anyhow::Result<Option<Self>> {
-            let store = SqliteStore::open_read_only(
-                &crate::store::database_path_from_env()?,
-                crate::store::token_key::encryption_key,
-            )?;
+            let database = crate::store::database_path_from_env()?;
+            let store =
+                SqliteStore::open_read_only(&database, crate::store::token_key::encryption_key)?;
             let Some(id) = store.terminal_session(held)? else {
                 return Ok(None);
             };
             let Some(session) = store.session(&id)? else {
                 return Ok(None);
             };
-            Self::from_session(store, session).map(Some)
+            Self::from_session(database, &store, session).map(Some)
         };
         let mut title = load()
             .inspect_err(|error| tracing::debug!(%error, "cannot read viewed Session name"))
@@ -310,26 +311,29 @@ impl TerminalTitle {
     }
 
     fn load(input: &str) -> anyhow::Result<Option<Self>> {
-        let store = SqliteStore::open_read_only(
-            &crate::store::database_path_from_env()?,
-            crate::store::token_key::encryption_key,
-        )?;
+        let database = crate::store::database_path_from_env()?;
+        let store =
+            SqliteStore::open_read_only(&database, crate::store::token_key::encryption_key)?;
         let Some(session) = store.session_for_artifact(input)? else {
             return Ok(None);
         };
-        Self::from_session(store, session).map(Some)
+        Self::from_session(database, &store, session).map(Some)
     }
 
-    fn from_session(store: SqliteStore, session: LfSession) -> anyhow::Result<Self> {
+    fn from_session(
+        database: PathBuf,
+        store: &SqliteStore,
+        session: LfSession,
+    ) -> anyhow::Result<Self> {
         let seen_revisions = Some(TitleRevisions::of(store.revisions()?));
-        let name = session_title(&store, &session)?;
+        let name = session_title(store, &session)?;
         Ok(Self {
             attachment: store.session_attachment(&session.id)?,
             provider_name: name.provider,
             names: name.names,
             next_deadline: name.next_deadline,
             seen_revisions,
-            store,
+            database,
             session: session.id.to_string(),
             host: HostNames::current(),
             checked: Instant::now(),
@@ -349,15 +353,16 @@ impl TerminalTitle {
             }
             // A replaced or released attachment must stop changing the old terminal's names.
             Ok(ViewerPoll::Detached) => self.host = None,
-            Err(error) => {
-                tracing::warn!(%error, "cannot refresh terminal Session name");
-                self.host = None;
-            }
+            // A busy or replaced store is read again on the next check: the seen
+            // revisions only advance after a read succeeds.
+            Err(error) => tracing::debug!(%error, "cannot refresh terminal Session name"),
         }
     }
 
     fn poll_names(&mut self) -> StoreResult<ViewerPoll> {
-        let current_revisions = TitleRevisions::of(self.store.revisions()?);
+        let store =
+            SqliteStore::open_read_only(&self.database, crate::store::token_key::encryption_key)?;
+        let current_revisions = TitleRevisions::of(store.revisions()?);
         let now_unix = time::OffsetDateTime::now_utc().unix_timestamp();
         let revision_moved = self.seen_revisions != Some(current_revisions);
         let deadline_due = self
@@ -366,7 +371,7 @@ impl TerminalTitle {
         if !revision_moved && !deadline_due {
             return Ok(ViewerPoll::Unchanged);
         }
-        match self.read_names_with_deadline()? {
+        match self.read_names_with_deadline(&store)? {
             Some((names, next_deadline)) => {
                 self.seen_revisions = Some(current_revisions);
                 self.next_deadline = next_deadline;
@@ -376,14 +381,17 @@ impl TerminalTitle {
         }
     }
 
-    fn read_names_with_deadline(&self) -> StoreResult<Option<(Names, Option<i64>)>> {
-        if self.store.session_attachment(&self.session)? != self.attachment {
+    fn read_names_with_deadline(
+        &self,
+        store: &SqliteStore,
+    ) -> StoreResult<Option<(Names, Option<i64>)>> {
+        if store.session_attachment(&self.session)? != self.attachment {
             return Ok(None);
         }
-        self.store
+        store
             .session(&self.session)?
             .map(|session| {
-                session_title(&self.store, &session).map(|title| (title.names, title.next_deadline))
+                session_title(store, &session).map(|title| (title.names, title.next_deadline))
             })
             .transpose()
     }
@@ -755,20 +763,10 @@ fn apply_title_message(
             let was_empty = watches.is_empty();
             watches.insert(key, *watched);
             if was_empty && subscription.is_none() {
-                let last_notified = Arc::new(std::sync::Mutex::new(None));
-                let last_cb = Arc::clone(&last_notified);
-                let (initial, follow) = crate::read_stream::follow_revisions(path, move |next| {
-                    let next_title = next.map(TitleRevisions::of);
-                    let mut guard = last_cb.lock().expect("title revision lock poisoned");
-                    if next_title != *guard {
-                        *guard = next_title;
-                        let _ = wake_tx.send(TitleMessage::Revisions(next_title));
-                    }
+                // The reader compares against the revisions its last sweep read.
+                let follow = crate::read_stream::follow_revisions(path, move |next| {
+                    let _ = wake_tx.send(TitleMessage::Revisions(next.map(TitleRevisions::of)));
                 });
-                let mut guard = last_notified.lock().expect("title revision lock poisoned");
-                if guard.is_none() {
-                    *guard = initial.map(TitleRevisions::of);
-                }
                 *subscription = Some(follow);
             }
         }
@@ -1015,7 +1013,7 @@ mod tests {
             )
             .unwrap();
         let title = TerminalTitle {
-            store,
+            database: path.clone(),
             session: session.id.to_string(),
             attachment: Some(attachment.clone()),
             names: Names {
@@ -1029,7 +1027,7 @@ mod tests {
             next_deadline: None,
         };
         crate::store::sessions::rename_session(
-            &title.store,
+            &store,
             &title.session,
             "Release notes",
             crate::session::TitleSource::Human,
@@ -1037,25 +1035,20 @@ mod tests {
         .unwrap();
         assert_eq!(
             title
-                .read_names_with_deadline()
+                .read_names_with_deadline(&store)
                 .unwrap()
                 .map(|(names, _)| names.terminal),
             Some("Release notes".to_string())
         );
         assert_eq!(
-            super::output_title(&title.store, &terminal)
+            super::output_title(&store, &terminal)
                 .unwrap()
                 .map(|reading| reading.terminal),
             Some("Release notes".into())
         );
-        attachment::claim_session_attachment(
-            &title.store,
-            &title.session,
-            Some(&attachment),
-            &process,
-        )
-        .unwrap();
-        assert_eq!(title.read_names_with_deadline().unwrap(), None);
+        attachment::claim_session_attachment(&store, &title.session, Some(&attachment), &process)
+            .unwrap();
+        assert_eq!(title.read_names_with_deadline(&store).unwrap(), None);
     }
 
     #[test]
@@ -1631,7 +1624,8 @@ mod tests {
         )
         .unwrap();
         let session = store.session(&fixture.session_id).unwrap().unwrap();
-        let mut title = TerminalTitle::from_session(store, session).unwrap();
+        let mut title = TerminalTitle::from_session(fixture.path.clone(), &store, session).unwrap();
+        drop(store);
 
         // Quiet store: revision gate short-circuits without re-reading names.
         assert_eq!(title.poll_names().unwrap(), super::ViewerPoll::Unchanged);

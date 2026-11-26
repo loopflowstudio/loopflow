@@ -140,6 +140,12 @@ delivers it about 5 s later (2 s keystroke quiet plus the 2 s retry). Enter
 written by the driver did not select from the slash menu, so the model picker
 itself was checked only through the fixture.
 
+A second steer sent while the woken turn runs (have the first ask for
+`sleep 15`) must not paste again: it arrives at a tool boundary and the
+transcript gains one `USER_INPUT` row for both. A fresh `LF_HOME`'s first
+`lf server run` spends about 16 s migrating, so the first `lf server status`
+can report the 10 s readiness timeout; check again before treating it as down.
+
 # Checking inline steer display
 
 Give a disposable hook two different markers, one in the model text and one

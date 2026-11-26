@@ -130,3 +130,18 @@ cursor: column 2 of the prompt row</pre>
 <li>The model picker screen was not reached live (see table).</li>
 <li><code>lf session steers … | head -1</code> panics with "failed printing to stdout: Broken pipe". This is outside this diff.</li>
 </ol>
+
+<h2>Pass 5 · Re-run after the Waker compress (live, agy 1.5.17)</h2>
+<p>Branch <code>lf</code> at <code>bc0538ee0b</code>, which moved post-boundary wakes onto one server <code>Waker</code>, dropped the <code>Woken</code> change outcome, and changed the hint check to cursor column 2. Fresh private <code>LF_HOME=/tmp/lfq5/home</code>, same Graph (<code>help task</code> → <code>demo</code>), conversation from <code>lf task checkout a27220 -a agy</code>, PTY viewer fed from a control file.</p>
+<table><tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>1. First idle prompt showing the dim <code>Auto mode … (shift+tab to cycle)</code> hint, <code>lf steer</code>: pasted 1 s later, answers <code>PELICAN</code></td><td class="ok">works</td></tr>
+<tr><td>2. Draft <code>my draft</code>, steer: pending after 15 s, draft intact; backspaced → delivered 4 s later, <code>OTTER</code></td><td class="ok">works</td></tr>
+<tr><td>3. <code>/</code> slash menu open, steer: pending after 12 s; backspace → delivered 3 s later, <code>HERON</code></td><td class="ok">works</td></tr>
+<tr><td>4. Viewer killed, steer: delivered in 1 s, <code>BADGER</code> in the transcript</td><td class="ok">works</td></tr>
+<tr><td>5. Server stopped by PID, <code>lf -b steer</code> saved (1 pending), server restarted: delivered 3 s after start to the still-running agy (holder survived), <code>WALRUS</code></td><td class="ok">works</td></tr>
+<tr><td>6. <code>lf task run</code>: Graph settles at <code>demo</code>; one wake, conversation reports "Waiting at: interactive step demo"</td><td class="ok">works</td></tr>
+<tr><td>7. Two steers 4 s apart, the first running <code>sleep 15</code>: one paste only; the second arrived at a tool boundary, answer <code>CRANE MOOSE</code></td><td class="ok">works</td></tr>
+<tr><td>8. agy quit (Esc, ctrl+c ×2), steer: "the Machine server starts …", new <code>agy --conversation 2caf4a7c…</code> in the holder, delivered 6 s, <code>LYNX</code></td><td class="ok">works</td></tr>
+</table>
+<p>Native transcript: 9 <code>USER_INPUT</code> rows: the opening turn, one for each of the 7 wakes, and the reopen. <code>lf.log</code> has no recording gap, panic or error. Its one WARN is the 16 s migration write hold on the fresh home's first open, which is also why the first <code>lf server status</code> hit the 10 s readiness timeout.</p>
+<p>Nothing broke this pass; no code changed. Still open: same list as Pass 4 (the hint wording match, the model picker not driven live, <code>lf session steers | head</code> broken pipe).</p>

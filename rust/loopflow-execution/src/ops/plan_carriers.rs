@@ -239,20 +239,30 @@ pub async fn before_first_read(directory: &Path) {
         return;
     }
     let path = crate::store::default_db_path();
-    let until = Instant::now() + WAIT;
     if !path.exists() {
         let Some(remote) = super::plan_git::remote(Path::new(&repo)) else {
             return;
         };
         let repo_for_fetch = repo.clone();
         let exchanged = crate::journal::request::spawn_blocking(move || {
-            let seen =
-                super::plan_git::fetch_seen(Path::new(&repo_for_fetch), &remote, Some(until))?;
+            let seen = super::plan_git::fetch_seen(
+                Path::new(&repo_for_fetch),
+                &remote,
+                Some(Instant::now() + WAIT),
+            )?;
             if seen.is_empty() {
                 return Ok(());
             }
+            // Start the post-open deadline after creating and migrating the store so
+            // first-time schema setup does not starve reading the fetched plan refs.
             let store = crate::store::open_sqlite(&path)?;
-            super::plan_git::exchange_seen(&store, &repo_for_fetch, &remote, &seen, Some(until))
+            super::plan_git::exchange_seen(
+                &store,
+                &repo_for_fetch,
+                &remote,
+                &seen,
+                Some(Instant::now() + WAIT),
+            )
         })
         .await
         .map_err(Into::into)
@@ -263,6 +273,7 @@ pub async fn before_first_read(directory: &Path) {
     let Ok(store) = crate::store::open_sqlite(&path) else {
         return;
     };
+    let until = Instant::now() + WAIT;
     let exchanged = first_read_at(&store, &repo, until, unix_secs(SystemTime::now())).await;
     went_on(&repo, exchanged.map(drop));
 }

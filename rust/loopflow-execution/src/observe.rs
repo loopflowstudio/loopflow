@@ -17,14 +17,27 @@ use crate::process::OsProcess;
 
 static SPAWNS: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(test)]
+thread_local! {
+    static THREAD_SPAWNS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 /// Record a subprocess spawned by the server or observation layer.
 pub fn record_spawn() {
     SPAWNS.fetch_add(1, Ordering::Relaxed);
+    #[cfg(test)]
+    THREAD_SPAWNS.with(|count| count.set(count.get() + 1));
 }
 
 /// Cumulative subprocesses recorded in this process.
 pub fn spawns() -> u64 {
     SPAWNS.load(Ordering::Relaxed)
+}
+
+/// Cumulative subprocesses recorded on the calling thread (for race-free unit tests).
+#[cfg(test)]
+pub(crate) fn thread_spawns() -> u64 {
+    THREAD_SPAWNS.with(std::cell::Cell::get)
 }
 
 /// Number of observation facts currently held by active subscriptions.

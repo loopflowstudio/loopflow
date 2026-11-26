@@ -3,7 +3,7 @@
 //! (`refs/loopflow/plan/<machine id>`, one stamped record per file) and reads
 //! the others' from `refs/loopflow/plan-seen/*`. It decides nothing: arriving
 //! records go through the one import, where the newest stamp wins.
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::path::Path;
@@ -27,9 +27,11 @@ const SEEN: &str = "refs/loopflow/plan-seen/";
 const REPOSITORY: &str = "repository";
 /// Bytes of records read from the store at a time while a commit is built.
 const PAGE: usize = 1 << 20;
-/// Base retry wait after a repository's minute exchange fails; doubles up to an hour.
+/// Base retry wait after a repository's background exchange fails; doubles up to an hour.
 const BACKOFF_BASE: Duration = Duration::from_secs(120);
 const BACKOFF_MAX: Duration = Duration::from_secs(60 * 60);
+/// Cap on cached verified `(commit_oid, repository_id)` pairs.
+const MAX_VERIFIED_TIPS: usize = 4096;
 
 #[derive(Debug, Clone, Copy)]
 struct RepoBackoff {
@@ -47,12 +49,70 @@ impl RepoBackoff {
 static BACKOFFS: LazyLock<Mutex<HashMap<String, RepoBackoff>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Immutable `(commit_oid, repository_id)` pairs whose `repository` blob has
+/// already been verified to match `repository_id`.
+static VERIFIED_TIP_REPOS: LazyLock<Mutex<HashSet<(String, String)>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
+
+pub(super) fn is_backed_off(repo: &str, now: Instant) -> bool {
+    let backoffs = BACKOFFS.lock().expect("plan-git backoff lock");
+    is_backed_off_in(&backoffs, repo, now)
+}
+
+fn is_backed_off_in(backoffs: &HashMap<String, RepoBackoff>, repo: &str, now: Instant) -> bool {
+    backoffs
+        .get(repo)
+        .is_some_and(|state| now < state.next_attempt)
+}
+
+fn clear_backoff(repo: &str) {
+    BACKOFFS.lock().expect("plan-git backoff lock").remove(repo);
+}
+
+fn record_backoff_in(
+    backoffs: &mut HashMap<String, RepoBackoff>,
+    repo: &str,
+    now: Instant,
+    result: &Result<()>,
+) {
+    match result {
+        Ok(()) => {
+            backoffs.remove(repo);
+        }
+        Err(error) => {
+            let failures = backoffs
+                .get(repo)
+                .map_or(1, |state| state.failures.saturating_add(1));
+            let wait = RepoBackoff::delay(failures);
+            backoffs.insert(
+                repo.to_owned(),
+                RepoBackoff {
+                    failures,
+                    next_attempt: now + wait,
+                },
+            );
+            tracing::debug!(
+                %repo,
+                failures,
+                retry_in_secs = wait.as_secs(),
+                error = %format!("{error:#}"),
+                "Git plan exchange failed"
+            );
+        }
+    }
+}
+
 /// The remote a repository's plan travels by: `origin`, else the first by
-/// name. `None` for a repository with no remote. The minute exchange asks
-/// this of every active repository, so `git remote` runs again only after
-/// the repository's config changes.
+/// name. `None` for a repository with no remote. Parses `.git/config` directly
+/// via `observe::derived` so ordinary repositories never fork `git remote`,
+/// falling back to `git remote` only for `[include]`/`[includeIf]`,
+/// `extensions.worktreeConfig`, or legacy `.git/remotes`/`.git/branches`.
 pub fn remote(repo: &Path) -> Option<String> {
+    if !repo.is_dir() {
+        return None;
+    }
     if crate::git::read_layout(repo).is_none() {
+        crate::observe::record_spawn();
         return remote_by_git(crate::git::git_stdout(repo, &["remote"]).ok());
     }
     let key = crate::observe::Derived::GitRemote {
@@ -60,14 +120,184 @@ pub fn remote(repo: &Path) -> Option<String> {
     };
     crate::observe::derived(key, || {
         if let Some(layout) = crate::git::read_layout(repo) {
-            let _ = crate::observe::read_to_string(&layout.common_dir.join("config"));
+            let config = crate::observe::read_to_string(&layout.common_dir.join("config"));
+            let has_remotes = has_legacy_remote_dir(&layout.common_dir.join("remotes"));
+            let has_branches = has_legacy_remote_dir(&layout.common_dir.join("branches"));
+            if !has_remotes && !has_branches {
+                if let Ok(config) = config {
+                    if let ConfigRemotes::Parsed(remote) = parse_config_remotes(&config) {
+                        return remote;
+                    }
+                }
+            }
         }
-        // The config read above says when to ask again; a cached answer would not.
         crate::observe::record_spawn();
         remote_by_git(crate::git::git_stdout_inheriting(repo, &["remote"], &|_| {}).ok())
     })
     .as_ref()
     .clone()
+}
+
+fn has_legacy_remote_dir(dir: &Path) -> bool {
+    crate::observe::read_dir(dir).is_ok_and(|entries| !entries.is_empty())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ConfigRemotes {
+    Parsed(Option<String>),
+    Fallback,
+}
+
+fn parse_config_remotes(config: &str) -> ConfigRemotes {
+    let mut remotes = BTreeSet::new();
+    let mut current_remote: Option<String> = None;
+    let mut in_extensions = false;
+    let mut in_continuation = false;
+
+    for raw_line in config.lines() {
+        let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
+        if in_continuation {
+            in_continuation = ends_with_odd_backslashes(strip_unquoted_comment(line));
+            continue;
+        }
+        let mut rest = line.trim_start_matches([' ', '\t']);
+        if rest.is_empty() || rest.starts_with('#') || rest.starts_with(';') {
+            continue;
+        }
+        if rest.starts_with('[') {
+            let Some((section, subsection, trailing)) = parse_section_header(rest) else {
+                return ConfigRemotes::Fallback;
+            };
+            let section = section.to_ascii_lowercase();
+            if section == "include" || section == "includeif" {
+                return ConfigRemotes::Fallback;
+            }
+            in_extensions = section == "extensions";
+            if section == "remote" {
+                match subsection {
+                    Some(name) if !name.is_empty() => current_remote = Some(name),
+                    Some(_) => return ConfigRemotes::Fallback,
+                    None => current_remote = None,
+                }
+            } else {
+                current_remote = None;
+            }
+            rest = trailing.trim_start_matches([' ', '\t']);
+            if rest.is_empty() || rest.starts_with('#') || rest.starts_with(';') {
+                continue;
+            }
+        }
+        let effective = strip_unquoted_comment(rest).trim_end_matches([' ', '\t']);
+        if !effective.is_empty() {
+            let key = effective.split(['=', ' ', '\t']).next().unwrap_or_default();
+            if !key.as_bytes().first().is_some_and(u8::is_ascii_alphabetic) {
+                return ConfigRemotes::Fallback;
+            }
+            if in_extensions && key.eq_ignore_ascii_case("worktreeconfig") {
+                return ConfigRemotes::Fallback;
+            }
+            if let Some(name) = &current_remote {
+                remotes.insert(name.clone());
+            }
+        }
+        in_continuation = ends_with_odd_backslashes(strip_unquoted_comment(rest));
+    }
+
+    let selected = if remotes.contains("origin") {
+        Some("origin".to_owned())
+    } else {
+        remotes.into_iter().next()
+    };
+    ConfigRemotes::Parsed(selected)
+}
+
+/// Parse a Git config section header (`[section]`, `[section "subsection"]`, or
+/// legacy `[section.subsection]`), returning `(section, subsection, trailing)`.
+fn parse_section_header(line: &str) -> Option<(&str, Option<String>, &str)> {
+    let body = line.strip_prefix('[')?;
+    let bytes = body.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'-') {
+        i += 1;
+    }
+    if i == 0 || i >= bytes.len() {
+        return None;
+    }
+    let section = &body[..i];
+    match bytes[i] {
+        b']' => Some((section, None, &body[i + 1..])),
+        b'.' => {
+            let rest = &body[i + 1..];
+            let close = rest.find(']')?;
+            let sub = &rest[..close];
+            if sub.is_empty() {
+                return None;
+            }
+            Some((section, Some(sub.to_ascii_lowercase()), &rest[close + 1..]))
+        }
+        b' ' | b'\t' => {
+            while i < bytes.len() && matches!(bytes[i], b' ' | b'\t') {
+                i += 1;
+            }
+            if i >= bytes.len() {
+                return None;
+            }
+            if bytes[i] == b']' {
+                return Some((section, None, &body[i + 1..]));
+            }
+            if bytes[i] != b'"' {
+                return None;
+            }
+            i += 1;
+            let mut sub = String::new();
+            let mut chars = body[i..].char_indices();
+            let mut closed_at = None;
+            while let Some((offset, ch)) = chars.next() {
+                match ch {
+                    '\\' => {
+                        let (_, escaped) = chars.next()?;
+                        sub.push(escaped);
+                    }
+                    '"' => {
+                        closed_at = Some(i + offset + 1);
+                        break;
+                    }
+                    _ => sub.push(ch),
+                }
+            }
+            let mut after = closed_at?;
+            while after < bytes.len() && matches!(bytes[after], b' ' | b'\t') {
+                after += 1;
+            }
+            if bytes.get(after) != Some(&b']') {
+                return None;
+            }
+            Some((section, Some(sub), &body[after + 1..]))
+        }
+        _ => None,
+    }
+}
+
+fn strip_unquoted_comment(line: &str) -> &str {
+    let mut in_quotes = false;
+    let mut escaped = false;
+    for (idx, ch) in line.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' => escaped = true,
+            '"' => in_quotes = !in_quotes,
+            '#' | ';' if !in_quotes => return &line[..idx],
+            _ => {}
+        }
+    }
+    line
+}
+
+fn ends_with_odd_backslashes(line: &str) -> bool {
+    line.bytes().rev().take_while(|b| *b == b'\\').count() % 2 == 1
 }
 
 fn remote_by_git(remotes: Option<String>) -> Option<String> {
@@ -86,16 +316,44 @@ fn remote_by_git(remotes: Option<String>) -> Option<String> {
 /// which the shared owner poll already covers). A repository whose exchange
 /// fails doubles its wait up to an hour.
 pub fn exchange_unowned(store: &SqliteStore) -> Result<()> {
-    let mut backoffs = BACKOFFS.lock().expect("plan-git backoff lock");
-    exchange_unowned_at(store, Instant::now(), &mut backoffs, |repo| {
+    exchange_unowned_at(store, Instant::now(), &BACKOFFS, |repo| {
         exchange(store, repo, None)
     })
+}
+
+/// Background exchange for an owned repository: shares `BACKOFFS` with
+/// [`exchange_unowned`] so unreachable remotes back off exponentially.
+pub(super) fn exchange_background(
+    store: &SqliteStore,
+    repo: &str,
+    until: Option<Instant>,
+) -> Result<()> {
+    exchange_background_at(store, repo, until, Instant::now())
+}
+
+pub(super) fn exchange_background_at(
+    store: &SqliteStore,
+    repo: &str,
+    until: Option<Instant>,
+    now: Instant,
+) -> Result<()> {
+    if is_backed_off(repo, now) {
+        return Ok(());
+    }
+    let result = exchange(store, repo, until);
+    record_backoff_in(
+        &mut BACKOFFS.lock().expect("plan-git backoff lock"),
+        repo,
+        now,
+        &result,
+    );
+    result
 }
 
 fn exchange_unowned_at(
     store: &SqliteStore,
     now: Instant,
-    backoffs: &mut HashMap<String, RepoBackoff>,
+    backoffs: &Mutex<HashMap<String, RepoBackoff>>,
     mut run_exchange: impl FnMut(&str) -> Result<()>,
 ) -> Result<()> {
     let owned = super::plan_carriers::owned_repositories(store)?;
@@ -105,37 +363,16 @@ fn exchange_unowned_at(
         {
             continue;
         }
-        if backoffs
-            .get(repo.as_ref())
-            .is_some_and(|state| now < state.next_attempt)
-        {
+        if is_backed_off_in(&backoffs.lock().expect("plan-git backoff lock"), &repo, now) {
             continue;
         }
-        match run_exchange(&repo) {
-            Ok(()) => {
-                backoffs.remove(repo.as_ref());
-            }
-            Err(error) => {
-                let failures = backoffs
-                    .get(repo.as_ref())
-                    .map_or(1, |state| state.failures.saturating_add(1));
-                let wait = RepoBackoff::delay(failures);
-                backoffs.insert(
-                    repo.into_owned(),
-                    RepoBackoff {
-                        failures,
-                        next_attempt: now + wait,
-                    },
-                );
-                tracing::debug!(
-                    repo = %path.display(),
-                    failures,
-                    retry_in_secs = wait.as_secs(),
-                    error = %format!("{error:#}"),
-                    "Git plan exchange failed"
-                );
-            }
-        }
+        let result = run_exchange(&repo);
+        record_backoff_in(
+            &mut backoffs.lock().expect("plan-git backoff lock"),
+            &repo,
+            now,
+            &result,
+        );
     }
     Ok(())
 }
@@ -190,6 +427,7 @@ pub fn send(store: &SqliteStore, repo: &str, until: Instant) -> Result<()> {
                 .or_else(|error| error.downcast::<NotTaken>().map(drop));
         }
         let me = crate::store::machines::local_machine(store)?.id;
+        let mine = seen_own_ref(path, me.as_str(), Some(until))?;
         publish(
             store,
             path,
@@ -197,6 +435,7 @@ pub fn send(store: &SqliteStore, repo: &str, until: Instant) -> Result<()> {
             me.as_str(),
             &repository,
             sent_seq,
+            mine.as_deref(),
             Some(until),
         )
     })
@@ -215,6 +454,9 @@ fn turn(
     let _turn = super::plan_carriers::lock(store, "plan-git", repository, until)?;
     let sent_seq = store.select_carrier(repo, Carrier::Git, remote)?.sent_seq;
     let result = carry(sent_seq);
+    if result.is_ok() {
+        clear_backoff(repo);
+    }
     let error = super::plan_carriers::carrier_error(&result);
     store.record_carrier_exchange(repo, Carrier::Git, error.as_deref())?;
     result
@@ -294,10 +536,28 @@ fn exchange_with(
         me.as_str(),
         repository,
         sent_seq,
+        mine.map(String::as_str),
         until,
     )?;
     failed.map_or(Ok(()), Err)?;
     NotTaken::of(&not_taken).map_or(Ok(()), |not_taken| Err(not_taken.into()))
+}
+
+/// This Machine's own fetched plan ref tip, when `send` runs without `seen_refs`.
+fn seen_own_ref(repo: &Path, me: &str, until: Option<Instant>) -> Result<Option<String>> {
+    let tip = git_until(
+        repo,
+        &[
+            "for-each-ref",
+            "--format=%(objectname)",
+            &format!("{SEEN}{me}"),
+        ],
+        None,
+        until,
+    )?;
+    let tip = String::from_utf8_lossy(&tip);
+    let tip = tip.trim();
+    Ok((!tip.is_empty()).then(|| tip.to_owned()))
 }
 
 /// Each fetched plan ref's Machine and commit.
@@ -448,10 +708,42 @@ fn record_path(record: &StampedRecord) -> Option<String> {
     })
 }
 
+fn tip_names_repository(
+    repo: &Path,
+    commit: &str,
+    repository: &RepositoryId,
+    until: Option<Instant>,
+) -> bool {
+    let key = (commit.to_owned(), repository.as_str().to_owned());
+    if VERIFIED_TIP_REPOS
+        .lock()
+        .expect("verified tip cache lock")
+        .contains(&key)
+    {
+        return true;
+    }
+    let matches = git_until(
+        repo,
+        &["cat-file", "-p", &format!("{commit}:{REPOSITORY}")],
+        None,
+        until,
+    )
+    .is_ok_and(|held| String::from_utf8_lossy(&held).trim() == repository.as_str());
+    if matches {
+        let mut cache = VERIFIED_TIP_REPOS.lock().expect("verified tip cache lock");
+        if cache.len() >= MAX_VERIFIED_TIPS {
+            cache.clear();
+        }
+        cache.insert(key);
+    }
+    matches
+}
+
 /// Commit every record changed here since `sent_seq` onto this Machine's ref
 /// as last fetched from the remote, and push, giving up at `until`. A remote
 /// without this Machine's ref is given the whole plan. Nothing is forced: a
 /// push the remote refuses is the error.
+#[allow(clippy::too_many_arguments)]
 fn publish(
     store: &SqliteStore,
     repo: &Path,
@@ -459,21 +751,10 @@ fn publish(
     me: &str,
     repository: &RepositoryId,
     sent_seq: i64,
+    mine: Option<&str>,
     until: Option<Instant>,
 ) -> Result<()> {
     let key = repo.to_string_lossy();
-    let tip = git_until(
-        repo,
-        &[
-            "for-each-ref",
-            "--format=%(objectname)",
-            &format!("{SEEN}{me}"),
-        ],
-        None,
-        until,
-    )?;
-    let tip = String::from_utf8_lossy(&tip);
-    let mine = (!tip.trim().is_empty()).then(|| tip.trim());
     let mut since = if mine.is_some() { sent_seq } else { 0 };
     let mut files = Vec::new();
     loop {
@@ -490,16 +771,8 @@ fn publish(
             break;
         }
     }
-    let named = mine.is_some_and(|mine| {
-        git_until(
-            repo,
-            &["cat-file", "-p", &format!("{mine}:{REPOSITORY}")],
-            None,
-            until,
-        )
-        .is_ok_and(|held| String::from_utf8_lossy(&held).trim() == repository.as_str())
-    });
-    if files.is_empty() && (named || mine.is_none()) {
+    if files.is_empty() && mine.is_none_or(|tip| tip_names_repository(repo, tip, repository, until))
+    {
         store.plan_sent(&key, Carrier::Git, since)?;
         return Ok(());
     }
@@ -1284,17 +1557,12 @@ mod tests {
         sender.exchange();
         // Register idle's checkout with no unfinished Tasks and no non-retired Waves.
         crate::repository::location::ensure_repository(&idle.store, &idle.repo).unwrap();
-        let mut backoffs = std::collections::HashMap::new();
+        let backoffs = std::sync::Mutex::new(std::collections::HashMap::new());
         let mut attempted = Vec::new();
-        super::exchange_unowned_at(
-            &idle.store,
-            std::time::Instant::now(),
-            &mut backoffs,
-            |repo| {
-                attempted.push(repo.to_owned());
-                Ok(())
-            },
-        )
+        super::exchange_unowned_at(&idle.store, std::time::Instant::now(), &backoffs, |repo| {
+            attempted.push(repo.to_owned());
+            Ok(())
+        })
         .unwrap();
         assert!(
             attempted.is_empty(),
@@ -1304,15 +1572,10 @@ mod tests {
 
         // Adding an unfinished Task makes the repo eligible.
         let local_task = idle.task("Active work");
-        super::exchange_unowned_at(
-            &idle.store,
-            std::time::Instant::now(),
-            &mut backoffs,
-            |repo| {
-                attempted.push(repo.to_owned());
-                Ok(())
-            },
-        )
+        super::exchange_unowned_at(&idle.store, std::time::Instant::now(), &backoffs, |repo| {
+            attempted.push(repo.to_owned());
+            Ok(())
+        })
         .unwrap();
         assert_eq!(attempted, std::slice::from_ref(&idle.repo));
 
@@ -1327,15 +1590,10 @@ mod tests {
             conn.execute("UPDATE waves SET retired_at=1", []).unwrap();
         }
         attempted.clear();
-        super::exchange_unowned_at(
-            &idle.store,
-            std::time::Instant::now(),
-            &mut backoffs,
-            |repo| {
-                attempted.push(repo.to_owned());
-                Ok(())
-            },
-        )
+        super::exchange_unowned_at(&idle.store, std::time::Instant::now(), &backoffs, |repo| {
+            attempted.push(repo.to_owned());
+            Ok(())
+        })
         .unwrap();
         assert!(
             attempted.is_empty(),
@@ -1348,12 +1606,12 @@ mod tests {
         use std::time::{Duration, Instant};
         let (_root, _origin, _sender, repo) = machines();
         repo.task("Work");
-        let mut backoffs = std::collections::HashMap::new();
+        let backoffs = std::sync::Mutex::new(std::collections::HashMap::new());
         let t0 = Instant::now();
         let mut attempts = 0usize;
 
         // First failure sets 2-minute backoff.
-        super::exchange_unowned_at(&repo.store, t0, &mut backoffs, |_| {
+        super::exchange_unowned_at(&repo.store, t0, &backoffs, |_| {
             attempts += 1;
             anyhow::bail!("offline")
         })
@@ -1364,7 +1622,7 @@ mod tests {
         super::exchange_unowned_at(
             &repo.store,
             t0 + Duration::from_secs(119),
-            &mut backoffs,
+            &backoffs,
             |_| {
                 attempts += 1;
                 anyhow::bail!("offline")
@@ -1375,7 +1633,7 @@ mod tests {
 
         // 120 s later: retries and fails -> 4-minute backoff.
         let t1 = t0 + Duration::from_secs(120);
-        super::exchange_unowned_at(&repo.store, t1, &mut backoffs, |_| {
+        super::exchange_unowned_at(&repo.store, t1, &backoffs, |_| {
             attempts += 1;
             anyhow::bail!("offline")
         })
@@ -1386,7 +1644,7 @@ mod tests {
         super::exchange_unowned_at(
             &repo.store,
             t1 + Duration::from_secs(239),
-            &mut backoffs,
+            &backoffs,
             |_| {
                 attempts += 1;
                 anyhow::bail!("offline")
@@ -1402,12 +1660,114 @@ mod tests {
 
         // Success clears the backoff.
         let t2 = t1 + Duration::from_secs(240);
-        super::exchange_unowned_at(&repo.store, t2, &mut backoffs, |_| {
+        super::exchange_unowned_at(&repo.store, t2, &backoffs, |_| {
             attempts += 1;
             Ok(())
         })
         .unwrap();
         assert_eq!(attempts, 3);
-        assert!(backoffs.is_empty());
+        assert!(backoffs.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn remote_parses_git_config_without_spawning_and_falls_back_when_needed() {
+        let root = tempfile::tempdir().unwrap();
+
+        // Plain repo with no remote: 0 spawns.
+        let plain = root.path().join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        git(&plain, &["init", "-q"]);
+        let before = crate::observe::thread_spawns();
+        assert_eq!(remote(&plain), None);
+        assert_eq!(
+            crate::observe::thread_spawns() - before,
+            0,
+            "cold lookup of plain repo without remotes must spawn nothing"
+        );
+
+        // Adding remotes in .git/config resolves without spawning.
+        git(&plain, &["remote", "add", "upstream", "/nowhere"]);
+        let before = crate::observe::thread_spawns();
+        assert_eq!(remote(&plain).as_deref(), Some("upstream"));
+        assert_eq!(crate::observe::thread_spawns() - before, 0);
+
+        // Empty [remote "origin"] section without keys is ignored (matches git remote).
+        let cfg_path = plain.join(".git/config");
+        let mut cfg = std::fs::read_to_string(&cfg_path).unwrap();
+        cfg.push_str("\n[remote \"origin\"] # comment only\n[core]\n\tbare = false\n");
+        std::fs::write(&cfg_path, cfg).unwrap();
+        let before = crate::observe::thread_spawns();
+        assert_eq!(remote(&plain).as_deref(), Some("upstream"));
+        assert_eq!(crate::observe::thread_spawns() - before, 0);
+
+        // Adding a key under [remote "origin"] selects origin with 0 spawns.
+        git(&plain, &["remote", "add", "origin", "/nowhere"]);
+        let before = crate::observe::thread_spawns();
+        assert_eq!(remote(&plain).as_deref(), Some("origin"));
+        assert_eq!(crate::observe::thread_spawns() - before, 0);
+
+        // [include] falls back to `git remote`.
+        let inc_repo = root.path().join("with-include");
+        std::fs::create_dir_all(&inc_repo).unwrap();
+        git(&inc_repo, &["init", "-q"]);
+        let extra = root.path().join("extra.gitconfig");
+        std::fs::write(&extra, "[remote \"included\"]\n\turl = /nowhere\n").unwrap();
+        let mut inc_cfg = std::fs::read_to_string(inc_repo.join(".git/config")).unwrap();
+        inc_cfg.push_str(&format!("\n[include]\n\tpath = {}\n", extra.display()));
+        std::fs::write(inc_repo.join(".git/config"), inc_cfg).unwrap();
+        let before = crate::observe::thread_spawns();
+        assert_eq!(remote(&inc_repo).as_deref(), Some("included"));
+        assert_eq!(
+            crate::observe::thread_spawns() - before,
+            1,
+            "[include] must fall back to git remote"
+        );
+
+        // Legacy .git/remotes/ falls back to `git remote` and matches its answer.
+        let legacy_repo = root.path().join("with-legacy");
+        std::fs::create_dir_all(&legacy_repo).unwrap();
+        git(&legacy_repo, &["init", "-q"]);
+        let remotes_dir = legacy_repo.join(".git/remotes");
+        std::fs::create_dir_all(&remotes_dir).unwrap();
+        std::fs::write(remotes_dir.join("legacy"), "URL: /nowhere\n").unwrap();
+        let expected_legacy =
+            super::remote_by_git(crate::git::git_stdout(&legacy_repo, &["remote"]).ok());
+        let before = crate::observe::thread_spawns();
+        assert_eq!(remote(&legacy_repo), expected_legacy);
+        assert_eq!(
+            crate::observe::thread_spawns() - before,
+            1,
+            "legacy .git/remotes must fall back to git remote"
+        );
+    }
+
+    #[test]
+    fn quiet_exchange_reuses_seen_refs_and_skips_repeated_cat_file() {
+        let (_root, _origin, laptop, mini) = machines();
+        let task = laptop.task("quiet poll");
+        laptop.exchange();
+        assert_eq!(laptop.unsent(), 0);
+
+        // First quiet exchange: fetch + for-each-ref + one-time cat-file verification = 3 forks.
+        let before = crate::observe::thread_spawns();
+        laptop.exchange();
+        assert_eq!(
+            crate::observe::thread_spawns() - before,
+            3,
+            "first quiet exchange should only run fetch, for-each-ref, and one cat-file"
+        );
+
+        // Subsequent quiet exchanges reuse seen_refs's mine and the verified tip cache = 2 forks.
+        let before = crate::observe::thread_spawns();
+        laptop.exchange();
+        assert_eq!(
+            crate::observe::thread_spawns() - before,
+            2,
+            "subsequent quiet exchange must only run fetch + for-each-ref"
+        );
+
+        // Verify the plan still round-trips to another clone.
+        mini.exchange();
+        assert_eq!(mini.title(&task).as_deref(), Some("quiet poll"));
     }
 }

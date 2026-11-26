@@ -614,54 +614,58 @@ threads, `spawns` unchanged across two calls a minute apart. Then
      - **`machine: mini` shorthand vs host-local `machine.jobs`:** `remote::project` descends into mappings when `has_child_settings("machine")` is true, so shorthand string values had to expand before projection and `replace_projection`, and `Placement` fields use `skip_serializing_if = "Option::is_none"` so repo-level `machine: mini` never emits `jobs: null` over global `machine.jobs`.
      - **macOS nested `kqueue` in Tokio:** `AsyncFd::new` registers both `EVFILT_READ` and `EVFILT_WRITE`, which fails with `EINVAL` on a nested `kqueue` fd; `AsyncFd::with_interest(watcher, Interest::READABLE)` is required and wakes immediately on `rm -rf` / `rename`.
 
-5. **Unify background Git plan sync and eliminate cold/quiet sync forks.** *(next)*
-   - Parse `[remote "<name>"]` directly from `.git/config` in `plan_git::remote`
-     (falling back to `git remote` only for `[include]`/`[includeIf]` or legacy
-     `.git/remotes`/`.git/branches`), eliminating the 12 cold `git remote` forks
-     on the server's first minute exchange so `server_idle.py target/release/lf
-     --seconds 60` passes `quiet: 0 spawns` with the strict budget unchanged.
-   - Gate `plan_carriers::poll_owned` on directory existence and carrier
-     presence (`plan_hub::hub` or `plan_git::remote`) before writing
-     `planning_scope_checks`, and share `plan_git`'s exponential backoff
-     (`BACKOFFS`, 2 min → 1 h) across both owned and unowned background Git
-     exchanges (keeping hub exchanges independent and explicit commands
-     unthrottled).
-   - Pass `mine` from `seen_refs()` into `plan_git::publish()` and remember
-     verified `(commit_oid, repository_id)` pairs so quiet polls with no unsent
-     records drop from 5 forks to 2 (`fetch` + `for-each-ref`).
-   - Add focused unit tests for each of the above and re-run release
-     `server_idle.py target/release/lf --seconds 60` to confirm `quiet` hits 0
-     spawns under the strict budget.
+5. **Unify background Git plan sync and eliminate cold/quiet sync forks.** *(done)*
+   - Parsed `[remote "<name>"]` directly from `.git/config` in `plan_git::remote`
+     (supporting quoted escapes, legacy `[remote.name]`, inline keys,
+     continuation lines, and key-presence matching `git remote`), falling back
+     to `git remote` only for `[include]`/`[includeIf]`,
+     `extensions.worktreeConfig`, or non-empty legacy `.git/remotes`/`.git/branches`
+     directories (all observed under `Derived::GitRemote`).
+   - Gated `plan_carriers::poll_owned` on directory existence, non-connected
+     tracker, and carrier eligibility (`plan_hub::hub` or un-backed-off
+     `plan_git::remote`) before writing `planning_scope_checks`; shared
+     `plan_git`'s `BACKOFFS` (2 min → 1 h) across `exchange_unowned` and
+     `poll_owned` without holding the mutex across network I/O, kept hub sync
+     independent of Git backoff, and cleared backoff in `plan_git::turn` on
+     explicit exchange/send success.
+   - Passed `mine` from `seen_refs()` into `plan_git::publish()` (and read
+     `seen_own_ref()` once in `send()`), skipped `cat-file` when writing new
+     records, and cached verified `(commit_oid, repository_id)` pairs in
+     `VERIFIED_TIP_REPOS` (capped at 4096), dropping quiet Git polls to 2 forks
+     (`fetch` + `for-each-ref`).
+   - **What it taught:** `git remote` counts any `[remote "<name>"]` section
+     declaring a key (ignoring empty sections) and does not list legacy
+     `.git/remotes/` entries on Git 2.50; also, `exchange_unowned` previously
+     held the global `BACKOFFS` mutex across Git I/O, which had to be released
+     around `exchange` so `turn()` can clear backoff on success without
+     deadlocking. `observe::thread_spawns()` (test-only thread-local counter)
+     makes spawn-count assertions race-free under parallel `cargo test`.
 
 Each pass deletes what it replaces and leaves the benchmark passing its
 then-current budgets.
 
 ## Remaining
 
-- **Pass 5 (above):** zero-fork `.git/config` remote discovery, carrier-gated
-  `poll_owned` with shared Git backoff, and quiet-poll `publish` fork
-  deduplication — bringing background plan sync onto one model and making the
-  60 s release benchmark pass `quiet: 0 spawns` without weakening any budget.
-- **Gate:** release build `server_idle.py target/release/lf --seconds 60`
-  (budgets enforced, 0 violations); after merge, `sample <server pid> 3` and
-  `lf server diagnostics --json` on the live Machine with Desktop open and
-  Graphs running; base-commit numbers beside the branch's in the PR body.
+- **Gate:** after merge, `sample <server pid> 3` and `lf server diagnostics
+  --json` on the live Machine with Desktop open and Graphs running; base-commit
+  numbers beside the branch's in the PR body.
 - If the PR is too large to review, it splits as stacked Tasks: lifetimes
   (Pass 3) and job budget + file bounds (Pass 4).
 
 ## Checks
 
 - `scratch/concept-review.html` — post-build concept review rewritten at HEAD `44298478` against base `d8b2afeb`; Pass 5 reconciled into this plan.
-- `uv run python scripts/benchmarks/server_idle.py target/debug/lf --seconds 10 --no-fail`:
-  - Baseline (before Pass 1 pool/settings/relay): `quiet` 0.60% CPU / 69 th / 36 spawns / 0 opens; `file_edits` 1.00% CPU / 69 th / 36 spawns / 0 opens; `db_writes` 0.60% CPU / 69 th / 48 spawns / 1 open.
-  - After Pass 1: `quiet` 0.50% CPU / 69 th / 36 spawns / 0 opens; `file_edits` 1.00% CPU / 69 th / 36 spawns / 0 opens; `db_writes` 0.60% CPU / 69 th / 37 spawns / 0 opens.
-  - After Pass 2 (budgets enforced, exit 0): `quiet` 0.10% CPU / 18 th / 0 spawns / 0 opens; `file_edits` 0.60% CPU / 16 th / 4 spawns / 0 opens; `db_writes` 0.10% CPU / 18 th / 0 spawns / 0 opens.
-  - After Pass 4 (realign, budgets enforced, exit 0): `quiet` 0.10% CPU / 18 th / 0 spawns / 0 opens; `file_edits` 0.80% CPU / 16 th / 4 spawns / 0 opens; `db_writes` 0.10% CPU / 18 th / 0 spawns / 0 opens.
-  - Release 60 s acceptance run (`target/release/lf --seconds 60`) runs at gate.
+- `uv run python scripts/benchmarks/server_idle.py`:
+  - Baseline (`target/debug/lf --seconds 10 --no-fail`, before Pass 1): `quiet` 0.60% CPU / 69 th / 36 spawns / 0 opens; `file_edits` 1.00% CPU / 69 th / 36 spawns / 0 opens; `db_writes` 0.60% CPU / 69 th / 48 spawns / 1 open.
+  - After Pass 1 (`target/debug/lf --seconds 10 --no-fail`): `quiet` 0.50% CPU / 69 th / 36 spawns / 0 opens; `file_edits` 1.00% CPU / 69 th / 36 spawns / 0 opens; `db_writes` 0.60% CPU / 69 th / 37 spawns / 0 opens.
+  - After Pass 2 (`target/debug/lf --seconds 10`, budgets enforced, exit 0): `quiet` 0.10% CPU / 18 th / 0 spawns / 0 opens; `file_edits` 0.60% CPU / 16 th / 4 spawns / 0 opens; `db_writes` 0.10% CPU / 18 th / 0 spawns / 0 opens.
+  - After Pass 4 (`target/debug/lf --seconds 10`, budgets enforced, exit 0): `quiet` 0.10% CPU / 18 th / 0 spawns / 0 opens; `file_edits` 0.80% CPU / 16 th / 4 spawns / 0 opens; `db_writes` 0.10% CPU / 18 th / 0 spawns / 0 opens.
+  - After Pass 5 (`target/release/lf --seconds 60`, strict budgets enforced, exit 0): `quiet` 0.12% CPU / 17 th / 0 spawns / 0 opens; `file_edits` 0.23% CPU / 16 th / 20 spawns / 0 opens; `db_writes` 0.08% CPU / 18 th / 0 spawns / 0 opens.
 - Focused tests passed in Pass 1: `server::schema::tests::` (8), `server::wire::tests::` (2), `machine::wire::tests::` (2), Swift `ServerProtocolTests` (25), `loopflow-storage::pool::tests::` (4), `store::opening::` (12), `read_stream::tests::` (11), `loopflow-harness::transcript::tests::misses_under_watched_root_cache_until_invalidated` (1), `config::settings::tests::` (24), `observe::tests::` (17), `transport::registry::tests::` (16), `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`.
 - Focused tests passed in Pass 2: `loopflow-storage::changes::tests::` (3), `loopflow-storage::query_plans::tests::` (17), `loopflow-execution::runtime::tests::` (2), `observe::tests::` (19, including `unheld_git_fact_is_not_rerun_after_its_interval` and `held_git_fact_reruns_after_checkout_write_and_not_before`), `transcript::watch::tests::` (3), `read_stream::tests::` (13, including `idle_subscription_performs_zero_steps_over_five_seconds` and `history_write_does_not_wake_state_subscription`), `ops::plan_git::tests::` (10, including active-work scoping and exponential backoff), `ops::task::workspace::tests::` (1), `transport::output::tests::` (10), `loopflow::server::subscriptions::tests::` (12), `server::maintenance::tests::` (1), `server::recovery::tests::` (10), `server::wake::tests::` (12), `server::service::tests::` (`identical_consumers_share_setup`, `queued_subscription_cancellation_skips_construction`), `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`.
 - Focused tests passed in Pass 3: `loopflow-storage::sqlite::processes::bridge_tests::has_unfinished_execution_tracks_graphs_and_agents` (1), `loopflow-storage::query_plans::tests::` (17), `loopflow-execution::installation::server::tests::` (1), `loopflow-execution::terminal_holder::tests::` (14, including `a_holder_exits_and_hangups_children_when_its_home_is_removed`), `loopflow::server::service::tests::custom_home_watcher_*` (2), `loopflow::server::maintenance::tests::` (1), `transport_tests` (`custom_home_ensure_starts_replaces_and_exits_on_home_removal`, `server_status_does_not_install_or_create_work`, `a_launch_refused_for_a_stopped_server_leaves_nothing_to_resume`), `integration::documented_commands::` (4), `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `server_idle.py target/debug/lf --seconds 10` (`quiet` 0.10% CPU / 18 th / 0 spawns / 0 opens; `file_edits` 0.60% CPU / 16 th / 4 spawns / 0 opens; `db_writes` 0.10% CPU / 18 th / 0 spawns / 0 opens).
 - Focused tests passed in Pass 4: `loopflow-storage::lock_file::tests::` (2), `loopflow-storage::query_plans::tests::` (17), `loopflow-execution::config::files::tests::{machine_jobs_coexists_with_machine_shorthand_and_is_global_only, editing_shorthand_placement_preserves_the_other_destination}` (2), `loopflow-execution::config::remote::tests::machine_jobs_stays_host_local_across_shorthand_projection` (1), `loopflow-execution::config::settings::tests::` (24), `loopflow-execution::store::file_retention::tests::` (2), `loopflow-execution::terminal_holder::tests::a_holder_exits_and_hangups_children_when_its_home_is_removed` (1), `loopflow::lf::commands::graph::tests::graph_steps_share_cores_and_run_niced_while_keeping_preset_env` (1), `loopflow::server::service::tests::custom_home_watcher_*` (2), `loopflow::server::schema::tests::` (8), `integration::documented_commands::` (4), `cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`.
+- Focused tests passed in Pass 5: `loopflow-execution::ops::plan_git::tests::` (13, including `remote_parses_git_config_without_spawning_and_falls_back_when_needed` and `quiet_exchange_reuses_seen_refs_and_skips_repeated_cat_file`), `loopflow-execution::ops::plan_carriers::tests::` (2, `poll_owned_skips_local_only_repository_without_writing_scope_check` and `poll_owned_backs_off_unreachable_git_without_blocking_hub`), `cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`, and release `server_idle.py target/release/lf --seconds 60` (exit 0, strict budgets enforced).
 - `sample 77346 3` on the live server, 2026-11-25 — run at kickoff, results above.
 - QA, 2026-11-25 (`scratch/qa.html`): release `server_idle.py --seconds 60` → `quiet` 0.08% / 18 th / 12 spawns (first exchange) / 0 opens; `file_edits` 0.17% / 17 th / 20 spawns; `db_writes` 0.05% / 17 th / 0 spawns. Before QA's `remote` cache: 12 spawns in `quiet` and `db_writes` each. Live private Machine: held-terminal echo 22–30 ms under `BEGIN EXCLUSIVE`; job budget 16/8/5 at nice 5 for three steps; home deletion stops server + holder in < 1 s; idle exit at 10 min. `cargo test -p loopflow-execution --lib ops::plan_git::` (11), `cargo test -p loopflow --lib server::service::tests::custom_home_watcher` (3), `cargo clippy -p loopflow -p loopflow-execution --all-targets -- -D warnings`.
 

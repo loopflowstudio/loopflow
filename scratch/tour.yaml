@@ -1,0 +1,115 @@
+at: 16fddc94f714d887111a3fc77670e2e63eca0274
+first:
+  - path: docs/server.md
+    why: User-facing diagnostics command and disposable custom-home lifetimes
+  - path: docs/config.md
+    why: Host-local machine.jobs setting and automatic Graph build job budget
+  - path: docs/troubleshooting.md
+    why: Diagnostics, hourly log/file rotation, and custom-home auto-exit
+  - path: docs/ops.md
+  - path: docs/dev/server.md
+    why: Internal server runtime and custom-home process model
+  - path: docs/dev/machines.md
+  - path: rust/loopflow/src/server/README.md
+
+  - path: rust/loopflow/src/server/wire.rs
+    why: Versioned server.diagnostics operation (protocol rev 11)
+  - path: rust/loopflow/src/server/schema.rs
+  - path: rust/loopflow-execution/src/machine/wire.rs
+  - path: swift/Loopflow/Services/ServerProtocol.swift
+    why: Swift wire mirror for server.diagnostics
+  - path: rust/loopflow/src/lf/commands/server.rs
+    why: CLI lf server diagnostics [--json]
+
+  - path: rust/loopflow-storage/src/pool.rs
+    why: Process-wide SQLite connection pool keyed by (path, dev, ino, mode)
+  - path: rust/loopflow-execution/src/store/opening.rs
+    why: Pooled open_sqlite and single-open read-only validation
+  - path: rust/loopflow-execution/src/store/mod.rs
+    why: Shared HomeRemovalWatcher and store entry points
+  - path: rust/loopflow-storage/src/changes.rs
+    why: History WAL watching and EVFILT_USER StoreWaker
+  - path: rust/loopflow-storage/src/lock_file.rs
+    why: Inode-verified lock acquisition and safe unlink
+  - path: rust/loopflow-execution/src/runtime.rs
+    why: Process-wide bounded Tokio runtime helper and block_on
+
+  - path: rust/loopflow-execution/src/transport/hosted.rs
+    why: Moves all SQLite and snapshot work off held-terminals relay loop
+  - path: rust/loopflow-execution/src/transport/registry.rs
+    why: Dispatches StoreWork and exit settlement to held-status worker
+  - path: rust/loopflow-execution/src/transport/snapshot.rs
+
+  - path: rust/loopflow-execution/src/observe.rs
+    why: Held-only refresh, shared FsWatcher, and always-on derived cache
+  - path: rust/loopflow-execution/src/config/settings.rs
+    why: One-shot Config validation with per-key fallback on errors
+  - path: rust/loopflow-execution/src/config.rs
+    why: Cached PATH harness lookup and derived config loading
+  - path: rust/loopflow-execution/src/read_stream.rs
+    why: Per-step pooled reads, domain-filtered wakeups, 30 s idle CHECK
+  - path: rust/loopflow-execution/src/transcript/watch.rs
+    why: Folds four transcript watcher threads into observe FsWatcher
+  - path: rust/loopflow-harness/src/transcript/mod.rs
+    why: Caches transcript misses under watched roots until create
+
+  - path: rust/loopflow/src/server/mod.rs
+    why: Bounded 4-worker / 12-blocking runtime and 2 s shutdown
+  - path: rust/loopflow/src/server/service.rs
+    why: Custom-home idle/removal exit and diagnostics handler
+  - path: rust/loopflow/src/server/maintenance.rs
+    why: Merged maintenance + plan-git loop and hourly file retention
+  - path: rust/loopflow/src/server/recovery.rs
+    why: Merged recovery + wake loop on StoreChanges
+  - path: rust/loopflow/src/server/wake.rs
+  - path: rust/loopflow/src/server/subscriptions.rs
+    why: Removes per-subscription planning poll thread
+  - path: rust/loopflow-execution/src/installation/server.rs
+    why: Keeps OS registration on ~/.lf only and retires hashed jobs
+  - path: rust/loopflow-execution/src/installation/server/detached.rs
+    why: Detached custom-home startup and peer-PID replacement
+  - path: rust/loopflow-execution/src/installation/server/linux.rs
+  - path: rust/loopflow-execution/src/terminal_holder.rs
+    why: Exits and SIGHUPs children when custom LF_HOME is removed
+
+  - path: rust/loopflow-execution/src/ops/plan_git.rs
+    why: Direct .git/config remote parser, shared backoff, 2-fork quiet poll
+  - path: rust/loopflow-execution/src/ops/plan_carriers.rs
+    why: Carrier-first poll_owned gating and debounced after_command
+  - path: rust/loopflow-execution/src/ops/planning_sync.rs
+
+  - path: rust/loopflow-execution/src/config/catalog.rs
+    why: Host-local machine.jobs setting declaration
+  - path: rust/loopflow-execution/src/config/placement.rs
+  - path: rust/loopflow-execution/src/config/files.rs
+    why: Preserves machine.jobs beside machine shorthand on edit
+  - path: rust/loopflow-execution/src/config/remote.rs
+    why: Strips host-local machine.jobs from remote Machine projections
+  - path: rust/loopflow/src/lf/commands/graph.rs
+    why: Divides cores across running Graph steps at nice 5
+  - path: rust/loopflow-execution/src/harness/codex.rs
+    why: Forwards build job budget env vars into Codex shell policy
+
+  - path: rust/loopflow-execution/src/store/file_retention.rs
+    why: Log rotation and pruning of logs, deliveries, backups, and locks
+
+  - path: scripts/benchmarks/server_idle.py
+    why: Three-phase idle/edit/write server benchmark with budget gates
+  - path: scripts/performance-budgets.json
+  - path: rust/loopflow-execution/src/transport/registry_tests.rs
+    why: Echo under 5 s write lock and Waiting during exit settlement
+  - path: rust/loopflow-execution/src/terminal_holder/tests.rs
+    why: Holder SIGHUP and exit on deleted custom LF_HOME
+  - path: rust/loopflow/tests/transport_tests.rs
+    why: Custom-home detached ensure, replace, and removal exit
+  - path: swift/LoopflowTests/ServerProtocolTests.swift
+
+hide:
+  - path: tests/fixtures/dto/server_schema.json
+    why: Regenerated wire schema snapshot for protocol revision 11
+  - path: rust/loopflow-execution/tests/fixtures/dto/server/
+    why: Regenerated DTO round-trip fixtures for protocol revision 11
+  - path: scratch/
+    why: Working plan, QA report, concept review, and ship review notes
+  - path: .lf/qa/
+    why: QA checklist notes updated for detached homes and idle server

@@ -32,6 +32,10 @@ found it, as someone who will maintain it.
 breaks isn't worth keeping, and a flaky test is a broken test. The test:
 break the feature in your head; does this fail?
 
+**Spend compute deliberately.** Compute is either shared with other agents or
+metered: run the smallest check that answers your question, leave broad suites
+to CI, and clean up what you start.
+
 **Protect the person's flow.** Don't ask permission for work that can be
 undone. Say what's needed, then stop.
 

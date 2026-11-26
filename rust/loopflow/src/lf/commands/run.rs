@@ -287,8 +287,7 @@ pub fn implicit_binding(cli: &Cli) -> Result<Option<loopflow_execution::ops::Wor
         return Ok(None);
     }
     let repo = std::env::current_dir()?;
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let Some(store) = loopflow_execution::store::open_existing_store().await? else {
             return Ok(None);
         };
@@ -449,8 +448,7 @@ fn prepare_task_input(
     )>,
 > {
     let Some(id) = &cli.task else { return Ok(None) };
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = std::sync::Arc::new(if cli.context {
             loopflow_execution::store::read_existing_registry()?
                 .ok_or_else(|| anyhow!("Task input unavailable: no local registry"))?

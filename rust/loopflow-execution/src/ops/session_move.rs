@@ -20,7 +20,7 @@ use loopflow_storage::work::task::Task;
 /// with its Task, as `lf task move` moves it, and is the conversation the Task
 /// carries, its Graph continuing through `run`.
 pub fn move_session(id: &str, target: &str, run: ContinueRun) -> Result<()> {
-    let task = tokio::runtime::Runtime::new()?.block_on(async {
+    let task = crate::runtime::block_on(async {
         let Some(store) = crate::store::open_existing_store().await? else {
             return Ok(None);
         };
@@ -89,7 +89,7 @@ pub fn move_task(
     conversation: Option<&str>,
     run: ContinueRun,
 ) -> Result<TaskOwnership> {
-    let (ownership, stopped) = tokio::runtime::Runtime::new()?.block_on(async {
+    let (ownership, stopped) = crate::runtime::block_on(async {
         let store: SharedStore = std::sync::Arc::new(
             crate::store::open_existing_store()
                 .await?
@@ -336,7 +336,7 @@ fn sender(
 /// records the arrival. Best-effort: a Machine out of reach, or one that
 /// cannot tell, answers no.
 pub fn arrived_on(task: &loopflow_model::durable::TaskId, to: &MachineId) -> Result<bool> {
-    tokio::runtime::Runtime::new()?.block_on(async {
+    crate::runtime::block_on(async {
         let asked = async {
             let target = crate::machine::connection::find_registered_machine(to.as_str()).await?;
             let args = ["session", "receive", "--arrived", task.as_str()].map(String::from);

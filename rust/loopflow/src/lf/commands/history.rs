@@ -150,8 +150,7 @@ impl HistoryCommand {
 
 fn export(since: &str, after: Option<&str>) -> anyhow::Result<()> {
     let since = loopflow_execution::output::parse_since(since, time::OffsetDateTime::now_utc())?;
-    let runtime = tokio::runtime::Runtime::new()?;
-    let store = runtime.block_on(open_store(&storage_config_from_env()?))?;
+    let store = loopflow_execution::runtime::block_on(open_store(&storage_config_from_env()?))?;
     let stdout = std::io::stdout();
     let mut out = std::io::BufWriter::new(stdout.lock());
     loopflow_execution::machine_records::export(
@@ -272,9 +271,8 @@ pub(crate) fn render(
     input: Option<&str>,
     view: SessionView,
 ) -> anyhow::Result<String> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    let store = runtime.block_on(open_store(&storage_config_from_env()?))?;
-    if runtime.block_on(store.session(id))?.is_some() {
+    let store = loopflow_execution::runtime::block_on(open_store(&storage_config_from_env()?))?;
+    if loopflow_execution::runtime::block_on(store.session(id))?.is_some() {
         if let Some(input) = input {
             let captured =
                 loopflow_execution::store::sessions::input_history(&store.sqlite, input)?;

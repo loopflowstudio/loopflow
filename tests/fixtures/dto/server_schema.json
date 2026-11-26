@@ -7731,7 +7731,7 @@
             },
             {
               "builtin": null,
-              "description": "design, implement, gate, land",
+              "description": "design, implement, land",
               "extends": null,
               "invocation": "lf code [message]",
               "kind": "graph",
@@ -8998,6 +8998,43 @@
       ],
       "type": "object"
     },
+    "ServerDiagnostics": {
+      "additionalProperties": false,
+      "description": "What `server.diagnostics` answers: live counters for the serving process.",
+      "properties": {
+        "held_facts": {
+          "description": "External facts currently held by open subscriptions.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "spawns": {
+          "description": "Cumulative subprocesses spawned by the server.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "store_opens": {
+          "description": "Cumulative SQLite connections opened since this server started.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "threads": {
+          "description": "Live OS threads in the server process.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "threads",
+        "store_opens",
+        "spawns",
+        "held_facts"
+      ],
+      "type": "object"
+    },
     "ServerMessage": {
       "description": "One message from the server.",
       "oneOf": [
@@ -10032,6 +10069,34 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/PlanChanges"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Live runtime counters for the serving process: OS threads, cumulative\nSQLite opens, spawned subprocesses, and held observation facts.",
+          "examples": [
+            {
+              "kind": "server.diagnostics"
+            }
+          ],
+          "properties": {
+            "kind": {
+              "const": "server.diagnostics",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/ServerDiagnostics"
+          },
+          "x-result-example": {
+            "held_facts": 11,
+            "spawns": 2,
+            "store_opens": 4,
+            "threads": 16
           }
         }
       ]
@@ -19565,7 +19630,7 @@
   ],
   "title": "Loopflow server protocol",
   "x-min-revision": 10,
-  "x-revision": 10,
+  "x-revision": 11,
   "x-terminal-close": {
     "payload": {
       "$ref": "#/$defs/Close"

@@ -58,7 +58,7 @@ struct RemoteTaskWorkspaceTests {
             #expect(files.document("document.txt").snapshot?.content == "unchanged on mini\n")
 
             // Changes shows mini's uncommitted hunk; Save writes it there.
-            await files.workingTree.refresh()
+            await files.workingTree.refresh(afterWrite: true)
             #expect(files.workingTree.error == nil)
             #expect(files.workingChanges?.files.map(\.path).contains("notes.txt") == true)
             files.selectFile("notes.txt", mode: .edit)

@@ -23,6 +23,26 @@ pub fn run(command: &ServerCommand) -> anyhow::Result<()> {
             );
             Ok(())
         }
+        ServerCommand::Diagnostics { json } => {
+            let mut connection = loopflow_execution::machine::client::Connection::open()?;
+            let answer = connection.request(crate::server::wire::Operation::Server(
+                crate::server::wire::ServerOperation::ServerDiagnostics,
+            ))?;
+            let diagnostics: crate::server::wire::ServerDiagnostics =
+                serde_json::from_value(answer.result)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&diagnostics)?);
+            } else {
+                println!(
+                    "threads: {}\nstore_opens: {}\nspawns: {}\nheld_facts: {}",
+                    diagnostics.threads,
+                    diagnostics.store_opens,
+                    diagnostics.spawns,
+                    diagnostics.held_facts,
+                );
+            }
+            Ok(())
+        }
         ServerCommand::Mobile { off, status } => {
             if *status {
                 println!(

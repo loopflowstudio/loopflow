@@ -23,7 +23,7 @@ fn invalid(error: impl std::fmt::Display) -> StoreError {
 }
 
 fn catalog_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Dashboard>> {
-    let mut statement = conn.prepare("SELECT s.id,s.revision,a.selection_json,a.arrangement_json,s.name,s.pinned,s.slots_json FROM dashboards s JOIN dashboard_arrangements a ON a.repository_id=s.repository_id AND a.dashboard_id=s.id AND a.expression_key=s.expression_key WHERE s.repository_id=?1 ORDER BY s.id")?;
+    let mut statement = conn.prepare_cached("SELECT s.id,s.revision,a.selection_json,a.arrangement_json,s.name,s.pinned,s.slots_json FROM dashboards s JOIN dashboard_arrangements a ON a.repository_id=s.repository_id AND a.dashboard_id=s.id AND a.expression_key=s.expression_key WHERE s.repository_id=?1 ORDER BY s.id")?;
     let rows = statement.query_map([repository.as_str()], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -265,7 +265,7 @@ fn start_times_in<'a>(
     if ids.peek().is_none() {
         return Ok(HashMap::new());
     }
-    let mut statement = conn.prepare(
+    let mut statement = conn.prepare_cached(
         "SELECT t.id, COALESCE(
             (SELECT MIN(o.at) FROM task_ownership o WHERE o.task_id=t.id AND o.kind != 'unclaim'),
             (SELECT e.created_at FROM task_events e WHERE e.task_id=t.id
@@ -540,7 +540,7 @@ fn fill_task_contents_in(
     if tasks.is_empty() {
         return Ok(());
     }
-    let mut query = conn.prepare(
+    let mut query = conn.prepare_cached(
         "SELECT t.id,t.issue_title,s.id,c.worktree,(SELECT id FROM machines WHERE is_local=1),
                 g.step,g.run_start,CASE WHEN g.run_start IS NOT NULL THEN g.graph END
          FROM tasks t

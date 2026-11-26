@@ -11,7 +11,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The newest revision this build speaks.
-pub const REVISION: u32 = 10;
+pub const REVISION: u32 = 11;
 /// Revision 10 requires Task and Machine selectors on Session attach and continue.
 pub const MIN_REVISION: u32 = 10;
 /// The largest message a control connection carries, so a reading never waits
@@ -345,6 +345,25 @@ pub enum ServerOperation {
         #[serde(deserialize_with = "Option::deserialize")]
         since: Option<i64>,
     },
+    /// Live runtime counters for the serving process: OS threads, cumulative
+    /// SQLite opens, spawned subprocesses, and held observation facts.
+    #[serde(rename = "server.diagnostics")]
+    #[schemars(extend("x-result" = generator.subschema_for::<ServerDiagnostics>()))]
+    ServerDiagnostics,
+}
+
+/// What `server.diagnostics` answers: live counters for the serving process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ServerDiagnostics {
+    /// Live OS threads in the server process.
+    pub threads: u64,
+    /// Cumulative SQLite connections opened since this server started.
+    pub store_opens: u64,
+    /// Cumulative subprocesses spawned by the server.
+    pub spawns: u64,
+    /// External facts currently held by open subscriptions.
+    pub held_facts: u64,
 }
 
 /// What `page.url` answers.
@@ -630,6 +649,7 @@ mod tests {
             include_str!("../../tests/fixtures/dto/server/not_found.json"),
             include_str!("../../tests/fixtures/dto/server/remote.json"),
             include_str!("../../tests/fixtures/dto/server/mobile_status.json"),
+            include_str!("../../tests/fixtures/dto/server/server_diagnostics_answer.json"),
             include_str!("../../tests/fixtures/dto/server/ticket_reply.json"),
             include_str!("../../tests/fixtures/dto/server/bulk.json"),
             include_str!("../../tests/fixtures/dto/server/admitted.json"),

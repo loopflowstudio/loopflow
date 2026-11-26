@@ -26,7 +26,7 @@ private Machine: the installed app opens the repository under the real `~/.lf`.
 Stop every server and holder launched for the walkthrough: a private home's
 `lf holder run` outlives its server, and the providers it holds are its direct
 children. For input and resize checks without a provider login, hold a real
-shell with `lf desktop shell <task> --checkout <path> --id <id> --create` in a PTY.
+shell with `lf desktop shell <task> --id <id> --create [-- <command>]` in a PTY.
 
 A private home keeps two SQLite files: `loopflow.db` (state, inputs as
 `captured` `session_events` with their newest ended turn) and `history.db`
@@ -234,3 +234,38 @@ answers "occupied without a Git locator" until `lf config repo --relocate
 <repo id>` runs there). Reuse the old path with `git clone` of the origin and
 a worktree at the old checkout path. Once every writer has exited, `sqlite3
 ?mode=ro` cannot open a home's store (no `-shm`); open it read-write.
+
+# Idle server work
+
+`lf server diagnostics --json` reports the server's `threads`, `store_opens`,
+`spawns` and `held_facts`; take it twice a minute apart around a quiet stretch.
+To name what a quiet server forks, put a `git` script first on the private
+`PATH` that appends `$(date +%T) ppid=$PPID cwd=$PWD $*` to a file and execs
+the real Git: Command lookups read `PATH` on each spawn, so it works on a
+server already running. Group by timestamp. A Git-planned repository with a
+claimed Task fetches its plan every 30 s (`watch_owned_work`): a quiet tick is
+`fetch` and `for-each-ref`, plus one `cat-file -p` after the tip moves. A
+claimed repository with no remote forks nothing; one whose remote comes from
+an `[include]` runs `git remote` once. The minute exchange covers the other
+active repositories. A claimed Task alone does not keep a custom home's server
+up: it idle-exits after 10 minutes and the polls stop, so hold a socket client
+(`hello` as `desktop`, then sit) for any watch longer than that. To check the
+Git backoff, `git remote set-url origin /missing.git` until one server fetch
+fails (next try 2 min later, then 4), restore it and run `lf task sync <id>`
+from the CLI: the server's next 30 s tick fetches again, and a comment made on
+another Machine meanwhile arrives with it. `scripts/benchmarks/server_idle.py
+<lf> --seconds 60` crosses the first minute exchange in `quiet`; 10-second runs
+miss anything slower than ten seconds.
+
+A held terminal's echo under a locked store: drive `lf desktop shell` from
+Python `pty.fork()`, hold `BEGIN EXCLUSIVE` on `loopflow.db` from `sqlite3`
+with `isolation_level=None`, and time `echo <token>` until the token shows
+twice. Exit a second shell (`exit 7`) under the lock: the view gets its code
+at once and `held_terminals.exit_code` lands after `COMMIT`.
+
+A custom home's server exits 10 minutes after its last client, held terminal
+and unfinished Graph or agent; store writes alone don't hold it. Deleting the
+home stops server and holders within a second and leaves no directory behind.
+A home made by the released `lf` keeps its `com.loopflow.server.<hash>` job
+while that server answers: branch launches reuse it. `lf install server` from
+the branch replaces it and boots the job out.

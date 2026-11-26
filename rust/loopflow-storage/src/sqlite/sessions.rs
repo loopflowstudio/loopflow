@@ -108,7 +108,7 @@ pub(crate) fn session_projection_inputs_in(
             "?1 IS NULL".to_owned(),
         )
     };
-    let mut query = conn.prepare(&format!(
+    let mut query = conn.prepare_cached(&format!(
         "SELECT s.agent_process_id,s.agent_pid,s.agent_os_started_at,s.agent_started_at,
          s.attached_lf_process_id IS NOT NULL,s.attached_pid,s.attached_os_started_at
          FROM {sessions} WHERE {selected} AND s.agent_ended_at IS NULL
@@ -134,7 +134,7 @@ pub(crate) fn session_projection_inputs_in(
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut query = conn.prepare(&format!(
+    let mut query = conn.prepare_cached(&format!(
         "SELECT {} FROM graph_processes g WHERE g.ended_at IS NULL AND {graphs}
          ORDER BY g.lf_process_id",
         super::graph_inventory::run_columns("g")
@@ -142,7 +142,7 @@ pub(crate) fn session_projection_inputs_in(
     let graph_runs = query
         .query_map([session], super::graph_inventory::read_run)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut query = conn.prepare(&format!(
+    let mut query = conn.prepare_cached(&format!(
         "SELECT DISTINCT act.observed_at + ?2 FROM {sessions}
          JOIN session_activity act ON {}
          WHERE {selected} AND act.observed_at > ?3 - ?2 ORDER BY 1",
@@ -321,13 +321,8 @@ fn title_source(source: TitleSource) -> &'static str {
 pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<LfSession>> {
     let canonical = loopflow_model::id::canonical_session(id);
     let id = canonical.as_str();
-    conn.query_row(
-        &format!("{SESSION_SELECT} WHERE s.id=?1"),
-        [id],
-        read_session,
-    )
-    .optional()?
-    .transpose()
+    let mut query = conn.prepare_cached(&format!("{SESSION_SELECT} WHERE s.id=?1"))?;
+    query.query_row([id], read_session).optional()?.transpose()
 }
 
 /// Activity row `act` counts toward Session `session`'s availability: the
@@ -344,7 +339,7 @@ fn current_agent_activity(session: &str) -> String {
 
 /// Reported status wins for the current AgentProcess; otherwise use the
 /// current attachment's input/hand-back/quiet reading. Filter before pagination.
-fn available_sql(session: &str, now: i64) -> String {
+fn available_sql(session: &str, now_param: &str) -> String {
     format!(
         "EXISTS(SELECT 1 FROM session_activity act
             WHERE {current}
@@ -357,7 +352,7 @@ fn available_sql(session: &str, now: i64) -> String {
                             WHERE json_extract(other.value,'$.state')='working')))))
             ELSE act.attachment_token={session}.attachment_token
                 AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
-                    OR {now}-act.observed_at>={quiet}))) END)",
+                    OR {now_param}-act.observed_at>={quiet}))) END)",
         current = current_agent_activity(session),
         quiet = crate::session::AVAILABILITY_QUIET_SECONDS
     )
@@ -380,10 +375,11 @@ fn inventory_query(
         sql.push_str(" AND s.interactive=1");
     }
     if filter.available {
+        let now_param = bind(Value::Integer(now));
+        let live_param = bind(Value::Text(live_agents.into()));
         sql.push_str(&format!(
-            " AND {} AND s.agent_process_id IN (SELECT value FROM json_each({}))",
-            available_sql("s", now),
-            bind(Value::Text(live_agents.into()))
+            " AND {} AND s.agent_process_id IN (SELECT value FROM json_each({live_param}))",
+            available_sql("s", &now_param),
         ));
     }
     if let Some(repo) = &filter.repo {
@@ -465,8 +461,8 @@ const SUMMARY_SELECT: &str = concat!(
     FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture"
 );
 
-fn summary_query(page: &str, by_id: bool, now: i64) -> String {
-    let available = available_sql("a", now);
+fn summary_query(page: &str, by_id: bool, now_param: &str) -> String {
+    let available = available_sql("a", now_param);
     let order = if by_id { "s.id" } else { "s.title,s.id" };
     // A Graph is the Graph process above the step that captured the current input.
     format!("WITH page AS MATERIALIZED ({page})
@@ -704,8 +700,11 @@ pub(super) fn session_summaries_in(
     let now = projection.now;
     let live_agents = &projection.live_agents;
     let mut labels = std::collections::HashMap::new();
-    let (page, values) = inventory_query(filter, SUMMARY_SELECT, now, live_agents)?;
-    let mut query = conn.prepare(&summary_query(&page, filter.after.is_some(), now))?;
+    let (page, mut values) = inventory_query(filter, SUMMARY_SELECT, now, live_agents)?;
+    values.push(rusqlite::types::Value::Integer(now));
+    let now_param = format!("?{}", values.len());
+    let mut query =
+        conn.prepare_cached(&summary_query(&page, filter.after.is_some(), &now_param))?;
     let rows = query.query_map(rusqlite::params_from_iter(values), |row| {
         read_summary(conn, &mut labels, row, projection)
     })?;
@@ -749,7 +748,7 @@ pub(super) fn admit_task_primary_in(
             choose_task_primary_in(conn, task, session.id.as_str())?;
         }
     }
-    ensure_primary_session_in(conn, &scope, session.clone(), caller_process)
+    ensure_primary_session_in(conn, &scope, session.clone(), caller_process, None)
 }
 
 fn ensure_primary_session_in(
@@ -757,11 +756,18 @@ fn ensure_primary_session_in(
     scope: &PrimaryScope,
     session: LfSession,
     caller_process: Option<&loopflow_model::id::LfProcessId>,
+    person_start_at: Option<i64>,
 ) -> StoreResult<LfSession> {
     if let Some(current) = primary_session_in(conn, scope)? {
         return Ok(current);
     }
     let session = reserve_session_in(conn, session, caller_process)?;
+    if let Some(at) = person_start_at {
+        conn.execute(
+            "UPDATE agent_sessions SET last_started_at=?2 WHERE id=?1",
+            params![&session.id, at],
+        )?;
+    }
     let marked = match scope {
         PrimaryScope::Repository(_) => conn.execute(
             "UPDATE agent_sessions SET primary_scope='repository' WHERE id=?1",
@@ -959,13 +965,9 @@ impl SqliteStore {
     /// The Session a held terminal runs, for its viewers.
     pub fn terminal_session(&self, terminal: &TerminalId) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT id FROM agent_sessions WHERE held_terminal_id=?1",
-                [terminal],
-                |row| row.get(0),
-            )
-            .optional()?)
+        let mut query =
+            conn.prepare_cached("SELECT id FROM agent_sessions WHERE held_terminal_id=?1")?;
+        Ok(query.query_row([terminal], |row| row.get(0)).optional()?)
     }
 
     /// The Session lf process `process` ran an agent for.
@@ -1127,18 +1129,18 @@ impl SqliteStore {
             return Ok(None);
         };
         let mut labels = std::collections::HashMap::new();
+        let mut query = conn.prepare_cached(&summary_query(
+            &format!("{SUMMARY_SELECT} WHERE s.id=?1"),
+            false,
+            "?2",
+        ))?;
         Ok(Some(
-            conn.query_row(
-                &summary_query(
-                    &format!("{SUMMARY_SELECT} WHERE s.id=?1"),
-                    false,
-                    projection.now,
-                ),
-                [id],
-                |row| read_summary(&conn, &mut labels, row, projection),
-            )
-            .optional()?
-            .transpose()?,
+            query
+                .query_row(params![id, projection.now], |row| {
+                    read_summary(&conn, &mut labels, row, projection)
+                })
+                .optional()?
+                .transpose()?,
         ))
     }
 
@@ -1186,7 +1188,7 @@ impl SqliteStore {
     pub fn sessions_for_agent_session(&self, thread: &AgentSessionId) -> StoreResult<Vec<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         // An input's captured row names the conversation that resumes it.
-        let mut query = conn.prepare(
+        let mut query = conn.prepare_cached(
             "SELECT id FROM agent_sessions WHERE provider_thread=?1
              UNION SELECT session_id FROM session_events WHERE kind='captured' AND provider_thread=?1
              ORDER BY 1",
@@ -1730,6 +1732,7 @@ impl SqliteStore {
         scope: &PrimaryScope,
         session: LfSession,
         caller_process: Option<&loopflow_model::id::LfProcessId>,
+        person_start_at: Option<i64>,
     ) -> StoreResult<LfSession> {
         // Nearly every call finds the primary it asks for; that takes no write lock.
         if let Some(current) = self.primary_session(scope)? {
@@ -1737,7 +1740,8 @@ impl SqliteStore {
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let session = ensure_primary_session_in(&tx, scope, session, caller_process)?;
+        let session =
+            ensure_primary_session_in(&tx, scope, session, caller_process, person_start_at)?;
         tx.commit()?;
         Ok(session)
     }
@@ -1882,7 +1886,7 @@ impl SqliteStore {
     pub fn bound_sessions(&self) -> StoreResult<Vec<crate::session::SessionBind>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
-        let mut query = conn.prepare(
+        let mut query = conn.prepare_cached(
             "SELECT s.id,s.bound_at,t.id,(SELECT slug FROM wave_addresses WHERE id=s.wave_id)
              FROM agent_sessions s JOIN tasks t ON t.id=s.task_id
              WHERE s.bound_at IS NOT NULL ORDER BY s.bound_at,s.id",
@@ -1919,7 +1923,7 @@ impl SqliteStore {
             }
         }
         let (sql, values) = inventory_query(filter, SESSION_SELECT, now, live_agents)?;
-        let mut query = snapshot.prepare(&sql)?;
+        let mut query = snapshot.prepare_cached(&sql)?;
         let rows = query.query_map(rusqlite::params_from_iter(values), read_session)?;
         Ok(Some(rows.map(|row| row?).collect::<StoreResult<_>>()?))
     }
@@ -1928,7 +1932,7 @@ impl SqliteStore {
         let canonical = loopflow_model::id::canonical_session(id);
         let id = canonical.as_str();
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
+        let mut query = conn.prepare_cached(
             "SELECT receipt_key FROM session_events WHERE kind='captured' AND session_id=?1 ORDER BY seq",
         )?;
         let rows = query.query_map([id], |row| row.get::<_, String>(0))?;
@@ -2102,7 +2106,7 @@ pub(super) fn repair_task_titles_in(
     task: &TaskId,
     previous: Option<&str>,
 ) -> StoreResult<()> {
-    let mut query = conn.prepare("SELECT id FROM agent_sessions WHERE task_id=?1 AND title_source='generated' AND completed_at IS NULL")?;
+    let mut query = conn.prepare_cached("SELECT id FROM agent_sessions WHERE task_id=?1 AND title_source='generated' AND completed_at IS NULL")?;
     let sessions = query
         .query_map([task.as_str()], |row| row.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;

@@ -562,9 +562,7 @@ fn prepare_work_binding(
     selector: &str,
     repo: &Path,
 ) -> anyhow::Result<loopflow_execution::ops::WorkBinding> {
-    let runtime = tokio::runtime::Runtime::new()
-        .map_err(|error| anyhow::anyhow!("cannot resolve {selector}: {error}"))?;
-    runtime.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = loopflow_execution::store::open_existing_store()
             .await
             .map_err(|error| anyhow::anyhow!("cannot resolve {selector}: {error}"))?
@@ -833,7 +831,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     match command {
         WaveCommand::Graph { cmd } => {
             use loopflow::lf::WaveGraphCommand;
-            tokio::runtime::Runtime::new()?.block_on(async {
+            loopflow_execution::runtime::block_on(async {
                 match cmd {
                     WaveGraphCommand::Show {
                         wave,
@@ -926,7 +924,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             repo: target,
             json,
         } => {
-            let renamed = tokio::runtime::Runtime::new()?.block_on(
+            let renamed = loopflow_execution::runtime::block_on(
                 loopflow_execution::ops::wave_lifecycle::rename(
                     repo,
                     wave,
@@ -997,9 +995,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             use loopflow::lf::commands::waves::{
                 list_closed_tasks, list_tasks, subscribe_tasks, TaskListArgs,
             };
-            tokio::runtime::Runtime::new()?.block_on(
-                loopflow_execution::ops::plan_carriers::before_first_read(repo),
-            );
             let args = TaskListArgs {
                 query: query.clone(),
                 wave: wave.clone(),

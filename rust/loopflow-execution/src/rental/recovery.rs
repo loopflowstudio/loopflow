@@ -10,9 +10,8 @@ use std::io::{BufReader, Seek};
 use std::process::{Command, Stdio};
 use time::OffsetDateTime;
 
-pub fn open_store(runtime: &tokio::runtime::Runtime) -> anyhow::Result<Store> {
-    runtime
-        .block_on(crate::store::open_existing_store())?
+pub fn open_store() -> anyhow::Result<Store> {
+    crate::runtime::block_on(crate::store::open_existing_store())?
         .ok_or_else(|| anyhow!("this command needs an initialized local store"))
 }
 
@@ -348,8 +347,7 @@ fn copy_up(
 /// `lf machine end` or the periodic Task check gives it back later.
 pub fn settle(machine: &MachineId) {
     let result = (|| -> anyhow::Result<()> {
-        let runtime = tokio::runtime::Runtime::new()?;
-        let store = open_store(&runtime)?;
+        let store = open_store()?;
         let sqlite = &store.sqlite;
         let Some(rental) = sqlite.rental_for_machine(machine)? else {
             return Ok(());
@@ -383,8 +381,7 @@ fn collect_running(sqlite: &SqliteStore, rental: &Rental) -> anyhow::Result<()> 
 /// # Errors
 /// When the store cannot be read, or a due rental's provider cannot be reached.
 pub fn check() -> anyhow::Result<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    let store = open_store(&runtime)?;
+    let store = open_store()?;
     let sqlite = &store.sqlite;
     let mut due = Vec::new();
     for rental in live_rentals(sqlite)? {

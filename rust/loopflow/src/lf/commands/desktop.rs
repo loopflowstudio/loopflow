@@ -665,12 +665,10 @@ pub(crate) fn read_task_pane(
         &loopflow_execution::repo::working_directory_in(directory)?,
         Some(issue),
     )?;
-    // A read reads what the store records; `wave.sync` exchanges planning.
-    tokio::runtime::Runtime::new()?.block_on(async {
-        let store = loopflow_execution::store::read_existing_registry()?
-            .map(std::sync::Arc::new)
-            .context("no Loopflow store exists on this Machine")?;
-        let status = loopflow_execution::ops::task::read_task_status(&store, &repo, issue).await?;
+    let (store, task) =
+        super::screens::registered_task(&repo, issue, super::screens::TaskScope::Repository)?;
+    loopflow_execution::runtime::block_on(async {
+        let status = loopflow_execution::ops::task::registered_task_status(&store, task).await?;
         super::waves::task_pane(&store, status).await
     })
 }
@@ -682,7 +680,7 @@ pub(crate) fn subscribe_task_pane(
     transport: Transport,
 ) -> Result<Option<Subscription>> {
     let repo = loopflow_execution::ops::task::task_repository(directory, Some(issue))?;
-    let task_id = tokio::runtime::Runtime::new()?.block_on(async {
+    let task_id = loopflow_execution::runtime::block_on(async {
         let store = loopflow_execution::store::read_existing_registry()?
             .map(std::sync::Arc::new)
             .context("no Loopflow store exists on this Machine")?;

@@ -19,6 +19,7 @@ A crash, a reboot or a closed terminal loses less than it looks like.
 
 ```bash
 lf doctor                                    # installation, store, lock contention, PTYs, stray processes
+lf server diagnostics --json                 # server threads, SQLite opens, spawns, and held facts
 lf task status <ID>                          # Graph step, conversation state, and reason
 lf graph show <RUN_ID>                       # per-step status and exit codes
 lf session history show <SESSION_ID> --final # agent's final output
@@ -136,7 +137,7 @@ through your `agents` list; once exhausted, Graph steps wait 5, 15, 30, then
 
 ```bash
 lf set --global agents claude,codex
-lf config settings --skill gate --explain
+lf config settings --skill qa --explain
 ```
 
 Sign in again natively on the execution Machine if credentials expired, then
@@ -233,17 +234,26 @@ and saves unpushed commits under `refs/lf/pruned/<branch>/<commit>` first.
 `scripts/disk-cleanup.sh` also reclaims idle build caches (`target`,
 `node_modules`, `.venv`, `DerivedData`) not held by any running process.
 
+The server's hourly maintenance rotates `~/.lf/logs/lf.log` at 32 MB (keeping 4
+files) and removes finished `terminal-*.log` and `graph-*.log` files untouched
+for 30 days, completed `context-deliveries/*.json` files after 7 days, old
+`loopflow.db.backup-*` snapshots once the next schema has been in use for 7
+days, and lock files whose owners have ended.
+
 ## Processes (`lf holder run`, strays, and `ps`)
 
 ```bash
 ps -axo pid,etime,command | grep -E '[ /]lf( |$)'
 lf machine doctor --json                     # lists stray agent processes by PID
+lf server diagnostics --json                 # server threads, SQLite opens, spawns, and held facts
 ```
 
-Expect one `lf server run`, one `lf holder run` per build with open work
-sessions (each exits a minute after its last conversation ends), and one `lf`
-per active Graph or headless run. Stop leftovers individually by PID, never
-`pkill lf`, which kills live work in other checkouts.
+Expect one `lf server run` for `~/.lf`, one `lf holder run` per build with open
+work sessions (each exits a minute after its last conversation ends), and one
+`lf` per active Graph or headless run. Servers started for a custom `LF_HOME`
+exit after 10 minutes idle or when that directory is removed, taking their
+holders with them. Stop leftovers individually by PID, never `pkill lf`, which
+kills live work in other checkouts.
 
 ## A Wave isn't moving
 

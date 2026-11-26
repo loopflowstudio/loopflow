@@ -107,14 +107,13 @@ impl SqliteStore {
 
     pub fn revision_map(&self) -> StoreResult<Revisions> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT domain,revision FROM store_revisions")?;
+        let mut query = conn.prepare_cached("SELECT domain,revision FROM store_revisions")?;
         let mut revisions: BTreeMap<String, i64> = query
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?;
-        let history =
-            conn.query_row("SELECT revision FROM history.history_revision", [], |row| {
-                row.get(0)
-            })?;
+        let mut history_query =
+            conn.prepare_cached("SELECT revision FROM history.history_revision")?;
+        let history = history_query.query_row([], |row| row.get(0))?;
         revisions.insert("history".to_owned(), history);
         Ok(Revisions(revisions))
     }

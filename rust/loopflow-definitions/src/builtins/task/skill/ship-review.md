@@ -5,7 +5,7 @@ action_style: conversational
 ---
 Make what ships understood, and decide what happens to everything the run left outside it.
 
-The work is built and the PR is published. Concept review and gate own
+The work is built and the PR is published. Concept review and CI own
 whether the change is right. This is not a code review and not a go/no-go.
 
 **Gather what exists before writing anything.**
@@ -33,6 +33,9 @@ order:
    storage tables someone building on top of this needs to know.
 4. **Trade-offs and invariants going forward**: choices made on their behalf,
    what was passed over, behavior that changed on purpose, and what must hold.
+   When the diff touches security-relevant code—auth, credentials or secrets,
+   telemetry or outbound data, untrusted input, or deployment—call out what
+   changed and suggest running `lf security-review` before delivering.
 5. **Findings**: everything left outside the PR, each as a `decision` component
    (`<lf-component name="decision" id="…" title="…" recommendation="…">`) for
    Fix here, File Task, or Drop. Add a `data-lf` action button only when a

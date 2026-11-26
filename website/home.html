@@ -17,7 +17,7 @@
         <li class="need"><p class="t">Resume a run after its machine is preempted</p><p class="m"><span class="ag">claude · opus</span><span class="st">available · design</span></p><ol class="steps"><li class="d"></li><li class="y"></li><li></li><li></li><li></li><li></li></ol></li>
         <li><p class="t">Round-robin tournament across checkpoints</p><p class="m"><span class="ag">claude · sonnet</span><span class="st run">pursue · concept-review</span></p><ol class="steps"><li class="d"></li><li class="d"></li><li class="d"></li><li class="r"></li><li></li><li></li></ol></li>
         <li><p class="t">Query benchmarks through DuckDB</p><p class="m"><span class="ag">opencode</span><span class="st run">task-design · kickoff</span></p><ol class="steps"><li class="r"></li><li></li><li></li><li></li><li></li><li></li></ol></li>
-        <li><p class="t">Reuse verified artifact downloads</p><p class="m"><span class="ag">codex</span><span class="st run">ship · gate</span></p><ol class="steps"><li class="d"></li><li class="d"></li><li class="d"></li><li class="d"></li><li class="d"></li><li class="r"></li></ol></li>
+        <li><p class="t">Reuse verified artifact downloads</p><p class="m"><span class="ag">codex</span><span class="st run">deliver · land</span></p><ol class="steps"><li class="d"></li><li class="d"></li><li class="d"></li><li class="d"></li><li class="d"></li><li class="r"></li></ol></li>
         <li class="done"><p class="t">Retain launch logs through startup failures</p><p class="m"><span class="ag">claude · opus</span><span class="st ok">landed · #10</span></p></li>
         <li class="done"><p class="t">Split run tracking from training</p><p class="m"><span class="ag">codex</span><span class="st ok">landed · #17</span></p></li>
       </ul>
@@ -85,7 +85,7 @@
       <h3>Runs</h3>
       <p>Headless runs in the background that turn one thing into the next: plans into code, code into verified code, numbers into analysis. Get as much as possible off the main thread; runs stop where a person belongs, and their results come back to the session the work lives in.</p>
 <pre tabindex="0" aria-label="Start background runs" class="term"><span class="p">$</span> <b>lf</b> -b task run ETU-14      <span class="c"># plan → code → pull request</span>
-<span class="p">$</span> <b>lf</b> -b gate                 <span class="c"># code → verified code</span>
+<span class="p">$</span> <b>lf</b> -b qa                   <span class="c"># code → verified code</span>
 <span class="p">$</span> <b>lf</b> -b research "why does reward plateau at 40k steps?"</pre>
     </article>
   </div>

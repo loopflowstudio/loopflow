@@ -534,8 +534,10 @@ fn scope_waves_to_repo(waves: Vec<Wave>, directory: &Path, all: bool) -> Result<
 }
 
 pub fn ls(json: bool, all: bool) -> Result<()> {
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
+    loopflow_execution::runtime::block_on(async {
+        if let Ok(directory) = std::env::current_dir() {
+            loopflow_execution::ops::plan_carriers::before_first_read(&directory).await;
+        }
         let Some(snapshots) = list(all).await? else {
             return no_registry(json, "[]");
         };
@@ -579,7 +581,8 @@ pub(crate) async fn wave_snapshots(store: &SharedStore, all: bool) -> Result<Vec
 /// <wave>` reads what the store records and `lf wave sync` exchanges planning.
 pub fn status(wave: Option<&str>, json: bool, observe: bool) -> Result<()> {
     let directory = std::env::current_dir()?;
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
+        loopflow_execution::ops::plan_carriers::before_first_read(&directory).await;
         let Some(status) = read_status(&directory, wave, observe).await? else {
             return no_registry(json, "null");
         };
@@ -594,14 +597,14 @@ pub fn status(wave: Option<&str>, json: bool, observe: bool) -> Result<()> {
 
 /// What `lf --cwd <directory> wave status [<wave>] --json` prints.
 pub fn status_json(directory: &Path, wave: Option<&str>, observe: bool) -> Result<String> {
-    let status = tokio::runtime::Runtime::new()?.block_on(read_status(directory, wave, observe))?;
+    let status = loopflow_execution::runtime::block_on(read_status(directory, wave, observe))?;
     Ok(serde_json::to_string(&status)?)
 }
 
 /// `lf --cwd <directory> wave plan <wave>`: one Wave's stored plan; None
 /// without a registry.
 pub fn desktop_status(directory: &Path, wave: &str) -> Result<Option<WaveDetailSnapshot>> {
-    tokio::runtime::Runtime::new()?.block_on(read_status(directory, Some(wave), false))
+    loopflow_execution::runtime::block_on(read_status(directory, Some(wave), false))
 }
 
 /// One Wave's status; None without a registry.
@@ -628,7 +631,7 @@ pub fn desktop_closed_tasks(
     after: Option<&str>,
 ) -> Result<ClosedTaskPageSnapshot> {
     let repo = loopflow_execution::repo::working_directory_in(directory)?;
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = loopflow_execution::store::read_existing_registry()?.map(std::sync::Arc::new);
         closed_task_page(
             store.as_ref(),
@@ -729,7 +732,8 @@ pub(crate) fn show_snapshot(
     all: bool,
     observe: bool,
 ) -> Result<RoadmapSnapshot> {
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
+        loopflow_execution::ops::plan_carriers::before_first_read(directory).await;
         let store = loopflow_execution::store::read_existing_registry()?.map(std::sync::Arc::new);
         show_roadmap(store.as_ref(), directory, wave, task, all, observe).await
     })
@@ -887,8 +891,8 @@ pub struct TaskListArgs {
 /// `lf task list`: the repository's open Tasks matching `query`, as the plan
 /// gives them.
 pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
+    loopflow_execution::runtime::block_on(async {
+        loopflow_execution::ops::plan_carriers::before_first_read(repo).await;
         let store = loopflow_execution::store::read_existing_registry()?.map(std::sync::Arc::new);
         let tasks = match &store {
             Some(store) => open_tasks(store, repo, query).await?,
@@ -1359,7 +1363,7 @@ pub(crate) fn task_completed(
     ids(&completion.children, &mut settled);
     let mut rows = HashMap::new();
     if !settled.is_empty() {
-        tokio::runtime::Runtime::new()?.block_on(async {
+        loopflow_execution::runtime::block_on(async {
             let store = loopflow_execution::store::read_existing_registry()?
                 .map(std::sync::Arc::new)
                 .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
@@ -1382,7 +1386,7 @@ pub(crate) fn task_completed(
 
 /// `lf task status`: the Task it was filed from and one line per child.
 pub fn print_task_family(task: &Task) -> Result<()> {
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = loopflow_execution::store::read_existing_registry()?
             .map(std::sync::Arc::new)
             .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
@@ -1420,8 +1424,7 @@ pub fn print_task_detail(
     status: loopflow_execution::ops::task::TaskStatus,
     unanswered: Option<String>,
 ) -> Result<()> {
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = loopflow_execution::store::read_existing_registry()?
             .map(std::sync::Arc::new)
             .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
@@ -1448,7 +1451,6 @@ pub(crate) fn read_task_detail(
     let store = loopflow_execution::store::read_existing_registry()?
         .map(Arc::new)
         .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
-    let rt = tokio::runtime::Runtime::new()?;
     let task = loopflow_execution::ops::task::registered_task(&store.sqlite, &repo, issue)?;
     let mut unanswered = None;
     if ask_owner {
@@ -1459,7 +1461,7 @@ pub(crate) fn read_task_detail(
             }
         }
     }
-    rt.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let status = loopflow_execution::ops::task::registered_task_status(&store, task).await?;
         task_detail(&store, status, unanswered).await
     })
@@ -1657,8 +1659,8 @@ pub fn list_closed_tasks(
     limit: usize,
     json: bool,
 ) -> Result<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
+    loopflow_execution::runtime::block_on(async {
+        loopflow_execution::ops::plan_carriers::before_first_read(repo).await;
         let store = loopflow_execution::store::read_existing_registry()?.map(std::sync::Arc::new);
         let page = closed_task_page(store.as_ref(), repo, wave, since, after, limit).await?;
         if json {

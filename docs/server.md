@@ -1,8 +1,9 @@
 # Connect clients
 
 ```bash
-lf server status   # check local client server readiness and any connection error
-lf install         # update Loopflow and keep its server registration in sync
+lf server status               # check local client server readiness and any connection error
+lf server diagnostics --json   # live threads, SQLite opens, spawned commands, and held facts
+lf install                     # update Loopflow and keep its server registration in sync
 ```
 
 Loopflow Desktop and held Task conversations connect through a local client
@@ -19,6 +20,7 @@ asking; `executable_sha256` names the server's own executable.
 |---|---|
 | Run work on another computer | `lf machine add mini`, then `lf --machine mini …` |
 | Check Desktop's connection to Loopflow | `lf server status` |
+| Check server threads, store opens, and spawns | `lf server diagnostics --json` |
 | Install or update Loopflow and its server | `lf install` |
 | Focus a Desktop window or script its panes | `lf desktop` |
 
@@ -84,6 +86,34 @@ command you need to run by hand.
 If macOS disabled Loopflow's background item, re-enable it in System Settings
 (or re-enable the user service on Linux). Status checks and Retry respect that
 setting and never re-register it behind your back.
+
+Only the default Machine (`~/.lf`) is registered with macOS Background Items or
+systemd. A server started for a custom `LF_HOME` runs as an ordinary detached
+process: it exits after 10 minutes with no connected clients, held terminals, or
+unfinished Graphs or agents, or once its `LF_HOME` directory is removed. Holders
+started for that home also close their PTYs and exit when the directory is
+removed; holders in an existing home still outlive server restarts and
+`lf install`.
+
+## Runtime diagnostics
+
+```bash
+lf server diagnostics --json
+```
+
+```json
+{
+  "threads": 16,
+  "store_opens": 4,
+  "spawns": 2,
+  "held_facts": 11
+}
+```
+
+- `threads`: live OS threads in the server process.
+- `store_opens`: cumulative SQLite connections opened since this server started (pooled connections are reused without incrementing this count).
+- `spawns`: cumulative subprocesses spawned by the server (such as `git` or `gh` checks for held observations).
+- `held_facts`: external facts (checkout Git state, files, processes, transcripts) currently held by open subscriptions.
 
 ## Browser review pages
 

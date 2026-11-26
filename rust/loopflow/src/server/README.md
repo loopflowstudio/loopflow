@@ -16,13 +16,20 @@ plus existing terminal attachment. It links no embedded Loopflow library. Deskto
 `install server` bridge is for local clients, not a separate setup workflow.
 
 On macOS the signed selected app bundles `com.loopflow.server.plist` and
-registers it with SMAppService. Explicit development Machines use separately
-named launchd jobs. Linux uses a systemd user service when its manager is available.
-Without a user manager, the first connection starts a detached `lf server run`
-and writes its output to `logs/server.log`. Closing Desktop does not
+registers it with SMAppService for the default Machine (`~/.lf`). Linux uses a
+systemd user service for the default Machine when its manager is available, or a
+detached `lf server run` without one. Custom `LF_HOME` Machines are never
+registered with launchd or systemd: `lf install server` boots out any legacy
+hashed job for that home, starts a detached `lf server run` logging to
+`logs/server.log`, and replaces an older build by pinning the listener via
+`LOCAL_PEERPID`/`SO_PEERCRED` before sending `SIGTERM`. A custom-home server
+exits when its home directory is removed or after 10 minutes with no connected
+clients, held terminals, or unfinished Graphs or agents; a holder also closes
+its PTYs and exits when its home directory is removed. Closing Desktop does not
 stop the service. Work sessions and Desktop shells run in a holder the service starts with
 `setsid` and controls ([Held terminals](../../../loopflow-execution/src/transport/README.md#held-terminals));
-stopping or replacing the service leaves holders and their agents running.
+stopping or replacing the service leaves holders and their agents running in an
+existing home.
 This service holds no PTY itself and hosts no Graphs: those run as
 [plain detached processes](../../../loopflow-execution/src/transport/README.md#headless-work). Logout/reboot do not
 preserve live processes; the [recovery pass](#recovery-pass) starts them again.
@@ -30,7 +37,7 @@ Disabled Background Items remain disabled. Upgrade
 retires the previous
 `com.loopflow.machine` registration before starting `com.loopflow.server`.
 The old bundled plist remains only for SMAppService approval inspection/removal.
-Development jobs and Linux units migrate their hashed labels the same way;
+Default-home Linux units migrate their hashed labels the same way;
 existing disabled/masked units require explicit enablement. The `machine.sock`
 address and its lock remain stable so already-running relays can recover across
 the rename. There is one listener, with no alias or alternate protocol path.

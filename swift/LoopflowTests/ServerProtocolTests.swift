@@ -96,6 +96,18 @@ struct ServerProtocolTests {
         #expect(status.clients.first?.requests == 12)
     }
 
+    @Test func serverDiagnosticsSharesTheRustContract() throws {
+        #expect(try encoded(.request(id: "diagnostics-1", operation: .serverDiagnostics, select: nil, requestID: nil)) == value("server_diagnostics"))
+        guard case .response("diagnostics-1", _, let result, nil) = try message("server_diagnostics_answer") else {
+            Issue.record("Missing diagnostics response"); return
+        }
+        let diagnostics = try result.decode(ServerDiagnostics.self)
+        #expect(diagnostics.threads == 16)
+        #expect(diagnostics.storeOpens == 4)
+        #expect(diagnostics.spawns == 2)
+        #expect(diagnostics.heldFacts == 11)
+    }
+
     @Test func errorsBranchOnTheirCode() {
         let unknown = ServerError(code: "outcome_unknown", message: "launch ended without a result", data: .null)
         #expect(unknown.code == .outcomeUnknown)

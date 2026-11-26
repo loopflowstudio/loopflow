@@ -76,8 +76,7 @@ pub struct CiIncidentDto {
 pub fn report(since: &str, wave: Option<&str>, repo: Option<&str>) -> Result<CiReportDto> {
     let now = OffsetDateTime::now_utc();
     let since_at = parse_since(since, now)?;
-    let runtime = tokio::runtime::Runtime::new()?;
-    let rows = runtime.block_on(async {
+    let rows = crate::runtime::block_on(async {
         let Some(store) = open_existing_store().await? else {
             return Ok(Vec::new());
         };

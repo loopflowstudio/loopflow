@@ -1958,8 +1958,7 @@ fn finish_release_pr(
 }
 
 fn wait_for_release_repair(landing: &loopflow_storage::pr_landing::PrLanding) -> OpsResult<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    let store = runtime.block_on(crate::ops::pr_landing::landing_store())?;
+    let store = crate::runtime::block_on(crate::ops::pr_landing::landing_store())?;
     let deadline = Instant::now() + Duration::from_secs(60 * 60);
     while crate::ops::pr_landing::repair_running(&store, &landing.repo, landing.pr_number)? {
         if Instant::now() >= deadline {

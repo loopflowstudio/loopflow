@@ -430,9 +430,7 @@ fn task_error(message: impl std::fmt::Display) -> OpsError {
 pub(super) fn block_on_task<T>(
     future: impl std::future::Future<Output = OpsResult<T>>,
 ) -> OpsResult<T> {
-    tokio::runtime::Runtime::new()
-        .map_err(|error| task_error(format!("failed to build task runtime: {error}")))?
-        .block_on(future)
+    crate::runtime::block_on(future)
 }
 
 async fn task_store() -> OpsResult<SharedStore> {
@@ -3183,9 +3181,15 @@ pub fn prepare_conversation_beside(task: &Task) {
     let prepared = block_on_task(async {
         let store = task_store().await?;
         let worktree = task.worktree().map_err(task_error)?.clone();
-        crate::ops::human_session::primary::ensure_task(&store, &worktree, task.id.as_str(), None)
-            .await
-            .map_err(task_error)?;
+        crate::ops::human_session::primary::ensure_task(
+            &store,
+            &worktree,
+            task.id.as_str(),
+            None,
+            false,
+        )
+        .await
+        .map_err(task_error)?;
         Ok(())
     });
     if let Err(error) = prepared {

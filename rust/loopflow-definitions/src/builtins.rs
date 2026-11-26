@@ -298,12 +298,12 @@ mod tests {
             "reduce",
             "polish",
             "concept-review",
+            "security-review",
             "ship-review",
             "explore",
             "research",
             "qa",
             "triage",
-            "gate",
             "demo",
             "measure",
             "optimize-plan",
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn generic_execution_skills_never_infer_a_wave_or_require_pm() {
-        for name in ["implement", "gate", "research", "sync-conflicts"] {
+        for name in ["implement", "research", "sync-conflicts"] {
             let skill = get_builtin_skill(name).expect("generic skill");
             assert!(!skill.contains("matches this work"), "{name}");
             assert!(!skill.contains("lf pm show"), "{name}");

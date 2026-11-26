@@ -366,10 +366,10 @@ mod tests {
         // Its only stop is inside an XOR path.
         std::fs::write(
             graphs.join("conditional.yaml"),
-            "- implement\n- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - interactive: demo\n      skip:\n        description: Nothing to review\n- gate\n",
+            "- implement\n- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - interactive: demo\n      skip:\n        description: Nothing to review\n- qa\n",
         )
         .unwrap();
-        std::fs::write(graphs.join("alone.yaml"), "- implement\n- gate\n").unwrap();
+        std::fs::write(graphs.join("alone.yaml"), "- implement\n- qa\n").unwrap();
         std::fs::write(graphs.join("broken.yaml"), "- graph: no-such-graph\n").unwrap();
         let catalog = graph_catalog(repo.path()).unwrap();
         let outline = |name: &str| {
@@ -595,7 +595,6 @@ mod tests {
         type Case<'a> = (&'a str, &'a [&'a str], &'a [(usize, usize)]);
         let repo = tempfile::tempdir().unwrap();
         let cases: &[Case<'_>] = &[
-            ("queue", &["compress", "sync", "realign", "gate"], &[]),
             ("refresh", &["sync", "realign"], &[]),
             ("task-design", &["kickoff"], &[]),
             (
@@ -622,10 +621,10 @@ mod tests {
             ),
             (
                 "quick",
-                &["sync", "implement", "qa", "gate", "land --wait-and-fix"],
+                &["sync", "implement", "qa", "land --wait-and-fix"],
                 &[(1, 0)],
             ),
-            ("deliver", &["reflect", "gate", "land --wait-and-fix"], &[]),
+            ("deliver", &["reflect", "land --wait-and-fix"], &[]),
             ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[]),
         ];
         for (name, labels, returns) in cases {

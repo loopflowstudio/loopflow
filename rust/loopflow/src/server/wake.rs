@@ -981,13 +981,14 @@ mod tests {
     fn pin_lf_home(
         home: &Path,
     ) -> (
-        std::sync::MutexGuard<'static, ()>,
         crate::test_ambient::EnvGuard,
+        std::sync::MutexGuard<'static, ()>,
     ) {
         let lock = loopflow_execution::journal::test_env_lock();
         let guard = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         std::env::set_var("LF_HOME", home);
-        (lock, guard)
+        // Tuple fields drop in order: restore LF_HOME before releasing the lock.
+        (guard, lock)
     }
 
     fn check_waiting_steer(harness: HarnessKind, wake_at: WakeAt) {

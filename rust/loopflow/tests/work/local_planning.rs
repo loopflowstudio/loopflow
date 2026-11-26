@@ -3036,3 +3036,76 @@ fn task_creation_defaults_to_standalone_in_bound_contexts() {
     assert_eq!(retained.wave_id.as_ref().unwrap().as_str(), wave_id);
     assert_eq!(retained.worktree.as_deref(), Some(checkout));
 }
+
+#[test]
+fn fresh_clone_reads_remote_plan_after_task_create_and_on_first_wave_list() {
+    let origin = TestRepo::new();
+    let home_a = tempfile::tempdir().unwrap();
+    let home_b = tempfile::tempdir().unwrap();
+    let home_c = tempfile::tempdir().unwrap();
+    let clones = tempfile::tempdir().unwrap();
+
+    let clone_origin = |name: &str| {
+        let dir = clones.path().join(name);
+        let output = Command::new("git")
+            .args([
+                "clone",
+                "-q",
+                origin.bare_path().to_str().unwrap(),
+                dir.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git clone: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(Command::new("git")
+            .current_dir(&dir)
+            .args(["config", "user.email", "fixture@example.test"])
+            .status()
+            .unwrap()
+            .success());
+        dir.canonicalize().unwrap()
+    };
+
+    // Home A creates a Wave and a Task, pushing them to the bare origin.
+    lf(
+        origin.path(),
+        home_a.path(),
+        &[
+            "task", "create", "--wave", "alpha", "--title", "A", "--json",
+        ],
+    );
+
+    // Home B clones, saves locally first (`lf task create`), then runs `lf task list`:
+    // it must still fetch A's plan on that first list.
+    let clone_b = clone_origin("b");
+    lf(
+        &clone_b,
+        home_b.path(),
+        &["task", "create", "--title", "B", "--json"],
+    );
+    let listed = lf(&clone_b, home_b.path(), &["task", "list", "--json"]);
+    let mut titles: Vec<&str> = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["task"]["name"].as_str().unwrap())
+        .collect();
+    titles.sort_unstable();
+    assert_eq!(titles, ["A", "B"]);
+
+    // Home C clones and runs `lf wave list --json` as its very first command:
+    // it must fetch the remote plan and list Wave `alpha` from A.
+    let clone_c = clone_origin("c");
+    let waves = lf(&clone_c, home_c.path(), &["wave", "list", "--json"]);
+    let names: Vec<&str> = waves
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"alpha"), "expected wave alpha in {waves}");
+}

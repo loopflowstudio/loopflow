@@ -77,6 +77,23 @@ pub(super) enum Why {
 /// What the hub gave and this Machine could not write is the error, and the
 /// next exchange reads the hub from the same place.
 pub(super) fn exchange(store: &SqliteStore, repo: &str, why: Why) -> Result<()> {
+    exchange_with(store, repo, why, |hub, repository, until, run| {
+        let mut connection = open(store, repo, hub, repository, until)?;
+        run(&mut |operation| connection.request(operation).map(|answer| answer.result))
+    })
+}
+
+fn exchange_with(
+    store: &SqliteStore,
+    repo: &str,
+    why: Why,
+    connect: impl FnOnce(
+        &Machine,
+        &RepositoryId,
+        Option<Instant>,
+        &mut dyn FnMut(&mut dyn FnMut(ServerOperation) -> Result<serde_json::Value>) -> Result<()>,
+    ) -> Result<()>,
+) -> Result<()> {
     let Some(hub) = hub(store)? else {
         return Ok(());
     };
@@ -90,19 +107,18 @@ pub(super) fn exchange(store: &SqliteStore, repo: &str, why: Why) -> Result<()> 
     let _turn = super::plan_carriers::lock(store, "plan-hub", &repository, until)?;
     let held = store.select_carrier(repo, Carrier::Hub, hub.id.as_str())?;
     if matches!(why, Why::Save(_))
-        && held.seen_seq.is_some()
+        && held.has_read()
         && store.plan_unsent(repo, Carrier::Hub, 0)?.count == 0
     {
         return Ok(());
     }
-    let result = (|| {
-        let mut connection = open(store, repo, &hub, &repository, until)?;
-        send(store, &mut connection, repo, &repository, held.sent_seq)?;
+    let result = connect(&hub, &repository, until, &mut |call| {
+        send(store, call, repo, &repository, held.sent_seq)?;
         let mut since = held.seen_seq;
         let mut records = Vec::new();
         loop {
             let page: PlanChanges = request(
-                &mut connection,
+                call,
                 ServerOperation::PlanChanges {
                     repository: repository.clone(),
                     since,
@@ -121,7 +137,7 @@ pub(super) fn exchange(store: &SqliteStore, repo: &str, why: Why) -> Result<()> 
             &crate::store::ownership::machine_names(store)?,
         )?;
         NotTaken::of(&skipped).map_or(Ok(()), |not_taken| Err(not_taken.into()))
-    })();
+    });
     let error = super::plan_carriers::carrier_error(&result);
     store.record_carrier_exchange(repo, Carrier::Hub, error.as_deref())?;
     result
@@ -150,11 +166,10 @@ fn open(
 }
 
 fn request<T: serde::de::DeserializeOwned>(
-    connection: &mut Connection,
+    call: &mut dyn FnMut(ServerOperation) -> Result<serde_json::Value>,
     operation: ServerOperation,
 ) -> Result<T> {
-    let answer = connection.request(operation)?;
-    Ok(serde_json::from_value(answer.result)?)
+    Ok(serde_json::from_value(call(operation)?)?)
 }
 
 /// Every record changed here past `sent_seq`, a page a request. The cursor
@@ -164,7 +179,7 @@ fn request<T: serde::de::DeserializeOwned>(
 /// pages still go, and all of them go again at the next exchange.
 fn send(
     store: &SqliteStore,
-    connection: &mut Connection,
+    call: &mut dyn FnMut(ServerOperation) -> Result<serde_json::Value>,
     repo: &str,
     repository: &RepositoryId,
     mut sent_seq: i64,
@@ -174,7 +189,7 @@ fn send(
         let page = store.plan_records_since(repo, sent_seq, BUDGET)?;
         if !page.records.is_empty() {
             let applied: PlanApplied = request(
-                connection,
+                call,
                 ServerOperation::PlanApply {
                     repository: repository.clone(),
                     records: page.records,
@@ -233,4 +248,147 @@ fn checkout(store: &SqliteStore, repository: &RepositoryId) -> Result<String> {
         .ok_or_else(|| {
             anyhow!("the hub has no checkout of repository {repository}; clone it there and run `lf config repo --bind {repository}` in it, or when the hub already holds this plan, run `lf config repo --bind <id>` here with the id `lf config repo` prints in the hub's checkout")
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apply_here, changes_here, exchange_with, set_hub, Why};
+    use crate::machine::wire::ServerOperation;
+    use crate::ops::plan_carriers::first_read_with;
+    use loopflow_storage::sqlite::plan_carriers::Carrier;
+    use loopflow_storage::work::task::NewTask;
+    use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    fn git(dir: &Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_hub_only_clone_reads_the_hub_on_its_first_list() {
+        let root = tempfile::tempdir().unwrap();
+        let hub_repo_dir = root.path().join("hub-repo");
+        let clone_repo_dir = root.path().join("clone-repo");
+        std::fs::create_dir_all(&hub_repo_dir).unwrap();
+        std::fs::create_dir_all(&clone_repo_dir).unwrap();
+        git(&hub_repo_dir, &["init", "-q"]);
+        git(&clone_repo_dir, &["init", "-q"]);
+        let hub_repo = hub_repo_dir
+            .canonicalize()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let clone_repo = clone_repo_dir
+            .canonicalize()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+
+        let hub_store =
+            crate::store::opening::open_ephemeral(&root.path().join("hub/loopflow.db")).unwrap();
+        let clone_store =
+            crate::store::opening::open_ephemeral(&root.path().join("clone/loopflow.db")).unwrap();
+
+        let hub_repo_id =
+            crate::repository::location::ensure_repository(&hub_store, &hub_repo).unwrap();
+        let project =
+            crate::test_support::seed_wave_project(&hub_store, &hub_repo, "plan").unwrap();
+        hub_store
+            .create_task(&NewTask {
+                parent_task_id: None,
+                repository_id: hub_repo_id.clone(),
+                id: loopflow_model::durable::TaskId::new(),
+                project_id: Some(project.id),
+                title: "from hub".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+
+        // Point the clone at the hub and bind it to the hub's repository id (no Git remote).
+        let hub_machine = crate::store::machines::local_machine(&hub_store).unwrap();
+        crate::store::machines::add_machine(&clone_store, &hub_machine.id, "hub", "hub").unwrap();
+        set_hub(&clone_store, Some(&hub_machine.id)).unwrap();
+        let registration = clone_store.repository_registration(&clone_repo).unwrap();
+        assert!(clone_store
+            .register_repository(&clone_repo, &registration, &hub_repo_id, true)
+            .unwrap());
+
+        let hub_calls = Arc::new(AtomicUsize::new(0));
+        let run = |now: i64| {
+            let clone_store = &clone_store;
+            let hub_store = &hub_store;
+            let clone_repo = clone_repo.as_str();
+            let hub_calls = Arc::clone(&hub_calls);
+            let until = Instant::now() + Duration::from_secs(60);
+            async move {
+                first_read_with(
+                    clone_store,
+                    clone_repo,
+                    until,
+                    now,
+                    |_, _, _| async { panic!("hub-only clone must not run Git") },
+                    |store, repo, until| {
+                        hub_calls.fetch_add(1, Ordering::SeqCst);
+                        let res =
+                            exchange_with(store, repo, Why::Read(until), |_, _, _, run_rpc| {
+                                run_rpc(&mut |operation| match operation {
+                                    ServerOperation::PlanApply {
+                                        repository,
+                                        records,
+                                    } => Ok(serde_json::to_value(apply_here(
+                                        hub_store,
+                                        &repository,
+                                        &records,
+                                    )?)?),
+                                    ServerOperation::PlanChanges { repository, since } => {
+                                        Ok(serde_json::to_value(changes_here(
+                                            hub_store,
+                                            &repository,
+                                            since,
+                                        )?)?)
+                                    }
+                                    other => panic!("unexpected hub op: {other:?}"),
+                                })
+                            });
+                        async move { res }
+                    },
+                )
+                .await
+            }
+        };
+
+        assert!(run(1_000).await.unwrap());
+        assert_eq!(hub_calls.load(Ordering::SeqCst), 1);
+        let listed: Vec<String> = clone_store
+            .open_tasks_matching(&hub_repo_id, "", None, None)
+            .unwrap()
+            .into_iter()
+            .map(|task| task.title)
+            .collect();
+        assert_eq!(listed, ["from hub"]);
+        assert!(clone_store
+            .plan_carrier(&clone_repo, Carrier::Hub)
+            .unwrap()
+            .unwrap()
+            .has_read());
+
+        // A second read skips the hub.
+        assert!(!run(1_001).await.unwrap());
+        assert_eq!(hub_calls.load(Ordering::SeqCst), 1);
+    }
 }

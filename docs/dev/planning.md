@@ -296,8 +296,8 @@ stays unread and `plan-first-read:<repo>` in `planning_scope_checks` skips
 retries for 60 s so offline reads do not stall every time. A served read of an
 unread clone answers from the store once and exchanges after its reply. Task
 creation reads nothing first: the send after its save takes in what changed at
-the hub. A provider exit reads the hub only; `lf repo tracker --subscribe` reads
-the store alone. Every exchange a command waits on without asking for it (a
+the hub. A provider exit reads the hub only; `--subscribe` commands read the
+store alone. Every exchange a command waits on without asking for it (a
 save, a claim, a first read, a read of the hub) is stopped at five seconds: Git
 is killed and the hub's answer is waited for until then, and the next exchange
 carries the rest. `lf task sync` waits as long as the carriers take.

@@ -13,7 +13,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, bail, Result};
 
 use loopflow_model::durable::{RepositoryId, TaskId};
-use loopflow_storage::sqlite::plan_carriers::NotTaken;
+use loopflow_storage::sqlite::plan_carriers::{Carrier, NotTaken};
 use loopflow_storage::sqlite::planning_scope_checks::ScopeCheck;
 use loopflow_storage::sqlite::SqliteStore;
 
@@ -223,24 +223,161 @@ pub(super) fn carrier_error(result: &Result<()>) -> Option<String> {
         .map(|error| format!("{error:#}"))
 }
 
-/// A clone this Machine has not met reads its remote's plan when first
-/// asked what the plan is (`lf task list`, `lf repo tracker`), before the
-/// command opens the store it reads. See [`super::plan_git::first_exchange`].
+/// How long an offline first read waits before trying again on a later read.
+const FIRST_READ_COOLDOWN_SECS: i64 = 60;
+
+/// A clone that has not read its carriers' plan reads it when first asked what
+/// the plan is (`lf task list`, `lf repo tracker`, `lf plan list`,
+/// `lf plan board`, `lf wave list`, `lf wave show`, `lf wave status`,
+/// `lf wave plan`), before the command opens the store it reads.
 pub async fn before_first_read(directory: &Path) {
     let Ok(Some((store, repo))) = carried(directory) else {
         return;
     };
     let until = Instant::now() + WAIT;
-    let exchanged = {
-        let repo = repo.clone();
-        crate::journal::request::spawn_blocking(move || {
-            super::plan_git::first_exchange(&store, &repo, until).map(drop)
-        })
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let exchanged = first_read_at(&store, &repo, until, now).await;
+    went_on(&repo, exchanged.map(drop));
+}
+
+pub(super) async fn first_read_at(
+    store: &SqliteStore,
+    repo: &str,
+    until: Instant,
+    now: i64,
+) -> Result<bool> {
+    first_read_with(
+        store,
+        repo,
+        until,
+        now,
+        |store, repo, until| {
+            let (store, repo) = (store.clone(), repo.to_owned());
+            async move {
+                crate::journal::request::spawn_blocking(move || {
+                    super::plan_git::exchange(&store, &repo, Some(until))
+                })
+                .await?
+            }
+        },
+        |store, repo, until| {
+            let (store, repo) = (store.clone(), repo.to_owned());
+            async move {
+                crate::journal::request::spawn_blocking(move || {
+                    super::plan_hub::exchange(&store, &repo, Why::Read(until))
+                })
+                .await?
+            }
+        },
+    )
+    .await
+}
+
+pub(super) async fn first_read_with<FG, FH>(
+    store: &SqliteStore,
+    repo: &str,
+    until: Instant,
+    now: i64,
+    run_git: impl FnOnce(&SqliteStore, &str, Instant) -> FG,
+    run_hub: impl FnOnce(&SqliteStore, &str, Instant) -> FH,
+) -> Result<bool>
+where
+    FG: std::future::Future<Output = Result<()>>,
+    FH: std::future::Future<Output = Result<()>>,
+{
+    let remote = super::plan_git::remote(Path::new(repo));
+    let git_row = match &remote {
+        Some(_) => store.plan_carrier(repo, Carrier::Git)?,
+        None => None,
     };
-    went_on(
-        &repo,
-        exchanged.await.unwrap_or_else(|error| Err(error.into())),
-    );
+    let git_needed = remote.as_deref().is_some_and(|peer| {
+        !git_row
+            .as_ref()
+            .is_some_and(|held| held.peer == peer && held.has_read())
+    });
+
+    let hub = match super::plan_hub::hub(store) {
+        Ok(hub) => hub,
+        Err(error) => {
+            tracing::debug!(%repo, error = %format!("{error:#}"), "first read hub lookup failed");
+            None
+        }
+    };
+    let (hub_row, hub_needed) = match &hub {
+        Some(hub) if store.repository_id(repo)?.is_some() => {
+            let row = store.plan_carrier(repo, Carrier::Hub)?;
+            let needed = !row
+                .as_ref()
+                .is_some_and(|held| held.peer == hub.id.as_str() && held.has_read());
+            (row, needed)
+        }
+        _ => (None, false),
+    };
+
+    if !git_needed && !hub_needed {
+        return Ok(false);
+    }
+
+    let git_errored = git_needed
+        && remote.as_deref().is_some_and(|peer| {
+            git_row
+                .as_ref()
+                .is_some_and(|held| held.peer == peer && held.error.is_some())
+        });
+    let hub_errored = hub_needed
+        && hub.as_ref().is_some_and(|hub| {
+            hub_row
+                .as_ref()
+                .is_some_and(|held| held.peer == hub.id.as_str() && held.error.is_some())
+        });
+
+    let scope = format!("plan-first-read:{repo}");
+    let mut stamped = false;
+    let mut do_git = git_needed;
+    let mut do_hub = hub_needed;
+    if git_errored || hub_errored {
+        match store.begin_scope_check(&scope, now, FIRST_READ_COOLDOWN_SECS)? {
+            ScopeCheck::Recent { .. } => {
+                if git_errored {
+                    do_git = false;
+                }
+                if hub_errored {
+                    do_hub = false;
+                }
+            }
+            ScopeCheck::Started { .. } => {
+                stamped = true;
+            }
+        }
+    }
+
+    if !do_git && !do_hub {
+        return Ok(false);
+    }
+
+    let git = async {
+        if do_git {
+            run_git(store, repo, until).await
+        } else {
+            Ok(())
+        }
+    };
+    let hub = async {
+        if do_hub {
+            run_hub(store, repo, until).await
+        } else {
+            Ok(())
+        }
+    };
+    let (git, hub) = tokio::join!(git, hub);
+    let failed = carrier_error(&git).is_some() || carrier_error(&hub).is_some();
+    if failed && !stamped {
+        let _ = store.begin_scope_check(&scope, now, 0);
+    }
+    git.and(hub).map(|()| true)
 }
 
 /// The store and repository of `directory`, when this Machine has a store

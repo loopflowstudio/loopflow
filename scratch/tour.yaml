@@ -1,4 +1,4 @@
-at: ff7ae3bc65c692f1bdc592af8eb80cf20c0b06b9
+at: a6c19a6ef399848a08e6837f1f3282db8d5cb8bf
 first:
   - path: docs/surfaces.md
     why: Review page UX across browser, Desktop, headless, and offline
@@ -17,9 +17,9 @@ first:
   - path: rust/loopflow/src/lf/commands/page/
     why: Fragment compiler split into build, components, diff, operations, html
   - path: rust/loopflow-definitions/src/builtins/page/runtime.js
-    why: Highlight notes, choices, receipts, loopback WS, Desktop bridge
+    why: Floating pill, gutter ranges, sidebar, dock, loopback WS, Desktop bridge
   - path: rust/loopflow-definitions/src/builtins/page/base.css
-    why: Page layout, code blocks, and guarded data-label prompts
+    why: Page layout, code rows, floating note UI, dock, guarded prompts
   - path: swift/LoopflowMac/Views/TaskHTMLView.swift
     why: Desktop TaskHTMLBridge wired only in TaskFileReadingView
   - path: swift/LoopflowMac/ReviewDiff.swift

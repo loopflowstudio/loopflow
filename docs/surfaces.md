@@ -65,7 +65,7 @@ lf page open scratch/ship-review.html --host browser   # force browser (or --hos
 
 | Where you work | `lf page open` does | `⌘↩` sends |
 |---|---|---|
-| Browser beside Rex or any terminal | Opens `http://127.0.0.1:<port>/<token>/f/<path>` and prints it | `task.steer` (Task pages) or `session.steer` (Wave, standalone Session, repo) through `lf server`; the strip prints the server's delivery line |
+| Browser beside Rex or any terminal | Opens `http://127.0.0.1:<port>/<token>/f/<path>` and prints it | `task.steer` (Task pages) or `session.steer` (Wave, standalone Session, repo) through `lf server`; the dock prints the server's delivery line |
 | Loopflow Desktop | Opens the page in **Files** quietly (`lf desktop files`) | Notes, choices, and answers join **Diff** line comments in Desktop's shared comments strip and insert into the conversation input |
 | Headless Graph step (`lf -b` / auto) | Prints the local URL and exits without popping a browser window | Desktop's `scratch/` watcher shows a quiet **Updated** notice if the Task is open; open the URL or file when ready |
 | Offline (`file://` or stopped server) | Double-click the file | Copies the same one-line message to the clipboard |
@@ -101,7 +101,7 @@ On the page:
   example, **File Task now**) is separate from the reply queue. Clicking it
   opens an inline confirmation showing the operation kind and fields, runs the
   operation immediately, and replaces the button with an in-place receipt
-  (`Filed LOO-1200`). It never opens the reply strip or Desktop's comments
+  (`Filed LOO-1200`). It never enters the browser dock or Desktop's comments
   strip; if you also send queued notes with `⌘↩`, a short
   `[already ran: task.create → LOO-1200]` suffix rides along so the agent does
   not repeat it. Offline, clicking the button adds `Run: …` to the reply for
@@ -114,7 +114,7 @@ banner (`Loopflow server disconnected — run lf page open <path>`) and `⌘↩`
 falls back to copying. Browser loopback serves checkouts
 on this Machine; for peer-owned Tasks, open the page in Desktop. Hand-written
 `scratch/*.html` files without the page kit keep opening as plain pages with no
-strip. Passing a raw `*.page.html` source to `lf page open` exits with the
+dock. Passing a raw `*.page.html` source to `lf page open` exits with the
 `lf page build` command instead of serving uncompiled tags.
 
 To author or customize review pages and components, see

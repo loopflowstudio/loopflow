@@ -220,7 +220,7 @@ fn parse_unified_diff(patch: &str) -> ParsedDiff {
     ParsedDiff { hunks }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 enum NoteTarget {
     NewLine(usize),
     OldLine(usize),
@@ -340,20 +340,16 @@ fn render_diff_block(
                 "<tr class=\"{cls} lf-code-row\"{row_attrs}><td class=\"lf-ln lf-ln-old\">{old_str}</td><td class=\"lf-ln lf-ln-new\">{new_str}</td><td class=\"lf-sign\">{sign}</td><td>{}</td></tr>",
                 escape_html(&dl.text)
             );
-            for (idx, note) in notes.iter().enumerate() {
-                let attaches = match note.target {
+            emit_matching_notes(
+                &mut rows,
+                notes,
+                &mut matched_notes,
+                4,
+                |target| match target {
                     NoteTarget::NewLine(n) => dl.new_line == Some(n),
                     NoteTarget::OldLine(o) => dl.old_line == Some(o),
-                };
-                if attaches {
-                    matched_notes.insert(idx);
-                    let _ = writeln!(
-                        rows,
-                        "<tr class=\"lf-line-note\" data-notes><td colspan=\"4\">{}</td></tr>",
-                        note.html
-                    );
-                }
-            }
+                },
+            );
         }
     }
 
@@ -421,16 +417,13 @@ fn render_file_block(
             "<tr class=\"lf-code-row\" data-line=\"{line_no}\"><td class=\"lf-ln lf-ln-single\">{line_no}</td><td>{}</td></tr>",
             escape_html(text)
         );
-        for (idx, note) in notes.iter().enumerate() {
-            if matches!(note.target, NoteTarget::NewLine(n) if n == line_no) {
-                matched_notes.insert(idx);
-                let _ = writeln!(
-                    rows,
-                    "<tr class=\"lf-line-note\" data-notes><td colspan=\"2\">{}</td></tr>",
-                    note.html
-                );
-            }
-        }
+        emit_matching_notes(
+            &mut rows,
+            notes,
+            &mut matched_notes,
+            2,
+            |target| matches!(target, NoteTarget::NewLine(n) if n == line_no),
+        );
     }
 
     for (idx, note) in notes.iter().enumerate() {
@@ -446,6 +439,25 @@ fn render_file_block(
     }
 
     Ok(wrap_codeblock(path, range, !notes.is_empty(), &rows))
+}
+
+fn emit_matching_notes(
+    rows: &mut String,
+    notes: &[LineNote],
+    matched: &mut BTreeSet<usize>,
+    colspan: usize,
+    mut matches: impl FnMut(NoteTarget) -> bool,
+) {
+    for (idx, note) in notes.iter().enumerate() {
+        if matches(note.target) {
+            matched.insert(idx);
+            let _ = writeln!(
+                rows,
+                "<tr class=\"lf-line-note\" data-notes><td colspan=\"{colspan}\">{}</td></tr>",
+                note.html
+            );
+        }
+    }
 }
 
 fn wrap_codeblock(

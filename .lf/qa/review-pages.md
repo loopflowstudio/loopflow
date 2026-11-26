@@ -31,7 +31,7 @@ Read what `⌘↩` delivered from the store, read-only:
 checks are plain `curl` with WebSocket upgrade headers: no `Origin`, a foreign
 `Origin`, a wrong `Host` or token each give 404; the right three give 101.
 Stopping the server by PID under an open page shows the restart banner and
-flips the strip to `Copy reply`. Stop the server before rebuilding `lf` (the
+flips the dock to `Copy reply`. Stop the server before rebuilding `lf` (the
 build replaces the binary it runs), then restart it: the token changes, the
 port stays (derived from the socket path), so `localStorage` drafts and
 receipts survive into the reopened URL. Clear `localStorage` from the page

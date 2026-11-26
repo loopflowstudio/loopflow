@@ -92,7 +92,7 @@ th {
   font-size: 12.5px;
 }
 
-/* Meta bar */
+/* Meta bar & server status banner */
 .lf-meta {
   display: flex;
   flex-wrap: wrap;
@@ -102,11 +102,8 @@ th {
   margin-bottom: 24px;
 }
 
-.lf-meta code {
-  font-size: 12px;
-}
+.lf-meta code { font-size: 12px; }
 
-/* Banner (server restart / host warnings) */
 .lf-banner {
   background: var(--lf-warning-fill);
   color: var(--lf-warning-ink);
@@ -145,9 +142,7 @@ th {
   white-space: nowrap;
 }
 
-.lf-codeblock-scroll {
-  overflow-x: auto;
-}
+.lf-codeblock-scroll { overflow-x: auto; }
 
 .lf-code-table {
   width: 100%;
@@ -175,9 +170,7 @@ th {
   position: relative;
 }
 
-.lf-code-table tr.lf-code-row td.lf-ln {
-  cursor: pointer;
-}
+.lf-code-table tr.lf-code-row td.lf-ln { cursor: pointer; }
 
 .lf-code-table tr.lf-code-row td.lf-ln-old,
 .lf-code-table tr.lf-code-row td.lf-ln-single {
@@ -214,17 +207,13 @@ th {
   opacity: 1;
 }
 
-.lf-code-table tr.lf-code-row.lf-row-has-note td {
-  background: var(--lf-highlight);
-}
+.lf-code-table tr.lf-code-row.lf-row-has-note td { background: var(--lf-highlight); }
 
 .lf-code-table tr.lf-code-row.lf-row-has-note td.lf-ln:first-child {
   box-shadow: inset 3px 0 0 var(--lf-accent);
 }
 
-.lf-code-table tr.lf-code-row.lf-row-selecting td {
-  background: var(--lf-working-fill);
-}
+.lf-code-table tr.lf-code-row.lf-row-selecting td { background: var(--lf-working-fill); }
 
 .lf-code-table td.lf-sign {
   width: 18px;
@@ -254,9 +243,7 @@ th {
   border-bottom: 1px solid var(--lf-border);
 }
 
-.lf-codeblock.lf-notes-hidden tr.lf-line-note {
-  display: none;
-}
+.lf-codeblock.lf-notes-hidden tr.lf-line-note { display: none; }
 
 /* Builtin components */
 .lf-decision {
@@ -317,9 +304,7 @@ th {
 
 /* Draw `data-label` as a heading only when the control has no selectable prompt child;
    a decision card shows its title instead. */
-[data-choice][data-label]:not(:has(> p, > label, > h3, > h4, > legend))::before,
-[data-multiselect][data-label]:not(:has(> p, > label, > h3, > h4, > legend))::before,
-[data-question][data-label]:not(:has(> p, > label, > h3, > h4, > legend))::before {
+:is([data-choice], [data-multiselect], [data-question])[data-label]:not(:has(> p, > label, > h3, > h4, > legend))::before {
   content: attr(data-label);
   display: block;
   flex-basis: 100%;
@@ -332,9 +317,7 @@ th {
   margin: 10px 0 2px;
 }
 
-.lf-decision [data-choice][data-label]::before {
-  content: none;
-}
+.lf-decision [data-choice][data-label]::before { content: none; }
 
 button {
   appearance: none;
@@ -349,16 +332,10 @@ button {
   cursor: pointer;
 }
 
-button:hover {
-  background: var(--lf-surface-muted);
-}
+button:hover { background: var(--lf-surface-muted); }
 
-button.is-selected, button[aria-pressed="true"] {
-  background: var(--lf-accent);
-  border-color: var(--lf-accent);
-  color: var(--lf-accent-text);
-}
-
+button.is-selected,
+button[aria-pressed="true"],
 button.lf-btn-accent {
   background: var(--lf-accent);
   border-color: var(--lf-accent);
@@ -384,9 +361,7 @@ button.lf-btn-quiet[aria-pressed="true"] {
   color: var(--lf-accent-text);
 }
 
-[data-question] {
-  margin: 14px 0;
-}
+[data-question] { margin: 14px 0; }
 
 [data-question] textarea, [data-question] input[type="text"] {
   width: 100%;
@@ -402,16 +377,26 @@ button.lf-btn-quiet[aria-pressed="true"] {
 }
 
 /* Direct action confirmation & receipt */
-.lf-action-confirm {
+.lf-action-confirm,
+.lf-action-receipt,
+.lf-action-error {
   display: inline-flex;
-  flex-wrap: wrap;
   align-items: center;
+  font-size: 13px;
+  border-radius: 4px;
+}
+
+.lf-action-confirm,
+.lf-action-error {
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.lf-action-confirm {
   padding: 6px 10px;
   border: 1px solid var(--lf-border-strong);
   border-radius: 6px;
   background: var(--lf-surface-muted);
-  font-size: 13px;
 }
 
 .lf-action-summary {
@@ -421,27 +406,17 @@ button.lf-btn-quiet[aria-pressed="true"] {
 }
 
 .lf-action-receipt {
-  display: inline-flex;
-  align-items: center;
   gap: 6px;
   padding: 5px 10px;
-  border-radius: 4px;
   background: var(--lf-success-fill);
   color: var(--lf-success-ink);
-  font-size: 13px;
   font-weight: 600;
 }
 
 .lf-action-error {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
   padding: 5px 10px;
-  border-radius: 4px;
   background: var(--lf-failure-fill);
   color: var(--lf-failure-ink);
-  font-size: 13px;
 }
 
 /* Warm-underlined cross-element note highlights */
@@ -453,10 +428,7 @@ button.lf-btn-quiet[aria-pressed="true"] {
   transition: background 0.12s ease;
 }
 
-.lf-hl:hover,
-.lf-hl.is-active {
-  background: var(--lf-highlight-active, var(--lf-highlight));
-}
+.lf-hl:hover { background: var(--lf-highlight-active, var(--lf-highlight)); }
 
 .lf-pulse-ring {
   outline: 2px solid var(--lf-accent);
@@ -490,9 +462,7 @@ button.lf-btn-quiet[aria-pressed="true"] {
   font-weight: 500;
 }
 
-.lf-float-pill button:hover {
-  background: rgba(128, 128, 128, 0.24);
-}
+.lf-float-pill button:hover { background: rgba(128, 128, 128, 0.24); }
 
 .lf-float-pill-sep {
   width: 1px;
@@ -500,13 +470,10 @@ button.lf-btn-quiet[aria-pressed="true"] {
   background: rgba(128, 128, 128, 0.35);
 }
 
-/* Floating comment composer (prose selection, diff gutter, or edit) */
-.lf-float-composer {
+/* Floating comment composer & hover cards */
+.lf-float-composer,
+.lf-hover-card {
   position: fixed;
-  z-index: 970;
-  width: min(320px, calc(100vw - 16px));
-  padding: 10px;
-  border-radius: 9px;
   background: var(--lf-surface);
   border: 1px solid var(--lf-border-strong);
   box-shadow: var(--lf-shadow, 0 8px 26px rgba(0, 0, 0, 0.18));
@@ -514,6 +481,20 @@ button.lf-btn-quiet[aria-pressed="true"] {
   display: flex;
   flex-direction: column;
   gap: 7px;
+}
+
+.lf-float-composer {
+  z-index: 970;
+  width: min(320px, calc(100vw - 16px));
+  padding: 10px;
+  border-radius: 9px;
+}
+
+.lf-hover-card {
+  z-index: 950;
+  width: min(290px, calc(100vw - 16px));
+  padding: 10px 12px;
+  border-radius: 8px;
 }
 
 .lf-anchor-quote {
@@ -526,9 +507,22 @@ button.lf-btn-quiet[aria-pressed="true"] {
   text-overflow: ellipsis;
 }
 
-.lf-float-composer textarea {
+.lf-card-body {
+  color: var(--lf-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lf-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.lf-float-composer textarea,
+.lf-sidebar-item textarea {
   width: 100%;
-  min-height: 58px;
+  min-height: 56px;
   padding: 6px 8px;
   border: 1px solid var(--lf-border-strong);
   border-radius: 5px;
@@ -539,39 +533,7 @@ button.lf-btn-quiet[aria-pressed="true"] {
   resize: vertical;
 }
 
-.lf-float-composer-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
-/* Hover card for saved highlights and line notes */
-.lf-hover-card {
-  position: fixed;
-  z-index: 950;
-  width: min(290px, calc(100vw - 16px));
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--lf-border-strong);
-  background: var(--lf-surface);
-  box-shadow: var(--lf-shadow, 0 8px 26px rgba(0, 0, 0, 0.18));
-  font-size: 13px;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-
-.lf-hover-card-body {
-  color: var(--lf-text);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.lf-hover-card-foot {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-}
+.lf-sidebar-item textarea { background: var(--lf-surface); }
 
 /* Top-right Comments toggle + collapsible slide-over sidebar */
 .lf-comments-toggle {
@@ -592,9 +554,7 @@ button.lf-btn-quiet[aria-pressed="true"] {
   box-shadow: var(--lf-shadow-sm, 0 3px 12px rgba(0, 0, 0, 0.08));
 }
 
-.lf-comments-toggle.has-notes {
-  border-color: var(--lf-accent);
-}
+.lf-comments-toggle.has-notes { border-color: var(--lf-accent); }
 
 .lf-comments-count {
   display: inline-flex;
@@ -609,6 +569,8 @@ button.lf-btn-quiet[aria-pressed="true"] {
   font-size: 11px;
   font-weight: 600;
 }
+
+.lf-comments-count[hidden] { display: none; }
 
 .lf-sidebar {
   position: fixed;
@@ -626,9 +588,7 @@ button.lf-btn-quiet[aria-pressed="true"] {
   transition: transform 0.18s ease;
 }
 
-.lf-sidebar.is-open {
-  transform: translateX(0);
-}
+.lf-sidebar.is-open { transform: translateX(0); }
 
 .lf-sidebar-head {
   display: flex;
@@ -668,34 +628,7 @@ button.lf-btn-quiet[aria-pressed="true"] {
   gap: 6px;
 }
 
-.lf-sidebar-item:hover {
-  border-color: var(--lf-accent);
-}
-
-.lf-sidebar-item-text {
-  color: var(--lf-text);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.lf-sidebar-item textarea {
-  width: 100%;
-  min-height: 54px;
-  padding: 6px 8px;
-  border: 1px solid var(--lf-border-strong);
-  border-radius: 5px;
-  background: var(--lf-surface);
-  color: var(--lf-text);
-  font-family: var(--lf-font-sans);
-  font-size: 13px;
-  resize: vertical;
-}
-
-.lf-sidebar-item-foot {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-}
+.lf-sidebar-item:hover { border-color: var(--lf-accent); }
 
 /* Fixed T3 Code-style attached-chip composer dock (hidden in Loopflow Desktop) */
 .lf-dock {
@@ -716,8 +649,6 @@ button.lf-btn-quiet[aria-pressed="true"] {
   gap: 8px;
 }
 
-.lf-dock[hidden] { display: none; }
-
 .lf-dock-chips {
   display: flex;
   flex-wrap: wrap;
@@ -727,6 +658,7 @@ button.lf-btn-quiet[aria-pressed="true"] {
   overflow-y: auto;
 }
 
+.lf-dock[hidden],
 .lf-dock-chips[hidden] { display: none; }
 
 .lf-chip {
@@ -742,9 +674,7 @@ button.lf-btn-quiet[aria-pressed="true"] {
   cursor: pointer;
 }
 
-.lf-chip:hover {
-  border-color: var(--lf-accent);
-}
+.lf-chip:hover { border-color: var(--lf-accent); }
 
 .lf-chip-tag {
   font-size: 10px;
@@ -829,8 +759,6 @@ button.lf-btn-quiet[aria-pressed="true"] {
   overflow-y: auto;
 }
 
-.lf-dock-preview[hidden] { display: none; }
-
 .lf-dock-status {
   font-size: 12.5px;
   color: var(--lf-text-secondary);
@@ -839,6 +767,5 @@ button.lf-btn-quiet[aria-pressed="true"] {
   white-space: nowrap;
 }
 
-.lf-dock-status[hidden] { display: none; }
 .lf-dock-status.is-error { color: var(--lf-failure-ink); }
 .lf-dock-status.is-ok { color: var(--lf-success-ink); }

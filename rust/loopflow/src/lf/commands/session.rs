@@ -932,8 +932,10 @@ async fn select(
     request_id: Option<&str>,
     launch: bool,
 ) -> anyhow::Result<String> {
+    // Preparing or resuming a conversation for an opening caller holds the
+    // server's recovery pass off while the caller's own launch comes up.
     let selected =
-        loopflow_execution::ops::human_session::select_connection(store, directory, target, launch)
+        loopflow_execution::ops::human_session::select_connection(store, directory, target, true)
             .await?;
     if selected.started {
         loopflow_execution::journal::request::diagnostic(format_args!(
@@ -1077,7 +1079,7 @@ async fn restarted(
     agent: Option<&str>,
 ) -> anyhow::Result<Opening> {
     let selected =
-        loopflow_execution::ops::human_session::select_connection(store, directory, target, launch)
+        loopflow_execution::ops::human_session::select_connection(store, directory, target, true)
             .await?;
     let request_id = request_id
         .map(str::to_owned)
@@ -1273,4 +1275,95 @@ pub(super) fn mutate(
             _ => unreachable!("is_mutation selects Session mutations"),
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+    use loopflow_execution::ops::recovery::due_task_conversations;
+    use loopflow_execution::store::{open_store, storage_config_from_env};
+
+    #[test]
+    fn prepared_task_resume_holds_recovery_off() {
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir_in("/tmp").unwrap();
+        let saved = std::env::var_os("LF_HOME");
+        std::env::set_var("LF_HOME", home.path());
+        struct Restore(Option<std::ffi::OsString>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                match self.0.take() {
+                    Some(value) => std::env::set_var("LF_HOME", value),
+                    None => std::env::remove_var("LF_HOME"),
+                }
+            }
+        }
+        let _restore = Restore(saved);
+
+        let repo = loopflow_test_support::TestRepo::new();
+        let checkout = repo.path().canonicalize().unwrap();
+        let store =
+            loopflow_execution::runtime::block_on(open_store(&storage_config_from_env().unwrap()))
+                .unwrap();
+        let repository_id = loopflow_execution::repository::location::ensure_repository(
+            &store.sqlite,
+            &checkout.to_string_lossy(),
+        )
+        .unwrap();
+        let task = loopflow_model::durable::TaskId::new();
+        store
+            .sqlite
+            .create_task(&loopflow_storage::work::task::NewTask {
+                parent_task_id: None,
+                repository_id,
+                id: task.clone(),
+                project_id: None,
+                title: "Prepared remotely".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        loopflow_execution::store::ownership::claim_task(&store.sqlite, &task)
+            .unwrap()
+            .unwrap();
+        store
+            .sqlite
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+                rusqlite::params![task.as_str(), checkout.to_str().unwrap()],
+            )
+            .unwrap();
+
+        let cli = crate::lf::Cli::try_parse_from([
+            "lf",
+            "--agent",
+            "claude",
+            "session",
+            "resume",
+            "--task",
+            task.as_str(),
+            "--prepare",
+            "--json",
+        ])
+        .unwrap();
+        let prepared = super::prepared(&cli, &checkout).unwrap();
+
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let due = due_task_conversations(&store.sqlite, now).unwrap();
+        assert!(
+            due.now.is_empty(),
+            "preparing a Task resume for an opening caller must hold recovery off: {due:?}"
+        );
+        let later = due_task_conversations(&store.sqlite, now + 60).unwrap();
+        assert!(
+            later
+                .now
+                .iter()
+                .any(|row| row.session.as_str() == prepared.id.as_str()),
+            "recovery still starts the prepared conversation after the initial backoff"
+        );
+    }
 }

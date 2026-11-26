@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-1113 Concept Review — Trackerless Plan First-Read (Post-Build)</title>
+<title>LOO-1113 Concept Review — Trackerless Plan First-Read (HEAD b9ab216a14)</title>
 <style>
   /* Loopflow Light (website/static/theme.css) */
   :root {
@@ -215,13 +215,6 @@
   .grid-2 {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-    gap: 1rem;
-    margin: 0.85rem 0 1.25rem;
-  }
-
-  .grid-3 {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
     gap: 1rem;
     margin: 0.85rem 0 1.25rem;
   }
@@ -460,33 +453,34 @@
     <div class="eyebrow">
       <span>LOO-1113</span>
       <span>·</span>
-      <span>Post-Build Concept Review</span>
+      <span>Concept Review</span>
       <span>·</span>
-      <span class="badge b-built">HEAD ba211424c3 vs main 6c2560bd0f</span>
+      <span class="badge b-built">HEAD b9ab216a14 vs main 6c2560bd0f</span>
     </div>
-    <h1>Trackerless Plan First-Read &amp; Dual-Carrier Gate</h1>
+    <h1>Trackerless Plan First-Read Across Every Entry Point</h1>
     <div class="area-box">
-      <strong>Area reviewed:</strong> How a repository without Linear or Asana decides whether it has read its shared plan, runs its initial carrier exchange, handles offline/hub failures, and wires that gate across CLI reads, subscriptions, and server reads (<code>sqlite::plan_carriers</code>, <code>ops::plan_carriers</code>, <code>ops::plan_git</code>, <code>ops::plan_hub</code>, <code>bin/lf.rs</code>, <code>commands/tracker.rs</code>, <code>server/service.rs</code>).
+      <strong>Area reviewed:</strong> How a repository without Linear or Asana decides whether a clone has read its shared plan, runs its initial carrier exchange (Git and Hub), handles offline failures, and delivers that arrival across every plan-reading and Task-lookup surface — CLI reads, single-Task reads, subscriptions, and served requests (<code>sqlite::plan_carriers</code>, <code>ops::plan_carriers</code>, <code>ops::plan_git</code>, <code>ops::plan_hub</code>, <code>ops::planning_sync</code>, <code>commands/{waves,screens,tracker,desktop}.rs</code>, <code>bin/lf.rs</code>, <code>server/service.rs</code>).
       <br>
-      <strong>Why this whole area:</strong> LOO-1113's implementation is committed at <code>ba211424c3</code>. Reviewing the built change against <code>origin/main</code> as a whole system shows that the core Git-only bug is cleanly fixed, while the new dual-carrier first-read gate introduced a real regression for any Machine with a Hub configured.
+      <strong>Why this whole area:</strong> Pass 2 (<code>b9ab216a14</code>) fixed the dual-carrier regression and moved <code>before_first_read</code> out of <code>lf.rs</code> into the read entry points. Probing all 13 plan and Task read commands live on a brand-new Machine against <code>HEAD</code> confirms the core clone-level gate works — and exposes two remaining mismatches (<code>lf wave show</code> silently returning empty on a brand-new Machine because <code>carried()</code> refuses when <code>loopflow.db</code> does not exist yet, and <code>lf task show &lt;id&gt;</code> still failing on unread clones beside <code>task status</code> and <code>task detail</code>), plus a 1-line cooldown bug when an offline Hub sits beside a healthy Git remote.
     </div>
 
     <div class="status-grid">
       <div class="status-box built">
-        <h4>Already Built &amp; Committed (<code>ba211424c3</code>)</h4>
+        <h4>Built &amp; Committed (<code>b9ab216a14</code>)</h4>
         <ul>
           <li><code>PlanCarrier::has_read()</code> and <code>SqliteStore::plan_read()</code> on <code>plan_carriers.seen_seq</code> (no migration, zero idle revision bump).</li>
-          <li><code>lf task create</code> → <code>lf task list</code> in a fresh Git clone now fetches remote Tasks on list #1 and skips fetching on list #2.</li>
-          <li>8 CLI plan-reading commands wired to <code>before_first_read</code>; all 5 <code>--subscribe</code> variants made store-only.</li>
-          <li>60 s offline retry cooldown in <code>planning_scope_checks</code>; <code>docs/work.md</code> and <code>docs/dev/planning.md</code> updated; unit + CLI tests added.</li>
+          <li>Clone-level gate in <code>first_read_with</code>: once <em>either</em> current carrier (Git or Hub) has read, all later reads stay local (0 ms). Fixes both the read-#2 Hub SSH failure and offline-Hub stalls.</li>
+          <li><code>before_first_read</code> moved out of <code>lf.rs</code> into the 6 non-subscribing CLI entry points in <code>waves.rs</code> and <code>tracker.rs</code>; served requests skip it via <code>!journal::request::active()</code>.</li>
+          <li><code>lf task detail &lt;id&gt;</code> now syncs on miss via <code>planning_sync::find_task</code>; all 5 CLI <code>--subscribe</code> streams are store-only; 60 s offline cooldown; docs and tests updated.</li>
         </ul>
       </div>
       <div class="status-box open">
         <h4>Still Broken or Unconfirmed in <code>HEAD</code></h4>
         <ul>
-          <li><strong>Bug (F1):</strong> On a Machine with a Hub configured, a fresh Git clone hits SSH to the Hub on the <em>second</em> <code>lf task list</code>, fails with an unknown local repo ID (or stalls 5 s every 60 s when the Hub is offline), and pollutes <code>lf repo tracker</code>.</li>
-          <li><strong>Scattered wiring (F2):</strong> 7 copy-pasted <code>before_first_read</code> calls in <code>lf.rs</code> (+1 in <code>tracker.rs</code>); <code>lf task detail</code> missed.</li>
-          <li><strong>Unconfirmed headless calls (Q2–Q4):</strong> <code>--subscribe</code> store-only behavior, 60 s cooldown, and keeping empty clones quiet on the server were chosen headless.</li>
+          <li><strong>Bug (F1 — verified live):</strong> On a brand-new Machine (no <code>loopflow.db</code> yet), <code>lf wave show</code> bypasses <code>admit_process()</code>, hits <code>if !path.exists()</code> in <code>carried()</code>, skips the fetch, and prints empty <code>waves: [], tasks: []</code> — contradicting <code>docs/work.md:331</code>.</li>
+          <li><strong>Gap (F2 — verified live):</strong> <code>lf task show &lt;id&gt;</code> still fails with <code>Task &lt;id&gt; is not registered</code> on an unread clone, right beside <code>lf task status</code> and <code>lf task detail</code> which both sync on miss.</li>
+          <li><strong>Edge case (F3):</strong> An offline Hub's leftover <code>error</code> trips the 60 s cooldown via <code>||</code> and blocks an online Git fetch even after a Git push cleared Git's own error.</li>
+          <li><strong>Unconfirmed headless calls (Q2–Q4):</strong> <code>--subscribe</code> store-only, 60 s offline cooldown, and quiet empty clones still await human confirmation.</li>
         </ul>
       </div>
     </div>
@@ -502,161 +496,132 @@
   </header>
 
   <!-- 1. CONCRETE WALKTHROUGHS -->
-  <h2>1. Concrete Walkthroughs on Built <code>HEAD</code></h2>
+  <h2>1. Concrete Walkthroughs on Current <code>HEAD</code> (<code>b9ab216a14</code>)</h2>
   <p>
-    Testing the committed code against the promises in <code>docs/work.md</code>: <em>"Later reads answer from this Machine's local store without fetching"</em> and <em>"Git keeps carrying every change, so a hub that is off costs only the speed."</em>
+    Tested live with <code>target/debug/lf</code> against a bare Git origin carrying Wave <code>alpha</code> and Task <code>FromA</code>, and traced through the dual-carrier and offline recovery paths.
   </p>
 
-  <h3>Path A — Git-only fresh clone: create first, then list, then list again</h3>
+  <h3>Path A — Core bug &amp; dual-carrier fix (Works in <code>HEAD</code>)</h3>
   <div class="grid-2">
     <div class="card built-ok">
       <div class="card-head">
-        <span class="card-title">Built in <code>HEAD</code> (Works)</span>
-        <span class="badge b-yes">Fixed</span>
+        <span class="card-title">Git-only fresh clone: create first, then list, then offline recovery</span>
+        <span class="badge b-yes">Verified in HEAD</span>
       </div>
-      <div class="term"><span class="t-muted"># Machine A already pushed "made on A"</span>
+      <div class="term"><span class="t-muted"># Machine A pushed Wave "alpha" + Task "FromA"</span>
 <span class="t-cmd">c$ git clone origin repo &amp;&amp; cd repo</span>
-<span class="t-cmd">c$ lf task create 'made on C'</span>
-made on C · 8f4a21c
+<span class="t-cmd">c$ lf task create 'FromC'</span>
+FromC · 8f4a21c
 <span class="t-cmd">c$ lf task list</span>
-<span class="t-ok">3e1c9a0 · — · made on A
-8f4a21c · — · made on C</span>
-<span class="t-cmd">c$ lf task list</span>   <span class="t-ok"># 0 ms, 0 git fetches</span></div>
+<span class="t-ok">4688d1 · — · FromA
+8f4a21c · — · FromC</span>
+<span class="t-cmd">c$ lf task list</span>         <span class="t-ok"># 0 ms, 0 git fetches</span>
+
+<span class="t-muted"># Offline: fetch stalls ≤5 s, stamps 60 s cooldown</span>
+<span class="t-cmd">d$ lf task list</span>         <span class="t-warn"># fails, prints []</span>
+<span class="t-cmd">d$ lf task list</span>         <span class="t-ok"># 1 ms (skipped inside 60 s)</span>
+<span class="t-muted"># Back online: save clears git.error → next list fetches immediately</span></div>
       <div class="db-strip">
-        <strong>After create:</strong> <code>plan_carriers(git)</code> has <code>sent_seq=1, seen_seq=NULL</code><br>
+        <strong>After create:</strong> <code>plan_carriers(git)</code> = <code>sent_seq=1, seen_seq=NULL</code><br>
         <strong>After list #1:</strong> <code>exchange_with</code> fetches, sets <code>seen_seq=0</code> before <code>publish</code><br>
-        <strong>On list #2:</strong> <code>has_read() == true</code> → returns immediately
+        <strong>List #2+:</strong> <code>git_row.has_read() == true</code> → returns <code>Ok(false)</code>
       </div>
     </div>
 
     <div class="card built-ok">
       <div class="card-head">
-        <span class="card-title">Offline first read &amp; recovery in <code>HEAD</code> (Works)</span>
-        <span class="badge b-yes">Fixed</span>
-      </div>
-      <div class="term"><span class="t-muted"># Wi-Fi off, Git-only clone</span>
-<span class="t-cmd">c$ lf task list</span>   <span class="t-warn"># stalls ≤5 s, fails, stamps cooldown</span>
-<span class="t-cmd">c$ lf task list</span>   <span class="t-ok"># 1 ms (skipped inside 60 s window)</span>
-<span class="t-cmd">c$ lf repo tracker</span> <span class="t-ok"># 1 ms, shows offline error</span>
-<span class="t-muted"># Wi-Fi back on (+60 s, or lf task sync now)</span>
-<span class="t-cmd">c$ lf task list</span>
-<span class="t-ok">3e1c9a0 · — · made on A</span></div>
-      <div class="db-strip">
-        <strong>On fail:</strong> <code>seen_seq=NULL, error=Some</code> + <code>planning_scope_checks("plan-first-read:&lt;repo&gt;")</code><br>
-        <strong>On success:</strong> zero writes to <code>planning_scope_checks</code>; <code>seen_seq=0</code>
-      </div>
-    </div>
-  </div>
-
-  <h3>Path B — Counterexample 1A: Fresh Git clone when your Machine has a Hub (<code>lf machine hub mini</code>)</h3>
-  <div class="grid-2">
-    <div class="card broken">
-      <div class="card-head">
-        <span class="card-title">Built in <code>HEAD</code> (Broken on read #2!)</span>
-        <span class="badge b-no">Regression</span>
+        <span class="card-title">Git + Hub clone (unbound fresh clone or offline Hub)</span>
+        <span class="badge b-yes">Fixed in Pass 2</span>
       </div>
       <div class="term"><span class="t-muted"># Laptop has `lf machine hub mini` set globally</span>
 <span class="t-cmd">laptop$ git clone origin repo &amp;&amp; cd repo</span>
-<span class="t-cmd">laptop$ lf task list</span>    <span class="t-muted"># read #1: repo_id is None → Git only</span>
-<span class="t-ok">3e1c9a0 · — · made on mini</span>
-<span class="t-cmd">laptop$ lf task list</span>    <span class="t-err"># read #2: repo_id now exists!</span>
-<span class="t-err"># opens SSH to mini asking for laptop's brand-new random repo_id!
-# mini doesn't know that id → FAILS, writes Hub error, stamps 60 s</span>
-<span class="t-cmd">laptop$ lf repo tracker</span>
-Plan: Git origin.
-<span class="t-err">Hub mini, failing since 10:34:
-  the hub has no checkout of repository repo_91c2…</span>
-<span class="t-muted"># 60 s later, lf task list hits SSH and fails AGAIN — forever</span></div>
-      <div class="db-strip">
-        <strong>Read #1:</strong> <code>repository_id(repo)</code> is <code>None</code> → skips Hub; Git creates random <code>repo_91c2</code>, imports mini's Tasks, records mini's id as unselected locator, skips push (nothing local to send).<br>
-        <strong>Read #2:</strong> <code>repository_id</code> is now <code>Some(repo_91c2)</code> and <code>Hub.has_read() == false</code> → SSHes to mini with <code>repo_91c2</code>, which mini has never seen!
-      </div>
-    </div>
-
-    <div class="card proposed">
-      <div class="card-head">
-        <span class="card-title">Proposed Fix: Clone-Level "Any Carrier Has Read"</span>
-        <span class="badge b-proposed">Proposed</span>
-      </div>
-      <div class="term"><span class="t-muted"># Laptop has `lf machine hub mini` set globally</span>
-<span class="t-cmd">laptop$ git clone origin repo &amp;&amp; cd repo</span>
-<span class="t-cmd">laptop$ lf task list</span>    <span class="t-ok"># read #1: Git fetches the whole plan</span>
-<span class="t-ok">3e1c9a0 · — · made on mini</span>
-<span class="t-cmd">laptop$ lf task list</span>    <span class="t-ok"># read #2: 0 ms, 0 network</span>
-<span class="t-ok">3e1c9a0 · — · made on mini</span>
+<span class="t-cmd">laptop$ lf task list</span>    <span class="t-ok"># read #1: Git fetches whole plan</span>
+<span class="t-ok">4688d1 · — · FromA</span>
+<span class="t-cmd">laptop$ lf task list</span>    <span class="t-ok"># read #2: 0 ms, 0 SSH, no Hub error</span>
 <span class="t-cmd">laptop$ lf repo tracker</span>
 <span class="t-ok">Plan: Git origin.
-Hub mini.</span></div>
+Hub mini.</span>
+
+<span class="t-muted"># Bound clone, GitHub online, home `mini` offline:</span>
+<span class="t-cmd">laptop$ lf task list</span>    <span class="t-ok"># read #1: Git succeeds → clone is read</span>
+<span class="t-cmd">laptop$ lf wave list</span>    <span class="t-ok"># read #2+: 0 ms (Hub off costs only speed)</span></div>
       <div class="db-strip">
-        <strong>Gate:</strong> if <em>any</em> current carrier has <code>has_read()</code>, the clone has read its plan → return immediately.<br>
-        <strong>Hub-only clone (<code>--bind</code>):</strong> no Git remote, Hub unread → Hub runs on read #1 and marks <code>Hub.has_read()</code>.
+        <strong>Gate (<code>plan_carriers.rs:318</code>):</strong> <code>git_row.has_read() || hub_row.has_read()</code> → return <code>Ok(false)</code>.<br>
+        <strong>Hub-only (<code>--bind</code>, no Git remote):</strong> read #1 reads Hub → <code>hub_row.has_read() == true</code> → read #2+ 0 ms.
       </div>
     </div>
   </div>
 
-  <h3>Path C — Counterexample 1B: Git online, Hub offline (laptop away from home <code>mini</code>)</h3>
+  <h3>Path B — Counterexample 1: Brand-new Machine runs <code>lf wave show</code> first</h3>
   <div class="grid-2">
     <div class="card broken">
       <div class="card-head">
-        <span class="card-title">Built in <code>HEAD</code> (5 s stall every minute forever)</span>
-        <span class="badge b-no">Contradicts docs</span>
+        <span class="card-title">Built in <code>HEAD</code> (Silently empty!)</span>
+        <span class="badge b-no">Broken live</span>
       </div>
-      <div class="term"><span class="t-muted"># At a coffee shop: GitHub works, home `mini` is unreachable</span>
-<span class="t-cmd">laptop$ lf task list</span>       <span class="t-ok"># Git succeeds (plan is complete!)</span>
-<span class="t-cmd">laptop$ lf task list</span>       <span class="t-err"># stalls 5 s on SSH to offline mini</span>
-<span class="t-muted"># 60 s later:</span>
-<span class="t-cmd">laptop$ lf wave list</span>       <span class="t-err"># stalls 5 s on SSH AGAIN</span>
-<span class="t-muted"># 60 s later:</span>
-<span class="t-cmd">laptop$ lf plan list</span>       <span class="t-err"># stalls 5 s on SSH AGAIN</span></div>
-      <p class="note">
-        Directly contradicts <code>docs/work.md:412</code>: <em>"Git keeps carrying every change, so a hub that is off costs only the speed."</em> Because <code>first_read_with</code> insists that <em>both</em> carriers reach <code>has_read() == true</code>, an unreachable Hub stalls every read once a minute indefinitely even after Git succeeded.
-      </p>
+      <div class="term"><span class="t-muted"># Fresh Machine (no ~/.lf/loopflow.db yet). Clone repo with remote plan.</span>
+<span class="t-cmd">new$ git clone origin repo &amp;&amp; cd repo</span>
+<span class="t-cmd">new$ lf wave show --json</span>
+<span class="t-err">{"generated_at":"…","tasks":{"items":[],"state":"ok"},"waves":[]}</span>
+<span class="t-muted"># No ~/.lf/loopflow.db created, no git fetch ran!
+# Meanwhile `lf plan list` (same show_snapshot!) fetches and shows FromA:</span>
+<span class="t-cmd">new$ lf plan list --json</span>
+<span class="t-ok">{"tasks":{"items":[… "FromA" …]},"waves":[… "alpha" …]}</span></div>
+      <div class="db-strip">
+        <strong>Why <code>lf wave show</code> alone fails:</strong> <code>lf.rs:1901</code> marks <code>WaveCommand::Show</code> as <code>planning_read</code>, taking the early return at <code>lf.rs:2019</code> that skips <code>journal::admit_process()</code>. The other 7 commands only worked because <code>admit_process()</code> secretly called <code>open_ledger()</code> and created <code>loopflow.db</code> before <code>before_first_read</code> checked <code>if !path.exists()</code> (<code>plan_carriers.rs:392</code>).
+      </div>
     </div>
 
     <div class="card proposed">
       <div class="card-head">
-        <span class="card-title">Proposed Fix: Hub Off Costs Only Speed</span>
+        <span class="card-title">Proposed Fix (F1): Open store when a Git remote exists</span>
         <span class="badge b-proposed">Proposed</span>
       </div>
-      <div class="term"><span class="t-muted"># At a coffee shop: GitHub works, home `mini` is unreachable</span>
-<span class="t-cmd">laptop$ lf task list</span>       <span class="t-ok"># Git succeeds → clone is read</span>
-<span class="t-cmd">laptop$ lf task list</span>       <span class="t-ok"># 0 ms (instant)</span>
-<span class="t-cmd">laptop$ lf wave list</span>       <span class="t-ok"># 0 ms (instant)</span>
-<span class="t-cmd">laptop$ lf plan list</span>       <span class="t-ok"># 0 ms (instant)</span></div>
-      <p class="note">
-        Once Git has read the plan, reads never stall on an offline Hub. When <code>mini</code> comes back online, saves, <code>lf task sync</code>, and server exchanges resume live Hub sync automatically.
-      </p>
+      <div class="term"><span class="t-muted"># Fresh Machine (no ~/.lf/loopflow.db yet), repo with Git remote</span>
+<span class="t-cmd">new$ git clone origin repo &amp;&amp; cd repo</span>
+<span class="t-cmd">new$ lf wave show --json</span>
+<span class="t-ok">{"tasks":{"items":[… "FromA" …]},"waves":[… "alpha" …]}</span>
+<span class="t-cmd">new$ lf wave show --json</span>   <span class="t-ok"># 0 ms, 0 git fetches</span>
+
+<span class="t-muted"># Fresh Machine, local-only repo (no remote):</span>
+<span class="t-cmd">new$ git init local &amp;&amp; cd local &amp;&amp; lf wave show --json</span>
+<span class="t-ok">{"tasks":{"items":[]},"waves":[]}</span>   <span class="t-muted"># still creates no loopflow.db</span></div>
+      <div class="db-strip">
+        <strong>In <code>carried()</code> &amp; <code>exchange_after_command()</code>:</strong> check <code>tracker::connected(&amp;repo)</code> first; if <code>!path.exists()</code> and <code>plan_git::remote(Path::new(&amp;repo)).is_none()</code>, return <code>Ok(None)</code>. Otherwise open/create the store via <code>open_sqlite(&amp;path)</code> so <code>first_read_at</code> runs without relying on <code>admit_process()</code>.
+      </div>
     </div>
   </div>
 
-  <h3>Path D — Counterexample 2: Opening a fresh clone with <code>--subscribe</code> or <code>lf task detail</code></h3>
+  <h3>Path C — Counterexample 2: Single-Task lookups &amp; offline Hub beside recovered Git</h3>
   <div class="grid-2">
-    <div class="card warn">
+    <div class="card broken">
       <div class="card-head">
-        <span class="card-title"><code>lf task list --subscribe</code> &amp; Server Subscriptions</span>
-        <span class="badge b-built">Changed from main</span>
+        <span class="card-title"><code>lf task show &lt;id&gt;</code> on an unread clone (Verified live)</span>
+        <span class="badge b-no">Missed command</span>
       </div>
       <div class="term"><span class="t-cmd">c$ git clone origin repo &amp;&amp; cd repo</span>
-<span class="t-cmd">c$ lf task list --subscribe --json</span>
-<span class="t-warn">{"answers":1,"unavailable":null,"body":[]}</span>
-<span class="t-muted"># Stays [] forever until a one-shot read or `lf task sync` runs
-# (Same for Desktop if it opens a fresh clone via Subscribe only)</span></div>
+<span class="t-cmd">c$ lf task status 4688d1</span>   <span class="t-ok"># syncs on miss → finds FromA</span>
+<span class="t-cmd">c$ lf task detail 4688d1</span>   <span class="t-ok"># syncs on miss → finds FromA</span>
+<span class="t-cmd">c$ lf task show   4688d1</span>
+<span class="t-err">Error: Task 4688d1 is not registered</span></div>
       <p class="note">
-        On <code>main</code>, <code>lf task list --subscribe</code> ran <code>before_first_read</code> before streaming; <code>HEAD</code> skipped it to match the other 4 <code>--subscribe</code> commands. Server <code>Start::Subscribe</code> also skips <code>after_command</code> (unlike <code>Start::Request</code>). Open in Question 2.
+        <code>desktop.rs:645</code> describes <code>lf task show</code> as <em>"from the same reading as <code>lf task status</code>"</em>, and <code>docs/work.md:703</code> pairs them, but <code>read_task_pane</code> calls <code>read_task_status</code> directly without syncing on miss.
       </p>
     </div>
 
     <div class="card warn">
       <div class="card-head">
-        <span class="card-title"><code>lf task detail &lt;id&gt;</code> on a fresh clone</span>
-        <span class="badge b-this">Missed command</span>
+        <span class="card-title">Offline Hub's stale error blocks recovered Git for 60 s (F3)</span>
+        <span class="badge b-this">1-line logic bug</span>
       </div>
-      <div class="term"><span class="t-cmd">c$ git clone origin repo &amp;&amp; cd repo</span>
-<span class="t-cmd">c$ lf task status 3e1c9a</span>  <span class="t-ok"># syncs on miss → works</span>
-<span class="t-cmd">c$ lf task detail 3e1c9a</span>
-<span class="t-err">Error: Task 3e1c9a is not registered</span></div>
+      <div class="term"><span class="t-muted"># t=0: Coffee shop Wi-Fi drops. Both Git and Hub fail.
+# t=20s: Wi-Fi returns (GitHub works; home `mini` still off).</span>
+<span class="t-cmd">laptop$ lf task create 'B'</span>  <span class="t-ok"># Git push succeeds → clears git.error!</span>
+                             <span class="t-warn"># Hub fails → hub.error stays Some</span>
+<span class="t-cmd">laptop$ lf task list</span>        <span class="t-err"># t=25s: sees hub.error.is_some()</span>
+<span class="t-err"># enters 60 s cooldown → SKIPS ONLINE GIT! Shows only B.</span></div>
       <p class="note">
-        <code>lf task status</code> uses <code>find_task</code> (which exchanges both carriers on a cache miss), while <code>lf task detail</code> queries <code>resolve_task_id</code> directly with neither <code>before_first_read</code> nor <code>find_task</code>.
+        <code>plan_carriers.rs:326</code> checks <code>git_errored || hub_errored</code> instead of requiring <em>all eligible carriers</em> to be in error (<code>(!has_git || git_errored) &amp;&amp; (!has_hub || hub_errored)</code>). With <code>||</code>, an offline Hub's error suppresses an online Git fetch and also stamps an unused <code>planning_scope_checks</code> row on a read where Git succeeds.
       </p>
     </div>
   </div>
@@ -664,7 +629,7 @@ Hub mini.</span></div>
   <!-- 2. DOMAIN VS CODE ALIGNMENT -->
   <h2>2. Do Domain Concepts and Code Concepts Line Up in <code>HEAD</code>?</h2>
   <p>
-    Every pairing below reflects current <code>HEAD</code> (<code>ba211424c3</code>), not pre-build <code>main</code>.
+    Every pairing below reflects current <code>HEAD</code> (<code>b9ab216a14</code>) as verified against the code and live binary.
   </p>
 
   <div class="table-wrap">
@@ -682,60 +647,83 @@ Hub mini.</span></div>
           <td><strong>"Has this clone read its remote plan yet?"</strong><br>Saving locally does not count as having read from peers.</td>
           <td>
             <code>PlanCarrier::has_read()</code> → <code>plan_carriers.seen_seq.is_some()</code>.<br>
-            Git writes <code>0</code> via <code>SqliteStore::plan_read()</code> inside <code>exchange_with</code> when <code>failed.is_none()</code>, before <code>publish</code>.
+            Git writes <code>0</code> via <code>SqliteStore::plan_read()</code> in <code>exchange_with</code> when <code>failed.is_none()</code>, before <code>publish</code>.
           </td>
           <td><span class="badge b-yes">YES</span></td>
           <td>
-            Cleanly separates "has read" from <code>repository_plans</code> registration with no migration and zero idle revision bumps. <code>seen_seq</code> holds a sequence watermark for Hub and a <code>0</code> marker for Git, honestly documented on the struct and in <code>docs/dev/planning.md</code>.
+            Cleanly separates "has read" from <code>repository_plans</code> registration with no migration and zero idle revision bumps.
           </td>
         </tr>
 
         <tr>
-          <td><strong>"Read the plan once; later reads stay local; an offline Hub costs only speed"</strong><br>A clone with Git and a Hub should read once and stay instant after.</td>
+          <td><strong>"Read the plan once from either carrier; later reads stay local; an offline Hub costs only speed"</strong></td>
           <td>
-            <code>plan_carriers::first_read_with</code> checks <code>git_needed</code> and <code>hub_needed</code> independently, and gates Hub on <code>store.repository_id(repo).is_some()</code>.
+            <code>plan_carriers::first_read_with</code> checks <code>git_row.has_read() || hub_row.has_read()</code>, then runs eligible carriers concurrently.
+          </td>
+          <td><span class="badge b-yes">YES</span></td>
+          <td>
+            Pass 2's clone-level gate fixes both the read-#2 unknown-repo Hub failure and recurring offline-Hub stalls. Only the cooldown predicate inside it has a small <code>||</code>-vs-<code>&amp;&amp;</code> bug (F3).
+          </td>
+        </tr>
+
+        <tr>
+          <td><strong>"Clone on a brand-new Machine and read the plan with zero setup"</strong><br><code>docs/work.md:314,331</code> names <code>lf wave show</code> among the 8 first-read commands.</td>
+          <td>
+            <code>plan_carriers::carried()</code> and <code>exchange_after_command()</code> both return <code>Ok(None)</code> / <code>Ok(())</code> when <code>!default_db_path().exists()</code>.
           </td>
           <td><span class="badge b-no">NO</span></td>
           <td>
-            <span class="mismatch-tag">Two gates for one concept</span>
-            <span class="mismatch-tag">Hidden 2nd network hit</span><br>
-            <strong>Biggest mismatch in <code>HEAD</code>:</strong> Read #1 has no <code>repository_id</code> yet, so only Git runs (creating a random local ID). Read #2 then sees <code>repository_id.is_some()</code> + unread Hub and SSHes to the Hub with an unknown ID — failing, polluting <code>lf repo tracker</code>, and retrying every 60 s forever. Same 5 s/min stall whenever a Hub is offline even after Git succeeded.
+            <span class="mismatch-tag">Hidden precondition</span>
+            <span class="mismatch-tag">Accidental dependency</span><br>
+            <strong>Biggest mismatch in <code>HEAD</code>:</strong> 7 of the 8 listed commands only fetch on a brand-new Machine because <code>journal::admit_process()</code> accidentally creates <code>loopflow.db</code> first. <code>lf wave show</code> is marked <code>planning_read</code> (skips <code>admit_process</code>) so it silently prints an empty plan and never fetches. Same guard skips served <code>after_command</code> before any CLI write creates the DB.
           </td>
         </tr>
 
         <tr>
-          <td><strong>"Every command that views the plan uses the same first-read rule"</strong><br>No hidden distinction between <code>task list</code>, <code>wave list</code>, <code>plan list</code>, <code>task detail</code>.</td>
+          <td><strong>"Look up a specific Task by ID in an unread clone"</strong><br><code>task status</code>, <code>task detail</code>, and <code>task show</code> are sibling reads of one Task.</td>
           <td>
-            7 separate calls to <code>before_first_read</code> / <code>before_first_read_cwd</code> in <code>bin/lf.rs</code> + 1 in <code>commands/tracker.rs:71</code>.<br>
-            <code>screens::task_detail</code> skips both <code>before_first_read</code> and <code>find_task</code>.
+            <code>ops::task::task_status</code> and <code>screens::task_detail</code> call <code>planning_sync::find_task</code> on miss.<br>
+            <code>desktop::read_task_pane</code> (<code>lf task show</code>) calls <code>read_task_status</code> (local store only).
           </td>
           <td><span class="badge b-no">NO</span></td>
           <td>
             <span class="mismatch-tag">No single owner</span><br>
-            CLI dispatch arms in <code>bin/lf.rs</code> manually remember to call <code>before_first_read_cwd()</code> instead of the plan-read layer owning it. <code>lf task detail &lt;id&gt;</code> was already missed, and any future plan-reading command can forget it again.
+            <code>lf task show &lt;id&gt;</code> still fails with <code>Task &lt;id&gt; is not registered</code> on an unread clone. Also, <code>screens::task_detail</code> runs <code>find_task</code> <em>after</em> <code>Read::peer_route()</code>, so the first call for a Task owned by another Machine returns local-only fields while call #2 forwards to the owner.
           </td>
         </tr>
 
         <tr>
-          <td><strong>"Offline, reads stay fast; back online, they catch up"</strong><br>No 5-second hangs on repeated offline reads.</td>
+          <td><strong>"Every overview/list command uses the same first-read rule"</strong></td>
           <td>
-            <code>planning_scope_checks</code> key <code>plan-first-read:&lt;repo&gt;</code> with 60 s cooldown, written only on failure; bypassed once <code>plan_carriers.error</code> clears.
+            6 non-subscribing CLI entry points in <code>waves.rs</code> and <code>tracker.rs</code> call <code>before_first_read</code>; guarded by <code>!journal::request::active()</code>. Zero calls left in <code>bin/lf.rs</code>.
           </td>
           <td><span class="badge b-yes">YES</span></td>
           <td>
-            Works cleanly for single-carrier clones: 0 extra SQLite writes on the happy path, instant repeat reads offline, automatic recovery after 60 s (or immediately after a successful save/sync clears <code>error</code>). Simplifies further once F1 removes the per-carrier boolean matrix.
+            Cleanly moved out of <code>lf.rs</code> in pass 2. Once F1 removes the <code>!path.exists()</code> refusal in <code>carried()</code>, all 8 documented overview/list commands behave identically on fresh Machines too.
           </td>
         </tr>
 
         <tr>
-          <td><strong>"A live subscription streams changes without stalling startup"</strong><br><code>--subscribe</code> and Desktop watches.</td>
+          <td><strong>"Offline, reads stay fast; back online, they catch up"</strong></td>
+          <td>
+            <code>planning_scope_checks</code> key <code>plan-first-read:&lt;repo&gt;</code> (60 s), gated on <code>git_errored || hub_errored</code>.
+          </td>
+          <td><span class="badge b-no">NO</span> <span style="font-size:11.5px; color:var(--text-tertiary)">dual-carrier</span></td>
+          <td>
+            <span class="mismatch-tag">Overbroad cooldown trigger</span><br>
+            Works on Git-only clones, including early recovery when a save clears <code>git.error</code>. With a Hub configured, <code>||</code> lets an offline Hub's leftover <code>error</code> suppress an online Git fetch for 60 s (F3).
+          </td>
+        </tr>
+
+        <tr>
+          <td><strong>"A live subscription streams changes without stalling startup"</strong><br>CLI <code>--subscribe</code> and Desktop watches.</td>
           <td>
             All 5 CLI <code>--subscribe</code> paths skip <code>before_first_read</code>; server <code>Start::Subscribe</code> skips <code>after_command</code> (unlike <code>Start::Request</code>).
           </td>
           <td><span class="badge b-no">NO</span> <span style="font-size:11.5px; color:var(--text-tertiary)">tradeoff</span></td>
           <td>
             <span class="mismatch-tag">Silent empty stream</span><br>
-            Consistent and read-only, but opening a fresh clone directly with <code>lf task list --subscribe</code> (or a Desktop subscription without a prior Request) prints <code>[]</code> and stays empty until another command runs. Also changed <code>lf task list --subscribe</code> from <code>main</code> without human confirmation (Question 2).
+            Consistent and read-only, and now accurately documented in <code>docs/dev/planning.md:299</code>, but opening an unread clone directly with <code>--subscribe</code> stays empty until another command runs. Changed <code>lf task list --subscribe</code> from <code>main</code> without human confirmation (Question 2).
           </td>
         </tr>
 
@@ -746,177 +734,150 @@ Hub mini.</span></div>
           </td>
           <td><span class="badge b-yes">YES</span></td>
           <td>
-            Saves stay fast and leave <code>Git.seen_seq</code> NULL, so the next read still fetches other Machines' plans.
-          </td>
-        </tr>
-
-        <tr>
-          <td><strong>"A colliding Wave name doesn't break other records or force re-fetches"</strong></td>
-          <td>
-            <code>exchange_with</code> calls <code>plan_read</code> whenever <code>failed.is_none()</code>, even when <code>not_taken</code> is non-empty; <code>plan_refs</code> holds back only the skipped ref.
-          </td>
-          <td><span class="badge b-yes">YES</span></td>
-          <td>
-            Refused pushes and <code>not_taken</code> Wave collisions don't undo read completion.
+            Saves stay fast and leave Git's <code>seen_seq</code> NULL, so the next read still fetches other Machines' plans.
           </td>
         </tr>
 
         <tr>
           <td><strong>"Empty clones stay quiet on the server; active repos sync every minute"</strong></td>
           <td>
-            <code>plan_git::exchange_unowned</code> polls <code>active_plan_repository_paths()</code>; <code>docs/work.md</code> and <code>docs/dev/planning.md</code> now match.
+            <code>plan_git::exchange_unowned</code> polls <code>active_plan_repository_paths()</code>; <code>docs/work.md</code> and <code>docs/dev/planning.md</code> match.
           </td>
           <td><span class="badge b-yes">YES</span></td>
           <td>
-            Code and docs now tell the same truth (stale promises from before LOO-1110 are gone). Product preference confirmed in Question 4.
-          </td>
-        </tr>
-
-        <tr>
-          <td><strong>"Switching a clone's remote reads the new remote"</strong></td>
-          <td>
-            <code>select_carrier</code> resets <code>seen_seq = NULL</code> when remote name (<code>peer</code>) changes.
-          </td>
-          <td><span class="badge b-yes">YES</span> <span style="font-size:11.5px; color:var(--text-tertiary)">mostly</span></td>
-          <td>
-            Changing remote name resets read-state; <code>git remote set-url origin &lt;new&gt;</code> keeps <code>peer == "origin"</code>. Rare; separate outcome if ever needed.
+            Code and docs agree. Confirmed in Question 4.
           </td>
         </tr>
       </tbody>
     </table>
   </div>
 
-  <h3>Read-Surface Matrix at <code>HEAD</code> (<code>ba211424c3</code>)</h3>
+  <h3>Live Read-Surface Matrix at <code>HEAD</code> (<code>b9ab216a14</code>)</h3>
   <div class="table-wrap">
     <table class="matrix">
       <thead>
         <tr>
           <th>Command / Surface</th>
-          <th><code>main</code> (<code>6c2560bd</code>)</th>
-          <th>Built in <code>HEAD</code> (<code>ba211424</code>)</th>
-          <th>With Proposed Fix (F1 + F2)</th>
+          <th>Brand-new Machine<br>(no <code>loopflow.db</code>)</th>
+          <th>Existing Machine<br>(unread clone)</th>
+          <th>With Proposed Fixes<br>(F1 + F2 + F3)</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td><code>lf task list</code> / <code>lf repo tracker</code> (Git-only)</td>
-          <td class="cell-warn">Broken after save</td>
-          <td class="cell-yes">Reads once, 60 s offline cooldown</td>
-          <td class="cell-yes">Same</td>
+          <td><code>lf task list</code>, <code>lf task list --closed</code></td>
+          <td class="cell-yes">Fetches once (via <code>admit_process</code>)</td>
+          <td class="cell-yes">Fetches once, 0 ms after</td>
+          <td class="cell-yes">Fetches once (no <code>admit_process</code> dependency)</td>
         </tr>
         <tr>
-          <td><code>lf wave list</code> / <code>show</code> / <code>status</code> / <code>plan</code>, <code>lf plan list</code> / <code>board</code></td>
-          <td class="cell-no">Never fetched</td>
-          <td class="cell-yes">Reads once (via <code>lf.rs</code> arms)</td>
-          <td class="cell-yes">Owned at read boundary</td>
+          <td><code>lf wave list</code>, <code>lf wave status</code>, <code>lf wave plan</code>, <code>lf plan list</code>, <code>lf plan board</code>, <code>lf repo tracker</code></td>
+          <td class="cell-yes">Fetches once (via <code>admit_process</code>)</td>
+          <td class="cell-yes">Fetches once, 0 ms after</td>
+          <td class="cell-yes">Same (no <code>admit_process</code> dependency)</td>
         </tr>
         <tr>
-          <td>Any of the 8 reads on a <strong>Git + Hub</strong> clone</td>
-          <td class="cell-warn">Git only, broken after save</td>
-          <td class="cell-no">Read #2 SSHes to Hub with unknown ID / stalls 5 s/min offline</td>
-          <td class="cell-yes">Read #1 reads plan; read #2+ always 0 ms local</td>
+          <td><strong><code>lf wave show</code></strong></td>
+          <td class="cell-no">Empty <code>[]</code> — skips fetch!</td>
+          <td class="cell-yes">Fetches once, 0 ms after</td>
+          <td class="cell-yes">Fetches once on brand-new Machine too</td>
         </tr>
         <tr>
-          <td>Any of the 8 reads on a <strong>Hub-only</strong> (<code>--bind</code>) clone</td>
-          <td class="cell-no">Never read Hub</td>
-          <td class="cell-yes">Reads Hub on read #1</td>
-          <td class="cell-yes">Same (Git absent → Hub runs on read #1)</td>
+          <td>Any of the 8 reads on <strong>Git + Hub</strong> (unbound or Hub offline)</td>
+          <td class="cell-yes">Git fetches #1; 0 ms #2+ (except <code>wave show</code>)</td>
+          <td class="cell-warn">0 ms #2+, unless Hub error trips 60 s cooldown on recovered Git</td>
+          <td class="cell-yes">Always 0 ms #2+; online Git never blocked by offline Hub</td>
         </tr>
         <tr>
-          <td><code>lf task detail &lt;id&gt;</code></td>
-          <td class="cell-no">Fails on unread clone</td>
-          <td class="cell-no">Still fails (missed)</td>
-          <td class="cell-yes">Uses <code>find_task</code> (syncs on miss like <code>task status</code>)</td>
+          <td><code>lf task status &lt;id&gt;</code>, <code>lf task detail &lt;id&gt;</code></td>
+          <td class="cell-yes">Syncs on miss, finds Task</td>
+          <td class="cell-yes">Syncs on miss, finds Task</td>
+          <td class="cell-yes">Same (+ peer-route recheck on <code>task detail</code>)</td>
+        </tr>
+        <tr>
+          <td><strong><code>lf task show &lt;id&gt;</code></strong></td>
+          <td class="cell-no">Fails: <code>not registered</code></td>
+          <td class="cell-no">Fails: <code>not registered</code></td>
+          <td class="cell-yes">Syncs on miss, finds Task</td>
         </tr>
         <tr>
           <td>CLI <code>--subscribe</code> (all 5) &amp; Server <code>Start::Subscribe</code></td>
-          <td class="cell-warn">Only <code>task list</code> blocked; rest store-only</td>
-          <td class="cell-warn">All store-only (empty if never read)</td>
+          <td class="cell-warn">Store-only (empty)</td>
+          <td class="cell-warn">Store-only (empty)</td>
           <td class="cell-yes">Store-only (Q2a) or async bg fetch if unread (Q2b)</td>
         </tr>
         <tr>
           <td>Server <code>Start::Request</code> (one-shot served reads)</td>
+          <td class="cell-no">Answers empty; <code>after_command</code> skips if no DB</td>
           <td class="cell-yes">Answers once, then <code>after_command</code></td>
-          <td class="cell-yes">Same (marks both carriers read)</td>
-          <td class="cell-yes">Same</td>
+          <td class="cell-yes">Answers once, then <code>after_command</code> creates DB &amp; fetches</td>
         </tr>
       </tbody>
     </table>
   </div>
 
   <!-- 3. BIGGEST MISMATCH -->
-  <h2>3. The Biggest Mismatch in <code>HEAD</code> — Before &amp; After</h2>
+  <h2>3. The Biggest Remaining Mismatch in <code>HEAD</code> — Before &amp; After</h2>
   <div class="callout">
-    <strong>The core mismatch in <code>HEAD</code>:</strong> <code>first_read_with</code> treats "has this clone read its plan?" as <strong>"has <em>every</em> configured carrier individually recorded <code>has_read()</code>?"</strong> Because a fresh Git clone has no <code>repository_id</code> before read #1, Git runs on read #1 (creating a brand-new local ID), and then Hub suddenly becomes eligible on read #2 — firing an SSH call the Hub cannot recognize, writing a permanent carrier error, and stalling offline-Hub laptops for 5 s every 60 s forever.
+    <strong>The core mismatch in <code>HEAD</code>:</strong> <code>plan_carriers::carried()</code> (and <code>exchange_after_command()</code>) treats <em>"does <code>~/.lf/loopflow.db</code> already exist on disk?"</em> as a gate for whether a clone can fetch its remote plan. On a brand-new Machine, that makes first-read arrival depend accidentally on whether the CLI command passed through <code>journal::admit_process()</code> — so <code>lf plan list</code> works while <code>lf wave show</code> (calling the exact same <code>show_snapshot</code> function!) silently returns empty.
   </div>
 
   <div class="grid-2">
     <div class="card broken">
       <div class="card-head">
-        <span class="card-title">Built in <code>HEAD</code> (<code>plan_carriers.rs:279–381</code>)</span>
+        <span class="card-title">Built in <code>HEAD</code> (<code>plan_carriers.rs:389–396</code>)</span>
         <span class="badge b-built">Built in HEAD</span>
       </div>
       <div class="flow-box">
         <div class="flow-row">
-          <span class="node">Read #1</span>
+          <span class="node">lf wave show</span>
           <span class="arrow">→</span>
-          <span class="node bad">repo_id is None → hub_needed = false</span>
-          <span class="arrow">→</span>
-          <span class="node">Git fetches, mints repo_91c2</span>
+          <span class="node">planning_read (skips admit_process)</span>
         </div>
         <div class="flow-row">
-          <span class="node">Read #2</span>
+          <span class="node">before_first_read</span>
           <span class="arrow">→</span>
-          <span class="node bad">git_needed = false, hub_needed = true!</span>
-          <span class="arrow">→</span>
-          <span class="node bad">SSH to Hub with unknown repo_91c2</span>
+          <span class="node bad">carried(): !path.exists() → Ok(None)</span>
         </div>
         <div class="flow-row">
-          <span class="node bad">Hub error recorded</span>
+          <span class="node">show_roadmap</span>
           <span class="arrow">→</span>
-          <span class="node bad">60 s cooldown</span>
-          <span class="arrow">→</span>
-          <span class="node bad">Retries every 60 s forever</span>
+          <span class="node bad">store is None → waves: [], tasks: []</span>
         </div>
       </div>
       <p class="note">
-        Requires ~90 lines of tangled per-carrier flags (<code>git_needed</code>, <code>hub_needed</code>, <code>git_errored</code>, <code>hub_errored</code>, <code>do_git</code>, <code>do_hub</code>, <code>stamped</code>) multiplexing two independent carrier gates through one shared cooldown key.
+        The bug is invisible on any developer Machine that already has <code>~/.lf/loopflow.db</code> from another repo, and only hits a real newcomer cloning their first repo — the exact "zero setup on a second Machine" path <code>docs/work.md</code> leads with.
       </p>
     </div>
 
     <div class="card proposed">
       <div class="card-head">
-        <span class="card-title">Proposed: One Clone-Level First-Read Gate</span>
+        <span class="card-title">Proposed: Check for a Carrier, Not an Accidental DB File</span>
         <span class="badge b-proposed">Recommended</span>
       </div>
       <div class="flow-box">
         <div class="flow-row">
-          <span class="node good">git_read || hub_read</span>
+          <span class="node good">tracker::connected(&amp;repo)?</span>
           <span class="arrow">→</span>
-          <span class="node good">true? return Ok(false) (0 ms)</span>
+          <span class="node">yes: return Ok(None)</span>
         </div>
         <div class="flow-row">
-          <span class="node good">neither has read</span>
+          <span class="node good">!path.exists() &amp;&amp; remote.is_none()?</span>
           <span class="arrow">→</span>
-          <span class="node good">if any errored, check 60 s cooldown</span>
+          <span class="node good">return Ok(None) (no DB created)</span>
         </div>
         <div class="flow-row">
-          <span class="node good">run eligible carriers</span>
+          <span class="node good">else: open_sqlite(&amp;path)</span>
           <span class="arrow">→</span>
-          <span class="node good">Git (if remote) + Hub (if repo_id)</span>
-        </div>
-        <div class="flow-row">
-          <span class="node good">either succeeds</span>
-          <span class="arrow">→</span>
-          <span class="node good">clone is read; all later reads 0 ms</span>
+          <span class="node good">first_read_at fetches remote plan</span>
         </div>
       </div>
       <p class="note">
-        One rule, ~40 lines, zero per-carrier cooldown multiplexing:
-        <br>• <strong>Git-only</strong> or <strong>Git+Hub (unbound)</strong>: read #1 fetches Git → read #2+ instant.
-        <br>• <strong>Hub-only (<code>--bind</code>)</strong>: read #1 reads Hub → read #2+ instant.
-        <br>• <strong>Git+Hub (bound)</strong>: read #1 runs both concurrently; if Hub is off, Git marks the clone read → read #2+ instant.
-        <br>• <strong>Remote name changed</strong> (Git-only): <code>git_row.peer != peer</code> → <code>git_read</code> is false → reads the new remote once.
+        Counterexamples checked:
+        <br>• <strong>Local-only repo (no remote)</strong> on a brand-new Machine: <code>remote.is_none()</code> → creates no DB, returns empty in 0 ms.
+        <br>• <strong>Linear/Asana repo</strong>: <code>tracker::connected</code> is true → creates no DB.
+        <br>• <strong>Git repo with remote</strong> on a brand-new Machine: opens DB, fetches remote plan, marks <code>seen_seq = 0</code> → <code>lf wave show</code> prints remote Waves &amp; Tasks on try #1.
+        <br>• <strong>Hub-only (<code>--bind</code>)</strong>: binding already created <code>loopflow.db</code>, so <code>path.exists()</code> is already true.
       </p>
     </div>
   </div>
@@ -926,67 +887,77 @@ Hub mini.</span></div>
 
   <div class="finding">
     <div class="finding-head">
-      <span class="finding-title">F1. Make first-read a clone-level "any current carrier has read" gate, not "every carrier must succeed"</span>
+      <span class="finding-title">F1. Let <code>carried()</code> and <code>exchange_after_command()</code> open the store when a Git remote exists</span>
       <span class="badge b-this">This work (LOO-1113)</span>
     </div>
     <p>
-      In <code>plan_carriers::first_read_with</code>, if either the current Git remote row or the current Hub row already has <code>has_read() == true</code>, return <code>Ok(false)</code> immediately. Only when <em>neither</em> current carrier has read yet does <code>before_first_read</code> check the 60 s error cooldown and run whichever carriers are eligible (Git if a remote exists; Hub if configured and <code>store.repository_id(repo).is_some()</code>).
+      In <code>plan_carriers::carried</code> (<code>plan_carriers.rs:389</code>) and <code>exchange_after_command</code> (<code>plan_carriers.rs:462</code>), return early when <code>!path.exists()</code> <em>only</em> if the repository has no Git remote (<code>plan_git::remote(Path::new(&amp;repo)).is_none()</code>). Otherwise open the store and run the first read. This fixes <code>lf wave show</code> on a brand-new Machine and eliminates the accidental dependency on <code>journal::admit_process()</code>.
     </p>
     <p class="finding-meta">
-      <strong>Test to add:</strong> A fresh clone with both a bare Git origin <em>and</em> a configured Hub (<code>lf machine hub</code>): read #1 fetches Git and sees the remote Task; read #2 runs neither Git nor Hub (0 spawns, 0 Hub calls, no Hub error recorded). Also test an unreachable Hub + reachable Git on a bound clone: read #1 succeeds via Git and read #2 does not retry the offline Hub.
-      <br><strong>Passed over:</strong> Keeping per-carrier AND semantics (causes the read-#2 unknown-repo SSH failure and recurring 5 s offline-Hub stalls). Reversible.
+      <strong>Test to add:</strong> In <code>local_planning.rs</code>, run <code>lf wave show --json</code> as the very first command on a brand-new <code>LF_HOME</code> against a clone of a remote holding Wave <code>alpha</code> and Task <code>A</code>; assert both appear.
+      <br><strong>Passed over:</strong> Routing <code>lf wave show</code> through <code>admit_process()</code> (adds process-admission overhead to a read intentionally exempted from it, and leaves served <code>after_command</code> broken). Reversible.
     </p>
   </div>
 
   <div class="finding">
     <div class="finding-head">
-      <span class="finding-title">F2. Give plan-reading one owner instead of 7 <code>before_first_read</code> calls in <code>bin/lf.rs</code> (and fix <code>lf task detail</code>)</span>
+      <span class="finding-title">F2. Sync on miss in <code>lf task show &lt;id&gt;</code> (and recheck peer route after sync in <code>task detail</code>)</span>
       <span class="badge b-this">This work (LOO-1113)</span>
     </div>
     <p>
-      Currently <code>bin/lf.rs</code> sprinkles <code>before_first_read</code> / <code>before_first_read_cwd</code> across 7 dispatch branches while <code>commands/tracker.rs</code> has an 8th, and <code>lf task detail &lt;id&gt;</code> was missed (it fails with <code>Task &lt;id&gt; is not registered</code> on a fresh clone instead of syncing on miss like <code>lf task status &lt;id&gt;</code>).
+      <code>lf task status &lt;id&gt;</code> and <code>lf task detail &lt;id&gt;</code> both sync via <code>planning_sync::find_task</code> when a Task is missing locally; <code>lf task show &lt;id&gt;</code> (<code>desktop::read_task_pane</code>) still fails with <code>Task &lt;id&gt; is not registered</code>. Giving <code>read_task_pane</code> the same non-served <code>find_task</code> miss fallback (or sharing one helper with <code>screens::task_detail</code>) closes the gap across all three single-Task reads. For <code>Read::TaskDetail</code>, re-checking <code>peer_route()</code> if a local miss was resolved by sync (or running miss resolution before <code>peer_route</code>) also avoids a local-only first response for Tasks owned by another Machine.
     </p>
     <p class="finding-meta">
-      <strong>Recommendation:</strong> Move the CLI first-read call into the non-subscribing CLI entry points (<code>waves::ls</code>, <code>waves::status</code>, <code>waves::show</code>, <code>waves::list_tasks</code>, <code>waves::list_closed_tasks</code>, <code>screens::print</code> for <code>PlanBoard</code>, <code>tracker::run_async</code>) — or into a single CLI read gate — keeping served requests non-blocking (<code>!journal::request::active()</code>). Route <code>screens::task_detail</code>'s lookup through <code>planning_sync::find_task</code> on miss so <code>lf task detail &lt;id&gt;</code> behaves like <code>lf task status &lt;id&gt;</code>. Reversible.
+      <strong>Passed over:</strong> Leaving <code>lf task show</code> store-only (forces people to learn an arbitrary difference between <code>lf task detail &lt;id&gt;</code> and <code>lf task show &lt;id&gt;</code>). Reversible.
     </p>
   </div>
 
   <div class="finding">
     <div class="finding-head">
-      <span class="finding-title">F3. Clarify <code>--subscribe</code> on unread clones (store-only vs background first-read)</span>
+      <span class="finding-title">F3. Gate the 60 s first-read cooldown only when every eligible carrier is in error</span>
       <span class="badge b-this">This work (LOO-1113)</span>
     </div>
     <p>
-      <code>HEAD</code> changed <code>lf task list --subscribe</code> to skip <code>before_first_read</code> so all 5 CLI <code>--subscribe</code> commands and server <code>Start::Subscribe</code> streams read the store alone. That keeps frame 1 instant and read-only, at the cost that a fresh clone opened directly via <code>--subscribe</code> (or Desktop subscribing before any one-shot Request) stays empty until another command runs.
+      In <code>plan_carriers::first_read_with</code> (<code>plan_carriers.rs:326</code>), change <code>errored</code> from <code>git_errored || hub_errored</code> to <code>(!has_git || git_errored) &amp;&amp; (!has_hub || hub_errored)</code>. When Git has no error (fresh, or just cleared by a successful <code>lf task create</code> push), an offline Hub's leftover error will neither suppress Git for 60 s nor write an unused row to <code>planning_scope_checks</code>.
     </p>
     <p class="finding-meta">
-      <strong>Recommendation:</strong> Keep CLI <code>--subscribe</code> store-only (matches <code>lf repo tracker --subscribe</code>'s read-only contract and current <code>HEAD</code>), unless opening a fresh clone directly in Desktop via subscription alone is a common path — in which case firing a non-blocking background first-read on unread clones (option 2b) gives instant frame 1 <em>and</em> automatic frame 2 arrival. Update <code>docs/dev/planning.md:296</code> to note that served <em>requests</em> (not subscriptions) trigger <code>after_command</code>. Reversible.
+      <strong>Test to add:</strong> In <code>plan_hub.rs</code>, stamp <code>plan-first-read:&lt;repo&gt;</code> at <code>t=1000</code> with Hub errored and Git clean (simulating a recovered Git push while Hub stays offline); call <code>first_read_with</code> at <code>t=1025</code> and assert Git runs and marks the clone read. Reversible.
     </p>
   </div>
 
   <div class="finding">
     <div class="finding-head">
-      <span class="finding-title">F4. Discovering a teammate's very first Task in an already-read empty clone</span>
+      <span class="finding-title">F4. Confirm <code>--subscribe</code> on unread clones (store-only vs background first-read)</span>
+      <span class="badge b-this">This work (LOO-1113)</span>
+    </div>
+    <p>
+      <code>HEAD</code> keeps all 5 CLI <code>--subscribe</code> commands and server <code>Start::Subscribe</code> streams store-only (and <code>docs/dev/planning.md:299</code> now says so plainly). That keeps frame 1 instant and read-only, while an unread clone opened directly via <code>--subscribe</code> stays empty until a one-shot read or <code>lf task sync</code> runs. Open in Question 2.
+    </p>
+  </div>
+
+  <div class="finding">
+    <div class="finding-head">
+      <span class="finding-title">F5. Discovering a teammate's very first Task in an already-read empty clone</span>
       <span class="badge b-separate">Separate outcome</span>
     </div>
     <p>
-      A clone whose first read saw an empty remote marks <code>has_read() == true</code>; LOO-1110's <code>exchange_unowned</code> skips repositories with zero local open Tasks and zero active Waves. So a teammate's later first Task arrives only on <code>lf task sync</code> or a lookup by ID. <code>docs/work.md</code> and <code>docs/dev/planning.md</code> in <code>HEAD</code> now document this honestly.
+      A clone whose first read saw an empty remote marks <code>has_read() == true</code>; LOO-1110's <code>exchange_unowned</code> skips repositories with zero open Tasks and zero active Waves, so a teammate's later first Task arrives only on <code>lf task sync</code> or a lookup by ID. <code>docs/work.md</code> and <code>docs/dev/planning.md</code> document this accurately.
     </p>
     <p class="finding-meta">
-      <strong>What it would take:</strong> If empty clones should discover new remote plans automatically, a separate Task would need to add low-frequency polling (or periodic re-read) for empty-plan repos while staying within LOO-1110's idle-server budget.
+      <strong>What it would take:</strong> A separate Task to poll empty-plan repos at low frequency within LOO-1110's idle-server budget, if automatic discovery is wanted.
     </p>
   </div>
 
   <div class="finding">
     <div class="finding-head">
-      <span class="finding-title">F5. Changing a remote's URL in place (<code>git remote set-url origin &lt;new&gt;</code>)</span>
+      <span class="finding-title">F6. Repointing a remote URL in place (<code>git remote set-url origin &lt;new&gt;</code>)</span>
       <span class="badge b-separate">Separate outcome</span>
     </div>
     <p>
-      <code>plan_carriers.peer</code> stores the remote name (<code>"origin"</code>), not its URL, so repointing <code>origin</code> in place keeps <code>seen_seq = 0</code> and does not trigger a new first read.
+      <code>plan_carriers.peer</code> stores the remote's name (<code>"origin"</code>), not its URL, so changing <code>origin</code>'s URL in place keeps <code>seen_seq = 0</code> and does not trigger a new first read.
     </p>
     <p class="finding-meta">
-      <strong>What it would take:</strong> Store or hash the resolved remote URL beside the remote name in <code>plan_carriers</code> while keeping <code>lf repo tracker</code> displaying the short name. Rare today; separate unless it comes up.
+      <strong>What it would take:</strong> Store or hash the resolved URL beside the remote name in <code>plan_carriers</code> while keeping <code>lf repo tracker</code> printing the short name. Rare today.
     </p>
   </div>
 
@@ -997,16 +968,19 @@ Hub mini.</span></div>
   </p>
 
   <div class="question">
-    <div class="q-title">1. On a Machine that uses a Hub, what should happen on the second <code>lf task list</code> in a fresh Git clone (or when the Hub is offline)?</div>
+    <div class="q-title">1. Should <code>lf wave show</code> on a brand-new Machine and <code>lf task show &lt;id&gt;</code> on an unread clone fetch the remote plan like the other read commands?</div>
     <div class="q-context">
-      In <code>HEAD</code> today, the first <code>lf task list</code> fetches from Git and shows the whole plan, but the <em>second</em> <code>lf task list</code> tries to SSH to your Hub with the clone's brand-new random ID (failing with "hub has no checkout" and repeating every 60 seconds). If your Hub is turned off, every read also stalls up to 5 seconds once a minute forever even though Git already read the plan.
+      In <code>HEAD</code> today, cloning on a brand-new Machine (no Loopflow store yet) and running <code>lf wave show</code> prints an empty list even though <code>lf plan list</code> and <code>lf task list</code> fetch and show the team's plan. Separately, <code>lf task show &lt;id&gt;</code> fails with "not registered" on an unread clone while <code>lf task status &lt;id&gt;</code> and <code>lf task detail &lt;id&gt;</code> both fetch and find it.
     </div>
     <ul class="opt-list">
       <li class="opt rec">
-        <span class="opt-key">1a</span> <strong>(Recommended) Once the clone has read from either Git or the Hub, later reads stay instant and local</strong> — fixes the second-read Hub failure and offline-Hub stalls. Hub-only clones (with no Git remote) still pull from the Hub on their first list; Git+Hub clones read once and let the Hub join normally on saves and syncs.
+        <span class="opt-key">1a</span> <strong>(Recommended) Yes — fix both (plus the offline-Hub cooldown edge case) in LOO-1113</strong> — every plan overview and single-Task read behaves the same on a fresh clone or brand-new Machine, matching what <code>docs/work.md</code> already promises.
       </li>
       <li class="opt">
-        <span class="opt-key">1b</span> <strong>Keep requiring both Git and the Hub to each succeed once (current <code>HEAD</code>)</strong> — accepts the second-read SSH failure and 5-second stalls every minute whenever a Hub is unreachable or doesn't yet know a fresh Git clone.
+        <span class="opt-key">1b</span> <strong>Fix <code>lf wave show</code> (and the cooldown edge case) only; leave <code>lf task show &lt;id&gt;</code> store-only</strong> — keeps <code>lf task show</code> strictly local as a Desktop pane read, while fixing the broken documented command.
+      </li>
+      <li class="opt">
+        <span class="opt-key">1c</span> <strong>Ship <code>HEAD</code> as-is</strong> — accepts <code>lf wave show</code> returning empty on a brand-new Machine and <code>lf task show</code> failing on unread clones.
       </li>
     </ul>
   </div>
@@ -1030,38 +1004,41 @@ Hub mini.</span></div>
   </div>
 
   <div class="question">
-    <div class="q-title">3. Confirm the offline first-read cooldown already built in <code>HEAD</code>: when a fresh clone's first list fails offline, when should reads try again?</div>
+    <div class="q-title">3. When you are offline on an unread clone, how should repeated reads behave?</div>
     <div class="q-context">
-      Adopted headless in <code>HEAD</code>. If you clone a repo and run <code>lf task list</code> with no network, it waits up to 5 seconds and falls back to the local store.
+      The first <code>lf task list</code> tries to reach the remote (waiting up to 5 seconds) and then shows your local Tasks. Because the clone has still never read the remote, Loopflow has to decide what the next <code>lf task list</code> two seconds later should do.
     </div>
     <ul class="opt-list">
       <li class="opt rec">
-        <span class="opt-key">3a</span> <strong>(Recommended) Wait 60 seconds before retrying automatically (current <code>HEAD</code>)</strong> — repeated lists while offline are instant; once back online, a list a minute later (or <code>lf task sync</code> anytime) fetches the remote plan.
+        <span class="opt-key">3a</span> <strong>(Recommended) Wait 60 seconds after a failed first read before trying again (current <code>HEAD</code>)</strong> — repeat offline reads answer immediately, and once you reconnect the first read after a minute (or immediately after any successful push or <code>lf task sync</code>) catches up automatically.
       </li>
       <li class="opt">
-        <span class="opt-key">3b</span> <strong>Retry on every read</strong> — fetches immediately as soon as you reconnect, at the cost of stalling up to 5 seconds on every read while offline.
+        <span class="opt-key">3b</span> <strong>Try on every read until one succeeds</strong> — catches up the instant you reconnect, at the cost of a 5-second pause on every offline read.
+      </li>
+      <li class="opt">
+        <span class="opt-key">3c</span> <strong>Stop retrying on reads after the first failure until you run <code>lf task sync</code></strong> — zero offline pauses after try #1, but reconnecting won't pull the remote plan on a plain <code>lf task list</code>.
       </li>
     </ul>
   </div>
 
   <div class="question">
-    <div class="q-title">4. Confirm empty-clone background behavior already built in <code>HEAD</code>: if a clone's first read sees zero Tasks and a teammate adds the first Task later, should the background server keep polling that empty clone?</div>
+    <div class="q-title">4. If you clone a repo before anyone has created any Tasks in it, and a teammate later creates the first Task, should your clone pick it up automatically?</div>
     <div class="q-context">
-      Adopted headless in <code>HEAD</code> to preserve LOO-1110's idle-server budget (no background <code>git fetch</code> on repositories with zero local Tasks and zero Waves).
+      Your first <code>lf task list</code> fetches the empty remote and marks the clone read. To keep idle repositories from generating background Git traffic, the local server only polls repos that already have at least one open Task or Wave.
     </div>
     <ul class="opt-list">
       <li class="opt rec">
-        <span class="opt-key">4a</span> <strong>(Recommended) Keep empty clones quiet (current <code>HEAD</code>)</strong> — zero idle background fetches; a teammate's very first Task arrives via <code>lf task sync</code> or looking it up by ID. Once the clone has any open Task or Wave, background sync runs every minute.
+        <span class="opt-key">4a</span> <strong>(Recommended) Keep empty clones quiet (current <code>HEAD</code>)</strong> — zero background network traffic on repos you aren't using Loopflow in; run <code>lf task sync</code> (or look up a Task by ID) to pull a teammate's first Task.
       </li>
       <li class="opt">
-        <span class="opt-key">4b</span> <strong>Poll previously-read empty clones too</strong> — file a separate Task so a teammate's first Task appears automatically in an empty clone, accepting periodic background <code>git fetch</code> on idle repos.
+        <span class="opt-key">4b</span> <strong>File a separate Task to poll empty clones periodically</strong> — teammates' first Tasks appear automatically without running <code>lf task sync</code>, at the cost of periodic background fetches for empty repos.
       </li>
     </ul>
   </div>
 
   <footer>
-    <span>Reviewed <code>HEAD ba211424c3</code> against <code>origin/main 6c2560bd0f</code> · <code>scratch/concept-review.html</code></span>
-    <span>No code, docs, migrations, or plan files modified.</span>
+    <span>Generated from HEAD <code>b9ab216a14</code> vs base <code>6c2560bd0f</code> (LOO-1113)</span>
+    <span><code>scratch/concept-review.html</code></span>
   </footer>
 </main>
 </body>

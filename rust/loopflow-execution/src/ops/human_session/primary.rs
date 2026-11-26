@@ -616,18 +616,26 @@ mod tests {
                 (repo, checkout, id)
             };
             let (_opened_repo, opened_checkout, opened) = make_task("Opened by person");
-            let (_prepared_repo, prepared_checkout, prepared) = make_task("Prepared by checkout");
+            let (_prepared_repo, prepared_checkout, prepared) = make_task("Prepared without start");
 
-            let (opened_session, started) =
-                super::ensure_task(&store, &opened_checkout, opened.as_str(), None, true)
-                    .await
-                    .unwrap();
-            assert!(started);
-            let (prepared_session, started) =
-                super::ensure_task(&store, &prepared_checkout, prepared.as_str(), None, false)
-                    .await
-                    .unwrap();
-            assert!(started);
+            let opened_session = crate::ops::human_session::select_connection(
+                &store,
+                &opened_checkout,
+                crate::ops::human_session::SessionTarget::Task(opened.as_str()),
+                true,
+            )
+            .await
+            .unwrap();
+            assert!(opened_session.started);
+            let prepared_session = crate::ops::human_session::select_connection(
+                &store,
+                &prepared_checkout,
+                crate::ops::human_session::SessionTarget::Task(prepared.as_str()),
+                false,
+            )
+            .await
+            .unwrap();
+            assert!(prepared_session.started);
 
             let now = time::OffsetDateTime::now_utc().unix_timestamp();
             let due = crate::ops::recovery::due_task_conversations(&store.sqlite, now).unwrap();
@@ -637,11 +645,11 @@ mod tests {
                     .map(|row| row.session.as_str())
                     .collect::<Vec<_>>(),
                 vec![prepared_session.id.as_str()],
-                "background checkout preparation is immediately due, while a person's prepare holds recovery off"
+                "preparing without launch is immediately due, while a person's start holds recovery off"
             );
             assert!(
                 due.next_at.is_some_and(|at| at > now),
-                "the person's prepared primary still wakes recovery after the initial backoff"
+                "the person's started primary still wakes recovery after the initial backoff"
             );
             let later =
                 crate::ops::recovery::due_task_conversations(&store.sqlite, now + 60).unwrap();
@@ -649,7 +657,7 @@ mod tests {
                 later
                     .now
                     .iter()
-                    .any(|row| row.session == opened_session.id),
+                    .any(|row| row.session.as_str() == opened_session.id.as_str()),
                 "if the caller never starts it, recovery starts it after the backoff"
             );
         });

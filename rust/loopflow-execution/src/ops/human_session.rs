@@ -273,10 +273,13 @@ pub async fn existing_connection(
 }
 
 /// The conversation `lf resume` selects, created when its scope has none.
+/// When `person_starting` is true, a newly created Task primary holds the
+/// server's recovery pass off while the caller's own launch comes up.
 pub async fn select_connection(
     store: &SharedStore,
     cwd: &Path,
     target: SessionTarget<'_>,
+    person_starting: bool,
 ) -> Result<Selected> {
     use crate::session::PrimaryScope;
     let target = resolve_target(store, target).await?;
@@ -294,7 +297,7 @@ pub async fn select_connection(
         PrimaryScope::Repository(repo) => primary::ensure(store, repo.as_path(), None).await?,
         PrimaryScope::Wave(wave) => primary::ensure(store, cwd, Some(wave.as_str())).await?,
         PrimaryScope::Task(task) => {
-            primary::ensure_task(store, cwd, task.as_str(), None, true).await?
+            primary::ensure_task(store, cwd, task.as_str(), None, person_starting).await?
         }
         _ => anyhow::bail!("Unsupported conversation scope: {scope:?}"),
     };

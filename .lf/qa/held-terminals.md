@@ -90,3 +90,24 @@ and prefixes the last argument, lf's remote command, with `. <remote env>;`.
 remote-TTY view is `ssh -tt <host> '<env>; lf resume --task <id>'`; read the
 stand-in's log over SSH. Stop the remote server by `lsof -t` on its store,
 then its `lf holder run`, and delete the directory: that disk is nearly full.
+
+# Titles
+
+The server writes a held terminal's title as `ESC]0;<name>BEL` into its
+output stream; log the view's PTY output and grep it. A viewer under tmux
+renames its own window: run the view with `TMUX=/tmp/fake,1,0 TMUX_PANE=%7`
+and a `tmux` script first on `PATH` that appends its arguments to a file.
+Have the stand-in dump `env | grep -E '^(LF_|CLAUDE)'` to a file at start
+(`ps eww` shows no environment for a holder's child); piping hook JSON
+(`session_id` = its `--session-id`, `cwd`) into
+`env $(cat agent.env) lf __context-block --moment stop` from the checkout
+yields the turn, so the title gains `· Available`. Availability by quiet
+time (120 s after `observed_at`) needs `program_status` NULL: one OSC 7501
+report leaves `{"seen":true}` for good, so use a fresh conversation, then
+`lf steer <task> '…'` and fire `--moment tool` to deliver it, which sets
+`yielded=0`; the title turns Available 120 s later with no revision moving
+(`select * from store_revisions` before and after). A Task at an
+interactive step needs `graph:` in `.lf/config.yaml` committed and merged
+into the Task's checkout before `lf task run`. `sample <server> 1` shows
+`title-reader` in `recv` when nothing is due and `recv_timeout` when a
+deadline is armed.

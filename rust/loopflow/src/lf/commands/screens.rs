@@ -162,12 +162,21 @@ pub fn board(
     Ok(plan.into())
 }
 
+/// Whether a Task lookup stays in the selected repository or falls back across
+/// all recorded repositories.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TaskScope {
+    Repository,
+    RepositoryOrAny,
+}
+
 /// The store and the Task `issue` names from `repo`. A CLI read that misses
 /// asks the plan first, as `lf task status <id>` does; a served read answers
 /// from the store.
 pub(crate) fn registered_task(
     repo: &Path,
     issue: &str,
+    scope: TaskScope,
 ) -> Result<(loopflow_execution::store::SharedStore, Task)> {
     let store = loopflow_execution::store::read_existing_registry()?.map(Arc::new);
     if let Some(store) = &store {
@@ -177,9 +186,10 @@ pub(crate) fn registered_task(
             Some(&repo.to_string_lossy()),
         )? {
             Some(id) => Some(id),
-            None => {
+            None if scope == TaskScope::RepositoryOrAny => {
                 loopflow_execution::store::children::resolve_task_id(&store.sqlite, issue, None)?
             }
+            None => None,
         };
         if let Some(task) = id.map(|id| store.sqlite.task(&id)).transpose()?.flatten() {
             return Ok((Arc::clone(store), task));
@@ -214,7 +224,7 @@ pub(crate) fn registered_task(
 
 pub fn task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {
     let repo = loopflow_execution::repo::working_directory_in(directory)?;
-    let (store, task) = registered_task(&repo, issue)?;
+    let (store, task) = registered_task(&repo, issue, TaskScope::RepositoryOrAny)?;
     let id = task.id.clone();
     let pane = loopflow_execution::runtime::block_on(async {
         let status = loopflow_execution::ops::task::registered_task_status(&store, task).await?;

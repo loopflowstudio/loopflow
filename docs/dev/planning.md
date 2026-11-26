@@ -286,9 +286,10 @@ Task or a non-retired Wave and no local claims; empty clones stay quiet.
 Before a non-subscribing plan-reading CLI command (`lf task list`,
 `lf repo tracker`, `lf plan list`, `lf plan board`, `lf wave list`,
 `lf wave show`, `lf wave status`, `lf wave plan`) opens the store,
-`before_first_read` opens it (creating it on a Machine's first command when the
-clone has a Git remote) and checks whether this clone has read from either current
-carrier (the Git remote's row or, when a hub is set and the clone has a
+`before_first_read` checks whether this clone has read from either current
+carrier (on a Machine with no store yet, it fetches the Git remote's plan refs
+first and creates the store only when the remote carries a plan; otherwise it
+checks whether the Git remote's row or, when a hub is set and the clone has a
 repository id, the hub's row has `seen_seq` set). Once either has read, later
 reads skip it. Otherwise it runs the eligible carriers together, each up to
 five seconds. A clone that already saved locally still reads on its first list

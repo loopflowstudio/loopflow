@@ -665,7 +665,8 @@ pub(crate) fn read_task_pane(
         &loopflow_execution::repo::working_directory_in(directory)?,
         Some(issue),
     )?;
-    let (store, task) = super::screens::registered_task(&repo, issue)?;
+    let (store, task) =
+        super::screens::registered_task(&repo, issue, super::screens::TaskScope::Repository)?;
     loopflow_execution::runtime::block_on(async {
         let status = loopflow_execution::ops::task::registered_task_status(&store, task).await?;
         super::waves::task_pane(&store, status).await

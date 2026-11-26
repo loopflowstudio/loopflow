@@ -350,6 +350,46 @@ pub fn exchange(store: &SqliteStore, repo: &str, until: Option<Instant>) -> Resu
     })
 }
 
+/// Fetch `remote`'s plan refs without opening a store, returning the fetched
+/// `(machine_id, commit_oid)` tips. Used before creating a store on a fresh
+/// Machine so a repository with no remote plan leaves the registry absent.
+pub(super) fn fetch_seen(
+    path: &Path,
+    remote: &str,
+    until: Option<Instant>,
+) -> Result<HashMap<String, String>> {
+    git_until(
+        path,
+        &[
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            "--prune",
+            "--no-write-fetch-head",
+            "--no-recurse-submodules",
+            remote,
+            &format!("+{OWN}*:{SEEN}*"),
+        ],
+        None,
+        until,
+    )?;
+    seen_refs(path, until)
+}
+
+/// Complete an exchange from refs already fetched by [`fetch_seen`].
+pub(super) fn exchange_seen(
+    store: &SqliteStore,
+    repo: &str,
+    remote: &str,
+    seen: &HashMap<String, String>,
+    until: Option<Instant>,
+) -> Result<()> {
+    let repository = crate::repository::location::ensure_repository(store, repo)?;
+    turn(store, repo, remote, &repository, until, |sent_seq| {
+        exchange_with_seen(store, repo, remote, &repository, sent_seq, seen, until)
+    })
+}
+
 /// Push the records changed here onto this Machine's ref as last fetched,
 /// fetching nothing, and give up at `until`. A push the remote refuses (its
 /// copy of the ref is ahead of the one fetched) is the error, and the next
@@ -416,24 +456,21 @@ fn exchange_with(
     sent_seq: i64,
     until: Option<Instant>,
 ) -> Result<()> {
+    let seen = fetch_seen(Path::new(repo), remote, until)?;
+    exchange_with_seen(store, repo, remote, repository, sent_seq, &seen, until)
+}
+
+fn exchange_with_seen(
+    store: &SqliteStore,
+    repo: &str,
+    remote: &str,
+    repository: &RepositoryId,
+    sent_seq: i64,
+    seen: &HashMap<String, String>,
+    until: Option<Instant>,
+) -> Result<()> {
     let path = Path::new(repo);
-    git_until(
-        path,
-        &[
-            "fetch",
-            "--quiet",
-            "--no-tags",
-            "--prune",
-            "--no-write-fetch-head",
-            "--no-recurse-submodules",
-            remote,
-            &format!("+{OWN}*:{SEEN}*"),
-        ],
-        None,
-        until,
-    )?;
     let me = crate::store::machines::local_machine(store)?.id;
-    let seen = seen_refs(path, until)?;
     let mine = seen.get(me.as_str());
 
     // A ref that cannot be read does not stop the others or this Machine's push.
@@ -441,7 +478,7 @@ fn exchange_with(
     let mut not_taken = Vec::new();
     let taken = store.plan_ref_tips(repo)?;
     let names = crate::store::ownership::machine_names(store)?;
-    for (machine, tip) in &seen {
+    for (machine, tip) in seen {
         if machine == me.as_str() || taken.get(machine) == Some(tip) {
             continue;
         }

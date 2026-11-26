@@ -232,10 +232,37 @@ pub async fn before_first_read(directory: &Path) {
     if crate::journal::request::active() {
         return;
     }
-    let Ok(Some((store, repo))) = carried(directory) else {
+    let Ok(repo) = crate::repository::discover(directory).map(|r| r.to_string()) else {
         return;
     };
+    if crate::ops::tracker::connected(&repo) {
+        return;
+    }
+    let path = crate::store::default_db_path();
     let until = Instant::now() + WAIT;
+    if !path.exists() {
+        let Some(remote) = super::plan_git::remote(Path::new(&repo)) else {
+            return;
+        };
+        let repo_for_fetch = repo.clone();
+        let exchanged = crate::journal::request::spawn_blocking(move || {
+            let seen =
+                super::plan_git::fetch_seen(Path::new(&repo_for_fetch), &remote, Some(until))?;
+            if seen.is_empty() {
+                return Ok(());
+            }
+            let store = crate::store::open_sqlite(&path)?;
+            super::plan_git::exchange_seen(&store, &repo_for_fetch, &remote, &seen, Some(until))
+        })
+        .await
+        .map_err(Into::into)
+        .and_then(|result| result);
+        went_on(&repo, exchanged);
+        return;
+    }
+    let Ok(store) = crate::store::open_sqlite(&path) else {
+        return;
+    };
     let exchanged = first_read_at(&store, &repo, until, unix_secs(SystemTime::now())).await;
     went_on(&repo, exchanged.map(drop));
 }
@@ -376,14 +403,8 @@ where
     Err(first_error.expect("at least one carrier ran"))
 }
 
-/// The store and repository of `directory` when the repository has no Linear
-/// or Asana and something carries its plan: a Git remote, or a store that
-/// may name a hub. A first Machine opens its store here.
-fn carried(directory: &Path) -> Result<Option<(SqliteStore, String)>> {
-    let repo = crate::repository::discover(directory)?.to_string();
-    carried_store(&repo).map(|store| store.map(|store| (store, repo)))
-}
-
+/// The store for `repo` when the repository has no Linear or Asana and
+/// something carries its plan: a Git remote, or a store that may name a hub.
 fn carried_store(repo: &str) -> Result<Option<SqliteStore>> {
     let path = crate::store::default_db_path();
     if crate::ops::tracker::connected(repo)

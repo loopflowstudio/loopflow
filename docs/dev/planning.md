@@ -286,7 +286,8 @@ Task or a non-retired Wave and no local claims; empty clones stay quiet.
 Before a non-subscribing plan-reading CLI command (`lf task list`,
 `lf repo tracker`, `lf plan list`, `lf plan board`, `lf wave list`,
 `lf wave show`, `lf wave status`, `lf wave plan`) opens the store,
-`before_first_read` checks whether this clone has read from either current
+`before_first_read` opens it (creating it on a Machine's first command when the
+clone has a Git remote) and checks whether this clone has read from either current
 carrier (the Git remote's row or, when a hub is set and the clone has a
 repository id, the hub's row has `seen_seq` set). Once either has read, later
 reads skip it. Otherwise it runs the eligible carriers together, each up to
@@ -295,7 +296,10 @@ because `plan_git::send` pushes without fetching and leaves `seen_seq` NULL;
 any full exchange marks it once every ref reads cleanly. If every carrier that
 ran fails or times out, the clone stays unread and `plan-first-read:<repo>` in
 `planning_scope_checks` skips retries for 60 s so offline reads do not stall
-every time. A served request for an unread clone answers from the store once
+every time; the wait applies only while every eligible carrier's row records an
+error, so a hub that is still off does not hold back a Git remote that came
+back. `lf task status <id>`, `lf task detail <id>` and `lf task show <id>` ask
+the plan when the Task is not in the store. A served request for an unread clone answers from the store once
 and exchanges after its reply; subscriptions (both served and `--subscribe`)
 read the store alone and do not trigger an exchange. Task creation reads
 nothing first: the send after its save takes in what changed at the hub. A

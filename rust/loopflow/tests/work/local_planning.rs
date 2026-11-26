@@ -3097,21 +3097,30 @@ fn fresh_clone_reads_remote_plan_after_task_create_and_on_first_wave_list() {
     titles.sort_unstable();
     assert_eq!(titles, ["A", "B"]);
 
-    // Home C clones and runs `lf wave list --json` as its very first command:
-    // it must fetch the remote plan and list Wave `alpha` from A.
+    // Home C is a brand-new Machine with no store yet. `lf wave show` is its
+    // very first command and skips process admission: it must still fetch the
+    // remote plan and show Wave `alpha` with A's and B's Tasks.
     let clone_c = clone_origin("c");
-    let waves = lf(&clone_c, home_c.path(), &["wave", "list", "--json"]);
-    let names: Vec<&str> = waves
+    let shown = lf(&clone_c, home_c.path(), &["wave", "show", "--json"]);
+    let names: Vec<&str> = shown["waves"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|entry| entry["name"].as_str().unwrap())
+        .map(|entry| entry["wave"]["name"].as_str().unwrap())
         .collect();
-    assert!(names.contains(&"alpha"), "expected wave alpha in {waves}");
+    assert!(names.contains(&"alpha"), "expected wave alpha in {shown}");
+    let mut titles: Vec<&str> = shown["tasks"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["task"]["name"].as_str().unwrap())
+        .collect();
+    titles.sort_unstable();
+    assert_eq!(titles, ["A", "B"]);
 }
 
 #[test]
-fn fresh_clone_task_detail_finds_remote_task() {
+fn fresh_clone_task_detail_and_show_find_remote_task() {
     let origin = TestRepo::new();
     let home_a = tempfile::tempdir().unwrap();
     let home_b = tempfile::tempdir().unwrap();
@@ -3145,4 +3154,10 @@ fn fresh_clone_task_detail_finds_remote_task() {
     let detail = lf(&clone_b, home_b.path(), &["task", "detail", id, "--json"]);
     assert_eq!(detail["task"]["id"], id);
     assert_eq!(detail["task"]["name"], "From A");
+
+    // `lf task show` on another fresh home finds it the same way.
+    let home_c = tempfile::tempdir().unwrap();
+    let pane = lf(&clone_b, home_c.path(), &["task", "show", id, "--json"]);
+    assert_eq!(pane["task"]["id"], id);
+    assert_eq!(pane["task"]["title"], "From A");
 }

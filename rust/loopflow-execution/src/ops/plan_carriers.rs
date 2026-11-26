@@ -323,8 +323,8 @@ where
     }
 
     let scope = format!("plan-first-read:{repo}");
-    let errored = git_row.as_ref().is_some_and(|held| held.error.is_some())
-        || hub_row.as_ref().is_some_and(|held| held.error.is_some());
+    let errored = (!has_git || git_row.as_ref().is_some_and(|held| held.error.is_some()))
+        && (!has_hub || hub_row.as_ref().is_some_and(|held| held.error.is_some()));
     let mut stamped = false;
     if errored {
         match store.begin_scope_check(&scope, now, FIRST_READ_COOLDOWN_SECS)? {
@@ -384,15 +384,22 @@ where
     }
 }
 
-/// The store and repository of `directory`, when this Machine has a store
-/// and the repository has no Linear or Asana.
+/// The store and repository of `directory` when the repository has no Linear
+/// or Asana and something carries its plan: a Git remote, or a store that
+/// may name a hub. A first Machine opens its store here.
 fn carried(directory: &Path) -> Result<Option<(SqliteStore, String)>> {
     let repo = crate::repository::discover(directory)?.to_string();
+    carried_store(&repo).map(|store| store.map(|store| (store, repo)))
+}
+
+fn carried_store(repo: &str) -> Result<Option<SqliteStore>> {
     let path = crate::store::default_db_path();
-    if !path.exists() || crate::ops::tracker::connected(&repo) {
+    if crate::ops::tracker::connected(repo)
+        || (!path.exists() && super::plan_git::remote(Path::new(repo)).is_none())
+    {
         return Ok(None);
     }
-    Ok(Some((crate::store::open_sqlite(&path)?, repo)))
+    Ok(Some(crate::store::open_sqlite(&path)?))
 }
 
 /// A command that read the plan first goes on without it.
@@ -459,11 +466,9 @@ fn exchange_after_command(repo: &str) -> Result<()> {
         repo,
         completed: false,
     };
-    let path = crate::store::default_db_path();
-    if !path.exists() || crate::ops::tracker::connected(repo) {
+    let Some(store) = carried_store(repo)? else {
         return Ok(());
-    }
-    let store = crate::store::open_sqlite(&path)?;
+    };
     loop {
         let result = exchange(&store, repo, None);
         let mut turns = TURNS.lock().expect("plan turns are never poisoned");

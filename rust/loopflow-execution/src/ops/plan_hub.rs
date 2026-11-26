@@ -562,4 +562,89 @@ mod tests {
         assert_eq!(git_calls.load(Ordering::SeqCst), 1);
         assert_eq!(hub_calls.load(Ordering::SeqCst), 1);
     }
+
+    #[tokio::test]
+    async fn an_offline_hub_does_not_hold_back_a_git_remote_that_came_back() {
+        let root = tempfile::tempdir().unwrap();
+        let origin = loopflow_test_support::TestRepo::new();
+        let clone_dir = root.path().join("clone");
+        git(
+            root.path(),
+            &[
+                "clone",
+                "-q",
+                origin.bare_path().to_str().unwrap(),
+                clone_dir.to_str().unwrap(),
+            ],
+        );
+        let clone_repo = clone_dir
+            .canonicalize()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+
+        let hub_store =
+            crate::store::opening::open_ephemeral(&root.path().join("hub/loopflow.db")).unwrap();
+        let clone_store =
+            crate::store::opening::open_ephemeral(&root.path().join("clone/loopflow.db")).unwrap();
+        let hub_machine = crate::store::machines::local_machine(&hub_store).unwrap();
+        crate::store::machines::add_machine(&clone_store, &hub_machine.id, "hub", "hub").unwrap();
+        set_hub(&clone_store, Some(&hub_machine.id)).unwrap();
+        crate::repository::location::ensure_repository(&clone_store, &clone_repo).unwrap();
+
+        let git_online = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let git_calls = Arc::new(AtomicUsize::new(0));
+        let run = |now: i64| {
+            let clone_store = &clone_store;
+            let clone_repo = clone_repo.as_str();
+            let git_online = Arc::clone(&git_online);
+            let git_calls = Arc::clone(&git_calls);
+            let until = Instant::now() + Duration::from_secs(60);
+            async move {
+                first_read_with(
+                    clone_store,
+                    clone_repo,
+                    until,
+                    now,
+                    |store, repo, until| {
+                        git_calls.fetch_add(1, Ordering::SeqCst);
+                        let res = if git_online.load(Ordering::SeqCst) {
+                            super::super::plan_git::exchange(store, repo, Some(until))
+                        } else {
+                            Err(anyhow::anyhow!("network is down"))
+                        };
+                        async move { res }
+                    },
+                    |store, repo, until| {
+                        let res = exchange_with(store, repo, Why::Read(until), |_, _, _, _| {
+                            Err(anyhow::anyhow!("hub unreachable"))
+                        });
+                        async move { res }
+                    },
+                )
+                .await
+            }
+        };
+
+        // Offline: both fail, the cooldown starts, and the hub keeps its error.
+        assert!(run(1_000).await.is_err());
+        assert!(clone_store
+            .plan_carrier(&clone_repo, Carrier::Hub)
+            .unwrap()
+            .unwrap()
+            .error
+            .is_some());
+
+        // Git is back with no error of its own; 25 s later the hub's error does
+        // not keep it waiting out the minute.
+        git_online.store(true, Ordering::SeqCst);
+        assert!(run(1_025).await.unwrap());
+        assert_eq!(git_calls.load(Ordering::SeqCst), 2);
+        assert!(clone_store
+            .plan_carrier(&clone_repo, Carrier::Git)
+            .unwrap()
+            .unwrap()
+            .has_read());
+    }
 }

@@ -12,7 +12,7 @@ use super::waves::{
 use loopflow_execution::durable::{GraphProcessDetail, TaskSection, TaskState};
 use loopflow_execution::ops::human_session::{SessionRecord, SessionState};
 use loopflow_model::comment::TaskComments;
-use loopflow_storage::work::task::{CiCheck, CiState};
+use loopflow_storage::work::task::{CiCheck, CiState, Task};
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PlanBoard {
@@ -162,8 +162,13 @@ pub fn board(
     Ok(plan.into())
 }
 
-pub fn task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {
-    let repo = loopflow_execution::repo::working_directory_in(directory)?;
+/// The store and the Task `issue` names from `repo`. A CLI read that misses
+/// asks the plan first, as `lf task status <id>` does; a served read answers
+/// from the store.
+pub(crate) fn registered_task(
+    repo: &Path,
+    issue: &str,
+) -> Result<(loopflow_execution::store::SharedStore, Task)> {
     let mut store = loopflow_execution::store::read_existing_registry()?.map(Arc::new);
     let mut task = match &store {
         Some(store) => {
@@ -184,8 +189,8 @@ pub fn task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {
         None => None,
     };
     if task.is_none() && !loopflow_execution::journal::request::active() {
-        let main = loopflow_execution::git::worktrees::main_repo_root(&repo)
-            .unwrap_or_else(|_| repo.clone());
+        let main = loopflow_execution::git::worktrees::main_repo_root(repo)
+            .unwrap_or_else(|_| repo.to_path_buf());
         let (writable, found) = loopflow_execution::runtime::block_on(async {
             let writable = loopflow_execution::ops::planning_sync::planning_store().await?;
             let found = loopflow_execution::ops::planning_sync::find_task(
@@ -207,6 +212,12 @@ pub fn task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {
         )
         .with(serde_json::json!({ "issue": issue }))
     })?;
+    Ok((store, task))
+}
+
+pub fn task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {
+    let repo = loopflow_execution::repo::working_directory_in(directory)?;
+    let (store, task) = registered_task(&repo, issue)?;
     let id = task.id.clone();
     let pane = loopflow_execution::runtime::block_on(async {
         let status = loopflow_execution::ops::task::registered_task_status(&store, task).await?;

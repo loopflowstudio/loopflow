@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1114 ship review: titles follow the store, not a clock</title>
+<style>
+:root{--bg:#ffffff;--surface:#f7f8fa;--text:#161b22;--muted:#57606a;--border:#d8dee6;--code-bg:#f0f3f6;--accent:#0969da;--accent-bg:#ddf4ff;--yes:#1a7f37;--yes-bg:#dafbe1;--warn:#9a6700;--warn-bg:#fff8c5;--no:#cf222e;--no-bg:#ffebe9;--prop:#8250df;--prop-bg:#fbefff}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--text:#e6edf3;--muted:#8b949e;--border:#30363d;--code-bg:#21262d;--accent:#58a6ff;--accent-bg:#0c2d6b;--yes:#3fb950;--yes-bg:#12261e;--warn:#d29922;--warn-bg:#2b2111;--no:#f85149;--no-bg:#2d1214;--prop:#bc8cff;--prop-bg:#271a3b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+main{max-width:920px;margin:0 auto;padding:40px 24px 80px}
+h1{font-size:26px;margin:0 0 6px}
+h2{font-size:19px;margin:40px 0 10px;padding-top:16px;border-top:1px solid var(--border)}
+h3{font-size:15px;margin:22px 0 6px}
+p.sub{color:var(--muted);margin:0 0 24px}
+code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);padding:1px 5px;border-radius:4px}
+pre{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:14px 16px;overflow-x:auto;margin:10px 0}
+pre code{background:none;padding:0}
+.hl{color:var(--yes);font-weight:600}
+.dim{color:var(--muted)}
+table{border-collapse:collapse;width:100%;margin:10px 0;font-size:14px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+th{color:var(--muted);font-weight:600}
+.pill{display:inline-block;font-size:12px;font-weight:600;padding:1px 8px;border-radius:999px}
+.pass{background:var(--yes-bg);color:var(--yes)}
+.pre{background:var(--warn-bg);color:var(--warn)}
+.task{background:var(--prop-bg);color:var(--prop)}
+.drop{background:var(--code-bg);color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 18px;margin:12px 0}
+.card h3{margin-top:0}
+ol.q>li{margin:14px 0}
+ol.q ol{list-style:lower-alpha;margin-top:4px}
+a{color:var(--accent)}
+</style>
+</head>
+<body>
+<main>
+<h1>Terminal titles follow store changes, not a clock</h1>
+<p class="sub">LOO-1114 · <a href="https://github.com/loopflowstudio/loopflow/pull/2052">PR #2052</a> · head <code>5e39b7dd99</code> · reviewed with nobody present; questions below are still open</p>
+
+<h2>1. What ships</h2>
+<p>An idle <code>lf server</code> stops doing title work. Before, every held terminal woke the host loop and the title reader twice a second, and each wake ran about ten SQL statements, most parsed fresh. Now the reader sleeps on a channel and reads only when the store's <code>sessions</code>, <code>planning</code> or <code>graphs</code> revision moves, or a title's own "Available in 120 s" deadline arrives. Only terminals someone is looking at get read.</p>
+<p>What you see does not change: renames, a Task reaching a waiting step, and <code>· Available</code> still land in the tab title within half a second. From the QA run on a private Machine:</p>
+<pre><code>1795719737.544 title: 87fcc7 Title QA task
+1795719755.432 title: 87fcc7 Renamed by QA                <span class="dim">← lf session rename at .367 (65 ms)</span>
+1795719866.440 title: 87fcc7 Renamed by QA · Available    <span class="dim">← Stop hook at .405 (35 ms)</span>
+1795719880.863 title: 87fcc7 Renamed by QA                <span class="dim">← agent reports working</span>
+1795720028.673 title: 87fcc7 Renamed by QA · Demo         <span class="dim">← lf task run reaches the demo step</span>
+
+1795720079.387 title: 9cd953 Quiet deadline task          <span class="dim">← steer delivered</span>
+1795720199.146 title: 9cd953 Quiet deadline task · Available  <span class="dim">← no write; +120 s exactly</span></code></pre>
+<p>And the cost:</p>
+<table>
+<tr><th>Measurement</th><th>Result</th></tr>
+<tr><td>Idle server, viewed held Task conversation, 30 s</td><td><span class="hl">30 ms CPU</span>; <code>title-reader</code> parked in <code>mpsc::Receiver::recv</code>, zero <code>sqlite3RunParser</code> frames</td></tr>
+<tr><td><code>server_idle.py</code> <code>held_idle</code> (30 held, 5 viewed)</td><td>0.40% CPU, 0 store opens (budget 1%)</td></tr>
+<tr><td><code>server_idle.py</code> <code>held_writes</code> (one writer)</td><td>0.53% CPU, 0 store opens (budget 5%)</td></tr>
+<tr><td>20 renames in 2 s</td><td>4 titles sent, last one lands; 50 ms CPU</td></tr>
+<tr><td>Warm title read, debug</td><td>0.163 ms per read through the pooled store</td></tr>
+</table>
+
+<h2>2. How to try it</h2>
+<p>From this checkout, after <code>lf install</code> of the branch build:</p>
+<pre><code>lf task run &lt;some Task&gt; -a claude        <span class="dim"># open a held Task conversation; leave it idle</span>
+top -pid $(pgrep -f 'lf server run' | head -1)   <span class="dim"># CPU near zero</span>
+lf session rename &lt;session id&gt; 'New name'  <span class="dim"># tab title changes at once</span>
+uv run python scripts/benchmarks/server_idle.py</code></pre>
+<p>The private-Machine route QA used (fake tmux, PTY viewer, isolated <code>LF_HOME</code>) is written up in <code>.lf/qa/held-terminals.md</code> under "Titles". Start reading the diff at <code>rust/loopflow-execution/src/terminal_title.rs</code>; <code>scratch/tour.yaml</code> has the order.</p>
+
+<h2>3. What may surprise you</h2>
+<div class="card"><h3>Unviewed terminals get no title reads</h3>
+<p>A held terminal with no tab is not swept. On attach it shows the retained title at once and the fresh one in the same output chunk (QA: renamed while unviewed, reattached, both lines at <code>…221.326</code>). Passed over: keeping every hosted terminal current.</p></div>
+<div class="card"><h3>Local cmux/tmux viewers still read SQLite</h3>
+<p>Viewers now gate on revisions too (two cached revision reads a second per tab), but they still open the store. Pushing titles over the view stream would end that and make remote <code>lf --machine</code> tabs rename, but bumps the held-terminal protocol 4 → 5, which can't be taken back once released. Kept out of this PR; filed as <strong>LOO-1115</strong>.</p></div>
+<div class="card"><h3><code>now</code> is a bound parameter in the session summary SQL</h3>
+<p><code>available_sql</code> used to format the current time into the statement text, so no statement could be cached. It is now <code>?N</code> in every caller (<code>session_summaries_in</code>, <code>inventory_query</code>, the single-Session summary). This touches <code>lf session list --available</code> as well as titles.</p></div>
+<div class="card"><h3><code>watch_planning</code> is gone</h3>
+<p>Planning subscriptions now read <code>read_stream::watch_revisions</code>, which carries all of <code>StoreRevisions</code>; they filter <code>planning</code> themselves. The title reader uses a sibling, <code>follow_revisions</code>, on a std channel. One observer thread, two subscribe shapes.</p></div>
+<div class="card"><h3>A silent agent death can leave "Available" stale up to 60 s</h3>
+<p>No liveness clock was added. <code>recovery-wake</code> writes within 60 s and that wakes the reader.</p></div>
+<p>Security review: not needed. No auth, credential, outbound data or untrusted input changes.</p>
+<p><strong>CI:</strong> the PR head ran with <code>scratch/</code> present, so the matrix was deferred (<code>scratch-clear</code> success, <code>rust-test</code> and the rest skipped). That is not a test pass; the suites run when delivery clears scratch. Focused local run: <code>cargo test -p loopflow-execution --lib -- terminal_title:: read_stream::</code>, 33 passed.</p>
+
+<h2>4. Findings left outside the PR</h2>
+<table>
+<tr><th>Finding</th><th>Proposal</th></tr>
+<tr><td>Server-pushed titles (<code>Event::Title</code>) so viewers stop reading SQLite and remote cmux/tmux tabs rename. Protocol 4 → 5.</td><td><span class="pill task">Task LOO-1115</span></td></tr>
+<tr><td>Detaching prints <code>Left “87fcc7 Title QA task”</code>, the launch-time name, after a rename. Built at launch in <code>transport.rs</code>; pre-existing.</td><td><span class="pill task">in LOO-1115</span> the viewer will know the current title from the event</td></tr>
+<tr><td><code>recovery-wake</code> runs a second <code>StoreChanges</code> thread on <code>loopflow.db</code>; <code>lifetime::Watcher</code> polls <code>session_attachment</code> every 2 s.</td><td><span class="pill task">Task 1e7e41</span> both onto the shared observer (Linear sync pending)</td></tr>
+<tr><td>Uncached <code>prepare</code>/<code>query_row</code> off the title path.</td><td><span class="pill drop">drop</span> no measured cost; take them as files are touched</td></tr>
+<tr><td>Reader retry after a failed sweep never reached on a real store (WAL readers aren't blocked by <code>BEGIN EXCLUSIVE</code>).</td><td><span class="pill drop">drop</span> unit test <code>reader_retries_after_failed_sweep_and_lands_rename</code> covers it</td></tr>
+<tr><td>Installed-Machine <code>sample</code> on the real <code>~/.lf</code> server.</td><td><span class="pill pre">after install</span> the private server stood in</td></tr>
+</table>
+
+<h2>5. Questions still yours</h2>
+<ol class="q">
+<li>Server-pushed titles and the protocol bump:
+ <ol><li>its own Task, LOO-1115, after this lands (as filed)</li><li>fold into this PR before delivery</li><li>not wanted; delete LOO-1115</li></ol></li>
+<li>Unviewed held terminals:
+ <ol><li>no reads until attached (as built)</li><li>keep every hosted terminal's title current</li></ol></li>
+<li>A silent agent death leaves "Available" stale until <code>recovery-wake</code> (≤ 60 s):
+ <ol><li>acceptable (as built)</li><li>add a liveness check to the reader's deadline</li></ol></li>
+<li>recovery-wake / lifetime watcher onto the shared observer (1e7e41):
+ <ol><li>keep as its own Task</li><li>drop; the cost is small</li></ol></li>
+</ol>
+</main>
+</body>
+</html>

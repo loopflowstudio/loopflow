@@ -1,0 +1,23 @@
+at: a4138f3fc22f27bfedbdeecf690b31e3642dfcbe
+first:
+  - path: docs/work.md
+    why: what a person sees on a fresh clone
+  - path: docs/dev/planning.md
+    why: when each carrier reads, seen_seq for Git
+  - path: rust/loopflow-storage/src/sqlite/plan_carriers.rs
+    why: has_read and plan_read, the one recorded fact
+  - path: rust/loopflow-execution/src/ops/plan_carriers.rs
+    why: before_first_read, the clone-level gate and cooldown
+  - path: rust/loopflow-execution/src/ops/plan_git.rs
+    why: a full exchange marks Git read; first_exchange gone
+  - path: rust/loopflow-execution/src/ops/plan_hub.rs
+    why: hub uses has_read; hub first-read tests
+  - path: rust/loopflow/src/lf/commands/waves.rs
+    why: plan-reading commands call the first read
+  - path: rust/loopflow/src/lf/commands/screens.rs
+    why: task detail and show sync on miss
+  - path: rust/loopflow/tests/work/local_planning.rs
+    why: CLI journeys across fresh homes
+hide:
+  - path: scratch/
+    why: working notes, cleared on land

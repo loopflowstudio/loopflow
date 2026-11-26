@@ -75,7 +75,7 @@ impl SqliteStore {
         let conn = connection.savepoint()?;
         let mut threads: Vec<ThreadFacts> = Vec::new();
         {
-            let mut query = conn.prepare(
+            let mut query = conn.prepare_cached(
                 "SELECT t.provider_thread,t.provider_turn,t.started_at,t.ended_at,t.status,
                         json_extract(c.payload,'$.provider')
                  FROM history.turns t
@@ -128,7 +128,7 @@ impl SqliteStore {
                 });
             }
         }
-        let mut account = conn.prepare(
+        let mut account = conn.prepare_cached(
             "SELECT account_id FROM provider_session_accounts
              WHERE provider=?1 AND provider_session_id=?2",
         )?;
@@ -276,7 +276,7 @@ impl SqliteStore {
     /// it ran on, for the retention summary.
     pub fn retention_sessions(&self) -> StoreResult<Vec<crate::transcript::RetainedSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
+        let mut query = conn.prepare_cached(
             "SELECT s.id,s.title,s.provider,s.provider_thread,s.cwd,
                     MAX(s.created_at,COALESCE(s.completed_at,0)),
                     (SELECT account_id FROM provider_session_accounts a
@@ -304,7 +304,7 @@ impl SqliteStore {
     /// Original input order survives importing earlier observations after later ones.
     pub fn input_events(&self, input: &str) -> StoreResult<Vec<Value>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
+        let mut query = conn.prepare_cached(
             "SELECT e.payload FROM session_events c
              JOIN history.session_history e ON c.seq=e.captured_event AND c.kind='captured' AND c.receipt_key=?1
              WHERE e.kind='events'
@@ -318,7 +318,7 @@ impl SqliteStore {
     /// Each silence the recorder observed in one input, as `(since, until)`.
     pub fn input_silences(&self, input: &str) -> StoreResult<Vec<(i64, i64)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
+        let mut query = conn.prepare_cached(
             "SELECT json_extract(e.payload,'$.evidence.since'),json_extract(e.payload,'$.evidence.observed_at')
              FROM session_events c
              JOIN history.session_history e ON c.seq=e.captured_event AND c.kind='captured' AND c.receipt_key=?1

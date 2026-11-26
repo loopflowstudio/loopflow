@@ -72,7 +72,7 @@ pub fn list(args: &GraphProcessInventoryArgs, json: bool) -> Result<()> {
 /// `lf graph list --runs`' page, scoped to the repository containing
 /// `directory` unless `--all`.
 pub fn page(directory: &Path, args: &GraphProcessInventoryArgs) -> Result<GraphProcessPage> {
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = open_store(&storage_config_from_env()?).await?;
         let repo = if args.all {
             None
@@ -150,7 +150,7 @@ pub fn detail(selector: &str) -> Result<GraphProcessDetail> {
 
 /// The Graph run `selector` names, if one was recorded.
 pub fn find(selector: &str) -> Result<Option<GraphProcessDetail>> {
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = open_store(&storage_config_from_env()?).await?;
         Ok(store.graph_detail(selector).await?)
     })

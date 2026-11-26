@@ -429,9 +429,7 @@ fn task_error(message: impl std::fmt::Display) -> OpsError {
 pub(super) fn block_on_task<T>(
     future: impl std::future::Future<Output = OpsResult<T>>,
 ) -> OpsResult<T> {
-    tokio::runtime::Runtime::new()
-        .map_err(|error| task_error(format!("failed to build task runtime: {error}")))?
-        .block_on(future)
+    crate::runtime::block_on(future)
 }
 
 async fn task_store() -> OpsResult<SharedStore> {

@@ -34,6 +34,7 @@ pub fn task_find(
 impl TaskFileInventory {
     pub(crate) fn scan(worktree: &Path) -> io::Result<Self> {
         let root = worktree.canonicalize()?;
+        crate::observe::record_spawn();
         let output = Command::new("git")
             .args([
                 "ls-files",

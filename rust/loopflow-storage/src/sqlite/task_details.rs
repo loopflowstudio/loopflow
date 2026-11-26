@@ -187,7 +187,7 @@ pub(super) fn states_in(conn: &Connection, ids: &str) -> StoreResult<HashMap<Tas
 }
 
 fn repository_paths_in(conn: &Connection) -> StoreResult<HashMap<RepositoryId, String>> {
-    let mut statement = conn.prepare("SELECT id,repo FROM repository_plans")?;
+    let mut statement = conn.prepare_cached("SELECT id,repo FROM repository_plans")?;
     let rows = statement.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;

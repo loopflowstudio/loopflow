@@ -6,14 +6,14 @@ use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::{mpsc, Notify, Semaphore};
 use tokio::task::{AbortHandle, JoinSet};
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
@@ -42,6 +42,14 @@ const BULK: Duration = Duration::from_secs(120);
 const QUEUE: usize = 64;
 /// How long the listener rests after `accept` fails, as it does out of descriptors.
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
+/// How often a custom-home server checks that its home still exists and whether it is idle.
+const CUSTOM_HOME_CHECK: Duration = Duration::from_secs(2);
+/// How long a custom-home server stays up with no clients, no held terminals,
+/// and no unfinished Graphs or agents.
+const CUSTOM_HOME_IDLE: Duration = Duration::from_secs(10 * 60);
+/// How often an otherwise-idle custom-home server checks SQLite for unfinished
+/// Graphs or agents.
+const CUSTOM_HOME_EXECUTION_CHECK: Duration = Duration::from_secs(30);
 
 type Lines = Framed<UnixStream, LinesCodec>;
 
@@ -154,6 +162,14 @@ fn connected(clients: &Clients) -> Vec<ConnectedClient> {
 }
 
 pub(super) async fn run() -> Result<()> {
+    let home = loopflow_execution::store::lf_home_dir();
+    let custom_home = loopflow_execution::store::custom_home_selected();
+    let home_identity = loopflow_execution::store::home_identity(&home);
+    if custom_home && loopflow_execution::store::home_removed(&home, home_identity) {
+        loopflow_execution::installation::server::retire_self_if_registered();
+        tracing::info!(home = %home.display(), "Custom home is gone; server exiting");
+        return Ok(());
+    }
     loopflow_storage::instrumentation::enable_request_tracing();
     let observations = loopflow_execution::observe::Cache::shared();
     let _transcripts = loopflow_execution::transcript::watch::watch(&observations);
@@ -189,23 +205,19 @@ pub(super) async fn run() -> Result<()> {
     let subscriptions = Arc::new(Subscriptions::default());
     let (remote_control, remote_requests) = mpsc::channel(8);
     super::maintenance::start();
-    super::maintenance::start_plan_exchange();
     tokio::spawn(loopflow_execution::ops::tracker_events::watch_owned_work(
         None,
     ));
     // Held terminals keep running in their holders whether or not this server
     // can host them; without a registry their views wait for the next server.
     let terminals = match Registry::open(&executable_sha256) {
-        Ok(terminals) => {
-            super::recovery::start(terminals.clone());
-            Some(terminals)
-        }
+        Ok(terminals) => Some(terminals),
         Err(error) => {
             tracing::error!(%instance, %error, "Held terminals are not hosted by this server");
             None
         }
     };
-    super::wake::start(terminals.clone());
+    super::recovery::start(terminals.clone());
     let remote = super::remote::manage(
         super::mobile::configured(),
         remote_requests,
@@ -217,12 +229,185 @@ pub(super) async fn run() -> Result<()> {
         subscriptions.clone(),
         terminals.clone(),
     );
+    let shutdown_instance = instance.clone();
+    let client_activity = Arc::new(Notify::new());
+    let lifetime = {
+        let slots = slots.clone();
+        let terminals = terminals.clone();
+        let activity = client_activity.clone();
+        async move {
+            if custom_home {
+                watch_custom_home(
+                    home,
+                    home_identity,
+                    slots,
+                    terminals,
+                    activity,
+                    CustomHomeSchedule {
+                        check_every: CUSTOM_HOME_CHECK,
+                        idle_timeout: CUSTOM_HOME_IDLE,
+                        execution_check_every: CUSTOM_HOME_EXECUTION_CHECK,
+                    },
+                    store_has_unfinished_execution,
+                )
+                .await
+            } else {
+                std::future::pending::<ShutdownReason>().await
+            }
+        }
+    };
     tracing::info!(%instance, socket = %path.display(), "Loopflow server ready");
     tokio::select! {
         result = remote => result,
         _ = peers.expiring() => unreachable!("peer expiry runs until shutdown"),
         _ = tickets.expiring() => unreachable!("ticket expiry runs until shutdown"),
-        result = local(listener, instance, executable_sha256, slots, clients, remote_control, tickets.clone(), subscriptions, terminals) => result,
+        reason = lifetime => {
+            let _ = std::fs::remove_file(&path);
+            match reason {
+                // lf.log would recreate the removed home; stderr is already open.
+                ShutdownReason::HomeRemoved => {
+                    eprintln!("Custom-home Loopflow server exiting: its home was removed (instance {shutdown_instance})");
+                    loopflow_execution::installation::server::retire_self_if_registered();
+                }
+                ShutdownReason::Idle => {
+                    tracing::info!(instance = %shutdown_instance, "Custom-home Loopflow server exiting after idling");
+                }
+            }
+            Ok(())
+        }
+        result = local(listener, instance, executable_sha256, slots, clients, remote_control, tickets.clone(), subscriptions, terminals, client_activity) => result,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShutdownReason {
+    HomeRemoved,
+    Idle,
+}
+
+fn store_has_unfinished_execution(home: &std::path::Path) -> bool {
+    let db = home.join("loopflow.db");
+    if !db.exists() {
+        return false;
+    }
+    loopflow_execution::store::opening::open_read_only_validated(&db)
+        .ok()
+        .and_then(|store| store.has_unfinished_execution().ok())
+        .unwrap_or(false)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CustomHomeSchedule {
+    check_every: Duration,
+    idle_timeout: Duration,
+    execution_check_every: Duration,
+}
+
+async fn watch_custom_home(
+    home: std::path::PathBuf,
+    initial_identity: Option<(u64, u64)>,
+    slots: Arc<Semaphore>,
+    terminals: Option<Arc<Registry>>,
+    client_activity: Arc<Notify>,
+    schedule: CustomHomeSchedule,
+    has_unfinished_execution: impl Fn(&std::path::Path) -> bool + Send + Sync + 'static,
+) -> ShutdownReason {
+    let has_unfinished_execution = Arc::new(has_unfinished_execution);
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    let home_watcher = loopflow_execution::store::HomeRemovalWatcher::new(&home)
+        .ok()
+        .and_then(|watcher| {
+            tokio::io::unix::AsyncFd::with_interest(watcher, tokio::io::Interest::READABLE).ok()
+        });
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let home_watcher: Option<()> = None;
+
+    // When the server last had nothing to serve. Store writes alone are not
+    // work: the owner poll records its own checks every 30 s.
+    let mut idle: Option<SystemTime> = None;
+    let mut store_busy = false;
+
+    loop {
+        if loopflow_execution::store::home_removed(&home, initial_identity) {
+            return ShutdownReason::HomeRemoved;
+        }
+
+        let has_clients = slots.available_permits() < MAX_CONNECTIONS;
+        let has_terminals = terminals
+            .as_deref()
+            .is_some_and(Registry::has_active_terminals);
+        let wait = if has_clients || has_terminals {
+            idle = None;
+            store_busy = false;
+            // With the kernel watch active and client connect/disconnect notifying
+            // `client_activity`, an active server with clients needs no timer at all.
+            has_terminals.then_some(schedule.execution_check_every)
+        } else {
+            let now = SystemTime::now();
+            let elapsed = idle
+                .and_then(|since| now.duration_since(since).ok())
+                .unwrap_or_default();
+            // Query SQLite only on idle entry, while execution was busy, or at
+            // the idle deadline — never on a periodic timer while truly idle.
+            if idle.is_none() || store_busy || elapsed >= schedule.idle_timeout {
+                let check = has_unfinished_execution.clone();
+                let check_home = home.clone();
+                store_busy = tokio::task::spawn_blocking(move || check(&check_home))
+                    .await
+                    .unwrap_or(false);
+                if store_busy {
+                    idle = None;
+                    Some(schedule.execution_check_every)
+                } else if idle.is_some() && elapsed >= schedule.idle_timeout {
+                    return ShutdownReason::Idle;
+                } else {
+                    let since = *idle.get_or_insert(now);
+                    Some(
+                        schedule
+                            .idle_timeout
+                            .saturating_sub(now.duration_since(since).unwrap_or_default()),
+                    )
+                }
+            } else {
+                Some(schedule.idle_timeout.saturating_sub(elapsed))
+            }
+        };
+        let wait = if home_watcher.is_some() {
+            wait
+        } else {
+            Some(wait.map_or(schedule.check_every, |d| d.min(schedule.check_every)))
+        };
+
+        let wait_home = async {
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            if let Some(watcher) = &home_watcher {
+                if let Ok(mut guard) = watcher.readable().await {
+                    watcher.get_ref().drain();
+                    guard.clear_ready();
+                    return;
+                }
+            }
+            std::future::pending::<()>().await;
+        };
+        let wait_timer = async {
+            match wait {
+                Some(duration) => tokio::time::sleep(duration).await,
+                None => std::future::pending::<()>().await,
+            }
+        };
+        tokio::select! {
+            _ = wait_home => {}
+            _ = client_activity.notified() => {}
+            _ = wait_timer => {}
+        }
+    }
+}
+
+struct NotifyOnDrop(Arc<Notify>);
+
+impl Drop for NotifyOnDrop {
+    fn drop(&mut self) {
+        self.0.notify_one();
     }
 }
 
@@ -237,6 +422,7 @@ async fn local(
     tickets: Arc<Tickets>,
     subscriptions: Arc<Subscriptions>,
     terminals: Option<Arc<Registry>>,
+    client_activity: Arc<Notify>,
 ) -> Result<()> {
     loop {
         let (socket, _) = match listener.accept().await {
@@ -269,7 +455,10 @@ async fn local(
         let tickets = tickets.clone();
         let subscriptions = subscriptions.clone();
         let terminals = terminals.clone();
+        let activity = client_activity.clone();
+        activity.notify_one();
         tokio::spawn(async move {
+            let _notify = NotifyOnDrop(activity);
             if let Err(error) = connection(
                 socket,
                 &instance,
@@ -1949,6 +2138,15 @@ async fn served(
             mobile_control(remote_control, Control::Status { reply }).await?;
             serde_json::to_value(result.await.map_err(unavailable)?).map_err(unavailable)
         }
+        Operation::Server(ServerOperation::ServerDiagnostics) => {
+            let diagnostics = super::wire::ServerDiagnostics {
+                threads: loopflow_execution::process::OsProcess::current_thread_count(),
+                store_opens: loopflow_storage::instrumentation::opened_connections(),
+                spawns: loopflow_execution::observe::spawns(),
+                held_facts: loopflow_execution::observe::current_held_facts(),
+            };
+            serde_json::to_value(diagnostics).map_err(unavailable)
+        }
         Operation::Server(ServerOperation::MobileConfigure { configuration }) => {
             let (reply, result) = tokio::sync::oneshot::channel();
             mobile_control(
@@ -1976,17 +2174,15 @@ async fn served(
                 let query = origin.place(query)?;
                 measured_result(measured, || {
                     loopflow_execution::journal::request::isolate(|| {
-                        loopflow_execution::observe::Cache::shared()
-                            .capture(|| match origin {
-                                Origin::Local(peers) => query.read_with(
-                                    &|| requester.strong_count() == 0,
-                                    |machine, sender, read| peers.query(machine, sender, read),
-                                ),
-                                Origin::Machine(_) => {
-                                    query.read_here_until(&|| requester.strong_count() == 0)
-                                }
-                            })
-                            .0
+                        loopflow_execution::observe::Cache::shared().read_once(|| match origin {
+                            Origin::Local(peers) => query.read_with(
+                                &|| requester.strong_count() == 0,
+                                |machine, sender, read| peers.query(machine, sender, read),
+                            ),
+                            Origin::Machine(_) => {
+                                query.read_here_until(&|| requester.strong_count() == 0)
+                            }
+                        })
                     })
                 })
             })
@@ -2554,6 +2750,7 @@ mod tests {
             Arc::new(Tickets::default()),
             Arc::new(Subscriptions::default()),
             None,
+            Arc::new(tokio::sync::Notify::new()),
         );
         // A status probe checks that the listener answers without opening a
         // Machine registry as a hello would.
@@ -4091,7 +4288,8 @@ mod tests {
             assert!(bodies.iter().all(|body| *body == bodies[0]));
             let work = meter::snapshot().since(before);
             meter::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
-            assert_eq!(work.stages["runtime_build"].count, 1);
+            assert_eq!(work.stages.get("runtime_build").map_or(0, |c| c.count), 0);
+            assert_eq!(work.stages["reader_setup"].count, 1);
             assert_eq!(work.stages["projection"].count, 1);
             drop(first.writer);
             first.server.await.unwrap().unwrap();
@@ -4190,10 +4388,10 @@ mod tests {
         meter::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
         assert_eq!(
             work.stages
-                .get("runtime_build")
+                .get("reader_setup")
                 .map_or(0, |count| count.count),
             0,
-            "canceled queued subscription constructed a runtime"
+            "canceled queued subscription constructed a reader"
         );
     }
 
@@ -4548,6 +4746,159 @@ mod tests {
             let plans = request(&mut once, "once", query).await;
             assert_eq!(plans.as_array().unwrap().len(), 2, "{plans}");
         });
+    }
+
+    #[test]
+    fn custom_home_watcher_exits_when_home_is_removed() {
+        use super::{watch_custom_home, CustomHomeSchedule, ShutdownReason};
+        use loopflow_execution::store::home_identity;
+        use tokio::sync::Notify;
+
+        let home = tempfile::tempdir().unwrap();
+        let home_path = home.path().to_path_buf();
+        let initial = home_identity(&home_path);
+        let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+        let _connected_client = slots.clone().try_acquire_owned().unwrap();
+        let activity = Arc::new(Notify::new());
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let reason = runtime.block_on(async move {
+            let watcher = tokio::spawn(watch_custom_home(
+                home_path,
+                initial,
+                slots,
+                None,
+                activity,
+                CustomHomeSchedule {
+                    check_every: Duration::from_secs(60),
+                    idle_timeout: Duration::from_secs(60),
+                    execution_check_every: Duration::from_secs(60),
+                },
+                |_| true,
+            ));
+            tokio::time::sleep(Duration::from_millis(60)).await;
+            assert!(!watcher.is_finished());
+            drop(home);
+            // Kernel home-removal watch exits well before the 60 s fallback timer.
+            tokio::time::timeout(Duration::from_secs(2), watcher)
+                .await
+                .expect("watcher should exit when home is removed")
+                .unwrap()
+        });
+        assert_eq!(reason, ShutdownReason::HomeRemoved);
+    }
+
+    #[test]
+    fn custom_home_watcher_exits_idle_while_the_store_keeps_being_written() {
+        use super::{watch_custom_home, CustomHomeSchedule, ShutdownReason};
+        use loopflow_execution::store::home_identity;
+        use tokio::sync::Notify;
+
+        let home = tempfile::tempdir().unwrap();
+        let home_path = home.path().to_path_buf();
+        let initial = home_identity(&home_path);
+        let wal = home_path.join("loopflow.db-wal");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let reason = runtime.block_on(async move {
+            let watcher = tokio::spawn(watch_custom_home(
+                home_path,
+                initial,
+                Arc::new(Semaphore::new(MAX_CONNECTIONS)),
+                None,
+                Arc::new(Notify::new()),
+                CustomHomeSchedule {
+                    check_every: Duration::from_millis(15),
+                    idle_timeout: Duration::from_millis(120),
+                    execution_check_every: Duration::from_millis(15),
+                },
+                |_| false,
+            ));
+            // The owner poll's scope checks write the store with no work running.
+            let writes = tokio::spawn(async move {
+                let mut wal_len = 0;
+                loop {
+                    wal_len = wal_len % 7 + 1;
+                    std::fs::write(&wal, vec![0; wal_len]).unwrap();
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            });
+            let reason = tokio::time::timeout(Duration::from_secs(2), watcher)
+                .await
+                .expect("store writes alone must not keep the server")
+                .unwrap();
+            writes.abort();
+            reason
+        });
+        assert_eq!(reason, ShutdownReason::Idle);
+    }
+
+    #[test]
+    fn custom_home_watcher_waits_for_clients_and_unfinished_execution_before_idle_exit() {
+        use super::{watch_custom_home, CustomHomeSchedule, ShutdownReason};
+        use loopflow_execution::store::home_identity;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use tokio::sync::Notify;
+
+        let home = tempfile::tempdir().unwrap();
+        let home_path = home.path().to_path_buf();
+        let initial = home_identity(&home_path);
+        let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+        let client = slots.clone().try_acquire_owned().unwrap();
+        let activity = Arc::new(Notify::new());
+        let busy = Arc::new(AtomicBool::new(true));
+        let busy_check = busy.clone();
+        let checks = Arc::new(AtomicUsize::new(0));
+        let checks_count = checks.clone();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let reason = runtime.block_on(async move {
+            let watcher = tokio::spawn(watch_custom_home(
+                home_path,
+                initial,
+                slots,
+                None,
+                activity.clone(),
+                CustomHomeSchedule {
+                    check_every: Duration::from_millis(15),
+                    idle_timeout: Duration::from_millis(120),
+                    execution_check_every: Duration::from_millis(15),
+                },
+                move |_| {
+                    checks_count.fetch_add(1, Ordering::Relaxed);
+                    busy_check.load(Ordering::Relaxed)
+                },
+            ));
+            // Connected client keeps the server alive past idle_timeout without polling the store.
+            tokio::time::sleep(Duration::from_millis(160)).await;
+            assert!(!watcher.is_finished());
+            assert_eq!(checks.load(Ordering::Relaxed), 0);
+            drop(client);
+            activity.notify_one();
+            // Unfinished Graph or agent keeps the server alive past idle_timeout.
+            tokio::time::sleep(Duration::from_millis(160)).await;
+            assert!(!watcher.is_finished());
+            busy.store(false, Ordering::Relaxed);
+            // Wait until the watcher observes idle, then verify it does NOT poll repeatedly while idle.
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            let checks_at_idle = checks.load(Ordering::Relaxed);
+            let reason = tokio::time::timeout(Duration::from_secs(2), watcher)
+                .await
+                .expect("watcher should exit once idle")
+                .unwrap();
+            assert!(
+                checks.load(Ordering::Relaxed) <= checks_at_idle + 2,
+                "idle watcher should only confirm store at deadline, not poll every tick"
+            );
+            reason
+        });
+        assert_eq!(reason, ShutdownReason::Idle);
     }
 }
 

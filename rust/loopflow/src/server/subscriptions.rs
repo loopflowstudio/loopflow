@@ -179,37 +179,15 @@ impl Subscriptions {
         ))
     }
 
-    // Ownership entries and Task moves advance the planning revision. One
-    // watcher serves every routed demand, including while its peer is quiet.
+    // Ownership entries and Task moves advance the planning revision. Reuses
+    // `read_stream`'s shared store observer without spawning a separate thread.
     fn planning(&self, database: &std::path::Path) -> Arc<watch::Receiver<Option<i64>>> {
         let mut shared = lock(&self.planning);
         if let Some(revisions) = shared.upgrade() {
             return revisions;
         }
-        let database = database.to_owned();
-        let (send, receive) = watch::channel(None);
-        let revisions = Arc::new(receive);
+        let revisions = Arc::new(loopflow_execution::read_stream::watch_planning(database));
         *shared = Arc::downgrade(&revisions);
-        std::thread::spawn(move || {
-            let mut changes = loopflow_storage::changes::StoreChanges::watch(&database);
-            let mut store = None;
-            while !send.is_closed() {
-                if store.is_none() {
-                    store = loopflow_execution::store::read_existing_registry()
-                        .ok()
-                        .flatten();
-                }
-                let revision = store
-                    .as_ref()
-                    .and_then(|store| store.sqlite.revisions().ok());
-                if revision.is_none() {
-                    store = None;
-                }
-                let next = revision.map(|revision| revision.planning);
-                send.send_if_modified(|value| std::mem::replace(value, next) != next);
-                changes.wait(Duration::from_secs(1));
-            }
-        });
         revisions
     }
 
@@ -942,8 +920,8 @@ mod tests {
         drop(runtime);
         let work = meter::snapshot().since(before);
         meter::ENABLED.store(false, Ordering::Relaxed);
-        assert_eq!(stage(&work, "runtime_build"), stage(&work, "runtime_drop"));
-        assert_eq!(work.opens, work.closes);
+        assert_eq!(stage(&work, "runtime_build"), 0);
+        assert_eq!(stage(&work, "reader_setup"), stage(&work, "reader_drop"));
     }
 
     fn stage(work: &meter::Snapshot, name: &str) -> u64 {
@@ -1307,7 +1285,8 @@ mod tests {
                 second.initial().await;
                 quiet.initial().await;
                 let work = meter::snapshot().since(before);
-                assert_eq!(stage(&work, "runtime_build"), 1);
+                assert_eq!(stage(&work, "runtime_build"), 0);
+                assert_eq!(stage(&work, "reader_setup"), 1);
                 assert_eq!(stage(&work, "projection"), 1);
 
                 let before = meter::snapshot();
@@ -1410,9 +1389,9 @@ mod tests {
                 drop(held);
                 drop(entered);
                 let work = meter::snapshot().since(before);
-                assert_eq!(stage(&work, "runtime_build"), 1);
-                assert_eq!(stage(&work, "runtime_drop"), 1);
-                assert_eq!(work.opens, work.closes);
+                assert_eq!(stage(&work, "runtime_build"), 0);
+                assert_eq!(stage(&work, "reader_setup"), 1);
+                assert_eq!(stage(&work, "reader_drop"), 1);
             })
         });
     }
@@ -1448,7 +1427,9 @@ mod tests {
                 ] {
                     consumer.initial().await;
                 }
-                assert_eq!(stage(&meter::snapshot().since(before), "runtime_build"), 4);
+                let work = meter::snapshot().since(before);
+                assert_eq!(stage(&work, "runtime_build"), 0);
+                assert_eq!(stage(&work, "reader_setup"), 4);
                 drop(first);
                 drop(different_arguments);
                 drop(different_select);

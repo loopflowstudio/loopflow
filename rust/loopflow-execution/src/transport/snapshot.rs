@@ -25,12 +25,26 @@ fn path(session: &str) -> PathBuf {
     ))
 }
 
-/// Write the terminal for whoever reopens its Session before the provider is
-/// back. A terminal with no Session or shell leaves nothing.
-pub fn leave(terminal: &TerminalId, output: &Output) {
-    let Some(screen) = output.terminal() else {
-        return;
-    };
+/// Encode the terminal's current screen in memory, without touching disk or
+/// SQLite, so the held-terminal relay thread can hand the bytes to its worker.
+pub(super) fn encode(output: &Output) -> Option<Vec<u8>> {
+    let screen = output.terminal()?;
+    let mut bytes = format!("{HEADER}{}\n", ghostty_vt::REVISION).into_bytes();
+    match screen.encode().context("Encode the terminal snapshot") {
+        Ok(encoded) => {
+            bytes.extend(encoded);
+            Some(bytes)
+        }
+        Err(error) => {
+            tracing::warn!(%error, "Terminal snapshot not encoded");
+            None
+        }
+    }
+}
+
+/// Write pre-encoded snapshot bytes for whoever reopens the terminal's Session.
+/// Runs off the held-terminal relay thread.
+pub(super) fn write_encoded(terminal: &TerminalId, bytes: Vec<u8>) {
     let written = || -> Result<Option<PathBuf>> {
         let store = crate::journal::process_ledger()?;
         let session = if store.is_shell_terminal(terminal)? {
@@ -40,7 +54,7 @@ pub fn leave(terminal: &TerminalId, output: &Output) {
         } else {
             return Ok(None);
         };
-        write(&session, screen).map(Some)
+        write_bytes(&session, &bytes).map(Some)
     };
     match written() {
         Ok(Some(path)) => {
@@ -51,10 +65,8 @@ pub fn leave(terminal: &TerminalId, output: &Output) {
     }
 }
 
-fn write(session: &str, terminal: &Terminal) -> Result<PathBuf> {
+fn write_bytes(session: &str, bytes: &[u8]) -> Result<PathBuf> {
     let path = path(session);
-    let mut bytes = format!("{HEADER}{}\n", ghostty_vt::REVISION).into_bytes();
-    bytes.extend(terminal.encode().context("Encode the terminal snapshot")?);
     std::fs::create_dir_all(path.parent().expect("snapshot path has a parent"))?;
     // Written whole: a reader never meets a half-written stream.
     let draft = path.with_extension("ghostsnp.draft");

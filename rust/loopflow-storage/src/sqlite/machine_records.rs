@@ -104,7 +104,7 @@ fn copied_rows<T: DeserializeOwned>(
     kind: RecordKind,
     session: &str,
 ) -> StoreResult<Vec<T>> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "SELECT row FROM machine_records WHERE origin_machine_id=?1 AND kind=?2
         AND json_extract(row,'$.session_id')=?3",
     )?;
@@ -184,7 +184,7 @@ impl SqliteStore {
 
     pub fn open_transcripts(&self) -> StoreResult<Vec<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare("SELECT id FROM agent_sessions WHERE completed_at IS NULL AND provider_thread IS NOT NULL")?;
+        let mut statement = conn.prepare_cached("SELECT id FROM agent_sessions WHERE completed_at IS NULL AND provider_thread IS NOT NULL")?;
         let ids = statement
             .query_map([], |row| row.get(0))?
             .collect::<Result<_, _>>()?;
@@ -345,7 +345,7 @@ impl SqliteStore {
         repository: Option<&RepositoryId>,
     ) -> StoreResult<Vec<CopiedSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
+        let mut statement = conn.prepare_cached(
             "SELECT r.origin_machine_id, r.key,
                     json_extract(r.row,'$.title'), json_extract(r.row,'$.completed_at'),
                     json_extract(r.row,'$.start_failure')
@@ -464,7 +464,7 @@ impl SqliteStore {
         captured: i64,
     ) -> StoreResult<Vec<(i64, i64)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
+        let mut statement = conn.prepare_cached(
             "SELECT json_extract(json_extract(row,'$.payload'),'$.evidence.since'),
                     json_extract(json_extract(row,'$.payload'),'$.evidence.observed_at')
              FROM machine_records
@@ -482,7 +482,7 @@ impl SqliteStore {
     /// Machines holding a copy of the Session, and their last completed collection.
     pub fn copied_session_origins(&self, session: &str) -> StoreResult<Vec<(MachineId, i64)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT s.origin_machine_id,coalesce(c.observed_at,s.observed_at) FROM machine_records s
              LEFT JOIN machine_records c ON c.origin_machine_id=s.origin_machine_id
                 AND c.kind='checkpoint' AND c.key='export'
@@ -520,7 +520,7 @@ impl SqliteStore {
         };
         let origin = MachineId::from_raw(origin);
         let row: serde_json::Value = serde_json::from_str(&row)?;
-        let mut statement = conn.prepare(
+        let mut statement = conn.prepare_cached(
             "SELECT row FROM machine_records
              WHERE origin_machine_id=?1 AND kind IN ('session_event','history')
                AND json_extract(row,'$.session_id')=?2

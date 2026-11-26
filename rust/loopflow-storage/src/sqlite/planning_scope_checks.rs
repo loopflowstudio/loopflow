@@ -29,7 +29,7 @@ impl SqliteStore {
     /// repository alias. Resolve the tracker scope once per path.
     pub fn tracked_repositories(&self) -> StoreResult<Vec<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
+        let mut query = conn.prepare_cached(
             "SELECT DISTINCT r.repo FROM repository_plans r WHERE EXISTS (
                 SELECT 1 FROM tasks t WHERE t.repository_id=r.id AND t.external_issue_id IS NOT NULL)",
         )?;

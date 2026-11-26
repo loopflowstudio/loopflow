@@ -3,12 +3,13 @@
 //! (`refs/loopflow/plan/<machine id>`, one stamped record per file) and reads
 //! the others' from `refs/loopflow/plan-seen/*`. It decides nothing: arriving
 //! records go through the one import, where the newest stamp wins.
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{Read, Write};
+use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::mpsc::Receiver;
-use std::time::Instant;
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{anyhow, bail, Context, Result};
 
@@ -26,11 +27,256 @@ const SEEN: &str = "refs/loopflow/plan-seen/";
 const REPOSITORY: &str = "repository";
 /// Bytes of records read from the store at a time while a commit is built.
 const PAGE: usize = 1 << 20;
+/// Base retry wait after a repository's background exchange fails; doubles up to an hour.
+const BACKOFF_BASE: Duration = Duration::from_secs(120);
+const BACKOFF_MAX: Duration = Duration::from_secs(60 * 60);
+/// Cap on cached verified `(commit_oid, repository_id)` pairs.
+const MAX_VERIFIED_TIPS: usize = 4096;
+
+#[derive(Debug, Clone, Copy)]
+struct RepoBackoff {
+    failures: u32,
+    next_attempt: SystemTime,
+}
+
+impl RepoBackoff {
+    fn delay(failures: u32) -> Duration {
+        let shift = failures.saturating_sub(1).min(16);
+        BACKOFF_BASE.saturating_mul(1 << shift).min(BACKOFF_MAX)
+    }
+}
+
+#[derive(Default)]
+struct Backoffs(Mutex<HashMap<String, RepoBackoff>>);
+
+impl Backoffs {
+    /// A failure waits out its delay only while the store still records the
+    /// Git carrier failing: a command in another process that exchanged
+    /// since then ends the wait here too.
+    fn is_backed_off(&self, store: &SqliteStore, repo: &str, now: SystemTime) -> bool {
+        let waiting = self
+            .0
+            .lock()
+            .expect("plan-git backoff lock")
+            .get(repo)
+            .is_some_and(|state| now < state.next_attempt);
+        if !waiting {
+            return false;
+        }
+        let recovered = store
+            .plan_carrier(repo, Carrier::Git)
+            .ok()
+            .flatten()
+            .is_some_and(|held| held.error.is_none());
+        if recovered {
+            self.clear(repo);
+        }
+        !recovered
+    }
+
+    fn clear(&self, repo: &str) {
+        self.0.lock().expect("plan-git backoff lock").remove(repo);
+    }
+
+    fn run(
+        &self,
+        store: &SqliteStore,
+        repo: &str,
+        now: SystemTime,
+        op: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
+        if self.is_backed_off(store, repo, now) {
+            return Ok(());
+        }
+        let result = op();
+        let mut backoffs = self.0.lock().expect("plan-git backoff lock");
+        match &result {
+            Ok(()) => {
+                backoffs.remove(repo);
+            }
+            // A record the carrier brought that could not be written here is
+            // no failure of the carrier, and the next read may take it.
+            Err(error) if error.is::<NotTaken>() => {
+                backoffs.remove(repo);
+            }
+            Err(error) => {
+                let failures = backoffs
+                    .get(repo)
+                    .map_or(1, |state| state.failures.saturating_add(1));
+                let wait = RepoBackoff::delay(failures);
+                backoffs.insert(
+                    repo.to_owned(),
+                    RepoBackoff {
+                        failures,
+                        next_attempt: now + wait,
+                    },
+                );
+                tracing::debug!(
+                    %repo,
+                    failures,
+                    retry_in_secs = wait.as_secs(),
+                    error = %format!("{error:#}"),
+                    "Git plan exchange failed"
+                );
+            }
+        }
+        result
+    }
+}
+
+static BACKOFFS: LazyLock<Backoffs> = LazyLock::new(Backoffs::default);
+
+/// Immutable `(commit_oid, repository_id)` pairs whose `repository` blob has
+/// already been verified to match `repository_id`.
+static VERIFIED_TIP_REPOS: LazyLock<Mutex<HashSet<(String, String)>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
+
+pub(super) fn is_backed_off(store: &SqliteStore, repo: &str, now: SystemTime) -> bool {
+    BACKOFFS.is_backed_off(store, repo, now)
+}
 
 /// The remote a repository's plan travels by: `origin`, else the first by
-/// name. `None` for a repository with no remote.
+/// name. `None` for a repository with no remote. Parses ordinary `.git/config`
+/// sections directly via `observe::derived` so common repositories never fork
+/// `git remote`, falling back to `git remote` for `[include]`/`[includeIf]`,
+/// `extensions.worktreeConfig`, legacy `.git/remotes`/`.git/branches`, or
+/// exotic config syntax.
 pub fn remote(repo: &Path) -> Option<String> {
-    let remotes = crate::git::git_stdout(repo, &["remote"]).ok()?;
+    if !repo.is_dir() {
+        return None;
+    }
+    let Some(layout) = crate::git::read_layout(repo) else {
+        return remote_by_git(crate::git::git_stdout(repo, &["remote"]).ok());
+    };
+    let key = crate::observe::Derived::GitRemote {
+        repo: repo.to_owned(),
+    };
+    crate::observe::derived(key, || {
+        let config = crate::observe::read_to_string(&layout.common_dir.join("config"));
+        let has_remotes = has_legacy_remote_dir(&layout.common_dir.join("remotes"));
+        let has_branches = has_legacy_remote_dir(&layout.common_dir.join("branches"));
+        if !has_remotes && !has_branches {
+            if let Ok(config) = config {
+                if let ConfigRemotes::Parsed(remote) = parse_config_remotes(&config) {
+                    return remote;
+                }
+            }
+        }
+        crate::observe::record_spawn();
+        remote_by_git(crate::git::git_stdout_inheriting(repo, &["remote"], &|_| {}).ok())
+    })
+    .as_ref()
+    .clone()
+}
+
+fn has_legacy_remote_dir(dir: &Path) -> bool {
+    crate::observe::read_dir(dir).is_ok_and(|entries| !entries.is_empty())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ConfigRemotes {
+    Parsed(Option<String>),
+    Fallback,
+}
+
+fn parse_config_remotes(config: &str) -> ConfigRemotes {
+    let mut remotes = BTreeSet::new();
+    let mut current_remote: Option<&str> = None;
+    let mut in_extensions = false;
+
+    for raw_line in config.lines() {
+        let line = raw_line.trim_matches([' ', '\t', '\r']);
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        // Defer line continuations to `git remote` instead of reimplementing Git's lexer.
+        if line.ends_with('\\') {
+            return ConfigRemotes::Fallback;
+        }
+        if line.starts_with('[') {
+            let Some((section, subsection)) = parse_simple_section_header(line) else {
+                return ConfigRemotes::Fallback;
+            };
+            if section.eq_ignore_ascii_case("include") || section.eq_ignore_ascii_case("includeif")
+            {
+                return ConfigRemotes::Fallback;
+            }
+            in_extensions = section.eq_ignore_ascii_case("extensions");
+            current_remote = if section.eq_ignore_ascii_case("remote") {
+                match subsection {
+                    Some(name) if !name.is_empty() => Some(name),
+                    Some(_) => return ConfigRemotes::Fallback,
+                    None => None,
+                }
+            } else {
+                None
+            };
+            continue;
+        }
+        let key = line
+            .split(['=', ' ', '\t', '#', ';'])
+            .next()
+            .unwrap_or_default();
+        if !key.as_bytes().first().is_some_and(u8::is_ascii_alphabetic) {
+            return ConfigRemotes::Fallback;
+        }
+        if in_extensions && key.eq_ignore_ascii_case("worktreeconfig") {
+            return ConfigRemotes::Fallback;
+        }
+        if let Some(name) = current_remote {
+            remotes.insert(name);
+        }
+    }
+
+    let selected = if remotes.contains("origin") {
+        Some("origin".to_owned())
+    } else {
+        remotes.into_iter().next().map(str::to_owned)
+    };
+    ConfigRemotes::Parsed(selected)
+}
+
+/// Parse `[section]` or `[section "subsection"]` with no escapes or inline keys.
+/// Exotic syntax (escapes, legacy `[section.sub]`, trailing keys) returns `None`
+/// so callers fall back to `git remote`.
+fn parse_simple_section_header(line: &str) -> Option<(&str, Option<&str>)> {
+    let rest = line.strip_prefix('[')?;
+    let section_end = rest
+        .bytes()
+        .position(|b| !(b.is_ascii_alphanumeric() || b == b'-'))?;
+    if section_end == 0 {
+        return None;
+    }
+    let section = &rest[..section_end];
+    let after_section = &rest[section_end..];
+    let (subsection, trailing) = if let Some(trailing) = after_section.strip_prefix(']') {
+        (None, trailing)
+    } else {
+        let inner = after_section
+            .strip_prefix([' ', '\t'])?
+            .trim_start_matches([' ', '\t']);
+        if let Some(trailing) = inner.strip_prefix(']') {
+            (None, trailing)
+        } else {
+            let quoted = inner.strip_prefix('"')?;
+            let close = quoted.find('"')?;
+            let sub = &quoted[..close];
+            if sub.contains('\\') {
+                return None;
+            }
+            let trailing = quoted[close + 1..]
+                .trim_start_matches([' ', '\t'])
+                .strip_prefix(']')?;
+            (Some(sub), trailing)
+        }
+    };
+    let trailing = trailing.trim_start_matches([' ', '\t']);
+    (trailing.is_empty() || trailing.starts_with('#') || trailing.starts_with(';'))
+        .then_some((section, subsection))
+}
+
+fn remote_by_git(remotes: Option<String>) -> Option<String> {
+    let remotes = remotes?;
     let mut remotes: Vec<&str> = remotes.lines().filter(|name| !name.is_empty()).collect();
     remotes.sort_unstable();
     remotes
@@ -40,18 +286,49 @@ pub fn remote(repo: &Path) -> Option<String> {
         .map(|name| (*name).to_owned())
 }
 
-/// The minute exchange discovers plans even when this Machine owns nothing.
+/// The minute exchange covers existing repositories that have an unfinished
+/// Task or a non-retired Wave on this Machine (and no active local claim,
+/// which the shared owner poll already covers). A repository whose exchange
+/// fails doubles its wait up to an hour.
 pub fn exchange_unowned(store: &SqliteStore) -> Result<()> {
+    exchange_unowned_at(store, SystemTime::now(), &BACKOFFS, |repo| {
+        exchange(store, repo, None)
+    })
+}
+
+/// Background exchange for an owned repository: shares `BACKOFFS` with
+/// [`exchange_unowned`] so unreachable remotes back off exponentially.
+pub(super) fn exchange_background(
+    store: &SqliteStore,
+    repo: &str,
+    until: Option<Instant>,
+) -> Result<()> {
+    exchange_background_at(store, repo, until, SystemTime::now())
+}
+
+pub(super) fn exchange_background_at(
+    store: &SqliteStore,
+    repo: &str,
+    until: Option<Instant>,
+    now: SystemTime,
+) -> Result<()> {
+    BACKOFFS.run(store, repo, now, || exchange(store, repo, until))
+}
+
+fn exchange_unowned_at(
+    store: &SqliteStore,
+    now: SystemTime,
+    backoffs: &Backoffs,
+    mut run_exchange: impl FnMut(&str) -> Result<()>,
+) -> Result<()> {
     let owned = super::plan_carriers::owned_repositories(store)?;
-    for path in store.repository_paths()? {
+    for path in store.active_plan_repository_paths()? {
         let repo = path.to_string_lossy();
         if owned.contains(repo.as_ref()) || !path.is_dir() || crate::ops::tracker::connected(&repo)
         {
             continue;
         }
-        if let Err(error) = exchange(store, &repo, None) {
-            tracing::debug!(%repo, error = %format!("{error:#}"), "Git plan exchange failed");
-        }
+        let _ = backoffs.run(store, &repo, now, || run_exchange(&repo));
     }
     Ok(())
 }
@@ -106,6 +383,7 @@ pub fn send(store: &SqliteStore, repo: &str, until: Instant) -> Result<()> {
                 .or_else(|error| error.downcast::<NotTaken>().map(drop));
         }
         let me = crate::store::machines::local_machine(store)?.id;
+        let mine = seen_own_ref(path, me.as_str(), Some(until))?;
         publish(
             store,
             path,
@@ -113,6 +391,7 @@ pub fn send(store: &SqliteStore, repo: &str, until: Instant) -> Result<()> {
             me.as_str(),
             &repository,
             sent_seq,
+            mine.as_deref(),
             Some(until),
         )
     })
@@ -131,6 +410,9 @@ fn turn(
     let _turn = super::plan_carriers::lock(store, "plan-git", repository, until)?;
     let sent_seq = store.select_carrier(repo, Carrier::Git, remote)?.sent_seq;
     let result = carry(sent_seq);
+    if result.is_ok() {
+        BACKOFFS.clear(repo);
+    }
     let error = super::plan_carriers::carrier_error(&result);
     store.record_carrier_exchange(repo, Carrier::Git, error.as_deref())?;
     result
@@ -210,10 +492,28 @@ fn exchange_with(
         me.as_str(),
         repository,
         sent_seq,
+        mine.map(String::as_str),
         until,
     )?;
     failed.map_or(Ok(()), Err)?;
     NotTaken::of(&not_taken).map_or(Ok(()), |not_taken| Err(not_taken.into()))
+}
+
+/// This Machine's own fetched plan ref tip, when `send` runs without `seen_refs`.
+fn seen_own_ref(repo: &Path, me: &str, until: Option<Instant>) -> Result<Option<String>> {
+    let tip = git_until(
+        repo,
+        &[
+            "for-each-ref",
+            "--format=%(objectname)",
+            &format!("{SEEN}{me}"),
+        ],
+        None,
+        until,
+    )?;
+    let tip = String::from_utf8_lossy(&tip);
+    let tip = tip.trim();
+    Ok((!tip.is_empty()).then(|| tip.to_owned()))
 }
 
 /// Each fetched plan ref's Machine and commit.
@@ -364,10 +664,42 @@ fn record_path(record: &StampedRecord) -> Option<String> {
     })
 }
 
+fn tip_names_repository(
+    repo: &Path,
+    commit: &str,
+    repository: &RepositoryId,
+    until: Option<Instant>,
+) -> bool {
+    let key = (commit.to_owned(), repository.as_str().to_owned());
+    if VERIFIED_TIP_REPOS
+        .lock()
+        .expect("verified tip cache lock")
+        .contains(&key)
+    {
+        return true;
+    }
+    let matches = git_until(
+        repo,
+        &["cat-file", "-p", &format!("{commit}:{REPOSITORY}")],
+        None,
+        until,
+    )
+    .is_ok_and(|held| String::from_utf8_lossy(&held).trim() == repository.as_str());
+    if matches {
+        let mut cache = VERIFIED_TIP_REPOS.lock().expect("verified tip cache lock");
+        if cache.len() >= MAX_VERIFIED_TIPS {
+            cache.clear();
+        }
+        cache.insert(key);
+    }
+    matches
+}
+
 /// Commit every record changed here since `sent_seq` onto this Machine's ref
 /// as last fetched from the remote, and push, giving up at `until`. A remote
 /// without this Machine's ref is given the whole plan. Nothing is forced: a
 /// push the remote refuses is the error.
+#[allow(clippy::too_many_arguments)]
 fn publish(
     store: &SqliteStore,
     repo: &Path,
@@ -375,21 +707,10 @@ fn publish(
     me: &str,
     repository: &RepositoryId,
     sent_seq: i64,
+    mine: Option<&str>,
     until: Option<Instant>,
 ) -> Result<()> {
     let key = repo.to_string_lossy();
-    let tip = git_until(
-        repo,
-        &[
-            "for-each-ref",
-            "--format=%(objectname)",
-            &format!("{SEEN}{me}"),
-        ],
-        None,
-        until,
-    )?;
-    let tip = String::from_utf8_lossy(&tip);
-    let mine = (!tip.trim().is_empty()).then(|| tip.trim());
     let mut since = if mine.is_some() { sent_seq } else { 0 };
     let mut files = Vec::new();
     loop {
@@ -406,16 +727,8 @@ fn publish(
             break;
         }
     }
-    let named = mine.is_some_and(|mine| {
-        git_until(
-            repo,
-            &["cat-file", "-p", &format!("{mine}:{REPOSITORY}")],
-            None,
-            until,
-        )
-        .is_ok_and(|held| String::from_utf8_lossy(&held).trim() == repository.as_str())
-    });
-    if files.is_empty() && (named || mine.is_none()) {
+    if files.is_empty() && mine.is_none_or(|tip| tip_names_repository(repo, tip, repository, until))
+    {
         store.plan_sent(&key, Carrier::Git, since)?;
         return Ok(());
     }
@@ -481,7 +794,45 @@ fn file(stream: &mut Vec<u8>, path: &str, content: &[u8]) {
     stream.push(b'\n');
 }
 
+/// Set `O_NONBLOCK` on a pipe descriptor so `poll` can multiplex stdin, stdout,
+/// and stderr on the calling thread without spawning per-pipe reader threads.
+fn set_nonblocking(fd: std::os::fd::RawFd) -> std::io::Result<()> {
+    // SAFETY: `fd` is an open pipe descriptor owned by the caller.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: setting `O_NONBLOCK` on an open pipe fd is safe.
+    if unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Drain a non-blocking pipe until `WouldBlock` or EOF, dropping it on EOF/error.
+fn drain_pipe(pipe: &mut Option<impl Read>, out: &mut Vec<u8>, buf: &mut [u8]) {
+    let Some(reader) = pipe.as_mut() else {
+        return;
+    };
+    loop {
+        match reader.read(buf) {
+            Ok(0) => {
+                *pipe = None;
+                break;
+            }
+            Ok(n) => out.extend_from_slice(&buf[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => {
+                *pipe = None;
+                break;
+            }
+        }
+    }
+}
+
 /// Run Git without a terminal, stopping its process group at the deadline.
+/// Multiplexes stdin/stdout/stderr with `poll(2)` so no extra threads are spawned.
 fn git_until(
     repo: &Path,
     args: &[&str],
@@ -508,39 +859,134 @@ fn git_until(
         // Its own group, so stopping it stops its transport helpers too.
         std::os::unix::process::CommandExt::process_group(&mut command, 0);
     }
+    crate::observe::record_spawn();
     let mut child = command.spawn().context("start git")?;
-    let stdin = child.stdin.take();
-    let stdout = read_in_background(child.stdout.take().expect("stdout is piped"));
-    let stderr = read_in_background(child.stderr.take().expect("stderr is piped"));
-    let answered = |pipe: &Receiver<Vec<u8>>| match until {
-        Some(until) => pipe
-            .recv_timeout(until.saturating_duration_since(Instant::now()))
-            .ok(),
-        None => pipe.recv().ok(),
-    };
-    let output = std::thread::scope(|scope| {
-        if let (Some(mut stdin), Some(input)) = (stdin, input) {
-            // Git may answer before it has read everything it is given.
-            scope.spawn(move || {
-                let _ = stdin.write_all(input);
-            });
-        }
-        let output = (answered(&stdout), answered(&stderr));
-        if output.0.is_none() || output.1.is_none() {
-            // SAFETY: the child is unreaped, so its id still names the
-            // group it leads; signalling a group has no memory effects.
-            unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL) };
-        }
-        output
-    });
-    let status = child.wait()?;
-    let (Some(stdout), Some(stderr)) = output else {
-        bail!("git {} did not answer in time", args[0]);
-    };
-    if status.success() {
-        return Ok(stdout);
+    let mut stdin = child.stdin.take();
+    let mut stdout = child.stdout.take();
+    let mut stderr = child.stderr.take();
+    if let Some(ref pipe) = stdin {
+        set_nonblocking(pipe.as_raw_fd()).context("configure git stdin nonblocking")?;
     }
-    let stderr = String::from_utf8_lossy(&stderr);
+    if let Some(ref pipe) = stdout {
+        set_nonblocking(pipe.as_raw_fd()).context("configure git stdout nonblocking")?;
+    }
+    if let Some(ref pipe) = stderr {
+        set_nonblocking(pipe.as_raw_fd()).context("configure git stderr nonblocking")?;
+    }
+
+    let input_bytes = input.unwrap_or(&[]);
+    let mut written = 0usize;
+    if written >= input_bytes.len() {
+        stdin = None;
+    }
+    let mut out_bytes = Vec::new();
+    let mut err_bytes = Vec::new();
+    let mut buf = [0u8; 8192];
+    let mut timed_out = false;
+
+    while stdin.is_some() || stdout.is_some() || stderr.is_some() {
+        let timeout_ms = match until {
+            Some(deadline) => {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    timed_out = true;
+                    break;
+                }
+                remaining.as_millis().min(i32::MAX as u128) as libc::c_int
+            }
+            None => -1,
+        };
+        let mut fds = [libc::pollfd {
+            fd: -1,
+            events: 0,
+            revents: 0,
+        }; 3];
+        let mut nfds = 0usize;
+        let mut push_fd = |fd: std::os::fd::RawFd, events: libc::c_short| {
+            let idx = nfds;
+            fds[idx] = libc::pollfd {
+                fd,
+                events,
+                revents: 0,
+            };
+            nfds += 1;
+            idx
+        };
+        let stdin_idx = stdin
+            .as_ref()
+            .map(|p| push_fd(p.as_raw_fd(), libc::POLLOUT));
+        let stdout_idx = stdout
+            .as_ref()
+            .map(|p| push_fd(p.as_raw_fd(), libc::POLLIN));
+        let stderr_idx = stderr
+            .as_ref()
+            .map(|p| push_fd(p.as_raw_fd(), libc::POLLIN));
+
+        // SAFETY: `fds[..nfds]` contains valid open file descriptors.
+        let ready = unsafe { libc::poll(fds.as_mut_ptr(), nfds as libc::nfds_t, timeout_ms) };
+        if ready < 0 {
+            let err = std::io::Error::last_os_error();
+            if err.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(err.into());
+        }
+        if ready == 0 {
+            timed_out = true;
+            break;
+        }
+
+        if let (Some(idx), Some(pipe)) = (stdin_idx, stdin.as_mut()) {
+            let revents = fds[idx].revents;
+            if revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+                stdin = None;
+            } else if revents & libc::POLLOUT != 0 {
+                loop {
+                    match pipe.write(&input_bytes[written..]) {
+                        Ok(0) => {
+                            stdin = None;
+                            break;
+                        }
+                        Ok(n) => {
+                            written += n;
+                            if written >= input_bytes.len() {
+                                stdin = None;
+                                break;
+                            }
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                        Err(_) => {
+                            stdin = None;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if stdout_idx.is_some_and(|idx| fds[idx].revents != 0) {
+            drain_pipe(&mut stdout, &mut out_bytes, &mut buf);
+        }
+        if stderr_idx.is_some_and(|idx| fds[idx].revents != 0) {
+            drain_pipe(&mut stderr, &mut err_bytes, &mut buf);
+        }
+    }
+
+    if timed_out {
+        drop(stdin);
+        drop(stdout);
+        drop(stderr);
+        // SAFETY: the child is unreaped, so its id still names the group it
+        // leads; signalling a group has no memory effects.
+        unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL) };
+        let _ = child.wait();
+        bail!("git {} did not answer in time", args[0]);
+    }
+    let status = child.wait()?;
+    if status.success() {
+        return Ok(out_bytes);
+    }
+    let stderr = String::from_utf8_lossy(&err_bytes);
     let reason = stderr
         .lines()
         .find(|line| line.starts_with("fatal:") || line.starts_with("error:"))
@@ -551,21 +997,11 @@ fn git_until(
     }
 }
 
-fn read_in_background(mut pipe: impl Read + Send + 'static) -> Receiver<Vec<u8>> {
-    let (sender, receiver) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let _ = pipe.read_to_end(&mut bytes);
-        let _ = sender.send(bytes);
-    });
-    receiver
-}
-
 #[cfg(test)]
 mod tests {
     use super::{exchange, first_exchange, remote, send};
     use loopflow_model::durable::RepositoryId;
-    use loopflow_storage::sqlite::plan_carriers::Carrier;
+    use loopflow_storage::sqlite::plan_carriers::{Carrier, NotTaken};
     use loopflow_storage::sqlite::SqliteStore;
     use loopflow_storage::work::task::{NewTask, TaskUpdate};
     use loopflow_test_support::TestRepo;
@@ -723,8 +1159,9 @@ mod tests {
         let (_root, _origin, sender, owner) = machines();
         let task = sender.task("Before the claim");
         sender.exchange();
-        // Register the checkout before its first minute tick.
+        // Register the checkout with an active Wave before its first minute tick.
         crate::repository::location::ensure_repository(&owner.store, &owner.repo).unwrap();
+        crate::test_support::seed_wave_project(&owner.store, &owner.repo, "other").unwrap();
         super::exchange_unowned(&owner.store).unwrap();
         assert_eq!(owner.title(&task).as_deref(), Some("Before the claim"));
         git(
@@ -1053,5 +1490,320 @@ mod tests {
             .plan_carrier(&alone.repo, Carrier::Git)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn a_remote_added_after_the_first_lookup_is_seen_at_once() {
+        let root = tempfile::tempdir().unwrap();
+        let clone = root.path().join("clone");
+        std::fs::create_dir_all(&clone).unwrap();
+        git(&clone, &["init", "-q"]);
+        assert_eq!(remote(&clone), None);
+        assert_eq!(remote(&clone), None);
+        git(&clone, &["remote", "add", "upstream", "/nowhere"]);
+        assert_eq!(remote(&clone).as_deref(), Some("upstream"));
+        git(&clone, &["remote", "add", "origin", "/nowhere"]);
+        assert_eq!(remote(&clone).as_deref(), Some("origin"));
+    }
+
+    #[test]
+    fn minute_exchange_skips_repos_without_unfinished_tasks_or_active_waves() {
+        let (_root, _origin, sender, idle) = machines();
+        let task = sender.task("Remote task");
+        sender.exchange();
+        // Register idle's checkout with no unfinished Tasks and no non-retired Waves.
+        crate::repository::location::ensure_repository(&idle.store, &idle.repo).unwrap();
+        let backoffs = super::Backoffs::default();
+        let mut attempted = Vec::new();
+        super::exchange_unowned_at(
+            &idle.store,
+            std::time::SystemTime::now(),
+            &backoffs,
+            |repo| {
+                attempted.push(repo.to_owned());
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(
+            attempted.is_empty(),
+            "idle repo with no unfinished Task or active Wave must be skipped: {attempted:?}"
+        );
+        assert_eq!(idle.title(&task), None);
+
+        // Adding an unfinished Task makes the repo eligible.
+        let local_task = idle.task("Active work");
+        super::exchange_unowned_at(
+            &idle.store,
+            std::time::SystemTime::now(),
+            &backoffs,
+            |repo| {
+                attempted.push(repo.to_owned());
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(attempted, std::slice::from_ref(&idle.repo));
+
+        // Completing the Task and retiring its Wave skips the repo again.
+        {
+            let conn = idle.store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE tasks SET planning_state='completed' WHERE id=?1",
+                [local_task.as_str()],
+            )
+            .unwrap();
+            conn.execute("UPDATE waves SET retired_at=1", []).unwrap();
+        }
+        attempted.clear();
+        super::exchange_unowned_at(
+            &idle.store,
+            std::time::SystemTime::now(),
+            &backoffs,
+            |repo| {
+                attempted.push(repo.to_owned());
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(
+            attempted.is_empty(),
+            "repo with only completed Tasks and retired Waves must be skipped: {attempted:?}"
+        );
+    }
+
+    #[test]
+    fn minute_exchange_doubles_backoff_on_failure_up_to_one_hour() {
+        use std::time::{Duration, SystemTime};
+        let (_root, _origin, _sender, repo) = machines();
+        repo.task("Work");
+        let backoffs = super::Backoffs::default();
+        let t0 = SystemTime::now();
+        let mut attempts = 0usize;
+
+        // First failure sets 2-minute backoff.
+        super::exchange_unowned_at(&repo.store, t0, &backoffs, |_| {
+            attempts += 1;
+            anyhow::bail!("offline")
+        })
+        .unwrap();
+        assert_eq!(attempts, 1);
+
+        // 119 s later: still backed off.
+        super::exchange_unowned_at(
+            &repo.store,
+            t0 + Duration::from_secs(119),
+            &backoffs,
+            |_| {
+                attempts += 1;
+                anyhow::bail!("offline")
+            },
+        )
+        .unwrap();
+        assert_eq!(attempts, 1);
+
+        // 120 s later: retries and fails -> 4-minute backoff.
+        let t1 = t0 + Duration::from_secs(120);
+        super::exchange_unowned_at(&repo.store, t1, &backoffs, |_| {
+            attempts += 1;
+            anyhow::bail!("offline")
+        })
+        .unwrap();
+        assert_eq!(attempts, 2);
+
+        // 239 s later: still backed off; 240 s later: retries.
+        super::exchange_unowned_at(
+            &repo.store,
+            t1 + Duration::from_secs(239),
+            &backoffs,
+            |_| {
+                attempts += 1;
+                anyhow::bail!("offline")
+            },
+        )
+        .unwrap();
+        assert_eq!(attempts, 2);
+
+        // Caps at 1 hour regardless of failure count.
+        assert_eq!(super::RepoBackoff::delay(1), Duration::from_secs(120));
+        assert_eq!(super::RepoBackoff::delay(2), Duration::from_secs(240));
+        assert_eq!(super::RepoBackoff::delay(10), Duration::from_secs(3600));
+
+        // Success clears the backoff.
+        let t2 = t1 + Duration::from_secs(240);
+        super::exchange_unowned_at(&repo.store, t2, &backoffs, |_| {
+            attempts += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(attempts, 3);
+        assert!(backoffs.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn background_backoff_ends_when_another_process_exchanges_or_a_record_is_not_taken() {
+        use std::time::{Duration, SystemTime};
+        let (_root, _origin, _sender, repo) = machines();
+        repo.task("Work");
+        let (store, path) = (&repo.store, repo.repo.as_str());
+        store.select_carrier(path, Carrier::Git, "origin").unwrap();
+        let backoffs = super::Backoffs::default();
+        let t0 = SystemTime::now();
+        let mut attempts = 0usize;
+        let mut fail = |_: &str| {
+            attempts += 1;
+            store
+                .record_carrier_exchange(path, Carrier::Git, Some("offline"))
+                .unwrap();
+            anyhow::bail!("offline")
+        };
+        super::exchange_unowned_at(store, t0, &backoffs, &mut fail).unwrap();
+        super::exchange_unowned_at(store, t0 + Duration::from_secs(30), &backoffs, &mut fail)
+            .unwrap();
+        assert_eq!(attempts, 1, "a recorded failure backs off");
+
+        // `lf task sync` in another process exchanged and recorded success.
+        store
+            .record_carrier_exchange(path, Carrier::Git, None)
+            .unwrap();
+        let mut retried = 0usize;
+        let mut not_taken = |_: &str| {
+            retried += 1;
+            Err(NotTaken {
+                count: 1,
+                reason: "a Wave of that name exists here".into(),
+            }
+            .into())
+        };
+        let t1 = t0 + Duration::from_secs(60);
+        super::exchange_unowned_at(store, t1, &backoffs, &mut not_taken).unwrap();
+        super::exchange_unowned_at(
+            store,
+            t1 + Duration::from_secs(30),
+            &backoffs,
+            &mut not_taken,
+        )
+        .unwrap();
+        assert_eq!(
+            retried, 2,
+            "a read with records not taken is no carrier failure"
+        );
+    }
+
+    #[test]
+    fn remote_parses_git_config_without_spawning_and_falls_back_when_needed() {
+        let root = tempfile::tempdir().unwrap();
+
+        // Plain repo with no remote: 0 spawns.
+        let plain = root.path().join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        git(&plain, &["init", "-q"]);
+        let before = crate::observe::thread_spawns();
+        assert_eq!(remote(&plain), None);
+        assert_eq!(
+            crate::observe::thread_spawns() - before,
+            0,
+            "cold lookup of plain repo without remotes must spawn nothing"
+        );
+
+        // Adding remotes in .git/config resolves without spawning.
+        git(&plain, &["remote", "add", "upstream", "/nowhere"]);
+        let before = crate::observe::thread_spawns();
+        assert_eq!(remote(&plain).as_deref(), Some("upstream"));
+        assert_eq!(crate::observe::thread_spawns() - before, 0);
+
+        // Empty [remote "origin"] section without keys is ignored (matches git remote).
+        let cfg_path = plain.join(".git/config");
+        let mut cfg = std::fs::read_to_string(&cfg_path).unwrap();
+        cfg.push_str("\n[remote \"origin\"] # comment only\n[core]\n\tbare = false\n");
+        std::fs::write(&cfg_path, cfg).unwrap();
+        let before = crate::observe::thread_spawns();
+        assert_eq!(remote(&plain).as_deref(), Some("upstream"));
+        assert_eq!(crate::observe::thread_spawns() - before, 0);
+
+        // Adding a key under [remote "origin"] selects origin with 0 spawns.
+        git(&plain, &["remote", "add", "origin", "/nowhere"]);
+        let before = crate::observe::thread_spawns();
+        assert_eq!(remote(&plain).as_deref(), Some("origin"));
+        assert_eq!(crate::observe::thread_spawns() - before, 0);
+
+        // [include] falls back to `git remote`.
+        let inc_repo = root.path().join("with-include");
+        std::fs::create_dir_all(&inc_repo).unwrap();
+        git(&inc_repo, &["init", "-q"]);
+        let extra = root.path().join("extra.gitconfig");
+        std::fs::write(&extra, "[remote \"included\"]\n\turl = /nowhere\n").unwrap();
+        let mut inc_cfg = std::fs::read_to_string(inc_repo.join(".git/config")).unwrap();
+        inc_cfg.push_str(&format!("\n[include]\n\tpath = {}\n", extra.display()));
+        std::fs::write(inc_repo.join(".git/config"), inc_cfg).unwrap();
+        let before = crate::observe::thread_spawns();
+        assert_eq!(remote(&inc_repo).as_deref(), Some("included"));
+        assert_eq!(
+            crate::observe::thread_spawns() - before,
+            1,
+            "[include] must fall back to git remote"
+        );
+
+        // Legacy .git/remotes/ falls back to `git remote` and matches its answer.
+        let legacy_repo = root.path().join("with-legacy");
+        std::fs::create_dir_all(&legacy_repo).unwrap();
+        git(&legacy_repo, &["init", "-q"]);
+        let remotes_dir = legacy_repo.join(".git/remotes");
+        std::fs::create_dir_all(&remotes_dir).unwrap();
+        std::fs::write(remotes_dir.join("legacy"), "URL: /nowhere\n").unwrap();
+        let expected_legacy =
+            super::remote_by_git(crate::git::git_stdout(&legacy_repo, &["remote"]).ok());
+        let before = crate::observe::thread_spawns();
+        assert_eq!(remote(&legacy_repo), expected_legacy);
+        assert_eq!(
+            crate::observe::thread_spawns() - before,
+            1,
+            "legacy .git/remotes must fall back to git remote"
+        );
+
+        // Exotic config syntax (legacy `[remote.name]` header) falls back to `git remote`.
+        let exotic_repo = root.path().join("with-exotic");
+        std::fs::create_dir_all(&exotic_repo).unwrap();
+        git(&exotic_repo, &["init", "-q"]);
+        let mut exotic_cfg = std::fs::read_to_string(exotic_repo.join(".git/config")).unwrap();
+        exotic_cfg.push_str("\n[remote.legacy]\n\turl = /nowhere\n");
+        std::fs::write(exotic_repo.join(".git/config"), exotic_cfg).unwrap();
+        let before = crate::observe::thread_spawns();
+        assert_eq!(remote(&exotic_repo).as_deref(), Some("legacy"));
+        assert_eq!(
+            crate::observe::thread_spawns() - before,
+            1,
+            "exotic section syntax must fall back to git remote"
+        );
+    }
+
+    #[test]
+    fn quiet_exchange_reuses_seen_refs_and_skips_repeated_cat_file() {
+        let (_root, _origin, laptop, mini) = machines();
+        let task = laptop.task("quiet poll");
+        laptop.exchange();
+        assert_eq!(laptop.unsent(), 0);
+
+        // First quiet exchange: fetch + for-each-ref + one-time cat-file verification = 3 forks.
+        let before = crate::observe::thread_spawns();
+        laptop.exchange();
+        assert_eq!(
+            crate::observe::thread_spawns() - before,
+            3,
+            "first quiet exchange should only run fetch, for-each-ref, and one cat-file"
+        );
+
+        // Subsequent quiet exchanges reuse seen_refs's mine and the verified tip cache = 2 forks.
+        let before = crate::observe::thread_spawns();
+        laptop.exchange();
+        assert_eq!(
+            crate::observe::thread_spawns() - before,
+            2,
+            "subsequent quiet exchange must only run fetch + for-each-ref"
+        );
+
+        // Verify the plan still round-trips to another clone.
+        mini.exchange();
+        assert_eq!(mini.title(&task).as_deref(), Some("quiet poll"));
     }
 }

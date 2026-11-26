@@ -128,6 +128,9 @@ mod tests {
             include_str!(
                 "../../../loopflow-execution/tests/fixtures/dto/server/mobile_status_request.json"
             ),
+            include_str!(
+                "../../../loopflow-execution/tests/fixtures/dto/server/server_diagnostics.json"
+            ),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/upload.json"),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/ticket.json"),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_run.json"),

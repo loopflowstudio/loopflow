@@ -359,7 +359,7 @@ writes! {
             (None, Some(wave)) => SteerScope::Wave(wave),
             (None, None) => SteerScope::Repository,
         };
-        tokio::runtime::Runtime::new()?.block_on(async {
+        loopflow_execution::runtime::block_on(async {
             let store = super::session::open_shared_store().await?;
             anyhow::Ok(loopflow_execution::engine::session::steer(&store, directory, scope, message).await?)
         })?
@@ -389,7 +389,7 @@ writes! {
     } => super::session::StatusRecorded;
     {
         id, terminal, agent_process, stream, sequence, records, ..
-    } => tokio::runtime::Runtime::new()?.block_on(super::session::status_recorded(
+    } => loopflow_execution::runtime::block_on(super::session::status_recorded(
         id,
         terminal,
         agent_process.as_deref(),
@@ -444,7 +444,7 @@ writes! {
         wave: String,
         name: String,
     } => loopflow_execution::ops::wave_lifecycle::WaveRenamed;
-    { wave, name, .. } => tokio::runtime::Runtime::new()?.block_on(
+    { wave, name, .. } => loopflow_execution::runtime::block_on(
         loopflow_execution::ops::wave_lifecycle::rename(directory, wave, Some(name), None),
     )?,
 
@@ -498,7 +498,7 @@ writes! {
     } => {
         let repo = loopflow_execution::repo::require_repo_root(directory, "this command")?;
 
-        tokio::runtime::Runtime::new()?.block_on(loopflow_execution::ops::wave_lifecycle::add(
+        loopflow_execution::runtime::block_on(loopflow_execution::ops::wave_lifecycle::add(
             &repo,
             wave,
             objective.as_deref(),
@@ -1219,7 +1219,7 @@ impl Write {
         // The Task's Linear mapping resolves on the destination, whose own
         // Task ID may differ.
         let source = match self {
-            Self::TaskAutoOn { .. } => tokio::runtime::Runtime::new()?.block_on(
+            Self::TaskAutoOn { .. } => loopflow_execution::runtime::block_on(
                 loopflow_execution::machine::task::resolve_task_source(
                     Some(route.task_id.as_str()),
                     self.directory(),
@@ -1492,17 +1492,23 @@ pub(super) fn steer_task(
 
     loopflow_execution::ops::task::validate_task_comment_input(message)
         .map_err(|error| Error::new(ErrorCode::Invalid, error.to_string()))?;
-    let rt = tokio::runtime::Runtime::new()?;
-    let (store, task) = rt
-        .block_on(loopflow_execution::ops::task::resolve_saved_task(
-            repo, wave, issue,
-        ))
-        .with_context(|| format!("resolving Task {issue}"))?;
+    let (store, task) = loopflow_execution::runtime::block_on(
+        loopflow_execution::ops::task::resolve_saved_task(repo, wave, issue),
+    )
+    .with_context(|| format!("resolving Task {issue}"))?;
     let participant = match sender {
         Some(sender) => sender.selection.participant.clone(),
         None => loopflow_execution::config::participant_name_in(repo)?,
     };
-    let save = |fallback| rt.block_on(task::steer(&store, &task, message, participant, fallback));
+    let save = |fallback| {
+        loopflow_execution::runtime::block_on(task::steer(
+            &store,
+            &task,
+            message,
+            participant,
+            fallback,
+        ))
+    };
     let Some(peer) = TaskPeer::resolve(&store.sqlite, &task.id)? else {
         return save(None);
     };
@@ -1557,8 +1563,9 @@ pub(super) fn run_task(
 }
 
 pub(crate) fn find_machine(selector: &str) -> anyhow::Result<loopflow_model::durable::Machine> {
-    tokio::runtime::Runtime::new()?
-        .block_on(loopflow_execution::machine::connection::find_registered_machine(selector))
+    loopflow_execution::runtime::block_on(
+        loopflow_execution::machine::connection::find_registered_machine(selector),
+    )
 }
 
 #[cfg(test)]

@@ -20,15 +20,13 @@
 pub mod events;
 
 #[cfg(any(test, feature = "test-support"))]
-use crate::performance::subscription_measurement::{Runtime, Stage};
-#[cfg(not(any(test, feature = "test-support")))]
-use tokio::runtime::Runtime;
+use crate::performance::subscription_measurement::Stage;
 
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
+use std::sync::{Arc, Condvar, LazyLock, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -37,17 +35,19 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::machine::wire::SubscriptionEvent;
-use crate::observe::{Cache, Dependencies};
+use crate::observe::{Cache, Dependencies, FactWatcher};
 use crate::store::{SharedStore, StorageConfig};
-use loopflow_storage::changes::StoreChanges;
+use loopflow_storage::changes::{StoreChanges, StoreWaker};
 use loopflow_storage::sqlite::StoreRevisions;
 
 /// A burst is read once it has been quiet this long…
 const QUIET: Duration = Duration::from_millis(100);
 /// …or this long after its first commit, so a steady writer cannot postpone it.
 const BURST: Duration = Duration::from_millis(250);
-/// Revisions are read again on this clock in case a filesystem event was lost.
-const CHECK: Duration = Duration::from_secs(1);
+/// Fallback reconcile interval when neither store nor observation pushed a wake.
+const CHECK: Duration = Duration::from_secs(30);
+/// Initial retry wait for a failing read; doubles up to [`RETRY_CAP`].
+const RETRY_BASE: Duration = Duration::from_secs(1);
 /// A read that keeps failing is tried again after 1 s, 2 s, 4 s… up to this.
 const RETRY_CAP: Duration = Duration::from_secs(60);
 /// A read spends at most this share of the subscription's time: after a reading that
@@ -310,23 +310,164 @@ impl<A: DeserializeOwned + Send> Inbox for (Mutex<Mailbox<A>>, Condvar) {
         let mut mailbox = self.0.lock().expect("subscription mailbox poisoned");
         mailbox.requests.push(Request { id, args: None });
         self.1.notify_all();
+        drop(mailbox);
+        notify_pull_wakers();
     }
 
     fn close(&self) {
         self.0.lock().expect("subscription mailbox poisoned").closed = true;
         self.1.notify_all();
+        notify_pull_wakers();
     }
 
     fn look(&self) -> bool {
         let mut mailbox = self.0.lock().expect("subscription mailbox poisoned");
         mailbox.look = true;
+        let open = !mailbox.closed;
         self.1.notify_all();
-        !mailbox.closed
+        drop(mailbox);
+        notify_pull_wakers();
+        open
     }
 }
 
-/// Serve `read` as `run` does, read on the puller's thread. A thread of this
-/// process only waits for the next reason to read and calls `wake`.
+struct InboxWatcher(Weak<dyn Inbox>);
+
+impl FactWatcher for InboxWatcher {
+    fn wake(&self) {
+        if let Some(inbox) = self.0.upgrade() {
+            inbox.look();
+        }
+    }
+}
+
+trait PullTarget: Send + Sync {
+    /// Returns the next wake deadline (`<= now` to fire now), or `None` when
+    /// idle or closed.
+    fn poll_due(&self, now: Instant) -> Option<Instant>;
+    fn fire(&self);
+}
+
+struct RegisteredPull<A> {
+    shared: Shared<A>,
+    wake: Box<dyn Fn() + Send + Sync>,
+}
+
+impl<A: Send> PullTarget for RegisteredPull<A> {
+    fn poll_due(&self, now: Instant) -> Option<Instant> {
+        let mut mailbox = lock(&self.shared);
+        if mailbox.closed {
+            return None;
+        }
+        match mailbox.pull_at {
+            Some(at) if mailbox.asked() || now >= at => {
+                mailbox.pull_at = None;
+                Some(now)
+            }
+            Some(at) => Some(at),
+            None => None,
+        }
+    }
+
+    fn fire(&self) {
+        #[cfg(any(test, feature = "test-support"))]
+        let _wake = Stage::new("wake_callback");
+        (self.wake)();
+    }
+}
+
+#[derive(Default)]
+struct PullWakerState {
+    generation: u64,
+    targets: Vec<Weak<dyn PullTarget>>,
+}
+
+static PULL_WAKERS: LazyLock<(Mutex<PullWakerState>, Condvar)> =
+    LazyLock::new(|| (Mutex::new(PullWakerState::default()), Condvar::new()));
+static PULL_WAKER_STARTED: AtomicBool = AtomicBool::new(false);
+
+fn notify_pull_wakers() {
+    if !PULL_WAKER_STARTED.load(Ordering::Acquire) {
+        return;
+    }
+    let (lock, cv) = &*PULL_WAKERS;
+    let mut state = lock.lock().expect("pull wakers poisoned");
+    state.generation = state.generation.wrapping_add(1);
+    cv.notify_all();
+}
+
+fn register_pull_waker(target: Weak<dyn PullTarget>) {
+    if !PULL_WAKER_STARTED.swap(true, Ordering::AcqRel) {
+        let _ = std::thread::Builder::new()
+            .name("subscription-waker".into())
+            .spawn(run_pull_waker_loop);
+    }
+    let (lock, cv) = &*PULL_WAKERS;
+    let mut state = lock.lock().expect("pull wakers poisoned");
+    state.targets.retain(|existing| existing.strong_count() > 0);
+    state.targets.push(target);
+    state.generation = state.generation.wrapping_add(1);
+    cv.notify_all();
+}
+
+fn run_pull_waker_loop() {
+    #[cfg(any(test, feature = "test-support"))]
+    let _waker = Stage::new("wake_thread_lifetime");
+    let (lock, cv) = &*PULL_WAKERS;
+    loop {
+        let (before_gen, targets) = {
+            let mut state = lock.lock().expect("pull wakers poisoned");
+            let mut live = Vec::with_capacity(state.targets.len());
+            state.targets.retain(|weak| match weak.upgrade() {
+                Some(target) => {
+                    live.push(target);
+                    true
+                }
+                None => false,
+            });
+            (state.generation, live)
+        };
+        let now = Instant::now();
+        let mut to_fire = Vec::new();
+        let mut earliest: Option<Instant> = None;
+        for target in targets {
+            match target.poll_due(now) {
+                Some(at) if at <= now => to_fire.push(target),
+                Some(at) => {
+                    earliest = Some(earliest.map_or(at, |prev| prev.min(at)));
+                }
+                None => {}
+            }
+        }
+        for target in to_fire {
+            target.fire();
+        }
+        let guard = lock.lock().expect("pull wakers poisoned");
+        if guard.generation != before_gen {
+            continue;
+        }
+        match earliest {
+            Some(at) => {
+                let wait = at.saturating_duration_since(Instant::now());
+                if !wait.is_zero() {
+                    drop(
+                        cv.wait_timeout_while(guard, wait, |state| state.generation == before_gen)
+                            .expect("pull wakers poisoned"),
+                    );
+                }
+            }
+            None => {
+                drop(
+                    cv.wait_while(guard, |state| state.generation == before_gen)
+                        .expect("pull wakers poisoned"),
+                );
+            }
+        }
+    }
+}
+
+/// Serve `read` as `run` does, read on the puller's thread. One shared process
+/// waker thread waits for the next reason to read and calls `wake`.
 fn start_pull<A, T, F, Fut>(
     watch: Watch,
     args: A,
@@ -346,39 +487,15 @@ where
     let mut reader = Reader::new(shared.clone(), None, watch, args, read, select)?;
     reader.observer = events.then(crate::read_stream::events::Observer::default);
     lock(&shared).pull_at = Some(Instant::now());
-    let waker = shared.clone();
-    std::thread::spawn(move || {
-        #[cfg(any(test, feature = "test-support"))]
-        let _waker = Stage::new("wake_thread_lifetime");
-        let mut mailbox = lock(&waker);
-        while !mailbox.closed {
-            mailbox = match mailbox.pull_at {
-                Some(at) if mailbox.asked() || Instant::now() >= at => {
-                    mailbox.pull_at = None;
-                    drop(mailbox);
-                    #[cfg(any(test, feature = "test-support"))]
-                    let _wake = Stage::new("wake_callback");
-                    wake();
-                    lock(&waker)
-                }
-                Some(at) => {
-                    let wait = at.saturating_duration_since(Instant::now());
-                    waker
-                        .1
-                        .wait_timeout(mailbox, wait)
-                        .expect("subscription mailbox poisoned")
-                        .0
-                }
-                None => waker
-                    .1
-                    .wait(mailbox)
-                    .expect("subscription mailbox poisoned"),
-            };
-        }
+    let target: Arc<dyn PullTarget> = Arc::new(RegisteredPull {
+        shared: shared.clone(),
+        wake,
     });
+    register_pull_waker(Arc::downgrade(&target));
     let ended = Arc::new(AtomicBool::new(false));
     let failed = ended.clone();
     let pull = move || -> SubscriptionUpdate {
+        let _keep_target = &target;
         if failed.load(Ordering::Acquire) {
             return SubscriptionUpdate::default();
         }
@@ -387,6 +504,7 @@ where
             Ok(Ok(step)) => {
                 lock(&shared).pull_at = Some(step.wake);
                 shared.1.notify_all();
+                notify_pull_wakers();
                 return step.update;
             }
             Ok(Err(error)) => format!("{error:#}"),
@@ -455,26 +573,16 @@ struct Step {
     wake: Instant,
 }
 
-fn reader_runtime() -> std::io::Result<Runtime> {
-    let mut builder = tokio::runtime::Builder::new_multi_thread();
-    builder.enable_all();
-    #[cfg(any(test, feature = "test-support"))]
-    return Runtime::build(&mut builder);
-    #[cfg(not(any(test, feature = "test-support")))]
-    builder.build()
-}
-
 /// One subscription's reading state: what it last read and sent, and when.
 struct Reader<A, F> {
     shared: Shared<A>,
+    watcher: Arc<dyn FactWatcher>,
     database: PathBuf,
     read: F,
     watch: Watch,
     args: A,
-    runtime: Runtime,
     observations: Arc<Cache>,
     dependencies: Dependencies,
-    store: Option<SharedStore>,
     // Why the store that exists cannot be opened; a refused store is not an empty one.
     refused: Option<String>,
     answers: Option<u64>,
@@ -487,6 +595,13 @@ struct Reader<A, F> {
     /// The dotted paths each body keeps; none keeps it whole.
     select: Option<Vec<String>>,
     observer: Option<crate::read_stream::events::Observer>,
+}
+
+impl<A, F> Drop for Reader<A, F> {
+    fn drop(&mut self) {
+        #[cfg(any(test, feature = "test-support"))]
+        let _drop = Stage::new("reader_drop");
+    }
 }
 
 impl<A, T, F, Fut> Reader<A, F>
@@ -506,29 +621,26 @@ where
         read: F,
         select: Option<Vec<String>>,
     ) -> Result<Self> {
+        #[cfg(any(test, feature = "test-support"))]
+        let _setup = Stage::new("reader_setup");
         let database = crate::store::database_path_from_env()?;
         let inbox: Arc<dyn Inbox> = shared.clone();
-        if watch == Watch::Files {
-            let mut readers = FILE_READERS.lock().expect("file subscriptions");
-            readers.retain(|reader| reader.strong_count() > 0);
-            readers.push(Arc::downgrade(&inbox));
-        }
+        let watcher: Arc<dyn FactWatcher> = Arc::new(InboxWatcher(Arc::downgrade(&inbox)));
         // Stdio uses the same observer to notice its parent exiting.
         if watch != Watch::Files || parent.is_some() {
-            follow_store(&database, &inbox, parent);
+            follow_store(&database, &inbox, watch, parent);
         }
         Ok(Self {
             shared,
+            watcher,
             database,
             read,
             watch,
             args,
             select,
             observer: None,
-            runtime: reader_runtime()?,
             observations: Cache::shared(),
             dependencies: Dependencies::default(),
-            store: None,
             refused: None,
             answers: None,
             force: true,
@@ -561,41 +673,48 @@ where
             }
             mailbox.closed
         };
-        if self.watch != Watch::Files && self.store.is_none() && self.database.exists() {
+        let store = if self.watch != Watch::Files && self.database.exists() {
             #[cfg(any(test, feature = "test-support"))]
             let _open = Stage::new("reader_store_open");
             let config = StorageConfig::sqlite(self.database.clone());
-            match self
-                .runtime
-                .block_on(crate::store::open_read_only_store(&config))
-            {
+            match crate::store::open_read_only_store(&config) {
                 Ok(opened) => {
-                    self.store = Some(Arc::new(opened));
                     self.refused = None;
+                    Some(Arc::new(opened))
                 }
-                Err(error) => self.refused = Some(format!("{error:#}")),
+                Err(error) => {
+                    self.refused = Some(format!("{error:#}"));
+                    None
+                }
             }
-        }
-        let revisions = self
-            .store
+        } else {
+            self.refused = None;
+            None
+        };
+        let revisions = store
             .as_ref()
             .and_then(|store| store.sqlite.revisions().ok());
         let now = Instant::now();
         let observed_changes = self.dependencies.changed();
-        let due = self.force
-            || match self.read_on {
-                None => true,
-                Some(read_on) => {
-                    let changed = match (self.read_at, revisions) {
-                        (Some(old), Some(new)) => changed(self.watch, old, new),
-                        (None, None) => false,
-                        _ => true,
-                    };
-                    retry_due(self.failures, read_on, now)
-                        || (now - read_on >= self.cost.saturating_mul(BUSY_SHARE)
-                            && (changed || observed_changes))
+        let store_changed = revisions_moved(self.watch, self.read_at, revisions);
+        let pending_change = store_changed || observed_changes;
+        let (due, throttled_until) = match (self.force, self.read_on) {
+            (true, _) | (_, None) => (true, None),
+            (false, Some(read_on)) => {
+                let rest_end = read_on + self.cost.saturating_mul(BUSY_SHARE);
+                if retry_due(self.failures, read_on, now) {
+                    (true, None)
+                } else if pending_change {
+                    if now >= rest_end {
+                        (true, None)
+                    } else {
+                        (false, Some(rest_end))
+                    }
+                } else {
+                    (false, None)
                 }
-            };
+            }
+        };
         let mut update = SubscriptionUpdate::default();
         if due {
             #[cfg(any(test, feature = "test-support"))]
@@ -606,28 +725,29 @@ where
                 settle(&self.shared);
             }
             // The first revision query pins the snapshot the whole reading uses.
-            let store = self.store.clone();
             let snapshot = store
                 .as_ref()
                 .map(|store| store.sqlite.read_snapshot())
                 .transpose()?;
-            let read_at = self
-                .store
+            let read_at = store
                 .as_ref()
                 .map(|store| store.sqlite.revision_map())
                 .transpose()?;
             let revisions = read_at.as_ref().map(|map| map.to_store_revisions());
             let began = Instant::now();
-            let (reading, dependencies) = self.observations.capture(|| match &self.refused {
-                Some(reason) => Err(anyhow::anyhow!("Loopflow store cannot be read: {reason}")),
-                None => self
-                    .runtime
-                    .block_on((self.read)(self.store.clone(), self.args.clone())),
-            });
+            let (reading, dependencies) =
+                self.observations
+                    .capture_for(Arc::downgrade(&self.watcher), || match &self.refused {
+                        Some(reason) => {
+                            Err(anyhow::anyhow!("Loopflow store cannot be read: {reason}"))
+                        }
+                        None => {
+                            crate::runtime::block_on((self.read)(store.clone(), self.args.clone()))
+                        }
+                    });
             self.dependencies = dependencies;
             let reading = reading.and_then(|body| Ok(serde_json::to_value(body)?));
-            if let (Some(observer), Some(store), Ok(body)) =
-                (&mut self.observer, &self.store, &reading)
+            if let (Some(observer), Some(store), Ok(body)) = (&mut self.observer, &store, &reading)
             {
                 update.events = observer.read(&store.sqlite, body)?;
             }
@@ -660,12 +780,14 @@ where
             self.read_on = Some(began);
             self.force = false;
         }
+        drop(store);
         let read_on = self.read_on.expect("a subscription reads before it waits");
-        let rest_end = read_on + self.cost.saturating_mul(BUSY_SHARE);
-        let wake = if rest_end > now {
+        let wake = if let Some(rest_end) = throttled_until {
             rest_end
+        } else if self.failures > 0 {
+            read_on + retry_delay(self.failures)
         } else {
-            now + CHECK
+            Instant::now() + CHECK
         };
         Ok(Step {
             update,
@@ -675,14 +797,16 @@ where
     }
 }
 
+fn retry_delay(failures: u32) -> Duration {
+    RETRY_BASE
+        .saturating_mul(1 << (failures - 1).min(16))
+        .min(RETRY_CAP)
+}
+
 /// A failed reading is retried without a change, each time after twice the
 /// wait, so a read that cannot succeed does not spin.
 fn retry_due(failures: u32, read_on: Instant, now: Instant) -> bool {
-    failures > 0
-        && now - read_on
-            >= CHECK
-                .saturating_mul(1 << (failures - 1).min(16))
-                .min(RETRY_CAP)
+    failures > 0 && now - read_on >= retry_delay(failures)
 }
 
 /// Remove the fields that restate when a result was read.
@@ -765,68 +889,161 @@ fn accept<A: DeserializeOwned>(mailbox: &mut Mailbox<A>, line: &[u8]) {
     }
 }
 
-/// File-only subscriptions have no store event to wake them after a config write.
-static FILE_READERS: Mutex<Vec<Weak<dyn Inbox>>> = Mutex::new(Vec::new());
-
-pub(crate) fn wake_file_readers() {
-    FILE_READERS
-        .lock()
-        .expect("file subscriptions")
-        .retain(|reader| reader.upgrade().is_some_and(|reader| reader.look()));
+struct Follower {
+    inbox: Weak<dyn Inbox>,
+    watch: Watch,
+    parent: Option<u32>,
+    last_seen: Option<StoreRevisions>,
 }
 
-/// The subscriptions of one store in this process, and the parent each follows.
-type Followers = Vec<(Weak<dyn Inbox>, Option<u32>)>;
+struct ObserverEntry {
+    followers: Vec<Follower>,
+    planning: Vec<tokio::sync::watch::Sender<Option<i64>>>,
+    waker: StoreWaker,
+}
+
+fn ensure_observer<'a>(
+    observers: &'a mut HashMap<PathBuf, ObserverEntry>,
+    database: &Path,
+) -> &'a mut ObserverEntry {
+    observers.entry(database.to_owned()).or_insert_with(|| {
+        let store = StoreChanges::watch(database);
+        let waker = store.waker();
+        let watched = database.to_owned();
+        let _ = std::thread::Builder::new()
+            .name("store-observer".into())
+            .spawn(move || observe(&watched, store));
+        ObserverEntry {
+            followers: Vec::new(),
+            planning: Vec::new(),
+            waker,
+        }
+    })
+}
+
+/// Watch `database`'s planning revision through the shared `store-observer`
+/// thread without spawning an extra `StoreChanges` thread or polling on a 1 s clock.
+pub fn watch_planning(database: &Path) -> tokio::sync::watch::Receiver<Option<i64>> {
+    let initial = read_store_revisions(database).map(|rev| rev.planning);
+    let (send, receive) = tokio::sync::watch::channel(initial);
+    let mut observers = observers();
+    let entry = ensure_observer(&mut observers, database);
+    entry.planning.retain(|tx| !tx.is_closed());
+    entry.planning.push(send);
+    receive
+}
 
 /// Every subscription of a store in this process shares one observer of it, so an
 /// app serving many subscriptions follows its store once.
-static OBSERVERS: OnceLock<Mutex<HashMap<PathBuf, Followers>>> = OnceLock::new();
+static OBSERVERS: OnceLock<Mutex<HashMap<PathBuf, ObserverEntry>>> = OnceLock::new();
 
-fn observers() -> MutexGuard<'static, HashMap<PathBuf, Followers>> {
+fn observers() -> MutexGuard<'static, HashMap<PathBuf, ObserverEntry>> {
     OBSERVERS
         .get_or_init(Default::default)
         .lock()
         .unwrap_or_else(|poison| poison.into_inner())
 }
 
-/// Wake `inbox` when `database` may have changed, and close it when `parent`
-/// (when it follows one) exits.
-fn follow_store(database: &Path, inbox: &Arc<dyn Inbox>, parent: Option<u32>) {
-    let mut observers = observers();
-    let followers = observers.entry(database.to_owned()).or_default();
-    followers.push((Arc::downgrade(inbox), parent));
-    if followers.len() == 1 {
-        let database = database.to_owned();
-        std::thread::spawn(move || observe(&database));
+fn read_store_revisions(database: &Path) -> Option<StoreRevisions> {
+    if !database.exists() {
+        return None;
+    }
+    let config = StorageConfig::sqlite(database.to_path_buf());
+    crate::store::open_read_only_store(&config)
+        .ok()
+        .and_then(|store| store.sqlite.revisions().ok())
+}
+
+fn revisions_moved(watch: Watch, old: Option<StoreRevisions>, new: Option<StoreRevisions>) -> bool {
+    match (old, new) {
+        (Some(old), Some(new)) => changed(watch, old, new),
+        (None, None) => false,
+        _ => true,
     }
 }
 
-/// Wake each subscription of `database` when the store may have changed, and close
+/// Wake `inbox` when `database`'s watched domain moves, and close it when
+/// `parent` (when it follows one) exits.
+fn follow_store(database: &Path, inbox: &Arc<dyn Inbox>, watch: Watch, parent: Option<u32>) {
+    let initial = if watch == Watch::Files {
+        None
+    } else {
+        read_store_revisions(database)
+    };
+    let mut observers = observers();
+    let existed = observers.contains_key(database);
+    let entry = ensure_observer(&mut observers, database);
+    entry.followers.push(Follower {
+        inbox: Arc::downgrade(inbox),
+        watch,
+        parent,
+        last_seen: initial,
+    });
+    if existed && (watch == Watch::History || parent.is_some()) {
+        entry.waker.wake();
+    }
+}
+
+/// Wake each subscription of `database` whose watched domain moved, and close
 /// one whose parent exited: a descendant that inherited the pipe can hold
 /// stdin open long after the parent is gone. Ends with its last subscription.
-fn observe(database: &Path) {
+fn observe(database: &Path, mut store: StoreChanges) {
     #[cfg(any(test, feature = "test-support"))]
     let _observer = Stage::new("observer_lifetime");
-    let mut store = StoreChanges::watch(database);
     loop {
-        store.wait(CHECK);
+        let (wait_timeout, watch_history) = {
+            let observers = observers();
+            let followers = observers
+                .get(database)
+                .map(|entry| entry.followers.as_slice());
+            let has_parent = followers.is_some_and(|list| list.iter().any(|f| f.parent.is_some()));
+            let watch_history =
+                followers.is_some_and(|list| list.iter().any(|f| f.watch == Watch::History));
+            (
+                if has_parent {
+                    Duration::from_secs(1)
+                } else {
+                    CHECK
+                },
+                watch_history,
+            )
+        };
+        store.wait_with_history(wait_timeout, watch_history);
         let current = parent_process();
+        let current_revisions = read_store_revisions(database);
         let mut observers = observers();
-        let followers = observers
+        let entry = observers
             .get_mut(database)
             .expect("a store's followers outlive its observer");
-        followers.retain(|(inbox, parent)| {
-            let Some(inbox) = inbox.upgrade() else {
+        entry.followers.retain_mut(|follower| {
+            let Some(inbox) = follower.inbox.upgrade() else {
                 return false;
             };
             // A subscription served in-process follows no parent.
-            if parent.is_some() && *parent != current {
+            if follower.parent.is_some() && follower.parent != current {
                 inbox.close();
                 return false;
             }
-            inbox.look()
+            if follower.watch == Watch::Files {
+                return true;
+            }
+            let moved = revisions_moved(follower.watch, follower.last_seen, current_revisions);
+            follower.last_seen = current_revisions;
+            if moved {
+                inbox.look()
+            } else {
+                true
+            }
         });
-        if followers.is_empty() {
+        let next_planning = current_revisions.map(|rev| rev.planning);
+        entry.planning.retain(|tx| {
+            if tx.is_closed() {
+                return false;
+            }
+            tx.send_if_modified(|value| std::mem::replace(value, next_planning) != next_planning);
+            true
+        });
+        if entry.followers.is_empty() && entry.planning.is_empty() {
             observers.remove(database);
             return;
         }
@@ -1052,8 +1269,10 @@ mod tests {
         std::fs::write(checkout.join("unrelated.txt"), "changed\n").unwrap();
         let until = Instant::now() + Duration::from_millis(1200);
         while Instant::now() < until {
-            wakes.recv_timeout(Duration::from_secs(2)).unwrap();
-            assert!(subscription.pull().frame.is_none());
+            let remaining = until.saturating_duration_since(Instant::now());
+            if wakes.recv_timeout(remaining).is_ok() {
+                assert!(subscription.pull().frame.is_none());
+            }
         }
         assert_eq!(reads.load(Ordering::Relaxed), before);
         assert!(!home.path().join("loopflow.db").exists());
@@ -1326,6 +1545,97 @@ mod tests {
         assert_ne!(
             read(rows(1)),
             identity(Some("gone"), Some(&rows(1))).unwrap()
+        );
+    }
+
+    #[test]
+    fn idle_subscription_performs_zero_steps_over_five_seconds() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let _store =
+            crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+        let (sender, wakes) = mpsc::channel();
+        let subscription = start_pull(
+            Watch::State,
+            (),
+            |store, ()| async move {
+                let store = super::require_store(store)?;
+                Ok(store.sqlite.revisions()?.planning)
+            },
+            Box::new(move || {
+                let _ = sender.send(());
+            }),
+            None,
+            false,
+        )
+        .unwrap();
+        assert!(next_frame(&subscription, &wakes)["unavailable"].is_null());
+        // No store or fact changes for 5 seconds: zero wakes and zero steps.
+        assert!(
+            wakes.recv_timeout(Duration::from_secs(5)).is_err(),
+            "idle subscription must not wake over 5 s"
+        );
+    }
+
+    #[test]
+    fn history_write_does_not_wake_state_subscription() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let store =
+            crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+        store.test_session(
+            "state-vs-history",
+            &loopflow_storage::session_record::new_artifact_key(),
+        );
+        let (state_tx, state_wakes) = mpsc::channel();
+        let state_sub = start_pull(
+            Watch::State,
+            (),
+            |store, ()| async move {
+                let store = super::require_store(store)?;
+                Ok(store.sqlite.revisions()?.planning)
+            },
+            Box::new(move || {
+                let _ = state_tx.send(());
+            }),
+            None,
+            false,
+        )
+        .unwrap();
+        let (hist_tx, hist_wakes) = mpsc::channel();
+        let hist_sub = start_pull(
+            Watch::History,
+            (),
+            |store, ()| async move {
+                let store = super::require_store(store)?;
+                Ok(store.sqlite.session_turns("state-vs-history")?.len())
+            },
+            Box::new(move || {
+                let _ = hist_tx.send(());
+            }),
+            None,
+            false,
+        )
+        .unwrap();
+        assert!(next_frame(&state_sub, &state_wakes)["unavailable"].is_null());
+        assert_eq!(next_frame(&hist_sub, &hist_wakes)["body"], 0);
+        // Drain any startup notifications before committing to history.
+        while state_wakes.try_recv().is_ok() {
+            let _ = state_sub.pull();
+        }
+
+        // Write a turn (advances history revision only).
+        store.record_turn_start("state-vs-history", &"thread".into(), "turn-1", 1);
+        assert_eq!(next_frame(&hist_sub, &hist_wakes)["body"], 1);
+        assert!(
+            state_wakes
+                .recv_timeout(Duration::from_millis(1200))
+                .is_err(),
+            "Watch::State subscription must not wake on a history-only write"
         );
     }
 }

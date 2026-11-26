@@ -778,6 +778,122 @@ read next",
 }
 
 #[test]
+fn typing_echoes_within_200ms_while_store_write_lock_is_held() {
+    let ledger = TestLedgerGuard::new();
+    let registry = Registry::open(BUILD).unwrap();
+    let place = holder();
+
+    let live_term = registry
+        .start(shell(None, "echo-live", "printf ready; exec cat"))
+        .unwrap();
+    let mut live_view = View::attach(&live_term);
+    live_view.wait_for("ready");
+
+    // A second terminal whose exit hits the store worker while the write lock is held.
+    let stop_file = ledger.home().join("stop-exit");
+    let exit_term = registry
+        .start(shell(
+            None,
+            "exit-under-lock",
+            &format!(
+                "printf armed; while [ ! -e '{}' ]; do sleep 0.01; done; exit 0",
+                stop_file.display()
+            ),
+        ))
+        .unwrap();
+    let mut exit_view = View::attach(&exit_term);
+    exit_view.wait_for("armed");
+
+    // Hold SQLite's write lock from an independent connection.
+    let blocker = rusqlite::Connection::open(ledger.home().join("loopflow.db")).unwrap();
+    blocker.execute_batch("BEGIN EXCLUSIVE").unwrap();
+
+    // Trigger exit settlement so the store worker blocks on SQLite.
+    std::fs::write(&stop_file, "").unwrap();
+    drop(exit_view);
+    std::thread::sleep(Duration::from_millis(150));
+
+    // Typing into the live terminal must still echo immediately.
+    let started = Instant::now();
+    live_view.type_in(b"ping-under-lock\n");
+    live_view.wait_for("ping-under-lock");
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < Duration::from_millis(200),
+        "held terminal echo took {elapsed:?} while SQLite write lock was held"
+    );
+
+    blocker.execute_batch("ROLLBACK").unwrap();
+    drop(blocker);
+    registry.close();
+    kill(&place, &live_term);
+    kill(&place, &exit_term);
+}
+
+#[test]
+fn attaching_during_in_flight_exit_settlement_waits_then_sees_exit_code() {
+    let ledger = TestLedgerGuard::new();
+    let registry = Registry::open(BUILD).unwrap();
+    let _place = holder();
+
+    let go = ledger.home().join("go-exit-42");
+    let terminal = registry
+        .start(shell(
+            None,
+            "exit-42",
+            &format!(
+                "printf ready; while [ ! -e '{}' ]; do sleep 0.01; done; exit 42",
+                go.display()
+            ),
+        ))
+        .unwrap();
+    let mut view = View::attach(&terminal);
+    view.wait_for("ready");
+
+    // Hold SQLite's write lock so exit settlement stays in flight on the worker.
+    let blocker = rusqlite::Connection::open(ledger.home().join("loopflow.db")).unwrap();
+    blocker.execute_batch("BEGIN EXCLUSIVE").unwrap();
+
+    std::fs::write(&go, "").unwrap();
+    drop(view);
+
+    // Once the relay hands the exit to the worker, attaching must answer Waiting
+    // (non-engine error), never Ended with a missing exit code.
+    wait_until("terminal to enter settling (Waiting)", || {
+        match connect(&terminal) {
+            Err(err) => !err.is::<crate::engine::Error>(),
+            Ok(_) => false,
+        }
+    });
+
+    // Release the lock: settlement commits and the next attach sees exit_code 42.
+    blocker.execute_batch("ROLLBACK").unwrap();
+    drop(blocker);
+
+    let mut exit_code = None;
+    wait_until(
+        "terminal to report Ended with exit_code 42",
+        || match connect(&terminal) {
+            Err(err) => {
+                if let Some(engine) = err.downcast_ref::<crate::engine::Error>() {
+                    exit_code = engine
+                        .data
+                        .as_ref()
+                        .and_then(|d| d.get("exit_code"))
+                        .and_then(serde_json::Value::as_u64);
+                    true
+                } else {
+                    false
+                }
+            }
+            Ok(_) => false,
+        },
+    );
+    assert_eq!(exit_code, Some(42));
+    registry.close();
+}
+
+#[test]
 fn session_terminal_for_prefers_the_requested_live_terminal() {
     let _ledger = TestLedgerGuard::new();
     let registry = Registry::open(BUILD).unwrap();

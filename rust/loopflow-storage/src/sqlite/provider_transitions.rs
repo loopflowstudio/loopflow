@@ -204,7 +204,7 @@ impl SqliteStore {
     /// Every transition `session` made, oldest first, from its history.
     pub fn provider_transitions(&self, session: &str) -> StoreResult<Vec<ProviderTransition>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
+        let mut statement = conn.prepare_cached(
             "SELECT payload,observed_at FROM history.session_history
              WHERE session_id=?1 AND kind='transition' ORDER BY seq",
         )?;

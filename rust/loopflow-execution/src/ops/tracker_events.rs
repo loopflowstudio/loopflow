@@ -317,7 +317,6 @@ pub(crate) async fn check_owned_work(
             } else {
                 super::plan_carriers::poll_owned(store, &repo, window)
                     .await
-                    .map(Some)
                     .map_err(message)
             };
             // Wake when the shared attempt expires, even if another reader made it.

@@ -394,7 +394,7 @@ pub(crate) struct ViewerTitle {
 /// handle and every `OutputTitle` made from it are gone.
 #[derive(Debug, Clone)]
 pub(crate) struct TitleReader {
-    requests: mpsc::SyncSender<TitleRequest>,
+    requests: std::sync::Arc<std::sync::OnceLock<mpsc::SyncSender<TitleRequest>>>,
 }
 
 #[derive(Debug)]
@@ -408,29 +408,35 @@ const TITLE_QUEUE: usize = 64;
 
 impl TitleReader {
     pub fn spawn() -> Self {
-        let path = crate::store::database_path_from_env();
-        let (requests, requested) = mpsc::sync_channel::<TitleRequest>(TITLE_QUEUE);
-        std::thread::spawn(move || {
-            let Ok(path) = path else { return };
-            let mut store = None;
-            while let Ok(request) = requested.recv() {
-                let mut read = || -> anyhow::Result<Option<String>> {
-                    if store.is_none() {
-                        store = Some(SqliteStore::open_read_only(
+        Self {
+            requests: std::sync::Arc::new(std::sync::OnceLock::new()),
+        }
+    }
+
+    fn sender(&self) -> &mpsc::SyncSender<TitleRequest> {
+        self.requests.get_or_init(|| {
+            let path = crate::store::database_path_from_env();
+            let (requests, requested) = mpsc::sync_channel::<TitleRequest>(TITLE_QUEUE);
+            let _ = std::thread::Builder::new()
+                .name("title-reader".into())
+                .spawn(move || {
+                    let Ok(path) = path else { return };
+                    while let Ok(request) = requested.recv() {
+                        let read = SqliteStore::open_read_only(
                             &path,
                             crate::store::token_key::encryption_key,
-                        )?);
+                        )
+                        .map_err(anyhow::Error::from)
+                        .and_then(|store| output_title(&store, &request.held));
+                        if let Ok(Some(name)) = read.inspect_err(
+                            |error| tracing::debug!(%error, "cannot read output Session name"),
+                        ) {
+                            let _ = request.answer.try_send(name);
+                        }
                     }
-                    output_title(store.as_ref().expect("opened above"), &request.held)
-                };
-                if let Ok(Some(name)) = read()
-                    .inspect_err(|error| tracing::debug!(%error, "cannot read output Session name"))
-                {
-                    let _ = request.answer.try_send(name);
-                }
-            }
-        });
-        Self { requests }
+                });
+            requests
+        })
     }
 }
 
@@ -463,7 +469,7 @@ impl OutputTitle {
             .is_none_or(|checked| checked.elapsed() >= Duration::from_millis(500))
         {
             self.checked = Some(Instant::now());
-            let _ = self.reader.requests.try_send(TitleRequest {
+            let _ = self.reader.sender().try_send(TitleRequest {
                 held: self.held.clone(),
                 answer: self.answer.clone(),
             });

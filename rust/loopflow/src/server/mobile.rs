@@ -103,10 +103,7 @@ fn configure(configuration: Option<Configuration>) -> Result<Option<Configuratio
 
 pub fn enable() -> Result<Configuration> {
     let _lock = lock()?;
-    let (_, host) = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?
-        .block_on(Tailscale::discover())?;
+    let (_, host) = loopflow_execution::runtime::block_on(Tailscale::discover())?;
     let owner = host.owner;
     let value = loopflow_execution::config::files::read(&configuration_path())?;
     // Explicit setup replaces obsolete mobile settings; file read/parse errors

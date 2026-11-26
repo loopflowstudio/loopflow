@@ -1,0 +1,12 @@
+{
+  "type": "response",
+  "id": "diagnostics-1",
+  "trace_id": "4b0e1f2a-9c3d-4e5f-8a6b-7c8d9e0f1a2b",
+  "result": {
+    "threads": 16,
+    "store_opens": 4,
+    "spawns": 2,
+    "held_facts": 11
+  },
+  "revisions": null
+}

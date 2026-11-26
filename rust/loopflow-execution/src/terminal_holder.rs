@@ -39,6 +39,11 @@ const READER_QUEUE: usize = 4 * wire::CHUNK;
 /// How long a holder with no running child waits for a start.
 #[cfg(not(any(test, feature = "test-support")))]
 const IDLE: Duration = Duration::from_secs(60);
+/// How often a holder checks that its Machine home still exists.
+#[cfg(not(test))]
+const HOME_CHECK: Duration = Duration::from_secs(2);
+#[cfg(test)]
+const HOME_CHECK: Duration = Duration::from_millis(100);
 #[cfg(any(test, feature = "test-support"))]
 thread_local! {
     /// A fixture's holder thread chooses how long it idles; two seconds suits
@@ -102,10 +107,12 @@ pub enum Served {
     Finished,
 }
 
-/// `lf holder run`: hold this build's PTYs until the last child is gone.
+/// `lf holder run`: hold this build's PTYs until the last child is gone or the
+/// Machine home is removed.
 pub fn run() -> Result<()> {
     let build = build()?;
-    serve(&Place::of(&build)?, &build, || {
+    let home = crate::store::lf_home_dir();
+    serve_for_home(&Place::of(&build)?, &build, Some(&home), || {
         // The one line the starting server waits for: what it started.
         let _ = writeln!(io::stdout(), "{} {build}", std::process::id());
         let _ = io::stdout().flush();
@@ -313,6 +320,26 @@ struct Holder<'a> {
 /// Claim this build's socket and hold PTYs until the last child and reader are
 /// gone and no start arrives for `IDLE`. `ready` runs once the socket accepts connections.
 pub fn serve(place: &Place, build: &str, ready: impl FnOnce()) -> Result<Served> {
+    serve_for_home(place, build, None, ready)
+}
+
+/// Like [`serve`], also exiting and closing every PTY (delivering SIGHUP to
+/// children) once `home` is definitively removed (not found or replaced by a
+/// new inode). Never triggers on transient I/O errors.
+pub(crate) fn serve_for_home(
+    place: &Place,
+    build: &str,
+    home: Option<&Path>,
+    ready: impl FnOnce(),
+) -> Result<Served> {
+    let initial_home = home.and_then(crate::store::home_identity);
+    if home.is_some_and(|dir| crate::store::home_removed(dir, initial_home)) {
+        return Ok(Served::Finished);
+    }
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    let home_watcher = home.and_then(|dir| crate::store::HomeRemovalWatcher::new(dir).ok());
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let home_watcher: Option<()> = None;
     let lock = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -352,10 +379,31 @@ pub fn serve(place: &Place, build: &str, ready: impl FnOnce()) -> Result<Served>
     let IDLE = TEST_IDLE.get();
     let mut connections: Vec<Connection> = Vec::new();
     let mut idle_since = Some(Instant::now());
+    // When the kernel home-removal watch is active, poll sleeps with no timer
+    // while children run; fall back to HOME_CHECK only if the watch failed.
+    let mut next_home_check = home
+        .filter(|_| home_watcher.is_none())
+        .map(|_| Instant::now() + HOME_CHECK);
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    let home_watch_fd = home_watcher.as_ref().map(AsRawFd::as_raw_fd);
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let home_watch_fd: Option<RawFd> = None;
     loop {
-        let timeout =
-            idle_since.map(|since| (since + IDLE).saturating_duration_since(Instant::now()));
-        let ready = poll(&listener, &wake, &connections, &holder.terminals, timeout);
+        let now = Instant::now();
+        let idle_timeout = idle_since.map(|since| (since + IDLE).saturating_duration_since(now));
+        let home_timeout = next_home_check.map(|due| due.saturating_duration_since(now));
+        let timeout = match (idle_timeout, home_timeout) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        let ready = poll(
+            &listener,
+            &wake,
+            home_watch_fd,
+            &connections,
+            &holder.terminals,
+            timeout,
+        );
         if ready.listener {
             while let Ok((socket, _)) = listener.accept() {
                 if socket.set_nonblocking(true).is_ok() {
@@ -405,6 +453,31 @@ pub fn serve(place: &Place, build: &str, ready: impl FnOnce()) -> Result<Served>
             }
             !connection.closed
         });
+        let check_home = if ready.home_watch {
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            if let Some(watcher) = &home_watcher {
+                watcher.drain();
+            }
+            true
+        } else {
+            next_home_check.is_some_and(|due| Instant::now() >= due)
+        };
+        if check_home {
+            if let Some(home) = home {
+                if crate::store::home_removed(home, initial_home) {
+                    // Closing each master PTY hangs up its foreground process group (SIGHUP).
+                    for terminal in holder.terminals.values_mut() {
+                        terminal.master = None;
+                        terminal.input.clear();
+                    }
+                    let _ = std::fs::remove_file(&place.socket);
+                    return Ok(Served::Finished);
+                }
+                if next_home_check.is_some() {
+                    next_home_check = Some(Instant::now() + HOME_CHECK);
+                }
+            }
+        }
         // A reader still on its way to an exit keeps the holder too.
         let running = holder
             .terminals
@@ -618,6 +691,9 @@ impl Holder<'_> {
         // SAFETY: these syscalls only affect the child; fd 0 is the slave PTY after dup2.
         unsafe {
             command.pre_exec(|| {
+                // A detached server or holder may inherit SIGHUP = SIG_IGN; restore
+                // default delivery so closing the master PTY hangs up the child.
+                libc::signal(libc::SIGHUP, libc::SIG_DFL);
                 if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
                     return Err(io::Error::last_os_error());
                 }
@@ -741,12 +817,14 @@ pub fn recorded_exit(place: &Place, terminal: &str) -> Result<Option<Exit>> {
 struct Ready {
     listener: bool,
     wake: bool,
+    home_watch: bool,
     readable: Vec<RawFd>,
 }
 
 fn poll(
     listener: &UnixListener,
     wake: &UnixStream,
+    home_watch: Option<RawFd>,
     connections: &[Connection],
     terminals: &BTreeMap<String, Terminal>,
     timeout: Option<Duration>,
@@ -760,6 +838,12 @@ fn poll(
         pollfd(listener.as_raw_fd(), libc::POLLIN),
         pollfd(wake.as_raw_fd(), libc::POLLIN),
     ];
+    let home_watch_index = home_watch.map(|fd| {
+        let idx = fds.len();
+        fds.push(pollfd(fd, libc::POLLIN));
+        idx
+    });
+    let dynamic_start = fds.len();
     for connection in connections {
         let mut events = 0;
         // A writer ahead of its child waits; everything else is read at once.
@@ -802,7 +886,8 @@ fn poll(
     Ready {
         listener: fds[0].revents != 0,
         wake: fds[1].revents != 0,
-        readable: fds[2..]
+        home_watch: home_watch_index.is_some_and(|idx| fds[idx].revents != 0),
+        readable: fds[dynamic_start..]
             .iter()
             .filter(|fd| fd.revents & !libc::POLLOUT != 0)
             .map(|fd| fd.fd)

@@ -215,9 +215,10 @@ fn register_authored_waves(
                 .filter_map(|path| main_repository(path, directory).ok()),
         );
     }
-    let runtime = tokio::runtime::Runtime::new()?;
     for repo in repos {
-        if let Err(error) = runtime.block_on(crate::ops::wave_lifecycle::register_authored(&repo)) {
+        if let Err(error) =
+            crate::runtime::block_on(crate::ops::wave_lifecycle::register_authored(&repo))
+        {
             tracing::warn!(repo = %repo.display(), %error, "authored Waves were not registered");
         }
     }

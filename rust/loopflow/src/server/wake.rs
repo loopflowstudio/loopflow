@@ -28,7 +28,7 @@ use loopflow_storage::sqlite::SqliteStore;
 
 /// How long the watcher waits for a store change before reading the revision
 /// anyway: the change signal can miss a checkpoint or a Machine's sleep.
-const UNSIGNALLED: Duration = Duration::from_secs(60);
+pub(super) const UNSIGNALLED: Duration = Duration::from_secs(60);
 const SEND_DEADLINE: Duration = Duration::from_secs(2);
 /// A provider's turn start loads nothing new; it answers once the turn exists.
 const TURN_START_DEADLINE: Duration = Duration::from_secs(15);
@@ -39,55 +39,28 @@ pub(super) fn after_turn(store: &SqliteStore, session: &str) {
     wake_idle(store, Some(session));
 }
 
-/// Start the Machine's one watcher. It runs as long as the server; without
-/// `terminals` it starts no stopped Session.
-pub(super) fn start(terminals: Option<Arc<Registry>>) {
-    let spawned = std::thread::Builder::new()
-        .name("task-update-wake".into())
-        .spawn(|| {
-            loopflow_execution::journal::request::isolate(|| watch(terminals));
-        });
-    if let Err(error) = spawned {
-        tracing::warn!(%error, "Task updates wait for each conversation's next turn");
-    }
-}
-
-fn watch(terminals: Option<Arc<Registry>>) {
-    let path = loopflow_execution::store::default_db_path();
-    let mut changes = loopflow_storage::changes::StoreChanges::watch(&path);
-    let mut watcher = Watcher {
-        terminals,
-        ..Watcher::default()
-    };
-    loop {
-        watcher.read(&path);
-        changes.wait(UNSIGNALLED);
-    }
-}
-
-/// The watcher's store, the revisions it last woke conversations for, and
-/// the held terminals it starts stopped Sessions in.
+/// The revisions this watcher last woke conversations for, and the held
+/// terminals it starts stopped Sessions in. Driven by `recovery`'s single
+/// store-watching thread.
 #[derive(Default)]
-struct Watcher {
-    store: Option<SqliteStore>,
+pub(super) struct Watcher {
     seen: Option<(i64, i64)>,
     terminals: Option<Arc<Registry>>,
 }
 
 impl Watcher {
+    pub(super) fn new(terminals: Option<Arc<Registry>>) -> Self {
+        Self {
+            seen: None,
+            terminals,
+        }
+    }
+
     /// Wake idle conversations if the revisions moved since the last reading.
     /// The first reading wakes too: what arrived while no server ran reaches
     /// each idle conversation now. One that already heard it gets nothing;
     /// claimed updates and confirmed steers say so.
-    fn read(&mut self, path: &Path) {
-        if self.store.is_none() && path.exists() {
-            self.store = loopflow_execution::store::open_sqlite(path)
-                .inspect_err(|error| tracing::warn!(%error, "Task update watcher has no store"))
-                .ok();
-        }
-        let Some(store) = &self.store else {
-            return;
-        };
+    pub(super) fn read_with(&mut self, store: &SqliteStore) {
         match store
             .task_update_revision()
             .and_then(|updates| Ok((updates, store.steer_revision()?)))
@@ -113,8 +86,17 @@ impl Watcher {
             Ok(_) => {}
             Err(error) => {
                 tracing::warn!(%error, "steer and Task update revisions unread");
-                self.store = None;
             }
+        }
+    }
+
+    #[cfg(test)]
+    fn read(&mut self, path: &Path) {
+        if !path.exists() {
+            return;
+        }
+        if let Ok(store) = loopflow_execution::store::open_sqlite(path) {
+            self.read_with(&store);
         }
     }
 }
@@ -301,10 +283,7 @@ fn open_inbox(key: &Path, thread: &str) -> Result<Option<(UnixStream, String)>> 
 }
 
 fn start_codex_turn(endpoint: &Path, thread: &str, text: &str) -> Result<()> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    runtime.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         tokio::time::timeout(
             TURN_START_DEADLINE,
             loopflow_execution::harness::codex_connection::deliver_update(endpoint, thread, text),

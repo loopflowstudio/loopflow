@@ -1,10 +1,9 @@
 //! Filesystem authority retained while structured identities change spelling.
 
 use std::collections::HashSet;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::path::Path;
 
-use fs2::FileExt;
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
@@ -12,18 +11,26 @@ use super::migration_runner::MigrationProcess;
 use super::ProcessIdentityEvidence;
 use crate::{StoreError, StoreResult};
 
-pub(crate) fn session_fence_file(database: &Path, locator: &str) -> StoreResult<File> {
+pub(crate) fn session_fence_path(
+    database: &Path,
+    locator: &str,
+) -> StoreResult<std::path::PathBuf> {
     let root = database
         .canonicalize()
         .map_err(io_error)?
         .with_extension("session-locks");
     std::fs::create_dir_all(&root).map_err(io_error)?;
-    OpenOptions::new()
+    Ok(root.join(hex::encode(Sha256::digest(locator.as_bytes()))))
+}
+
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) fn session_fence_file(database: &Path, locator: &str) -> StoreResult<File> {
+    std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
         .read(true)
         .write(true)
-        .open(root.join(hex::encode(Sha256::digest(locator.as_bytes()))))
+        .open(session_fence_path(database, locator)?)
         .map_err(io_error)
 }
 
@@ -71,10 +78,10 @@ pub(super) fn preflight(
         }
         affected_owners.extend([agent, parent, attached].into_iter().flatten());
         if let Some(database) = database {
-            let file = session_fence_file(database, &session)?;
-            match file.try_lock_exclusive() {
-                Ok(()) => guards.push(file),
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+            let path = session_fence_path(database, &session)?;
+            match crate::lock_file::try_lock_exclusive_verified(&path) {
+                Ok(Some(file)) => guards.push(file),
+                Ok(None) => {
                     return Err(StoreError::InvalidData(format!(
                         "canonical identity migration deferred: Session {session} fence is busy; retry after dispatch settles"
                     )));

@@ -128,7 +128,7 @@ fn completed_graph_steps(
     conn: &rusqlite::Connection,
     tasks: &[&TaskId],
 ) -> StoreResult<HashMap<TaskId, HashSet<LfProcessId>>> {
-    let mut query = conn.prepare(
+    let mut query = conn.prepare_cached(
         "SELECT g.task_id, gs.lf_process_id FROM graph_processes g
          JOIN graph_process_steps gs ON gs.graph_lf_process_id=g.lf_process_id
          WHERE g.task_id IN (SELECT value FROM json_each(?1)) AND gs.ended_at IS NOT NULL",
@@ -564,7 +564,7 @@ impl SqliteStore {
         wave: &loopflow_model::id::WaveId,
     ) -> StoreResult<std::collections::HashSet<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
+        let mut statement = conn.prepare_cached(
             "SELECT t.id FROM projects p JOIN tasks t ON t.project_id=p.id WHERE p.wave_id=?1",
         )?;
         let rows = statement.query_map([wave], |row| row.get::<_, String>(0))?;
@@ -904,7 +904,7 @@ impl SqliteStore {
     /// process, or was found dead.
     pub fn local_task_runs(&self) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
+        let mut query = conn.prepare_cached(
             "SELECT task_id FROM task_graphs WHERE (run_pid IS NOT NULL OR run_died_at IS NOT NULL)
              AND task_id IN (SELECT task_id FROM task_checkouts)",
         )?;

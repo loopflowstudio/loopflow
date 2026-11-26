@@ -1193,7 +1193,7 @@ impl SqliteStore {
     pub fn sessions_for_agent_session(&self, thread: &AgentSessionId) -> StoreResult<Vec<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         // An input's captured row names the conversation that resumes it.
-        let mut query = conn.prepare(
+        let mut query = conn.prepare_cached(
             "SELECT id FROM agent_sessions WHERE provider_thread=?1
              UNION SELECT session_id FROM session_events WHERE kind='captured' AND provider_thread=?1
              ORDER BY 1",
@@ -1891,7 +1891,7 @@ impl SqliteStore {
     pub fn bound_sessions(&self) -> StoreResult<Vec<crate::session::SessionBind>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
-        let mut query = conn.prepare(
+        let mut query = conn.prepare_cached(
             "SELECT s.id,s.bound_at,t.id,(SELECT slug FROM wave_addresses WHERE id=s.wave_id)
              FROM agent_sessions s JOIN tasks t ON t.id=s.task_id
              WHERE s.bound_at IS NOT NULL ORDER BY s.bound_at,s.id",
@@ -1937,7 +1937,7 @@ impl SqliteStore {
         let canonical = loopflow_model::id::canonical_session(id);
         let id = canonical.as_str();
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
+        let mut query = conn.prepare_cached(
             "SELECT receipt_key FROM session_events WHERE kind='captured' AND session_id=?1 ORDER BY seq",
         )?;
         let rows = query.query_map([id], |row| row.get::<_, String>(0))?;
@@ -2111,7 +2111,7 @@ pub(super) fn repair_task_titles_in(
     task: &TaskId,
     previous: Option<&str>,
 ) -> StoreResult<()> {
-    let mut query = conn.prepare("SELECT id FROM agent_sessions WHERE task_id=?1 AND title_source='generated' AND completed_at IS NULL")?;
+    let mut query = conn.prepare_cached("SELECT id FROM agent_sessions WHERE task_id=?1 AND title_source='generated' AND completed_at IS NULL")?;
     let sessions = query
         .query_map([task.as_str()], |row| row.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;

@@ -222,7 +222,7 @@
       if (note.kind === "line") {
         const anchor = formatLineAnchor(note);
         entries.push({
-          tag: "diff",
+          tag: "lines",
           summary: shortPath(note.path) + ":" + formatLineSpan(note) + " — " + text,
           title: anchor + " — " + text,
           ref: "`" + pagePath + "` § " + anchor + " — " + text,
@@ -590,8 +590,11 @@
     document.querySelectorAll("[data-question]").forEach((box) => {
       const qid = box.getAttribute("data-question");
       const label = box.getAttribute("data-label") || qid;
-      const input = box.querySelector("textarea, input");
-      if (!input) return;
+      let input = box.querySelector("textarea, input");
+      if (!input) {
+        input = el("textarea", { rows: 2 });
+        box.append(input);
+      }
       input.addEventListener("input", () => {
         const answer = input.value;
         if (!oneLine(answer)) delete state.questions[qid];
@@ -652,8 +655,11 @@
       groupEl.querySelectorAll("button").forEach((btn) => setPressed(btn, values.includes(buttonValue(btn))));
     });
     document.querySelectorAll("[data-question]").forEach((box) => {
-      const input = box.querySelector("textarea, input");
-      if (!input) return;
+      let input = box.querySelector("textarea, input");
+      if (!input) {
+        input = el("textarea", { rows: 2 });
+        box.append(input);
+      }
       const entry = state.questions[box.getAttribute("data-question")];
       const saved = entry ? entry.answer : "";
       if (input.value !== saved) input.value = saved;
@@ -1292,12 +1298,14 @@
 
         const previewNote = { kind: "line", path, side: rangeSide, lineStart, lineEnd };
         const selectedRows = rowsForLineNote(previewNote);
+        // Span the whole range so a composer that flips above it never covers it.
+        const firstRect = (selectedRows[0] || tr).getBoundingClientRect();
         const anchorRow = selectedRows[selectedRows.length - 1] || tr;
         const rowRect = anchorRow.getBoundingClientRect();
         const codeCell = anchorRow.lastElementChild;
         const codeLeft = codeCell ? codeCell.getBoundingClientRect().left : rowRect.left + 110;
         const composerRect = {
-          top: rowRect.top,
+          top: firstRect.top,
           bottom: rowRect.bottom,
           left: codeLeft + 12,
           right: rowRect.right,
@@ -1620,6 +1628,10 @@
       el("div", "lf-dock-row", dockOverallInput, el("div", "lf-dock-actions", dockPreviewBtn, dockClearBtn, dockSendBtn))
     );
     document.body.append(dockEl);
+    // Reserve the dock's height below the page so the last control stays reachable.
+    new ResizeObserver(() => {
+      document.documentElement.style.setProperty("--lf-dock-room", dockEl.offsetHeight + 40 + "px");
+    }).observe(dockEl);
   }
 
   function updateDockMeta(entries) {
@@ -1660,7 +1672,7 @@
         el(
           "span",
           { cls: "lf-chip", title: entry.title, on: { click: () => entry.jump() } },
-          el("span", { cls: "lf-chip-tag tag-" + entry.tag, text: entry.tag }),
+          el("span", { cls: "lf-chip-tag tag-" + entry.tag, text: entry.tag[0].toUpperCase() + entry.tag.slice(1) }),
           el("span", { cls: "lf-chip-text", text: entry.summary }),
           el("button", {
             type: "button",

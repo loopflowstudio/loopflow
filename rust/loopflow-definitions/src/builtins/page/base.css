@@ -15,7 +15,7 @@ html, body {
 main.lf-page {
   max-width: 860px;
   margin: 0 auto;
-  padding: 44px 24px 168px;
+  padding: 44px 24px max(168px, var(--lf-dock-room, 0px));
 }
 
 h1 {
@@ -202,12 +202,12 @@ th {
 }
 
 .lf-code-table tr.lf-code-row:hover .lf-gutter-plus,
-.lf-code-table tr.lf-code-row.lf-row-has-note .lf-gutter-plus,
 .lf-code-table .lf-gutter-plus:focus-visible {
   opacity: 1;
 }
 
-.lf-code-table tr.lf-code-row.lf-row-has-note td { background: var(--lf-highlight); }
+/* A noted row keeps its diff tint; only the gutter carries the note. */
+.lf-code-table tr.lf-code-row.lf-row-has-note td.lf-ln { background: var(--lf-highlight-active); }
 
 .lf-code-table tr.lf-code-row.lf-row-has-note td.lf-ln:first-child {
   box-shadow: inset 3px 0 0 var(--lf-accent);
@@ -677,10 +677,8 @@ button.lf-btn-quiet[aria-pressed="true"] {
 .lf-chip:hover { border-color: var(--lf-accent); }
 
 .lf-chip-tag {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
   padding: 1px 5px;
   border-radius: 4px;
   background: var(--lf-surface-element);
@@ -689,7 +687,7 @@ button.lf-btn-quiet[aria-pressed="true"] {
 }
 
 .lf-chip-tag.tag-note { background: var(--lf-highlight); color: var(--lf-accent); }
-.lf-chip-tag.tag-diff { background: var(--lf-working-fill); color: var(--lf-working-ink); }
+.lf-chip-tag.tag-lines { background: var(--lf-working-fill); color: var(--lf-working-ink); }
 .lf-chip-tag.tag-choice { background: var(--lf-success-fill); color: var(--lf-success-ink); }
 .lf-chip-tag.tag-answer { background: var(--lf-warning-fill); color: var(--lf-warning-ink); }
 .lf-chip-tag.tag-run { background: var(--lf-failure-fill); color: var(--lf-failure-ink); }

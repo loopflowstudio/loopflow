@@ -23,7 +23,12 @@ Drive it with the `browse` MCP (Claude in Chrome may be disconnected).
 inject a `<script>` that replaces `navigator.clipboard.writeText` and stores
 the text in a DOM attribute. `browse.drag({from, to})` makes a text selection;
 `page.mouse.down` is unsupported. Press `Meta+Enter` without clicking the body
-first (a scrolled body click misses). `browse.emulate({colorScheme: 'dark'})`
+first (a scrolled body click misses). `browse` refuses clicks on controls the fixed
+dock covers ("<div class=\"lf-dock\"> is on top of it"): scroll to the bottom
+first. Hover a code row's gutter cell (`td.lf-ln`), not the row, before a
+`Shift+click`: an open composer covers the next rows' code, never the gutter.
+A reload restores scroll after load, so measure a drag's bounding box only
+after `scrollTo`. `browse.emulate({colorScheme: 'dark'})`
 then reload checks dark.
 
 Read what `⌘↩` delivered from the store, read-only:

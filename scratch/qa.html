@@ -8,6 +8,60 @@ img{max-width:100%;border:1px solid #ddd;border-radius:4px;margin:8px 0}.fix{bor
 table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:4px 8px;text-align:left;vertical-align:top}
 @media (prefers-color-scheme:dark){body{background:#1c1a19;color:#ddd}code,pre{background:#2a2725}td,th,h2,img{border-color:#444}}
 </style></head><body>
+<h1>LOO-1109 QA, pass 3: the note-taking UI after compress</h1>
+<p>Fresh private Machine (<code>/tmp/lf-qa-pg</code>), Task <code>c1a599</code> in an adopted worktree, branch <code>lf</code> at <code>c1a5e7a</code>. The page has a tracked edit and an untracked file as <code>&lt;lf-diff&gt;</code>, an <code>&lt;lf-file&gt;</code>, a <code>decision</code> with a <code>data-lf</code> <code>task.create</code>, and a choice, a multiselect and a bare <code>data-question</code>. Built, opened the <code>lf page open --print</code> URL in Chrome after clearing <code>localStorage</code>.</p>
+
+<h2>1. Text note across <code>&lt;code&gt;</code></h2>
+<p>Dragged "now prints a name from <code>name()</code>": the pill (Comment (c) · Flag · Copy) sat above the selection; <code>c</code>, typed, <code>⌘↩</code> saved a highlight spanning the <code>&lt;code&gt;</code>, a chip in the dock and <code>Comments 1</code>.</p>
+<img src="qa/p3-1-pill.png">
+
+<h2>2. Gutter ranges</h2>
+<p><code>+</code> on new line 6, Shift+click line 10 gave <code>src/main.rs:6–10</code>; a <code>+</code> on <code>.lf/config.yaml</code> line 2 gave a file-line note. Three problems:</p>
+<ul>
+<li><b>Bug:</b> the composer flipped above the <em>last</em> row of the range when it didn't fit below, so it covered lines 6–9, the code being commented on.</li>
+<li><b>Bug:</b> noted rows painted wine at 14% over the add tint, which reads as grey: the diff's green was gone, and every noted row kept a solid <code>+</code> that looked like an action, not a mark.</li>
+<li>The dock tags read <code>NOTE</code> / <code>DIFF</code> in small capitals, and <code>DIFF</code> also labelled the <code>&lt;lf-file&gt;</code> note, which is no diff.</li>
+</ul>
+<img src="qa/p3-2-composer-covers.png"><img src="qa/p3-3-muddy-rows.png">
+
+<h2>3. Server stopped, restarted, page rebuilt</h2>
+<p>Killed the server by PID: banner and <code>Copy reply ⌘↩</code>. Restarted it and rebuilt the page with the new runtime: same port, new token, all three notes back (the body, and so <code>build_id</code>, didn't change).</p>
+<img src="qa/p3-4-rows-fixed.png"><img src="qa/p3-5-composer-above.png">
+
+<h2>4. Decision, <code>data-lf</code>, questions, direction, send</h2>
+<p>File Task on the decision, File Task now → Run → <code>Filed 6d0703</code> in place. Yes, mac + linux. <b>Bug:</b> question 3 was only a heading. <code>lf help page</code> shows <code>&lt;textarea&gt;</code> inside <code>data-question</code>; without one the runtime skipped the control, so there was nowhere to type. Its spot was also under the dock at full scroll, and Preview grew the dock to ~240px over the page's fixed 168px bottom padding.</p>
+<img src="qa/p3-6-question-missing.png">
+<p>Direction "Take argv, keep the comma", <code>⌘↩</code>. The dock showed "Saved a74ee6b0-…; nothing reads it until c1a599 runs" and the <code>steers</code> row read:</p>
+<pre>(1) `scratch/ship-review.html` § What was built › "now prints a name from name()" why name() and not an arg? (2) `scratch/ship-review.html` § src/main.rs:6–10 — name() could take argv (3) `scratch/ship-review.html` § .lf/config.yaml:2 — why codex default? (4) `scratch/ship-review.html` § Name is hardcoded: File Task (5) `scratch/ship-review.html` § 1. Keep the comma?: yes (6) `scratch/ship-review.html` § 2. Which targets: mac, linux (7) `scratch/ship-review.html` Overall: Take argv, keep the comma [already ran: task.create → 6d0703]</pre>
+<p>After the fixes: the answer box appears, and with Preview open the last control still scrolls clear of the dock. Clear dropped the drafts and kept <code>Filed 6d0703</code>.</p>
+<img src="qa/p3-7-question-fixed.png">
+
+<h2>5. Dark, sidebar, hover card</h2>
+<p>A Flag note and a line 9–10 range in dark: highlight across <code>h1</code>, <code>h2</code> and <code>p</code>, the hover card with Edit / Delete, the sidebar in document order. Noted rows keep their green tint.</p>
+<img src="qa/p3-8-dark.png">
+
+<h2>6. Offline</h2>
+<p>Same file from a plain <code>http.server</code>: File Task now → "Offline — added to reply", <code>⌘↩</code> copied <code>(1) `scratch/ship-review.html` § 1. Keep the comma?: yes (2) `scratch/ship-review.html` Run: task.create title=Read the name from argv</code>.</p>
+<img src="qa/p3-9-offline.png">
+
+<h2>Fixes (pass 3)</h2>
+<ul class="fix">
+<li><code>runtime.js</code>: a range's composer anchors to the whole range (first row's top to last row's bottom), so flipping above never covers it.</li>
+<li><code>base.css</code>: a noted row marks only its gutter (<code>--lf-highlight-active</code> plus the accent bar) and keeps its diff tint; the <code>+</code> shows on hover only (the gutter of a noted row already opens its card).</li>
+<li>Dock tags are sentence case (<code>Note</code>, <code>Lines</code>, <code>Choice</code>, <code>Answer</code>, <code>Run</code>); line and file notes say <code>Lines</code>.</li>
+<li>A <code>data-question</code> with no <code>&lt;textarea&gt;</code> or <code>&lt;input&gt;</code> gets a textarea.</li>
+<li>The page reserves the dock's measured height (<code>--lf-dock-room</code>, from a <code>ResizeObserver</code>) below its content.</li>
+</ul>
+
+<h2>Not reached (pass 3)</h2>
+<p>Dev Desktop: the pill, gutter ranges and sidebar inside <code>TaskHTMLView</code> and the bridge into <code>ReviewCommentsStrip</code> were not driven this pass. The dock is hidden there, so the padding fix doesn't apply.</p>
+
+<h2>Still wrong (pass 3)</h2>
+<ul>
+<li>The steer status shows a raw UUID ("Saved a74ee6b0-…"), the server's <code>delivery.sentence</code>, unchanged (finding f2 on the ship review).</li>
+<li>The selection pill covers the heading above a first-line selection. Notion does the same; left.</li>
+</ul>
+
 <h1>LOO-1109 QA, pass 2: Pass 5 and compress in Chrome</h1>
 <p>Same private Machine (<code>/tmp/lfqa-pg</code>), Task <code>c56843</code>, branch <code>lf</code> at <code>7f5a53a</code>. I added two rich-prompt controls to the page: a <code>data-choice</code> with a <code>&lt;p&gt;</code> question and a <code>data-question</code> with a <code>&lt;label&gt;</code>. Rebuilt it, opened the <code>lf page open --print</code> URL in Chrome and used it.</p>
 

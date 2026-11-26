@@ -548,7 +548,7 @@ refresh ownership.
 # .lf/graphs/build.yaml
 - step: implement
 - step: compress
-- step: gate
+- step: qa
 ```
 
 ```bash

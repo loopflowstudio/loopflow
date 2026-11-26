@@ -3,20 +3,21 @@
 ## Scratch, cancellation and macOS path filters
 
 Publish checkpoints with working notes in `scratch/`; hosted CI defers the full
-matrix until scratch is clear. Gate turns the checkpoint into a candidate
-before it reviews (commit, sync, `lf scratch clear`, `lf pr publish`), so the
-matrix runs while it reads the diff. [Gate](../.lf/skills/gate.md) holds the
-steps and where the notes go.
+matrix until scratch is clear. `lf pr publish` keeps those notes in place while
+`ship-review` is open.
 
-`lf pr submit`, `lf land`, and `lf pr land` clear committed scratch additions
-too; after gate they find none. Scratch-free PRs, including
-small changes and Dependabot updates, run the full test matrix in parallel.
-Implement/compress only build changed code and run its focused test. Gate names
-the few tests that matter most for the change and reads their result, and the
-suites', from CI for the head it pushed; see the verification cadence in
-[AGENTS.md](../AGENTS.md#when-to-run-what). The PR body keeps one check-result line.
-Required checks run unattended; defer unavailable checks to capable CI and
-leave people's judgment to demo/review. Neither blocks earlier Graph steps.
+`lf pr submit`, `lf pr arm`, and `lf land` (and `lf pr land`) sync first, clear
+branch-added `scratch/` files once against the integration target on the head
+they are about to push, and push that clean head once so the full test matrix
+starts immediately. Real code conflicts keep `scratch/` on disk for
+`sync-conflicts` and clear before pushing once resolved; pure stacked-scratch
+conflicts drop automatically. Scratch-free PRs, including small changes and
+Dependabot updates, run the full test matrix in parallel. Implement/compress
+only build changed code and run its focused test; CI runs the suites and
+`lf land --wait-and-fix` (`ci-fix`) repairs failures; see the verification
+cadence in [AGENTS.md](../AGENTS.md#when-to-run-what). Required checks run
+unattended; defer unavailable checks to capable CI and leave people's judgment
+to demo/review. Neither blocks earlier Graph steps.
 
 For checkpoint PRs, `scratch-clear` reports deferred tests and `tests-result`
 and the matrix jobs skip. That is not a passing test result, though
@@ -25,18 +26,15 @@ queue always rejects scratch artifacts and runs the Linux suite before merging.
 Missing scratch, classifier failures, and unexpected skipped candidate jobs
 still fail the aggregate. Restoring scratch on a later PR head defers its tests.
 
-After the final `lf sync`, run `lf scratch clear` and check that `scratch/`
-contains only `.gitkeep` before publishing or arming (cached PR copy is consumed
-by publication). A sync can restore notes retained during conflict resolution
-after an earlier cleanup. Check the final tree with the
-same predicate as CI:
+To trigger full CI on a manual `lf pr publish` without submitting or arming
+auto-merge, run `lf scratch clear` first. CI checks the tree with:
 
 ```bash
 test -d scratch && test -z "$(find scratch -mindepth 1 ! -path 'scratch/.gitkeep' -print)"
 ```
 
 The repository owns the `scratch-clear` classifier; the native CLI does not exempt
-a failing required check by name. Delivery cleanup preserves existing scratch
+a failing required check by name. Delivery cleanup keeps existing scratch
 content, so repositories retaining it must define their own candidate policy.
 
 A new PR update cancels the previous CI run for that PR. Main and merge-group

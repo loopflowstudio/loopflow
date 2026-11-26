@@ -30,3 +30,10 @@ pub fn added(repo: &Path, base: &str, tree: &str) -> Result<Vec<String>, GitErro
         .map(str::to_owned)
         .collect())
 }
+
+pub(crate) fn remove<S: AsRef<str>>(repo: &Path, paths: &[S]) -> Result<(), GitError> {
+    let mut args = vec!["--literal-pathspecs", "rm", "-f", "--"];
+    args.extend(paths.iter().map(AsRef::as_ref));
+    git_stdout(repo, &args)?;
+    Ok(())
+}

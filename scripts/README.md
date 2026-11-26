@@ -345,7 +345,7 @@ After changing `Cargo.lock` (including a release version bump),
 by `third_party.py`, run
 `uv run python scripts/third_party.py refresh` and
 `uv run pytest python/tests/test_third_party.py`. Release preparation refreshes
-the inventory after bumping versions. Gate must check the resulting release
+the inventory after bumping versions. CI must check the resulting release
 tree: stale inventory fails both Python tests and Desktop packaging.
 
 ## Validation scripts

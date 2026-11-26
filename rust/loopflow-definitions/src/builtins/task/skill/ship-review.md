@@ -5,7 +5,7 @@ action_style: conversational
 ---
 Make what ships understood, and decide what happens to everything the run left outside it.
 
-The work is built and the PR is published. Concept review and gate own
+The work is built and the PR is published. Concept review and CI own
 whether the change is right. This is not a code review and not a go/no-go.
 
 **Gather what exists before writing anything.**
@@ -31,7 +31,10 @@ this order:
 2. How to try it: the built thing at the place to start, the command ready to
    type or the window open.
 3. What is likeliest to surprise them: choices made on their behalf, what was
-   passed over, behavior that changed on purpose.
+   passed over, behavior that changed on purpose. When the diff touches
+   security-relevant code—auth, credentials or secrets, telemetry or outbound
+   data, untrusted input, or deployment—call out what changed and suggest
+   running `lf security-review` before delivering.
 4. Findings: everything left outside the PR, each with a proposal. Fix here,
    its own Task, or drop.
 5. Numbered questions, so "2b" is a complete answer.

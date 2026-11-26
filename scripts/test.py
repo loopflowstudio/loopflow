@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Changed-aware test runner.
 
-Runs only the CI suites the branch actually touches, so the iterative
-`lf gate` loop (sync -> gate -> bugfix -> gate) doesn't pay for the whole
-matrix every pass. Stdlib only.
+Runs only the CI suites the branch actually touches, so iterative local checks
+don't pay for the whole matrix every pass. Stdlib only.
 
     uv run python scripts/test.py            # run suites the branch touched
     uv run python scripts/test.py --reuse-passing  # reuse this exact tree's pass

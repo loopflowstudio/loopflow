@@ -651,6 +651,14 @@ then-current budgets.
   numbers beside the branch's in the PR body.
 - If the PR is too large to review, it splits as stacked Tasks: lifetimes
   (Pass 3) and job budget + file bounds (Pass 4).
+- Shape read after Pass 5, for gate review (not blocking):
+  - `plan_git::BACKOFFS` measures its 2 min → 1 h backoff with `Instant`;
+    AGENTS.md asks for `SystemTime` on hour-scale deadlines (Instant stops
+    while the Mac sleeps, so a backoff can outlast an hour of wall time).
+  - `plan_git.rs` now carries a hand-written `.git/config` remote parser
+    (~200 lines with quoting, continuations, legacy sections). It is the price
+    of 0 cold forks; review whether the fallback triggers
+    (`[include]`, `extensions.worktreeConfig`, legacy dirs) can shrink it.
 
 ## Checks
 

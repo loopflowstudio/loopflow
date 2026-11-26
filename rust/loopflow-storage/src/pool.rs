@@ -57,6 +57,14 @@ impl PoolKey {
         };
         #[cfg(not(unix))]
         let (dev, ino) = (0, 0);
+        #[cfg(unix)]
+        if !is_accessible(&canonical, mode) {
+            // Drop any idle pooled connections for this inode so SQLite flushes
+            // its per-inode `pUnused` fd list instead of reusing an open fd on
+            // the fresh open fallback.
+            evict_inode(&canonical, dev, ino);
+            return None;
+        }
         Some(Self {
             path: canonical,
             dev,
@@ -64,6 +72,32 @@ impl PoolKey {
             mode,
         })
     }
+}
+
+#[cfg(unix)]
+fn evict_inode(path: &Path, dev: u64, ino: u64) {
+    let evicted = {
+        let Ok(mut pool) = POOL.lock() else {
+            return;
+        };
+        pool.evict_inode(path, dev, ino)
+    };
+    drop(evicted);
+}
+
+#[cfg(unix)]
+fn is_accessible(path: &Path, mode: PoolMode) -> bool {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c_path) = CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    let flags = match mode {
+        PoolMode::Write => libc::R_OK | libc::W_OK,
+        PoolMode::ReadOnly => libc::R_OK,
+    };
+    // SAFETY: `c_path` is a valid NUL-terminated C string; `access` only checks permissions.
+    unsafe { libc::access(c_path.as_ptr(), flags) == 0 }
 }
 
 /// What a pooled connection last validated against this binary's schema.
@@ -202,6 +236,27 @@ impl PoolState {
                 }
             }
         }
+    }
+
+    #[cfg(unix)]
+    fn evict_inode(&mut self, path: &Path, dev: u64, ino: u64) -> Vec<PooledConn> {
+        let keys: Vec<PoolKey> = self
+            .buckets
+            .keys()
+            .filter(|key| key.path == path && key.dev == dev && key.ino == ino)
+            .cloned()
+            .collect();
+        let mut evicted = Vec::new();
+        for key in &keys {
+            if let Some(bucket) = self.buckets.remove(key) {
+                self.total = self.total.saturating_sub(bucket.len());
+                evicted.extend(bucket);
+            }
+        }
+        if !keys.is_empty() {
+            self.order.retain(|key| !keys.contains(key));
+        }
+        evicted
     }
 }
 
@@ -608,5 +663,51 @@ mod tests {
             "connection with escaped Arc clone must not be pooled"
         );
         drop(escaped);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inaccessible_database_bypasses_pool_and_fails_to_open() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("loopflow.db");
+        let build = test_fixture::build();
+        let observers = test_fixture::observers();
+
+        let store = SqliteStore::open_prepared(
+            &path,
+            false,
+            true,
+            SQLITE_WRITE_BUSY_TIMEOUT,
+            &build,
+            &observers,
+            fixed_key,
+        )
+        .unwrap();
+        drop(store);
+        assert_eq!(idle_count(&path, PoolMode::Write), 1);
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let opened = SqliteStore::open_prepared(
+            &path,
+            false,
+            true,
+            SQLITE_WRITE_BUSY_TIMEOUT,
+            &build,
+            &observers,
+            fixed_key,
+        );
+        let read_only = SqliteStore::open_read_only(&path, fixed_key);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        assert!(
+            opened.is_err(),
+            "chmod 000 database must not reuse a pooled write connection"
+        );
+        assert!(
+            read_only.is_err(),
+            "chmod 000 database must not reuse a pooled read-only connection"
+        );
     }
 }

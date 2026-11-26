@@ -45,11 +45,19 @@ pub(super) fn start(home: &Path, executable: &Path, replace: bool) -> Result<()>
         .stdin(Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log);
-    // SAFETY: setsid is async-signal-safe and affects only the child.
+    // Close every inherited descriptor above stderr (including caller release
+    // locks and worktree leases, which intentionally clear FD_CLOEXEC for work
+    // children) so the long-lived daemon never holds a caller's lock open.
+    let descriptors = open_descriptors_above_stderr();
+    // SAFETY: setsid and fcntl(F_SETFD, FD_CLOEXEC) are async-signal-safe and
+    // affect only the child; Rust's own exec-error pipe is already CLOEXEC.
     unsafe {
-        command.pre_exec(|| {
+        command.pre_exec(move || {
             if libc::setsid() < 0 {
                 return Err(io::Error::last_os_error());
+            }
+            for fd in &descriptors {
+                libc::fcntl(*fd, libc::F_SETFD, libc::FD_CLOEXEC);
             }
             Ok(())
         });
@@ -59,6 +67,24 @@ pub(super) fn start(home: &Path, executable: &Path, replace: bool) -> Result<()>
         let _ = child.wait();
     });
     Ok(())
+}
+
+fn open_descriptors_above_stderr() -> Vec<libc::c_int> {
+    let Ok(entries) = std::fs::read_dir("/dev/fd").or_else(|_| std::fs::read_dir("/proc/self/fd"))
+    else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(|entry| {
+            entry
+                .ok()?
+                .file_name()
+                .to_str()?
+                .parse::<libc::c_int>()
+                .ok()
+        })
+        .filter(|fd| *fd > libc::STDERR_FILENO)
+        .collect()
 }
 
 /// Only the server accepting connections on this Machine's private socket.

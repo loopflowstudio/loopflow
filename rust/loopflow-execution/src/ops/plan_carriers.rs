@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Result};
 
@@ -56,13 +56,11 @@ pub(super) async fn poll_owned(
             false
         }
     };
-    let now_ts = time::OffsetDateTime::now_utc().unix_timestamp();
-    let now = Instant::now();
+    let now = SystemTime::now();
     poll_owned_with(
         store,
         repo,
         window,
-        now_ts,
         now,
         has_hub,
         || read(store, repo),
@@ -75,13 +73,11 @@ pub(super) async fn poll_owned(
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn poll_owned_with<FH, FG>(
     store: &crate::store::Store,
     repo: &str,
     window: i64,
-    now_ts: i64,
-    now: Instant,
+    now: SystemTime,
     has_hub: bool,
     run_hub: impl FnOnce() -> FH,
     run_git: impl FnOnce(Instant) -> FG,
@@ -98,6 +94,10 @@ where
     if !has_hub && !git_due {
         return Ok(None);
     }
+    let now_ts = now
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
     let scope = format!("plan:{repo}");
     if let ScopeCheck::Recent { attempted_at } =
         store.sqlite.begin_scope_check(&scope, now_ts, window)?
@@ -382,7 +382,7 @@ mod tests {
     use std::path::Path;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
-    use std::time::{Duration, Instant};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     fn git(dir: &Path, args: &[&str]) {
         let output = std::process::Command::new("git")
@@ -494,9 +494,9 @@ mod tests {
 
         let hub_calls = Arc::new(AtomicUsize::new(0));
         let git_calls = Arc::new(AtomicUsize::new(0));
-        let t0 = Instant::now();
+        let t0 = UNIX_EPOCH + Duration::from_secs(1_000);
 
-        let run_once = |now_ts: i64, now: Instant, has_hub: bool| {
+        let run_once = |now: SystemTime, has_hub: bool| {
             let store_ref = &store;
             let repo_str = repo.clone();
             let hub_calls = Arc::clone(&hub_calls);
@@ -506,7 +506,6 @@ mod tests {
                     store_ref,
                     &repo_str,
                     0,
-                    now_ts,
                     now,
                     has_hub,
                     || {
@@ -532,12 +531,12 @@ mod tests {
         };
 
         // Tick 1: both hub and Git run; Git fails -> 2-minute backoff.
-        assert!(run_once(1_000, t0, true).await.unwrap().is_some());
+        assert!(run_once(t0, true).await.unwrap().is_some());
         assert_eq!(hub_calls.load(Ordering::SeqCst), 1);
         assert_eq!(git_calls.load(Ordering::SeqCst), 1);
 
         // Tick 2 (+30 s): Git is backed off, but hub still runs.
-        assert!(run_once(1_030, t0 + Duration::from_secs(30), true)
+        assert!(run_once(t0 + Duration::from_secs(30), true)
             .await
             .unwrap()
             .is_some());
@@ -547,9 +546,7 @@ mod tests {
         // Tick 3 (+60 s, no hub): Git backed off and no hub -> skipped completely,
         // no planning_scope_checks update.
         assert_eq!(
-            run_once(1_060, t0 + Duration::from_secs(60), false)
-                .await
-                .unwrap(),
+            run_once(t0 + Duration::from_secs(60), false).await.unwrap(),
             None
         );
         assert_eq!(
@@ -563,12 +560,12 @@ mod tests {
 
         // Tick 4 (+120 s): 2-minute backoff elapsed -> Git retries and fails -> 4-minute backoff.
         let t1 = t0 + Duration::from_secs(120);
-        assert!(run_once(1_120, t1, true).await.unwrap().is_some());
+        assert!(run_once(t1, true).await.unwrap().is_some());
         assert_eq!(hub_calls.load(Ordering::SeqCst), 3);
         assert_eq!(git_calls.load(Ordering::SeqCst), 2);
 
         // Tick 5 (+239 s after t1): still inside 4-minute backoff; hub still runs.
-        assert!(run_once(1_359, t1 + Duration::from_secs(239), true)
+        assert!(run_once(t1 + Duration::from_secs(239), true)
             .await
             .unwrap()
             .is_some());
@@ -580,14 +577,12 @@ mod tests {
         super::super::plan_git::exchange(&store.sqlite, &repo, None).unwrap();
 
         // Next background poll even 1 s later sees backoff cleared and runs Git.
-        assert!(run_once(
-            1_360,
-            t1 + Duration::from_secs(240) - Duration::from_secs(1),
-            true
-        )
-        .await
-        .unwrap()
-        .is_some());
+        assert!(
+            run_once(t1 + Duration::from_secs(240) - Duration::from_secs(1), true)
+                .await
+                .unwrap()
+                .is_some()
+        );
         assert_eq!(hub_calls.load(Ordering::SeqCst), 5);
         assert_eq!(git_calls.load(Ordering::SeqCst), 3);
     }

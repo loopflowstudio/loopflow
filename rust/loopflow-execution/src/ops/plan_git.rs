@@ -9,7 +9,7 @@ use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::{LazyLock, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{anyhow, bail, Context, Result};
 
@@ -36,7 +36,7 @@ const MAX_VERIFIED_TIPS: usize = 4096;
 #[derive(Debug, Clone, Copy)]
 struct RepoBackoff {
     failures: u32,
-    next_attempt: Instant,
+    next_attempt: SystemTime,
 }
 
 impl RepoBackoff {
@@ -46,88 +46,92 @@ impl RepoBackoff {
     }
 }
 
-static BACKOFFS: LazyLock<Mutex<HashMap<String, RepoBackoff>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+#[derive(Default)]
+struct Backoffs(Mutex<HashMap<String, RepoBackoff>>);
+
+impl Backoffs {
+    fn is_backed_off(&self, repo: &str, now: SystemTime) -> bool {
+        self.0
+            .lock()
+            .expect("plan-git backoff lock")
+            .get(repo)
+            .is_some_and(|state| now < state.next_attempt)
+    }
+
+    fn clear(&self, repo: &str) {
+        self.0.lock().expect("plan-git backoff lock").remove(repo);
+    }
+
+    fn run(&self, repo: &str, now: SystemTime, op: impl FnOnce() -> Result<()>) -> Result<()> {
+        if self.is_backed_off(repo, now) {
+            return Ok(());
+        }
+        let result = op();
+        let mut backoffs = self.0.lock().expect("plan-git backoff lock");
+        match &result {
+            Ok(()) => {
+                backoffs.remove(repo);
+            }
+            Err(error) => {
+                let failures = backoffs
+                    .get(repo)
+                    .map_or(1, |state| state.failures.saturating_add(1));
+                let wait = RepoBackoff::delay(failures);
+                backoffs.insert(
+                    repo.to_owned(),
+                    RepoBackoff {
+                        failures,
+                        next_attempt: now + wait,
+                    },
+                );
+                tracing::debug!(
+                    %repo,
+                    failures,
+                    retry_in_secs = wait.as_secs(),
+                    error = %format!("{error:#}"),
+                    "Git plan exchange failed"
+                );
+            }
+        }
+        result
+    }
+}
+
+static BACKOFFS: LazyLock<Backoffs> = LazyLock::new(Backoffs::default);
 
 /// Immutable `(commit_oid, repository_id)` pairs whose `repository` blob has
 /// already been verified to match `repository_id`.
 static VERIFIED_TIP_REPOS: LazyLock<Mutex<HashSet<(String, String)>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
 
-pub(super) fn is_backed_off(repo: &str, now: Instant) -> bool {
-    let backoffs = BACKOFFS.lock().expect("plan-git backoff lock");
-    is_backed_off_in(&backoffs, repo, now)
-}
-
-fn is_backed_off_in(backoffs: &HashMap<String, RepoBackoff>, repo: &str, now: Instant) -> bool {
-    backoffs
-        .get(repo)
-        .is_some_and(|state| now < state.next_attempt)
-}
-
-fn clear_backoff(repo: &str) {
-    BACKOFFS.lock().expect("plan-git backoff lock").remove(repo);
-}
-
-fn record_backoff_in(
-    backoffs: &mut HashMap<String, RepoBackoff>,
-    repo: &str,
-    now: Instant,
-    result: &Result<()>,
-) {
-    match result {
-        Ok(()) => {
-            backoffs.remove(repo);
-        }
-        Err(error) => {
-            let failures = backoffs
-                .get(repo)
-                .map_or(1, |state| state.failures.saturating_add(1));
-            let wait = RepoBackoff::delay(failures);
-            backoffs.insert(
-                repo.to_owned(),
-                RepoBackoff {
-                    failures,
-                    next_attempt: now + wait,
-                },
-            );
-            tracing::debug!(
-                %repo,
-                failures,
-                retry_in_secs = wait.as_secs(),
-                error = %format!("{error:#}"),
-                "Git plan exchange failed"
-            );
-        }
-    }
+pub(super) fn is_backed_off(repo: &str, now: SystemTime) -> bool {
+    BACKOFFS.is_backed_off(repo, now)
 }
 
 /// The remote a repository's plan travels by: `origin`, else the first by
-/// name. `None` for a repository with no remote. Parses `.git/config` directly
-/// via `observe::derived` so ordinary repositories never fork `git remote`,
-/// falling back to `git remote` only for `[include]`/`[includeIf]`,
-/// `extensions.worktreeConfig`, or legacy `.git/remotes`/`.git/branches`.
+/// name. `None` for a repository with no remote. Parses ordinary `.git/config`
+/// sections directly via `observe::derived` so common repositories never fork
+/// `git remote`, falling back to `git remote` for `[include]`/`[includeIf]`,
+/// `extensions.worktreeConfig`, legacy `.git/remotes`/`.git/branches`, or
+/// exotic config syntax.
 pub fn remote(repo: &Path) -> Option<String> {
     if !repo.is_dir() {
         return None;
     }
-    if crate::git::read_layout(repo).is_none() {
-        crate::observe::record_spawn();
+    let Some(layout) = crate::git::read_layout(repo) else {
         return remote_by_git(crate::git::git_stdout(repo, &["remote"]).ok());
-    }
+    };
     let key = crate::observe::Derived::GitRemote {
         repo: repo.to_owned(),
     };
     crate::observe::derived(key, || {
-        if let Some(layout) = crate::git::read_layout(repo) {
-            let config = crate::observe::read_to_string(&layout.common_dir.join("config"));
-            let has_remotes = has_legacy_remote_dir(&layout.common_dir.join("remotes"));
-            let has_branches = has_legacy_remote_dir(&layout.common_dir.join("branches"));
-            if !has_remotes && !has_branches {
-                if let Ok(config) = config {
-                    if let ConfigRemotes::Parsed(remote) = parse_config_remotes(&config) {
-                        return remote;
-                    }
+        let config = crate::observe::read_to_string(&layout.common_dir.join("config"));
+        let has_remotes = has_legacy_remote_dir(&layout.common_dir.join("remotes"));
+        let has_branches = has_legacy_remote_dir(&layout.common_dir.join("branches"));
+        if !has_remotes && !has_branches {
+            if let Ok(config) = config {
+                if let ConfigRemotes::Parsed(remote) = parse_config_remotes(&config) {
+                    return remote;
                 }
             }
         }
@@ -150,154 +154,98 @@ enum ConfigRemotes {
 
 fn parse_config_remotes(config: &str) -> ConfigRemotes {
     let mut remotes = BTreeSet::new();
-    let mut current_remote: Option<String> = None;
+    let mut current_remote: Option<&str> = None;
     let mut in_extensions = false;
-    let mut in_continuation = false;
 
     for raw_line in config.lines() {
-        let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
-        if in_continuation {
-            in_continuation = ends_with_odd_backslashes(strip_unquoted_comment(line));
+        let line = raw_line.trim_matches([' ', '\t', '\r']);
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
             continue;
         }
-        let mut rest = line.trim_start_matches([' ', '\t']);
-        if rest.is_empty() || rest.starts_with('#') || rest.starts_with(';') {
-            continue;
+        // Defer line continuations to `git remote` instead of reimplementing Git's lexer.
+        if line.ends_with('\\') {
+            return ConfigRemotes::Fallback;
         }
-        if rest.starts_with('[') {
-            let Some((section, subsection, trailing)) = parse_section_header(rest) else {
+        if line.starts_with('[') {
+            let Some((section, subsection)) = parse_simple_section_header(line) else {
                 return ConfigRemotes::Fallback;
             };
-            let section = section.to_ascii_lowercase();
-            if section == "include" || section == "includeif" {
+            if section.eq_ignore_ascii_case("include") || section.eq_ignore_ascii_case("includeif")
+            {
                 return ConfigRemotes::Fallback;
             }
-            in_extensions = section == "extensions";
-            if section == "remote" {
+            in_extensions = section.eq_ignore_ascii_case("extensions");
+            current_remote = if section.eq_ignore_ascii_case("remote") {
                 match subsection {
-                    Some(name) if !name.is_empty() => current_remote = Some(name),
+                    Some(name) if !name.is_empty() => Some(name),
                     Some(_) => return ConfigRemotes::Fallback,
-                    None => current_remote = None,
+                    None => None,
                 }
             } else {
-                current_remote = None;
-            }
-            rest = trailing.trim_start_matches([' ', '\t']);
-            if rest.is_empty() || rest.starts_with('#') || rest.starts_with(';') {
-                continue;
-            }
+                None
+            };
+            continue;
         }
-        let effective = strip_unquoted_comment(rest).trim_end_matches([' ', '\t']);
-        if !effective.is_empty() {
-            let key = effective.split(['=', ' ', '\t']).next().unwrap_or_default();
-            if !key.as_bytes().first().is_some_and(u8::is_ascii_alphabetic) {
-                return ConfigRemotes::Fallback;
-            }
-            if in_extensions && key.eq_ignore_ascii_case("worktreeconfig") {
-                return ConfigRemotes::Fallback;
-            }
-            if let Some(name) = &current_remote {
-                remotes.insert(name.clone());
-            }
+        let key = line
+            .split(['=', ' ', '\t', '#', ';'])
+            .next()
+            .unwrap_or_default();
+        if !key.as_bytes().first().is_some_and(u8::is_ascii_alphabetic) {
+            return ConfigRemotes::Fallback;
         }
-        in_continuation = ends_with_odd_backslashes(strip_unquoted_comment(rest));
+        if in_extensions && key.eq_ignore_ascii_case("worktreeconfig") {
+            return ConfigRemotes::Fallback;
+        }
+        if let Some(name) = current_remote {
+            remotes.insert(name);
+        }
     }
 
     let selected = if remotes.contains("origin") {
         Some("origin".to_owned())
     } else {
-        remotes.into_iter().next()
+        remotes.into_iter().next().map(str::to_owned)
     };
     ConfigRemotes::Parsed(selected)
 }
 
-/// Parse a Git config section header (`[section]`, `[section "subsection"]`, or
-/// legacy `[section.subsection]`), returning `(section, subsection, trailing)`.
-fn parse_section_header(line: &str) -> Option<(&str, Option<String>, &str)> {
-    let body = line.strip_prefix('[')?;
-    let bytes = body.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'-') {
-        i += 1;
-    }
-    if i == 0 || i >= bytes.len() {
+/// Parse `[section]` or `[section "subsection"]` with no escapes or inline keys.
+/// Exotic syntax (escapes, legacy `[section.sub]`, trailing keys) returns `None`
+/// so callers fall back to `git remote`.
+fn parse_simple_section_header(line: &str) -> Option<(&str, Option<&str>)> {
+    let rest = line.strip_prefix('[')?;
+    let section_end = rest
+        .bytes()
+        .position(|b| !(b.is_ascii_alphanumeric() || b == b'-'))?;
+    if section_end == 0 {
         return None;
     }
-    let section = &body[..i];
-    match bytes[i] {
-        b']' => Some((section, None, &body[i + 1..])),
-        b'.' => {
-            let rest = &body[i + 1..];
-            let close = rest.find(']')?;
-            let sub = &rest[..close];
-            if sub.is_empty() {
+    let section = &rest[..section_end];
+    let after_section = &rest[section_end..];
+    let (subsection, trailing) = if let Some(trailing) = after_section.strip_prefix(']') {
+        (None, trailing)
+    } else {
+        let inner = after_section
+            .strip_prefix([' ', '\t'])?
+            .trim_start_matches([' ', '\t']);
+        if let Some(trailing) = inner.strip_prefix(']') {
+            (None, trailing)
+        } else {
+            let quoted = inner.strip_prefix('"')?;
+            let close = quoted.find('"')?;
+            let sub = &quoted[..close];
+            if sub.contains('\\') {
                 return None;
             }
-            Some((section, Some(sub.to_ascii_lowercase()), &rest[close + 1..]))
+            let trailing = quoted[close + 1..]
+                .trim_start_matches([' ', '\t'])
+                .strip_prefix(']')?;
+            (Some(sub), trailing)
         }
-        b' ' | b'\t' => {
-            while i < bytes.len() && matches!(bytes[i], b' ' | b'\t') {
-                i += 1;
-            }
-            if i >= bytes.len() {
-                return None;
-            }
-            if bytes[i] == b']' {
-                return Some((section, None, &body[i + 1..]));
-            }
-            if bytes[i] != b'"' {
-                return None;
-            }
-            i += 1;
-            let mut sub = String::new();
-            let mut chars = body[i..].char_indices();
-            let mut closed_at = None;
-            while let Some((offset, ch)) = chars.next() {
-                match ch {
-                    '\\' => {
-                        let (_, escaped) = chars.next()?;
-                        sub.push(escaped);
-                    }
-                    '"' => {
-                        closed_at = Some(i + offset + 1);
-                        break;
-                    }
-                    _ => sub.push(ch),
-                }
-            }
-            let mut after = closed_at?;
-            while after < bytes.len() && matches!(bytes[after], b' ' | b'\t') {
-                after += 1;
-            }
-            if bytes.get(after) != Some(&b']') {
-                return None;
-            }
-            Some((section, Some(sub), &body[after + 1..]))
-        }
-        _ => None,
-    }
-}
-
-fn strip_unquoted_comment(line: &str) -> &str {
-    let mut in_quotes = false;
-    let mut escaped = false;
-    for (idx, ch) in line.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        match ch {
-            '\\' => escaped = true,
-            '"' => in_quotes = !in_quotes,
-            '#' | ';' if !in_quotes => return &line[..idx],
-            _ => {}
-        }
-    }
-    line
-}
-
-fn ends_with_odd_backslashes(line: &str) -> bool {
-    line.bytes().rev().take_while(|b| *b == b'\\').count() % 2 == 1
+    };
+    let trailing = trailing.trim_start_matches([' ', '\t']);
+    (trailing.is_empty() || trailing.starts_with('#') || trailing.starts_with(';'))
+        .then_some((section, subsection))
 }
 
 fn remote_by_git(remotes: Option<String>) -> Option<String> {
@@ -316,7 +264,7 @@ fn remote_by_git(remotes: Option<String>) -> Option<String> {
 /// which the shared owner poll already covers). A repository whose exchange
 /// fails doubles its wait up to an hour.
 pub fn exchange_unowned(store: &SqliteStore) -> Result<()> {
-    exchange_unowned_at(store, Instant::now(), &BACKOFFS, |repo| {
+    exchange_unowned_at(store, SystemTime::now(), &BACKOFFS, |repo| {
         exchange(store, repo, None)
     })
 }
@@ -328,32 +276,22 @@ pub(super) fn exchange_background(
     repo: &str,
     until: Option<Instant>,
 ) -> Result<()> {
-    exchange_background_at(store, repo, until, Instant::now())
+    exchange_background_at(store, repo, until, SystemTime::now())
 }
 
 pub(super) fn exchange_background_at(
     store: &SqliteStore,
     repo: &str,
     until: Option<Instant>,
-    now: Instant,
+    now: SystemTime,
 ) -> Result<()> {
-    if is_backed_off(repo, now) {
-        return Ok(());
-    }
-    let result = exchange(store, repo, until);
-    record_backoff_in(
-        &mut BACKOFFS.lock().expect("plan-git backoff lock"),
-        repo,
-        now,
-        &result,
-    );
-    result
+    BACKOFFS.run(repo, now, || exchange(store, repo, until))
 }
 
 fn exchange_unowned_at(
     store: &SqliteStore,
-    now: Instant,
-    backoffs: &Mutex<HashMap<String, RepoBackoff>>,
+    now: SystemTime,
+    backoffs: &Backoffs,
     mut run_exchange: impl FnMut(&str) -> Result<()>,
 ) -> Result<()> {
     let owned = super::plan_carriers::owned_repositories(store)?;
@@ -363,16 +301,7 @@ fn exchange_unowned_at(
         {
             continue;
         }
-        if is_backed_off_in(&backoffs.lock().expect("plan-git backoff lock"), &repo, now) {
-            continue;
-        }
-        let result = run_exchange(&repo);
-        record_backoff_in(
-            &mut backoffs.lock().expect("plan-git backoff lock"),
-            &repo,
-            now,
-            &result,
-        );
+        let _ = backoffs.run(&repo, now, || run_exchange(&repo));
     }
     Ok(())
 }
@@ -455,7 +384,7 @@ fn turn(
     let sent_seq = store.select_carrier(repo, Carrier::Git, remote)?.sent_seq;
     let result = carry(sent_seq);
     if result.is_ok() {
-        clear_backoff(repo);
+        BACKOFFS.clear(repo);
     }
     let error = super::plan_carriers::carrier_error(&result);
     store.record_carrier_exchange(repo, Carrier::Git, error.as_deref())?;
@@ -1557,12 +1486,17 @@ mod tests {
         sender.exchange();
         // Register idle's checkout with no unfinished Tasks and no non-retired Waves.
         crate::repository::location::ensure_repository(&idle.store, &idle.repo).unwrap();
-        let backoffs = std::sync::Mutex::new(std::collections::HashMap::new());
+        let backoffs = super::Backoffs::default();
         let mut attempted = Vec::new();
-        super::exchange_unowned_at(&idle.store, std::time::Instant::now(), &backoffs, |repo| {
-            attempted.push(repo.to_owned());
-            Ok(())
-        })
+        super::exchange_unowned_at(
+            &idle.store,
+            std::time::SystemTime::now(),
+            &backoffs,
+            |repo| {
+                attempted.push(repo.to_owned());
+                Ok(())
+            },
+        )
         .unwrap();
         assert!(
             attempted.is_empty(),
@@ -1572,10 +1506,15 @@ mod tests {
 
         // Adding an unfinished Task makes the repo eligible.
         let local_task = idle.task("Active work");
-        super::exchange_unowned_at(&idle.store, std::time::Instant::now(), &backoffs, |repo| {
-            attempted.push(repo.to_owned());
-            Ok(())
-        })
+        super::exchange_unowned_at(
+            &idle.store,
+            std::time::SystemTime::now(),
+            &backoffs,
+            |repo| {
+                attempted.push(repo.to_owned());
+                Ok(())
+            },
+        )
         .unwrap();
         assert_eq!(attempted, std::slice::from_ref(&idle.repo));
 
@@ -1590,10 +1529,15 @@ mod tests {
             conn.execute("UPDATE waves SET retired_at=1", []).unwrap();
         }
         attempted.clear();
-        super::exchange_unowned_at(&idle.store, std::time::Instant::now(), &backoffs, |repo| {
-            attempted.push(repo.to_owned());
-            Ok(())
-        })
+        super::exchange_unowned_at(
+            &idle.store,
+            std::time::SystemTime::now(),
+            &backoffs,
+            |repo| {
+                attempted.push(repo.to_owned());
+                Ok(())
+            },
+        )
         .unwrap();
         assert!(
             attempted.is_empty(),
@@ -1603,11 +1547,11 @@ mod tests {
 
     #[test]
     fn minute_exchange_doubles_backoff_on_failure_up_to_one_hour() {
-        use std::time::{Duration, Instant};
+        use std::time::{Duration, SystemTime};
         let (_root, _origin, _sender, repo) = machines();
         repo.task("Work");
-        let backoffs = std::sync::Mutex::new(std::collections::HashMap::new());
-        let t0 = Instant::now();
+        let backoffs = super::Backoffs::default();
+        let t0 = SystemTime::now();
         let mut attempts = 0usize;
 
         // First failure sets 2-minute backoff.
@@ -1666,7 +1610,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(attempts, 3);
-        assert!(backoffs.lock().unwrap().is_empty());
+        assert!(backoffs.0.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -1738,6 +1682,21 @@ mod tests {
             crate::observe::thread_spawns() - before,
             1,
             "legacy .git/remotes must fall back to git remote"
+        );
+
+        // Exotic config syntax (legacy `[remote.name]` header) falls back to `git remote`.
+        let exotic_repo = root.path().join("with-exotic");
+        std::fs::create_dir_all(&exotic_repo).unwrap();
+        git(&exotic_repo, &["init", "-q"]);
+        let mut exotic_cfg = std::fs::read_to_string(exotic_repo.join(".git/config")).unwrap();
+        exotic_cfg.push_str("\n[remote.legacy]\n\turl = /nowhere\n");
+        std::fs::write(exotic_repo.join(".git/config"), exotic_cfg).unwrap();
+        let before = crate::observe::thread_spawns();
+        assert_eq!(remote(&exotic_repo).as_deref(), Some("legacy"));
+        assert_eq!(
+            crate::observe::thread_spawns() - before,
+            1,
+            "exotic section syntax must fall back to git remote"
         );
     }
 

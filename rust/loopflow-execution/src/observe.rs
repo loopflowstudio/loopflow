@@ -766,10 +766,7 @@ impl Cache {
             if hinted {
                 let mut entry = slot.entry.lock().expect("observed fact");
                 let due = (entry.checked + TURN_HINTED).max(target);
-                entry.hinted_due = Some(match entry.hinted_due {
-                    Some(existing) => existing.min(due),
-                    None => due,
-                });
+                min_time(&mut entry.hinted_due, due);
                 any = true;
             }
         }

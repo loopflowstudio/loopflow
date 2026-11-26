@@ -342,9 +342,9 @@ impl FactWatcher for InboxWatcher {
 }
 
 trait PullTarget: Send + Sync {
-    /// Returns `Ok(true)` if the wake callback should fire now, `Ok(false)` with
-    /// an optional next deadline if still waiting, or `Err(())` once closed.
-    fn poll_due(&self, now: Instant) -> std::result::Result<Option<Instant>, ()>;
+    /// Returns the next wake deadline (`<= now` to fire now), or `None` when
+    /// idle or closed.
+    fn poll_due(&self, now: Instant) -> Option<Instant>;
     fn fire(&self);
 }
 
@@ -354,18 +354,18 @@ struct RegisteredPull<A> {
 }
 
 impl<A: Send> PullTarget for RegisteredPull<A> {
-    fn poll_due(&self, now: Instant) -> std::result::Result<Option<Instant>, ()> {
+    fn poll_due(&self, now: Instant) -> Option<Instant> {
         let mut mailbox = lock(&self.shared);
         if mailbox.closed {
-            return Err(());
+            return None;
         }
         match mailbox.pull_at {
             Some(at) if mailbox.asked() || now >= at => {
                 mailbox.pull_at = None;
-                Ok(Some(now))
+                Some(now)
             }
-            Some(at) => Ok(Some(at)),
-            None => Ok(None),
+            Some(at) => Some(at),
+            None => None,
         }
     }
 
@@ -432,11 +432,11 @@ fn run_pull_waker_loop() {
         let mut earliest: Option<Instant> = None;
         for target in targets {
             match target.poll_due(now) {
-                Ok(Some(at)) if at <= now => to_fire.push(target),
-                Ok(Some(at)) => {
+                Some(at) if at <= now => to_fire.push(target),
+                Some(at) => {
                     earliest = Some(earliest.map_or(at, |prev| prev.min(at)));
                 }
-                Ok(None) | Err(()) => {}
+                None => {}
             }
         }
         for target in to_fire {
@@ -696,11 +696,7 @@ where
             .and_then(|store| store.sqlite.revisions().ok());
         let now = Instant::now();
         let observed_changes = self.dependencies.changed();
-        let store_changed = match (self.read_at, revisions) {
-            (Some(old), Some(new)) => changed(self.watch, old, new),
-            (None, None) => false,
-            _ => true,
-        };
+        let store_changed = revisions_moved(self.watch, self.read_at, revisions);
         let pending_change = store_changed || observed_changes;
         let (due, throttled_until) = match (self.force, self.read_on) {
             (true, _) | (_, None) => (true, None),

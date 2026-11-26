@@ -1798,12 +1798,9 @@ pub(super) fn task_checkout_in(
 pub(super) const TASK_VISIBLE: &str = "t.planning_deleted_at IS NULL";
 /// Present locally known Linear identity, otherwise the shortest unique local hex prefix.
 pub(super) fn short_task_id(conn: &Connection, id: &TaskId) -> StoreResult<Option<String>> {
-    let identifier: Option<String> = conn
-        .query_row(
-            "SELECT issue_identifier FROM tasks WHERE id=?1",
-            [id.as_str()],
-            |row| row.get(0),
-        )
+    let mut query = conn.prepare_cached("SELECT issue_identifier FROM tasks WHERE id=?1")?;
+    let identifier: Option<String> = query
+        .query_row([id.as_str()], |row| row.get(0))
         .optional()?;
     let Some(identifier) = identifier else {
         return Ok(None);
@@ -2200,13 +2197,11 @@ fn unique_task_id(
 }
 
 pub(super) fn task_on(conn: &Connection, task_id: &TaskId) -> StoreResult<Option<Task>> {
-    conn.query_row(
-        &format!("{TASK_COLUMNS} WHERE t.id=?1"),
-        [task_id.as_str()],
-        |row| map_task_row(conn, row),
-    )
-    .optional()
-    .map_err(StoreError::from)
+    let mut query = conn.prepare_cached(&format!("{TASK_COLUMNS} WHERE t.id=?1"))?;
+    query
+        .query_row([task_id.as_str()], |row| map_task_row(conn, row))
+        .optional()
+        .map_err(StoreError::from)
 }
 
 fn task_pr_on(conn: &Connection, pr_id: &TaskPrId) -> StoreResult<Option<TaskPr>> {

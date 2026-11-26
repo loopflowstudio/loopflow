@@ -896,10 +896,60 @@ struct Follower {
     last_seen: Option<StoreRevisions>,
 }
 
+type RevisionCallback = Arc<Mutex<dyn FnMut(Option<StoreRevisions>) + Send>>;
+
+enum RevisionSink {
+    Watch(tokio::sync::watch::Sender<Option<StoreRevisions>>),
+    Notify {
+        callback: Weak<Mutex<dyn FnMut(Option<StoreRevisions>) + Send>>,
+        last_seen: Option<StoreRevisions>,
+    },
+}
+
+impl RevisionSink {
+    fn is_live(&self) -> bool {
+        match self {
+            Self::Watch(tx) => !tx.is_closed(),
+            Self::Notify { callback, .. } => callback.strong_count() > 0,
+        }
+    }
+}
+
+/// Keeps a synchronous revision listener attached to the shared `store-observer`
+/// thread until dropped.
+pub struct RevisionFollow {
+    database: PathBuf,
+    callback: Option<RevisionCallback>,
+}
+
+impl std::fmt::Debug for RevisionFollow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RevisionFollow")
+            .field("database", &self.database)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Drop for RevisionFollow {
+    fn drop(&mut self) {
+        self.callback.take();
+        let observers = observers();
+        if let Some(entry) = observers.get(&self.database) {
+            entry.waker.wake();
+        }
+    }
+}
+
 struct ObserverEntry {
     followers: Vec<Follower>,
-    planning: Vec<tokio::sync::watch::Sender<Option<i64>>>,
+    revisions: Vec<RevisionSink>,
     waker: StoreWaker,
+}
+
+impl ObserverEntry {
+    fn is_empty(&self) -> bool {
+        self.followers.is_empty() && self.revisions.is_empty()
+    }
 }
 
 fn ensure_observer<'a>(
@@ -915,22 +965,43 @@ fn ensure_observer<'a>(
             .spawn(move || observe(&watched, store));
         ObserverEntry {
             followers: Vec::new(),
-            planning: Vec::new(),
+            revisions: Vec::new(),
             waker,
         }
     })
 }
 
-/// Watch `database`'s planning revision through the shared `store-observer`
-/// thread without spawning an extra `StoreChanges` thread or polling on a 1 s clock.
-pub fn watch_planning(database: &Path) -> tokio::sync::watch::Receiver<Option<i64>> {
-    let initial = read_store_revisions(database).map(|rev| rev.planning);
+/// Watch `database`'s store revisions through the shared `store-observer`
+/// thread without spawning an extra `StoreChanges` thread or polling on a clock.
+pub fn watch_revisions(database: &Path) -> tokio::sync::watch::Receiver<Option<StoreRevisions>> {
+    let initial = read_store_revisions(database);
     let (send, receive) = tokio::sync::watch::channel(initial);
     let mut observers = observers();
     let entry = ensure_observer(&mut observers, database);
-    entry.planning.retain(|tx| !tx.is_closed());
-    entry.planning.push(send);
+    entry.revisions.retain(RevisionSink::is_live);
+    entry.revisions.push(RevisionSink::Watch(send));
     receive
+}
+
+/// Call `on_change` on the shared `store-observer` thread whenever `database`'s
+/// revisions move after registration, until the returned guard drops.
+pub(crate) fn follow_revisions(
+    database: &Path,
+    on_change: impl FnMut(Option<StoreRevisions>) + Send + 'static,
+) -> RevisionFollow {
+    let initial = read_store_revisions(database);
+    let callback: RevisionCallback = Arc::new(Mutex::new(on_change));
+    let mut observers = observers();
+    let entry = ensure_observer(&mut observers, database);
+    entry.revisions.retain(RevisionSink::is_live);
+    entry.revisions.push(RevisionSink::Notify {
+        callback: Arc::downgrade(&callback),
+        last_seen: initial,
+    });
+    RevisionFollow {
+        database: database.to_owned(),
+        callback: Some(callback),
+    }
 }
 
 /// Every subscription of a store in this process shares one observer of it, so an
@@ -1009,42 +1080,86 @@ fn observe(database: &Path, mut store: StoreChanges) {
             )
         };
         store.wait_with_history(wait_timeout, watch_history);
+        // A listener that left woke the observer; with none left it ends without
+        // reading the store.
+        {
+            let mut observers = observers();
+            let entry = observers
+                .get_mut(database)
+                .expect("a store's followers outlive its observer");
+            entry
+                .followers
+                .retain(|follower| follower.inbox.strong_count() > 0);
+            entry.revisions.retain(RevisionSink::is_live);
+            if entry.is_empty() {
+                observers.remove(database);
+                return;
+            }
+        }
         let current = parent_process();
         let current_revisions = read_store_revisions(database);
-        let mut observers = observers();
-        let entry = observers
-            .get_mut(database)
-            .expect("a store's followers outlive its observer");
-        entry.followers.retain_mut(|follower| {
-            let Some(inbox) = follower.inbox.upgrade() else {
-                return false;
-            };
-            // A subscription served in-process follows no parent.
-            if follower.parent.is_some() && follower.parent != current {
-                inbox.close();
-                return false;
+        let mut notifications = Vec::new();
+        let finished = {
+            let mut observers = observers();
+            let entry = observers
+                .get_mut(database)
+                .expect("a store's followers outlive its observer");
+            entry.followers.retain_mut(|follower| {
+                let Some(inbox) = follower.inbox.upgrade() else {
+                    return false;
+                };
+                // A subscription served in-process follows no parent.
+                if follower.parent.is_some() && follower.parent != current {
+                    inbox.close();
+                    return false;
+                }
+                if follower.watch == Watch::Files {
+                    return true;
+                }
+                let moved = revisions_moved(follower.watch, follower.last_seen, current_revisions);
+                follower.last_seen = current_revisions;
+                if moved {
+                    inbox.look()
+                } else {
+                    true
+                }
+            });
+            entry.revisions.retain_mut(|sink| match sink {
+                RevisionSink::Watch(tx) => {
+                    if tx.is_closed() {
+                        return false;
+                    }
+                    tx.send_if_modified(|value| {
+                        std::mem::replace(value, current_revisions) != current_revisions
+                    });
+                    true
+                }
+                RevisionSink::Notify {
+                    callback,
+                    last_seen,
+                } => {
+                    let Some(cb) = callback.upgrade() else {
+                        return false;
+                    };
+                    if *last_seen != current_revisions {
+                        *last_seen = current_revisions;
+                        notifications.push(cb);
+                    }
+                    true
+                }
+            });
+            let empty = entry.is_empty();
+            if empty {
+                observers.remove(database);
             }
-            if follower.watch == Watch::Files {
-                return true;
+            empty
+        };
+        for callback in notifications {
+            if let Ok(mut cb) = callback.lock() {
+                cb(current_revisions);
             }
-            let moved = revisions_moved(follower.watch, follower.last_seen, current_revisions);
-            follower.last_seen = current_revisions;
-            if moved {
-                inbox.look()
-            } else {
-                true
-            }
-        });
-        let next_planning = current_revisions.map(|rev| rev.planning);
-        entry.planning.retain(|tx| {
-            if tx.is_closed() {
-                return false;
-            }
-            tx.send_if_modified(|value| std::mem::replace(value, next_planning) != next_planning);
-            true
-        });
-        if entry.followers.is_empty() && entry.planning.is_empty() {
-            observers.remove(database);
+        }
+        if finished {
             return;
         }
     }

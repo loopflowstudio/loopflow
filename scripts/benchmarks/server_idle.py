@@ -1,8 +1,10 @@
-"""Measure `lf server run` CPU, threads, forks, and store opens across three phases."""
+"""Measure `lf server run` CPU, threads, forks, and store opens across idle, write, and held-terminal phases."""
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import hashlib
 import json
 import os
 import platform
@@ -10,6 +12,7 @@ import select
 import signal
 import socket
 import sqlite3
+import struct
 import subprocess
 import sys
 import tempfile
@@ -17,6 +20,9 @@ import time
 from pathlib import Path
 
 BUDGETS_PATH = Path(__file__).resolve().parents[1] / "performance-budgets.json"
+HELD_REVISION = 4
+HELD_TERMINAL_COUNT = 30
+VIEWED_TERMINAL_COUNT = 5
 
 
 class ServerPeer:
@@ -56,12 +62,12 @@ class ServerPeer:
                     frames += 1
         return frames
 
-    def diagnostics(self, req_id: str) -> dict:
+    def request(self, req_id: str, operation: dict) -> dict:
         self.send(
             {
                 "type": "request",
                 "id": req_id,
-                "operation": {"kind": "server.diagnostics"},
+                "operation": operation,
                 "select": None,
                 "sender": None,
                 "request_id": None,
@@ -72,10 +78,137 @@ class ServerPeer:
             if message.get("type") == "response" and message.get("id") == req_id:
                 return message["result"]
             if message.get("type") == "error" and message.get("id") == req_id:
-                raise RuntimeError(f"server.diagnostics failed: {message}")
+                raise RuntimeError(f"{operation.get('kind')} failed: {message}")
+
+    def diagnostics(self, req_id: str) -> dict:
+        return self.request(req_id, {"kind": "server.diagnostics"})
 
     def close(self) -> None:
         self.socket.close()
+
+
+class HeldViewer:
+    """Minimal attached viewer over `held.sock` so the server exercises viewed-terminal title work."""
+
+    def __init__(self, entrance: Path, terminal_id: str) -> None:
+        self.socket = socket.socket(socket.AF_UNIX)
+        self.socket.settimeout(10)
+        self.socket.connect(str(entrance))
+        handshake = json.dumps({"terminal": terminal_id, "revision": HELD_REVISION}) + "\n"
+        self.socket.sendall(handshake.encode())
+        line = b""
+        while not line.endswith(b"\n"):
+            chunk = self.socket.recv(1)
+            if not chunk:
+                raise RuntimeError("held entrance closed during handshake")
+            line += chunk
+        answer = json.loads(line)
+        if answer.get("answer") != "hosted":
+            raise RuntimeError(f"held entrance rejected {terminal_id}: {answer}")
+        self._req_id = 0
+        self._send_request(
+            {
+                "kind": "attach",
+                "rows": 24,
+                "cols": 80,
+                "focused": True,
+                "name": "bench",
+                "from": None,
+            }
+        )
+        self.socket.setblocking(False)
+
+    def _send_request(self, body: dict) -> None:
+        self._req_id += 1
+        payload = json.dumps({"id": self._req_id, **body}).encode()
+        frame = struct.pack(">BI", 0x11, len(payload)) + payload
+        self.socket.sendall(frame)
+
+    def heartbeat(self) -> None:
+        self.socket.setblocking(True)
+        try:
+            self._send_request({"kind": "controlled", "ready": None})
+        finally:
+            self.socket.setblocking(False)
+
+    def drain(self) -> None:
+        while True:
+            try:
+                data = self.socket.recv(65536)
+                if not data:
+                    break
+            except BlockingIOError:
+                break
+
+    def close(self) -> None:
+        self.socket.close()
+
+
+def _held_entrance(lf_home: Path) -> Path:
+    digest = hashlib.sha256(str(lf_home.resolve()).encode()).hexdigest()[:16]
+    return Path("/tmp").resolve() / f"lf-{os.geteuid()}-{digest}" / "held.sock"
+
+
+def _start_held_terminals(
+    peer: ServerPeer,
+    db_path: Path,
+    lf_home: Path,
+    repo0: Path,
+    stop_file: Path,
+) -> list[HeldViewer]:
+    entrance = _held_entrance(lf_home)
+    terminals: list[tuple[str, str]] = []
+    for i in range(HELD_TERMINAL_COUNT):
+        session_id = f"session_{i:032x}"
+        result = peer.request(
+            f"held-start-{i}",
+            {
+                "kind": "session.start",
+                "session": session_id,
+                "request": f"bench-held-{i}",
+                "argv": [
+                    "/bin/sh",
+                    "-c",
+                    f"while [ ! -e '{stop_file}' ]; do sleep 1; done",
+                ],
+                "cwd": str(repo0),
+                "env": [["PATH", "/usr/bin:/bin"]],
+                "rows": 24,
+                "cols": 80,
+                "placement": None,
+            },
+        )
+        terminals.append((session_id, result["terminal_id"]))
+
+    # Bind each Session to a Task and its held terminal with an attached process so title reads resolve full summaries.
+    conn = sqlite3.connect(db_path, timeout=15.0)
+    try:
+        now = int(time.time())
+        proc_id = "proc_00000000000000000000000000000001"
+        conn.execute(
+            "INSERT OR IGNORE INTO processes(id, trace_id, cwd, started_at) VALUES (?, 'bench', ?, ?)",
+            (proc_id, str(repo0), now),
+        )
+        task_ids = [row[0] for row in conn.execute("SELECT id FROM tasks ORDER BY id").fetchall()]
+        for i, (session_id, terminal_id) in enumerate(terminals):
+            agent_id = f"agent_{i:032x}"
+            token = f"tok_{i:032x}"
+            task_id = task_ids[i % len(task_ids)] if task_ids else None
+            conn.execute(
+                "UPDATE agent_sessions SET held_terminal_id = ?, task_id = ?, "
+                "attached_lf_process_id = ?, attachment_token = ?, "
+                "agent_launcher_lf_process_id = ?, agent_process_id = ?, "
+                "agent_started_at = ? WHERE id = ?",
+                (terminal_id, task_id, proc_id, token, proc_id, agent_id, now, session_id),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    viewers = [
+        HeldViewer(entrance, terminal_id) for _, terminal_id in terminals[:VIEWED_TERMINAL_COUNT]
+    ]
+    return viewers
 
 
 def _clean_env(home: Path) -> dict[str, str]:
@@ -230,6 +363,31 @@ def _writer_loop(db_path: Path, stop_file: Path, rate_hz: float) -> None:
         conn.close()
 
 
+@contextlib.contextmanager
+def _background_writer(binary: Path, db_path: Path, stop_file: Path):
+    writer = subprocess.Popen(
+        [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            str(binary),
+            "--_writer-db",
+            str(db_path),
+            "--_writer-stop",
+            str(stop_file),
+        ],
+        stdin=subprocess.DEVNULL,
+    )
+    try:
+        yield
+    finally:
+        stop_file.write_text("stop")
+        try:
+            writer.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            writer.terminate()
+            writer.wait(timeout=5)
+
+
 def _measure_phase(
     name: str,
     pid: int,
@@ -340,7 +498,8 @@ def main() -> int:
                 stderr=subprocess.STDOUT,
             )
             peer: ServerPeer | None = None
-            writer: subprocess.Popen | None = None
+            viewers: list[HeldViewer] = []
+            stop_terminals = home / "stop-terminals"
             try:
                 sock_path = _wait_ready(binary, env, server)
                 peer = ServerPeer(sock_path)
@@ -424,33 +583,42 @@ def main() -> int:
                 time.sleep(3.5)
                 peer.drain_nonblocking()
 
-                stop_file = home / "stop-writer"
-                writer = subprocess.Popen(
-                    [
-                        sys.executable,
-                        str(Path(__file__).resolve()),
-                        str(binary),
-                        "--_writer-db",
-                        str(db_path),
-                        "--_writer-stop",
-                        str(stop_file),
-                    ],
-                    stdin=subprocess.DEVNULL,
-                )
-                try:
+                with _background_writer(binary, db_path, home / "stop-writer"):
                     results["db_writes"] = _measure_phase(
                         "db_writes", server.pid, peer, args.seconds, lambda _t, _e: None
                     )
-                finally:
-                    stop_file.write_text("stop")
-                    writer.wait(timeout=10)
-                    writer = None
+
+                viewers = _start_held_terminals(
+                    peer, db_path, home / ".lf", repo0, stop_terminals
+                )
+                time.sleep(2.0)
+                peer.drain_nonblocking()
+                for viewer in viewers:
+                    viewer.drain()
+
+                def _keep_viewers(tick: int, _elapsed: float) -> None:
+                    for viewer in viewers:
+                        viewer.drain()
+                        if tick % 5 == 0:
+                            viewer.heartbeat()
+
+                results["held_idle"] = _measure_phase(
+                    "held_idle", server.pid, peer, args.seconds, _keep_viewers
+                )
+
+                with _background_writer(binary, db_path, home / "stop-held-writer"):
+                    results["held_writes"] = _measure_phase(
+                        "held_writes", server.pid, peer, args.seconds, _keep_viewers
+                    )
             finally:
+                stop_terminals.write_text("stop")
+                for viewer in viewers:
+                    viewer.close()
+                if viewers:
+                    # Let the 30 `/bin/sh` children observe `stop-terminals` and exit cleanly.
+                    time.sleep(1.5)
                 if peer is not None:
                     peer.close()
-                if writer is not None and writer.poll() is None:
-                    writer.terminate()
-                    writer.wait(timeout=5)
                 server.terminate()
                 try:
                     server.wait(timeout=10)

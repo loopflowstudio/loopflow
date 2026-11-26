@@ -36,6 +36,18 @@
       "max_threads": 24,
       "max_spawns": 0,
       "max_store_opens": 0
+    },
+    "held_idle": {
+      "max_cpu_percent": 1.0,
+      "max_threads": 28,
+      "max_spawns": 0,
+      "max_store_opens": 0
+    },
+    "held_writes": {
+      "max_cpu_percent": 5.0,
+      "max_threads": 28,
+      "max_spawns": 0,
+      "max_store_opens": 0
     }
   }
 }

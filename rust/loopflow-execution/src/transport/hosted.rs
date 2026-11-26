@@ -119,6 +119,11 @@ impl Hosted {
             watchers
                 .lifetime
                 .watch(id.clone(), waker.try_clone()?, Arc::clone(&attachment));
+        let title = crate::terminal_title::OutputTitle::new(
+            id.clone(),
+            waker.try_clone()?,
+            watchers.titles.clone(),
+        );
         Ok(Self {
             control_key,
             viewers: Vec::new(),
@@ -146,7 +151,7 @@ impl Hosted {
             kept: None,
             execution_directory_reported: false,
             execution_directory_requested: false,
-            title: crate::terminal_title::OutputTitle::new(&id, &watchers.titles),
+            title,
             reported_status: None,
             replayed_through: 0,
             id,
@@ -551,6 +556,7 @@ impl Hosted {
             .viewers
             .iter()
             .any(|v| self.sizing.held_by(v) && !v.catching_up);
+        self.title.set_viewed(self.viewers.iter().any(Viewer::live));
         if let Some(name) = self.title.tick() {
             self.output.title(&name);
         }
@@ -728,6 +734,7 @@ impl Hosted {
             self.observed_hold,
             time::OffsetDateTime::now_utc().unix_timestamp(),
         );
+        self.title.set_viewed(self.viewers.iter().any(Viewer::live));
         if hold != self.observed_hold {
             self.observed_hold = hold;
             self.viewing.send(hold);
@@ -873,7 +880,6 @@ impl Hosted {
             .chain(deadline)
             .chain(Some(Instant::now() + Duration::from_secs(10)))
             .chain(child.retry_at())
-            .chain(Some(self.title.deadline()))
             .chain(self.settling.as_ref().and_then(Settling::deadline))
             .min()
     }

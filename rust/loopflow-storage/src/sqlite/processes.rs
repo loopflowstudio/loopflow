@@ -422,20 +422,19 @@ fn attachment_in(
 ) -> StoreResult<Option<SessionAttachment>> {
     let canonical = loopflow_model::id::canonical_session(session);
     let session = canonical.as_str();
-    let row = conn
-        .query_row(
-            "SELECT attached_lf_process_id,attachment_token,agent_launcher_lf_process_id,
-             agent_process_id FROM agent_sessions WHERE id=?1",
-            [session],
-            |row| {
-                Ok((
-                    row.get::<_, Option<String>>(0)?,
-                    row.get::<_, Option<AttachmentToken>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<AgentProcessId>>(3)?,
-                ))
-            },
-        )
+    let mut query = conn.prepare_cached(
+        "SELECT attached_lf_process_id,attachment_token,agent_launcher_lf_process_id,
+         agent_process_id FROM agent_sessions WHERE id=?1",
+    )?;
+    let row = query
+        .query_row([session], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<AttachmentToken>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<AgentProcessId>>(3)?,
+            ))
+        })
         .optional()?
         .ok_or(StoreError::NotFound)?;
     let Some(token) = row.1 else {

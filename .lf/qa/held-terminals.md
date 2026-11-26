@@ -40,7 +40,7 @@ from `lf` with `LF_BIN` naming that path (`lf install server`, or
 build: its `lf server status` still reports `ready`, with an
 `executable_sha256` that is not its own. A live holder
 keeps serving new terminals; stop it (the `lf holder run` under your `bin/`
-path) and the next `lf desktop shell <task> --checkout <path> --id <id>
+path) and the next `lf desktop shell <task> --id <id>
 --create` fails naming both builds. `lf install server` from the replaced path restarts the detached private-home
 server (or the launchd-run server on `~/.lf`). A failed `--create` keeps its
 `--id`: retry with a new one. The holder the server started from the new build

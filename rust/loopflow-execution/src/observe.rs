@@ -421,6 +421,9 @@ pub enum Derived {
         claude: Option<PathBuf>,
         codex: Option<PathBuf>,
     },
+    /// The remote a repository's plan travels by, which changes only with
+    /// its Git config.
+    GitRemote { repo: PathBuf },
 }
 
 /// The entries and revisions read by one invocation, including bounded workers.

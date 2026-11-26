@@ -262,10 +262,16 @@ pub(super) async fn run() -> Result<()> {
         _ = peers.expiring() => unreachable!("peer expiry runs until shutdown"),
         _ = tickets.expiring() => unreachable!("ticket expiry runs until shutdown"),
         reason = lifetime => {
-            tracing::info!(instance = %shutdown_instance, ?reason, "Custom-home Loopflow server exiting");
             let _ = std::fs::remove_file(&path);
-            if reason == ShutdownReason::HomeRemoved {
-                loopflow_execution::installation::server::retire_self_if_registered();
+            match reason {
+                // lf.log would recreate the removed home; stderr is already open.
+                ShutdownReason::HomeRemoved => {
+                    eprintln!("Custom-home Loopflow server exiting: its home was removed (instance {shutdown_instance})");
+                    loopflow_execution::installation::server::retire_self_if_registered();
+                }
+                ShutdownReason::Idle => {
+                    tracing::info!(instance = %shutdown_instance, "Custom-home Loopflow server exiting after idling");
+                }
             }
             Ok(())
         }
@@ -290,38 +296,11 @@ fn store_has_unfinished_execution(home: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct FileStamp {
-    modified: Option<SystemTime>,
-    len: u64,
-}
-
-fn file_stamp(path: &std::path::Path) -> Option<FileStamp> {
-    let meta = std::fs::metadata(path).ok()?;
-    Some(FileStamp {
-        modified: meta.modified().ok(),
-        len: meta.len(),
-    })
-}
-
-fn store_activity_stamp(home: &std::path::Path) -> (Option<FileStamp>, Option<FileStamp>) {
-    (
-        file_stamp(&home.join("loopflow.db")),
-        file_stamp(&home.join("loopflow.db-wal")),
-    )
-}
-
 #[derive(Debug, Clone, Copy)]
 struct CustomHomeSchedule {
     check_every: Duration,
     idle_timeout: Duration,
     execution_check_every: Duration,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct IdleWindow {
-    since: SystemTime,
-    store_stamp: (Option<FileStamp>, Option<FileStamp>),
 }
 
 async fn watch_custom_home(
@@ -343,7 +322,9 @@ async fn watch_custom_home(
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     let home_watcher: Option<()> = None;
 
-    let mut idle: Option<IdleWindow> = None;
+    // When the server last had nothing to serve. Store writes alone are not
+    // work: the owner poll records its own checks every 30 s.
+    let mut idle: Option<SystemTime> = None;
     let mut store_busy = false;
 
     loop {
@@ -363,11 +344,8 @@ async fn watch_custom_home(
             has_terminals.then_some(schedule.execution_check_every)
         } else {
             let now = SystemTime::now();
-            if idle.is_some_and(|w| store_activity_stamp(&home) != w.store_stamp) {
-                idle = None;
-            }
             let elapsed = idle
-                .and_then(|w| now.duration_since(w.since).ok())
+                .and_then(|since| now.duration_since(since).ok())
                 .unwrap_or_default();
             // Query SQLite only on idle entry, while execution was busy, or at
             // the idle deadline — never on a periodic timer while truly idle.
@@ -383,14 +361,11 @@ async fn watch_custom_home(
                 } else if idle.is_some() && elapsed >= schedule.idle_timeout {
                     return ShutdownReason::Idle;
                 } else {
-                    let window = idle.get_or_insert_with(|| IdleWindow {
-                        since: now,
-                        store_stamp: store_activity_stamp(&home),
-                    });
+                    let since = *idle.get_or_insert(now);
                     Some(
                         schedule
                             .idle_timeout
-                            .saturating_sub(now.duration_since(window.since).unwrap_or_default()),
+                            .saturating_sub(now.duration_since(since).unwrap_or_default()),
                     )
                 }
             } else {
@@ -4708,6 +4683,53 @@ mod tests {
                 .unwrap()
         });
         assert_eq!(reason, ShutdownReason::HomeRemoved);
+    }
+
+    #[test]
+    fn custom_home_watcher_exits_idle_while_the_store_keeps_being_written() {
+        use super::{watch_custom_home, CustomHomeSchedule, ShutdownReason};
+        use loopflow_execution::store::home_identity;
+        use tokio::sync::Notify;
+
+        let home = tempfile::tempdir().unwrap();
+        let home_path = home.path().to_path_buf();
+        let initial = home_identity(&home_path);
+        let wal = home_path.join("loopflow.db-wal");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let reason = runtime.block_on(async move {
+            let watcher = tokio::spawn(watch_custom_home(
+                home_path,
+                initial,
+                Arc::new(Semaphore::new(MAX_CONNECTIONS)),
+                None,
+                Arc::new(Notify::new()),
+                CustomHomeSchedule {
+                    check_every: Duration::from_millis(15),
+                    idle_timeout: Duration::from_millis(120),
+                    execution_check_every: Duration::from_millis(15),
+                },
+                |_| false,
+            ));
+            // The owner poll's scope checks write the store with no work running.
+            let writes = tokio::spawn(async move {
+                let mut wal_len = 0;
+                loop {
+                    wal_len = wal_len % 7 + 1;
+                    std::fs::write(&wal, vec![0; wal_len]).unwrap();
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            });
+            let reason = tokio::time::timeout(Duration::from_secs(2), watcher)
+                .await
+                .expect("store writes alone must not keep the server")
+                .unwrap();
+            writes.abort();
+            reason
+        });
+        assert_eq!(reason, ShutdownReason::Idle);
     }
 
     #[test]

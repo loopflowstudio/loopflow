@@ -48,9 +48,30 @@ static BACKOFFS: LazyLock<Mutex<HashMap<String, RepoBackoff>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// The remote a repository's plan travels by: `origin`, else the first by
-/// name. `None` for a repository with no remote.
+/// name. `None` for a repository with no remote. The minute exchange asks
+/// this of every active repository, so `git remote` runs again only after
+/// the repository's config changes.
 pub fn remote(repo: &Path) -> Option<String> {
-    let remotes = crate::git::git_stdout(repo, &["remote"]).ok()?;
+    if crate::git::read_layout(repo).is_none() {
+        return remote_by_git(crate::git::git_stdout(repo, &["remote"]).ok());
+    }
+    let key = crate::observe::Derived::GitRemote {
+        repo: repo.to_owned(),
+    };
+    crate::observe::derived(key, || {
+        if let Some(layout) = crate::git::read_layout(repo) {
+            let _ = crate::observe::read_to_string(&layout.common_dir.join("config"));
+        }
+        // The config read above says when to ask again; a cached answer would not.
+        crate::observe::record_spawn();
+        remote_by_git(crate::git::git_stdout_inheriting(repo, &["remote"], &|_| {}).ok())
+    })
+    .as_ref()
+    .clone()
+}
+
+fn remote_by_git(remotes: Option<String>) -> Option<String> {
+    let remotes = remotes?;
     let mut remotes: Vec<&str> = remotes.lines().filter(|name| !name.is_empty()).collect();
     remotes.sort_unstable();
     remotes
@@ -1240,6 +1261,20 @@ mod tests {
             .plan_carrier(&alone.repo, Carrier::Git)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn a_remote_added_after_the_first_lookup_is_seen_at_once() {
+        let root = tempfile::tempdir().unwrap();
+        let clone = root.path().join("clone");
+        std::fs::create_dir_all(&clone).unwrap();
+        git(&clone, &["init", "-q"]);
+        assert_eq!(remote(&clone), None);
+        assert_eq!(remote(&clone), None);
+        git(&clone, &["remote", "add", "upstream", "/nowhere"]);
+        assert_eq!(remote(&clone).as_deref(), Some("upstream"));
+        git(&clone, &["remote", "add", "origin", "/nowhere"]);
+        assert_eq!(remote(&clone).as_deref(), Some("origin"));
     }
 
     #[test]

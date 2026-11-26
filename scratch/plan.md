@@ -576,6 +576,16 @@ No implementation pass remains; every section §1–§11 is built.
   after merge, `sample <server pid> 3` and `lf server diagnostics --json` on the
   live Machine with Desktop open and Graphs running; base-commit numbers beside
   the branch's in the PR body.
+- **Gate benchmark, `quiet` spawns:** the 60 s release run's `quiet` phase
+  crosses the server's first minute exchange, which runs `git remote` once per
+  active repository to fill `plan_git::remote`'s cache (12 on the fixture).
+  Later minutes fork nothing (`db_writes` 0). Decide at gate: a warm-up past
+  the first exchange, or a one-time allowance in the budget.
+- **Owned-work poll forks (pre-existing, not in this plan):** a Git-planned
+  repository with a claimed Task fetches its plan every 30 s from the server's
+  `watch_owned_work` (`git remote`, `fetch`, two `for-each-ref`, `cat-file`).
+  Linear repositories make HTTP calls instead. It is what a quiet private
+  Machine with claimed work still forks.
 - **Compress candidates** (shape reads, not required for acceptance):
   `observe.rs` `read_once` vs the inline stat path for unheld reads (one path?);
   `harness/drive.rs:19` per-turn `current_thread` runtime → `runtime::block_on`.
@@ -596,6 +606,7 @@ No implementation pass remains; every section §1–§11 is built.
 - Focused tests passed in Pass 3: `loopflow-storage::sqlite::processes::bridge_tests::has_unfinished_execution_tracks_graphs_and_agents` (1), `loopflow-storage::query_plans::tests::` (17), `loopflow-execution::installation::server::tests::` (1), `loopflow-execution::terminal_holder::tests::` (14, including `a_holder_exits_and_hangups_children_when_its_home_is_removed`), `loopflow::server::service::tests::custom_home_watcher_*` (2), `loopflow::server::maintenance::tests::` (1), `transport_tests` (`custom_home_ensure_starts_replaces_and_exits_on_home_removal`, `server_status_does_not_install_or_create_work`, `a_launch_refused_for_a_stopped_server_leaves_nothing_to_resume`), `integration::documented_commands::` (4), `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `server_idle.py target/debug/lf --seconds 10` (`quiet` 0.10% CPU / 18 th / 0 spawns / 0 opens; `file_edits` 0.60% CPU / 16 th / 4 spawns / 0 opens; `db_writes` 0.10% CPU / 18 th / 0 spawns / 0 opens).
 - Focused tests passed in Pass 4: `loopflow-storage::lock_file::tests::` (2), `loopflow-storage::query_plans::tests::` (17), `loopflow-execution::config::files::tests::{machine_jobs_coexists_with_machine_shorthand_and_is_global_only, editing_shorthand_placement_preserves_the_other_destination}` (2), `loopflow-execution::config::remote::tests::machine_jobs_stays_host_local_across_shorthand_projection` (1), `loopflow-execution::config::settings::tests::` (24), `loopflow-execution::store::file_retention::tests::` (2), `loopflow-execution::terminal_holder::tests::a_holder_exits_and_hangups_children_when_its_home_is_removed` (1), `loopflow::lf::commands::graph::tests::graph_steps_share_cores_and_run_niced_while_keeping_preset_env` (1), `loopflow::server::service::tests::custom_home_watcher_*` (2), `loopflow::server::schema::tests::` (8), `integration::documented_commands::` (4), `cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`.
 - `sample 77346 3` on the live server, 2026-11-25 — run at kickoff, results above.
+- QA, 2026-11-25 (`scratch/qa.html`): release `server_idle.py --seconds 60` → `quiet` 0.08% / 18 th / 12 spawns (first exchange) / 0 opens; `file_edits` 0.17% / 17 th / 20 spawns; `db_writes` 0.05% / 17 th / 0 spawns. Before QA's `remote` cache: 12 spawns in `quiet` and `db_writes` each. Live private Machine: held-terminal echo 22–30 ms under `BEGIN EXCLUSIVE`; job budget 16/8/5 at nice 5 for three steps; home deletion stops server + holder in < 1 s; idle exit at 10 min. `cargo test -p loopflow-execution --lib ops::plan_git::` (11), `cargo test -p loopflow --lib server::service::tests::custom_home_watcher` (3), `cargo clippy -p loopflow -p loopflow-execution --all-targets -- -D warnings`.
 
 ## User docs written before implementation
 

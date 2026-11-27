@@ -1,10 +1,18 @@
 # Questions
 
-- Assumed: a leftover Wave `chat:` block is ignored silently (`"chat"` stays in
-  `WAVE_ONLY_KEYS` beside `linear`, with a removal Task) instead of warning
-  `skipping chat: unknown setting` in every checkout that predates the merge.
-- Assumed: lf stops stripping `LF_DISCORD_TOKEN` from agent launches now that
-  nothing reads it. If the token stays live in Doppler, a `doppler run -- lf …`
-  launch hands it to the agent. Revoking the token closes this.
-- Not checked: whether `lf discord serve` is running on another Machine
-  (mini-heart). A running bridge keeps answering until its process is stopped.
+- Open, cannot be undone: when is the Discord bot's token revoked? The concept
+  review recommends before the merge (revoke in Discord, delete the secret
+  from Doppler `loopflow/dev`, remove the bot from the guild), so the PR lists
+  them as done. The plan does not hold the merge for it. Until it is revoked,
+  an agent started under `doppler run -c dev -- lf …` can read it, as it can
+  every other secret in that config except `GH_TOKEN` and `OPENCODE_API_KEY`.
+- Assumed (made for review): `Surface` goes to two variants, `HumanPresent`
+  and `Headless`, in this change. `lf-prompt --surface cli|mac|iphone|ide`
+  then read as headless. The steer named only `Surface::Chat`.
+- Assumed (made for review): a leftover Wave `chat:` block is ignored
+  silently, in a list of retired Wave keys beside `linear` and apart from
+  `id`, with a removal Task filed in this change.
+- Not known: which Task deletes the retired `linear` Wave key. LOO-640 is
+  named for the `GOAL.md` fallback only.
+- Not checked: whether `lf discord serve` runs on a Machine other than this
+  one and 100.96.227.95.

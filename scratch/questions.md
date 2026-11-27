@@ -13,5 +13,11 @@ recommended option for each, marked as made for review.
   checkable from here. It decides whether the PAT is revoked or only the two
   stored copies are deleted. Doppler holds a copy the brief did not name.
 - **Pin the Rust compiler too?** Taken: no; compiler and tools float.
-- **Dependabot alerts stay on** (alerts only; security-update PRs are already
-  disabled). Assumed wanted as the prompt for hand bumps.
+- **What should say a version here has a known vulnerability?** Today nothing
+  does. Taken: the docs say so; a person checks the dependency graph setting;
+  the uncovered part is a deferred finding. The alternatives are "nothing
+  needs to" and a scheduled check that files a Task.
+- **Should GitHub refuse an unpinned action?** Taken: yes, by the repository
+  setting, after merge.
+- **Keep a pin to code published 14 hours earlier?** Taken: no; the
+  `install-action` pin moved to v2.90.3 (18 days old, nextest 0.9.151).

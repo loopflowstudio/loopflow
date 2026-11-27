@@ -23,6 +23,9 @@ Working notes for `/explore` on review sheets and reusable human-comprehension i
 - **Jack Heart:** "1b: yes, and open it in rex / 1b should be stacked on 1104 / maybe both should"
 - **Jack Heart:** "/explore some better UIs for the note taking. take inspiration from things like t3 code, google docs, notion"
 - **Jack Heart:** "1c: Notion bubble + hover + sidebar | 2a: Yes, gutter + and Shift+click ranges | 3b: T3 Code chip dock + overall direction input | 4a: Build it in LOO-1109 now"
+- **Jack Heart:** "Saved 63367886-8447-4648-8a72-6f05678c03b5; nothing reads it until 390c67 runs is this just because the server isnt conencte yet"
+- **Jack Heart:** "ok"
+- **Jack Heart:** "lg2m ship it"
 
 ## Chosen direction
 

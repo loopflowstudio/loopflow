@@ -76,8 +76,18 @@ lf --machine mini -a codex implement
   stdin, never in command arguments or logs, and land with owner-only
   permissions (`0600`). Linear tokens in SQLite are encrypted using an
   owner-only `provider-token.key`.
+- **Rentals:** a rented Machine never receives your `gh` token. It gets a
+  GitHub App user token that acts as you in the one repository it runs,
+  cannot change `.github/workflows/`, and expires 8 hours after issue. The
+  grant that renews it stays encrypted on your Machine. Giving back a
+  repository's last rental ends the token then; a rental its provider deletes
+  while your Machine is asleep leaves the token working until your Machine
+  next checks, or the 8 hours pass. Codex, OpenCode and the forwarded Claude
+  token are not narrowed for a rental: list in `--logins` only what the work
+  needs. See [Rentals](subscriptions.md#rentals).
 - **SSH agent forwarding:** SSH agent forwarding remains opt-in with
-  `lf --machine <machine> --forward-agent`.
+  `lf --machine <machine> --forward-agent`. A rental's first connection
+  forwards neither the agent nor X11.
 
 ## Local client server
 

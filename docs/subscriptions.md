@@ -154,19 +154,68 @@ approver needs no terminal, so unattended sign-ins use one.
 
 ### Rentals
 
+A rental works as you on GitHub, in the one repository it runs, for at most 8
+hours. Your own `gh` token stays on your Machine.
+
 ```bash
 lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 \
-  --max-usd-per-hour 0.40 --logins codex,github
+  --max-usd-per-hour 0.40 --logins codex
 lf task run LOO-570 --rent code
 ```
 
-Task placement signs in to the template's `--logins` or, when unset, to the
-providers signed in here that reach another Machine (Codex, GitHub, Linear,
-OpenCode). Preparation also signs in to GitHub for a GitHub origin and Linear
-for a Linear-backed repository. Each provider needs at most one approval.
-Command approvers let sign-in run unattended. Claude uses a forwarded token on
-each launch. Task placement requires either a forwarded
-`CLAUDE_CODE_OAUTH_TOKEN` or a Codex sign-in before renting.
+```text
+Rentals need GitHub for loopflowstudio/loopflow.
+Approve at https://github.com/login/device with code ABCD-1234
+Renting 4 vCPU 8 GB on daytona at $0.40/h until 03:40
+GitHub on code-1 until 07:40
+```
+
+Once per repository, install the [Loopflow GitHub App](https://github.com/apps/loopflow)
+on it. A repository's first rental then asks for one approval, before anything
+is rented; later rentals of that repository ask for nothing.
+
+What the rental holds:
+
+- **One repository.** The token clones, pushes and opens pull requests in the
+  repository the rental runs and reads no other, so a private submodule or Git
+  dependency kept in a second repository does not clone there.
+- **Your name.** Commits and pull requests are yours, as they are from your
+  own Machine.
+- **No workflow edits.** GitHub refuses a push from a rental that adds or
+  changes a file under `.github/workflows/`. Run that Task on a Machine you
+  own.
+- **8 hours at most.** Placement prints when GitHub stops on that rental. The
+  token stops sooner, when the repository's last rental is given back.
+
+```bash
+lf ondemand login github          # approve ahead of time, from the repository's checkout
+lf machine logins code-1          # github reads signed out once the token stops
+lf machine login github code-1    # send a fresh token to a rental that outlasts it
+```
+
+`lf ondemand login github` is the approval by itself. Run it before a
+placement that has no terminal, such as a scheduled run, or set a
+[command approver](#choose-who-approves); a placement with neither stops
+before renting and names the command. A rental's `github` row in
+`lf machine logins` asks GitHub with the token the rental holds, so it reads
+signed out as soon as a push would fail. `lf machine login github <rental>`
+sends a fresh token for the repository whose checkout you run it from, in
+place of the one the rental held.
+
+| Placement stops with | Do this |
+| --- | --- |
+| The Loopflow app is not installed on the repository | Install it from the link printed, then place again; that placement asks for a new code |
+| No approval for this repository and no terminal | `lf ondemand login github` in its checkout |
+| The approving GitHub account is not the one `gh` is signed in to here | Approve as the `gh` account |
+
+A rental signs in to GitHub for a GitHub origin and Linear for a Linear-backed
+repository, and to nothing else unless the template's `--logins` names it:
+`codex` or `opencode`. Each provider needs at most one approval. Claude uses
+a forwarded token on each launch. Task placement requires either a forwarded
+`CLAUDE_CODE_OAUTH_TOKEN` or `--logins codex` before renting.
+
+Machines you own are unchanged: `lf machine login github mini` installs your
+own `gh` token there.
 
 ### Per-run secrets
 
@@ -224,4 +273,5 @@ The same command signs in GitHub, Linear, Asana, Doppler and OpenCode here;
 GitHub, Linear and OpenCode also reach another Machine. Sending one to another Machine signs it in here
 first if needed, then installs it there over SSH: a GitHub token, a Linear
 access token refreshed here, or a fresh OpenCode device login. A destination
-already signed in to a different account keeps its own.
+already signed in to a different account keeps its own. A rental gets a
+narrower GitHub token than a Machine you own; see [Rentals](#rentals).

@@ -281,6 +281,38 @@ prints a sentinel:
 
 Done when the demo above runs against a real rental.
 
+## Docs
+
+Written ahead of the build, describing intended behavior:
+
+- `docs/subscriptions.md` "Rentals": the example and its output, the app
+  install, what the token reaches, `lf ondemand login github`,
+  `lf machine login github <rental>`, the stops, `--logins`.
+- `docs/ops.md` "Rental credentials" bullet.
+- `docs/security.md` "Credentials over SSH": a Rentals bullet, and first
+  contact forwarding neither agent nor X11.
+
+`documented_commands` checks doc examples against Clap, so
+`lf ondemand login github` fails it until Pass 2 adds the command. Pass 1
+lands with that example held back or the command stubbed in Clap.
+
+Questions the writing raised (also in `scratch/questions.md`):
+
+1. **Approving before the app is installed costs a second code.** The device
+   code is spent on a token GitHub did not restrict, and refresh takes no
+   `repository_id`. The docs put the install first and say the next placement
+   asks for a new code. Can the install be checked before the code is shown?
+   (`GET /user/installations` needs an app user token; the laptop's `gh`
+   token cannot ask.)
+2. **Does a command approver let a placement with no terminal approve?** The
+   docs say yes, as `approvers` already promises for every sign-in; "Absent
+   and error states" above says such a placement stops.
+3. **The app's address.** The docs link `https://github.com/apps/loopflow`;
+   the slug is whatever the registration gets.
+4. **Sample output wording** (`Rentals need GitHub for …`, `GitHub on code-1
+   until 07:40`) is made for the docs; the build matches it or the docs
+   follow.
+
 ## Review
 
 What happened to each finding of `scratch/concept-review.html` (`6d9c5c7988`).

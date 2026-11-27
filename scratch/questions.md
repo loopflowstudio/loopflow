@@ -35,3 +35,15 @@
 - **Owned Machines still get the laptop token.**
 - **File the two deferred findings as Tasks?** Automatic renewal; signing
   Codex and OpenCode out at give-back.
+
+## Raised by writing the docs
+
+- **Approve before installing the app, and the code is wasted.** Docs say
+  install first; skipping it means a second code after installing. Can `lf`
+  see the missing install before showing a code?
+- **No terminal, but a command approver is set:** does placement approve
+  through it (docs say yes) or stop (plan's absent states say stop)?
+- **App address in the docs** is `https://github.com/apps/loopflow` until the
+  app is registered.
+- **`lf ondemand login github` is in the docs before Clap has it**, so
+  `documented_commands` fails until Pass 2.

@@ -40,108 +40,36 @@ suites under Acceptance passed. Nothing has been rebuilt since.
 `design/prototypes/homepage-next`), `release/*/NOTES.md` and two Wave
 `MEMORY.md` lines. Those stay: shipped records and a community link.
 
-## What remains: one pass
+## Built
 
-### 1. A leftover `chat:` block warns on every command
+- §1 Leftover `chat:` block: `RETIRED_WAVE_KEYS` (`linear`, `chat`) beside a
+  one-key `WAVE_ONLY_KEYS`; LOO-1121 deletes the list (736ce4cbeb). The
+  `GOAL.md` fallback keeps retired keys too, so a first edit still carries
+  `linear` into `config.yaml` for released lf.
+- §3 `run_prompt` returns `Result<()>`; `run_bound_prompt` folded into
+  `run_bound` (ff48cc001b). `harness/mod.rs` needed no reformat.
+- §2 `Surface { HumanPresent, Headless }`, serde derives gone, `SURFACE_CHAT`
+  and `surfaces/chat.md` deleted (050966bd30). One thing deserialized the
+  prompt's `Surface`: the golden prompt cases (`tests/goldens/*.yaml`, all
+  `headless`). They now hold a string parsed with `FromStr`, as `lf-prompt`
+  does, so the name has one spelling.
 
-Dropping `"chat"` from `WAVE_ONLY_KEYS`
-(`rust/loopflow-execution/src/work/wave/config.rs:24`) sends a leftover
-`chat:` block into the shared settings layer. Probe at kickoff with this
-checkout's `target/debug/lf`, a Wave `config.yaml` holding `chat:`:
+What a run showed (2026-11-26, this checkout's `target/debug/lf`):
+`lf discord serve product` exits 2 with "skill or graph not found: discord",
+not Clap's "unrecognized subcommand": an unknown first word is looked up as a
+skill. A Wave `config.yaml` with `agent: claude` and a `chat:` block prints
+no warning from `lf --wave scan config settings` and still shows the agent.
+Passed: execution `work::wave::config::` (7), the surface and prompt tests
+(8), `golden_prompt`, `context_tests::gather_context_preserves_surface`,
+`cargo check -p loopflow --all-targets`, `scripts/check_architecture.py`.
+Left to CI: clippy, `lf::tests::`, `documented_commands::`, the suites.
 
-```
-$ lf --wave scan config settings
-warning: …/.lf/wave/scan/config.yaml:2: skipping chat: unknown setting
-```
-
-111 `loopflow.*` worktrees and the main checkout carry that block in
-`.lf/wave/product/config.yaml` until each takes the merge. `GOAL.md`
-frontmatter is unaffected: `parse_goal_settings` drops keys it doesn't know.
-
-A leftover `chat:` block is ignored silently, and a removal Task is filed in
-this change (`lf task create`), per the shared-file rule in AGENTS.md.
-
-Made for review (concept review, question 3a): the list splits in two. `id`
-is the one key a Wave owns; `linear` and `chat` go in a list of retired Wave
-keys that nothing reads, each with the Task that deletes it (`chat`: the Task
-filed here; `linear`: find its Task before naming one, LOO-640 is the
-`GOAL.md` fallback and may not cover it). Passed over: `chat` beside `linear`
-in the one existing list with a comment (smaller, but the list's name then
-says "keys a Wave carries" for two keys nothing reads); `RETIRED_SETTINGS` in
-`config/settings.rs` (every scope's personal files, and LOO-919 deletes it);
-letting it warn.
-
-Test: `read_wave_layer` on a config with a `chat:` block returns a layer
-without it. It fails if the key is dropped again.
-
-### 2. `Surface` becomes two variants
-
-Steer: "Also remove the chat prompt surface: `Surface::Chat` in
-rust/loopflow-execution/src/prompt/mod.rs (variant, its `"chat"` parse arm,
-`instructions` arm and test), `SURFACE_CHAT` in
-rust/loopflow-definitions/src/builtins.rs, and
-rust/loopflow-definitions/src/builtins/surfaces/chat.md."
-
-That removal stands. Made for review (concept review, question 1a): the same
-edit takes `Cli`, `Ide`, `Mac` and `Iphone` down to one `HumanPresent`, so the
-enum has one variant per instruction file:
-
-```rust
-pub enum Surface { HumanPresent, #[default] Headless }
-```
-
-Why here: the only launcher choice is `run.rs:518` (`Cli` when interactive,
-else `Headless`); `Ide`, `Mac`, `Iphone` appear only in tests
-(`prompt/mod.rs:1880`, `prompt/process.rs:527`) and share `Cli`'s text.
-Passed over: removing only `Chat` and filing the rest as its own Task (the
-steer's literal scope; four names for one answer stay), and keeping `Mac` and
-`Iphone` as placeholders for the apps. If the iOS app needs its own
-instructions, that is a third file and a third variant then.
-
-What the pass does:
-
-- `Surface`: two variants; `instructions` matches both by name; `FromStr`
-  takes `human-present` and falls to `Headless` for anything else.
-- Drop the `Serialize`/`Deserialize` derives and `#[serde(...)]` attributes
-  and build. The prompt's `Surface` is never stored: `PromptComponents` and
-  `GatherContextOpts` have no serde, and a recorded Session's `surface` is a
-  different thing, a `String` holding `"tui"` or `"headless"`. If the build
-  fails, something reads one: keep the derive and write down what.
-- `lf-prompt --surface` (`rust/loopflow/src/bin/lf-prompt.rs:24`): help text
-  says `headless/human-present`. Its two callers
-  (`tests/e2e/test_smoke.sh:42`, `scripts/evals/instruction_levels.py:53`)
-  pass `headless`. `cli`, `mac`, `iphone`, `ide` now read as headless; no
-  aliases.
-- Delete `SURFACE_CHAT`, `surfaces/chat.md`,
-  `chat_surface_speaks_plainly_and_is_distinct_from_headless`, and the parser
-  test that expects `Ide`. `surface_parser_unknown_defaults_to_headless`
-  stays as it is.
-- Rename `Surface::Cli` at its uses: `run.rs:519`, `prompt/process.rs`,
-  `prompt/mod.rs` tests, `rust/loopflow/tests/context_tests.rs`. The two
-  loops over human surfaces become one case.
-- `trace.rs` `ContextAssetKind::Chat` is a recorded context asset kind, a
-  different enum. Untouched.
-
-### 3. Small leftovers
-
-- `run::run_bound_prompt` returned the capture directory only for
-  `answer_bound`; both remaining callers `.map(|_| ())`. Fold it into
-  `run_bound` returning `Result<()>` if `run_prompt`'s other callers allow.
-- `harness/mod.rs`: `.env("LF_HOME", …)` chain reformats under `cargo fmt`.
-
-### 4. Check
-
-`cargo check -p loopflow --all-targets`, the focused tests and acceptance
-commands below, `scripts/check_architecture.py`. Then commit, review, PR, land.
-
-What the pass teaches: whether anything deserializes the prompt's `Surface`
-(the derive drop answers it), and whether `run_prompt`'s callers let the
-capture directory go.
+What remains: review, PR, land.
 
 ## Acceptance check
 
 ```bash
-target/debug/lf discord serve product     # → clap: unrecognized subcommand, exit 2
+target/debug/lf discord serve product     # → skill or graph not found: discord, exit 2
 target/debug/lf help | grep -ci discord   # → 0
 git grep -n -i 'discord' -- rust swift docs python   # → nothing
 git grep -n 'Surface::\(Chat\|Cli\|Ide\|Mac\|Iphone\)\|SURFACE_CHAT' -- rust   # → nothing
@@ -151,7 +79,7 @@ cargo test -p loopflow --lib -- documented_commands wave_resolution_matrix lf::t
 cargo test -p loopflow --test integration context_tests   # find the binary that holds context_tests.rs first
 ```
 
-Demo: `lf discord serve product` answers "unrecognized subcommand", and
+Demo: `lf discord serve product` answers "skill or graph not found: discord", and
 `lf help` lists no Discord command.
 
 ## Absent and error states

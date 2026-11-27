@@ -12,7 +12,10 @@
 - Assumed (made for review): a leftover Wave `chat:` block is ignored
   silently, in a list of retired Wave keys beside `linear` and apart from
   `id`, with a removal Task filed in this change.
-- Not known: which Task deletes the retired `linear` Wave key. LOO-640 is
-  named for the `GOAL.md` fallback only.
+- Assumed: one Task, LOO-1121, deletes both retired Wave keys. No existing
+  Task named the `linear` key (`lf task list linear`), so it joins `chat`.
+- Assumed: the golden prompt cases parse `surface` with `FromStr` so the
+  serde derives could go; keeping the derive would spell the variant
+  `human_present` in YAML and `human-present` on the command line.
 - Not checked: whether `lf discord serve` runs on a Machine other than this
   one and 100.96.227.95.

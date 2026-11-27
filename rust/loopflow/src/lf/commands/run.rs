@@ -39,7 +39,7 @@ pub fn run(
     cli: &Cli,
 ) -> Result<()> {
     if let Some(binding) = implicit_binding(cli)? {
-        return run_bound_prompt(kind, skill, message, cli, &binding).map(|_| ());
+        return run_bound(kind, skill, message, cli, &binding);
     }
     let mut built = build_prompt(kind.mode(), repo_root, skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
@@ -54,7 +54,7 @@ pub fn run(
     });
 
     print_context_header(&built, cli);
-    run_prompt(built, cli, kind).map(|_| ())
+    run_prompt(built, cli, kind)
 }
 
 pub(crate) fn preview_prompt(
@@ -183,7 +183,7 @@ pub fn resume(
         ..resolved
     };
     print_context_header(&built, &turn);
-    run_prompt(built, &turn, kind).map(|_| ())
+    run_prompt(built, &turn, kind)
 }
 
 #[doc(hidden)]
@@ -194,16 +194,6 @@ pub fn run_bound(
     cli: &Cli,
     binding: &loopflow_execution::ops::WorkBinding,
 ) -> Result<()> {
-    run_bound_prompt(kind, skill, message, cli, binding).map(|_| ())
-}
-
-fn run_bound_prompt(
-    kind: LaunchKind,
-    skill: Option<&str>,
-    message: Option<&str>,
-    cli: &Cli,
-    binding: &loopflow_execution::ops::WorkBinding,
-) -> Result<Option<std::path::PathBuf>> {
     let mut scoped;
     let binding = if let Some(scope) = operator_scope(skill, cli, &binding.cwd, Some(binding))? {
         scoped = binding.clone();
@@ -516,7 +506,7 @@ fn build_prompt_at(
     info!("preparing launch prompt");
     let prepare_start = Instant::now();
     let surface = if is_interactive {
-        Surface::Cli
+        Surface::HumanPresent
     } else {
         Surface::Headless
     };
@@ -651,12 +641,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
     );
 }
 
-/// Run the prompt; a headless run returns where its input was recorded.
-fn run_prompt(
-    built: PromptBuild,
-    cli: &Cli,
-    kind: LaunchKind,
-) -> Result<Option<std::path::PathBuf>> {
+fn run_prompt(built: PromptBuild, cli: &Cli, kind: LaunchKind) -> Result<()> {
     if kind.mode() == Mode::Interactive {
         info!("launching interactive vendor session");
         let runtime = begin_process_runtime(&built, "tui", None, cli.prepared_capture.as_deref())?;
@@ -681,17 +666,15 @@ fn run_prompt(
                 .as_ref()
                 .map_or("failed", NativeOutcome::capture_outcome),
         )?;
-        return result
-            .and_then(|outcome| {
-                let harness = built.agent_config.agent.harness;
-                let assigned = loopflow_execution::harness::launcher(harness)
-                    .capabilities()
-                    .thread
-                    .for_kind(kind)
-                    == loopflow_execution::harness::ThreadName::Assigned;
-                outcome.result(harness, assigned, kind)
-            })
-            .map(|()| None);
+        return result.and_then(|outcome| {
+            let harness = built.agent_config.agent.harness;
+            let assigned = loopflow_execution::harness::launcher(harness)
+                .capabilities()
+                .thread
+                .for_kind(kind)
+                == loopflow_execution::harness::ThreadName::Assigned;
+            outcome.result(harness, assigned, kind)
+        });
     }
 
     // Native terminals own their turn status. A separate lf record would remain
@@ -727,7 +710,7 @@ fn run_prompt(
         ))),
         (Err(error), Ok(())) => Err(error),
         (Ok(()), Err(error)) => Err(anyhow!("Session completed but did not settle: {error}")),
-        (Ok(()), Ok(())) => Ok(Some(runtime.artifact_dir())),
+        (Ok(()), Ok(())) => Ok(()),
     }
 }
 

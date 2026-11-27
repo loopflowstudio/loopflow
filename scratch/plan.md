@@ -1,7 +1,7 @@
 # LOO-1118: rentals receive a repository-scoped, expiring GitHub token
 
-Passes 1 and 2 are built. Pass 3 (rentals use the token) is next and needs no
-person. The four probes under "Unanswered until the app exists" need a person
+Passes 1, 2 and 3 are built; no pass remains. Nothing has run against
+GitHub's real app or a real rental. The four probes under "Unanswered until the app exists" need a person
 twice: see "Needs a person now". `scratch/concept-review.html` (at
 `6d9c5c7988`) reviewed the kickoff plan; its findings are folded in below and
 listed under "Review".
@@ -300,11 +300,29 @@ Survives: Linear's renewed token, OpenCode and Codex sign-in when listed in
    around read-then-renew. `credentials::github_login` and
    `LF_TEST_MACHINE_GITHUB_URL` are gone; `rental::github::login_of` and the
    `TEST_GITHUB_URL` task-local replace them.
-3. **Rentals use it.** Approval at first placement, the `connect` branch for
-   rentals, always-send and replace-on-different, the GitHub row that asks
-   GitHub, re-send on refresh, the no-terminal stop, the cut in `mark_ended`,
-   `rentals.github_repository`, the printed stop time, docs (`docs/ops.md`,
-   `docs/subscriptions.md`, `docs/security.md`).
+3. **Rentals use it, unproven.** Built at `dfbd8864c9`: approval before `rent` in
+   `place` (`github::approve_first_rental`), `credentials::connect_rental`
+   for every rental GitHub sign-in (`prepare` passes the Task's repository;
+   `lf machine login github <rental>` passes the directory it runs in),
+   re-send after a renewal, replace-on-different in `install`, the cut in
+   `mark_ended`, `rentals.github_repository_id`, `GitHub on <label> until
+   HH:MM`. Changed from the plan:
+   - The column is `github_repository_id` and is never cleared: holders are
+     the live rentals carrying it, so an ended rental stops counting by its
+     state.
+   - The GitHub row asks GitHub on any Machine whose `gh` token starts
+     `ghu_`, not "on a rental": a Machine cannot tell it is rented, and only
+     a token that expires needs asking. No answer reads `unknown`.
+   - An ending skips the renewal when the stored token already expired.
+   - The renewal, the holder record and the retirement all run under
+     `credential_lock("github")`, which fails at once when held: a second
+     `lf` signing a rental in to GitHub at the same moment is told "another
+     machine login is in progress", and an ending that meets it leaves the
+     token to expire.
+   Not covered by a test: the order in `place` (approval before
+   `admit_rental`) is read from the code; the stop itself is
+   `no_terminal_and_no_command_approver_asks_github_for_nothing`. No
+   placement was run against a real rental.
 
 ## Acceptance
 

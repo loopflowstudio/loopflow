@@ -98,3 +98,19 @@
   ends the first one's tokens is probe 2.
 - **`LF_APPROVE_MACHINE` is `rentals`** for this approval: no Machine exists
   yet when it is asked.
+
+## Raised by Pass 3
+
+- **Does `gh auth login --with-token` take a `ghu_` token?** `install` pipes
+  it exactly as it pipes the laptop token. Probe 3 answers it; if `gh` refuses
+  for missing scopes, the rental needs `GH_TOKEN` or a Git credential helper
+  instead of `gh`'s file.
+- **A rental's deadline past 8 h renews on every sign-in.** No token outlives
+  such a rental, so each placement or `lf machine login github` of that
+  repository renews and re-sends to its other rentals.
+- **A failed renewal with a terminal goes straight to a new code,** without
+  printing why the renewal failed.
+- **`lf ondemand rent` by hand signs in to nothing on GitHub.** It has no
+  repository; `lf machine login github <label>` from a checkout does it.
+- **The ending's renewal can wait on GitHub** (15 s a request, four requests)
+  inside `lf machine end` and the server's rental check.

@@ -898,6 +898,15 @@ pub struct GithubRentalGrant {
     pub expires_at: OffsetDateTime,
 }
 
+/// A live rental signed in to GitHub for one repository.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GithubHolder {
+    pub rental: Rental,
+    /// The expiry of the token it was last sent; `None` before any send
+    /// reached it. It is behind when this is not its repository's grant's.
+    pub sent_expires_at: Option<OffsetDateTime>,
+}
+
 #[cfg(test)]
 #[path = "rental_tests.rs"]
 mod tests;

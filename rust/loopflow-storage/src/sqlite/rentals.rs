@@ -5,8 +5,8 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
 use crate::rental::{
-    self, GithubRentalGrant, Hardware, OnDemand, Ownership, Provider, Rental, RentalCost, RentalId,
-    RentalState, Usd,
+    self, GithubHolder, GithubRentalGrant, Hardware, OnDemand, Ownership, Provider, Rental,
+    RentalCost, RentalId, RentalState, Usd,
 };
 use crate::rows::now_unix;
 use crate::token_crypto;
@@ -417,8 +417,10 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Records that `id` was sent the token of GitHub repository
-    /// `repository_id`; returns the repository it held before.
+    /// Records that `id` is being signed in for GitHub repository
+    /// `repository_id`, and returns the repository it held before. Whatever
+    /// it was sent earlier is no longer assumed held: the next send that
+    /// reaches it is recorded.
     pub fn set_rental_github_repository(
         &self,
         id: &RentalId,
@@ -435,14 +437,30 @@ impl SqliteStore {
             .optional()?
             .ok_or(StoreError::NotFound)?;
         tx.execute(
-            "UPDATE rentals SET github_repository_id=?2 WHERE id=?1",
+            "UPDATE rentals SET github_repository_id=?2,github_token_expires_at=NULL
+             WHERE id=?1",
             params![id.as_str(), repository_id],
         )?;
         tx.commit()?;
         Ok(before)
     }
 
-    /// The GitHub repository whose token `id` was last sent.
+    /// Records that `id` now holds its repository's token expiring at
+    /// `expires_at`: the send reached it.
+    pub fn set_rental_github_token_sent(
+        &self,
+        id: &RentalId,
+        expires_at: OffsetDateTime,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE rentals SET github_token_expires_at=?2 WHERE id=?1",
+            params![id.as_str(), expires_at.unix_timestamp()],
+        )?;
+        Ok(())
+    }
+
+    /// The GitHub repository `id` is signed in for.
     pub fn rental_github_repository(&self, id: &RentalId) -> StoreResult<Option<i64>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
@@ -454,18 +472,24 @@ impl SqliteStore {
         .ok_or(StoreError::NotFound)
     }
 
-    /// Live rentals holding the token of GitHub repository `repository_id`.
-    pub fn rentals_holding_github(&self, repository_id: i64) -> StoreResult<Vec<Rental>> {
+    /// Live rentals signed in for GitHub repository `repository_id`, each
+    /// with the expiry of the token it was last sent.
+    pub fn rentals_holding_github(&self, repository_id: i64) -> StoreResult<Vec<GithubHolder>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         collect(
             &conn,
             &format!(
-                "SELECT {RENTAL_COLUMNS} FROM rentals
+                "SELECT {RENTAL_COLUMNS},github_token_expires_at FROM rentals
                  WHERE github_repository_id=?1 AND state NOT IN ('ended','lost')
                  ORDER BY created_at, id"
             ),
             [repository_id],
-            map_rental,
+            |row| {
+                Ok(GithubHolder {
+                    rental: map_rental(row)?,
+                    sent_expires_at: row.get::<_, Option<i64>>(15)?.map(at).transpose()?,
+                })
+            },
         )
     }
 

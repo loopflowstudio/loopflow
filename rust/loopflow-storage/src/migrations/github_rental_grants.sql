@@ -10,7 +10,9 @@ CREATE TABLE github_rental_grants (
     expires_at INTEGER NOT NULL
 ) STRICT;
 
--- The GitHub repository whose token a rental was last sent. Stored because a
--- rental made by hand has no Task to derive it from. It names who needs the
--- new token after a renewal and whether an ending rental was the last holder.
+-- The GitHub repository a rental is signed in for, stored because a rental
+-- made by hand has no Task to derive it from, and the expiry of the token it
+-- was last sent. A rental whose expiry is not its repository's current
+-- `github_rental_grants.expires_at` holds a token that stopped working.
 ALTER TABLE rentals ADD COLUMN github_repository_id INTEGER;
+ALTER TABLE rentals ADD COLUMN github_token_expires_at INTEGER;

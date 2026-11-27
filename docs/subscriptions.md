@@ -165,6 +165,7 @@ lf task run LOO-570 --rent code
 
 ```text
 Rentals need GitHub for loopflowstudio/loopflow.
+First install the app on loopflowstudio/loopflow: https://github.com/apps/loopflow-studio
 Approve at https://github.com/login/device with code ABCD-1234
 Renting 4 vCPU 8 GB on daytona at $0.40/h until 03:40
 GitHub on code-1 until 07:40
@@ -199,15 +200,23 @@ signed out as soon as a push would fail. `lf machine login github <rental>`
 sends a fresh token for the repository whose checkout you run it from, in
 place of the one the rental held.
 
+Renewing a repository's token ends the one its rentals hold, so every rental
+of that repository is sent the new one. A rental that could not be reached is
+named, and the next placement, sign-in or ending for that repository sends it
+again. Everything GitHub can refuse is asked before renting, so a refusal
+bills nothing.
+
 | Placement stops with | Do this |
 | --- | --- |
 | The Loopflow Studio app is not installed on the repository | Install it from the link printed, then place again; that placement asks for a new code |
 | No approval for this repository and no terminal | `lf ondemand login github` in its checkout |
+| GitHub no longer renews the approval and there is no terminal | `lf ondemand login github` in its checkout |
 | The approving GitHub account is not the one `gh` is signed in to here | Approve as the `gh` account |
 
 A rental signs in to GitHub for a GitHub origin and Linear for a Linear-backed
 repository, and to nothing else unless the template's `--logins` names it:
-`codex` or `opencode`. Each provider needs at most one approval. Claude uses
+`codex` or `opencode`. `--logins github` or `linear` is refused: they follow
+the repository. Each provider needs at most one approval. Claude uses
 a forwarded token on each launch. Task placement requires either a forwarded
 `CLAUDE_CODE_OAUTH_TOKEN` or `--logins codex` before renting.
 

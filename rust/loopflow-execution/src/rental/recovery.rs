@@ -277,24 +277,24 @@ fn mark_ended(sqlite: &SqliteStore, rental: &Rental) -> anyhow::Result<()> {
             .map_or_else(|| task.to_string(), |task| task.identifier);
         println!("{name} back on {here}");
     }
-    retire_github(sqlite, rental);
+    settle_github(sqlite, rental);
     Ok(())
 }
 
-/// Cut the GitHub token an ended rental held, once no live rental of its
-/// repository holds it. An ending never fails on GitHub: a token left alone
-/// stops at its own expiry.
-fn retire_github(sqlite: &SqliteStore, rental: &Rental) {
-    let retired = sqlite
+/// Settle the GitHub repository an ended rental was signed in for: its token
+/// is cut once no live rental holds it. An ending never fails on GitHub: a
+/// token left alone stops at its own expiry.
+fn settle_github(sqlite: &SqliteStore, rental: &Rental) {
+    let settled = sqlite
         .rental_github_repository(&rental.id)
         .map_err(anyhow::Error::from)
         .and_then(|held| match held {
-            Some(repository) => {
-                crate::runtime::block_on(crate::rental::github::retire_token(sqlite, repository))
-            }
+            Some(repository) => crate::runtime::block_on(crate::rental::github::settle_unattended(
+                sqlite, repository,
+            )),
             None => Ok(()),
         });
-    if let Err(error) = retired {
+    if let Err(error) = settled {
         tracing::warn!(rental = %rental.id, "GitHub token left to expire: {error:#}");
     }
 }

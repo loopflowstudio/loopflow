@@ -16,7 +16,7 @@ use super::task_row::TaskReading;
 use super::work_route::TaskPeer;
 use crate::lf::{OndemandCommand, PoolCommand};
 use loopflow_execution::installation::{ArtifactIdentity, ArtifactRole};
-use loopflow_execution::machine::{credentials, forward, login};
+use loopflow_execution::machine::{forward, login};
 use loopflow_execution::machine_records::CopyCounts;
 use loopflow_execution::provider_auth::Provider as LoginProvider;
 use loopflow_execution::rental::clock;
@@ -172,9 +172,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             max_usd_per_hour,
             logins,
         } => {
-            for provider in logins {
-                login::require_reach(*provider, Some("a rental"))?;
-            }
+            require_template_logins(logins)?;
             let ondemand = OnDemand {
                 name: name.clone(),
                 provider: *provider,
@@ -714,20 +712,27 @@ pub fn place(
     }
     let name = placement.rent.expect("checked: a pool or an on-demand");
     let forwarded = forward::read(repo)?;
-    let logins = sign_in_order(require_ondemand(sqlite, name)?.logins);
+    let ondemand = require_ondemand(sqlite, name)?;
+    let logins = sign_in_order(ondemand.logins.iter().copied());
     require_agent_login(
         name,
         forwarded.carries_env(login::CLAUDE_TOKEN_ENV),
         &logins,
     )?;
-    // A repository's first rental asks for its GitHub approval before any
-    // rental exists to pay for.
+    // Everything GitHub can refuse is asked before a rental exists to pay
+    // for: after renting, only the send to it is left.
+    let admission = rental::admit(&ondemand, sqlite.live_rentals(name)?, None, None, now())?;
     loopflow_execution::runtime::block_on(
-        loopflow_execution::rental::github::approve_first_rental(sqlite, repo, batch),
+        loopflow_execution::rental::github::settle_before_renting(
+            sqlite,
+            repo,
+            admission.deadline,
+            batch,
+        ),
     )?;
     let (rental, machine) = rent(sqlite, name, None, None, false)?;
     let label = machine.name();
-    if let Err(error) = prepare(&machine, &rental, &logins, repo, &task, sqlite, batch) {
+    if let Err(error) = prepare(&machine, &logins, repo, &task, sqlite, batch) {
         // Nothing ran on it yet, so nothing is lost by giving it back now.
         let cleanup = Sandboxes::from_env(rental.provider)
             .and_then(|api| delete_sandbox(sqlite, &api, &rental));
@@ -855,6 +860,21 @@ fn hand_off(repo: &Path, issue: &str, label: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A template's `logins` are agent providers. GitHub and Linear follow the
+/// repository, so listing them would promise nothing.
+fn require_template_logins(logins: &[LoginProvider]) -> anyhow::Result<()> {
+    for provider in logins {
+        if login::follows_repository(*provider) {
+            return Err(anyhow!(
+                "GitHub and Linear are signed in whenever the repository uses them; \
+                 --logins takes codex or opencode"
+            ));
+        }
+        login::require_reach(*provider, Some("a rental"))?;
+    }
+    Ok(())
+}
+
 /// A rental runs an agent only with the forwarded Claude token or a Codex
 /// sign-in its template lists; what is signed in here reaches no rental
 /// unasked.
@@ -879,7 +899,6 @@ fn require_agent_login(
 /// need, then prepare the Task's repository and Wave on the rental.
 fn prepare(
     machine: &Machine,
-    rental: &Rental,
     logins: &[LoginProvider],
     repo: &Path,
     task: &loopflow_storage::work::task::Task,
@@ -899,16 +918,10 @@ fn prepare(
         linear.then_some(LoginProvider::Linear),
     ];
     for provider in sign_in_order(logins.iter().copied().chain(required.into_iter().flatten())) {
-        loopflow_execution::runtime::block_on(async {
-            if provider == LoginProvider::GitHub {
-                // The Task's repository, whatever directory this runs from.
-                let approver = login::approver(provider, None)?;
-                let approver = approver.as_ref();
-                credentials::connect_rental(sqlite, machine, rental, repo, approver, batch).await
-            } else {
-                login::login(machine, provider, None, false, batch).await
-            }
-        })?;
+        // GitHub is for the Task's repository, whatever directory this runs from.
+        loopflow_execution::runtime::block_on(login::login(
+            machine, provider, repo, None, false, batch,
+        ))?;
     }
     if let Some(wave_id) = task.wave_id.as_ref().filter(|_| linear) {
         let wave = sqlite.get_wave(wave_id)?;
@@ -1012,7 +1025,8 @@ pub fn end(label: &str, force: bool) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        checkout_script, first_contact, require_agent_login, reused_host_key, sign_in_order,
+        checkout_script, first_contact, require_agent_login, require_template_logins,
+        reused_host_key, sign_in_order,
     };
     use loopflow_execution::provider_auth::Provider;
     use loopflow_storage::rental::Provider as Rented;
@@ -1049,6 +1063,19 @@ mod tests {
         assert!(error.to_string().contains("--logins codex"), "{error}");
         require_agent_login("code", true, &[]).unwrap();
         require_agent_login("code", false, &[Provider::Codex]).unwrap();
+    }
+
+    #[test]
+    fn a_template_lists_agent_providers_only() {
+        let error = require_template_logins(&[Provider::Codex, Provider::GitHub]).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("--logins takes codex or opencode"),
+            "{error}"
+        );
+        assert!(require_template_logins(&[Provider::Linear]).is_err());
+        require_template_logins(&[Provider::Codex, Provider::OpenCodeZen]).unwrap();
     }
 
     #[test]

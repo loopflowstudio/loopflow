@@ -174,10 +174,13 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             } else {
                 named_or_here(machines).await
             };
+            let here = std::env::current_dir()?;
+            let here = here.as_path();
             return each(targets, "signed in", |machine| async move {
                 login::login(
                     &machine,
                     *provider,
+                    here,
                     chrome_profile.as_deref(),
                     *api_key,
                     batch,

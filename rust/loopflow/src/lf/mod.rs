@@ -1458,6 +1458,7 @@ impl MachineCommand {
             Self::Ondemand { cmd } => match cmd {
                 OndemandCommand::List { .. } => false,
                 OndemandCommand::Add { .. }
+                | OndemandCommand::Login { .. }
                 | OndemandCommand::Max { .. }
                 | OndemandCommand::Rent { .. }
                 | OndemandCommand::Remove { .. } => true,
@@ -3246,9 +3247,10 @@ pub enum OndemandCommand {
         /// Above this hourly price nothing is rented
         #[arg(long, value_name = "USD")]
         max_usd_per_hour: loopflow_storage::rental::Usd,
-        /// Providers each rental is signed in to as it starts (codex, github,
-        /// linear or opencode); unset, each of those signed in here. Claude
-        /// arrives with each launch as the token `forward.env` names
+        /// Agent providers each rental is signed in to as it starts (codex or
+        /// opencode); unset, none. GitHub and Linear are signed in whenever
+        /// the repository uses them. Claude arrives with each launch as the
+        /// token `forward.env` names
         #[arg(long, value_delimiter = ',', value_name = "PROVIDER")]
         logins: Vec<loopflow_execution::provider_auth::Provider>,
     },
@@ -3256,6 +3258,11 @@ pub enum OndemandCommand {
     List {
         #[arg(long)]
         json: bool,
+    },
+    /// Approve a service for the rentals of the repository this checkout is of
+    Login {
+        #[arg(value_enum)]
+        service: RentalService,
     },
     /// Change how many machines it rents at once; current machines stay
     Max { name: String, max: u32 },
@@ -3272,6 +3279,13 @@ pub enum OndemandCommand {
     },
     /// Forget it; its rentals' history stays
     Remove { name: String },
+}
+
+/// A service rentals sign in to with a login narrower than this Machine's own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum RentalService {
+    /// A token for the one repository, as you, renewed here
+    Github,
 }
 
 #[derive(Debug, Subcommand)]

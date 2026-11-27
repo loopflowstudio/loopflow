@@ -154,19 +154,97 @@ approver needs no terminal, so unattended sign-ins use one.
 
 ### Rentals
 
+A rental works as you on GitHub, in the one repository it runs, for at most 8
+hours. Your own `gh` token stays on your Machine.
+
 ```bash
 lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 \
-  --max-usd-per-hour 0.40 --logins codex,github
+  --max-usd-per-hour 0.40 --logins codex
 lf task run LOO-570 --rent code
 ```
 
-Task placement signs in to the template's `--logins` or, when unset, to the
-providers signed in here that reach another Machine (Codex, GitHub, Linear,
-OpenCode). Preparation also signs in to GitHub for a GitHub origin and Linear
-for a Linear-backed repository. Each provider needs at most one approval.
-Command approvers let sign-in run unattended. Claude uses a forwarded token on
-each launch. Task placement requires either a forwarded
-`CLAUDE_CODE_OAUTH_TOKEN` or a Codex sign-in before renting.
+```text
+Rentals need GitHub for loopflowstudio/loopflow.
+First install the app on loopflowstudio/loopflow: https://github.com/apps/loopflow-studio
+Approve at https://github.com/login/device with code ABCD-1234
+Renting 4 vCPU 8 GB on daytona at $0.40/h until 03:40
+GitHub on code-1 until 07:40
+```
+
+Once per repository, install the [Loopflow Studio GitHub App](https://github.com/apps/loopflow-studio)
+on it. A repository's first rental then asks for one approval, before anything
+is rented; later rentals of that repository ask for nothing.
+
+What the rental holds:
+
+- **One repository.** The token clones, pushes and opens pull requests in the
+  repository the rental runs and reads no other, so a private submodule or Git
+  dependency kept in a second repository does not clone there.
+- **Your name.** Commits and pull requests are yours, as they are from your
+  own Machine.
+- **8 hours at most.** Placement prints when GitHub stops on that rental. The
+  token stops sooner, when the repository's last rental is given back. When it
+  stops before the rental does, placement says so and names the renewal:
+
+  ```text
+  GitHub on code-1 until 07:40, before the rental ends; `lf machine login github code-1` renews
+  ```
+
+```bash
+lf ondemand login github          # approve ahead of time, from the repository's checkout
+lf ondemand list                  # each running rental: GitHub until 07:40, or not delivered
+lf machine logins code-1          # github reads signed out once the token stops
+lf machine login github code-1    # send a fresh token to a rental that outlasts it
+```
+
+`lf ondemand login github` is the approval by itself. Run it before a
+placement that has no terminal, such as a scheduled run, or set a
+[command approver](#choose-who-approves); a placement with neither stops
+before renting and names the command. On a repository GitHub still honors an
+approval for, it says so and asks for nothing; a code appears only when there
+is no approval or GitHub no longer renews it.
+
+`lf ondemand list` shows what this Machine sent each running rental:
+`GitHub until 07:40`, `GitHub ended 07:40` once that time has passed, or
+`GitHub not delivered` when the repository's current token never reached it.
+It reads the record here and asks neither the rental
+nor GitHub. A rental's `github` row in
+`lf machine logins` asks GitHub with the token the rental holds, so it reads
+signed out as soon as a push would fail. `lf machine login github <rental>`
+sends the rental a fresh token for its repository, from any directory. A
+rental's repository is set once: one from `lf ondemand rent` has none until
+its first GitHub sign-in, which takes the checkout you run it from.
+
+Renewing a repository's token ends the one its rentals hold, so every rental
+of that repository is sent the new one. A rental that could not be reached is
+named, and the next placement, sign-in or ending for that repository sends it
+again. Everything GitHub can refuse is asked before renting, so a refusal
+bills nothing: a stored approval is checked with GitHub too, so one you
+revoked or an app you uninstalled stops the placement there. A renewal that
+loses its connection to GitHub keeps your approval: the next command checks
+the new token before any rental gets it, and asks for no code. A command that
+finds another `lf` working on the same repository's token says it is waiting,
+then goes on once that one finishes or its code is approved. A rental given
+back at that moment does not wait: the other `lf` is settling the repository,
+and a token nothing ended early stops by itself within 8 hours. When a stored
+approval is refused, the reason is printed above the new code.
+
+| Placement stops with | Do this |
+| --- | --- |
+| The Loopflow Studio app is not installed on the repository | Install it from the link printed, then place again; that placement asks for a new code |
+| No approval for this repository and no terminal | `lf ondemand login github` in its checkout |
+| GitHub no longer renews the approval and there is no terminal | `lf ondemand login github` in its checkout |
+| The approving GitHub account is not the one `gh` is signed in to here | Approve as the `gh` account |
+
+A rental signs in to GitHub for a GitHub origin and Linear for a Linear-backed
+repository, and to nothing else unless the template's `--logins` names it:
+`codex` or `opencode`. `--logins github` or `linear` is refused: they follow
+the repository. Each provider needs at most one approval. Claude uses
+a forwarded token on each launch. Task placement requires either a forwarded
+`CLAUDE_CODE_OAUTH_TOKEN` or `--logins codex` before renting.
+
+Machines you own are unchanged: `lf machine login github mini` installs your
+own `gh` token there.
 
 ### Per-run secrets
 
@@ -224,4 +302,5 @@ The same command signs in GitHub, Linear, Asana, Doppler and OpenCode here;
 GitHub, Linear and OpenCode also reach another Machine. Sending one to another Machine signs it in here
 first if needed, then installs it there over SSH: a GitHub token, a Linear
 access token refreshed here, or a fresh OpenCode device login. A destination
-already signed in to a different account keeps its own.
+already signed in to a different account keeps its own. A rental gets a
+narrower GitHub token than a Machine you own; see [Rentals](#rentals).

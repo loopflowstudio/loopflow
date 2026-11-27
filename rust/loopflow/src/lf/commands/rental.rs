@@ -11,7 +11,6 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, Context};
 use serde::Serialize;
-use time::OffsetDateTime;
 
 use super::task_row::TaskReading;
 use super::work_route::TaskPeer;
@@ -20,26 +19,21 @@ use loopflow_execution::installation::{ArtifactIdentity, ArtifactRole};
 use loopflow_execution::machine::{forward, login};
 use loopflow_execution::machine_records::CopyCounts;
 use loopflow_execution::provider_auth::Provider as LoginProvider;
+use loopflow_execution::rental::clock;
+use loopflow_execution::rental::github::Approval;
 use loopflow_execution::rental::recovery::{
     delete_sandbox, end as end_rental, give_back, held_ids, now, open_store, refresh_all,
 };
 use loopflow_execution::rental::sandbox::Sandboxes;
 use loopflow_model::durable::{CapacityDefault, Machine, RepositoryId};
 use loopflow_storage::rental::{
-    self, Hardware, OnDemand, Pool, PoolMachine, Provider, Rental, RentalState, Usd,
+    self, GithubDelivery, Hardware, OnDemand, Pool, PoolMachine, Provider, Rental, RentalState, Usd,
 };
 use loopflow_storage::sqlite::SqliteStore;
 
 /// An image-built sandbox answers SSH within seconds; RunPod and AWS
 /// install the tools on stock Ubuntu first, which takes minutes.
 const SSH_WAIT: Duration = Duration::from_secs(20 * 60);
-
-/// Local wall-clock time, as people read deadlines.
-fn clock(at: OffsetDateTime) -> String {
-    chrono::DateTime::from_timestamp(at.unix_timestamp(), 0)
-        .map(|at| at.with_timezone(&chrono::Local).format("%H:%M").to_string())
-        .unwrap_or_else(|| at.to_string())
-}
 
 // ---------------------------------------------------------------------------
 // lf pool
@@ -159,6 +153,9 @@ struct RentalListing {
     tasks: Vec<loopflow_model::durable::TaskId>,
     /// What has been copied from it, once anything has.
     copied: Option<CopyCounts>,
+    /// What a live rental was sent for GitHub, as recorded here.
+    #[serde(skip)]
+    github: Option<GithubDelivery>,
 }
 
 pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
@@ -179,9 +176,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             max_usd_per_hour,
             logins,
         } => {
-            for provider in logins {
-                login::require_reach(*provider, Some("a rental"))?;
-            }
+            require_template_logins(logins)?;
             let ondemand = OnDemand {
                 name: name.clone(),
                 provider: *provider,
@@ -250,6 +245,18 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
                 print_ondemand(listing);
             }
         }
+        OndemandCommand::Login {
+            service: crate::lf::RentalService::Github,
+        } => {
+            let approval = loopflow_execution::runtime::block_on(
+                loopflow_execution::rental::github::approve_ahead(
+                    sqlite,
+                    &std::env::current_dir()?,
+                    batch,
+                ),
+            )?;
+            println!("{}", approval_line(&approval));
+        }
         OndemandCommand::Max { name, max } => {
             loopflow_execution::store::rentals::set_ondemand_max(sqlite, name, *max)?;
             println!("{name} rents at most {max} at once; current machines stay");
@@ -303,6 +310,22 @@ fn require_ondemand(sqlite: &SqliteStore, name: &str) -> anyhow::Result<OnDemand
     })
 }
 
+fn approval_line(approval: &Approval) -> String {
+    let Approval {
+        repository,
+        login,
+        already,
+    } = approval;
+    if *already {
+        format!("GitHub is already approved for {repository} as {login}; nothing to type")
+    } else {
+        format!(
+            "GitHub approved for {repository} as {login}; its rentals hold a token for that \
+             repository only"
+        )
+    }
+}
+
 fn listing(sqlite: &SqliteStore, rental: Rental) -> anyhow::Result<RentalListing> {
     let (machine, tasks, copied) = match &rental.machine_id {
         Some(id) => (
@@ -313,11 +336,17 @@ fn listing(sqlite: &SqliteStore, rental: Rental) -> anyhow::Result<RentalListing
         ),
         None => (None, Vec::new(), None),
     };
+    let github = if rental.state.is_live() {
+        sqlite.rental_github_delivery(&rental.id)?
+    } else {
+        None
+    };
     Ok(RentalListing {
         rental,
         machine,
         tasks,
         copied,
+        github,
     })
 }
 
@@ -368,8 +397,16 @@ fn print_ondemand(listing: &OndemandListing) {
         let copied = entry
             .copied
             .map_or_else(String::new, |counts| format!(" · {counts} copied"));
+        let github = match entry.github {
+            Some(GithubDelivery::Until(at)) if at <= time::OffsetDateTime::now_utc() => {
+                format!(" · GitHub ended {}", clock(at))
+            }
+            Some(GithubDelivery::Until(at)) => format!(" · GitHub until {}", clock(at)),
+            Some(GithubDelivery::NotDelivered) => " · GitHub not delivered".to_string(),
+            None => String::new(),
+        };
         println!(
-            "  {name} · {when} · {} · {} · {cost}{how}{}{copied}",
+            "  {name} · {when} · {} · {} · {cost}{how}{}{copied}{github}",
             rental.hardware,
             rental.hardware.format_hourly_rate(rental.usd_per_hour),
             if tasks.is_empty() {
@@ -456,10 +493,13 @@ fn linux_lf() -> anyhow::Result<Option<std::path::PathBuf>> {
 const LINUX_LF_ENV: &str = "LF_RENT_LINUX_BIN";
 
 /// SSH that trusts a sandbox's fresh host key once; Machine routes then
-/// check it strictly like any other.
+/// check it strictly like any other. A rented machine is handed neither the
+/// SSH agent nor the display, whatever `~/.ssh/config` forwards.
 fn first_contact(route: &str, script: &str) -> Command {
     let mut ssh = Command::new("ssh");
     ssh.args([
+        "-a",
+        "-x",
         "-o",
         "StrictHostKeyChecking=accept-new",
         "-o",
@@ -487,17 +527,25 @@ fn run_bootstrap(route: &str, script: &str, stdin: Stdio) -> anyhow::Result<Vec<
     Ok(output.stdout)
 }
 
-/// A tunnel port may be reused by a later sandbox with another host key.
-fn forget_host_key(route: &str) {
+/// The `known_hosts` entry a new rental's address may already have: a tunnel
+/// port or public address is reused by later sandboxes with other host keys.
+/// Daytona's route is its one gateway, whose key stays as first accepted.
+fn reused_host_key(provider: Provider, route: &str) -> Option<String> {
+    if provider == Provider::Daytona {
+        return None;
+    }
     let address = route.trim_start_matches("ssh://");
     let address = address.rsplit_once('@').map_or(address, |(_, host)| host);
-    let entry = match address.rsplit_once(':') {
+    Some(match address.rsplit_once(':') {
         Some((host, port)) if port != "22" => format!("[{host}]:{port}"),
         Some((host, _)) => host.to_string(),
         None => address.to_string(),
-    };
+    })
+}
+
+fn forget_host_key(entry: &str) {
     let _ = Command::new("ssh-keygen")
-        .args(["-R", &entry])
+        .args(["-R", entry])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
@@ -538,7 +586,9 @@ fn attach(
     route: &str,
     linux_lf: Option<&Path>,
 ) -> anyhow::Result<Machine> {
-    forget_host_key(route);
+    if let Some(entry) = reused_host_key(rental.provider, route) {
+        forget_host_key(&entry);
+    }
     let deadline = SystemTime::now() + SSH_WAIT;
     let arch = loop {
         let output = first_contact(route, "uname -m").output()?;
@@ -693,15 +743,24 @@ pub fn place(
     }
     let name = placement.rent.expect("checked: a pool or an on-demand");
     let forwarded = forward::read(repo)?;
-    let logins = sign_ins(&require_ondemand(sqlite, name)?.logins)?;
-    if !forwarded.carries_env(login::CLAUDE_TOKEN_ENV) && !logins.contains(&LoginProvider::Codex) {
-        return Err(anyhow!(
-            "a rental from {name} would have no agent login: forward {token} \
-             (`lf set --global forward.env '[{token}]'` after `claude setup-token` and \
-             `doppler secrets set {token}`), or sign it in to Codex (`lf machine login codex` here)",
-            token = login::CLAUDE_TOKEN_ENV,
-        ));
-    }
+    let ondemand = require_ondemand(sqlite, name)?;
+    let logins = sign_in_order(ondemand.logins.iter().copied());
+    require_agent_login(
+        name,
+        forwarded.carries_env(login::CLAUDE_TOKEN_ENV),
+        &logins,
+    )?;
+    // Everything GitHub can refuse is asked before a rental exists to pay
+    // for: after renting, only the send to it is left.
+    let admission = rental::admit(&ondemand, sqlite.live_rentals(name)?, None, None, now())?;
+    loopflow_execution::runtime::block_on(
+        loopflow_execution::rental::github::settle_before_renting(
+            sqlite,
+            repo,
+            admission.deadline,
+            batch,
+        ),
+    )?;
     let (rental, machine) = rent(sqlite, name, None, None, false)?;
     let label = machine.name();
     if let Err(error) = prepare(&machine, &logins, repo, &task, sqlite, batch) {
@@ -832,24 +891,42 @@ fn hand_off(repo: &Path, issue: &str, label: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// What a rental signs in to at prepare: the template's `logins`, else every
-/// provider signed in here, in `sign_in_order`.
-fn sign_ins(logins: &[LoginProvider]) -> anyhow::Result<Vec<LoginProvider>> {
-    if !logins.is_empty() {
-        return Ok(sign_in_order(logins.iter().copied()));
+/// A template's `logins` are agent providers. GitHub and Linear follow the
+/// repository, so listing them would promise nothing.
+fn require_template_logins(logins: &[LoginProvider]) -> anyhow::Result<()> {
+    for provider in logins {
+        if login::follows_repository(*provider) {
+            return Err(anyhow!(
+                "GitHub and Linear are signed in whenever the repository uses them; \
+                 --logins takes codex or opencode"
+            ));
+        }
+        login::require_reach(*provider, Some("a rental"))?;
     }
-    let here = loopflow_execution::runtime::block_on(
-        loopflow_execution::machine::connection::local_machine(),
-    )?;
-    Ok(sign_in_order(
-        loopflow_execution::runtime::block_on(login::logins(&here))?
-            .into_iter()
-            .filter(|row| row.state == login::LoginState::SignedIn)
-            .map(|row| row.provider),
+    Ok(())
+}
+
+/// A rental runs an agent only with the forwarded Claude token or a Codex
+/// sign-in its template lists; what is signed in here reaches no rental
+/// unasked.
+fn require_agent_login(
+    ondemand: &str,
+    claude_token: bool,
+    logins: &[LoginProvider],
+) -> anyhow::Result<()> {
+    if claude_token || logins.contains(&LoginProvider::Codex) {
+        return Ok(());
+    }
+    Err(anyhow!(
+        "a rental from {ondemand} would have no agent login: forward {token} \
+         (`lf set --global forward.env '[{token}]'` after `claude setup-token` and \
+         `doppler secrets set {token}`), or sign it in to Codex (`--logins codex` on \
+         `lf ondemand add {ondemand}`)",
+        token = login::CLAUDE_TOKEN_ENV,
     ))
 }
 
-/// Sign in to the selected providers and the services checkout and planning
+/// Sign in to the template's `logins` and the services checkout and planning
 /// need, then prepare the Task's repository and Wave on the rental.
 fn prepare(
     machine: &Machine,
@@ -872,7 +949,10 @@ fn prepare(
         linear.then_some(LoginProvider::Linear),
     ];
     for provider in sign_in_order(logins.iter().copied().chain(required.into_iter().flatten())) {
-        loopflow_execution::runtime::block_on(login::login(machine, provider, None, false, batch))?;
+        // GitHub is for the Task's repository, whatever directory this runs from.
+        loopflow_execution::runtime::block_on(login::login(
+            machine, provider, repo, None, false, batch,
+        ))?;
     }
     if let Some(wave_id) = task.wave_id.as_ref().filter(|_| linear) {
         let wave = sqlite.get_wave(wave_id)?;
@@ -946,6 +1026,7 @@ fn checkout_script(
         "{} && {identity}mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || {clone} {dir}; }} && cd {dir} && lf config repo --bind {repository}",
         loopflow_execution::machine::ssh::remote_path(),
         dir = q(directory),
+        repository = q(repository.as_str()),
     );
     Ok((origin, script))
 }
@@ -974,8 +1055,59 @@ pub fn end(label: &str, force: bool) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{checkout_script, sign_in_order};
+    use super::{
+        checkout_script, first_contact, require_agent_login, require_template_logins,
+        reused_host_key, sign_in_order,
+    };
     use loopflow_execution::provider_auth::Provider;
+    use loopflow_storage::rental::Provider as Rented;
+
+    #[test]
+    fn first_contact_forwards_neither_the_agent_nor_the_display() {
+        let ssh = first_contact("ssh://lf@203.0.113.7:40022", "uname -m");
+        let args: Vec<_> = ssh.get_args().collect();
+        let route = args.iter().position(|arg| *arg == "--").unwrap();
+        assert!(args[..route].contains(&"-a".as_ref()));
+        assert!(args[..route].contains(&"-x".as_ref()));
+    }
+
+    #[test]
+    fn only_a_reused_address_has_its_host_key_forgotten() {
+        assert_eq!(
+            reused_host_key(Rented::Modal, "ssh://lf@r3.modal.host:40022"),
+            Some("[r3.modal.host]:40022".into())
+        );
+        assert_eq!(
+            reused_host_key(Rented::Aws, "ssh://lf@203.0.113.7"),
+            Some("203.0.113.7".into())
+        );
+        assert_eq!(
+            reused_host_key(Rented::Daytona, "ssh://token@ssh.app.daytona.io"),
+            None
+        );
+    }
+
+    #[test]
+    fn a_template_with_no_logins_signs_in_to_no_agent() {
+        assert!(sign_in_order([]).is_empty());
+        let error = require_agent_login("code", false, &[]).unwrap_err();
+        assert!(error.to_string().contains("--logins codex"), "{error}");
+        require_agent_login("code", true, &[]).unwrap();
+        require_agent_login("code", false, &[Provider::Codex]).unwrap();
+    }
+
+    #[test]
+    fn a_template_lists_agent_providers_only() {
+        let error = require_template_logins(&[Provider::Codex, Provider::GitHub]).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("--logins takes codex or opencode"),
+            "{error}"
+        );
+        assert!(require_template_logins(&[Provider::Linear]).is_err());
+        require_template_logins(&[Provider::Codex, Provider::OpenCodeZen]).unwrap();
+    }
 
     #[test]
     fn a_rental_signs_in_once_to_each_provider_that_reaches_it_github_first() {
@@ -1029,7 +1161,7 @@ mod tests {
         // No store records either checkout: the Task alone names the repository.
         let repository = loopflow_model::durable::RepositoryId::new();
         let (_, script) = checkout_script(&worktree, &repository).unwrap();
-        assert!(script.ends_with(&format!("lf config repo --bind {repository}")));
+        assert!(script.ends_with(&format!("lf config repo --bind '{repository}'")));
         assert!(script.contains("gh repo clone 'loopflowstudio/loopflow'"));
         assert!(script.contains("git config --global user.email 'jack@example.com'"));
     }

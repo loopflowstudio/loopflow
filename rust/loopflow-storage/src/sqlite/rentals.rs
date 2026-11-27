@@ -5,9 +5,11 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
 use crate::rental::{
-    self, Hardware, OnDemand, Ownership, Provider, Rental, RentalCost, RentalId, RentalState, Usd,
+    self, GithubDelivery, GithubHolder, GithubRentalGrant, Hardware, OnDemand, Ownership, Provider,
+    Rental, RentalCost, RentalId, RentalState, Usd,
 };
 use crate::rows::now_unix;
+use crate::token_crypto;
 use crate::{StoreError, StoreResult};
 use loopflow_model::durable::{MachineId, TaskId};
 
@@ -345,6 +347,162 @@ impl SqliteStore {
         let rental = rental_in(&tx, id)?;
         tx.commit()?;
         Ok(Some((rental, returned)))
+    }
+
+    /// The grant for one GitHub repository's rentals, tokens decrypted.
+    pub fn github_rental_grant(
+        &self,
+        repository_id: i64,
+    ) -> StoreResult<Option<GithubRentalGrant>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let row = conn
+            .query_row(
+                "SELECT repository,login,access_token,refresh_token,expires_at
+                 FROM github_rental_grants WHERE repository_id=?1",
+                [repository_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((repository, login, access, refresh, expires_at)) = row else {
+            return Ok(None);
+        };
+        let decrypt = |token: &str| {
+            token_crypto::decrypt_token(token, self.token_key)
+                .map_err(|_| invalid(format!("unreadable GitHub rental grant for {repository}")))
+        };
+        Ok(Some(GithubRentalGrant {
+            repository_id,
+            access_token: decrypt(&access)?,
+            refresh_token: decrypt(&refresh)?,
+            expires_at: at(expires_at)?,
+            repository,
+            login,
+        }))
+    }
+
+    /// Replace the repository's grant: a refresh ends the tokens it held.
+    pub fn put_github_rental_grant(&self, grant: &GithubRentalGrant) -> StoreResult<()> {
+        let encrypt = |token: &str| {
+            token_crypto::encrypt_token(token, self.token_key)
+                .map_err(|_| invalid("credential encryption failed"))
+        };
+        let (access, refresh) = (
+            encrypt(&grant.access_token)?,
+            encrypt(&grant.refresh_token)?,
+        );
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO github_rental_grants(repository_id,repository,login,access_token,
+                refresh_token,expires_at) VALUES(?1,?2,?3,?4,?5,?6)
+             ON CONFLICT(repository_id) DO UPDATE SET repository=excluded.repository,
+                login=excluded.login,access_token=excluded.access_token,
+                refresh_token=excluded.refresh_token,expires_at=excluded.expires_at",
+            params![
+                grant.repository_id,
+                grant.repository,
+                grant.login,
+                access,
+                refresh,
+                grant.expires_at.unix_timestamp()
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Records that `id` is being signed in for GitHub repository
+    /// `repository_id`. Whatever it was sent earlier is no longer assumed
+    /// held: the next send that reaches it is recorded.
+    pub fn set_rental_github_repository(
+        &self,
+        id: &RentalId,
+        repository_id: i64,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE rentals SET github_repository_id=?2,github_token_expires_at=NULL
+             WHERE id=?1",
+            params![id.as_str(), repository_id],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    /// Records that `id` now holds its repository's token expiring at
+    /// `expires_at`: the send reached it.
+    pub fn set_rental_github_token_sent(
+        &self,
+        id: &RentalId,
+        expires_at: OffsetDateTime,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE rentals SET github_token_expires_at=?2 WHERE id=?1",
+            params![id.as_str(), expires_at.unix_timestamp()],
+        )?;
+        Ok(())
+    }
+
+    /// The GitHub repository `id` is signed in for.
+    pub fn rental_github_repository(&self, id: &RentalId) -> StoreResult<Option<i64>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT github_repository_id FROM rentals WHERE id=?1",
+            [id.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or(StoreError::NotFound)
+    }
+
+    /// Live rentals signed in for GitHub repository `repository_id`, each
+    /// with the expiry of the token it was last sent.
+    pub fn rentals_holding_github(&self, repository_id: i64) -> StoreResult<Vec<GithubHolder>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        collect(
+            &conn,
+            &format!(
+                "SELECT {RENTAL_COLUMNS},github_token_expires_at FROM rentals
+                 WHERE github_repository_id=?1 AND state NOT IN ('ended','lost')
+                 ORDER BY created_at, id"
+            ),
+            [repository_id],
+            |row| {
+                Ok(GithubHolder {
+                    rental: map_rental(row)?,
+                    sent_expires_at: row.get::<_, Option<i64>>(15)?.map(at).transpose()?,
+                })
+            },
+        )
+    }
+
+    /// What `id` was sent for GitHub against its repository's grant; `None`
+    /// when it is signed in for no repository.
+    pub fn rental_github_delivery(&self, id: &RentalId) -> StoreResult<Option<GithubDelivery>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let row = conn
+            .query_row(
+                "SELECT r.github_token_expires_at,g.expires_at FROM rentals r
+                 LEFT JOIN github_rental_grants g ON g.repository_id=r.github_repository_id
+                 WHERE r.id=?1 AND r.github_repository_id IS NOT NULL",
+                [id.as_str()],
+                |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?)),
+            )
+            .optional()?;
+        row.map(|(sent, current)| match sent {
+            Some(sent) if Some(sent) == current => at(sent).map(GithubDelivery::Until),
+            _ => Ok(GithubDelivery::NotDelivered),
+        })
+        .transpose()
     }
 
     /// Reachable and added: the rental is running as this Machine.

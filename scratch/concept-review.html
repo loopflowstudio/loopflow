@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1118 concept review: a rental's GitHub access after Pass 6</title>
+<style>
+:root {
+  --background: #faf8f5; --surface: #fffdf9; --surface-muted: #f3eee7;
+  --border: #e6dfd6; --border-strong: #d6ccc0;
+  --text: #2a2624; --text-secondary: #5f5752;
+  --accent: #722f37;
+  --working-ink: #2f629f; --working-fill: #d5dde6;
+  --warning-ink: #7f5a19; --warning-fill: #e4dccd;
+  --failure-ink: #a64038; --failure-fill: #ecd9d5;
+  --success-ink: #386c48; --success-fill: #d7dfd6;
+  --font-serif: 'Old Standard TT', Georgia, serif;
+  --font-sans: 'Atkinson Hyperlegible Next', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'Spline Sans Mono', ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #1b1817; --surface: #23201e; --surface-muted: #2b2725;
+    --border: #3a3431; --border-strong: #4a433f;
+    --text: #ece6dd; --text-secondary: #b5ada3;
+    --accent: #d98a94;
+    --working-ink: #8fb6e8; --working-fill: #24303f;
+    --warning-ink: #d9b36a; --warning-fill: #3a3122;
+    --failure-ink: #e8958d; --failure-fill: #40261f;
+    --success-ink: #8fc49f; --success-fill: #223327;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--background); color: var(--text);
+  font: 16px/1.55 var(--font-sans); }
+main { max-width: 1040px; margin: 0 auto; padding: 48px 24px 96px; }
+h1, h2, h3 { font-family: var(--font-serif); font-weight: 700; line-height: 1.2; }
+h1 { font-size: 2.1rem; margin: 0 0 12px; }
+h2 { font-size: 1.5rem; margin: 56px 0 12px; padding-top: 20px; border-top: 1px solid var(--border-strong); }
+h3 { font-size: 1.15rem; margin: 28px 0 8px; }
+p { margin: 0 0 12px; max-width: 74ch; }
+code, pre { font-family: var(--font-mono); font-size: 0.86em; }
+code { background: var(--surface-muted); padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 14px 16px; overflow-x: auto; margin: 0 0 12px; line-height: 1.5; }
+pre code { background: none; padding: 0; font-size: 1em; }
+.lede { font-size: 1.1rem; color: var(--text-secondary); }
+.tag { display: inline-block; font-size: 0.8rem; padding: 1px 9px; border-radius: 999px;
+  border: 1px solid transparent; white-space: nowrap; vertical-align: 1px; }
+.today { background: var(--surface-muted); color: var(--text-secondary); border-color: var(--border-strong); }
+.proposed { background: var(--success-fill); color: var(--success-ink); }
+.no { background: var(--failure-fill); color: var(--failure-ink); }
+.yes { background: var(--success-fill); color: var(--success-ink); }
+.partly { background: var(--warning-fill); color: var(--warning-ink); }
+.sep { background: var(--warning-fill); color: var(--warning-ink); }
+table { width: 100%; border-collapse: collapse; margin: 8px 0 16px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+th { font-weight: 600; background: var(--surface-muted); font-size: 0.92rem; }
+tr:last-child td { border-bottom: none; }
+td.fit { width: 76px; }
+.unknown { background: var(--working-fill); color: var(--working-ink); }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 12px 0; }
+@media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; }
+.card.before { border-left: 4px solid var(--working-ink); }
+.card.after { border-left: 4px solid var(--success-ink); }
+.card h3 { margin-top: 0; }
+.big { border: 2px solid var(--accent); border-radius: 12px; padding: 20px 22px; background: var(--surface); margin: 16px 0; }
+.big h3 { margin-top: 0; color: var(--accent); }
+.finding { border-left: 4px solid var(--border-strong); padding: 2px 0 2px 16px; margin: 22px 0; }
+.finding h3 { margin: 0 0 6px; }
+.legend span { margin-right: 14px; }
+ol.q > li { margin-bottom: 20px; padding-left: 4px; }
+ol.q > li > strong { font-family: var(--font-serif); font-size: 1.08rem; }
+ol.q ol { list-style: lower-alpha; margin-top: 6px; }
+ol.q ol li { margin-bottom: 6px; }
+.rec { color: var(--success-ink); font-weight: 600; }
+.small { color: var(--text-secondary); font-size: 0.92rem; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>The concepts line up. One of them runs in the wrong place: giving a rental back can make this Machine's server wait on a person.</h1>
+<p class="lede">Concept review of LOO-1118 as it stands after Pass 6, against <code>main</code>.
+The area taken: what a rental holds on GitHub from placement to give-back, the approval behind it,
+the commands a person meets (<code>lf task run --rent</code>, <code>lf ondemand login github</code>,
+<code>lf machine login github &lt;rental&gt;</code>, <code>lf machine logins</code>,
+<code>lf ondemand list</code>, <code>lf machine end</code>), the background pass that gives rentals
+back, and the records under them, read as someone seeing the whole change for the first time.</p>
+<p class="small">State at <code>7848c11487</code>: Passes 1 to 6 are built and committed, tested
+against a stand-in GitHub. The three findings of the review after Pass 5 are built (a rental's
+repository is set once; a renewal is stored before it is checked; the list says
+<code>GitHub ended</code>) and are not repeated. Nothing has been asked of GitHub with an app token
+and no rental has held one. Everything marked proposed below is unbuilt. Decided earlier and not
+reopened: one shared "Loopflow Studio" app and what installing it trusts, Workflows write, 8 hours,
+one token shared by a repository's rentals.</p>
+<p class="legend">
+  <span><span class="tag today">built</span> in this branch</span>
+  <span><span class="tag proposed">proposed</span> this review</span>
+  <span><span class="tag yes">yes</span> person and code agree</span>
+  <span><span class="tag partly">partly</span></span>
+  <span><span class="tag no">no</span> they do not</span>
+  <span><span class="tag unknown">unasked</span> waits on GitHub's answer</span>
+  <span><span class="tag sep">separate</span> its own outcome</span>
+</p>
+
+<h2>One interaction, walked</h2>
+<p>Two rentals are running: <code>code-1</code> on a <code>loopflowstudio/loopflow</code> Task and
+<code>web-1</code> on another repository. You place a third Task for loopflow.</p>
+<pre><code>14:00  lf task run LOO-571 --rent code
+         Rentals need GitHub for loopflowstudio/loopflow.
+         First install the app on loopflowstudio/loopflow: https://github.com/apps/loopflow-studio
+         Approve at https://github.com/login/device with code WXYZ-5678</code></pre>
+<p><strong>Normal path.</strong> Usually no code appears here: the repository was approved at its
+first rental and the stored token is checked and reused. A code appears when GitHub refuses what is
+stored (the approval was revoked, six months passed, the app was uninstalled, or the check of a
+renewed token failed). The screen does not say which; the refusal GitHub gave is dropped before the
+code is shown.</p>
+<p><strong>Failure.</strong> You are at lunch. At 14:03 code-1's Task finishes and this Machine's
+server gives it back: Session history copied, sandbox deleted, billing stopped. Its last step is
+GitHub's: end the token code-1 held. That step first waits for whoever is working on loopflow's
+token, which is the placement showing your code. It waits as long as the code lives, 15 minutes.</p>
+<p>The wait is inside the server's one recovery pass, the same loop that restarts a Task run whose
+<code>lf</code> died, starts runs that were waiting on a usage limit, collects every rental's
+history and gives back every other rental. Until 14:15 none of that happens: <code>web-1</code>,
+whose Task finished at 14:05, stays rented and billed, and a run that died at 14:04 stays dead. The
+one line that says so, <code>Waiting for another lf to finish with GitHub for
+loopflowstudio/loopflow; if it shows a code, approve it there</code>, goes to the server's stderr.</p>
+<p><strong>Recovery.</strong> At 14:15 the code expires, the placement fails, the pass goes on.
+Nothing is lost, and nothing told you. On an ordinary day this needs a code on screen at the wrong
+moment, which is rare. Under two of GitHub's answers nobody has asked for yet (the table further
+down), a code appears at nearly every placement.</p>
+
+<h2>Do the concepts line up?</h2>
+<table>
+<tr><th>What a person knows</th><th>What the code has</th><th class="fit"></th><th>What is wrong</th></tr>
+<tr><td>Rentals of this repository are approved for GitHub, once</td>
+  <td><code>github_rental_grants</code>, one row per repository; <code>lf ondemand login github</code>
+  keeps a working approval and asks for nothing</td>
+  <td><span class="tag yes">yes</span></td><td></td></tr>
+<tr><td>A rental works in one repository</td>
+  <td><code>rentals.github_repository_id</code>, set by the first sign-in and never moved</td>
+  <td><span class="tag yes">yes</span></td><td>Since Pass 6.</td></tr>
+<tr><td>The token reaches this one repository and no other</td>
+  <td><code>reach()</code>, asked before any rental is sent a token</td>
+  <td><span class="tag unknown">unasked</span></td>
+  <td>The code now has one belief and one place for it. Whether GitHub's listing can show the
+  restriction is still unknown; the plan's two-repository run answers it.</td></tr>
+<tr><td>Nothing is rented when GitHub would say no</td>
+  <td><code>settle_before_renting</code></td>
+  <td><span class="tag yes">yes</span></td><td></td></tr>
+<tr><td>Renew GitHub on this rental: <code>lf machine login github code-1</code></td>
+  <td><code>sign_in</code>: the recorded repository, from any directory</td>
+  <td><span class="tag yes">yes</span></td><td></td></tr>
+<tr><td>This rental can use GitHub until HH:MM, or missed its token</td>
+  <td><code>GithubDelivery</code>: what the rental was sent against the repository's current
+  token</td>
+  <td><span class="tag yes">yes</span></td>
+  <td>A rental that missed a token waits for the next command on its repository; nobody acting is
+  the separate outcome below.</td></tr>
+<tr><td>Giving a rental back ends its GitHub access</td>
+  <td><code>mark_ended</code> runs the same <code>settle</code> a placement runs: take the
+  repository's lock and wait for it, ask GitHub what the token reaches, SSH to rentals that are
+  behind, or renew once when it was the last</td>
+  <td><span class="tag no">no</span></td>
+  <td>A give-back is background bookkeeping to a person. In code it can wait 15 minutes on someone
+  else's untyped code, inside the server's only recovery pass. The biggest mismatch, below.</td></tr>
+<tr><td>Two commands at once on one repository</td>
+  <td>A lock per repository that waits and prints one line</td>
+  <td><span class="tag partly">partly</span></td>
+  <td>Right for a command a person is watching. The same wait is given to the server, where nobody
+  reads the line.</td></tr>
+<tr><td>I am asked for a code again, and why</td>
+  <td><code>settle</code>: any refusal with someone present goes to <code>approve_repository</code>;
+  the refusal text is discarded</td>
+  <td><span class="tag partly">partly</span></td>
+  <td>The same refusal is printed in full when nobody is present. Finding 2.</td></tr>
+<tr><td>A dropped connection does not cost the approval</td>
+  <td><code>renew</code> stores first; <code>usable</code> checks after</td>
+  <td><span class="tag yes">yes</span></td>
+  <td>A first approval whose check gets no answer still spends its code. One more code, nothing
+  else lost; left as built.</td></tr>
+<tr><td><code>lf machine logins code-1</code>: github signed in</td>
+  <td>On the rental: ask GitHub when the token starts <code>ghu_</code></td>
+  <td><span class="tag yes">yes</span></td><td></td></tr>
+<tr><td>(nothing)</td>
+  <td>"7 hours left is as good as new", "10 minutes past the quoted deadline", "which token" stored
+  as its expiry</td>
+  <td><span class="tag yes">yes</span></td>
+  <td>Code-only, and each removes something a person would otherwise meet.</td></tr>
+<tr><td>First contact, Daytona host key, empty <code>logins</code>, route user in errors</td>
+  <td>Pass 1</td><td><span class="tag yes">yes</span></td><td></td></tr>
+</table>
+
+<div class="big">
+<h3>The biggest mismatch: an ending is given a step that can wait on a person</h3>
+<p>Pass 4 made one step, <code>settle</code>, serve placement, sign-in, approval and ending with no
+flag between them. For the three a person runs, that is right. An ending is different in kind: it
+is run by <code>lf machine end</code> and also by the server's recovery pass
+(<code>ops::recovery::settle</code> → <code>rental::recovery::check</code> →
+<code>mark_ended</code> → <code>settle_unattended</code>), one thread that does everything else the
+server recovers. Earlier reviews weighed "an ending waits behind a typed code and says so" as a
+slow <code>lf machine end</code> and left it. What it stalls is the pass.</p>
+<div class="cols">
+<div class="card before">
+<h3>Ending <span class="tag today">built</span></h3>
+<p>Take the repository's lock, waiting as long as its holder takes: up to 15 minutes when the
+holder shows a code.</p>
+<p>Other rentals of the repository still running: three requests to GitHub about the stored token,
+then SSH to each rental that is behind.</p>
+<p>It was the last: one renewal, so the held token stops.</p>
+<p>All of it inside the pass that restarts dead runs and gives other rentals back.</p>
+</div>
+<div class="card after">
+<h3>Ending <span class="tag proposed">proposed</span></h3>
+<p>Try the lock once. Held: log it and go on; whoever holds it is settling this repository now, and
+the ended rental no longer counts as holding anything.</p>
+<p>Free: exactly what is built.</p>
+<p>Commands a person runs keep waiting and saying so.</p>
+</div>
+</div>
+<p><strong>Tested.</strong> Normal: the last rental ends, the lock is free, the token is cut, as
+today. Failure: the lock is held by a placement. If that placement goes through, the new rental
+shares the same token and a cut would have been wrong anyway; if it ends in a new approval, the old
+token is superseded. Recovery: a rental that was behind is sent the token by the next placement or
+sign-in for the repository, as the docs already say. <strong>Counterexample kept:</strong> the lock
+is held for a second by <code>lf ondemand login github</code> confirming an approval while the
+repository's last rental ends. The cut is skipped and that token works until its own 8 hours, on a
+sandbox that is already deleted. This is the fallback the code already names ("a token left alone
+stops at its own expiry") and what Pass 3 did before the lock waited.</p>
+<p class="small">What changes: one branch in <code>repository_lock</code> for the unattended
+caller, one sentence in <code>docs/subscriptions.md</code>. What it does not fix: an ending with
+the lock free still spends up to three GitHub requests and an SSH per behind rental inside the
+pass, each bounded by its timeout. That work belongs to the separate outcome (this Machine settles
+each repository by itself), which should not ride the recovery pass either. If the first real run
+shows a renewed token loses its restriction, the cut goes entirely and this finding goes with it.</p>
+</div>
+
+<h2>What still stands on answers nobody has</h2>
+<p>The docs describe all of this in the present tense. None of it has met GitHub. The plan's first
+run (install on two private repositories, type one code, read the second repository, renew, read
+again) is the next step for this work, and it needs a person on github.com twice. No finding on
+this page should be built ahead of it except the one above, which holds under every answer but
+one.</p>
+<table>
+<tr><th>Unasked</th><th>What rests on it</th><th>If the answer is no</th></tr>
+<tr><td>Is a token issued with <code>repository_id</code> limited to that repository, and does
+the installations listing show it?</td>
+  <td>The task itself; every send goes through <code>reach()</code></td>
+  <td>Listing shows the whole installation: the check becomes a read of a second repository that
+  must fail. Not limited at all: the mechanism is the wrong one.</td></tr>
+<tr><td>Does a renewed token keep the limit?</td>
+  <td>Renewal, the re-send, the cut at the last ending, the lock: about half of
+  <code>rental/github.rs</code></td>
+  <td>All of that goes; a code about once per repository per half-day.</td></tr>
+<tr><td>Does <code>gh</code> take a <code>ghu_</code> token for login, clone, PR, auto-merge,
+checks, and a push touching workflows?</td>
+  <td>How the rental holds the token</td>
+  <td><code>GH_TOKEN</code> or a Git credential helper on the rental instead of <code>gh</code>'s
+  file.</td></tr>
+<tr><td>Is the old token dead at once after a renewal?</td>
+  <td>"Giving back the last rental ends its GitHub access"</td>
+  <td>The cut does nothing and goes.</td></tr>
+<tr><td>Is there a cap of ten tokens, or ten an hour, per person and app?</td>
+  <td>The cut renews once per run of rentals; an eleventh repository</td>
+  <td>Back-to-back short rentals meet the hourly limit; the cut goes, or is rationed.</td></tr>
+</table>
+
+<h2>Smaller findings</h2>
+
+<div class="finding">
+<h3>2. A new code says why it is being asked <span class="tag proposed">this work</span></h3>
+<p>When GitHub refuses the stored approval and someone is at the terminal, <code>settle</code>
+throws the refusal away and shows a code under "Rentals need GitHub for …", the same words as a
+repository's first rental. The refusal is a finished sentence already (for example
+<code>GitHub no longer renews rentals' access to loopflowstudio/loopflow (bad_refresh_token)</code>,
+or <code>the Loopflow Studio app is not installed on …</code>), and it is printed in full when
+nobody is present. Print it above the code. One line; the uninstalled-app case is the one where it
+saves a wasted code, because the person can install before typing.</p>
+</div>
+
+<div class="finding">
+<h3>3. Left as built</h3>
+<p>One token per repository shared by its rentals, the re-send and "not delivered" that follow from
+it, the cut at the last ending, six requests to GitHub per placement, a first approval that loses
+its code when its check gets no answer, <code>lf ondemand login github</code> keeping a working
+approval without renewing it, a hand-rented box staying with its first repository. A person at a
+terminal waiting behind another <code>lf</code> and being told so.</p>
+</div>
+
+<div class="finding">
+<h3>4. Other outcomes <span class="tag sep">separate</span></h3>
+<p><strong>This Machine settles each repository by itself.</strong> It delivers a missed token and
+renews one near its end with nobody acting, which is what a rental longer than 8 hours and any
+headless use need. It takes its own rule for when to renew and its own place to run: after this
+review, not inside the recovery pass, and it would take over the re-send an ending does today.
+<strong>Codex and OpenCode outlive the rental</strong>: nothing signs either out before the sandbox
+is deleted. Both are in the plan as deferred; neither is a Task.</p>
+</div>
+
+<h2>Questions</h2>
+<ol class="q">
+<li><strong>A rental finishes in the background while a GitHub code for the same repository sits
+untyped in one of your terminals.</strong>
+<ol>
+<li class="rec">The server gives the rental back and carries on with everything else. If that
+rental was the repository's last, its GitHub token is not ended early that one time and stops by
+itself within 8 hours.</li>
+<li>As built: the server waits for the code, up to 15 minutes. In that time it restarts no dead
+Task run and gives back no other rental, and says so only in its own log.</li>
+</ol></li>
+<li><strong>You approved a repository last week. Today a placement shows a new code.</strong>
+<ol>
+<li class="rec">The line above the code says why: GitHub no longer renews the approval, or the app
+is no longer installed on the repository.</li>
+<li>As built: the same words as a first approval, no reason.</li>
+</ol></li>
+<li><strong>The name of the command that approves ahead of time.</strong> It takes no template and
+signs no Machine in; it lets rentals of the repository you are standing in use GitHub. Asked by
+every review so far, unanswered.
+<ol>
+<li class="rec">Keep <code>lf ondemand login github</code>: built, documented, named in every
+message that stops a placement.</li>
+<li><code>lf machine login github --rentals</code>: beside the other GitHub sign-ins.</li>
+</ol></li>
+<li><strong>Should scripts and the app reading <code>lf ondemand list --json</code> see each
+rental's GitHub state?</strong> Today only the printed list shows it.
+<ol>
+<li class="rec">Not yet. Nothing reads it, and a field in the JSON is harder to take back than a
+word in the text.</li>
+<li>Yes: add "until", "ended" and "not delivered" to the JSON now.</li>
+</ol></li>
+<li><strong>File the two separate outcomes in finding 4 as Tasks?</strong> Asked by every review so
+far, unanswered.
+<ol><li class="rec">Both.</li><li>Automatic settling only.</li><li>Neither yet.</li></ol></li>
+</ol>
+
+</main>
+</body>
+</html>

@@ -9,6 +9,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
+use crate::config::placement::Approver;
+use crate::machine::login::LoginState;
 use crate::provider_auth::Provider;
 use crate::store::{CredentialType, ProviderToken, SharedStore};
 use loopflow_model::durable::Machine;
@@ -42,18 +44,32 @@ enum Credential {
 const LINEAR_ACCESS_HOURS: f64 = 24.0;
 const _: () = assert!(loopflow_storage::rental::MAX_HOURS <= LINEAR_ACCESS_HOURS);
 
+/// `repo` is the checkout whose repository a rental's first GitHub sign-in
+/// is for; no other sign-in reads it.
 pub(crate) async fn connect(
     machine: &Machine,
     provider: Provider,
-    approver: Option<&crate::config::placement::Approver>,
+    repo: &Path,
+    approver: Option<&Approver>,
     batch: bool,
 ) -> Result<()> {
     let store = crate::provider_auth::operations::local_store().await?;
     let mut verified = "";
     let credential = match provider {
         Provider::GitHub => {
+            if let Some(rental) = store.sqlite.rental_for_machine(&machine.id)? {
+                return crate::rental::github::sign_in(
+                    &store.sqlite,
+                    machine,
+                    &rental,
+                    repo,
+                    approver,
+                    batch,
+                )
+                .await;
+            }
             let token = gh_token()?;
-            let login = github_login(token.expose_secret()).await?;
+            let login = crate::rental::github::login_of(token.expose_secret()).await?;
             if remote_has(machine, provider, &login).await? {
                 return Ok(());
             }
@@ -135,8 +151,47 @@ pub(crate) async fn connect(
     Ok(())
 }
 
+/// Send a rental its repository's GitHub token.
+pub(crate) fn send_github(machine: &Machine, login: &str, token: &str) -> Result<()> {
+    send(
+        machine,
+        &Credential::Github {
+            login: login.to_string(),
+            token: token.to_string(),
+        },
+    )
+}
+
+/// What tests see of sends: the bytes each Machine was sent, and Machines no
+/// send reaches.
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct TestSends {
+    pub unreachable: Vec<loopflow_model::durable::MachineId>,
+    pub sent: Vec<(loopflow_model::durable::MachineId, String)>,
+}
+
+#[cfg(test)]
+tokio::task_local! {
+    pub(crate) static TEST_SENDS: std::sync::Arc<std::sync::Mutex<TestSends>>;
+}
+
 fn send(machine: &Machine, credential: &Credential) -> Result<()> {
     let bytes = serde_json::to_vec(credential)?;
+    #[cfg(test)]
+    if let Ok(sends) = TEST_SENDS.try_with(Clone::clone) {
+        let mut sends = sends.lock().expect("test sends");
+        if sends.unreachable.contains(&machine.id) {
+            bail!(
+                "machine credential command failed on {}",
+                crate::machine::login::name(machine)
+            );
+        }
+        sends
+            .sent
+            .push((machine.id.clone(), String::from_utf8(bytes)?));
+        return Ok(());
+    }
     remote_command(
         machine,
         &["machine", "credentials", "receive"],
@@ -145,7 +200,7 @@ fn send(machine: &Machine, credential: &Credential) -> Result<()> {
     Ok(())
 }
 
-fn gh_token() -> Result<SecretString> {
+pub(crate) fn gh_token() -> Result<SecretString> {
     let output = Command::new("gh")
         .args(["auth", "token", "--hostname", "github.com"])
         .stderr(Stdio::null())
@@ -166,7 +221,7 @@ fn connecting(machine: &Machine, provider: Provider, login: &str) {
     );
 }
 
-fn foreground(batch: bool) -> bool {
+pub(crate) fn foreground(batch: bool) -> bool {
     use std::io::IsTerminal;
     // SAFETY: querying this process and stdin's foreground process group does not mutate either.
     let foreground = unsafe { libc::tcgetpgrp(libc::STDIN_FILENO) == libc::getpgrp() };
@@ -271,19 +326,7 @@ pub async fn receive(bytes: &[u8]) -> Result<()> {
 
 async fn installed(store: &SharedStore, provider: Provider, login: &str) -> Result<bool> {
     match provider {
-        Provider::GitHub => {
-            let Some(config) = gh_hosts()? else {
-                return Ok(false);
-            };
-            let github = &config["github.com"];
-            Ok(github["users"][login]["oauth_token"]
-                .as_str()
-                .is_some_and(|token| !token.is_empty())
-                || (github["user"].as_str() == Some(login)
-                    && github["oauth_token"]
-                        .as_str()
-                        .is_some_and(|token| !token.is_empty())))
-        }
+        Provider::GitHub => Ok(github_token(login)?.is_some()),
         Provider::Linear => match store.get_provider_token("linear").await? {
             Some(token) => {
                 let actual = linear_login(&token.access_token).await?;
@@ -333,6 +376,36 @@ fn gh_hosts() -> Result<Option<serde_yaml_ng::Value>> {
         .map_err(|_| anyhow!("invalid GitHub credential file"))
 }
 
+/// The token gh's hosts file keeps for `login` on this Machine.
+fn github_token(login: &str) -> Result<Option<String>> {
+    let Some(config) = gh_hosts()? else {
+        return Ok(None);
+    };
+    let github = &config["github.com"];
+    let active = (github["user"].as_str() == Some(login))
+        .then(|| github["oauth_token"].as_str())
+        .flatten();
+    Ok(github["users"][login]["oauth_token"]
+        .as_str()
+        .or(active)
+        .filter(|token| !token.is_empty())
+        .map(str::to_string))
+}
+
+/// Whether GitHub still takes the token gh keeps for `login` here. Asked only
+/// of a token that expires (a rental's `ghu_`), so a Machine holding its own
+/// `gh` login answers from the file alone. Unknown when GitHub did not answer.
+pub(crate) async fn github_login_state(login: &str) -> Result<LoginState> {
+    let Some(token) = github_token(login)?.filter(|token| token.starts_with("ghu_")) else {
+        return Ok(LoginState::SignedIn);
+    };
+    Ok(match crate::rental::github::login_of(&token).await {
+        Ok(_) => LoginState::SignedIn,
+        Err(error) if error.is::<crate::rental::github::Rejected>() => LoginState::SignedOut,
+        Err(_) => LoginState::Unknown,
+    })
+}
+
 /// The GitHub account gh is signed in as on this Machine.
 pub(crate) fn github_user() -> Result<Option<String>> {
     Ok(gh_hosts()?.and_then(|config| config["github.com"]["user"].as_str().map(str::to_string)))
@@ -351,10 +424,11 @@ async fn install(store: &SharedStore, credential: Credential) -> Result<()> {
     match credential {
         Credential::Github { login, token } => {
             let _lock = credential_lock("github")?;
-            if installed(store, Provider::GitHub, &login).await? {
+            // A rental's token is replaced by each renewal; an equal one stays.
+            if github_token(&login)?.as_deref() == Some(token.as_str()) {
                 return Ok(());
             }
-            if github_login(&token).await? != login {
+            if crate::rental::github::login_of(&token).await? != login {
                 bail!("GitHub credential identity mismatch");
             }
             let mut child = Command::new("gh")
@@ -386,7 +460,7 @@ async fn install(store: &SharedStore, credential: Credential) -> Result<()> {
             if !child.wait()?.success() {
                 bail!("GitHub credential installation failed");
             }
-            if !installed(store, Provider::GitHub, &login).await? {
+            if github_token(&login)?.as_deref() != Some(token.as_str()) {
                 bail!("GitHub did not retain the file-backed login");
             }
             let status = Command::new("gh")
@@ -561,33 +635,6 @@ fn credential_lock(provider: &str) -> Result<fs::File> {
     Ok(file)
 }
 
-async fn github_login(token: &str) -> Result<String> {
-    #[cfg(test)]
-    let endpoint = std::env::var("LF_TEST_MACHINE_GITHUB_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:1/user".into());
-    #[cfg(not(test))]
-    let endpoint = "https://api.github.com/user";
-    let response = reqwest::Client::new()
-        .get(endpoint)
-        .header("User-Agent", "loopflow")
-        .bearer_auth(token)
-        .timeout(std::time::Duration::from_secs(15))
-        .send()
-        .await
-        .map_err(|_| anyhow!("GitHub identity request failed"))?;
-    if !response.status().is_success() {
-        bail!("GitHub rejected credential identity request");
-    }
-    let value: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|_| anyhow!("invalid GitHub identity response"))?;
-    value["login"]
-        .as_str()
-        .map(str::to_string)
-        .ok_or_else(|| anyhow!("GitHub identity missing login"))
-}
-
 async fn linear_login(token: &str) -> Result<String> {
     #[cfg(test)]
     let client = crate::linear::LinearClient::with_base_url(
@@ -602,4 +649,82 @@ async fn linear_login(token: &str) -> Result<String> {
         .viewer_id()
         .await
         .map_err(|_| anyhow!("Linear identity request failed"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    use axum::http::StatusCode;
+    use serde_json::json;
+
+    use super::{github_login_state, install, Credential, LoginState};
+    use crate::config::environment::EnvVarGuard;
+    use crate::linear::test_server::{json_response, spawn, QueuedResponse};
+    use crate::rental::github::TEST_GITHUB_URL;
+
+    fn ok(body: serde_json::Value) -> QueuedResponse {
+        json_response(StatusCode::OK, body)
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
+    async fn a_received_token_replaces_another_and_reads_signed_out_once_github_refuses_it() {
+        let _env = crate::journal::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("LF_HOME", dir.path().to_str().unwrap());
+        let _gh_home = EnvVarGuard::set("GH_CONFIG_DIR", dir.path().to_str().unwrap());
+        let hosts = dir.path().join("hosts.yml");
+        std::fs::write(
+            &hosts,
+            "github.com:\n  user: jack\n  oauth_token: ghu_OLD\n",
+        )
+        .unwrap();
+        // gh, as far as a login goes: it keeps the token it is piped.
+        let bin = dir.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        std::fs::write(
+            bin.join("gh"),
+            "#!/bin/sh\n[ \"$2\" = login ] || exit 0\n\
+             printf 'github.com:\\n  user: jack\\n  oauth_token: %s\\n' \"$(cat)\" \
+             > \"$GH_CONFIG_DIR/hosts.yml\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(bin.join("gh"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+        let _path = EnvVarGuard::set("PATH", &path);
+        let store = std::sync::Arc::new(crate::store::Store::from_sqlite_for_test(
+            crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap(),
+        ));
+        let received = Credential::Github {
+            login: "jack".into(),
+            token: "ghu_NEW".into(),
+        };
+        let (url, _) = spawn(vec![
+            ok(json!({ "login": "jack" })),
+            json_response(StatusCode::UNAUTHORIZED, json!({})),
+        ])
+        .await;
+        TEST_GITHUB_URL
+            .scope(url, async {
+                install(&store, received).await.unwrap();
+                let kept = std::fs::read_to_string(&hosts).unwrap();
+                assert!(kept.contains("ghu_NEW") && !kept.contains("ghu_OLD"));
+                assert_eq!(
+                    github_login_state("jack").await.unwrap(),
+                    LoginState::SignedOut
+                );
+            })
+            .await;
+        // A login that does not expire is never asked about.
+        std::fs::write(
+            &hosts,
+            "github.com:\n  user: jack\n  oauth_token: gho_OWN\n",
+        )
+        .unwrap();
+        assert_eq!(
+            github_login_state("jack").await.unwrap(),
+            LoginState::SignedIn
+        );
+    }
 }

@@ -883,6 +883,40 @@ pub fn give_back(
     GiveBack::End
 }
 
+/// The GitHub App user token one repository's rentals hold, and the grant that
+/// renews it. The grant never leaves this Machine.
+// Deliberately no Debug: tokens must never be logged.
+#[derive(Clone, PartialEq, Eq)]
+pub struct GithubRentalGrant {
+    /// GitHub's numeric repository id: the one repository the token reaches.
+    pub repository_id: i64,
+    /// `owner/name`, as GitHub spells it.
+    pub repository: String,
+    pub login: String,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: OffsetDateTime,
+}
+
+/// A live rental signed in to GitHub for one repository.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GithubHolder {
+    pub rental: Rental,
+    /// The expiry of the token it was last sent; `None` before any send
+    /// reached it. It is behind when this is not its repository's grant's.
+    pub sent_expires_at: Option<OffsetDateTime>,
+}
+
+/// What this Machine recorded about the GitHub token a live rental holds. It
+/// is what was sent, not what GitHub would answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GithubDelivery {
+    /// It was sent its repository's current token, which stops at this time.
+    Until(OffsetDateTime),
+    /// Its repository's current token never reached it.
+    NotDelivered,
+}
+
 #[cfg(test)]
 #[path = "rental_tests.rs"]
 mod tests;

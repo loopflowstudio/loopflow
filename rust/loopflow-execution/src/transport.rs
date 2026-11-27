@@ -281,12 +281,18 @@ pub fn detach_current() -> Result<bool> {
     }
     let mut argv: Vec<String> = std::env::args().collect();
     let cwd = admit_current(&mut argv)?;
+    // Read before the child leaves this terminal: it can still show a person
+    // a code to approve, though it can ask them nothing.
+    let watched = crate::machine::credentials::foreground(false);
     let code = crate::os_process::detached::run(&argv, &cwd, false, &|command| {
         // No terminal shows detached work; it claims none.
         command
             .env_remove(STREAM_ENV)
             .env_remove("LF_TERMINAL_ID")
             .env_remove("LF_TERMINAL_TTY");
+        if watched {
+            crate::os_process::detached::watch(command);
+        }
     })?;
     if code != 0 {
         return Err(crate::process::CommandExit(code).into());

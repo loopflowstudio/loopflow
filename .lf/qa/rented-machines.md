@@ -65,3 +65,29 @@ then says `could not start: codex has no usable login…`, and its
 `lf.log` has `stopped Session not started`. A local private Machine is a poor stand-in: lf
 finds `opencode` under `~/.opencode/bin` whatever `PATH` says, and an
 unpinned Session resolves to it and starts.
+
+# A rental's GitHub approval, up to the code
+
+The branch `lf` talks to the real github.com (the stand-in GitHub exists only
+under `cfg(test)`), so everything up to typing the code runs for real and
+nothing after it does without a person: installing the Loopflow Studio app and
+approving a code act as someone on github.com. Keep the real `HOME` (`gh` reads
+its token from the keychain; under another `HOME` it reads signed out) with a
+private `LF_HOME`, and put stand-ins for `open` (it would open the device
+page), `ssh`, `ssh-keygen` and `uv` first on `PATH`. A fresh repository whose
+`origin` is `https://github.com/<owner>/<name>.git` is enough for
+`lf ondemand login github`.
+
+`lf task run` leaves its terminal before it places the Task, so drive it from
+`pty.fork()` to see a code and send `\x03` to see the detached run stop
+(`ps` for `task run <id>` a few seconds later). The agent-login check wants a
+value, not only the name in `forward.env`: export a placeholder
+`CLAUDE_CODE_OAUTH_TOKEN` outside Doppler's scope. For the stand-in rental,
+`LF_RENT_LINUX_BIN` can be a copy of the macOS branch binary: the install
+script and `lf install server` then run for real under each sandbox's `HOME`
+and leave an `lf server run` per sandbox (parent 1, no launchd job) to stop by
+PID. A `uv` stand-in that gives Daytona rentals `ssh://SECRET<n>@…` routes and
+an `ssh` that fails with that user in its stderr shows the user elided.
+Templates saved with `--logins codex,github` come from the released `lf`
+(`/Applications/Loopflow.app/Contents/MacOS/lf`) after one
+`lf task create` initializes the home.

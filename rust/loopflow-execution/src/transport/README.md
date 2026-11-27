@@ -528,6 +528,9 @@ from `/dev/null` and closed inherited descriptors except release locks and
 worktree leases. Task steps themselves wait inside their Graph's process tree.
 
 `LF_LAUNCHER_FD` carries the admitted LfProcess ID and a `released` message.
+`LF_LAUNCHER_WATCHED` says the launcher was started from a terminal and copies
+the child's output there, so a detached `lf task run` can show a person a code
+to approve (a rental's GitHub approval); it can still read nothing from them.
 Server launches, landing watchers and run restarts record the ID and append
 output to `logs/detached.log`. A pipe closing without an ID leaves delivery
 unknown; nothing launches again on that uncertainty. Workers report turns and

@@ -27,10 +27,13 @@ const PAGE_DEADLINE: Duration = Duration::from_secs(60);
 /// The `claude setup-token` a launch on another Machine signs Claude in with.
 pub const CLAUDE_TOKEN_ENV: &str = "CLAUDE_CODE_OAUTH_TOKEN";
 
-/// Sign `machine` in to `provider`. A Machine whose route is `local` is this one.
+/// Sign `machine` in to `provider`. A Machine whose route is `local` is this
+/// one. A rental's first GitHub sign-in is for the repository `repo` is a
+/// checkout of; nothing else reads `repo`.
 pub async fn login(
     machine: &Machine,
     provider: Provider,
+    repo: &std::path::Path,
     chrome_profile: Option<&str>,
     api_key: bool,
     batch: bool,
@@ -44,7 +47,8 @@ pub async fn login(
         service => {
             require_reach(service, Some(&name(machine)))?;
             let approver = approver(service, chrome_profile)?;
-            crate::machine::credentials::connect(machine, service, approver.as_ref(), batch).await
+            crate::machine::credentials::connect(machine, service, repo, approver.as_ref(), batch)
+                .await
         }
     }
 }
@@ -58,6 +62,12 @@ pub fn reaches_other_machines(provider: Provider) -> bool {
         provider,
         Provider::Codex | Provider::GitHub | Provider::Linear | Provider::OpenCodeZen
     )
+}
+
+/// Whether a rental is signed in to `provider` because its repository uses
+/// it, so no template lists it.
+pub fn follows_repository(provider: Provider) -> bool {
+    matches!(provider, Provider::GitHub | Provider::Linear)
 }
 
 /// Refuses a provider that cannot sign `machine` (another Machine, or any
@@ -349,6 +359,11 @@ async fn service_login(store: &crate::store::SharedStore, provider: Provider) ->
         _ => None,
     };
     let (state, account) = match installed {
+        // A rental's GitHub token expires: signed in means GitHub takes it.
+        Some(account) if provider == Provider::GitHub => (
+            crate::machine::credentials::github_login_state(&account).await?,
+            Some(account),
+        ),
         Some(account) => (LoginState::SignedIn, Some(account)),
         None => match store.provider_auth_snapshot(provider).await? {
             Some(snapshot) if snapshot.status.as_str() == "active" => {

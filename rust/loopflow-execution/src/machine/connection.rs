@@ -35,18 +35,31 @@ pub(crate) fn connection_failure(target: &str, kind: FailureKind, detail: &str) 
         FailureKind::Unreachable => format!("unreachable: run `{ssh}` to check the address, network and SSH service"),
         FailureKind::MissingLf => format!("no lf on the remote: run `{}`", install_command(target)),
     };
+    let message = format!(
+        "machine {target:?}: {guidance}{}",
+        if detail.is_empty() {
+            String::new()
+        } else {
+            format!("; {detail}")
+        }
+    );
     ConnectionFailure {
         kind,
-        message: format!(
-            "machine {target:?}: {guidance}{}",
-            if detail.is_empty() {
-                String::new()
-            } else {
-                format!("; {detail}")
-            }
-        ),
+        message: without_userinfo(target, message),
     }
     .into()
+}
+
+/// A rental's route can carry a credential as its SSH user (Daytona's access
+/// token), and SSH repeats it in diagnostics; errors name the host alone.
+fn without_userinfo(route: &str, message: String) -> String {
+    match route
+        .strip_prefix("ssh://")
+        .and_then(|rest| rest.split_once('@'))
+    {
+        Some((user, _)) if !user.is_empty() => message.replace(&format!("{user}@"), "…@"),
+        _ => message,
+    }
 }
 
 pub fn transport_failure(target: &str, detail: &str) -> anyhow::Error {
@@ -244,7 +257,22 @@ pub async fn local_machine() -> anyhow::Result<Machine> {
 
 #[cfg(test)]
 mod tests {
-    use super::release_number;
+    use super::{release_number, transport_failure};
+
+    #[test]
+    fn an_error_never_repeats_the_user_part_of_a_route() {
+        let error = transport_failure(
+            "ssh://SENTINEL@ssh.app.daytona.io",
+            "SENTINEL@ssh.app.daytona.io: Permission denied (publickey).",
+        )
+        .to_string();
+        assert!(!error.contains("SENTINEL"), "{error}");
+        assert!(error.contains("ssh.app.daytona.io"), "{error}");
+        // A plain destination's user is the person's own account name.
+        let error = transport_failure("jack@mini", "Connection refused").to_string();
+        assert!(error.contains("jack@mini"), "{error}");
+    }
+
     #[test]
     fn release_numbers_order_by_component() {
         assert!(release_number("0.14.14") > release_number("0.14.12"));

@@ -76,8 +76,29 @@ lf --machine mini -a codex implement
   stdin, never in command arguments or logs, and land with owner-only
   permissions (`0600`). Linear tokens in SQLite are encrypted using an
   owner-only `provider-token.key`.
+- **Rentals:** a rented Machine never receives your `gh` token. It gets a
+  GitHub App user token that acts as you in the one repository it runs and
+  expires 8 hours after issue. It can change `.github/workflows/`, so a
+  rental can push a workflow that reads that repository's Actions secrets. The
+  grant that renews it stays encrypted on your Machine. Giving back a
+  repository's last rental ends the token then; a rental its provider deletes
+  while your Machine is asleep leaves the token working until your Machine
+  next checks, or the 8 hours pass. Codex, OpenCode and the forwarded Claude
+  token are not narrowed for a rental: list in `--logins` only what the work
+  needs. See [Rentals](subscriptions.md#rentals).
+- **The Loopflow Studio GitHub App:** installing it on a repository trusts
+  its owner, the `loopflowstudio` organization, with that repository. `lf`
+  holds only the app's public client id, and Loopflow runs no server and keeps
+  no key for it. An administrator of that organization can still create a key
+  for the app, and a key mints tokens for every repository the app is
+  installed on, with its permissions: contents, pull requests and workflows
+  write. Install it only on repositories you rent for, and uninstall it to end
+  that trust. Because the client id is public, anyone can start an approval
+  under the app's name: enter a device code only when your own `lf` printed
+  it.
 - **SSH agent forwarding:** SSH agent forwarding remains opt-in with
-  `lf --machine <machine> --forward-agent`.
+  `lf --machine <machine> --forward-agent`. A rental's first connection
+  forwards neither the agent nor X11.
 
 ## Local client server
 

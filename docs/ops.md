@@ -267,9 +267,11 @@ Returned modal-1 (2 sessions copied; ceiling estimate $0.24)
 - From the first SSH shell, `lf config show` reports the caller’s global agent
   preferences. Use `lf config show --skill <name>` to see a skill’s route.
   The rental keeps its own installation stream.
-- **Rental credentials.** Task placement signs the rental in to the
-  template's `--logins` or the supported providers signed in here, plus GitHub
-  for a GitHub origin and Linear for a Linear-backed repository. Command
+- **Rental credentials.** A rental signs in to GitHub for a GitHub origin and
+  Linear for a Linear-backed repository, plus whatever the template's
+  `--logins` names (`codex`, `opencode`). Its GitHub token reaches that one
+  repository as you and stops within 8 hours; a repository's first rental asks
+  for one approval, and placement prints when GitHub stops there. Command
   approvers let sign-in run unattended. Claude uses a forwarded setup token.
   Linear receives a short-lived access token refreshed from your laptop.
   Use `lf machine forward <label>` to refresh named files on a live rental.

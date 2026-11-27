@@ -109,7 +109,13 @@ pub fn ondemands(store: &SqliteStore) -> StoreResult<Vec<OnDemand>> {
             max_machines: declaration.max_machines,
             max_usd_per_hour: declaration.max_usd_per_hour,
             hours: declaration.hours,
-            logins: declaration.logins,
+            // Templates saved before GitHub and Linear followed the
+            // repository may still list them.
+            logins: declaration
+                .logins
+                .into_iter()
+                .filter(|provider| !crate::machine::login::follows_repository(*provider))
+                .collect(),
         })
         .collect())
 }

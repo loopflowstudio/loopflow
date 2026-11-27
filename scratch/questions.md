@@ -8,6 +8,9 @@
   The alternative is an app each person registers. Either way a person
   registers one on github.com before Pass 2 can finish; settings are in the
   plan under "Needs a person".
+  Answered 2026-11-27, Jack: "Owner should either be Loopflow Studio or Jack
+  Heart if it needs to be a person". An organization can own an app, so the
+  owner is `loopflowstudio`. Registration itself: "go ahead and do it".
 - **Its permissions.** Adding one later asks every installation to approve
   again; removing one asks nobody. The plan starts without Workflows, so a
   Task that edits `.github/workflows/` cannot push from a rental.

@@ -226,10 +226,23 @@ pub trait Driver: Send + Sync {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Whether someone is in the conversation a launch opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 pub enum Mode {
     Interactive,
+    #[default]
     Headless,
+}
+
+impl Mode {
+    /// What the prompt says about who is in the conversation, so a skill
+    /// knows where a real dependency should route.
+    pub fn instructions(self) -> &'static str {
+        match self {
+            Self::Interactive => loopflow_definitions::builtins::SURFACE_HUMAN_PRESENT,
+            Self::Headless => loopflow_definitions::builtins::SURFACE_HEADLESS,
+        }
+    }
 }
 
 /// Launch kind, independently of Task attribution.

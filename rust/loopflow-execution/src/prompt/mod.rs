@@ -18,6 +18,7 @@ use std::time::Instant;
 
 use crate::error::CoreError;
 use crate::graph::{load_skill, Skill};
+use crate::harness::Mode;
 use crate::prompt::change::{Change, ChangeRange};
 use crate::repository::RepoId;
 use once_cell::sync::Lazy;
@@ -97,7 +98,7 @@ pub struct GatherContextOpts {
     pub message: Option<String>,
     /// Include loopflow operating guidance.
     pub operate: bool,
-    pub surface: Surface,
+    pub mode: Mode,
     /// Explicit docs paths, globs, or directories to include in context.
     pub docs: Vec<String>,
     /// Specific files to include in context.
@@ -124,40 +125,10 @@ impl GatherContextOpts {
     }
 }
 
-/// Whether someone is in the conversation the prompt opens.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Surface {
-    HumanPresent,
-    #[default]
-    Headless,
-}
-
-impl Surface {
-    /// State whether someone is participating in this conversation before the skill can decide
-    /// where a real dependency should route.
-    pub fn instructions(self) -> &'static str {
-        match self {
-            Self::Headless => loopflow_definitions::builtins::SURFACE_HEADLESS,
-            Self::HumanPresent => loopflow_definitions::builtins::SURFACE_HUMAN_PRESENT,
-        }
-    }
-}
-
-impl std::str::FromStr for Surface {
-    type Err = std::convert::Infallible;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Ok(match value {
-            "human-present" => Self::HumanPresent,
-            _ => Self::Headless,
-        })
-    }
-}
-
 /// All components of a prompt before assembly.
 #[derive(Debug, Clone, Default)]
 pub struct PromptComponents {
-    pub surface: Surface,
+    pub mode: Mode,
     pub user_name: Option<String>,
     pub docs: Vec<Document>,
     /// What the branch changed, when `context.diff` asks for it.
@@ -364,7 +335,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
 
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
     Ok(PromptComponents {
-        surface: opts.surface,
+        mode: opts.mode,
         user_name: crate::config::participant_name()?,
         docs,
         change,
@@ -1371,7 +1342,7 @@ fn read_text_file(path: &Path) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
-/// Render Loopflow's operating and surface instructions.
+/// Render Loopflow's operating and run mode instructions.
 pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
@@ -1384,7 +1355,7 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
         parts.push(user);
     }
 
-    let instructions = components.surface.instructions();
+    let instructions = components.mode.instructions();
     if !instructions.is_empty() {
         parts.push(instructions.to_string());
     }
@@ -1756,7 +1727,7 @@ mod tests {
     #[test]
     fn format_prompt_basic() {
         let components = PromptComponents {
-            surface: Surface::Headless,
+            mode: Mode::Headless,
             ..Default::default()
         };
 
@@ -1862,7 +1833,7 @@ mod tests {
     #[test]
     fn format_prompt_human_present_keeps_questions_with_present_human() {
         let prompt = render_full_prompt(PromptComponents {
-            surface: Surface::HumanPresent,
+            mode: Mode::Interactive,
             ..Default::default()
         });
         assert!(prompt.contains("Someone is in this conversation"));
@@ -1999,7 +1970,7 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_default_components_has_headless_surface() {
+    fn format_prompt_default_components_are_headless() {
         let components = PromptComponents::default();
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("Run mode is headless"));
@@ -2007,22 +1978,6 @@ mod tests {
         assert!(prompt.contains("say what is missing and stop"));
         assert!(prompt.contains("For a reversible choice"));
         assert!(prompt.contains("Stop\nany server or watcher you started"));
-    }
-
-    #[test]
-    fn surface_parser_unknown_defaults_to_headless() {
-        let parsed = "unknown_surface"
-            .parse::<Surface>()
-            .expect("surface parsing is infallible");
-        assert_eq!(parsed, Surface::Headless);
-    }
-
-    #[test]
-    fn surface_parser_reads_human_present() {
-        let parsed = "human-present"
-            .parse::<Surface>()
-            .expect("surface parsing is infallible");
-        assert_eq!(parsed, Surface::HumanPresent);
     }
 
     // ==========================================================================
@@ -2525,20 +2480,20 @@ mod tests {
     }
 
     #[test]
-    fn gather_context_surface_preserved() {
+    fn gather_context_keeps_the_mode() {
         let temp = tempfile::tempdir().expect("create temp dir");
         let repo = temp.path();
 
         let opts = GatherContextOpts {
             repo_root: repo.to_path_buf(),
-            surface: Surface::HumanPresent,
+            mode: Mode::Interactive,
             ..Default::default()
         };
 
         let result = gather_context(&opts);
         assert!(result.is_ok());
         let components = result.unwrap();
-        assert_eq!(components.surface, Surface::HumanPresent);
+        assert_eq!(components.mode, Mode::Interactive);
     }
 
     #[test]

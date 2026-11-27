@@ -14,7 +14,6 @@ use loopflow_execution::prompt::process::prepare_process_prompt;
 use loopflow_execution::prompt::process::ContextSourceOverrides;
 use loopflow_execution::prompt::process::ProcessPromptInput;
 use loopflow_execution::prompt::PromptComponents;
-use loopflow_execution::prompt::Surface;
 use loopflow_execution::session_record::{
     AgentProcessRequest, SessionCaptureSpec, SubjectAttribution,
 };
@@ -505,11 +504,6 @@ fn build_prompt_at(
 
     info!("preparing launch prompt");
     let prepare_start = Instant::now();
-    let surface = if is_interactive {
-        Surface::HumanPresent
-    } else {
-        Surface::Headless
-    };
 
     if let Some(skill) = &discovered_skill {
         match loopflow_definitions::name::portable_name(&skill.name).as_str() {
@@ -545,7 +539,7 @@ fn build_prompt_at(
             repo_root: repo_root.clone(),
             skill: skill.map(|value| value.to_string()),
             resolved_skill: discovered_skill.clone(),
-            surface,
+            mode,
             docs: Vec::new(),
             wave,
             message: message.map(|value| value.to_string()),

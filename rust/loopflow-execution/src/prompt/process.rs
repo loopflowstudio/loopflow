@@ -4,10 +4,11 @@ use crate::agent::AgentConfig;
 use crate::config::Config;
 use crate::error::CoreError;
 use crate::graph::Skill;
+use crate::harness::Mode;
 use crate::prompt::structured_reply::{structured_replies_for_context, ClientContext};
 use crate::prompt::{
     drop_duplicate_docs, format_task_prompt, gather_context, ClipboardContext, Document,
-    DocumentSource, GatherContextOpts, PromptComponents, RelatedRepoContext, Surface,
+    DocumentSource, GatherContextOpts, PromptComponents, RelatedRepoContext,
 };
 
 /// Optional per-source overrides for context gathering.
@@ -24,7 +25,7 @@ pub struct ProcessPromptInput {
     pub repo_root: PathBuf,
     pub skill: Option<String>,
     pub resolved_skill: Option<Skill>,
-    pub surface: Surface,
+    pub mode: Mode,
     pub docs: Vec<String>,
     pub wave: Option<String>,
     pub message: Option<String>,
@@ -73,7 +74,7 @@ fn prepare_prompt(
         repo_root,
         skill,
         resolved_skill,
-        surface,
+        mode,
         docs: requested_docs,
         wave,
         message,
@@ -96,7 +97,7 @@ fn prepare_prompt(
     let effective = crate::config::settings::resolve(config, resolved_skill.as_ref())?;
     let config = &effective.config;
     let (agent, fallback_agents) = if persist {
-        crate::agent::MachineAgents::default().for_prompt(config, surface)?
+        crate::agent::MachineAgents::default().for_prompt(config, mode)?
     } else {
         config.resolve_agents()?
     };
@@ -118,7 +119,7 @@ fn prepare_prompt(
         skill: None,
         message,
         operate: !no_loopflow,
-        surface,
+        mode,
         docs,
         files: Vec::new(),
         wave,
@@ -233,8 +234,8 @@ mod tests {
     use super::{prepare_process_prompt, PreparedProcessPrompt, ProcessPromptInput};
     use crate::config::Config;
     use crate::graph::Skill;
+    use crate::harness::Mode;
     use crate::prompt::structured_reply::ClientContext;
-    use crate::prompt::Surface;
     use std::fs;
     use tempfile::tempdir;
 
@@ -516,19 +517,19 @@ Test skill body.
     }
 
     #[test]
-    fn preferred_name_reaches_provider_prompts_on_every_surface() {
+    fn preferred_name_reaches_provider_prompts_in_every_mode() {
         let _home = crate::journal::TestLedgerGuard::new();
         let _name =
             crate::config::environment::EnvVarGuard::set(crate::config::USER_NAME_ENV, "  Jack  ");
         let tmp = create_repo_fixture();
         for agent in loopflow_harness::HarnessKind::ALL {
             let _selection = select_agent(agent.as_str());
-            for surface in [Surface::HumanPresent, Surface::Headless] {
+            for mode in [Mode::Interactive, Mode::Headless] {
                 let prepared = prepare_process_prompt(
                     &default_test_config(),
                     ProcessPromptInput {
                         repo_root: tmp.path().to_path_buf(),
-                        surface,
+                        mode,
                         ..Default::default()
                     },
                 )
@@ -564,7 +565,7 @@ Test skill body.
             ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".to_string()),
-                surface: Surface::Headless,
+                mode: Mode::Headless,
                 ..ProcessPromptInput::default()
             },
         )
@@ -587,7 +588,7 @@ Test skill body.
             ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".to_string()),
-                surface: Surface::Headless,
+                mode: Mode::Headless,
                 ..ProcessPromptInput::default()
             },
         )
@@ -609,7 +610,7 @@ Test skill body.
             &config,
             ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                surface: Surface::Headless,
+                mode: Mode::Headless,
                 ..ProcessPromptInput::default()
             },
         )
@@ -632,7 +633,7 @@ Test skill body.
             &config,
             ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                surface: Surface::Headless,
+                mode: Mode::Headless,
                 no_loopflow: true,
                 ..ProcessPromptInput::default()
             },
@@ -667,7 +668,7 @@ Test skill body.
             ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".to_string()),
-                surface: Surface::Headless,
+                mode: Mode::Headless,
                 ..ProcessPromptInput::default()
             },
         )
@@ -696,7 +697,7 @@ Test skill body.
                 ProcessPromptInput {
                     repo_root: tmp.path().to_path_buf(),
                     skill: Some(name.to_string()),
-                    surface: Surface::Headless,
+                    mode: Mode::Headless,
                     ..ProcessPromptInput::default()
                 },
             )
@@ -736,7 +737,7 @@ Test skill body.
             ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".to_string()),
-                surface: Surface::Headless,
+                mode: Mode::Headless,
                 ..ProcessPromptInput::default()
             },
         )
@@ -881,7 +882,7 @@ Test skill body.
                     docs: None,
                     content: Some("Skill body".to_string()),
                 }),
-                surface: Surface::Headless,
+                mode: Mode::Headless,
                 ..ProcessPromptInput::default()
             },
         )
@@ -1003,11 +1004,11 @@ Test skill body.
             }),
             ..Skill::named("audit")
         };
-        for (agent, surface) in [
-            ("claude:sonnet", Surface::Headless),
-            ("codex", Surface::Headless),
-            ("claude", Surface::HumanPresent),
-            ("codex", Surface::HumanPresent),
+        for (agent, mode) in [
+            ("claude:sonnet", Mode::Headless),
+            ("codex", Mode::Headless),
+            ("claude", Mode::Interactive),
+            ("codex", Mode::Interactive),
         ] {
             let _selection = select_agent(agent);
             let prepared = prepare_process_prompt(
@@ -1017,7 +1018,7 @@ Test skill body.
                     resolved_skill: Some(source.clone()),
                     message: Some("Preserve the Task checkout and return the decision".into()),
                     skill_arguments: "  \"exact arguments\"  ".into(),
-                    surface,
+                    mode,
                     ..ProcessPromptInput::default()
                 },
             )
@@ -1057,7 +1058,7 @@ Test skill body.
             &config,
             ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                surface: Surface::Headless,
+                mode: Mode::Headless,
                 ..ProcessPromptInput::default()
             },
         )
@@ -1077,7 +1078,7 @@ Test skill body.
             &default_test_config(),
             ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                surface: Surface::Headless,
+                mode: Mode::Headless,
                 ..ProcessPromptInput::default()
             },
         )
@@ -1098,7 +1099,7 @@ Test skill body.
             &config,
             ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                surface: Surface::Headless,
+                mode: Mode::Headless,
                 ..ProcessPromptInput::default()
             },
         )
@@ -1120,7 +1121,7 @@ Test skill body.
             &config,
             ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                surface: Surface::Headless,
+                mode: Mode::Headless,
                 ..ProcessPromptInput::default()
             },
         )

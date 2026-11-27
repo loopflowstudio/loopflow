@@ -1,7 +1,7 @@
 name: builtin_debug
 repo: tests/parity/fixtures/basic
 skill: debug
-surface: headless
+mode: headless
 docs: []
 diff_files: false
 diff: false

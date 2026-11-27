@@ -360,14 +360,10 @@ async fn service_login(store: &crate::store::SharedStore, provider: Provider) ->
     };
     let (state, account) = match installed {
         // A rental's GitHub token expires: signed in means GitHub takes it.
-        Some(account) if provider == Provider::GitHub => {
-            let state = match crate::machine::credentials::github_token_works(&account).await? {
-                Some(true) => LoginState::SignedIn,
-                Some(false) => LoginState::SignedOut,
-                None => LoginState::Unknown,
-            };
-            (state, Some(account))
-        }
+        Some(account) if provider == Provider::GitHub => (
+            crate::machine::credentials::github_login_state(&account).await?,
+            Some(account),
+        ),
         Some(account) => (LoginState::SignedIn, Some(account)),
         None => match store.provider_auth_snapshot(provider).await? {
             Some(snapshot) if snapshot.status.as_str() == "active" => {
@@ -553,7 +549,10 @@ fn answer(
 
 /// `--chrome-profile` for this run, else `approvers.<provider>`; none opens
 /// the default browser.
-pub fn approver(provider: Provider, chrome_profile: Option<&str>) -> Result<Option<Approver>> {
+pub(crate) fn approver(
+    provider: Provider,
+    chrome_profile: Option<&str>,
+) -> Result<Option<Approver>> {
     if let Some(profile) = chrome_profile {
         return Ok(Some(Approver::Chrome {
             chrome: profile.to_string(),

@@ -35,23 +35,14 @@ tokio::task_local! {
 #[error("GitHub rejected the credential")]
 pub(crate) struct Rejected;
 
-fn web(path: &str) -> String {
+/// `path` under `base`, github.com or api.github.com; a test's stand-in
+/// serves both.
+#[cfg_attr(test, allow(unused_variables))] // a test never reaches GitHub
+fn url(base: &str, path: &str) -> String {
     #[cfg(test)]
     let base = TEST_GITHUB_URL
         .try_with(Clone::clone)
         .unwrap_or_else(|_| "http://127.0.0.1:1".into());
-    #[cfg(not(test))]
-    let base = "https://github.com";
-    format!("{base}{path}")
-}
-
-fn api(path: &str) -> String {
-    #[cfg(test)]
-    let base = TEST_GITHUB_URL
-        .try_with(Clone::clone)
-        .unwrap_or_else(|_| "http://127.0.0.1:1".into());
-    #[cfg(not(test))]
-    let base = "https://api.github.com";
     format!("{base}{path}")
 }
 
@@ -59,7 +50,7 @@ fn api(path: &str) -> String {
 /// resource for this token.
 async fn read(token: &str, path: &str) -> Result<Option<serde_json::Value>> {
     let response = reqwest::Client::new()
-        .get(api(path))
+        .get(url("https://api.github.com", path))
         .header("User-Agent", "loopflow")
         .header("Accept", "application/vnd.github+json")
         .bearer_auth(token)
@@ -95,25 +86,31 @@ pub struct Repository {
     pub name: String,
 }
 
-/// The GitHub repository `repo`'s origin names, read with this Machine's own
-/// `gh` token; `None` when the origin is not on GitHub.
-pub(crate) async fn origin_repository(repo: &Path, token: &str) -> Result<Option<Repository>> {
-    let Some((owner, name)) = crate::git::worktrees::github_repo_nwo(repo) else {
-        return Ok(None);
-    };
+impl Repository {
+    fn of(grant: &GithubRentalGrant) -> Self {
+        Self {
+            id: grant.repository_id,
+            name: grant.repository.clone(),
+        }
+    }
+}
+
+/// The repository an origin names as `owner/name`, read with this Machine's
+/// own `gh` token.
+async fn origin_repository((owner, name): (String, String), token: &str) -> Result<Repository> {
     let found = read(token, &format!("/repos/{owner}/{name}"))
         .await?
         .ok_or_else(|| {
             anyhow!("GitHub has no {owner}/{name} for the account `gh` is signed in to")
         })?;
-    Ok(Some(Repository {
+    Ok(Repository {
         id: found["id"]
             .as_i64()
             .ok_or_else(|| anyhow!("GitHub named no id for {owner}/{name}"))?,
         name: found["full_name"]
             .as_str()
             .map_or_else(|| format!("{owner}/{name}"), str::to_string),
-    }))
+    })
 }
 
 // Deliberately no Debug: both tokens are credentials.
@@ -127,7 +124,7 @@ struct Issued {
 /// A form post to github.com, answered as JSON.
 fn post(path: &str, form: &[(&str, &str)]) -> reqwest::RequestBuilder {
     reqwest::Client::new()
-        .post(web(path))
+        .post(url("https://github.com", path))
         .header("User-Agent", "loopflow")
         .header("Accept", "application/json")
         .header("Content-Type", "application/x-www-form-urlencoded")
@@ -230,12 +227,6 @@ fn grant_of(issued: Issued, repository: &Repository, login: &str) -> Result<Gith
     })
 }
 
-/// A command approver needs no terminal; a browser needs a person at one.
-fn can_ask(approver: Option<&Approver>, batch: bool) -> bool {
-    matches!(approver, Some(Approver::Command { .. }))
-        || crate::machine::credentials::foreground(batch)
-}
-
 #[derive(Deserialize)]
 struct DeviceCode {
     device_code: String,
@@ -254,12 +245,10 @@ async fn approve_repository(
     asker: &Asker<'_>,
 ) -> Result<GithubRentalGrant> {
     let Asker {
-        login,
-        approver,
-        batch,
+        login, approver, ..
     } = *asker;
     let name = &repository.name;
-    if !can_ask(approver, batch) {
+    if !asker.can_ask() {
         bail!(
             "rentals have no GitHub approval for {name} and this run has no terminal to ask in; \
              run `lf ondemand login github` from a terminal in its checkout, or set a command \
@@ -336,10 +325,7 @@ async fn renew(
     sqlite: &SqliteStore,
     grant: &GithubRentalGrant,
 ) -> Result<std::result::Result<GithubRentalGrant, String>> {
-    let repository = Repository {
-        id: grant.repository_id,
-        name: grant.repository.clone(),
-    };
+    let repository = Repository::of(grant);
     let reply = token_request(&[
         ("client_id", APP_CLIENT_ID),
         ("grant_type", "refresh_token"),
@@ -444,6 +430,14 @@ pub(crate) struct Asker<'a> {
     pub batch: bool,
 }
 
+impl Asker<'_> {
+    /// A command approver needs no terminal; a browser needs a person at one.
+    fn can_ask(&self) -> bool {
+        matches!(self.approver, Some(Approver::Command { .. }))
+            || crate::machine::credentials::foreground(self.batch)
+    }
+}
+
 /// A live rental the repository's current token did not reach. It stays
 /// recorded as behind, so the next settle of the repository sends again.
 pub(crate) struct Unsent {
@@ -452,6 +446,7 @@ pub(crate) struct Unsent {
     pub error: anyhow::Error,
 }
 
+#[derive(Default)]
 pub(crate) struct Settled {
     /// When the repository's token stops, while anything needs it.
     pub expires_at: Option<OffsetDateTime>,
@@ -479,11 +474,6 @@ pub(crate) async fn settle(
     until: Option<OffsetDateTime>,
     asker: Option<&Asker<'_>>,
 ) -> Result<Settled> {
-    let nothing = Settled {
-        expires_at: None,
-        approved: false,
-        unsent: Vec::new(),
-    };
     let Some(_lock) = repository_lock(repository, asker.is_some()).await? else {
         // Whoever holds it is settling this repository now. A token this
         // ending would have cut stops at its own expiry.
@@ -491,7 +481,7 @@ pub(crate) async fn settle(
             repository = %repository.name,
             "another lf is settling GitHub; this ending leaves it to that one"
         );
-        return Ok(nothing);
+        return Ok(Settled::default());
     };
     let need = sqlite
         .rentals_holding_github(repository.id)?
@@ -502,7 +492,7 @@ pub(crate) async fn settle(
     let stored = sqlite
         .github_rental_grant(repository.id)?
         .filter(|stored| asker.is_none_or(|asker| stored.login == asker.login));
-    let asking = asker.filter(|asker| can_ask(asker.approver, asker.batch));
+    let asking = asker.filter(|asker| asker.can_ask());
     let (grant, approved) = match (stored, need) {
         (Some(stored), Some(need)) => {
             match (usable(sqlite, repository, stored, need).await?, asking) {
@@ -531,9 +521,9 @@ pub(crate) async fn settle(
             renew(sqlite, &stored)
                 .await?
                 .map_err(|refusal| anyhow!(refusal))?;
-            return Ok(nothing);
+            return Ok(Settled::default());
         }
-        (_, None) => return Ok(nothing),
+        (_, None) => return Ok(Settled::default()),
     };
     Ok(Settled {
         expires_at: Some(grant.expires_at),
@@ -590,10 +580,7 @@ fn report(unsent: &[Unsent], repository: &str) {
 fn approved_repository(sqlite: &SqliteStore, repository_id: i64) -> Result<Option<Repository>> {
     Ok(sqlite
         .github_rental_grant(repository_id)?
-        .map(|grant| Repository {
-            id: grant.repository_id,
-            name: grant.repository,
-        }))
+        .map(|grant| Repository::of(&grant)))
 }
 
 /// Settle a repository nobody is here to approve for: a rental signed in for
@@ -616,14 +603,12 @@ async fn settle_checkout(
     until: OffsetDateTime,
     batch: bool,
 ) -> Result<Option<Approval>> {
-    if crate::git::worktrees::github_repo_nwo(repo).is_none() {
-        return Ok(None);
-    }
-    let laptop = crate::machine::credentials::gh_token()?;
-    let token = secrecy::ExposeSecret::expose_secret(&laptop);
-    let Some(repository) = origin_repository(repo, token).await? else {
+    let Some(origin) = crate::git::worktrees::github_repo_nwo(repo) else {
         return Ok(None);
     };
+    let laptop = crate::machine::credentials::gh_token()?;
+    let token = secrecy::ExposeSecret::expose_secret(&laptop);
+    let repository = origin_repository(origin, token).await?;
     let login = login_of(token).await?;
     let approver = login::approver(Provider::GitHub, None)?;
     let asker = Asker {
@@ -720,13 +705,16 @@ async fn sign_in_as(
         .flatten();
     let repository = match recorded {
         Some(repository) => repository,
-        None => origin_repository(repo, laptop).await?.ok_or_else(|| {
-            anyhow!(
-                "{} has no GitHub origin; run this from a checkout of the repository \
-                 the rental works in",
-                repo.display()
-            )
-        })?,
+        None => {
+            let origin = crate::git::worktrees::github_repo_nwo(repo).with_context(|| {
+                format!(
+                    "{} has no GitHub origin; run this from a checkout of the repository \
+                     the rental works in",
+                    repo.display()
+                )
+            })?;
+            origin_repository(origin, laptop).await?
+        }
     };
     // Recorded before the settle, so no ending retires the token on the way.
     sqlite.set_rental_github_repository(&rental.id, repository.id)?;
@@ -798,7 +786,7 @@ mod tests {
     fn repository() -> Repository {
         Repository {
             id: 42,
-            name: "loopflowstudio/loopflow".into(),
+            name: "loopflowstudio/repository-42".into(),
         }
     }
 
@@ -847,14 +835,16 @@ mod tests {
         }
     }
 
-    fn stored(access: &str, refresh: &str) -> GithubRentalGrant {
+    /// Repository `id`'s grant, its token stopping `hours` from now.
+    fn grant(id: i64, access: &str, hours: i64) -> GithubRentalGrant {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
         GithubRentalGrant {
-            repository_id: 42,
-            repository: "loopflowstudio/loopflow".into(),
+            repository_id: id,
+            repository: format!("loopflowstudio/repository-{id}"),
             login: "jack".into(),
             access_token: access.into(),
-            refresh_token: refresh.into(),
-            expires_at: time::OffsetDateTime::from_unix_timestamp(1_800_000_000).unwrap(),
+            refresh_token: "ghr_OLD".into(),
+            expires_at: OffsetDateTime::from_unix_timestamp(now).unwrap() + Duration::hours(hours),
         }
     }
 
@@ -962,13 +952,10 @@ mod tests {
     #[tokio::test]
     async fn a_renewal_replaces_the_stored_tokens() {
         let (_dir, sqlite) = store();
-        sqlite
-            .put_github_rental_grant(&stored("ghu_OLD", "ghr_OLD"))
-            .unwrap();
+        let old = grant(42, "ghu_OLD", 1);
+        sqlite.put_github_rental_grant(&old).unwrap();
         let (url, requests) = spawn(vec![issued("ghu_NEW", "ghr_NEW")]).await;
-        let renewed = TEST_GITHUB_URL
-            .scope(url, renew(&sqlite, &stored("ghu_OLD", "ghr_OLD")))
-            .await;
+        let renewed = TEST_GITHUB_URL.scope(url, renew(&sqlite, &old)).await;
         let Ok(Ok(renewed)) = renewed else {
             panic!("GitHub renewed the grant")
         };
@@ -982,51 +969,32 @@ mod tests {
     #[tokio::test]
     async fn a_refused_renewal_keeps_the_grant_and_names_the_approval() {
         let (_dir, sqlite) = store();
-        sqlite
-            .put_github_rental_grant(&stored("ghu_OLD", "ghr_OLD"))
-            .unwrap();
+        let old = grant(42, "ghu_OLD", 1);
+        sqlite.put_github_rental_grant(&old).unwrap();
         let (url, _) = spawn(vec![ok(json!({ "error": "bad_refresh_token" }))]).await;
-        let result = TEST_GITHUB_URL
-            .scope(url, renew(&sqlite, &stored("ghu_OLD", "ghr_OLD")))
-            .await;
+        let result = TEST_GITHUB_URL.scope(url, renew(&sqlite, &old)).await;
         let Ok(Err(refusal)) = result else {
             panic!("GitHub refused the renewal")
         };
         assert!(refusal.contains("lf ondemand login github"));
-        assert!(sqlite.github_rental_grant(42).unwrap() == Some(stored("ghu_OLD", "ghr_OLD")));
+        assert!(sqlite.github_rental_grant(42).unwrap() == Some(old));
     }
 
     #[tokio::test]
     async fn the_repository_is_the_origins_as_this_machines_gh_reads_it() {
-        let dir = tempfile::tempdir().unwrap();
-        for args in [
-            &["init", "-q"][..],
-            &[
-                "remote",
-                "add",
-                "origin",
-                "git@github.com:loopflowstudio/Loopflow.git",
-            ],
-        ] {
-            let status = std::process::Command::new("git")
-                .arg("-C")
-                .arg(dir.path())
-                .args(args)
-                .status()
-                .unwrap();
-            assert!(status.success());
-        }
         let (url, requests) = spawn(vec![ok(
-            json!({ "id": 42, "full_name": "loopflowstudio/loopflow" }),
+            json!({ "id": 42, "full_name": "loopflowstudio/repository-42" }),
         )])
         .await;
+        // The origin's spelling is asked; GitHub's is kept.
+        let origin = ("loopflowstudio".to_string(), "Repository-42".to_string());
         let found = TEST_GITHUB_URL
-            .scope(url, origin_repository(dir.path(), LAPTOP))
+            .scope(url, origin_repository(origin, LAPTOP))
             .await
             .unwrap();
-        assert_eq!(found, Some(repository()));
+        assert_eq!(found, repository());
         let requests = requests.lock().await;
-        assert_eq!(requests[0].path, "/repos/loopflowstudio/Loopflow");
+        assert_eq!(requests[0].path, "/repos/loopflowstudio/Repository-42");
     }
 
     // -- Rentals ------------------------------------------------------------
@@ -1100,19 +1068,6 @@ mod tests {
             .set_rental_github_token_sent(&rental.id, held.expires_at)
             .unwrap();
         (rental, machine)
-    }
-
-    /// Repository `id`'s grant, its token stopping `hours` from now.
-    fn grant(id: i64, access: &str, hours: i64) -> GithubRentalGrant {
-        let now = OffsetDateTime::now_utc().unix_timestamp();
-        GithubRentalGrant {
-            repository_id: id,
-            repository: format!("loopflowstudio/repository-{id}"),
-            login: "jack".into(),
-            access_token: access.into(),
-            refresh_token: "ghr_OLD".into(),
-            expires_at: OffsetDateTime::from_unix_timestamp(now).unwrap() + Duration::hours(hours),
-        }
     }
 
     /// The account this Machine's `gh` token names.
@@ -1255,7 +1210,7 @@ mod tests {
         let settled = TEST_GITHUB_URL
             .scope(
                 url,
-                TEST_SENDS.scope(sends.clone(), settle(&store, &repository_42(), None, None)),
+                TEST_SENDS.scope(sends.clone(), settle(&store, &repository(), None, None)),
             )
             .await
             .unwrap();
@@ -1268,13 +1223,6 @@ mod tests {
         let requests = requests.lock().await;
         assert_eq!(renewals(&requests), 1);
         assert_eq!(requests.len(), 9);
-    }
-
-    fn repository_42() -> Repository {
-        Repository {
-            id: 42,
-            name: "loopflowstudio/repository-42".into(),
-        }
     }
 
     fn codes(requests: &[crate::linear::test_server::CapturedRequest]) -> usize {
@@ -1354,7 +1302,7 @@ mod tests {
         let sends = sends();
         let approver = approver();
         let asker = asker(approver.as_ref());
-        let repository = repository_42();
+        let repository = repository();
         let dropped = TEST_GITHUB_URL
             .scope(
                 url.clone(),
@@ -1410,7 +1358,7 @@ mod tests {
             let result = TEST_GITHUB_URL
                 .scope(
                     url.clone(),
-                    TEST_SENDS.scope(sends.clone(), settle(&store, &repository_42(), None, None)),
+                    TEST_SENDS.scope(sends.clone(), settle(&store, &repository(), None, None)),
                 )
                 .await;
             let Err(error) = result else {
@@ -1437,7 +1385,7 @@ mod tests {
         let result = TEST_GITHUB_URL
             .scope(
                 url,
-                settle(&store, &repository_42(), Some(until), Some(&asker(None))),
+                settle(&store, &repository(), Some(until), Some(&asker(None))),
             )
             .await;
         let Err(error) = result else {
@@ -1463,7 +1411,7 @@ mod tests {
         let until = OffsetDateTime::now_utc() + Duration::hours(4);
         let approver = approver();
         let asker = asker(approver.as_ref());
-        let repository = repository_42();
+        let repository = repository();
         let place = || settle(&store, &repository, Some(until), Some(&asker));
         let (first, second) = TEST_GITHUB_URL
             .scope(url, async { tokio::join!(place(), place()) })
@@ -1483,7 +1431,7 @@ mod tests {
             .put_github_rental_grant(&grant(42, "ghu_HELD", 6))
             .unwrap();
         let (url, requests) = spawn(renewal(42, "ghu_CUT", 8)).await;
-        let repository = repository_42();
+        let repository = repository();
         // A placement showing a code holds the lock for as long as the code lives.
         let placement = super::repository_lock(&repository, true).await.unwrap();
 
@@ -1519,7 +1467,7 @@ mod tests {
                 url,
                 settle(
                     &store,
-                    &repository_42(),
+                    &repository(),
                     Some(now),
                     Some(&asker(approver.as_ref())),
                 ),
@@ -1550,7 +1498,7 @@ mod tests {
         let result = TEST_GITHUB_URL
             .scope(
                 url,
-                settle(&store, &repository_42(), Some(until), Some(&asker(None))),
+                settle(&store, &repository(), Some(until), Some(&asker(None))),
             )
             .await;
         let Err(error) = result else {
@@ -1580,7 +1528,7 @@ mod tests {
         let settled = TEST_GITHUB_URL
             .scope(
                 url,
-                settle(&store, &repository_42(), Some(until), Some(&asker(None))),
+                settle(&store, &repository(), Some(until), Some(&asker(None))),
             )
             .await
             .unwrap();

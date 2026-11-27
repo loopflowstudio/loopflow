@@ -15,7 +15,7 @@ installed, not Loopflow Studio.
 
 **Made for review:** the first run installs on two repositories, not one.
 With one install `/user/installations` lists one repository whether or not
-GitHub restricted the token, so the check (`reach`, `github.rs:159`) passes
+GitHub restricted the token, so the check (`reach`, `rental/github.rs`) passes
 either way and the run would not show the restriction. Passed over: one
 repository, which exercises approval and renewal only.
 

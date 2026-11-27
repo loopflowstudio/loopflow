@@ -10,6 +10,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
 use crate::config::placement::Approver;
+use crate::machine::login::LoginState;
 use crate::provider_auth::Provider;
 use crate::store::{CredentialType, ProviderToken, SharedStore};
 use loopflow_model::durable::Machine;
@@ -393,15 +394,15 @@ fn github_token(login: &str) -> Result<Option<String>> {
 
 /// Whether GitHub still takes the token gh keeps for `login` here. Asked only
 /// of a token that expires (a rental's `ghu_`), so a Machine holding its own
-/// `gh` login answers from the file alone. `None` when GitHub did not answer.
-pub(crate) async fn github_token_works(login: &str) -> Result<Option<bool>> {
+/// `gh` login answers from the file alone. Unknown when GitHub did not answer.
+pub(crate) async fn github_login_state(login: &str) -> Result<LoginState> {
     let Some(token) = github_token(login)?.filter(|token| token.starts_with("ghu_")) else {
-        return Ok(Some(true));
+        return Ok(LoginState::SignedIn);
     };
     Ok(match crate::rental::github::login_of(&token).await {
-        Ok(_) => Some(true),
-        Err(error) if error.is::<crate::rental::github::Rejected>() => Some(false),
-        Err(_) => None,
+        Ok(_) => LoginState::SignedIn,
+        Err(error) if error.is::<crate::rental::github::Rejected>() => LoginState::SignedOut,
+        Err(_) => LoginState::Unknown,
     })
 }
 
@@ -621,7 +622,7 @@ async fn zen_check(token: &str) -> Result<()> {
 }
 
 /// One machine login per provider writes its account credentials at a time.
-pub(crate) fn credential_lock(provider: &str) -> Result<fs::File> {
+fn credential_lock(provider: &str) -> Result<fs::File> {
     let directory = crate::store::lf_home_dir().join("accounts");
     fs::create_dir_all(&directory)?;
     let file = fs::OpenOptions::new()
@@ -657,7 +658,7 @@ mod tests {
     use axum::http::StatusCode;
     use serde_json::json;
 
-    use super::{github_token_works, install, Credential};
+    use super::{github_login_state, install, Credential, LoginState};
     use crate::config::environment::EnvVarGuard;
     use crate::linear::test_server::{json_response, spawn, QueuedResponse};
     use crate::rental::github::TEST_GITHUB_URL;
@@ -709,7 +710,10 @@ mod tests {
                 install(&store, received).await.unwrap();
                 let kept = std::fs::read_to_string(&hosts).unwrap();
                 assert!(kept.contains("ghu_NEW") && !kept.contains("ghu_OLD"));
-                assert_eq!(github_token_works("jack").await.unwrap(), Some(false));
+                assert_eq!(
+                    github_login_state("jack").await.unwrap(),
+                    LoginState::SignedOut
+                );
             })
             .await;
         // A login that does not expire is never asked about.
@@ -718,6 +722,9 @@ mod tests {
             "github.com:\n  user: jack\n  oauth_token: gho_OWN\n",
         )
         .unwrap();
-        assert_eq!(github_token_works("jack").await.unwrap(), Some(true));
+        assert_eq!(
+            github_login_state("jack").await.unwrap(),
+            LoginState::SignedIn
+        );
     }
 }

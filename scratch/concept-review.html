@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-1118 concept review: what a rental holds of yours on GitHub</title>
+<title>LOO-1118 concept review: a rental's GitHub access, as built</title>
 <style>
 :root {
   --background: #faf8f5; --surface: #fffdf9; --surface-muted: #f3eee7;
@@ -87,343 +87,261 @@ ol.q ol li { margin-bottom: 6px; }
 <body>
 <main>
 
-<h1>What a rental holds of yours on GitHub</h1>
-<p class="lede">Concept review of the LOO-1118 plan, before anything is built. The area taken: every
-login a rental is given, how long each lasts, and the commands and records behind them. GitHub is
-the one the Task changes; Linear, Claude, Codex and OpenCode are read beside it because they share
-the same commands and the same "signed in" row.</p>
-<p class="small">State at <code>ed7d968826</code>: <code>scratch/plan.md</code> and
-<code>scratch/questions.md</code> are committed. No code has changed. Nothing on this page is built.</p>
+<h1>A rental's GitHub access: whose is it, the rental's or the repository's?</h1>
+<p class="lede">Concept review of LOO-1118 as built. The area taken: what a rental holds on GitHub
+from placement to give-back, the approval behind it, the commands a person meets
+(<code>lf task run --rent</code>, <code>lf ondemand login github</code>,
+<code>lf machine login</code>, <code>lf machine logins</code>), and the two records under them. The
+other logins are read only where they share a command.</p>
+<p class="small">State at <code>ca1dcb82d3</code>: Passes 1, 2 and 3 are built and committed, tested
+against a stand-in GitHub. Nothing has run against the real app or a real rental: the app is
+registered and installed nowhere, and the four probes in the plan are unanswered. Everything marked
+proposed below is unbuilt. Decided earlier and not reopened here: one shared "Loopflow Studio" app,
+Workflows write, 8 hours.</p>
 <p class="legend">
-  <span><span class="tag today">today</span> in the code now</span>
-  <span><span class="tag plan">plan</span> written in the plan, not built</span>
+  <span><span class="tag today">built</span> in this branch</span>
   <span><span class="tag proposed">proposed</span> this review</span>
-  <span><span class="tag sep">separate</span> another Task</span>
+  <span><span class="tag yes">yes</span> person and code agree</span>
+  <span><span class="tag no">no</span> they do not</span>
+  <span><span class="tag sep">separate</span> its own outcome</span>
 </p>
 
-<h2>The short version</h2>
-<p>The plan's mechanism holds up: a GitHub App user token from a device approval, limited to one
-repository, with the renewing grant kept on the laptop. The two mechanisms it passed over fail for
-the reasons it gives. What does not line up is around the mechanism:</p>
-<ul>
-  <li>A person has to learn "GitHub App", "client id" and "grant", and run a command named for
-  signing a Machine in that signs no Machine in.</li>
-  <li>"Signed in" stops meaning "works": the plan's own renew command would answer "already signed
-  in" and send nothing.</li>
-  <li>The token is cut short on two of the three ways a rental ends.</li>
-</ul>
-
 <h2>One interaction, walked</h2>
-<div class="cols">
-  <div class="card before">
-    <h3>First rental of a repository <span class="tag plan">plan</span></h3>
-<pre><code># github.com: register a GitHub App, set seven
-# permissions, enable device flow, copy its client id
-lf set --global forward.github_app Iv23li…
-# github.com: install the app on the repository
-lf machine login github --rental     # type a code
-lf task run LOO-570 --rent code</code></pre>
-    <p class="small">Four things to do before the command that was wanted, two of them on
-    github.com with no prompt from lf saying so.</p>
-  </div>
-  <div class="card after">
-    <h3>First rental of a repository <span class="tag proposed">proposed</span></h3>
-<pre><code>lf task run LOO-570 --rent code
-Rentals need GitHub for loopflowstudio/loopflow.
-Approve at https://github.com/login/device  code ABCD-1234
-Renting 4 vCPU 8 GB on daytona …</code></pre>
-    <p class="small">When the app is not on the repository yet, the same place prints its install
-    link and stops before renting. Later rentals of this repository ask nothing for six months.</p>
-  </div>
-</div>
-
-<h3>A failure, and the recovery</h3>
-<p>Rental A (<code>modal-1</code>) is five hours old. A second Task of the same repository is placed
-on rental B, due in four hours. The stored token has three hours left, so the laptop renews it.
-GitHub kills the old token at that moment. The laptop sends the new one to B and re-sends to A, and
-the SSH to A drops.</p>
-<table>
-  <tr><th style="width:30%">What happens</th><th>Under the plan as written</th><th>Proposed</th></tr>
-  <tr><td>A's agent runs <code>git push</code></td><td>401 from GitHub.</td><td>The same. GitHub's rule, not ours.</td></tr>
-  <tr><td><code>lf machine logins modal-1</code></td>
-      <td><code>github  signed in  jack</code>. The row reads <code>hosts.yml</code> for a user name
-      (<code>login.rs:346-350</code>); a dead token still has one.</td>
-      <td><code>github  signed out</code>: the rental asks GitHub with the token it holds.</td></tr>
-  <tr><td><code>lf machine login github modal-1</code></td>
-      <td>Prints "already signed in as jack" and sends nothing. <code>connect</code> returns at
-      <code>remote_has</code> (<code>credentials.rs:57-59</code>), which compares names. The plan
-      changes the receiving side to compare tokens and leaves this check on the sending side.</td>
-      <td>For a rental the laptop sends its current token every time. The receiver replaces a
-      different one and keeps an equal one.</td></tr>
-  <tr><td>Rental A is deleted by its provider at its deadline while the laptop sleeps</td>
-      <td>The laptop notices in <code>refresh</code> (<code>recovery.rs:108-116</code>), which calls
-      <code>mark_ended</code> directly. The plan hooks <code>give_back</code> and
-      <code>delete_sandbox</code>, so this path leaves the token alive to its 8 h mark.</td>
-      <td>The cut sits in <code>mark_ended</code>, whose comment already reads "Every path to
-      <code>ended</code> comes here".</td></tr>
-</table>
+<p>Two Tasks of <code>loopflowstudio/loopflow</code> go to rentals, forty minutes apart.</p>
+<pre><code>09:00  lf task run LOO-570 --rent code
+         Rentals need GitHub for loopflowstudio/loopflow.
+         Approve at https://github.com/login/device with code ABCD-1234
+         GitHub on code-1 until 17:00
+14:10  lf task run LOO-571 --rent code          # deadline 18:10, past 17:00
+         GitHub on code-2 until 22:10           # renewed: code-1's token died at this moment
+                                                # the new one is sent to code-1 over SSH</code></pre>
+<p>What a person holds in their head: <em>code-1 can use GitHub until 17:00.</em> What the code
+holds: <em>the repository has one token; code-1 and code-2 were last sent it.</em> GitHub forces
+the second shape (a grant has one live token, and a renewal kills the old one), so sharing is not
+the problem. The problem is that the rental's side of it is not written down anywhere.</p>
+<p><strong>Failure.</strong> At 14:10 the SSH send to code-2 fails. <code>connect_rental</code>
+returns on that error before it reaches the loop that re-sends to code-1
+(<code>credentials.rs</code>, <code>send(machine, …)?</code> then <code>for other in …</code>).
+The renewal already happened. code-1 now holds a dead token, nothing printed its name, and nothing
+recorded that it is behind.</p>
+<p><strong>Recovery.</strong> The placement is retried. The stored token now outlives the new
+rental, so <code>token_for</code> reports <code>renewed: false</code> and nobody is re-sent. code-1
+stays dead until its agent's push fails and someone reads <code>lf machine logins code-1</code> and
+runs <code>lf machine login github code-1</code>. "Who needs the new token" was a fact for the
+length of one function call.</p>
 
 <h2>Do the concepts line up?</h2>
 <table>
-  <tr><th style="width:26%">What a person knows</th><th style="width:30%">What the code has</th><th class="fit">Match</th><th>What is wrong</th></tr>
-  <tr>
-    <td>A rental, and a computer I own</td>
-    <td><code>Rental</code>, <code>Machine</code>, <code>rental_for_machine</code> <span class="tag today">today</span></td>
-    <td class="fit"><span class="tag yes">yes</span></td>
-    <td>The plan branches <code>connect</code> on exactly this: a rental gets the limited token, an
-    owned Machine keeps the laptop's.</td>
-  </tr>
-  <tr>
-    <td>This rental's GitHub access: this repository, until the rental ends</td>
-    <td><code>github_rental_grants</code>, one row per repository, one live token shared by that
-    repository's rentals; <code>rentals.github_repository</code> <span class="tag plan">plan</span></td>
-    <td class="fit"><span class="tag partly">partly</span></td>
-    <td>The reach matches. The lifetime does not: the token belongs to the repository's grant, so a
-    second rental can end the first one's token, and it lasts 8 h whatever the rental's length.
-    GitHub gives one live token per approval; the only way to one token per rental is a code typed
-    per rental. Kept as the plan has it, with the failure above made visible and recoverable.</td>
-  </tr>
-  <tr>
-    <td>Nothing. Nobody renting a machine thinks about an app registration.</td>
-    <td>A GitHub App each person registers; <code>forward.github_app</code> holds its client id <span class="tag plan">plan</span></td>
-    <td class="fit"><span class="tag no">no</span></td>
-    <td>A code concept the person has to build and operate. The setting is also misfiled:
-    <code>forward.*</code> is what crosses to another Machine, and a client id never does.</td>
-  </tr>
-  <tr>
-    <td>Let rentals use this repository (one approval)</td>
-    <td><code>lf machine login github --rental</code> <span class="tag plan">plan</span></td>
-    <td class="fit"><span class="tag no">no</span></td>
-    <td>One name for two ideas. Every other <code>lf machine login</code> signs a Machine in; this
-    one signs none in and stores a grant for the repository the shell stands in.</td>
-  </tr>
-  <tr>
-    <td>What a Machine is signed in to</td>
-    <td><code>LoginRow</code>, <code>remote_has</code>, <code>installed</code> <span class="tag today">today</span></td>
-    <td class="fit"><span class="tag no">no</span></td>
-    <td>True today because a GitHub token never expires. With an 8 h token, "signed in" is a name
-    in a file. Two of the three checks keep comparing names under the plan.</td>
-  </tr>
-  <tr>
-    <td>What a rental template signs in to</td>
-    <td><code>Ondemand.logins</code>, <code>sign_ins</code> <span class="tag today">today</span></td>
-    <td class="fit"><span class="tag no">no</span></td>
-    <td>Empty means "everything this laptop has", a raw OpenCode key included. The plan fixes it:
-    the template names agents, the repository decides GitHub and Linear. Two leftovers below.</td>
-  </tr>
-  <tr>
-    <td>Giving a rental back</td>
-    <td><code>mark_ended</code>, reached from <code>give_back</code>, <code>delete_sandbox</code>
-    and <code>refresh</code> <span class="tag today">today</span></td>
-    <td class="fit"><span class="tag yes">yes</span></td>
-    <td>One owner exists. The plan attaches the token cut to two of its three callers.</td>
-  </tr>
-  <tr>
-    <td>How long the rental lasts</td>
-    <td><code>Rental.deadline</code> (4 h default, 24 h most); Linear token 24 h; GitHub token 8 h</td>
-    <td class="fit"><span class="tag partly">partly</span></td>
-    <td>Linear's clock was chosen to cover the longest rental, so nobody meets it
-    (<code>credentials.rs:39-43</code>). GitHub's cannot be: a rental past 8 h meets a second clock.
-    Placement saying when GitHub stops is the least that makes it visible.</td>
-  </tr>
+<tr><th>What a person knows</th><th>What the code has</th><th class="fit"></th><th>What is wrong</th></tr>
+<tr><td>The app is installed on a repository, once, on github.com</td>
+  <td>Nothing stored; found by what a fresh token reaches (<code>grant_from</code>)</td>
+  <td><span class="tag partly">partly</span></td>
+  <td>The install link is printed only after a code has been typed and spent. The first-ever run
+  is the one most likely to lack the install.</td></tr>
+<tr><td>Rentals of this repository are approved for GitHub, once</td>
+  <td><code>github_rental_grants</code> row, <code>GithubRentalGrant</code></td>
+  <td><span class="tag yes">yes</span></td><td></td></tr>
+<tr><td>"Is it approved?" before renting</td>
+  <td><code>approve_first_rental</code>: any row exists. <code>token_for</code>, after renting: a
+  row for this <code>gh</code> account that GitHub still renews.</td>
+  <td><span class="tag no">no</span></td>
+  <td>One question, two answers. A revoked grant, a six-month-old one, or a changed
+  <code>gh</code> account passes the first and fails the second, after a rental is paid for and
+  with no terminal to ask in.</td></tr>
+<tr><td>This rental can use GitHub until HH:MM</td>
+  <td><code>rentals.github_repository_id</code> (which repository it was last sent) and the
+  repository's <code>expires_at</code></td>
+  <td><span class="tag no">no</span></td>
+  <td>The biggest mismatch, below. Which token a rental holds is not recorded, so the printed
+  time goes stale and a missed re-send is invisible.</td></tr>
+<tr><td>Giving a rental back ends its GitHub access</td>
+  <td><code>retire_token</code> from <code>mark_ended</code>: renew when no live rental holds the
+  repository</td>
+  <td><span class="tag partly">partly</span></td>
+  <td>A rental stops holding a repository two ways: it ends, or
+  <code>lf machine login github</code> from another checkout replaces its token. Only ending
+  retires. The replaced repository's token stays alive with no holder for up to 8 hours.</td></tr>
+<tr><td>Sign a rental in to GitHub</td>
+  <td><code>connect_rental</code>, reached from <code>prepare</code> (repository passed in) and
+  from <code>login::login</code> → <code>connect</code> (repository read from the current
+  directory)</td>
+  <td><span class="tag partly">partly</span></td>
+  <td>Two doors. <code>prepare</code> branches on GitHub to skip <code>login::login</code>
+  because that function cannot carry a repository.</td></tr>
+<tr><td>Two placements at once</td>
+  <td><code>credential_lock("github")</code>: one file for every repository, refuses when held,
+  held while a person types a device code</td>
+  <td><span class="tag no">no</span></td>
+  <td>A person sees "another machine login is in progress" for a placement of an unrelated
+  repository, or the second rental is rented, fails to sign in and is deleted. An ending that
+  meets the lock skips the cut.</td></tr>
+<tr><td><code>lf machine logins code-1</code>: github signed in</td>
+  <td>On the rental: ask GitHub when the token starts <code>ghu_</code></td>
+  <td><span class="tag yes">yes</span></td>
+  <td>The prefix stands in for "this token expires". Left as is: asking for every token would make
+  owned Machines read <code>unknown</code> offline.</td></tr>
+<tr><td><code>lf ondemand login github</code></td>
+  <td><code>OndemandCommand::Login { service: RentalService }</code>, an enum of one</td>
+  <td><span class="tag partly">partly</span></td>
+  <td><code>ondemand</code> is where templates live; this command takes no template and signs
+  nothing in. It approves a repository.</td></tr>
+<tr><td><code>--logins codex,github</code> on a template</td>
+  <td><code>github</code> and <code>linear</code> accepted, change nothing</td>
+  <td><span class="tag no">no</span></td>
+  <td>A word a person can type that does nothing.</td></tr>
+<tr><td>First contact, Daytona host key, empty <code>logins</code></td>
+  <td>Pass 1</td><td><span class="tag yes">yes</span></td><td></td></tr>
 </table>
 
 <div class="big">
-  <h3>The biggest mismatch: the person operates the mechanism</h3>
-  <p>The Task's outcome is one sentence a person can hold: a rental reaches one repository and
-  stops reaching it when the rental is over. The plan delivers the sentence and hands over the
-  machinery with it.</p>
-  <div class="cols">
-    <div class="card before">
-      <h3>Before <span class="tag plan">plan</span></h3>
-      <div class="flow">
-        <span class="box">your GitHub App</span><span class="arrow">→</span>
-        <span class="box"><code>forward.github_app</code></span><span class="arrow">→</span>
-        <span class="box"><code>login github --rental</code></span><span class="arrow">→</span>
-        <span class="box">grant per repository</span><span class="arrow">→</span>
-        <span class="box">rental</span>
-      </div>
-      <p class="small">Five nouns, three of them new to the person. Signed-in rows and the renew
-      command compare names.</p>
-    </div>
-    <div class="card after">
-      <h3>After <span class="tag proposed">proposed</span></h3>
-      <div class="flow">
-        <span class="box gone">your GitHub App</span>
-        <span class="box gone"><code>forward.github_app</code></span>
-        <span class="box new">approve once, at the first rental</span><span class="arrow">→</span>
-        <span class="box">grant per repository</span><span class="arrow">→</span>
-        <span class="box">rental</span>
-      </div>
-      <p class="small">One Loopflow app whose client id ships in <code>lf</code>. The grant is still
-      a row on the laptop; the person sees an approval and, later, an expiry time.</p>
-    </div>
-  </div>
-  <p><strong>Recommended.</strong> Register one public "Loopflow" GitHub App and compile its client
-  id in. A device-flow client id is public, the app needs no secret, no key, no webhook and no
-  server, so nothing is run by Loopflow. The first placement of a repository asks for the approval
-  in the terminal, the way Codex and OpenCode sign-ins already do at <code>prepare</code>; a run
-  with no terminal stops before renting and names the command to run first.</p>
-  <p><strong>Passed over.</strong> An app per person (the plan): every person learns registration
-  and seven permissions for no gain. The client id from the environment or Doppler, as
-  <code>LINEAR_CLIENT_ID</code> is read: a secret's home for a value that is not secret.</p>
-  <p><strong>Hard to undo once shipped.</strong> The app's name, owner and address appear on every
-  approval page and installation. Adding a permission later asks every installation to approve
-  again; removing one asks nobody. So the app should start with the fewest permissions (question 4).</p>
+<h3>The biggest mismatch: a rental's GitHub access is not a record</h3>
+<p>The person's unit is the rental. The code's unit is the repository's token, plus a pointer on
+each rental saying which repository. Everything about <em>this rental's</em> access is computed in
+passing: <code>RentalToken.renewed</code>, <code>RentalToken.replaced</code>,
+<code>RentalGithub.others</code>, the "until" line. When the pass is interrupted the fact is
+gone. Three behaviors fall out of that one gap: the stranded rental above, the replaced
+repository's token that nobody retires, and an "until" time that cannot be shown again.</p>
+<div class="cols">
+<div class="card before">
+<h3>Built</h3>
+<div class="flow"><span class="box">grant per repository</span><span class="arrow">+</span>
+<span class="box">rental → repository id</span></div>
+<p>Three paths each decide who gets what: <code>token_for</code> (renew, flag
+<code>renewed</code>), <code>connect_rental</code> (send, then re-send to others when flagged),
+<code>retire_token</code> (last holder gone). Re-send happens once, in the call that renewed.</p>
+</div>
+<div class="card after">
+<h3>Proposed <span class="tag proposed">proposed</span></h3>
+<div class="flow"><span class="box">grant per repository</span><span class="arrow">+</span>
+<span class="box new">rental → repository id and the expiry of the token it was sent</span></div>
+<p>A rental is behind when what it was sent is not the repository's current token. One step,
+<em>settle a repository</em>: renew when the token does not cover its live rentals, send to every
+live rental that is behind and record each send that lands, and when no live rental is left, renew
+once so the last token stops. Placement, <code>lf machine login github</code>, an ending and a
+replacement all call it for the repositories they touched.</p>
+</div>
+</div>
+<p><strong>Normal path:</strong> the same output as today. <strong>Failure:</strong> a send that
+fails leaves that rental recorded as behind and named. <strong>Recovery:</strong> the next settle
+of that repository, from any command, sends it; nothing depends on a flag from an earlier call.
+<strong>Survives:</strong> the grant table, one approval per repository, the cut at the last
+ending, the laptop token never leaving. <strong>Goes:</strong> <code>renewed</code>,
+<code>replaced</code>, <code>others</code>, <code>retire_token</code> as a separate rule.
+<strong>Counterexample kept:</strong> a rental whose provider deleted it still gets an SSH attempt
+until this Machine notices; the send fails, is logged, and stops when the rental reads ended.</p>
+<p class="small">Passed over: sending to the others before the new rental, or ignoring the first
+send's error. It fixes the walk above and leaves a failed re-send just as unrecorded. The deferred
+"this Machine renews by itself" then needs this record anyway; with it, that work is one call from
+the server's rental visit.</p>
 </div>
 
-<h2>Findings</h2>
+<h2>Smaller findings</h2>
 
 <div class="finding">
-  <h3>1. One Loopflow app, approval at first placement <span class="tag proposed">this work</span></h3>
-  <p>Above. Removes <code>forward.github_app</code>, the first demo line and the registration
-  steps. The grant step keeps the plan's check that the token reads the repository and cannot read
-  a second one, and prints the app's install link when the first half fails.</p>
-</div>
-
-<div class="finding">
-  <h3>2. "Signed in" has to mean the token works <span class="tag proposed">this work</span></h3>
-  <p>Three checks compare a login name: <code>remote_has</code> on the sender,
-  <code>installed</code> on the receiver, <code>service_login</code> behind
-  <code>lf machine logins</code>. The plan fixes the receiver. The sender still returns early, so
-  the renew command and the re-send both do nothing on a rental that already has a login. For a
-  rental the sender skips the question and sends; and the rental's GitHub row asks GitHub with the
-  token it holds, so an expired one reads signed out.</p>
+<h3>1. Get the token before renting <span class="tag proposed">this work</span></h3>
+<p>The rental's deadline is known from the template before anything is rented. Asking for "a token
+for this repository that lasts until then" before <code>rent</code> puts every GitHub failure
+ahead of the bill: no approval, a refused renewal, a changed <code>gh</code> account, GitHub
+unreachable, the app uninstalled. After renting, only the SSH send is left.
+<code>approve_first_rental</code> and its weaker check go; the plan's sentence "placement stops
+before anything is rented" becomes true for all of them, not only for a missing row.</p>
 </div>
 
 <div class="finding">
-  <h3>3. Cut the token in <code>mark_ended</code> <span class="tag proposed">this work</span></h3>
-  <p>One site instead of two, and it covers the sandbox its provider deleted. The renewal there is
-  a call to GitHub during an ending: it must never fail the ending, only log.</p>
-  <p><code>rentals.github_repository</code> stays a stored column. It cannot be derived from the
-  rental's Tasks: a rental made with <code>lf ondemand rent</code> has none, and
-  <code>mark_ended</code> hands the Tasks back before anything could ask.</p>
+<h3>2. Simultaneous placements wait their turn <span class="tag proposed">this work</span></h3>
+<p>The lock protects one repository's single-use refresh token. Scope it to the repository and let
+the second caller wait. Two placements of one repository then show one code, not a code and a
+refusal; placements of different repositories do not meet. An ending waits a moment and makes its
+cut. This Machine runs many placements at once; a refusal here is a failed Task launch.</p>
 </div>
 
 <div class="finding">
-  <h3>4. A rental reaches one repository <span class="tag proposed">this work, stated</span></h3>
-  <p><code>gh</code> keeps one token per account, so a rental has one GitHub login and one
-  repository. The plan excludes a private submodule. The same rule covers a rental made by hand:
-  <code>lf machine login github modal-1</code> takes the repository from the checkout it is run in,
-  and run from a second repository it replaces the first and says so. Chosen without asking,
-  because nothing today puts two repositories on one rental.</p>
+<h3>3. Show the install link with the code <span class="tag proposed">this work</span></h3>
+<p>An approval happens once per repository, and that is exactly when the app may be missing. Print
+<code>First install the app on loopflowstudio/loopflow: https://github.com/apps/loopflow-studio</code>
+above the code. The wasted first code becomes rare without any new check. <code>lf</code> cannot
+see the install beforehand: only a token from this app can ask.</p>
 </div>
 
 <div class="finding">
-  <h3>5. Two leftovers of the <code>logins</code> change <span class="tag proposed">this work</span></h3>
-  <p>The error for a rental with no agent says to run <code>lf machine login codex</code> here
-  (<code>rental.rs:697-704</code>). Once an empty <code>logins</code> stops following the laptop,
-  that advice does nothing; it has to name <code>--logins codex</code> on the template. The plan
-  says the message "already says so"; it does not.</p>
-  <p><code>github</code> and <code>linear</code> in <code>--logins</code> become words with no
-  effect, since the repository decides both. The docs example
-  <code>--logins codex,github</code> becomes <code>--logins codex</code>.</p>
+<h3>4. One door for "sign this rental in to GitHub" <span class="tag proposed">this work</span></h3>
+<p>With the settle step taking a repository, <code>prepare</code> and
+<code>lf machine login github &lt;rental&gt;</code> differ only in where the repository comes from.
+The branch in <code>prepare</code> and the current-directory read inside <code>connect</code>
+become one argument.</p>
 </div>
 
 <div class="finding">
-  <h3>6. Workflow permission reopens the door the token was meant to close <span class="tag proposed">this work, question 4</span></h3>
-  <p>The plan's app asks for Workflows write. With it, a rental can push a branch carrying a new
-  workflow, and a workflow on a branch reads the repository's Actions secrets. That is finding 2 of
-  the same security review, reached from the rental this Task is narrowing. Without it GitHub
-  refuses any push that adds or edits a file under <code>.github/workflows/</code>.</p>
+<h3>5. <code>--logins github</code> says what happens <span class="tag proposed">this work</span></h3>
+<p><code>lf ondemand add --logins github</code> answers "GitHub and Linear are signed in whenever
+the repository uses them; --logins takes codex or opencode". Templates already saved with them keep
+loading and the words are dropped when read.</p>
 </div>
 
 <div class="finding">
-  <h3>7. Rentals longer than 8 hours <span class="tag sep">separate</span></h3>
-  <p>The laptop's server already visits each rental to collect Session history. Renewing a token
-  near its end on that visit would make the 8 h clock disappear while the laptop is awake. It takes
-  the renew path from this work plus a call from that loop. Left out of this Task, as the plan has it.</p>
+<h3>6. Unproven facts the model rests on <span class="tag sep">needs a person</span></h3>
+<p>The four probes, plus two this review adds. GitHub documents, for OAuth apps, a limit of ten
+tokens per person and app with the oldest revoked past it, and ten new tokens an hour; whether App
+user tokens share it is unread here. If they do, the eleventh approved repository silently ends the
+first one's grant, and a rental longer than 8 hours, which renews on every sign-in, can meet the
+hourly limit. Add to probe 2: approve an eleventh repository, or read the limit.</p>
 </div>
 
 <div class="finding">
-  <h3>8. The other logins still outlive the rental <span class="tag sep">separate</span></h3>
-  <p>After this work GitHub ends with the rental and Linear ends within 24 h. The rest do not:
-  Codex's device login is its own renewing grant written on the rental, and nothing in the rental
-  code signs it out before the sandbox is deleted; OpenCode gets a fresh renewing login or a copied
-  raw key; Claude's setup token is long-lived and reaches the whole account. Signing Codex and
-  OpenCode out during give-back is a small change that helps only when the laptop does the giving
-  back. Claude has no narrower token to offer.</p>
+<h3>7. Other outcomes <span class="tag sep">separate</span></h3>
+<p><strong>This Machine renews a rental's token by itself.</strong> One call to settle from the
+server's rental visit, once the record above exists. Removes the 8-hour clock while the laptop is
+awake. <strong>Codex and OpenCode outlive the rental.</strong> Needs a sign-out in the give-back
+path and a decision about rentals the provider deletes. Both are in the plan as deferred, neither
+is a Task yet.</p>
 </div>
-
-<h2>What the plan gets right, and stays</h2>
-<ul>
-  <li>User token by device flow over an installation token (needs the laptop every hour and a
-  private key, authors PRs as a bot) and over a fine-grained PAT (cannot be created by a program).</li>
-  <li>The renewing grant never leaves the laptop, as Linear's does not.</li>
-  <li>No fallback to the laptop's token when the grant is missing: placement stops before renting.</li>
-  <li>Owned Machines unchanged.</li>
-  <li>Pass 1 proves the four unknowns against a real app before anything depends on them.</li>
-  <li>The first-contact fixes (<code>-a -x</code>, Daytona's pinned key, userinfo out of errors).</li>
-</ul>
 
 <h2>Questions</h2>
 <ol class="q">
-  <li><strong>Who owns the GitHub App?</strong>
-    <p>Either way an app must be registered on github.com by a person before the first pass can finish.</p>
-    <ol>
-      <li><span class="rec">Recommended.</span> One public "Loopflow" app under the organization.
-      Its id ships in <code>lf</code>. A person clicks Install on a repository once and never sees
-      an id.</li>
-      <li>Each person registers their own app and pastes its id into a setting (the plan).</li>
-    </ol>
-  </li>
-  <li><strong>Where does the first approval for a repository happen?</strong>
-    <ol>
-      <li><span class="rec">Recommended.</span> Inside <code>lf task run --rent</code>, the first
-      time that repository is rented from a terminal. A run with nobody there stops before renting
-      and names the command to run first.</li>
-      <li>Always a separate command, run before the first rental (the plan).</li>
-    </ol>
-  </li>
-  <li><strong>What is the command for approving ahead of time called?</strong>
-    <p>Needed for unattended setups under 2a, and for everyone under 2b.</p>
-    <ol>
-      <li><code>lf machine login github --rental</code> (the plan). Sits with the other sign-ins,
-      though it signs no Machine in.</li>
-      <li><span class="rec">Recommended.</span> <code>lf ondemand login github</code>. Sits with
-      <code>lf ondemand rent</code>, where rentals are set up.</li>
-    </ol>
-  </li>
-  <li><strong>May a rental push changes to CI workflows?</strong>
-    <ol>
-      <li><span class="rec">Recommended.</span> No. A Task that edits
-      <code>.github/workflows/</code> cannot push from a rental; GitHub refuses with its own
-      message and the Task is finished on your Machine. A rental can then never add a workflow that
-      reads the repository's secrets. Allowing it later means approving the app again.</li>
-      <li>Yes (the plan). Any Task can run on a rental; a rental can do to this repository's CI
-      what your laptop can.</li>
-    </ol>
-  </li>
-  <li><strong>A rental still running after 8 hours loses GitHub. What should happen?</strong>
-    <p>Rentals last 4 hours unless asked for longer; the most is 24.</p>
-    <ol>
-      <li><span class="rec">Recommended for this Task.</span> Placement prints the time GitHub
-      stops, and <code>lf machine login github &lt;rental&gt;</code> renews it (the plan).</li>
-      <li>Also file a Task so the laptop renews on its own while its server runs (finding 7).</li>
-    </ol>
-  </li>
-  <li><strong>A rental is deleted while the laptop is asleep. Its token keeps working until its
-  8-hour mark, or until the laptop next wakes and notices. Good enough?</strong>
-    <ol>
-      <li><span class="rec">Recommended.</span> Yes.</li>
-      <li>No. The only tighter option GitHub offers is a separate approval per rental: a code
-      typed, or an approver command run, at every placement.</li>
-    </ol>
-  </li>
-  <li><strong>A template with no <code>logins</code> no longer signs the rental in to Codex because
-  the laptop is.</strong>
-    <ol>
-      <li><span class="rec">Recommended.</span> Yes (the plan). A rental that should run Codex says
-      <code>--logins codex</code>.</li>
-      <li>Keep Codex following the laptop, and drop only OpenCode.</li>
-    </ol>
-  </li>
-  <li><strong>File finding 8 (sign Codex and OpenCode out when a rental is given back) as its own Task?</strong>
-    <ol>
-      <li>Yes.</li>
-      <li>No.</li>
-    </ol>
-  </li>
+<li><strong>When a rental's GitHub token is replaced under it and the new one fails to arrive,
+what should happen?</strong>
+<ol>
+<li class="rec">Loopflow remembers that rental is behind and sends the token the next time
+anything touches that repository's rentals; the failure names the rental. (Record what each rental
+was sent.)</li>
+<li>As built: it is told once, in the output of the command that caused it, when that command gets
+that far. Otherwise the rental's next push fails and you run
+<code>lf machine login github &lt;rental&gt;</code>.</li>
+</ol></li>
+<li><strong>Two <code>lf task run --rent</code> at the same moment.</strong>
+<ol>
+<li class="rec">The second waits a few seconds for the first, then proceeds. For a repository's
+first rental both wait on one code.</li>
+<li>As built: the second stops with "another machine login is in progress", sometimes after its
+rental was created and deleted.</li>
+</ol></li>
+<li><strong>GitHub says no (approval revoked, six months passed, <code>gh</code> switched
+accounts) on a run with no terminal.</strong>
+<ol>
+<li class="rec">The run stops before renting anything.</li>
+<li>As built: it rents, fails to sign in, deletes the rental, then stops.</li>
+</ol></li>
+<li><strong>The first approval of a repository.</strong>
+<ol>
+<li class="rec">The install link is printed above the code, every time a code is shown.</li>
+<li>As built: the link appears only after a code was typed and turned out useless.</li>
+</ol></li>
+<li><strong>The command that approves ahead of time.</strong> It takes no template and signs no
+Machine in; it lets rentals of the repository you are standing in use GitHub.
+<ol>
+<li>Keep <code>lf ondemand login github</code>.</li>
+<li><code>lf machine login github --rentals</code>: beside the other GitHub sign-ins, where
+<code>lf machine logins</code> already sends people.</li>
+<li class="rec">No recommendation: 5a is built and documented, 5b reads closer to what a person
+looks for. The name is easy to change until this lands.</li>
+</ol></li>
+<li><strong><code>--logins github</code> on a new template.</strong>
+<ol>
+<li class="rec">Refused with one sentence saying GitHub is always signed in.</li>
+<li>As built: accepted, does nothing.</li>
+</ol></li>
+<li><strong>File the two separate outcomes in finding 7 as Tasks?</strong>
+<ol><li>Both.</li><li>Automatic renewal only.</li><li>Neither yet.</li></ol></li>
 </ol>
 
 </main>

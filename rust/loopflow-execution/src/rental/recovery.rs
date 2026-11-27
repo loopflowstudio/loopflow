@@ -277,7 +277,26 @@ fn mark_ended(sqlite: &SqliteStore, rental: &Rental) -> anyhow::Result<()> {
             .map_or_else(|| task.to_string(), |task| task.identifier);
         println!("{name} back on {here}");
     }
+    retire_github(sqlite, rental);
     Ok(())
+}
+
+/// Cut the GitHub token an ended rental held, once no live rental of its
+/// repository holds it. An ending never fails on GitHub: a token left alone
+/// stops at its own expiry.
+fn retire_github(sqlite: &SqliteStore, rental: &Rental) {
+    let retired = sqlite
+        .rental_github_repository(&rental.id)
+        .map_err(anyhow::Error::from)
+        .and_then(|held| match held {
+            Some(repository) => {
+                crate::runtime::block_on(crate::rental::github::retire_token(sqlite, repository))
+            }
+            None => Ok(()),
+        });
+    if let Err(error) = retired {
+        tracing::warn!(rental = %rental.id, "GitHub token left to expire: {error:#}");
+    }
 }
 
 /// Pull the machine's records since its rental began (`lf history export`).
@@ -609,6 +628,68 @@ mod tests {
         assert!(refresh(&store, &api, &rental).unwrap().is_none());
         assert!(deleted(&log));
         assert_eq!(store.rental(&rental.id).unwrap().state, RentalState::Ended);
+    }
+
+    /// The grant a rental of repository 42 holds, its token still working.
+    fn grant() -> loopflow_storage::rental::GithubRentalGrant {
+        loopflow_storage::rental::GithubRentalGrant {
+            repository_id: 42,
+            repository: "loopflowstudio/loopflow".into(),
+            login: "jack".into(),
+            access_token: "ghu_HELD".into(),
+            refresh_token: "ghr_HELD".into(),
+            expires_at: time::OffsetDateTime::from_unix_timestamp(
+                time::OffsetDateTime::now_utc().unix_timestamp() + 3600,
+            )
+            .unwrap(),
+        }
+    }
+
+    #[test]
+    fn a_repositorys_last_rental_ending_stops_its_github_token() {
+        use crate::linear::test_server::{json_response, spawn};
+        use axum::http::StatusCode;
+        use serde_json::json;
+        let _env = crate::journal::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let _home =
+            crate::config::environment::EnvVarGuard::set("LF_HOME", dir.path().to_str().unwrap());
+        let (store, rental, _, _) = running(dir.path());
+        store.set_rental_github_repository(&rental.id, 42).unwrap();
+        store.put_github_rental_grant(&grant()).unwrap();
+        let ok = |body| json_response(StatusCode::OK, body);
+        let (url, _) = crate::runtime::block_on(spawn(vec![
+            ok(json!({
+                "access_token": "ghu_UNHELD", "refresh_token": "ghr_NEXT", "expires_in": 28800
+            })),
+            ok(json!({ "login": "jack" })),
+            ok(json!({ "total_count": 1, "installations": [{ "id": 7 }] })),
+            ok(json!({ "total_count": 1, "repositories": [{ "id": 42 }] })),
+        ]));
+        // Its provider deleted the sandbox; this Machine only notices.
+        let (api, _) = answering("null");
+        crate::rental::github::TEST_GITHUB_URL.sync_scope(url, || {
+            assert!(refresh(&store, &api, &rental).unwrap().is_none());
+        });
+        assert_eq!(store.rental(&rental.id).unwrap().state, RentalState::Ended);
+        let renewed = store.github_rental_grant(42).unwrap().unwrap();
+        assert!(renewed.access_token == "ghu_UNHELD");
+    }
+
+    #[test]
+    fn a_rental_ends_when_github_cannot_be_asked_to_stop_its_token() {
+        let _env = crate::journal::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let _home =
+            crate::config::environment::EnvVarGuard::set("LF_HOME", dir.path().to_str().unwrap());
+        let (store, rental, _, _) = running(dir.path());
+        store.set_rental_github_repository(&rental.id, 42).unwrap();
+        store.put_github_rental_grant(&grant()).unwrap();
+        let (api, _) = answering("null");
+        // No stand-in: every request to GitHub fails.
+        assert!(refresh(&store, &api, &rental).unwrap().is_none());
+        assert_eq!(store.rental(&rental.id).unwrap().state, RentalState::Ended);
+        assert!(store.github_rental_grant(42).unwrap() == Some(grant()));
     }
 
     /// A provider whose `get` answers `reply`, logging each operation.

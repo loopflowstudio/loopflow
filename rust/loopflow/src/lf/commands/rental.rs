@@ -11,15 +11,15 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, Context};
 use serde::Serialize;
-use time::OffsetDateTime;
 
 use super::task_row::TaskReading;
 use super::work_route::TaskPeer;
 use crate::lf::{OndemandCommand, PoolCommand};
 use loopflow_execution::installation::{ArtifactIdentity, ArtifactRole};
-use loopflow_execution::machine::{forward, login};
+use loopflow_execution::machine::{credentials, forward, login};
 use loopflow_execution::machine_records::CopyCounts;
 use loopflow_execution::provider_auth::Provider as LoginProvider;
+use loopflow_execution::rental::clock;
 use loopflow_execution::rental::recovery::{
     delete_sandbox, end as end_rental, give_back, held_ids, now, open_store, refresh_all,
 };
@@ -33,13 +33,6 @@ use loopflow_storage::sqlite::SqliteStore;
 /// An image-built sandbox answers SSH within seconds; RunPod and AWS
 /// install the tools on stock Ubuntu first, which takes minutes.
 const SSH_WAIT: Duration = Duration::from_secs(20 * 60);
-
-/// Local wall-clock time, as people read deadlines.
-fn clock(at: OffsetDateTime) -> String {
-    chrono::DateTime::from_timestamp(at.unix_timestamp(), 0)
-        .map(|at| at.with_timezone(&chrono::Local).format("%H:%M").to_string())
-        .unwrap_or_else(|| at.to_string())
-}
 
 // ---------------------------------------------------------------------------
 // lf pool
@@ -727,9 +720,14 @@ pub fn place(
         forwarded.carries_env(login::CLAUDE_TOKEN_ENV),
         &logins,
     )?;
+    // A repository's first rental asks for its GitHub approval before any
+    // rental exists to pay for.
+    loopflow_execution::runtime::block_on(
+        loopflow_execution::rental::github::approve_first_rental(sqlite, repo, batch),
+    )?;
     let (rental, machine) = rent(sqlite, name, None, None, false)?;
     let label = machine.name();
-    if let Err(error) = prepare(&machine, &logins, repo, &task, sqlite, batch) {
+    if let Err(error) = prepare(&machine, &rental, &logins, repo, &task, sqlite, batch) {
         // Nothing ran on it yet, so nothing is lost by giving it back now.
         let cleanup = Sandboxes::from_env(rental.provider)
             .and_then(|api| delete_sandbox(sqlite, &api, &rental));
@@ -881,6 +879,7 @@ fn require_agent_login(
 /// need, then prepare the Task's repository and Wave on the rental.
 fn prepare(
     machine: &Machine,
+    rental: &Rental,
     logins: &[LoginProvider],
     repo: &Path,
     task: &loopflow_storage::work::task::Task,
@@ -900,7 +899,16 @@ fn prepare(
         linear.then_some(LoginProvider::Linear),
     ];
     for provider in sign_in_order(logins.iter().copied().chain(required.into_iter().flatten())) {
-        loopflow_execution::runtime::block_on(login::login(machine, provider, None, false, batch))?;
+        loopflow_execution::runtime::block_on(async {
+            if provider == LoginProvider::GitHub {
+                // The Task's repository, whatever directory this runs from.
+                let approver = login::approver(provider, None)?;
+                let approver = approver.as_ref();
+                credentials::connect_rental(sqlite, machine, rental, repo, approver, batch).await
+            } else {
+                login::login(machine, provider, None, false, batch).await
+            }
+        })?;
     }
     if let Some(wave_id) = task.wave_id.as_ref().filter(|_| linear) {
         let wave = sqlite.get_wave(wave_id)?;

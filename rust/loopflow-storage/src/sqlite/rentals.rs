@@ -417,6 +417,58 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Records that `id` was sent the token of GitHub repository
+    /// `repository_id`; returns the repository it held before.
+    pub fn set_rental_github_repository(
+        &self,
+        id: &RentalId,
+        repository_id: i64,
+    ) -> StoreResult<Option<i64>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let before = tx
+            .query_row(
+                "SELECT github_repository_id FROM rentals WHERE id=?1",
+                [id.as_str()],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()?
+            .ok_or(StoreError::NotFound)?;
+        tx.execute(
+            "UPDATE rentals SET github_repository_id=?2 WHERE id=?1",
+            params![id.as_str(), repository_id],
+        )?;
+        tx.commit()?;
+        Ok(before)
+    }
+
+    /// The GitHub repository whose token `id` was last sent.
+    pub fn rental_github_repository(&self, id: &RentalId) -> StoreResult<Option<i64>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT github_repository_id FROM rentals WHERE id=?1",
+            [id.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or(StoreError::NotFound)
+    }
+
+    /// Live rentals holding the token of GitHub repository `repository_id`.
+    pub fn rentals_holding_github(&self, repository_id: i64) -> StoreResult<Vec<Rental>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        collect(
+            &conn,
+            &format!(
+                "SELECT {RENTAL_COLUMNS} FROM rentals
+                 WHERE github_repository_id=?1 AND state NOT IN ('ended','lost')
+                 ORDER BY created_at, id"
+            ),
+            [repository_id],
+            map_rental,
+        )
+    }
+
     /// Reachable and added: the rental is running as this Machine.
     pub fn attach_rental(&self, id: &RentalId, machine: &MachineId) -> StoreResult<Rental> {
         self.update_rental(

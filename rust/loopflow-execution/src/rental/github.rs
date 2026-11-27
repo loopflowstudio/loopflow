@@ -12,7 +12,7 @@ use time::OffsetDateTime;
 use crate::config::placement::Approver;
 use crate::machine::login::{self, Page, Sent};
 use crate::provider_auth::Provider;
-use loopflow_storage::rental::GithubRentalGrant;
+use loopflow_storage::rental::{GithubRentalGrant, Rental};
 use loopflow_storage::sqlite::SqliteStore;
 
 /// The public "Loopflow Studio" GitHub App. Device flow needs no secret, so
@@ -26,8 +26,13 @@ const REQUEST_DEADLINE: Duration = Duration::from_secs(15);
 #[cfg(test)]
 tokio::task_local! {
     /// The stand-in serving both github.com and api.github.com paths.
-    static TEST_GITHUB_URL: String;
+    pub(crate) static TEST_GITHUB_URL: String;
 }
+
+/// GitHub no longer takes the token it was asked with.
+#[derive(Debug, thiserror::Error)]
+#[error("GitHub rejected the credential")]
+pub(crate) struct Rejected;
 
 fn web(path: &str) -> String {
     #[cfg(test)]
@@ -68,7 +73,7 @@ async fn read(token: &str, path: &str) -> Result<Option<serde_json::Value>> {
             .map(Some)
             .map_err(|_| anyhow!("invalid GitHub response")),
         reqwest::StatusCode::NOT_FOUND => Ok(None),
-        reqwest::StatusCode::UNAUTHORIZED => bail!("GitHub rejected the credential"),
+        reqwest::StatusCode::UNAUTHORIZED => Err(Rejected.into()),
         status => bail!("GitHub answered {status}"),
     }
 }
@@ -91,7 +96,7 @@ pub struct Repository {
 
 /// The GitHub repository `repo`'s origin names, read with this Machine's own
 /// `gh` token; `None` when the origin is not on GitHub.
-async fn origin_repository(repo: &Path, token: &str) -> Result<Option<Repository>> {
+pub(crate) async fn origin_repository(repo: &Path, token: &str) -> Result<Option<Repository>> {
     let Some((owner, name)) = crate::git::worktrees::github_repo_nwo(repo) else {
         return Ok(None);
     };
@@ -216,6 +221,12 @@ async fn grant_from(
     })
 }
 
+/// A command approver needs no terminal; a browser needs a person at one.
+fn can_ask(approver: Option<&Approver>, batch: bool) -> bool {
+    matches!(approver, Some(Approver::Command { .. }))
+        || crate::machine::credentials::foreground(batch)
+}
+
 #[derive(Deserialize)]
 struct DeviceCode {
     device_code: String,
@@ -236,10 +247,7 @@ async fn approve_repository(
     batch: bool,
 ) -> Result<GithubRentalGrant> {
     let name = &repository.name;
-    // A command approver needs no terminal; a browser needs a person at one.
-    if !matches!(approver, Some(Approver::Command { .. }))
-        && !crate::machine::credentials::foreground(batch)
-    {
+    if !can_ask(approver, batch) {
         bail!(
             "rentals have no GitHub approval for {name} and this run has no terminal to ask in; \
              run `lf ondemand login github` from a terminal in its checkout, or set a command \
@@ -301,7 +309,7 @@ async fn approve_repository(
 /// Renew `grant`, which ends the token it held: every rental holding that
 /// token needs the new one. A refused renewal keeps the stored grant until an
 /// approval replaces it.
-pub async fn renew(sqlite: &SqliteStore, grant: &GithubRentalGrant) -> Result<GithubRentalGrant> {
+async fn renew(sqlite: &SqliteStore, grant: &GithubRentalGrant) -> Result<GithubRentalGrant> {
     let repository = Repository {
         id: grant.repository_id,
         name: grant.repository.clone(),
@@ -322,6 +330,104 @@ pub async fn renew(sqlite: &SqliteStore, grant: &GithubRentalGrant) -> Result<Gi
     let renewed = grant_from(issued, &repository, &grant.login).await?;
     sqlite.put_github_rental_grant(&renewed)?;
     Ok(renewed)
+}
+
+/// What a rental is sent for GitHub.
+// Deliberately no Debug: the grant holds credentials.
+pub(crate) struct RentalToken {
+    pub grant: GithubRentalGrant,
+    /// The repository's earlier token stopped working: its other rentals need
+    /// this one.
+    pub renewed: bool,
+    /// The repository whose token the rental held until now, when another.
+    pub replaced: Option<String>,
+}
+
+/// The token `rental` holds for `repository`, recorded as held. The stored one
+/// when it outlives the rental; otherwise a renewed one, or a new approval
+/// when GitHub no longer renews. `login` is the account this Machine's `gh`
+/// is signed in to.
+pub(crate) async fn token_for(
+    sqlite: &SqliteStore,
+    rental: &Rental,
+    repository: &Repository,
+    login: &str,
+    approver: Option<&Approver>,
+    batch: bool,
+) -> Result<RentalToken> {
+    // Two renewals of one grant would race for its single refresh token.
+    let _lock = crate::machine::credentials::credential_lock("github")?;
+    let stored = sqlite
+        .github_rental_grant(repository.id)?
+        .filter(|stored| stored.login == login);
+    let (grant, renewed) = match stored {
+        Some(stored) if stored.expires_at >= rental.deadline => (stored, false),
+        Some(stored) => {
+            let grant = match renew(sqlite, &stored).await {
+                Ok(grant) => grant,
+                Err(_) if can_ask(approver, batch) => {
+                    approve_repository(sqlite, repository, login, approver, batch).await?
+                }
+                Err(error) => return Err(error),
+            };
+            (grant, true)
+        }
+        None => (
+            approve_repository(sqlite, repository, login, approver, batch).await?,
+            true,
+        ),
+    };
+    // Recorded under the lock, so an ending rental never retires a token this
+    // one was just handed.
+    let replaced = match sqlite.set_rental_github_repository(&rental.id, repository.id)? {
+        Some(before) if before != repository.id => sqlite
+            .github_rental_grant(before)?
+            .map(|grant| grant.repository),
+        _ => None,
+    };
+    Ok(RentalToken {
+        grant,
+        renewed,
+        replaced,
+    })
+}
+
+/// Before anything is rented: `repo`'s rentals need a GitHub approval, asked
+/// for here at the repository's first rental. An origin outside GitHub needs
+/// none.
+pub async fn approve_first_rental(sqlite: &SqliteStore, repo: &Path, batch: bool) -> Result<()> {
+    if crate::git::worktrees::github_repo_nwo(repo).is_none() {
+        return Ok(());
+    }
+    let laptop = crate::machine::credentials::gh_token()?;
+    let token = secrecy::ExposeSecret::expose_secret(&laptop);
+    let Some(repository) = origin_repository(repo, token).await? else {
+        return Ok(());
+    };
+    let _lock = crate::machine::credentials::credential_lock("github")?;
+    if sqlite.github_rental_grant(repository.id)?.is_some() {
+        return Ok(());
+    }
+    let login = login_of(token).await?;
+    let approver = login::approver(Provider::GitHub, None)?;
+    approve_repository(sqlite, &repository, &login, approver.as_ref(), batch).await?;
+    Ok(())
+}
+
+/// A rental ended. When it was the last one holding the repository's token,
+/// renew the grant: that ends the token, and nothing holds the new one until
+/// the next rental.
+pub(crate) async fn retire_token(sqlite: &SqliteStore, repository_id: i64) -> Result<()> {
+    let _lock = crate::machine::credentials::credential_lock("github")?;
+    if !sqlite.rentals_holding_github(repository_id)?.is_empty() {
+        return Ok(());
+    }
+    match sqlite.github_rental_grant(repository_id)? {
+        Some(grant) if grant.expires_at > OffsetDateTime::now_utc() => {
+            renew(sqlite, &grant).await.map(drop)
+        }
+        _ => Ok(()),
+    }
 }
 
 /// `lf ondemand login github`: approve GitHub for the rentals of the

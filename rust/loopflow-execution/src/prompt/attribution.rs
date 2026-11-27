@@ -87,10 +87,10 @@ pub fn attributed_context(
         );
     }
     push(
-        components.surface.instructions(),
+        components.mode.instructions(),
         Kind::SurfaceInstructions,
         Scope::Global,
-        format!("{:?} surface", components.surface),
+        format!("{:?} mode", components.mode),
         None,
         "surface",
     );
@@ -263,7 +263,7 @@ pub fn attributed_context(
                 decision.reason = format!("selected skill: {}", decision.label);
             }
             Kind::SurfaceInstructions => {
-                decision.reason = format!("{:?} conversation surface", components.surface);
+                decision.reason = format!("{:?} run mode", components.mode);
             }
             Kind::RepoInstructions => {
                 decision.reason = "repository guide included in this input".into();

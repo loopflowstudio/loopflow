@@ -638,12 +638,6 @@ conversation and AgentProcess record. Revalidate native scope or exclusive proce
 group before signaling. An attached LfProcess may disappear while its AgentProcess survives;
 recorded endpoints alone do not prove liveness.
 
-## Independent bridges
-
-`lf discord serve <wave>` is a foreground bridge from a configured channel to
-bounded conversations. It has no Wave cursor or inbox authority. Cron and Task execution
-do not require a daemon or bridge. See [Discord](../work.md#talk-to-it-from-discord).
-
 ## Move a Wave without changing its identity
 
 Wave identity is a UUID. The readable Wave locator is `(canonical repository, slug)`.

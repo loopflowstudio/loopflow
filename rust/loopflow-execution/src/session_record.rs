@@ -557,15 +557,6 @@ impl SessionRecorder {
 }
 
 /// The store that holds the conversation for the capture recorded at `dir`.
-/// The final answer of the input recorded at `dir`, from its provider's
-/// transcript.
-///
-/// # Errors
-/// When the store cannot be opened or the transcript cannot be read.
-pub fn final_answer(dir: &Path) -> anyhow::Result<Option<String>> {
-    crate::transcript::answer::input_final_answer(&row_store(dir)?, &input_id_from_dir(dir)?)
-}
-
 pub(crate) fn row_store(dir: &Path) -> StoreResult<loopflow_storage::sqlite::SqliteStore> {
     crate::store::open_sqlite(&row_database(dir)?)
 }

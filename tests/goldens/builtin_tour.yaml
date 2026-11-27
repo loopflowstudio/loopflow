@@ -1,7 +1,6 @@
 name: builtin_tour
 repo: tests/parity/fixtures/basic
 skill: tour
-surface: headless
 docs: []
 diff_files: false
 diff: false

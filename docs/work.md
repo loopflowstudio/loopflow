@@ -718,25 +718,6 @@ Removal retires the Wave and its children, folds a child's `MEMORY.md` into its
 parent, and keeps completed history readable via `lf wave show payments`.
 You can then connect another Wave to the same Linear Project.
 
-### Talk to it from Discord
-
-Talk to a Wave from a Discord channel:
-
-```yaml
-# .lf/wave/billing/config.yaml
-chat:
-  provider: discord
-  guild_id: "123456789012345678"
-  channel_id: "234567890123456789"
-```
-
-```bash
-doppler run -- lf discord serve billing
-```
-
-Each new message becomes a Wave-attributed conversation and posts its final
-answer back to the channel.
-
 ## Reference
 
 **Task identifiers.** Ticket aliases (`LOO-12`, case-insensitive), full IDs, or

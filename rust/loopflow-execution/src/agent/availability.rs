@@ -23,10 +23,10 @@ impl MachineAgents {
     pub(crate) fn for_prompt(
         &mut self,
         config: &Config,
-        surface: crate::prompt::Surface,
+        mode: crate::harness::Mode,
     ) -> Result<(Agent, Vec<Agent>), LoadError> {
         let (agent, rest) = self.choose(config)?;
-        if surface == crate::prompt::Surface::Headless && crate::journal::graph_step() {
+        if mode == crate::harness::Mode::Headless && crate::journal::graph_step() {
             // An explicit worker stays on its harness. Report a missing login
             // before admitting a worker that would just wait for sign-in.
             if let Some(reason) = self.failure(agent.harness) {

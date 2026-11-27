@@ -8,15 +8,11 @@ use crate::name::portable_name;
 /// Launcher guidance every launch carries: how to work, Tasks and notes.
 pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
 
-/// Headless preamble — the only surface that needs one (no user is present).
-pub const SURFACE_HEADLESS: &str = include_str!("builtins/surfaces/headless.md");
+/// What a headless launch is told: nobody is in the conversation.
+pub const MODE_HEADLESS: &str = include_str!("builtins/modes/headless.md");
 
-/// Shared contract for every surface with someone participating in the current conversation.
-pub const SURFACE_HUMAN_PRESENT: &str = include_str!("builtins/surfaces/human-present.md");
-
-/// Live chat channel (e.g. Discord): a person is reading, so the reply is a
-/// plain, deliberate, addressed message — never a working transcript.
-pub const SURFACE_CHAT: &str = include_str!("builtins/surfaces/chat.md");
+/// What an interactive launch is told: someone is in the conversation.
+pub const MODE_INTERACTIVE: &str = include_str!("builtins/modes/interactive.md");
 
 /// Review page kit: shared interactive runtime, base stylesheet, default theme,
 /// and built-in `<lf-component>` templates.

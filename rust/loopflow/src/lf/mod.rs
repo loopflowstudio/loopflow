@@ -246,9 +246,7 @@ impl Cli {
 
     pub fn may_launch_agent(&self) -> bool {
         match &self.command {
-            None
-            | Some(Commands::External(_) | Commands::Inline { .. })
-            | Some(Commands::Discord { .. }) => true,
+            None | Some(Commands::External(_) | Commands::Inline { .. }) => true,
             Some(Commands::Skill { cmd }) => matches!(cmd, SkillCommand::External(_)),
             Some(Commands::Graph { cmd }) => {
                 matches!(cmd, GraphCommand::Run | GraphCommand::External(_))
@@ -660,11 +658,6 @@ pub enum Commands {
     Scratch {
         #[command(subcommand)]
         cmd: ScratchCommand,
-    },
-    /// Bridge new Discord messages to finite Wave Sessions
-    Discord {
-        #[command(subcommand)]
-        cmd: DiscordCommand,
     },
     /// Internal provider turn-boundary hook: context at startup and compaction,
     /// steers at tool and prompt boundaries, Linear fetch at turn end.
@@ -1152,7 +1145,6 @@ impl Commands {
             Self::Open(_)
             | Self::Inline { .. }
             | Self::Scratch { .. }
-            | Self::Discord { .. }
             | Self::ContextBlock { .. }
             | Self::External(_) => true,
         }
@@ -3731,7 +3723,6 @@ mod tests {
                 "lf", "--wave", "product", "config", "set", "machine", "mini",
             ],
             vec!["lf", "config", "unset", "agent", "--global"],
-            vec!["lf", "discord", "serve", "product"],
             vec!["lf", "machine", "doctor", "--plan", "--json"],
             vec!["lf", "wave", "sync", "product"],
             vec![
@@ -4532,10 +4523,4 @@ mod tests {
             .expect("unknown names remain eligible for skill discovery");
         assert!(matches!(cli.command, Some(Commands::External(_))));
     }
-}
-
-#[derive(Debug, Subcommand)]
-pub enum DiscordCommand {
-    /// Poll a configured channel and post each Session's final answer
-    Serve { wave: String },
 }

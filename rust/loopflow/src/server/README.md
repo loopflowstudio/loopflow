@@ -503,6 +503,8 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.auto.off` | `lf task auto off <issue>` | `engine::task` |
 | `task.steer` | `lf steer <issue> <message>` | `engine::task`; the saved steer ID and delivery receipt |
 | `task.report` | `lf task report <issue> <message>` | `engine::task` |
+| `task.pause` | `lf task pause <issue>` | Stop work on the execution Machine and return its receipt |
+| `task.unpause` | `lf task unpause <issue> [--run]` | Lift the hold there. With `run`, resume automatic work. Return the run or `null` when the Task stays at its step |
 | `task.interrupt` | `lf task interrupt <issue>` | `engine::task` |
 | `task.update` | `lf task update <issue>` | write |
 | `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |

@@ -1,1 +1,1 @@
-["open", "available", "busy", "blocked", "error", "unstarted", "idle", "active", "moving", "backlog", "working", "done", "auto"]
+["open", "available", "busy", "blocked", "error", "unstarted", "idle", "active", "moving", "paused", "backlog", "working", "done", "auto"]

@@ -44,6 +44,7 @@ pub fn run() -> anyhow::Result<()> {
         .worker_threads(4)
         .max_blocking_threads(12)
         .thread_keep_alive(std::time::Duration::from_secs(2))
+        .thread_stack_size(8 * 1024 * 1024)
         .thread_name("lf-server")
         .enable_all()
         .build()?;

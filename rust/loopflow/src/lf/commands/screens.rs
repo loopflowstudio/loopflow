@@ -227,7 +227,12 @@ pub fn task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {
     let (store, task) = registered_task(&repo, issue, TaskScope::RepositoryOrAny)?;
     let id = task.id.clone();
     let pane = loopflow_execution::runtime::block_on(async {
-        let status = loopflow_execution::ops::task::registered_task_status(&store, task).await?;
+        let status = loopflow_execution::ops::task::registered_task_status(
+            &store,
+            task,
+            crate::lf::navigation::command_merges,
+        )
+        .await?;
         super::waves::task_pane(&store, status).await
     })?;
     let row = pane.row.context("registered Task has no planning row")?;
@@ -327,6 +332,14 @@ mod tests {
         ))
         .unwrap();
         let decoded: TaskDetail = serde_json::from_value(detail.clone()).unwrap();
+        assert_eq!(
+            decoded.state,
+            loopflow_execution::durable::TaskState::Paused
+        );
+        assert_eq!(
+            decoded.section,
+            loopflow_execution::durable::TaskSection::Working
+        );
         assert_eq!(
             decoded.checks.as_ref().unwrap().failing_checks[0].name,
             "rust-test"

@@ -113,6 +113,7 @@
         "workspace": null
       },
       "lifecycle": "idle",
+      "working_group": "active",
       "selection_states": [
         "open",
         "idle",
@@ -170,6 +171,7 @@
         "outlook": null
       },
       "run_control": {
+        "pausing": false,
         "unavailable": null
       },
       "pr": null,
@@ -242,6 +244,7 @@
         "workspace": null
       },
       "lifecycle": "moving",
+      "working_group": "active",
       "selection_states": [
         "open",
         "moving",
@@ -299,6 +302,7 @@
         "outlook": null
       },
       "run_control": {
+        "pausing": false,
         "unavailable": null
       },
       "pr": null,

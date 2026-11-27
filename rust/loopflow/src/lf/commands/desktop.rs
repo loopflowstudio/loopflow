@@ -668,7 +668,12 @@ pub(crate) fn read_task_pane(
     let (store, task) =
         super::screens::registered_task(&repo, issue, super::screens::TaskScope::Repository)?;
     loopflow_execution::runtime::block_on(async {
-        let status = loopflow_execution::ops::task::registered_task_status(&store, task).await?;
+        let status = loopflow_execution::ops::task::registered_task_status(
+            &store,
+            task,
+            crate::lf::navigation::command_merges,
+        )
+        .await?;
         super::waves::task_pane(&store, status).await
     })
 }
@@ -684,7 +689,13 @@ pub(crate) fn subscribe_task_pane(
         let store = loopflow_execution::store::read_existing_registry()?
             .map(std::sync::Arc::new)
             .context("no Loopflow store exists on this Machine")?;
-        let status = loopflow_execution::ops::task::read_task_status(&store, &repo, issue).await?;
+        let status = loopflow_execution::ops::task::read_task_status(
+            &store,
+            &repo,
+            issue,
+            crate::lf::navigation::command_merges,
+        )
+        .await?;
         anyhow::Ok(
             status
                 .task
@@ -723,7 +734,11 @@ pub(crate) fn read_plans(
 ) -> Result<Vec<loopflow_storage::work::selection::ViewPlan>> {
     let store = work_registry()?;
     let repository = repository_in(selected, directory, &store.sqlite)?;
-    Ok(selections::selection_plans(&store.sqlite, &repository)?)
+    Ok(selections::selection_plans(
+        &store.sqlite,
+        &repository,
+        crate::lf::navigation::command_merges,
+    )?)
 }
 
 /// `lf desktop view list --subscribe` for `--repository`, else the repository
@@ -742,7 +757,11 @@ pub(crate) fn subscribe_plans(
                 .context("Work registry is unavailable")
                 .and_then(|store| {
                     let repository = repository_in(selected.as_ref(), &directory, &store.sqlite)?;
-                    Ok(selections::selection_plans(&store.sqlite, &repository)?)
+                    Ok(selections::selection_plans(
+                        &store.sqlite,
+                        &repository,
+                        crate::lf::navigation::command_merges,
+                    )?)
                 });
             async move { result }
         },
@@ -773,6 +792,7 @@ pub(crate) fn subscribe_view_plan(
                         &store.sqlite,
                         &repository,
                         expression.as_deref(),
+                        crate::lf::navigation::command_merges,
                     )?)
                 });
             async move { result }
@@ -806,6 +826,7 @@ pub(crate) fn read_all_view_plans(
         &store.sqlite,
         expression,
         &portfolio_repos()?,
+        crate::lf::navigation::command_merges,
     )?)
 }
 
@@ -827,6 +848,7 @@ pub(crate) fn subscribe_all_view_plans(
                 &store.sqlite,
                 args.expression.as_deref(),
                 &portfolio_repos()?,
+                crate::lf::navigation::command_merges,
             )?)
         },
         transport,
@@ -849,6 +871,7 @@ pub fn plan_view(
         &store.sqlite,
         &repository,
         expression,
+        crate::lf::navigation::command_merges,
     )?)
 }
 
@@ -899,6 +922,7 @@ fn view_plan(
                 id: SelectionId("work-default".into()),
                 expression,
             },
+            crate::lf::navigation::command_merges,
         )?
     } else {
         plan_view(

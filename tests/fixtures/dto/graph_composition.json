@@ -228,6 +228,10 @@
         "interactive": false
       }
     ],
+    "start": {
+      "action": "run",
+      "label": "Run: review"
+    },
     "interactive_steps": [],
     "sentence": "Runs on its own."
   }

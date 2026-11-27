@@ -64,6 +64,7 @@ pub mod task_moves;
 mod task_retirement;
 mod transport;
 pub use task_retirement::{TaskRetirement, ViewerHold, WORKSPACE_GRACE};
+pub mod task_pause;
 mod task_state;
 pub mod task_summaries;
 pub mod task_work;
@@ -75,7 +76,7 @@ pub use children::ClosedTaskPage;
 pub use graph_inventory::{entry_of, AgentLimitRecovery, GraphExecutionFacts, UnrunGraph};
 pub use revisions::{Revisions, StoreRevisions};
 pub use session_events::{AnsweredTurn, CurrentConversation, TurnSpan};
-pub use task_details::TaskDetailFacts;
+pub use task_details::{GraphDetail, GraphDetailInput, GraphDetailReader, TaskDetailFacts};
 pub use task_work::{Auto, AutoState, OpenWork};
 
 /// A fleet can legitimately queue longer than SQLite's common five-second

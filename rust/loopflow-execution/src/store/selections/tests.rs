@@ -1,5 +1,6 @@
 use crate::process::attachment;
 use crate::store::selections;
+use crate::task_graph::tests::test_merges;
 
 use loopflow_model::durable::RepositoryId;
 use loopflow_storage::sqlite::SqliteStore;
@@ -7,6 +8,14 @@ use loopflow_storage::work::selection::{
     Arrangement, ArrangementMode, DashboardId, Selection, SelectionError, SelectionExpression,
     SelectionId, WorkWorkspaceKind,
 };
+
+fn view_plan(
+    store: &SqliteStore,
+    repo: &RepositoryId,
+    query: Option<&str>,
+) -> crate::store::StoreResult<loopflow_storage::work::selection::ViewPlan> {
+    selections::view_plan(store, repo, query, test_merges)
+}
 
 fn fixture() -> (tempfile::TempDir, SqliteStore, RepositoryId) {
     let dir = tempfile::tempdir().unwrap();
@@ -228,7 +237,7 @@ fn owned_unstarted_task_is_open_but_excluded_from_working_queries() {
         Some("state:working"),
         Some("wave:Product state:working"),
     ] {
-        let plan = selections::view_plan(&store, &repo, expression).unwrap();
+        let plan = view_plan(&store, &repo, expression).unwrap();
         assert_eq!(
             plan.resolution.task_ids(),
             ["task_22222222222222222222222222222222"]
@@ -240,7 +249,7 @@ fn owned_unstarted_task_is_open_but_excluded_from_working_queries() {
         "wave:Product state:open",
         "state:unstarted state:backlog",
     ] {
-        let plan = selections::view_plan(&store, &repo, Some(expression)).unwrap();
+        let plan = view_plan(&store, &repo, Some(expression)).unwrap();
         assert!(
             plan.resolution.task_ids().iter().any(|id| id == task),
             "{expression}"
@@ -274,7 +283,7 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_prepend() {
         .execute("UPDATE tasks SET planning_rank=0 WHERE id=?1", [two])
         .unwrap();
     assert_eq!(
-        selections::view_plan(&store, &repo, None)
+        view_plan(&store, &repo, None)
             .unwrap()
             .resolution
             .task_ids(),
@@ -285,13 +294,13 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_prepend() {
         [two, one]
     );
     assert_eq!(
-        selections::view_plan(&store, &repo, None)
+        view_plan(&store, &repo, None)
             .unwrap()
             .resolution
             .task_ids(),
         [two, one]
     );
-    let plans = selections::selection_plans(&store, &repo).unwrap();
+    let plans = selections::selection_plans(&store, &repo, test_merges).unwrap();
     let wave = plans
         .iter()
         .find(|plan| {
@@ -310,7 +319,7 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_prepend() {
         ))
         .unwrap();
     assert_eq!(
-        selections::view_plan(&store, &repo, None)
+        view_plan(&store, &repo, None)
             .unwrap()
             .resolution
             .task_ids(),
@@ -326,7 +335,7 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_prepend() {
     }
     assert_eq!(store.revisions().unwrap(), revisions);
     assert_eq!(
-        selections::view_plan(&store, &repo, None)
+        view_plan(&store, &repo, None)
             .unwrap()
             .resolution
             .task_ids(),
@@ -339,28 +348,51 @@ fn sidebar_step_follows_the_captured_cursor_and_disappears_without_a_graph() {
     let (_dir, store, repo) = fixture();
     let id =
         loopflow_model::durable::TaskId::parse("task_22222222222222222222222222222222").unwrap();
-    let step = || {
-        selections::view_plan(&store, &repo, None)
+    let row = || {
+        view_plan(&store, &repo, None)
             .unwrap()
             .contents
             .into_iter()
             .find(|content| content.work.id == id.as_str())
             .unwrap()
-            .graph_step
     };
-    assert_eq!(step(), None);
+    assert_eq!(row().graph_step, None);
     let graph = crate::task_graph::CapturedGraph::load("code", _dir.path())
         .unwrap()
         .unwrap();
+    use loopflow_storage::execution::WorkingGroup::{Active, Paused, Shipping};
+    assert_eq!(row().working_group, Some(Active));
     let cursor = graph.find("implement").unwrap().cursor();
     store
         .take_up_task_graph(&id, &serde_json::to_string(&graph).unwrap())
         .unwrap();
-    assert_eq!(step(), None, "before the first step");
+    assert_eq!(row().graph_step, None, "before the first step");
     store.set_task_graph_step(&id, "end").unwrap();
-    assert_eq!(step(), None, "after the last step");
+    assert_eq!(row().graph_step, None, "after the last step");
+    assert_eq!(row().working_group, Some(Shipping));
+    let mark = |state| {
+        store
+            .set_task_auto(
+                &id,
+                &loopflow_storage::sqlite::Auto {
+                    state,
+                    at: 1,
+                    by: crate::process::Starter::Person { name: None },
+                },
+                false,
+            )
+            .unwrap();
+    };
+    store
+        .set_task_graph_step(&id, "land --wait-and-fix")
+        .unwrap();
+    assert_eq!(row().working_group, Some(Shipping));
+    mark(loopflow_storage::sqlite::AutoState::Off);
+    assert_eq!(row().working_group, Some(Active));
+    store.set_task_graph_step(&id, "ship-review").unwrap();
+    assert_eq!(row().working_group, Some(Active));
     store.set_task_graph_step(&id, "review").unwrap();
-    assert_eq!(step().as_deref(), Some("review"));
+    assert_eq!(row().graph_step.as_deref(), Some("review"));
     let carrier = store.test_lf_process();
     let started = loopflow_storage::graph_process::ExecutionStart::reserved(1);
     let run_from = |step: &str, cursor: &str| {
@@ -369,7 +401,16 @@ fn sidebar_step_follows_the_captured_cursor_and_disappears_without_a_graph() {
             .unwrap());
     };
     run_from("review", &serde_json::to_string(&cursor).unwrap());
-    assert_eq!(step().as_deref(), Some("implement"));
+    assert_eq!(row().graph_step.as_deref(), Some("implement"));
+    assert_eq!(row().working_group, Some(Active));
+    let deliver = serde_json::to_string(&graph.find("deliver").unwrap().cursor()).unwrap();
+    store
+        .advance_task_graph_run(&id, &carrier, &deliver)
+        .unwrap();
+    mark(loopflow_storage::sqlite::AutoState::On);
+    assert_eq!(row().working_group, Some(Shipping));
+    mark(loopflow_storage::sqlite::AutoState::Off);
+    assert_eq!(row().working_group, Some(Active));
     let past_end = serde_json::to_string(&crate::graph::runner::ExecutionCursor {
         index: graph.steps.len(),
         ..Default::default()
@@ -378,10 +419,23 @@ fn sidebar_step_follows_the_captured_cursor_and_disappears_without_a_graph() {
     store
         .advance_task_graph_run(&id, &carrier, &past_end)
         .unwrap();
-    assert_eq!(step().as_deref(), Some("review"));
+    assert_eq!(row().working_group, Some(Shipping));
+    assert_eq!(row().graph_step.as_deref(), Some("review"));
     store.set_task_graph_step(&id, "end").unwrap();
     run_from("end", &past_end);
-    assert_eq!(step(), None);
+    assert_eq!(row().graph_step, None);
+    store.conn.lock().unwrap().execute(
+        "INSERT INTO task_pauses(task_id,paused_at,paused_by) VALUES(?1,1,json_object('kind','person','name','Ada'))", [id.as_str()]
+    ).unwrap();
+    mark(loopflow_storage::sqlite::AutoState::On);
+    let matched = view_plan(&store, &repo, Some("kind:task state:paused")).unwrap();
+    assert_eq!(matched.contents.len(), 1);
+    let held = row();
+    assert_eq!(matched.contents[0], held);
+    assert!(held
+        .states
+        .contains(&loopflow_storage::work::selection::SelectionState::Working));
+    assert_eq!(held.working_group, Some(Paused));
 }
 
 #[test]
@@ -402,7 +456,7 @@ fn repository_and_wave_tiles_open_only_the_unfinished_primary() {
     .unwrap();
 
     let check = |primary: Option<&str>| {
-        let tiles: Vec<_> = selections::selection_plans(&store, &repo)
+        let tiles: Vec<_> = selections::selection_plans(&store, &repo, test_merges)
             .unwrap()
             .into_iter()
             .flat_map(|plan| plan.contents)
@@ -441,7 +495,9 @@ fn a_wave_scoped_reading_skips_repositories_without_that_wave() {
         )
         .unwrap();
     let repos = ["/repo".to_string(), "/other".to_string()];
-    let all = selections::all_view_plans(&store, Some("kind:task state:working"), &repos).unwrap();
+    let all =
+        selections::all_view_plans(&store, Some("kind:task state:working"), &repos, test_merges)
+            .unwrap();
     assert_eq!(
         all.iter()
             .map(|plan| plan.repo_path.as_str())
@@ -452,6 +508,7 @@ fn a_wave_scoped_reading_skips_repositories_without_that_wave() {
         &store,
         Some("wave:11111111-1111-1111-1111-111111111111 kind:task state:working"),
         &repos,
+        test_merges,
     )
     .unwrap();
     assert_eq!(scoped.len(), 1);
@@ -463,7 +520,7 @@ fn a_wave_scoped_reading_skips_repositories_without_that_wave() {
 fn wave_default_plan_uses_three_slot_strip() {
     use loopflow_storage::work::selection::{SlotLayout, SlotNode, SplitAxis};
     let (_dir, store, repo) = fixture();
-    let plans = selections::selection_plans(&store, &repo).unwrap();
+    let plans = selections::selection_plans(&store, &repo, test_merges).unwrap();
     let wave = plans
         .iter()
         .find(|plan| {
@@ -524,9 +581,7 @@ fn dashboard_slots_round_trip_survive_query_edits_and_reject_invalid_layouts() {
     use loopflow_storage::work::selection::{SlotLayout, SlotNode, SplitAxis};
     let (_dir, store, repo) = fixture();
     assert_eq!(
-        selections::view_plan(&store, &repo, Some("state:open"))
-            .unwrap()
-            .slots,
+        view_plan(&store, &repo, Some("state:open")).unwrap().slots,
         SlotLayout::golden()
     );
     assert_eq!(SlotLayout::golden().slots().len(), 7);
@@ -535,9 +590,7 @@ fn dashboard_slots_round_trip_survive_query_edits_and_reject_invalid_layouts() {
     assert_eq!(saved.slots, None);
     let query = format!("query:{}", id.0);
     assert_eq!(
-        selections::view_plan(&store, &repo, Some(&query))
-            .unwrap()
-            .slots,
+        view_plan(&store, &repo, Some(&query)).unwrap().slots,
         SlotLayout::golden()
     );
 
@@ -552,12 +605,7 @@ fn dashboard_slots_round_trip_survive_query_edits_and_reject_invalid_layouts() {
         .set_dashboard_slots(&repo, &id, saved.revision, Some(&two))
         .unwrap();
     assert_eq!(arranged.revision, saved.revision + 1);
-    assert_eq!(
-        selections::view_plan(&store, &repo, Some(&query))
-            .unwrap()
-            .slots,
-        two
-    );
+    assert_eq!(view_plan(&store, &repo, Some(&query)).unwrap().slots, two);
     let edited =
         selections::edit_dashboard(&store, &repo, &id, "state:backlog", Some(arranged.revision))
             .unwrap();
@@ -583,9 +631,7 @@ fn dashboard_slots_round_trip_survive_query_edits_and_reject_invalid_layouts() {
         .unwrap();
     assert_eq!(reset.slots, None);
     assert_eq!(
-        selections::view_plan(&store, &repo, Some(&query))
-            .unwrap()
-            .slots,
+        view_plan(&store, &repo, Some(&query)).unwrap().slots,
         SlotLayout::golden()
     );
 }
@@ -602,15 +648,15 @@ fn repository_queries_include_tasks_without_a_wave() {
             [],
         )
         .unwrap();
-    let plan = selections::view_plan(&store, &repo, Some("task:FIX-2")).unwrap();
+    let plan = view_plan(&store, &repo, Some("task:FIX-2")).unwrap();
     assert_eq!(plan.contents.len(), 1);
     assert_eq!(plan.contents[0].title, "Idle");
-    assert!(selections::view_plan(&store, &repo, None)
+    assert!(view_plan(&store, &repo, None)
         .unwrap()
         .contents
         .iter()
         .any(|content| content.work == plan.contents[0].work));
-    let wave = selections::view_plan(&store, &repo, Some("wave:Product state:open")).unwrap();
+    let wave = view_plan(&store, &repo, Some("wave:Product state:open")).unwrap();
     assert!(!wave
         .contents
         .iter()
@@ -620,20 +666,20 @@ fn repository_queries_include_tasks_without_a_wave() {
 #[test]
 fn dashboards_leave_repository_and_wave_defaults_unchanged() {
     let (_dir, store, repo) = fixture();
-    let defaults = selections::selection_plans(&store, &repo).unwrap();
+    let defaults = selections::selection_plans(&store, &repo, test_merges).unwrap();
     let id = DashboardId("backlog".into());
     let saved = selections::edit_dashboard(&store, &repo, &id, "state:backlog", None).unwrap();
     let named = store
         .set_dashboard_metadata(&repo, &id, saved.revision, Some("Later"), Some(true))
         .unwrap();
     let revisions = store.revisions().unwrap();
-    let dashboard = selections::view_plan(&store, &repo, Some("query:backlog")).unwrap();
+    let dashboard = view_plan(&store, &repo, Some("query:backlog")).unwrap();
     assert_eq!(dashboard.dashboard_id, Some(id.clone()));
     assert_eq!(dashboard.name.as_deref(), Some("Later"));
     assert!(dashboard.pinned);
     assert_eq!(dashboard.contents.len(), 2);
     assert!(dashboard.contents[0].primary_session.is_none());
-    let plans = selections::selection_plans(&store, &repo).unwrap();
+    let plans = selections::selection_plans(&store, &repo, test_merges).unwrap();
     assert_eq!(plans.len(), defaults.len() + 1);
     for (before, after) in defaults.iter().zip(&plans) {
         assert_eq!(before.selection, after.selection);
@@ -642,9 +688,7 @@ fn dashboards_leave_repository_and_wave_defaults_unchanged() {
         assert!(after.dashboard_id.is_none());
     }
     assert_eq!(
-        selections::view_plan(&store, &repo, None)
-            .unwrap()
-            .resolution,
+        view_plan(&store, &repo, None).unwrap().resolution,
         defaults[0].resolution
     );
     assert_eq!(store.revisions().unwrap(), revisions);
@@ -662,8 +706,8 @@ fn query_selection_identical_saved_expressions_keep_distinct_sources() {
         selections::edit_dashboard(&store, &repo, &DashboardId(id.into()), "state:open", None)
             .unwrap();
     }
-    let first = selections::view_plan(&store, &repo, Some("query:first")).unwrap();
-    let second = selections::view_plan(&store, &repo, Some("query:second")).unwrap();
+    let first = view_plan(&store, &repo, Some("query:first")).unwrap();
+    let second = view_plan(&store, &repo, Some("query:second")).unwrap();
     assert_eq!(
         first.resolution.members[0].work,
         second.resolution.members[0].work
@@ -841,12 +885,12 @@ fn a_published_pr_opens_a_task_that_waits_in_backlog_until_claimed() {
             [],
         )
         .unwrap();
-    assert!(selections::view_plan(&store, &repo, Some("state:backlog"))
+    assert!(view_plan(&store, &repo, Some("state:backlog"))
         .unwrap()
         .contents
         .iter()
         .any(|content| content.title == "Backlog"));
-    assert!(selections::view_plan(&store, &repo, Some("state:open"))
+    assert!(view_plan(&store, &repo, Some("state:open"))
         .unwrap()
         .contents
         .iter()
@@ -857,7 +901,7 @@ fn a_published_pr_opens_a_task_that_waits_in_backlog_until_claimed() {
 fn query_plans_include_backlog_without_creating_execution_and_keep_saved_edits() {
     let (_dir, store, repo) = fixture();
     let before = store.revisions().unwrap();
-    let plan = selections::view_plan(&store, &repo, Some("state:backlog")).unwrap();
+    let plan = view_plan(&store, &repo, Some("state:backlog")).unwrap();
     assert_eq!(plan.contents.len(), 2);
     let backlog = plan
         .contents
@@ -870,7 +914,7 @@ fn query_plans_include_backlog_without_creating_execution_and_keep_saved_edits()
     assert!(backlog.argv.is_none());
     assert_eq!(backlog.unavailable.len(), 2);
     assert_eq!(store.revisions().unwrap(), before);
-    let default = selections::view_plan(&store, &repo, None).unwrap();
+    let default = view_plan(&store, &repo, None).unwrap();
     assert_eq!(
         default.resolution.members[0].work.kind,
         WorkWorkspaceKind::Task
@@ -912,10 +956,10 @@ fn query_plans_include_backlog_without_creating_execution_and_keep_saved_edits()
         selections::edit_dashboard(&store, &repo, &id, "query:picked", Some(second.revision))
             .is_err()
     );
-    let plan = selections::view_plan(&store, &repo, Some("query:picked")).unwrap();
+    let plan = view_plan(&store, &repo, Some("query:picked")).unwrap();
     assert_eq!(plan.saved_revision, Some(second.revision));
     assert_eq!(plan.arrangement, second.arrangement);
-    let plans = selections::selection_plans(&store, &repo).unwrap();
+    let plans = selections::selection_plans(&store, &repo, test_merges).unwrap();
     let observed = plans
         .iter()
         .find(|plan| plan.dashboard_id.as_ref() == Some(&id))
@@ -1213,7 +1257,7 @@ fn a_dashboard_changed_after_preparation_rejects_the_prepared_write() {
 #[test]
 fn a_view_plan_names_who_a_claim_here_would_make_owner() {
     let (_dir, store, repo) = fixture();
-    let plan = selections::view_plan(&store, &repo, None).unwrap();
+    let plan = view_plan(&store, &repo, None).unwrap();
     let viewer = plan.viewer.expect("the test home has a Git identity");
     assert_eq!(
         viewer.person_key,

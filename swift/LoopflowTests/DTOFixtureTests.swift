@@ -12,6 +12,7 @@ struct DTOFixtureTests {
         #expect(!board.tasks.items.isEmpty)
         #expect(board.tasks.items[0].identifier == "W2-144")
         let detail = try JSONDecoder().decode(TaskDetail.self, from: loadFixtureData("task_screen_detail.json"))
+        #expect(detail.state == .paused && detail.section == .working)
         #expect(detail.checks?.failingChecks.first?.name == "rust-test")
         #expect(detail.currentSession?.state == .unknown)
         let card = try JSONDecoder().decode(SessionCard.self, from: loadFixtureData("session_card.json"))
@@ -328,6 +329,7 @@ struct DTOFixtureTests {
         #expect(window.session?.action?.label == "Take over")
         #expect(window.session?.observedAt == nil)
         #expect(report.windows[1].task?.actions?.recommended == .run)
+        #expect(report.windows[1].task?.runControl?.pausing == false)
         #expect(report.windows[1].task?.runControl?.unavailable == "Task checkout is on another Machine")
         #expect(window.workspaces.first?.hiddenPanes == ["files-pane"])
         #expect(window.viewParts.isEmpty)
@@ -429,9 +431,13 @@ struct DTOFixtureTests {
     @Test("Task overview reads its graph without diagnostic history")
     func taskOverviewFixture() throws {
         let overview = try JSONDecoder().decode(TaskOverview.self, from: loadFixtureData("task_overview.json"))
-        #expect(overview.graph != nil)
+        #expect(overview.graph?.control == WorkflowControl(action: .wait, label: "Waiting: land"))
         #expect(overview.sessions.count == 2)
         #expect(overview.graphProcesses.count == 1)
+        let pausing = try JSONDecoder().decode(
+            WorkflowControl.self,
+            from: Data(#"{"action":"pausing","label":"Pausing: deliver · land"}"#.utf8))
+        #expect(pausing == WorkflowControl(action: .pausing, label: "Pausing: deliver · land"))
     }
 
     @Test("Task work retains conversations and Graphs")
@@ -452,6 +458,7 @@ struct DTOFixtureTests {
         #expect(graph.steps.map(\.name) == ["plan", "review-design", "build", "demo"])
         #expect(graph.steps.map(\.interactive) == [false, true, false, true])
         #expect(graph.currentStep == 2)
+        #expect(graph.control == WorkflowControl(action: .pause, label: "build · implement"))
         #expect(graph.sentence == "build is running implement. You are next needed at demo.")
         #expect(try JSONDecoder().decode(TaskWork.self, from: JSONEncoder().encode(work)) == work)
         // `current_step` is required even when null.

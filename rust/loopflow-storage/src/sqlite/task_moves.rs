@@ -59,9 +59,11 @@ impl SqliteStore {
     /// The leaving move was sent as `payload`. It stays one move, as old as
     /// when it began; a repeat of a sent move returns its payload instead.
     pub fn record_move_sent(&self, task: &TaskId, payload: &str) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let updated = conn.execute(
-            "UPDATE task_moves SET state='sent',stopped=NULL,payload=?2
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        super::task_pause::require_settled_in(&tx, task)?;
+        let updated = tx.execute(
+            "UPDATE task_moves INDEXED BY task_moves_task SET state='sent',stopped=NULL,payload=?2
              WHERE task_id=?1 AND state='leaving'",
             params![task.as_str(), payload],
         )?;
@@ -70,6 +72,7 @@ impl SqliteStore {
                 "Task {task} has no move leaving"
             )));
         }
+        tx.commit()?;
         Ok(())
     }
 
@@ -120,7 +123,7 @@ impl SqliteStore {
         from: &MachineId,
         to: &MachineId,
     ) -> StoreResult<()> {
-        let here = &self.saved_local_machine()?.id == to;
+        let local = self.saved_local_machine()?.id;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let updated = tx.execute(
@@ -136,7 +139,19 @@ impl SqliteStore {
                 params![task.as_str(), from.as_str(), to.as_str(), now_unix()],
             )?;
         }
-        if here {
+        // A failed send can be claimed back with its hold. An acknowledgement
+        // for an old move cannot release a Task the sender has since reclaimed.
+        if from == &local
+            && updated != 0
+            && super::task_ownership::ownership_in(&tx, task)?
+                .owner
+                .and_then(|owner| owner.machine.id)
+                .as_ref()
+                == Some(to)
+        {
+            super::task_pause::clear_in(&tx, task)?;
+        }
+        if to == &local {
             tx.execute(
                 "UPDATE task_moves SET state='arrived',claim_id=NULL,stopped=NULL,payload=NULL
                  WHERE task_id=?1 AND state IN ('leaving','sent')",
@@ -159,6 +174,23 @@ impl SqliteStore {
             )
             .optional()?
             .unwrap_or(false))
+    }
+
+    /// The source can still include a new pause until its move is sent.
+    pub fn task_is_leaving(&self, task: &TaskId) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let read = conn.savepoint()?;
+        let leaving = read
+            .query_row(
+                "SELECT claim_id FROM task_moves INDEXED BY task_moves_task WHERE task_id=?1 AND state='leaving'",
+                [task.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        match leaving {
+            Some(claim) => current_claim(&read, task, &OwnershipEntryId::from_raw(claim)),
+            None => Ok(false),
+        }
     }
 
     /// The Task's move this Machine began that has not arrived, while its
@@ -205,8 +237,44 @@ pub(super) fn move_in_flight_in(
     let Some((claim_id, moving)) = moving else {
         return Ok(None);
     };
+    Ok(current_claim(conn, task, &claim_id)?.then_some(moving))
+}
+
+fn current_claim(conn: &Connection, task: &TaskId, claim: &OwnershipEntryId) -> StoreResult<bool> {
     let last = super::task_ownership::log_in(conn, task)?
         .pop()
         .map(|entry| entry.id);
-    Ok((last == Some(claim_id)).then_some(moving))
+    Ok(last.as_ref() == Some(claim))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::process::Starter;
+    use crate::test_fixture::{ownership, store_with_task};
+    use loopflow_model::durable::MachineId;
+
+    #[test]
+    fn a_leaving_move_waits_for_pause_cleanup_before_sending() {
+        let (_home, store, task) = store_with_task();
+        let mini = MachineId::new();
+        let owner = ownership(&store, store.task_scope(&task).unwrap());
+        store
+            .begin_task_move_prepared(&task, &mini, &owner)
+            .unwrap()
+            .unwrap();
+
+        // The pause caller exited after recording the interrupt.
+        store
+            .begin_task_pause(&task, &Starter::Person { name: None }, vec![])
+            .unwrap();
+        let held = store.task_pause(&task).unwrap().unwrap();
+        let refused = store.record_move_sent(&task, "{}").unwrap_err();
+        assert!(refused.to_string().contains("still stopping"), "{refused}");
+        assert!(store.task_is_leaving(&task).unwrap());
+
+        store.settle_task_pause(&task, false).unwrap();
+        store.record_move_sent(&task, "{}").unwrap();
+        assert!(!store.task_is_leaving(&task).unwrap());
+        assert_eq!(store.task_pause(&task).unwrap(), Some(held));
+    }
 }

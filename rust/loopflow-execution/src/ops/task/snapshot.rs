@@ -16,20 +16,20 @@ use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActi
 use crate::store::SharedStore;
 use base64::Engine as _;
 use loopflow_model::durable::MachineId;
-use loopflow_storage::child::ChildRef;
 use loopflow_storage::work::task::{PrPhase, Task, TaskPr};
 use sha2::{Digest, Sha256};
 
-pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
+pub fn task_snapshot(task: &Task, merges: fn(&[String]) -> bool) -> OpsResult<TaskSnapshot> {
     block_on_task(async {
         let store = task_store().await?;
-        read_task_snapshot(&store, task.clone()).await
+        read_task_snapshot(&store, task.clone(), merges).await
     })
 }
 
 pub(super) async fn read_task_snapshot(
     store: &SharedStore,
     mut task: Task,
+    merges: fn(&[String]) -> bool,
 ) -> OpsResult<TaskSnapshot> {
     let (local, ownership) = store
         .sqlite
@@ -38,13 +38,14 @@ pub(super) async fn read_task_snapshot(
     if ownership.owner_elsewhere(&local).is_some() {
         task.worktree = None;
     }
-    snapshot_here(store, task, local).await
+    snapshot_here(store, task, local, merges).await
 }
 
 pub(super) async fn snapshot_here(
     store: &SharedStore,
     task: Task,
     local: MachineId,
+    merges: fn(&[String]) -> bool,
 ) -> OpsResult<TaskSnapshot> {
     let wave = owning_wave(store, &task).await?;
     let repo = repository_for_task(store, &task)?;
@@ -58,37 +59,42 @@ pub(super) async fn snapshot_here(
         ),
         None => None,
     };
-    let work = store
-        .work_for_child(&ChildRef::Task(task.id.clone()))
-        .await
-        .map_err(|error| task_error(format!("failed to resolve Task Work: {error}")))?;
     let latest_event = store
         .latest_task_event(&task.id)
         .await
         .map_err(|error| task_error(format!("failed to read latest task event: {error}")))?;
     let pr = store.active_task_pr(&task.id).await.map_err(task_error)?;
     let active = pr.as_ref().filter(|pr| pr.is_active());
-    let work_status = store
-        .work_status(&work)
-        .await
-        .map_err(|error| task_error(format!("failed to derive Task Work status: {error}")))?;
-    let mut execution = crate::ops::task_execution::task_execution(store, &task)
-        .await
+    let status = store.task_state(&task.id).await.map_err(task_error)?;
+    let latest_graph = store
+        .sqlite
+        .latest_task_graph(&task.id)
         .map_err(task_error)?;
+    let mut execution = crate::ops::task_execution::task_execution(
+        &store.sqlite,
+        &task,
+        status,
+        latest_graph.as_ref(),
+    )
+    .map_err(task_error)?;
     let work_set =
-        crate::store::task_work::task_work(&store.sqlite, &task.id).map_err(task_error)?;
+        crate::store::task_work::task_work(&store.sqlite, &task.id, merges).map_err(task_error)?;
     let auto = store.sqlite.task_auto(&task.id).map_err(task_error)?;
     if execution.state == crate::ops::task_execution::TaskExecutionState::Idle {
-        if let Some(wait) = work_set
+        if let Some((step, off)) = work_set
             .graph
             .as_ref()
-            .and_then(|graph| graph.waiting_to_land(auto.as_ref(), &task.identifier))
+            .and_then(|graph| graph.landing_stop(auto.as_ref()))
         {
-            execution.state = crate::ops::task_execution::TaskExecutionState::Waiting;
-            execution.reason = wait;
+            if status == crate::durable::TaskState::Paused {
+                execution.reason = format!("Waiting at {step} while the Task is paused");
+            } else {
+                execution.state = crate::ops::task_execution::TaskExecutionState::Waiting;
+                execution.reason =
+                    crate::ops::task::auto::landing_wait(step, off, &task.identifier);
+            }
         }
     }
-    let status = store.task_state(&task.id).await.map_err(task_error)?;
     let parent_pr = match task.parent_pr_id.as_ref() {
         Some(parent_id) => store
             .get_task_pr(parent_id)
@@ -127,7 +133,7 @@ pub(super) async fn snapshot_here(
                 .or_else(|| task_event_process_refusal(latest_event.as_ref()).map(str::to_string))
         };
         let action_evidence = TaskActionEvidence {
-            status: work_status.clone(),
+            status,
             execution: Some(&execution),
             latest_pr_phase: pr.as_ref().map(TaskPr::phase),
             latest_pr_merge_request: pr.as_ref().and_then(TaskPr::merge_request),
@@ -170,10 +176,8 @@ pub(super) async fn snapshot_here(
     let starter = |session: Option<&loopflow_model::id::LfSessionId>| {
         super::auto::starter(&store.sqlite, &repo, session).map_err(task_error)
     };
-    let started_by = store
-        .sqlite
-        .latest_task_graph(&task.id)
-        .map_err(task_error)?
+    let started_by = latest_graph
+        .as_ref()
         .map(|graph| starter(graph.caller_session.as_ref()))
         .transpose()?;
     Ok(TaskSnapshot {

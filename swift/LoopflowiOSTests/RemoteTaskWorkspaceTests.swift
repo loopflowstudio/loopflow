@@ -291,7 +291,8 @@ private final class TwoMachines {
         let id = try await laptop.json(["task", "create", "--title", title, "--json"], cwd: repo, as: Created.self).task.id
         let row = try JSONSerialization.data(withJSONObject: [
             "work": ["repository": "repo_fixture", "kind": "task", "id": id], "title": title, "states": [],
-            "identifier": NSNull(), "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": [],
+            "identifier": NSNull(), "working_group": NSNull(), "graph_step": NSNull(),
+            "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": [],
             "open_children": 0,
         ] as [String: Any])
         return MobileTask(try JSONDecoder().decode(WorkViewPlan.Content.self, from: row))

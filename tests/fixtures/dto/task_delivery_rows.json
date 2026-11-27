@@ -253,6 +253,7 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": {
@@ -285,6 +286,7 @@
     },
     "graph_source": null,
     "lifecycle": "moving",
+    "working_group": "active",
     "selection_states": [
       "open",
       "moving",
@@ -545,6 +547,7 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": {
@@ -577,6 +580,7 @@
     },
     "graph_source": null,
     "lifecycle": "done",
+    "working_group": null,
     "selection_states": [
       "done"
     ]
@@ -835,6 +839,7 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": {
@@ -867,6 +872,7 @@
     },
     "graph_source": null,
     "lifecycle": "done",
+    "working_group": null,
     "selection_states": [
       "done"
     ]
@@ -938,11 +944,13 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "unstarted",
       "backlog"
@@ -1015,11 +1023,13 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "unstarted",
       "backlog"
@@ -1279,6 +1289,7 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": {
@@ -1311,6 +1322,7 @@
     },
     "graph_source": null,
     "lifecycle": "moving",
+    "working_group": "active",
     "selection_states": [
       "open",
       "moving",
@@ -1571,6 +1583,7 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": {
@@ -1603,6 +1616,7 @@
     },
     "graph_source": null,
     "lifecycle": "done",
+    "working_group": null,
     "selection_states": [
       "done"
     ]

@@ -23,8 +23,8 @@
     "project_id": "proj-project-current",
     "wave_id": "wave-1"
   },
-  "section": "backlog",
-  "state": "unstarted",
+  "section": "working",
+  "state": "paused",
   "pr": {
     "id": "pr-review",
     "sequence": 1,

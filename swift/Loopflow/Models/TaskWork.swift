@@ -120,6 +120,16 @@ public struct TaskOverview: Codable, Sendable, Equatable {
     }
 }
 
+/// The primary workflow button, read with the saved Graph cursor.
+public struct WorkflowControl: Codable, Sendable, Hashable {
+    public enum Action: String, Codable, Sendable {
+        case run, pause, pausing, unpause, resume, wait, done
+    }
+
+    public let action: Action
+    public let label: String
+}
+
 /// The graph a Task took up and where the Task stands on it. An interactive
 /// step is where a person takes part in the Task conversation; `start` and
 /// `end` are implicit.
@@ -194,6 +204,7 @@ public struct TaskGraph: Codable, Sendable, Equatable {
     public static let end = "end"
 
     public let name: String
+    public let control: WorkflowControl
     public let interactiveSteps: [InteractiveStep]
     public let position: Position
     /// The Graph's top-level steps in order.
@@ -205,7 +216,7 @@ public struct TaskGraph: Codable, Sendable, Equatable {
     public let sentence: String
 
     enum CodingKeys: String, CodingKey {
-        case name, position, steps, sentence
+        case name, control, position, steps, sentence
         case interactiveSteps = "interactive_steps"
         case currentStep = "current_step"
     }
@@ -223,6 +234,7 @@ extension TaskGraph {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
             name: try container.decode(String.self, forKey: .name),
+            control: try container.decode(WorkflowControl.self, forKey: .control),
             interactiveSteps: try container.decode([InteractiveStep].self, forKey: .interactiveSteps),
             position: try container.decode(Position.self, forKey: .position),
             steps: try container.decode([Step].self, forKey: .steps),

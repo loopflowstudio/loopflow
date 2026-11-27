@@ -890,15 +890,13 @@ fn run_store_worker(
                         .and_then(|store| store.is_shell_terminal(&terminal))
                         .unwrap_or(false);
                     if is_shell {
-                        let jobs = crate::os_process::TerminalJobs::new(pid);
                         let _ = spawn_with_ledger("shell-jobs", move || {
-                            let settled =
-                                jobs.terminate()
-                                    .map_err(anyhow::Error::from)
-                                    .and_then(|()| {
-                                        Ok(crate::journal::process_ledger()?
-                                            .settle_shell_jobs(&terminal)?)
-                                    });
+                            let settled = crate::os_process::terminate_shell_jobs(pid)
+                                .map_err(anyhow::Error::from)
+                                .and_then(|()| {
+                                    Ok(crate::journal::process_ledger()?
+                                        .settle_shell_jobs(&terminal)?)
+                                });
                             if let Err(error) = settled {
                                 tracing::error!(
                                     %terminal,

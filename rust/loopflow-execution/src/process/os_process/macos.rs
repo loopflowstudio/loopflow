@@ -43,13 +43,19 @@ pub fn read(pid: u32) -> io::Result<Option<OsProcess>> {
     Ok(Some(info.into_process(command)))
 }
 
+pub(super) fn read_name(pid: u32) -> io::Result<Option<OsProcess>> {
+    Ok(read_info(pid)?.map(|info| {
+        let command = name(&info.name);
+        info.into_process(command)
+    }))
+}
+
 /// Every process named by `p_comm`; arguments are never read.
 pub(super) fn sample_names() -> io::Result<Vec<OsProcess>> {
     let mut processes = Vec::new();
     for pid in pids()? {
-        if let Some(info) = read_info(pid)? {
-            let command = name(&info.name);
-            processes.push(info.into_process(command));
+        if let Some(process) = read_name(pid)? {
+            processes.push(process);
         }
     }
     Ok(processes)

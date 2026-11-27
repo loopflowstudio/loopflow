@@ -45,7 +45,7 @@ struct BacklogViewTests {
         condition["state"] = blocked == nil ? "clear" : "blocked"
         condition["reason"] = blocked ?? ""
         row["condition"] = condition
-        row["run_control"] = ["unavailable": unavailable.map { $0 as Any } ?? NSNull()]
+        row["run_control"] = ["pausing": false, "unavailable": unavailable.map { $0 as Any } ?? NSNull()]
         row["execution"] = step.map { ["state": "idle", "reason": "Stopped at \($0)", "step": $0, "captured": NSNull(),
                                               "died": NSNull(), "outlook": NSNull()] as Any }
             ?? NSNull()
@@ -275,7 +275,7 @@ struct BacklogViewTests {
                 .map { ["name": $0["label"], "skill": $0["label"], "description": NSNull()] }
             let json: [String: Any] = ["name": name, "description": description ?? NSNull(), "source": NSNull(),
                                        "compiled": ["name": name, "steps": steps], "composition": NSNull(), "unavailable": NSNull(),
-                                       "workflow": ["steps": [[String: Any]](), "interactive_steps": stops, "sentence": ""],
+                                       "workflow": ["start": ["action": "run", "label": "Run"], "steps": [[String: Any]](), "interactive_steps": stops, "sentence": ""],
                                        "included_by": includedBy, "runs": runs]
             return try JSONDecoder().decode(GraphCatalogEntry.self, from: JSONSerialization.data(withJSONObject: json))
         }

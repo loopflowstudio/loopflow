@@ -54,7 +54,9 @@ context without changing its Graph position or completion state.
 ```bash
 lf steer LOO-12 "keep the retry budget at 3"   # delivered at the next step or turn
 lf task status LOO-12 --json                   # thread: your steers, teammates' comments, agent reports
-lf task interrupt LOO-12                       # stop its running Graph
+lf task interrupt LOO-12                       # stop its running Graph; stay in Working
+lf task pause LOO-12                           # hold the Graph and keep the conversation open
+lf task unpause LOO-12 --run                   # lift pause and continue from the interrupted step
 lf task unassign LOO-12                        # release ownership; stops CI repair
 ```
 
@@ -82,6 +84,48 @@ itself is in `lf task status LOO-12 --json`.
 claims and runs. To jump into the conversation directly, run
 `lf resume --task LOO-12` ([Sessions](sessions.md)).
 
+### Pause a Task
+
+Pause an open, started Task to keep its checkout, claim, and Graph step for later.
+
+```text
+$ lf task pause LOO-12
+LOO-12 paused
+
+$ lf task status LOO-12
+LOO-12  paused
+  Graph code: Paused in build at implement. `lf task unpause --run` resumes it.
+```
+
+The worker and any subprocesses in its OS session stop. Other Tasks keep running.
+Codex tool shells can create their own OS sessions, and processes in those
+sessions can survive pause. A Graph command already in progress, such as `lf land`,
+finishes at its current step. The pause receipt names the finishing run.
+If cleanup was interrupted, repeat `lf task pause LOO-12` before unpausing.
+
+The primary conversation stays open. You can talk to it, send steers, or
+attach with `lf resume --task LOO-12`. The Task keeps its branch, dirty files,
+PR, and auto setting. New Graph runs, Auto-Ship, and worker retries wait for
+unpause, including after a Machine restart.
+
+An owned Task stays in **Working**, under **Paused** on Mac and iPhone.
+The Working rows in `lf task list --json` carry `working_group`.
+Find held Tasks with `lf task list --state paused`. Plain `lf task unpause LOO-12`
+lifts the hold. An interrupted step stays idle and ready for Run. If a step
+failed before pause, its failure stays in the execution history and shows
+in the Task’s condition again on unpause.
+Use `lf task unpause LOO-12 --run` to resume interrupted work or start a Graph that has yet to run.
+At a human step, at a landing step with auto off, or at the end, the command lifts
+the hold and leaves the Task there. Unpause on Mac and iPhone follows the same
+rule. Turn on Auto to continue from the landing stop.
+
+Unassign clears the hold once cleanup settles. Complete, abandon, and reopen
+also clear it. A move carries the hold to the destination, including a pause
+issued while the source is pushing the checkout. A pause issued after the
+payload was sent can need a retry when the checkout arrives.
+
+Use `lf task interrupt LOO-12` to stop the current run and allow another to start.
+
 ## See where everything stands
 
 ```bash
@@ -101,8 +145,8 @@ lf task list --closed --wave infra --since 7d  # closed in the last week
 lf task list --subscribe --json                # stream a JSON line on every change
 ```
 
-`lf task status` says where the Task stands on its Graph in one sentence, the
-same words Desktop's workflow bar shows:
+`lf task status` says where the Task stands on its Graph in one sentence, also
+available in Desktop’s workflow tooltip:
 
 ```text
 LOO-12  moving
@@ -110,11 +154,13 @@ LOO-12  moving
 ```
 
 With auto on, the second clause names auto: "Auto stands in next at
-ship-review." A stopped Graph reads "Stopped at build. `lf task run` starts it
-again." `--json` carries the parts: `graph.steps` (each top-level step's
+ship-review." A stopped Graph reads "Stopped in build at implement. `lf task run` starts it
+again." During cleanup the Task reads "Pausing at …". A paused run reads
+"Paused in build at implement. `lf task unpause --run` resumes it." At an interactive step,
+it reads "Paused at ship-review. `lf task unpause` lifts the hold." `--json` carries the parts: `graph.steps` (each top-level step's
 `name` and `interactive`, true when a person takes part anywhere inside the
 step), `graph.current_step` (its index, null before the start and at the end)
-and `graph.sentence`. Before a Task starts, Desktop draws the same steps from
+and `graph.sentence`. Both apps use `graph.control` for the button’s label and action. Before a Task starts, Desktop draws the same steps from
 [`lf graph list --json`](orchestration.md#describe-a-graph).
 
 Every read queries this machine's local store, so it answers instantly and
@@ -605,8 +651,8 @@ lf wave status billing                            # the Wave's Project, Tasks an
 ```
 
 `wave-operate` reviews every started Task you own (leaving running Graphs alone
-and continuing stopped ones), lists unstarted backlog for you to pick, and
-leaves teammates' Tasks untouched. Run it on a schedule with your OS scheduler:
+and continuing stopped ones), skips paused Tasks, lists unstarted backlog for
+you to pick, and leaves teammates' Tasks untouched. Run it on a schedule with your OS scheduler:
 
 ```bash
 # Linux crontab (or a macOS LaunchAgent when Keychain access is needed):

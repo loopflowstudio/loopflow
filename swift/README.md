@@ -91,9 +91,9 @@ yourself, call `/usr/bin/log`, since zsh's builtin `log` shadows it:
 ```
 
 Working Tasks lists owned, started, unfinished Tasks on any Machine this store
-records. Drag in the repository sidebar or Working Tasks grid to save an order.
-Turn on **Sort by status** in a repository or Wave sidebar to group Tasks by
-activity. [Sidebar order, filters and shortcuts](../docs/surfaces.md#working-tasks-in-the-sidebar).
+records. The sidebar groups them into **Active**, **Shipping**, and **Paused**.
+Drag within a group or in the Working Tasks grid to save an order. Turn on
+**Sort by status** to sort each group by conversation activity. [Sidebar order, filters and shortcuts](../docs/surfaces.md#working-tasks-in-the-sidebar).
 
 Click a Wave to see its Working Tasks and subwaves. Its backlog holds the open
 work nobody is running. **‹ Repo** returns to Working Tasks. Unstarted Tasks
@@ -394,32 +394,27 @@ your Ghostty configuration at launch, ignores its `theme =` setting and leaves
 the file untouched.
 Source and license notices ship offline with the catalogue.
 
-Under the jump bar, the workflow bar reads where the Task stands:
+Under the jump bar, the workflow track shows the Task’s steps. The step it stands at
+grows into a chip that says what is happening there.
 
 ```text
-code  plan  build  👤ship-review  deliver   build is running implement. You are next needed at ship-review.   [Auto-Ship]  …
+[⏸]  plan  build · implement ▾  👤ship-review  deliver            Auto ◉  ✓
 ```
 
-The Graph's name, then its top-level steps in order, a person before each step
-that waits for you. Steps already passed are quieter; the step the Task stands
-in is strong, in the working colour while it runs and in the waiting colour
-when it has stopped or is waiting for you. A step that appears in more than one
-part of the Graph (`concept-review` runs in both `plan` and `build`) marks the
-part it is running in. The sentence is the one `lf task status` prints. In a
-narrow window the steps go and the sentence stays.
+Click ⏸ to pause the worker and keep talking in the Task conversation; the chip reads
+**Paused: build · implement**. Click ▶ to resume the interrupted step. At a human stop, ▶ lifts
+the hold and the Task waits there for you. Once you finish the review, the chip reads
+**ship-review · next: deliver** and ▶ runs deliver. A failed or interrupted run offers
+its saved step again.
 
-When the Task can move, one button says how: **Start** before it has run,
-**Run** once its Graph has stopped. **Auto-Ship** turns the Task's auto setting
-on and runs it, as `lf task auto on` does: its run stands in at each
-interactive step and lands the PR. Turning it on raises the Notice "LOO-5
-Auto-Ship requested · Undo"; Undo is Stop Auto-Ship (`lf task auto off`), and
-so is the button, which reads **Stop Auto-Ship** while auto is on. While auto is on,
-the sentence names auto instead of you, and the Task's board card and sidebar
-row carry an Auto badge. Open a Dashboard with `state:auto` to watch those Tasks.
-
-Everything else is in **…**, the same list as the sidebar row's context menu:
-**Start from…** (or **Start with…** before the Task has a Graph), Complete or
-Reopen, Claim or Unassign, Move, Copy ID and link, and **Abandon…**.
+Click any other step to start from it. Click the chip to pick a starting point,
+interrupt a running step, or pause at review; the same menu has Claim or Unassign and
+**Abandon…**. On a narrow pane only ▶, the chip and its menu stay. The Auto switch runs
+through the remaining human steps when armed. You can switch it off while paused.
+The checkmark completes the Task and lights up when its PR merges or its Graph reaches
+the end. If a post-merge step stops after merge, **Run: `<step>`** is still available beside the
+checkmark. Right-click the Task in the sidebar for conversations, Wave moves, links and
+copy actions.
 
 ```text
 ⌘T          new shell tab in the Task’s Shell tool
@@ -784,14 +779,14 @@ When the selected Task's lifecycle becomes completed or abandoned, it stays
 visible with a green **Done** or red **Abandoned** header. Navigating away restores the ordinary
 sidebar filters. **Back** (⌘[) returns to the retained workspace and its sidebar
 row, preserving conversations, files and drafts without starting execution.
-**Start from…** in **…** lists `start` and the Task's interactive steps; picking
-one runs `lf task run ISSUE --from STEP` as a child of the app. **Complete** changes Task status independently: the row leaves the list in the
+Open the step label to pick a stage or human step. Each pick runs
+`lf task run ISSUE --from STEP`. **Complete** changes Task status independently: the row leaves the list in the
 click and the next Task opens. A refused completion brings the row back with a
 Notice saying why; completing again never replays the Graph.
 Linear completion leaves the displayed Workflow and live Processes intact.
 Loading or unavailable Workflow readings remain explicit; a failed refresh keeps
 the last recorded graph with its actions disabled. Only a successful Task reading
-with no captured Workflow offers **Start**, which runs `lf -b task run ISSUE`.
+with no captured Workflow offers its first step, which runs `lf task run ISSUE`.
 
 Use **⌘T** for a new shell tab and **View → Toggle Files** for Files.
 Choose **Graph processes** in **⌘K** to open the Graph process log. It lists every Graph process in the

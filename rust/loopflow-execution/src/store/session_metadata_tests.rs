@@ -90,7 +90,7 @@ fn input_replacement_retains_workspace_and_task_membership() {
     }
     let session = store.session(&session.id).unwrap().unwrap();
     assert_eq!(
-        crate::store::task_work::task_work(&store, &task)
+        crate::store::task_work::task_work(&store, &task, |_| false)
             .unwrap()
             .sessions
             .len(),
@@ -107,7 +107,7 @@ fn input_replacement_retains_workspace_and_task_membership() {
         None
     )
     .is_err());
-    let retained = crate::store::task_work::task_work(&store, &task)
+    let retained = crate::store::task_work::task_work(&store, &task, |_| false)
         .unwrap()
         .sessions;
     drop(exclusion);
@@ -122,7 +122,7 @@ fn input_replacement_retains_workspace_and_task_membership() {
     assert_eq!(replacement.cwd, session.cwd);
     assert_eq!(replacement.task_id, Some(task.clone()));
     assert_eq!(
-        crate::store::task_work::task_work(&store, &task)
+        crate::store::task_work::task_work(&store, &task, |_| false)
             .unwrap()
             .sessions
             .len(),

@@ -232,16 +232,6 @@ impl Cli {
         self.repo.is_some() || self.repository.is_some()
     }
 
-    /// The command merges a PR, or asks GitHub to merge it.
-    pub fn merges(&self) -> bool {
-        matches!(
-            &self.command,
-            Some(Commands::Pr {
-                cmd: Some(PrCommand::Land { .. } | PrCommand::Arm { .. })
-            })
-        )
-    }
-
     /// `lf task auto on`: the Task's run, asked for auto.
     pub fn turns_auto_on(&self) -> bool {
         matches!(
@@ -1203,6 +1193,8 @@ impl TaskCommand {
             | Self::Update { .. }
             | Self::Move { .. }
             | Self::Auto { .. }
+            | Self::Pause { .. }
+            | Self::Unpause { .. }
             | Self::Interrupt { .. } => true,
         }
     }
@@ -2155,7 +2147,7 @@ pub enum TaskCommand {
         #[arg(long, conflicts_with = "closed")]
         project: Option<String>,
         /// Only Tasks in this state
-        #[arg(long, conflicts_with = "closed", value_parser = ["unstarted", "idle", "active", "moving"])]
+        #[arg(long, conflicts_with = "closed", value_parser = ["unstarted", "idle", "active", "moving", "paused"])]
         state: Option<String>,
         #[arg(long)]
         json: bool,
@@ -2550,6 +2542,21 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[command(subcommand)]
         cmd: AutoCommand,
     },
+    /// Hold the Task’s Graph at its current step and keep its conversation open
+    Pause {
+        issue: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Lift the hold on a Task and optionally run its interrupted step
+    Unpause {
+        issue: String,
+        /// Resume automatic work. Keep review, an auto-off landing stop, and the end in place.
+        #[arg(long)]
+        run: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Stop the Task's running Graph or Task run and its scheduled automation
     Interrupt {
         issue: String,
@@ -2600,6 +2607,8 @@ impl TaskCommand {
             | Self::Delete { issue }
             | Self::Update { issue, .. }
             | Self::Report { issue, .. }
+            | Self::Pause { issue, .. }
+            | Self::Unpause { issue, .. }
             | Self::Interrupt { issue, .. }
             | Self::Wait { issue, .. } => Some(issue),
         }
@@ -2636,6 +2645,8 @@ impl TaskCommand {
             | Self::Delete { issue }
             | Self::Update { issue, .. }
             | Self::Report { issue, .. }
+            | Self::Pause { issue, .. }
+            | Self::Unpause { issue, .. }
             | Self::Interrupt { issue, .. }
             | Self::Wait { issue, .. } => Some(issue),
         }

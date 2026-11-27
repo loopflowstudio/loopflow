@@ -5,9 +5,12 @@ extends: builtin
 
 Build an isolated `.dev` bundle (`.lf/qa/desktop.md#loopflow-dev-on-the-live-machine`),
 not the shared `~/Applications/Loopflow Dev.app` other worktrees overwrite, and
-confirm its stamped revision matches `HEAD` before launching. When the change
-works with the installed server, point it at `~/.lf` instead of building `lf`,
-noting any server change waiting on branch `lf`.
+confirm its stamped revision matches `HEAD` before launching. Launch it with
+`open -n` (never the bare binary under `nohup`) so macOS brings the window
+forward, and verify `LF_DESKTOP=<bundle-id> lf desktop state --json` lists a
+window before handing it over. When the change works with the installed server,
+point it at `~/.lf` instead of building `lf`, noting any server change waiting
+on branch `lf`.
 
 ## Disposable Loopflow demos
 

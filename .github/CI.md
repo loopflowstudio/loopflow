@@ -189,7 +189,7 @@ The compiler and most tools are not pinned: Rust `stable`, the latest uv,
 Homebrew's xcodegen and the `ubuntu-latest` image. `rust-toolchain` is pinned
 on its `stable` branch, whose commits default to that toolchain, so it needs
 no `with:` input. The `install-action` commit also fixes the nextest version
-(0.9.151) and its checksum; nextest moves when that pin does.
+and its checksum; nextest moves when that pin does.
 
 ## Main packages
 

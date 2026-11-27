@@ -178,8 +178,10 @@ jobs:
         with:
           key: test-${{ steps.rust-profiles.outputs.key }}
           save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
-      - uses: taiki-e/install-action@9ac8eb8524181110c3ce1b7e409e8fee720b6427 # nextest
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
+        with:
+          tool: nextest
       - name: Build and archive Rust tests
         id: archive
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
@@ -237,7 +239,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - run: uv sync
-      - uses: taiki-e/install-action@9ac8eb8524181110c3ce1b7e409e8fee720b6427 # nextest
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: nextest
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: rust-${{ matrix.suite }}
@@ -422,8 +426,10 @@ jobs:
         with:
           key: ${{ steps.rust-profiles.outputs.key }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: taiki-e/install-action@9ac8eb8524181110c3ce1b7e409e8fee720b6427 # nextest
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
+        with:
+          tool: nextest
       - name: Run planning reconnect proofs and E2E smoke test
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: |

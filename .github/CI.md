@@ -180,15 +180,16 @@ uv lock --upgrade-package <name>
 gh api repos/<owner>/<action>/commits/<tag> --jq .sha     # the commit for a new action tag
 ```
 
-CI on that PR is the check. GitHub's vulnerability alerts stay on as the
-prompt; they notify and open no PR.
+CI on that PR is the check. Nothing announces that a version here is
+vulnerable: GitHub's vulnerability alerts are on, but GitHub does not alert on
+actions pinned by commit, and its dependency graph lists no manifest for this
+repository, so no alert has ever been raised.
 
 The compiler and most tools are not pinned: Rust `stable`, the latest uv,
-Homebrew's xcodegen and the `ubuntu-latest` image. `rust-toolchain` and
-`install-action` are pinned on their `stable` and `nextest` branches, whose
-commits default to that tool, so neither needs a `with:` input. The
-`install-action` commit also fixes the nextest version (0.9.152) and its
-checksum; nextest moves when that pin does.
+Homebrew's xcodegen and the `ubuntu-latest` image. `rust-toolchain` is pinned
+on its `stable` branch, whose commits default to that toolchain, so it needs
+no `with:` input. The `install-action` commit also fixes the nextest version
+and its checksum; nextest moves when that pin does.
 
 ## Main packages
 

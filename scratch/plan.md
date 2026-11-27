@@ -404,7 +404,7 @@ Survives: Linear's renewed token, OpenCode and Codex sign-in when listed in
    printed, not asserted; `approve_ahead` itself reads the real `gh`, so the
    test drives `settle` as it does.
 6. **A rental's repository is set once, and a dropped connection keeps the
-   approval.** Built at PASS6, made for review. `sign_in_as` uses the
+   approval.** Built at `2d0c806405`, made for review. `sign_in_as` uses the
    rental's recorded repository and never reads the directory's origin for
    it; the move, its line, its settle and its test are gone. `renew` stores
    what GitHub issued and asks nothing; `usable` is the one place a token is

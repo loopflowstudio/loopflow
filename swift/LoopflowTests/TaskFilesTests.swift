@@ -1035,7 +1035,7 @@ struct TaskFilesTests {
         files.comments.add(anchor: ["uno", "second"])
         #expect(files.comments.items.first?.anchor == ["uno", "second"])
         await document.reconcile(snapshot("above\nuno\nsecond\nthird", path: document.path))
-        #expect(files.comments.items.first?.selection.range == "L2-3")
+        #expect(files.comments.items.first?.selection?.range == "L2-3")
         await files.diffReview.loadReview()
         let file = try #require(files.diffReview.shownReview?.file(document.path))
         let diff = ReviewStream(store: files, reader: .changes, files: [file], split: false, addToConversation: nil)
@@ -2683,6 +2683,170 @@ struct TaskFilesTests {
         let view = TaskFilesView(store: store, checkoutBase: nil)
         _ = try view.inspect().find(text: "plan.md")
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "files-open")
+    }
+
+    private static let sampleReviewPageState: [String: Any] = [
+        "notes": [["id": "n1", "section": "Design", "quote": "loopback carrier", "text": "keep\tthis\nshort"]],
+        "choices": ["f1": ["label": "Finding 1", "value": "File Task"]],
+        "multiselects": [String: Any](),
+        "questions": [String: Any](),
+        "offlineActions": [Any](),
+        "receipts": [["key": "action-0", "kind": "task.create", "summary": "LOO-1200"]],
+    ]
+
+    private static let sampleReviewPageItems: [String] = [
+        "`scratch/ship-review.html` § Design › \"loopback carrier\" keep\tthis\nshort",
+        "`scratch/ship-review.html` § Finding 1: File Task",
+    ]
+
+    @Test func scratchPagesExcludePageSourceFragments() {
+        #expect(TaskFilesStore.isScratchPage("scratch/ship-review.html"))
+        #expect(!TaskFilesStore.isScratchPage("scratch/ship-review.page.html"))
+    }
+
+    @Test func reviewPageBridgeRestoresSavedStateAndDropsStaleBuilds() async throws {
+        let files = try twoFileStore()
+        let pagePath = "scratch/ship-review.html"
+        let bridge = TaskHTMLBridge(store: files, path: pagePath)
+
+        let initial = await bridge.handle(["type": "ready", "build_id": "b1"])
+        #expect(initial.0 is NSNull && initial.1 == nil)
+
+        _ = await bridge.handle([
+            "type": "sync", "path": "scratch/another-page.html", "build_id": "b1",
+            "state": Self.sampleReviewPageState, "items": Self.sampleReviewPageItems,
+        ])
+        #expect(files.comments.items.count == 2)
+
+        let restored = await bridge.handle(["type": "ready", "build_id": "b1"])
+        let restoredDict = try #require(restored.0 as? [String: Any])
+        #expect((restoredDict["notes"] as? [[String: Any]])?.count == 1)
+
+        // Rebuilding with a new build_id clears stale state and items from the previous build.
+        let rebuilt = await bridge.handle(["type": "ready", "build_id": "b2"])
+        #expect(rebuilt.0 is NSNull)
+        #expect(files.comments.items.isEmpty)
+    }
+
+    @Test func reviewPageCommentsSendOnOneLineWithDiffCommentsAndDoNotResurrect() async throws {
+        let files = try twoFileStore()
+        let pagePath = "scratch/ship-review.html"
+        let bridge = TaskHTMLBridge(store: files, path: pagePath)
+
+        _ = await bridge.handle([
+            "type": "sync", "build_id": "b1",
+            "state": Self.sampleReviewPageState, "items": Self.sampleReviewPageItems,
+        ])
+
+        // Reconciling a code file skips `.page` comments without crashing.
+        let doc = files.document("a.swift")
+        await doc.reconcile(snapshot("uno\nsecond\nthird", path: "a.swift"))
+        files.comments.select(path: "a.swift", source: .diff(side: .new, revision: files.diffReview.revision), line: 1, extend: false)
+        files.comments.draft = "Explain\nthis line"
+        files.comments.add(anchor: ["uno"])
+        files.comments.reconcile(doc)
+        files.comments.reconcile(path: "a.swift", revision: files.diffReview.revision, file: nil)
+        #expect(files.comments.items.count == 3)
+
+        // Failed send retains items and state; successful send delivers one line and clears state.
+        let beforeClear = files.comments.pageClearGeneration
+        var delivered: [String] = []
+        func send(available: Bool) throws {
+            let strip = ReviewCommentsStrip(store: files, isFocused: true) {
+                if available { delivered.append($0) }
+                return available
+            }
+            try strip.inspect().find(viewWithAccessibilityIdentifier: "changes-send").button().tap()
+        }
+        try send(available: false)
+        #expect(files.comments.items.count == 3 && files.comments.pageClearGeneration == beforeClear)
+
+        try send(available: true)
+        #expect(files.comments.items.isEmpty)
+        #expect(files.comments.pageClearGeneration == beforeClear + 1)
+        let sent = try #require(delivered.first)
+        #expect(!sent.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7f })
+        #expect(sent.contains("(1) `scratch/ship-review.html` § Design › \"loopback carrier\" keep this short"))
+        #expect(sent.contains("(2) `scratch/ship-review.html` § Finding 1: File Task"))
+        #expect(sent.contains("(3) `a.swift:L1` (after, \(files.diffReview.revision)) · lines since changed Explain this line"))
+        #expect(sent.contains("[already ran: task.create → LOO-1200]"))
+
+        // Returning to the page after an unmounted send resurrects no drafts; its receipt stays
+        // drawn, reported, and rides on no later reply.
+        let afterSend = await bridge.handle(["type": "ready", "build_id": "b1"])
+        let kept = try #require(afterSend.0 as? [String: Any])
+        #expect(kept["notes"] == nil && kept["choices"] == nil)
+        let receipts = try #require(kept["receipts"] as? [[String: Any]])
+        #expect(receipts.first?["summary"] as? String == "LOO-1200" && receipts.first?["reported"] as? Bool == true)
+        files.comments.select(path: "a.swift", source: .diff(side: .new, revision: files.diffReview.revision), line: 1, extend: false)
+        files.comments.draft = "again"
+        files.comments.add(anchor: ["uno"])
+        try send(available: true)
+        #expect(delivered.count == 2 && !delivered[1].contains("already ran"))
+    }
+
+    @Test func reviewPageBridgeForwardsOperationsAndSubstitutesPeerDirectory() async throws {
+        let captured = OSAllocatedUnfairLock<[(JSONValue, String?)]>(initialState: [])
+        let peerStore = TaskFilesStore(issue: "TEST-1", cwd: "/remote/checkout", machine: "home_peer",
+                                       query: RegistryQuery { _, _ in "{}" })
+        peerStore.localRepository = "/local/repo"
+        peerStore.sendPageOperation = { op, reqID in
+            captured.withLock { $0.append((op, reqID)) }
+            return RawJSON(Data(#"{"task":{"identifier":"LOO-1201"}}"#.utf8))
+        }
+        let bridge = TaskHTMLBridge(store: peerStore, path: "scratch/ship-review.html")
+
+        let action: [String: Any] = [
+            "type": "operation",
+            "request_id": "req-uuid-1",
+            "operation": ["kind": "task.create", "directory": "/remote/checkout", "title": "Follow up"],
+        ]
+        let cancelled = await bridge.handle(action)
+        #expect((cancelled.0 as? [String: Any])?["cancelled"] as? Bool == true)
+        #expect(captured.withLock { $0.isEmpty })
+
+        let opReply = await bridge.handle(action) { operation in
+            #expect(operation["kind"] == .string("task.create"))
+            #expect(operation["directory"] == .string("/local/repo"))
+            return true
+        }
+        let opResult = try #require((opReply.0 as? [String: Any])?["result"] as? [String: Any])
+        #expect((opResult["task"] as? [String: Any])?["identifier"] as? String == "LOO-1201")
+        let forwarded = try #require(captured.withLock { $0.first })
+        #expect(forwarded.1 == "req-uuid-1")
+        #expect(forwarded.0["directory"] == .string("/local/repo"))
+
+        peerStore.sendPageOperation = { _, _ in throw RegistryQueryError("permission denied") }
+        let errReply = await bridge.handle([
+            "type": "operation",
+            "operation": ["kind": "pr.land", "directory": "/remote/checkout"],
+        ]) { _ in true }
+        #expect((errReply.0 as? [String: Any])?["error"] as? String == "permission denied")
+    }
+
+    @Test func reviewPageBridgeAttachesOnlyToFileReaderNotRenderedDiff() async throws {
+        let files = try twoFileStore()
+        let pagePath = "scratch/ship-review.html"
+
+        let htmlDoc = files.document(pagePath)
+        await htmlDoc.reconcile(snapshot("<h1>Review</h1>", path: pagePath))
+        let plainHTML = try TaskFileReadingView(document: htmlDoc, store: files)
+            .inspect().find(TaskHTMLView.self).actualView()
+        #expect(plainHTML.bridge == nil)
+
+        let compiled = "<h1>Review</h1>\(TaskHTMLBridge.pageStamp){}</script>"
+        await htmlDoc.reconcile(snapshot(compiled, path: pagePath))
+        let readingHTML = try TaskFileReadingView(document: htmlDoc, store: files)
+            .inspect().find(TaskHTMLView.self).actualView()
+        #expect(readingHTML.bridge?.path == pagePath)
+
+        let reviewFile = ReviewFile(path: pagePath, oldPath: nil, status: .modified, blocks: [])
+        await files.workingTree.refresh()
+        _ = try await files.workingTree.readSides(reviewFile)
+        let rendered = ReviewRendered(store: files, reader: .changes, file: reviewFile, rendering: .html, split: true)
+        let renderedHTMLViews = try rendered.inspect().findAll(TaskHTMLView.self).map { try $0.actualView() }
+        #expect(!renderedHTMLViews.isEmpty)
+        #expect(renderedHTMLViews.allSatisfy { $0.bridge == nil })
     }
 }
 private func fileJSON(_ url: URL) throws -> [String: Any] {

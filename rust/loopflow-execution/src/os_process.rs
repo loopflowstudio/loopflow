@@ -12,8 +12,6 @@ use anyhow::{anyhow, Result};
 use crate::process::OsProcess;
 use loopflow_storage::sqlite::task_pause::StoppingSession;
 
-pub const DISCORD_TOKEN_ENV: &str = "LF_DISCORD_TOKEN";
-
 /// Bound both execution and inherited output pipes, then reap the owned group.
 pub fn bounded_output(command: &mut Command, timeout: Duration) -> std::io::Result<Output> {
     #[cfg(unix)]

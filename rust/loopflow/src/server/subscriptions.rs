@@ -1539,6 +1539,11 @@ mod tests {
                 );
                 assert!(first.initial().await["unavailable"].is_string());
                 let repo = loopflow_test_support::TestRepo::new();
+                // Hold the reader before creating the Task so it cannot deliver
+                // an unsolicited reading between creation and completion.
+                let held = pause("terminal", "pull");
+                assert!(first.member.checkpoint(8));
+                held.entered.await.unwrap();
                 store
                     .create_task(&loopflow_storage::work::task::NewTask {
                         parent_task_id: None,
@@ -1563,9 +1568,6 @@ mod tests {
                         [id.as_str()],
                     )
                     .unwrap();
-                let held = pause("terminal", "pull");
-                first.member.checkpoint(8);
-                held.entered.await.unwrap();
                 // Join and another checkpoint while a terminal read is in flight.
                 let mut joined = Consumer::new(
                     &registry,
@@ -1573,7 +1575,7 @@ mod tests {
                     read.clone(),
                     Some(vec!["task.title".into()]),
                 );
-                first.member.checkpoint(0);
+                assert!(first.member.checkpoint(0));
                 held.release.send(()).unwrap();
                 let recovered = first.reading().await;
                 assert!(recovered["unavailable"].is_null(), "{recovered}");

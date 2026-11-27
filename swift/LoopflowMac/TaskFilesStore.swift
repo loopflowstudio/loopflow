@@ -97,7 +97,7 @@ final class TaskFilesStore {
     }
 
     static func isScratchPage(_ path: String) -> Bool {
-        path.hasPrefix("scratch/") && isRenderablePage(path)
+        path.hasPrefix("scratch/") && isRenderablePage(path) && !path.lowercased().hasSuffix(".page.html")
     }
 
     var openAndScratch: [String] {
@@ -161,6 +161,13 @@ final class TaskFilesStore {
     }
 
     var measurementRepository: String?
+    /// This Mac's checkout of the repository, substituted when a peer-Machine
+    /// review page runs a `data-lf` operation whose stamped `directory` is remote.
+    var localRepository: String?
+    /// Sends a pre-validated review-page `data-lf` operation JSON object.
+    @ObservationIgnored var sendPageOperation: @Sendable (JSONValue, String?) async throws -> RawJSON = { operation, requestID in
+        try await ServerClient.rawOperation(operation, requestID: requestID)
+    }
     let issue: String
     /// The checkout on the Machine that runs the Task, as last read.
     private(set) var cwd: String { didSet { diffReview.cwd = cwd } }

@@ -57,7 +57,7 @@ managed by the local server vs. bare:
 | Kind | Started by | Terminal & lifetime | Server involvement |
 |---|---|---|---|
 | **Work session** | `lf resume --task`, interactive Graph steps, Wave/repo sessions, Desktop panes | Runs in a **holder** process; outlives windows and `lf install` | Records turns, wakes idle conversations on steers/updates |
-| **Worker** | Headless steps of `lf task run` / `lf task auto on`, Discord Wave replies | Headless; runs in its own process | Records turns; keeps running if server stops |
+| **Worker** | Headless steps of `lf task run` / `lf task auto on` | Headless; runs in its own process | Records turns; keeps running if server stops |
 | **Chat** | `lf`, `lf <skill>`, `lf -i`, interactive `lf graph` | Runs directly in your terminal (`Ctrl+C`/`Ctrl+Z` go straight to the agent); ends with the terminal | None; reads transcript at exit |
 | **Batch** | `lf -b <skill>` | Headless child of its caller; prints output and exits | None; reads transcript at exit |
 

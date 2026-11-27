@@ -1,0 +1,769 @@
+/* Base layout and component styles for compiled Loopflow review pages. */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--lf-bg);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+main.lf-page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 44px 24px max(168px, var(--lf-dock-room, 0px));
+}
+
+h1 {
+  font-family: var(--lf-font-serif);
+  font-size: 32px;
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  font-variant-ligatures: no-common-ligatures;
+  margin: 0 0 12px;
+}
+
+h2 {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 32px 0 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--lf-border);
+}
+
+h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 20px 0 8px;
+}
+
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 22px; }
+li { margin-bottom: 4px; }
+
+code, pre {
+  font-family: var(--lf-font-mono);
+  font-size: 12.5px;
+}
+
+code {
+  background: var(--lf-surface-muted);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+pre {
+  background: var(--lf-surface);
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 16px;
+  font-size: 14px;
+}
+
+th, td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--lf-border);
+  vertical-align: top;
+}
+
+th {
+  color: var(--lf-text-secondary);
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+/* Meta bar & server status banner */
+.lf-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: var(--lf-text-secondary);
+  font-size: 12.5px;
+  margin-bottom: 24px;
+}
+
+.lf-meta code { font-size: 12px; }
+
+.lf-banner {
+  background: var(--lf-warning-fill);
+  color: var(--lf-warning-ink);
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 13.5px;
+}
+
+/* Diff and File blocks */
+.lf-codeblock {
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  background: var(--lf-surface);
+  margin: 14px 0;
+  overflow: hidden;
+}
+
+.lf-codeblock-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--lf-surface-muted);
+  border-bottom: 1px solid var(--lf-border);
+  font-size: 12.5px;
+}
+
+.lf-codeblock-path {
+  font-family: var(--lf-font-mono);
+  color: var(--lf-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lf-codeblock-scroll { overflow-x: auto; }
+
+.lf-code-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+  font-family: var(--lf-font-mono);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.lf-code-table td {
+  border: 0;
+  padding: 0 8px;
+  white-space: pre;
+}
+
+.lf-code-table td.lf-ln {
+  width: 1%;
+  min-width: 38px;
+  text-align: right;
+  color: var(--lf-text-tertiary);
+  user-select: none;
+  border-right: 1px solid var(--lf-border);
+  font-variant-numeric: tabular-nums;
+  position: relative;
+}
+
+.lf-code-table tr.lf-code-row td.lf-ln { cursor: pointer; }
+
+.lf-code-table tr.lf-code-row td.lf-ln-old,
+.lf-code-table tr.lf-code-row td.lf-ln-single {
+  min-width: 52px;
+  padding-left: 24px;
+}
+
+.lf-code-table .lf-gutter-plus {
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border-radius: 4px;
+  border: none;
+  background: var(--lf-accent);
+  color: var(--lf-accent-text);
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.lf-code-table tr.lf-code-row:hover .lf-gutter-plus,
+.lf-code-table .lf-gutter-plus:focus-visible {
+  opacity: 1;
+}
+
+/* A noted row keeps its diff tint; only the gutter carries the note. */
+.lf-code-table tr.lf-code-row.lf-row-has-note td.lf-ln { background: var(--lf-highlight-active); }
+
+.lf-code-table tr.lf-code-row.lf-row-has-note td.lf-ln:first-child {
+  box-shadow: inset 3px 0 0 var(--lf-accent);
+}
+
+.lf-code-table tr.lf-code-row.lf-row-selecting td { background: var(--lf-working-fill); }
+
+.lf-code-table td.lf-sign {
+  width: 18px;
+  text-align: center;
+  user-select: none;
+  padding: 0 2px;
+}
+
+.lf-code-table tr.lf-add { background: var(--lf-success-fill); }
+.lf-code-table tr.lf-add td.lf-sign { color: var(--lf-success-ink); }
+.lf-code-table tr.lf-del { background: var(--lf-failure-fill); }
+.lf-code-table tr.lf-del td.lf-sign { color: var(--lf-failure-ink); }
+.lf-code-table tr.lf-hunk td {
+  background: var(--lf-surface-muted);
+  color: var(--lf-text-secondary);
+  padding: 3px 10px;
+}
+
+.lf-code-table tr.lf-line-note td {
+  white-space: normal;
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  background: var(--lf-surface-element);
+  color: var(--lf-text);
+  padding: 6px 12px;
+  border-top: 1px solid var(--lf-border);
+  border-bottom: 1px solid var(--lf-border);
+}
+
+.lf-codeblock.lf-notes-hidden tr.lf-line-note { display: none; }
+
+/* Builtin components */
+.lf-decision {
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  background: var(--lf-surface);
+  padding: 14px 16px;
+  margin: 14px 0;
+}
+
+.lf-decision-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.lf-decision-title {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.lf-decision-rec {
+  font-size: 12px;
+  color: var(--lf-text-secondary);
+}
+
+.lf-before-after {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.lf-before-after-pane {
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  background: var(--lf-surface);
+  padding: 12px 14px;
+}
+
+.lf-before-after-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--lf-text-secondary);
+  margin-bottom: 8px;
+}
+
+/* Controls: choices, questions, direct actions */
+[data-choice], [data-multiselect] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* Draw `data-label` as a heading only when the control has no selectable prompt child;
+   a decision card shows its title instead. */
+:is([data-choice], [data-multiselect], [data-question])[data-label]:not(:has(> p, > label, > h3, > h4, > legend))::before {
+  content: attr(data-label);
+  display: block;
+  flex-basis: 100%;
+  margin: 10px 0 2px;
+  font-weight: 600;
+}
+
+:is([data-choice], [data-multiselect]) > :is(p, label, h3, h4, legend) {
+  flex-basis: 100%;
+  margin: 10px 0 2px;
+}
+
+.lf-decision [data-choice][data-label]::before { content: none; }
+
+button {
+  appearance: none;
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  line-height: 1.2;
+  padding: 6px 11px;
+  border-radius: 4px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  cursor: pointer;
+}
+
+button:hover { background: var(--lf-surface-muted); }
+
+button.is-selected,
+button[aria-pressed="true"],
+button.lf-btn-accent {
+  background: var(--lf-accent);
+  border-color: var(--lf-accent);
+  color: var(--lf-accent-text);
+}
+
+button.lf-btn-accent:hover {
+  background: var(--lf-accent-hover);
+  border-color: var(--lf-accent-hover);
+}
+
+button.lf-btn-quiet {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-color: var(--lf-border);
+  color: var(--lf-text-secondary);
+}
+
+button.lf-btn-quiet.is-selected,
+button.lf-btn-quiet[aria-pressed="true"] {
+  background: var(--lf-accent);
+  border-color: var(--lf-accent);
+  color: var(--lf-accent-text);
+}
+
+[data-question] { margin: 14px 0; }
+
+[data-question] textarea, [data-question] input[type="text"] {
+  width: 100%;
+  min-height: 60px;
+  padding: 8px 10px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 4px;
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 14px;
+  resize: vertical;
+}
+
+/* Direct action confirmation & receipt */
+.lf-action-confirm,
+.lf-action-receipt,
+.lf-action-error {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  border-radius: 4px;
+}
+
+.lf-action-confirm,
+.lf-action-error {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lf-action-confirm {
+  padding: 6px 10px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 6px;
+  background: var(--lf-surface-muted);
+}
+
+.lf-action-summary {
+  font-family: var(--lf-font-mono);
+  font-size: 12px;
+  color: var(--lf-text-secondary);
+}
+
+.lf-action-receipt {
+  gap: 6px;
+  padding: 5px 10px;
+  background: var(--lf-success-fill);
+  color: var(--lf-success-ink);
+  font-weight: 600;
+}
+
+.lf-action-error {
+  padding: 5px 10px;
+  background: var(--lf-failure-fill);
+  color: var(--lf-failure-ink);
+}
+
+/* Warm-underlined cross-element note highlights */
+.lf-hl {
+  background: var(--lf-highlight);
+  border-bottom: 2px solid var(--lf-highlight-line, var(--lf-accent));
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.lf-hl:hover { background: var(--lf-highlight-active, var(--lf-highlight)); }
+
+.lf-pulse-ring {
+  outline: 2px solid var(--lf-accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* Notion-style floating selection bubble */
+.lf-float-pill {
+  position: fixed;
+  z-index: 960;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px;
+  border-radius: 8px;
+  background: var(--lf-bubble-bg, var(--lf-text));
+  color: var(--lf-bubble-text, var(--lf-bg));
+  border: 1px solid var(--lf-bubble-border, var(--lf-border-strong));
+  box-shadow: var(--lf-shadow, 0 8px 26px rgba(0, 0, 0, 0.2));
+  font-size: 12px;
+}
+
+.lf-float-pill button {
+  background: transparent;
+  border: none;
+  color: var(--lf-bubble-text, var(--lf-bg));
+  padding: 4px 8px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.lf-float-pill button:hover { background: rgba(128, 128, 128, 0.24); }
+
+.lf-float-pill-sep {
+  width: 1px;
+  height: 14px;
+  background: rgba(128, 128, 128, 0.35);
+}
+
+/* Floating comment composer & hover cards */
+.lf-float-composer,
+.lf-hover-card {
+  position: fixed;
+  background: var(--lf-surface);
+  border: 1px solid var(--lf-border-strong);
+  box-shadow: var(--lf-shadow, 0 8px 26px rgba(0, 0, 0, 0.18));
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.lf-float-composer {
+  z-index: 970;
+  width: min(320px, calc(100vw - 16px));
+  padding: 10px;
+  border-radius: 9px;
+}
+
+.lf-hover-card {
+  z-index: 950;
+  width: min(290px, calc(100vw - 16px));
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+
+.lf-anchor-quote {
+  font-size: 11.5px;
+  color: var(--lf-text-secondary);
+  border-left: 2px solid var(--lf-border-strong);
+  padding-left: 7px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lf-card-body {
+  color: var(--lf-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lf-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.lf-float-composer textarea,
+.lf-sidebar-item textarea {
+  width: 100%;
+  min-height: 56px;
+  padding: 6px 8px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 5px;
+  background: var(--lf-bg);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  resize: vertical;
+}
+
+.lf-sidebar-item textarea { background: var(--lf-surface); }
+
+/* Top-right Comments toggle + collapsible slide-over sidebar */
+.lf-comments-toggle {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  z-index: 920;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  font-size: 12.5px;
+  font-weight: 500;
+  box-shadow: var(--lf-shadow-sm, 0 3px 12px rgba(0, 0, 0, 0.08));
+}
+
+.lf-comments-toggle.has-notes { border-color: var(--lf-accent); }
+
+.lf-comments-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--lf-accent);
+  color: var(--lf-accent-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.lf-comments-count[hidden] { display: none; }
+
+.lf-sidebar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(340px, 92vw);
+  z-index: 940;
+  background: var(--lf-surface);
+  border-left: 1px solid var(--lf-border-strong);
+  box-shadow: var(--lf-shadow, 0 8px 26px rgba(0, 0, 0, 0.18));
+  display: flex;
+  flex-direction: column;
+  transform: translateX(104%);
+  transition: transform 0.18s ease;
+}
+
+.lf-sidebar.is-open { transform: translateX(0); }
+
+.lf-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--lf-border);
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.lf-sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lf-sidebar-empty {
+  font-size: 13px;
+  color: var(--lf-text-tertiary);
+  padding: 6px 2px;
+}
+
+.lf-sidebar-item {
+  padding: 9px 11px;
+  border: 1px solid var(--lf-border);
+  border-radius: 7px;
+  background: var(--lf-bg);
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lf-sidebar-item:hover { border-color: var(--lf-accent); }
+
+/* Fixed T3 Code-style attached-chip composer dock (hidden in Loopflow Desktop) */
+.lf-dock {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 1000;
+  width: min(820px, calc(100vw - 24px));
+  padding: 9px 12px;
+  background: var(--lf-surface);
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 11px;
+  box-shadow: var(--lf-shadow, 0 8px 28px rgba(0, 0, 0, 0.16));
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lf-dock-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  max-height: 92px;
+  overflow-y: auto;
+}
+
+.lf-dock[hidden],
+.lf-dock-chips[hidden] { display: none; }
+
+.lf-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-bg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.lf-chip:hover { border-color: var(--lf-accent); }
+
+.lf-chip-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--lf-surface-element);
+  color: var(--lf-text-secondary);
+  flex-shrink: 0;
+}
+
+.lf-chip-tag.tag-note { background: var(--lf-highlight); color: var(--lf-accent); }
+.lf-chip-tag.tag-lines { background: var(--lf-working-fill); color: var(--lf-working-ink); }
+.lf-chip-tag.tag-choice { background: var(--lf-success-fill); color: var(--lf-success-ink); }
+.lf-chip-tag.tag-answer { background: var(--lf-warning-fill); color: var(--lf-warning-ink); }
+.lf-chip-tag.tag-run { background: var(--lf-failure-fill); color: var(--lf-failure-ink); }
+
+.lf-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+}
+
+.lf-chip-x {
+  border: none;
+  background: transparent;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--lf-text-tertiary);
+}
+
+.lf-chip-x:hover {
+  background: transparent;
+  color: var(--lf-failure-ink);
+}
+
+.lf-dock-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.lf-dock-input {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 6px;
+  background: var(--lf-bg);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 13.5px;
+}
+
+.lf-dock-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.lf-dock-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.lf-dock-preview {
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: var(--lf-bg);
+  border: 1px solid var(--lf-border);
+  font-family: var(--lf-font-mono);
+  font-size: 11.5px;
+  color: var(--lf-text-secondary);
+  word-break: break-word;
+  max-height: 84px;
+  overflow-y: auto;
+}
+
+.lf-dock-status {
+  font-size: 12.5px;
+  color: var(--lf-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lf-dock-status.is-error { color: var(--lf-failure-ink); }
+.lf-dock-status.is-ok { color: var(--lf-success-ink); }

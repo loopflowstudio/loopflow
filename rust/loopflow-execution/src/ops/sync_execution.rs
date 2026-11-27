@@ -2,13 +2,13 @@ use crate::agent::{run_agent, ProcessConfig};
 use crate::config::{load_config_or_default, Config};
 use crate::git::{current_branch, get_default_branch};
 use crate::graph::load_skill;
+use crate::harness::Mode;
 use crate::ops::telemetry::record_ops_metric;
 use crate::ops::{
     abort_sync_for_resolution, continue_sync_for_resolution, plan_sync, recover_sync,
     sync_class_name, sync_strategy_name, sync_with_plan, OpsError, Progress, SyncOptions,
 };
 use crate::prompt::process::{prepare_process_prompt, ContextSourceOverrides, ProcessPromptInput};
-use crate::prompt::Surface;
 use anyhow::{anyhow, Result};
 use std::path::Path;
 use std::process::Command;
@@ -291,7 +291,7 @@ fn process_skill_agent(
             repo_root: repo_root.to_path_buf(),
             skill: Some(skill_name.to_string()),
             resolved_skill: Some(skill),
-            surface: Surface::Headless,
+            mode: Mode::Headless,
             message,
             source_overrides: ContextSourceOverrides {
                 // Sync conflicts already name the affected paths in `context`.

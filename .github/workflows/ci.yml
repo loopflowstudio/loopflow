@@ -25,8 +25,8 @@ jobs:
       reuse: ${{ steps.proof.outputs.reuse }}
       proof_url: ${{ steps.proof.outputs.proof_url }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: Find the merge queue's proof for this exact commit
         id: proof
         env:
@@ -45,8 +45,8 @@ jobs:
       macos-process-test: ${{ steps.classify.outputs.macos-process-test }}
       loopflow-ui-test: ${{ steps.classify.outputs.loopflow-ui-test }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: Classify changed paths
         id: classify
         run: uv run python scripts/macos_inputs.py "${{ github.event.pull_request.base.sha }}"
@@ -60,8 +60,8 @@ jobs:
     permissions:
       actions: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: Cancel this pull request's earlier merge-queue runs
         env:
           GH_TOKEN: ${{ github.token }}
@@ -73,12 +73,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Fetch canonical migration history
         run: git fetch --no-tags origin main:refs/remotes/origin/main
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       # Migrations need SQLite >= 3.47 (RAISE expressions); the runner's system Python is older.
       - name: Verify the architecture map
         run: uv run --managed-python python scripts/check_architecture.py
@@ -91,7 +91,7 @@ jobs:
     outputs:
       candidate: ${{ steps.scratch.outputs.candidate }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Select landing candidates and enforce queue scratch cleanup
         id: scratch
         env:
@@ -124,19 +124,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Fetch canonical migration history
         run: git fetch --no-tags origin main:refs/remotes/origin/main
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           components: clippy, rustfmt
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: Fingerprint workspace build profiles
         id: rust-profiles
         run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         id: rust-cache
         with:
           key: lint-${{ steps.rust-profiles.outputs.key }}
@@ -163,23 +163,25 @@ jobs:
     steps:
       # build.rs orders unmerged migrations after origin/main's; a shallow
       # clone has no history and orders them by name instead.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Fetch canonical migration history
         run: git fetch --no-tags origin main:refs/remotes/origin/main
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: astral-sh/setup-uv@v7
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: Fingerprint workspace build profiles
         id: rust-profiles
         run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         id: rust-cache
         with:
           key: test-${{ steps.rust-profiles.outputs.key }}
           save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
+        with:
+          tool: nextest
       - name: Build and archive Rust tests
         id: archive
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
@@ -191,14 +193,14 @@ jobs:
           /usr/bin/time -v cargo nextest archive --workspace \
             -E 'not kind(lib) & not binary(=planning_reconnect_tests)' \
             --archive-file "$RUNNER_TEMP/rust-integration.tar.zst"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: steps.archive.outcome == 'success'
         with:
           name: rust-library
           path: ${{ runner.temp }}/rust-library.tar.zst
           compression-level: 0
           retention-days: 1
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: steps.archive.outcome == 'success'
         with:
           name: rust-integration
@@ -230,15 +232,17 @@ jobs:
           - { suite: integration, shard: 2, partitions: 3 }
           - { suite: integration, shard: 3, partitions: 3 }
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Claims name their person by Git user.email; repository-local test identities win.
       - name: Give tests a fallback Git identity
         run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: astral-sh/setup-uv@v7
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - run: uv sync
-      - uses: taiki-e/install-action@nextest
-      - uses: actions/download-artifact@v8
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: nextest
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: rust-${{ matrix.suite }}
           path: ${{ runner.temp }}
@@ -282,7 +286,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Fetch canonical migration history
@@ -290,7 +294,7 @@ jobs:
       # Claims name their person by Git user.email; repository-local test identities win.
       - name: Give tests a fallback Git identity
         run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: Start disposable installation containers
         id: installation
         env:
@@ -311,7 +315,7 @@ jobs:
                   print(f"{proof}={container}", file=output)
           PY
           docker image inspect --format 'id={{.Id}}' "$PROOF_IMAGE" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: installation-cache
         with:
           path: ${{ runner.temp }}/installation-cargo
@@ -354,10 +358,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: Fetch canonical migration history
         run: git fetch --no-tags origin main:refs/remotes/origin/main
       - name: Verify migration namespaces
@@ -378,8 +382,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - run: uv sync
       - name: Fetch Cargo dependencies for offline build fixtures
         run: cargo fetch --locked
@@ -392,8 +396,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: Run website tests
         run: uv run python dev.py test
         working-directory: website
@@ -404,7 +408,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Fetch canonical migration history
@@ -412,18 +416,20 @@ jobs:
       # Claims name their person by Git user.email; repository-local test identities win.
       - name: Give tests a fallback Git identity
         run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: astral-sh/setup-uv@v7
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: Fingerprint workspace build profiles
         id: rust-profiles
         run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         id: rust-cache
         with:
           key: ${{ steps.rust-profiles.outputs.key }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
+        with:
+          tool: nextest
       - name: Run planning reconnect proofs and E2E smoke test
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: |

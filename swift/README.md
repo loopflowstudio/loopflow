@@ -1046,17 +1046,8 @@ roadmap, the Now list or a Wave's page, opens it in its
 repository window rather than creating another Task workspace in a sheet.
 A Wave on the roadmap is a section under its name, divided from the next by a
 line. A Wave's page shows its name and objective, followed by its Project and Tasks.
-Wave Chat loads the active backing's bounded history before SSE, keeps it visible
-through reconnects, and rolls equivalent operational failures into one
-disclosed notice. Cold launch does not start a chat transcript read.
-Local-backed conversations compose in the app. Discord-backed conversations
-mirror the same source-linked transcript and open Discord to reply; they never
-create a parallel local thread. Prior backing epochs remain selectable and
-read-only, and backing delivery trouble stays visible above the transcript.
-Commands, tools, file edits, and loop bookkeeping stay in the journal;
-decisions, deliveries, and actionable failures remain visible. The detail pane
-reads the Wave's plan, Tasks, decisions, PR delivery, and Task conditions
-from `lf wave plan <wave> --json`.
+The detail pane reads the Wave's plan, Tasks, decisions, PR delivery, and Task
+conditions from `lf wave plan <wave> --json`.
 
 Beside each Task's row, **Start** (**Run** once its Graph has run),
 **Open PR** and **Worktree** start its legal Graph, open its PR, and open the

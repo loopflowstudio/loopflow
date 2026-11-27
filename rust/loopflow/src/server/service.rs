@@ -5,16 +5,20 @@
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::{ready, Poll};
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{mpsc, Notify, Semaphore};
 use tokio::task::{AbortHandle, JoinSet};
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::WebSocketStream;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
 use super::answers::{Answer, Remembered};
@@ -65,6 +69,66 @@ pub(super) trait Carrier:
 
 impl Carrier for Lines {
     type Failure = LinesCodecError;
+}
+
+/// Protocol messages as WebSocket text frames. Binary frames belong to a
+/// bridged terminal and are refused here; the carrier answers pings itself.
+pub(super) struct Messages<S>(pub(super) WebSocketStream<S>);
+
+impl<S: AsyncRead + AsyncWrite + Unpin + Send> Stream for Messages<S> {
+    type Item = Result<String>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        loop {
+            let Some(message) = ready!(self.0.poll_next_unpin(cx)) else {
+                return Poll::Ready(None);
+            };
+            return Poll::Ready(match message {
+                Ok(Message::Text(text)) => Some(Ok(text.to_string())),
+                Ok(Message::Close(_)) => None,
+                Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)) => continue,
+                Ok(Message::Binary(_)) => Some(Err(anyhow::anyhow!(
+                    "the control connection carries text messages"
+                ))),
+                Err(error) => Some(Err(error.into())),
+            });
+        }
+    }
+}
+
+impl<S: AsyncRead + AsyncWrite + Unpin + Send> Sink<String> for Messages<S> {
+    type Error = anyhow::Error;
+
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Result<()>> {
+        self.0.poll_ready_unpin(cx).map_err(Into::into)
+    }
+
+    fn start_send(mut self: Pin<&mut Self>, item: String) -> Result<()> {
+        Ok(self.0.start_send_unpin(Message::Text(item.into()))?)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Result<()>> {
+        self.0.poll_flush_unpin(cx).map_err(Into::into)
+    }
+
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Result<()>> {
+        self.0.poll_close_unpin(cx).map_err(Into::into)
+    }
+}
+
+impl<S: AsyncRead + AsyncWrite + Unpin + Send> Carrier for Messages<S> {
+    type Failure = anyhow::Error;
+}
+
+/// Capabilities reserved for the same-user local Unix socket: mobile setup and
+/// loopback capability URL minting. Absent on Tailscale and loopback carriers.
+#[derive(Clone)]
+pub(super) struct LocalAuthority {
+    pub(super) remote: mpsc::Sender<Control>,
+    pub(super) loopback: Result<Arc<super::loopback::Handle>, String>,
 }
 
 /// Connections to this server and from it to other Machines.
@@ -204,6 +268,17 @@ pub(super) async fn run() -> Result<()> {
     let tickets = Arc::new(Tickets::default());
     let subscriptions = Arc::new(Subscriptions::default());
     let (remote_control, remote_requests) = mpsc::channel(8);
+    let (loopback_server, loopback_handle) = match super::loopback::Loopback::bind(&path).await {
+        Ok((server, handle)) => (Some(server), Ok(handle)),
+        Err(error) => {
+            tracing::warn!(%error, "Browser review pages are unavailable");
+            (None, Err(format!("{error:#}")))
+        }
+    };
+    let local_authority = LocalAuthority {
+        remote: remote_control,
+        loopback: loopback_handle,
+    };
     super::maintenance::start();
     tokio::spawn(loopflow_execution::ops::tracker_events::watch_owned_work(
         None,
@@ -229,6 +304,17 @@ pub(super) async fn run() -> Result<()> {
         subscriptions.clone(),
         terminals.clone(),
     );
+    let loopback = loopback_server.map(|server| {
+        server.run(
+            instance.clone(),
+            executable_sha256.clone(),
+            slots.clone(),
+            clients.clone(),
+            tickets.clone(),
+            subscriptions.clone(),
+            terminals.clone(),
+        )
+    });
     let shutdown_instance = instance.clone();
     let client_activity = Arc::new(Notify::new());
     let lifetime = {
@@ -259,6 +345,12 @@ pub(super) async fn run() -> Result<()> {
     tracing::info!(%instance, socket = %path.display(), "Loopflow server ready");
     tokio::select! {
         result = remote => result,
+        result = async {
+            match loopback {
+                Some(server) => server.await,
+                None => std::future::pending().await,
+            }
+        } => result,
         _ = peers.expiring() => unreachable!("peer expiry runs until shutdown"),
         _ = tickets.expiring() => unreachable!("ticket expiry runs until shutdown"),
         reason = lifetime => {
@@ -275,7 +367,7 @@ pub(super) async fn run() -> Result<()> {
             }
             Ok(())
         }
-        result = local(listener, instance, executable_sha256, slots, clients, remote_control, tickets.clone(), subscriptions, terminals, client_activity) => result,
+        result = local(listener, instance, executable_sha256, slots, clients, local_authority, tickets.clone(), subscriptions, terminals, client_activity) => result,
     }
 }
 
@@ -418,7 +510,7 @@ async fn local(
     executable_sha256: Arc<String>,
     slots: Arc<Semaphore>,
     clients: Clients,
-    remote_control: mpsc::Sender<Control>,
+    local_authority: LocalAuthority,
     tickets: Arc<Tickets>,
     subscriptions: Arc<Subscriptions>,
     terminals: Option<Arc<Registry>>,
@@ -451,7 +543,7 @@ async fn local(
         let instance = instance.clone();
         let executable_sha256 = executable_sha256.clone();
         let clients = clients.clone();
-        let remote_control = remote_control.clone();
+        let local_authority = local_authority.clone();
         let tickets = tickets.clone();
         let subscriptions = subscriptions.clone();
         let terminals = terminals.clone();
@@ -464,7 +556,7 @@ async fn local(
                 &instance,
                 &executable_sha256,
                 &clients,
-                Some(remote_control),
+                Some(local_authority),
                 terminals.clone(),
                 tickets,
                 &slots,
@@ -478,15 +570,15 @@ async fn local(
     }
 }
 
-/// Local connections may configure mobile access; `remote_control` is absent
-/// on the remote carrier.
+/// Local connections may configure mobile access and mint loopback page URLs;
+/// `local_authority` is absent on remote and loopback carriers.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn connection(
     mut socket: UnixStream,
     instance: &str,
     executable_sha256: &str,
     clients: &Clients,
-    remote_control: Option<mpsc::Sender<Control>>,
+    local_authority: Option<LocalAuthority>,
     terminals: Option<Arc<Registry>>,
     tickets: Arc<Tickets>,
     slots: &Arc<Semaphore>,
@@ -530,7 +622,7 @@ pub(super) async fn connection(
                 &mut lines,
                 instance.into(),
                 &listed,
-                remote_control,
+                local_authority,
                 Admission::Local,
                 tickets,
                 terminals,
@@ -776,7 +868,7 @@ pub(super) async fn session<C: Carrier>(
     lines: &mut C,
     instance: Arc<str>,
     listed: &Listed,
-    remote_control: Option<mpsc::Sender<Control>>,
+    local_authority: Option<LocalAuthority>,
     admission: Admission,
     tickets: Arc<Tickets>,
     terminals: Option<Arc<Registry>>,
@@ -1287,11 +1379,11 @@ pub(super) async fn session<C: Carrier>(
                 } else {
                     None
                 };
-                let (request_id, instance, outgoing, remote_control) = (
+                let (request_id, instance, outgoing, local_authority) = (
                     id.clone(),
                     instance.clone(),
                     outgoing.clone(),
-                    remote_control.clone(),
+                    local_authority.clone(),
                 );
                 let uploaded_reservation = uploaded_reservation.take();
                 let task = tasks.spawn(async move {
@@ -1309,7 +1401,7 @@ pub(super) async fn session<C: Carrier>(
                         instance,
                         outgoing,
                         reservation,
-                        remote_control,
+                        local_authority,
                     )
                     .await;
                 });
@@ -1992,7 +2084,7 @@ async fn request(
     instance: Arc<str>,
     outgoing: Outbox,
     reservation: Arc<Reservation>,
-    remote_control: Option<mpsc::Sender<Control>>,
+    local_authority: Option<LocalAuthority>,
 ) {
     #[cfg(test)]
     let completion = tests::take_request_completion(&id);
@@ -2017,7 +2109,7 @@ async fn request(
                 &instance,
                 &trace_id,
                 reservation.clone(),
-                remote_control,
+                local_authority,
             )
             .await
         }
@@ -2086,7 +2178,7 @@ async fn operate(
     instance: &str,
     trace_id: &loopflow_model::id::TraceId,
     reservation: Arc<Reservation>,
-    remote_control: Option<mpsc::Sender<Control>>,
+    local_authority: Option<LocalAuthority>,
 ) -> Answer {
     let measured = matches!(&operation, Operation::Measured(_));
     let remembered = request_id
@@ -2121,7 +2213,7 @@ async fn operate(
         }
         operation => operation,
     };
-    Answer::read(served(operation, origin, measured, reservation, remote_control).await)
+    Answer::read(served(operation, origin, measured, reservation, local_authority).await)
 }
 
 /// A read or a server operation; writes answer through `effect`.
@@ -2130,12 +2222,12 @@ async fn served(
     origin: Origin,
     measured: bool,
     reservation: Arc<Reservation>,
-    remote_control: Option<mpsc::Sender<Control>>,
+    local_authority: Option<LocalAuthority>,
 ) -> Result<serde_json::Value, Error> {
     match operation {
         Operation::Server(ServerOperation::MobileStatus) => {
             let (reply, result) = tokio::sync::oneshot::channel();
-            mobile_control(remote_control, Control::Status { reply }).await?;
+            mobile_control(local_authority.map(|l| l.remote), Control::Status { reply }).await?;
             serde_json::to_value(result.await.map_err(unavailable)?).map_err(unavailable)
         }
         Operation::Server(ServerOperation::ServerDiagnostics) => {
@@ -2150,7 +2242,7 @@ async fn served(
         Operation::Server(ServerOperation::MobileConfigure { configuration }) => {
             let (reply, result) = tokio::sync::oneshot::channel();
             mobile_control(
-                remote_control,
+                local_authority.map(|l| l.remote),
                 Control::Configure {
                     configuration,
                     reply,
@@ -2162,6 +2254,19 @@ async fn served(
                 .map_err(unavailable)?
                 .map_err(|message| Error::new(ErrorCode::Unavailable, message))?;
             Ok(serde_json::json!({ "configuration": configuration }))
+        }
+        Operation::Server(ServerOperation::PageUrl { path }) => {
+            let Some(authority) = local_authority else {
+                return Err(Error::new(
+                    ErrorCode::Invalid,
+                    "Page URLs are only minted on the Machine itself",
+                ));
+            };
+            let url = authority
+                .loopback
+                .map_err(|error| Error::new(ErrorCode::Unavailable, error))?
+                .url(&path)?;
+            serde_json::to_value(super::wire::PageUrl { url }).map_err(unavailable)
         }
 
         Operation::Read(query)
@@ -2740,13 +2845,18 @@ mod tests {
         drop(UnixStream::connect(&path).await.unwrap());
         let mut probe = UnixStream::connect(&path).await.unwrap();
         let (remote_control, _remote_requests) = mpsc::channel(1);
+        let (_loopback, loopback_handle) =
+            super::super::loopback::Loopback::bind(&path).await.unwrap();
         let serving = local(
             listener,
             "incarnation".into(),
             Arc::new("fixture".into()),
             Arc::new(Semaphore::new(MAX_CONNECTIONS)),
             Clients::default(),
-            remote_control,
+            super::LocalAuthority {
+                remote: remote_control,
+                loopback: Ok(loopback_handle),
+            },
             Arc::new(Tickets::default()),
             Arc::new(Subscriptions::default()),
             None,

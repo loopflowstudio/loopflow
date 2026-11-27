@@ -202,7 +202,7 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
 
 fn launch_task(cli: &Cli) -> Option<&str> {
     match &cli.command {
-        Some(Commands::Desktop { .. } | Commands::Open(_))
+        Some(Commands::Desktop { .. } | Commands::Open(_) | Commands::Page { .. })
         | Some(Commands::Task {
             cmd: TaskCommand::Location { .. },
         }) => None,

@@ -148,6 +148,16 @@ public actor ServerLink {
         try await request(.command(change), requestID: requestID, deadline: nil)
     }
 
+    /// Forward a pre-validated JSON operation object (e.g. from a review page's
+    /// `data-lf` button) without adding a typed `ServerOperation` case.
+    public func sendRawOperation(_ operation: JSONValue, requestID: String? = nil) async throws -> RawJSON {
+        try await admitted {
+            let id = UUID().uuidString
+            let message = try Self.rawOperationLine(id: id, operation: operation, requestID: requestID)
+            return try await self.sendRequest(id: id, message: message)
+        }.result
+    }
+
     private func request(_ operation: ServerOperation, requestID: String?, deadline: Duration?) async throws -> ServerAnswer {
         let measured: ServerOperation? = switch operation {
         case .read(let query): .measuredRead(query)
@@ -204,10 +214,14 @@ public actor ServerLink {
     /// Admission refusals ran nothing. Give ordinary concurrent loading time to
     /// drain without replaying a dispatched or disconnected command.
     private func admitted(_ operation: ServerOperation, requestID: String?) async throws -> ServerAnswer {
+        try await admitted { try await self.requestOnce(operation, requestID: requestID) }
+    }
+
+    private func admitted(_ attempt: () async throws -> ServerAnswer) async throws -> ServerAnswer {
         let deadline = ContinuousClock.now + Self.busyWait
         var delay = Duration.milliseconds(100)
         while true {
-            do { return try await requestOnce(operation, requestID: requestID) }
+            do { return try await attempt() }
             catch let error as ServerError {
                 guard ContinuousClock.now < deadline, error.code == .busy,
                       case .integer = error.data["max"],
@@ -221,9 +235,39 @@ public actor ServerLink {
 
     private struct Ticket: Decodable { let ticket: String }
 
+    private struct RawOperationRequest: Encodable {
+        let id: String
+        let operation: JSONValue
+        let requestID: String?
+
+        private enum Keys: String, CodingKey {
+            case type, id, operation, select, sender, requestID = "request_id"
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("request", forKey: .type)
+            try box.encode(id, forKey: .id)
+            try box.encode(operation, forKey: .operation)
+            try box.encodeNil(forKey: .select)
+            try box.encodeNil(forKey: .sender)
+            try box.encode(requestID, forKey: .requestID)
+        }
+    }
+
+    private static func rawOperationLine(id: String, operation: JSONValue, requestID: String?) throws -> Data {
+        let line = try JSONEncoder().encode(RawOperationRequest(id: id, operation: operation, requestID: requestID))
+        guard line.count <= ServerProtocol.maxBulk else { throw RegistryQueryError("Server request exceeds its limit") }
+        return line
+    }
+
     private func requestOnce(_ operation: ServerOperation, requestID: String?) async throws -> ServerAnswer {
         let id = UUID().uuidString
         let message = try Self.line(.request(id: id, operation: operation, select: nil, requestID: requestID))
+        return try await sendRequest(id: id, message: message)
+    }
+
+    private func sendRequest(id: String, message: Data) async throws -> ServerAnswer {
         if message.count <= ServerProtocol.maxMessage {
             return try await answer(id) { try await self.send(message) }
         }

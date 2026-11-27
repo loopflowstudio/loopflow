@@ -826,8 +826,8 @@ fn typing_echoes_within_200ms_while_store_write_lock_is_held() {
     blocker.execute_batch("ROLLBACK").unwrap();
     drop(blocker);
     registry.close();
+    // `exit_term` exited when the stop file appeared; only the live one is held.
     kill(&place, &live_term);
-    kill(&place, &exit_term);
 }
 
 #[test]

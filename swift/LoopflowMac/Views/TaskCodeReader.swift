@@ -21,14 +21,14 @@ struct TaskCodeReader: View {
     private var detachedComments: [ReviewComment] {
         guard let store else { return [] }
         return store.comments.items.filter {
-            $0.original.path == path && $0.original.source.isFile && $0.detached
+            $0.original?.path == path && $0.original?.source.isFile == true && $0.detached
         }
     }
 
     private var attachedComments: [ReviewComment] {
         guard let store else { return [] }
         return store.comments.items.filter {
-            !$0.detached && $0.original.path == path && $0.original.source.isFile
+            !$0.detached && $0.original?.path == path && $0.original?.source.isFile == true
         }
     }
 
@@ -898,7 +898,9 @@ final class CodeReaderCoordinator {
         // Collect all 1-based lines that host an editor, comment row, or symbol peek.
         var activeLines = Set<Int>()
         if let sel = state.commentSelection { activeLines.insert(sel.last) }
-        for comment in state.attachedComments { activeLines.insert(comment.selection.last) }
+        for comment in state.attachedComments {
+            if let last = comment.selection?.last { activeLines.insert(last) }
+        }
         if let peek = state.inlinePeek, let peekLine = peek.origin.line { activeLines.insert(peekLine) }
 
         // Remove stale slots.
@@ -919,7 +921,7 @@ final class CodeReaderCoordinator {
 
         for line in activeLines.sorted() {
             let selection = state.commentSelection?.last == line ? state.commentSelection : nil
-            let comments = state.attachedComments.filter { $0.selection.last == line }
+            let comments = state.attachedComments.filter { $0.selection?.last == line }
             let peek = state.inlinePeek?.origin.line == line ? state.inlinePeek : nil
             let lineIndex = textView.lineIndex
             let addToConversation = state.addToConversation

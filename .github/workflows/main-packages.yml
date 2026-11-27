@@ -8,14 +8,17 @@ on:
     workflows: [CI]
     types: [completed]
     branches: [main]
-  workflow_dispatch:
 
 jobs:
   packages:
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') }}
+    # The signed commit is a push to main that passed CI. This workflow always
+    # runs as main, so the `signing` environment admits it whatever it checks
+    # out, and `branches: [main]` also matches a fork's branch named main:
+    # `event == 'push'` keeps a pull request's head out of desktop-app.
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
     uses: ./.github/workflows/package-build.yml
     with:
-      revision: ${{ github.event.workflow_run.head_sha || github.sha }}
+      revision: ${{ github.event.workflow_run.head_sha }}
 
   # Desktop and the terminal stay on one build: the app bundles the exact
   # `lf` bytes of the aarch64 package, which promotion checks.
@@ -23,14 +26,18 @@ jobs:
     needs: packages
     runs-on: macos-26
     timeout-minutes: 60
+    # Only main can use this environment: .github/CI.md, "Signing secrets".
+    environment:
+      name: signing
+      deployment: false
     steps:
       # build.rs orders migrations by origin/main's first-parent history.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v7
-      - uses: actions/download-artifact@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: lf-aarch64-apple-darwin
           path: package
@@ -65,7 +72,7 @@ jobs:
           set -euo pipefail
           xcrun stapler validate swift/dist/Loopflow.dmg
           spctl --assess --type open --context context:primary-signature swift/dist/Loopflow.dmg
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Loopflow-dmg
           path: swift/dist/Loopflow.dmg

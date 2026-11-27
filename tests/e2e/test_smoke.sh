@@ -39,7 +39,7 @@
   "$ROOT_DIR/target/debug/lf-prompt" \
     --repo "$repo_dir" \
     --skill debug \
-    --surface headless \
+    --mode headless \
     --diff-files false \
     --diff false \
     | grep -q "Test"

@@ -46,6 +46,13 @@ enum ServerClient {
                                 location: location).decode()
     }
 
+    /// Forward a pre-validated JSON operation object from a review page.
+    static func rawOperation(_ operation: JSONValue, requestID: String? = nil, location: ServerLocation = .shared) async throws -> RawJSON {
+        try Task.checkCancellation()
+        let link = try await links.link(for: location)
+        return try await link.sendRawOperation(operation, requestID: requestID)
+    }
+
     private static func request(_ operation: ServerOperation, location: ServerLocation) async throws -> RawJSON {
         try Task.checkCancellation()
         let link = try await links.link(for: location)

@@ -821,8 +821,7 @@ is a batch. A Graph's correction turn in a Task run remains a worker.
 Interactive Task, Wave, repository and bound conversations are work sessions,
 as are conversations opened in a held terminal through Desktop or a framed
 `lf --machine` view. Workers run headless Task Graph steps and the `ci-fix` run
-landing starts. The checkout, `--task` and
-`LF_AS` only decide Task membership: accounting and Task steers always travel
+landing starts. The checkout, `--task` and `LF_AS` only decide Task membership: accounting and Task steers always travel
 together. Resume retains a Session's bare or managed lifetime, reading its
 binding and primary scope once before delegation; attribution alone leaves it
 bare. Every launch [reads its own steers from the store](#every-launch-reads-its-own-steers).

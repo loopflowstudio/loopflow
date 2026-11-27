@@ -242,36 +242,16 @@ fn gather_context_keeps_the_mode() {
     write_skill(repo, "debug", "Fix it.");
     make_commit(repo, "initial");
 
-    let auto = gather_context(&GatherContextOpts {
-        repo_root: repo.to_path_buf(),
-        skill: Some("debug".to_string()),
-        message: None,
-        operate: false,
-        mode: Mode::Headless,
-        files: vec![],
-        docs: vec![],
-        wave: None,
-        related_repos: Vec::new(),
-        ..Default::default()
-    })
-    .unwrap();
-
-    let interactive = gather_context(&GatherContextOpts {
-        repo_root: repo.to_path_buf(),
-        skill: Some("debug".to_string()),
-        message: None,
-        operate: false,
-        mode: Mode::Interactive,
-        files: vec![],
-        docs: vec![],
-        wave: None,
-        related_repos: Vec::new(),
-        ..Default::default()
-    })
-    .unwrap();
-
-    assert_eq!(auto.mode, Mode::Headless);
-    assert_eq!(interactive.mode, Mode::Interactive);
+    for mode in [Mode::Headless, Mode::Interactive] {
+        let components = gather_context(&GatherContextOpts {
+            repo_root: repo.to_path_buf(),
+            skill: Some("debug".to_string()),
+            mode,
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(components.mode, mode);
+    }
 }
 
 // =============================================================================

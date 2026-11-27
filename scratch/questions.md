@@ -16,9 +16,9 @@
   `id`, with a removal Task filed in this change.
 - Assumed: one Task, LOO-1121, deletes both retired Wave keys. No existing
   Task named the `linear` key (`lf task list linear`), so it joins `chat`.
-- Assumed: the golden prompt cases parse `mode` with Clap's `ValueEnum`, as
-  `lf-prompt --mode` does, so the two words have one spelling and `Mode`
-  needs no serde derive.
+- Assumed: the golden prompt cases carry no `mode` key. All six said
+  `headless`, so the test renders headless and nothing parses the word. An
+  interactive golden would bring the key back.
 - Assumed: `Mode::default()` is headless, as `Surface`'s was, so
   `GatherContextOpts` and `PromptComponents` keep `Default`.
 - Not checked: whether `builtin_skills_use_the_application_fallback` fails at

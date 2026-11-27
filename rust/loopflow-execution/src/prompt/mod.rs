@@ -1355,10 +1355,7 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
         parts.push(user);
     }
 
-    let instructions = components.mode.instructions();
-    if !instructions.is_empty() {
-        parts.push(instructions.to_string());
-    }
+    parts.push(components.mode.instructions().to_string());
 
     parts
 }
@@ -1831,7 +1828,7 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_human_present_keeps_questions_with_present_human() {
+    fn format_prompt_interactive_keeps_questions_in_the_conversation() {
         let prompt = render_full_prompt(PromptComponents {
             mode: Mode::Interactive,
             ..Default::default()
@@ -2477,23 +2474,6 @@ mod tests {
         assert!(paths.contains(&"README.md"));
         assert!(paths.contains(&"docs/README.md"));
         assert!(paths.contains(&"docs/nested/README.md"));
-    }
-
-    #[test]
-    fn gather_context_keeps_the_mode() {
-        let temp = tempfile::tempdir().expect("create temp dir");
-        let repo = temp.path();
-
-        let opts = GatherContextOpts {
-            repo_root: repo.to_path_buf(),
-            mode: Mode::Interactive,
-            ..Default::default()
-        };
-
-        let result = gather_context(&opts);
-        assert!(result.is_ok());
-        let components = result.unwrap();
-        assert_eq!(components.mode, Mode::Interactive);
     }
 
     #[test]

@@ -82,6 +82,14 @@ the rendered files untouched; `context_tests::` 16 passed; execution
 probes this Machine's installed harnesses and logins before the mode is
 read. Not run at the parent commit. Left to CI.
 
+Compress pass (2026-11-26): the golden cases dropped their `mode` key (all
+six were `headless`; the test renders headless), the unit copy of
+`gather_context_keeps_the_mode` went (the integration one covers both modes),
+and `format_system_sections` pushes the mode text without an empty check.
+Passed: `golden_prompt` with the rendered files untouched,
+`context_tests::gather_context_keeps_the_mode`, execution
+`prompt::tests::format_prompt` (9).
+
 ## Remaining
 
 Review, PR, land. Deferred: typing the recorded Session `surface` string

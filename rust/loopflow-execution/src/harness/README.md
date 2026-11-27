@@ -32,8 +32,8 @@ The four `LaunchKind` variants match the [glossary's launch names](../../../../d
 Work sessions and workers report turns to the Machine server. Chats and
 batches read their steers directly and report no turn boundaries.
 Transport selects `LaunchKind` once before `delegate` carries it out. Workers run
-`lf task run` steps and the `ci-fix` run landing starts. In-process callers such as commit messages, PR text and replay are
-batches. Task attribution never changes this choice. Resume reads the
+`lf task run` steps and the `ci-fix` run landing starts. In-process callers
+such as commit messages, PR text and replay are batches. Task attribution never changes this choice. Resume reads the
 Session's binding and primary scope before delegation: a chat reopens as a
 chat; a bound or primary conversation reopens as a work session.
 `admit` creates the capture and claims its attachment before a native launch;

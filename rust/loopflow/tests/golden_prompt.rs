@@ -15,7 +15,6 @@ struct GoldenCase {
     name: String,
     repo: String,
     skill: Option<String>,
-    mode: Option<String>,
     docs: Vec<String>,
     diff_files: bool,
     diff: bool,
@@ -90,14 +89,7 @@ fn golden_prompts_match() {
             skill: case.skill.clone(),
             message: None,
             operate: !case.no_loopflow,
-            mode: case
-                .mode
-                .as_deref()
-                .map(|mode| {
-                    <Mode as clap::ValueEnum>::from_str(mode, false)
-                        .expect("mode is headless or interactive")
-                })
-                .unwrap_or_default(),
+            mode: Mode::Headless,
             docs: case.docs.clone(),
             files: Vec::new(),
             include_diff: case.diff,

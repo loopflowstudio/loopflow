@@ -1,7 +1,6 @@
 name: builtin_implement
 repo: tests/parity/fixtures/basic
 skill: implement
-mode: headless
 docs: []
 diff_files: false
 diff: false

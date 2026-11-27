@@ -6,9 +6,11 @@
   them as done. The plan does not hold the merge for it. Until it is revoked,
   an agent started under `doppler run -c dev -- lf …` can read it, as it can
   every other secret in that config except `GH_TOKEN` and `OPENCODE_API_KEY`.
-- Assumed (made for review): `Surface` goes to two variants, `HumanPresent`
-  and `Headless`, in this change. `lf-prompt --surface cli|mac|iphone|ide`
-  then read as headless. The steer named only `Surface::Chat`.
+- Assumed (made for review): `Surface` went to two variants in this change,
+  and the next pass deletes it for `harness::Mode`, with `lf-prompt --mode
+  headless|interactive` rejecting any other word. The steer named only
+  `Surface::Chat`. Passed over: keeping "surface" as the prompt's own word
+  for a future phone or unwatched-terminal prompt.
 - Assumed (made for review): a leftover Wave `chat:` block is ignored
   silently, in a list of retired Wave keys beside `linear` and apart from
   `id`, with a removal Task filed in this change.

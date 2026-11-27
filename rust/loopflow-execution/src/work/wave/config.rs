@@ -28,13 +28,13 @@ const WAVE_ONLY_KEYS: [&str; 1] = ["id"];
 /// the list.
 const RETIRED_WAVE_KEYS: [&str; 2] = ["linear", "chat"];
 
-/// The Wave's own identity and bindings from its `config.yaml`.
+/// The Wave's own identity from its `config.yaml`.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WaveConfig {
     pub id: Option<loopflow_model::id::WaveId>,
 }
 
-/// Read the Wave's identity and bindings.
+/// Read the Wave's identity.
 pub fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
     match try_read_wave_config(repo, name) {
         Ok(config) => config,
@@ -45,7 +45,7 @@ pub fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
     }
 }
 
-/// Read the Wave's identity and bindings and surface a malformed file to
+/// Read the Wave's identity and surface a malformed file to
 /// callers that must fail closed before starting external side effects.
 pub(crate) fn try_read_wave_config(
     repo: &Path,
@@ -60,7 +60,7 @@ pub(crate) fn try_read_wave_config(
 }
 
 /// The Wave's shared `Config` values and the file they came from, without
-/// its own identity and bindings.
+/// its own identity.
 pub(crate) fn read_wave_layer(
     repo: &Path,
     name: &str,

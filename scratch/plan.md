@@ -8,11 +8,11 @@ bridge is removed, not fixed.
 ## Outcome
 
 `lf discord` is not a command. No lf code reads a Discord token, polls a
-channel or posts to one. A Wave's `chat:` block means nothing. The prompt has
-two surface contracts, headless and human-present, and the type has two
-variants.
+channel or posts to one. A Wave's `chat:` block means nothing. The prompt is
+told whether someone is in the conversation by the launch's run mode
+(`harness::Mode`); there is no second type for it.
 
-## What exists (committed at e577962da2)
+## What exists (committed at 2365b1f548)
 
 - `rust/loopflow/src/lf/commands/discord.rs`, `Commands::Discord`,
   `DiscordCommand`, the `lf.rs` dispatch arm and `run::answer_bound` are gone.
@@ -23,18 +23,13 @@ variants.
 - Docs: `docs/work.md` "Talk to it from Discord", `docs/dev/machines.md`
   "Independent bridges", and the mentions in glossary, sessions, security,
   environment, codebase, reference, index, harness/transport/server READMEs.
-- `swift/README.md`: the Discord sentence, and (uncommitted, from the concept
-  review) the Wave Chat sentences about backings, backing epochs and SSE. No
-  Swift source has any of it.
-
-- Docs pass (uncommitted): `docs/dev/reference.md` no longer lists chat among
+- `swift/README.md`: the Discord sentence and the Wave Chat sentences about
+  backings, backing epochs and SSE. No Swift source has any of it.
+- `docs/dev/reference.md` no longer lists chat among
   what a Wave holds, and its vocabulary appendix calls `project:<slug>` a work
   binding, not an "authored chat reference". No other shipped doc needs an
   edit: nothing documents `lf-prompt --surface` outside its Clap help (§2),
   and a leftover `chat:` block is silent, so no doc mentions it.
-
-Checked at kickoff: `cargo check -p loopflow --all-targets` clean; the focused
-suites under Acceptance passed. Nothing has been rebuilt since.
 
 `git grep -i discord` finds only the community invite link (`README.md`,
 `design/prototypes/homepage-next`), `release/*/NOTES.md` and two Wave
@@ -64,7 +59,40 @@ Passed: execution `work::wave::config::` (7), the surface and prompt tests
 `cargo check -p loopflow --all-targets`, `scripts/check_architecture.py`.
 Left to CI: clippy, `lf::tests::`, `documented_commands::`, the suites.
 
-What remains: review, PR, land.
+## Remaining: one pass
+
+**The prompt takes the launch's `Mode`; `Surface` is deleted.** Made for
+review, not settled (concept review question 1a). After §2, `Surface {
+HumanPresent, Headless }` is `harness::Mode { Interactive, Headless }` under
+a second name: `run.rs:471-511` converts one into the other, and no launch
+sets them differently.
+
+- `Mode::instructions()` returns `SURFACE_HEADLESS` or
+  `SURFACE_HUMAN_PRESENT`; the two instruction files and their text stay.
+- `prompt::Surface`, its `FromStr` and its two parser tests go. Fields typed
+  `Surface` (`prompt/mod.rs:100,160`, `prompt/process.rs:27`) become `Mode`;
+  the conversion in `run.rs` goes; `agent/availability.rs:26-29` and
+  `ops/sync_execution.rs:294` take `Mode`.
+- `lf-prompt --surface` becomes `--mode headless|interactive`, a Clap value
+  enum, so a wrong word is an error naming the two. Callers:
+  `tests/e2e/test_smoke.sh`, `scripts/evals/instruction_levels.py`.
+- Golden cases (`tests/goldens/*.yaml`) rename the key to `mode`; rendered
+  prompts stay byte-identical. `context_tests.rs`, `golden_prompt.rs` follow.
+
+Passed over: keeping `Surface` as the prompt module's own word (1c), because
+a phone or an unwatched held terminal may want its own instructions. No such
+launch exists; a third value brings a prompt type back on that day. Also
+passed over: doing it as its own Task after landing (1b); every file but
+`availability.rs` and `sync_execution.rs` is already in this diff.
+
+It will teach whether anything reads the prompt's value apart from the
+launch's mode: if a caller needs them to differ, the type stays and this
+section is rewritten.
+
+Check: `cargo check -p loopflow --all-targets`; execution `prompt::`;
+`golden_prompt`; `context_tests`; `lf-prompt --mode cli` exits non-zero.
+
+Then: review, PR, land.
 
 ## Acceptance check
 
@@ -72,7 +100,8 @@ What remains: review, PR, land.
 target/debug/lf discord serve product     # → skill or graph not found: discord, exit 2
 target/debug/lf help | grep -ci discord   # → 0
 git grep -n -i 'discord' -- rust swift docs python   # → nothing
-git grep -n 'Surface::\(Chat\|Cli\|Ide\|Mac\|Iphone\)\|SURFACE_CHAT' -- rust   # → nothing
+git grep -n 'prompt::Surface\|SURFACE_CHAT' -- rust   # → nothing
+target/debug/lf-prompt --mode cli   # → Clap error naming headless, interactive
 # a Wave config.yaml with a chat: block → `lf --wave <w> config settings` prints no warning
 cargo test -p loopflow-execution --lib work::wave::config:: prompt::
 cargo test -p loopflow --lib -- documented_commands wave_resolution_matrix lf::tests
@@ -85,7 +114,8 @@ Demo: `lf discord serve product` answers "skill or graph not found: discord", an
 ## Absent and error states
 
 - `chat:` in a Wave `config.yaml` or `GOAL.md`: ignored silently.
-- `lf-prompt --surface <anything but human-present>`: headless.
+- `lf-prompt --mode <anything but headless or interactive>`: a Clap error.
+  `--surface` is not a flag.
 - `LF_DISCORD_TOKEN` set in the environment: lf no longer strips it from agent
   and detached launches; it passes through like any other caller variable.
 
@@ -116,19 +146,19 @@ review. Other Machines were not checked.
 
 ## Concept review, answered
 
-Each finding of `scratch/concept-review.html` at e577962da2:
+Each finding of `scratch/concept-review.html` at 200d4e486a (it replaces the
+page written at e577962da2, whose findings §1 to §3 built):
 
-- Six surface names for two answers → adopted, §2, made for review.
-- "surface" names two ideas, and the plan's "recorded Session with surface
-  `chat` reads as headless" cannot occur → the absent state, the "no
-  migration" finding and the `"chat"` parser-test addition are cut; the serde
-  derive drop is in §2.
-- "chat" used five ways → two go in §1 and §2; the Wave Chat sentences in
-  `swift/README.md` are deleted here; `ContextAssetKind::Chat` stays.
-- Wave key list holds keys nothing reads → §1, made for review.
-- `run_bound_prompt` returns a directory nobody uses → §3, as planned.
-- Token revoked after the merge instead of before → open question, above.
-- mini-heart not checked → checked, above.
+- "Is someone in this conversation" is three types (`Mode`, `Surface`, the
+  recorded `surface` string) → the first two merge in the remaining pass,
+  made for review; the third is deferred below.
+- `FromStr for Surface` cannot fail, so `--surface cli` is silently headless
+  → goes with `Surface`; `--mode` rejects a wrong word.
+- Four doc comments in `work/wave/config.rs` said "identity and bindings"
+  for a struct that holds an id → fixed here (uncommitted).
+- Token still alive in Doppler `loopflow/dev` and no longer stripped → open
+  question, above. An old installed `lf` can still run the bridge until then.
+- Everything else on the page matches and is built.
 
 ## Deferred findings
 
@@ -137,6 +167,10 @@ Each finding of `scratch/concept-review.html` at e577962da2:
   account. The first inbound trigger (a webhook, a self-hosted server) needs
   a named author on the request and a rule for which authors may start an
   agent, designed before that trigger is built. Nothing to do in this Task.
+- **Type the recorded Session `surface` string.** `run.rs:647,692` write
+  `"tui"` or `"headless"` from the same `Mode`. A `Mode`-typed field on
+  `SessionCaptureSpec` that writes the same two strings: no migration, about
+  thirty literal sites, read by replay and Session lists.
 
 ## Exclusions
 

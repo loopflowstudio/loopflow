@@ -51,8 +51,8 @@ Loopflow assembles the operating contract, your `scratch/` notes, and any extra
 context you request:
 
 ```bash
-lf gate --docs 'docs/*.md'      # include files, globs, or directories
-lf gate --diff files            # include paths of files changed on this branch
+lf qa --docs 'docs/*.md'        # include files, globs, or directories
+lf qa --diff files              # include paths of files changed on this branch
 ```
 
 Try it on the demo repository:
@@ -64,7 +64,7 @@ python -m pytest test_calc.py   # see the bug; copy the error
 lf debug -c                     # fix it
 ```
 
-`debug`, `design`, `implement`, `qa`, `gate`, and more are built in. Your own
+`debug`, `design`, `implement`, `qa`, and more are built in. Your own
 Skill is a plain Markdown file in `.lf/skills/`:
 
 ```markdown
@@ -90,9 +90,9 @@ lf steer <ID> "raise ValueError, not ZeroDivisionError"   # redirects the run be
 ```
 
 `code` is a built-in Graph: it plans, implements in reviewable commits, runs
-`qa`, publishes the PR, pauses for your review, then delivers and pauses once
-more to verify on `main`. A Task remembers its Graph, so later `lf task run <ID>`
-calls continue from where it stopped.
+`qa`, publishes the PR, pauses for your review, then delivers and merges the
+PR. A Task remembers its Graph, so later `lf task run <ID>` calls continue from
+where it stopped.
 
 - Set `graph: code` in `.lf/config.yaml` to make it the repo default.
 - Run `lf -b task run <ID>` to run straight through interactive stops headless.
@@ -131,10 +131,10 @@ lf task auto off <ID>            # wait at the next interactive step and disarm 
 
 `lf task auto on` turns auto on and runs the Task: an agent stands in at each
 remaining interactive step, then `deliver` runs `reflect` (folds your feedback
-into skill improvements), `gate` (publishes the PR so CI starts, then reviews
-while CI runs), and `lf land --wait-and-fix`. It returns once the run starts,
-like `lf task run` (`-b` waits until merge). The Task completes when its PR merges, and
-`lf wt prune` cleans up finished worktrees later.
+into skill improvements) and `lf land --wait-and-fix` (syncs, clears `scratch/`
+notes, pushes once, and repairs failing CI until the PR merges). It returns once
+the run starts, like `lf task run` (`-b` waits until merge). The Task completes
+when its PR merges, and `lf wt prune` cleans up finished worktrees later.
 
 The same landing commands work on any branch outside a Task:
 

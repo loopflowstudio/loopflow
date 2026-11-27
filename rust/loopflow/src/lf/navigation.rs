@@ -706,10 +706,10 @@ mod landing_tests {
     fn shipping_checks_the_selected_path_up_to_its_landing() {
         let repo = tempfile::tempdir().unwrap();
         write(repo.path(), ".lf/graphs/ship.yaml",
-            "- xor:\n    paths:\n      direct:\n        description: Land now\n        graph: deliver\n      review:\n        description: Review first\n        steps:\n          - interactive: demo\n- interactive: verify\n");
+            "- xor:\n    paths:\n      direct:\n        description: Land now\n        graph: deliver\n      review:\n        description: Review first\n        steps:\n          - interactive: demo\n- interactive: research\n");
         let graph = CapturedGraph::load("ship", repo.path()).unwrap().unwrap();
         assert!(!graph.ships_before_review("start", None, None, command_merges));
-        for (step, expected) in [("reflect", true), ("demo", false), ("verify", false)] {
+        for (step, expected) in [("reflect", true), ("demo", false), ("research", false)] {
             let cursor = graph.find(step).unwrap().cursor();
             assert_eq!(
                 graph.ships_before_review("start", Some(&cursor), None, command_merges),
@@ -722,12 +722,19 @@ mod landing_tests {
     #[test]
     fn turning_auto_off_keeps_a_running_task_active_until_it_passes_land() {
         let repo = tempfile::tempdir().unwrap();
-        let graph = CapturedGraph::load("code", repo.path()).unwrap().unwrap();
+        write(
+            repo.path(),
+            ".lf/graphs/post-land.yaml",
+            "- reflect\n- cmd: land --wait-and-fix\n- qa\n",
+        );
+        let graph = CapturedGraph::load("post-land", repo.path())
+            .unwrap()
+            .unwrap();
         let off = Some(AutoState::Off);
         for (step, ships) in [
-            ("gate", false),
+            ("reflect", false),
             ("land --wait-and-fix", false),
-            ("verify", true),
+            ("qa", true),
         ] {
             let cursor = graph.find(step).unwrap().cursor();
             assert_eq!(
@@ -756,7 +763,7 @@ mod landing_tests {
                 "{name}"
             );
             if expected {
-                for step in ["deliver", "verify"] {
+                for step in ["deliver", "land --wait-and-fix"] {
                     let cursor = graph.find(step).unwrap().cursor();
                     assert!(
                         graph.ships_before_review("start", Some(&cursor), None, command_merges),

@@ -4,7 +4,7 @@ pub use adoption::TaskAdoptionOptions;
 pub mod remote;
 pub use remote::TASK_SOURCE_ENV;
 mod workspace;
-pub use workspace::{TaskFilesRevision, TaskFilesWatch};
+pub use workspace::{TaskFilesRevision, TaskFilesWatch, TaskScratchPage};
 mod planning_explain;
 pub use planning_explain::{
     explain_task_planning, TaskPlanningAction, TaskPlanningExplanation, TaskPlanningRequest,
@@ -15,7 +15,14 @@ pub use checkout_explain::{
 };
 mod explain;
 pub use explain::{explain_task_run, TaskRunAction, TaskRunExplanation};
+mod checkout_file;
 mod directory;
+mod find;
+mod grep;
+mod symbols;
+pub use find::{task_find, TaskFileInventory};
+pub use grep::{task_grep, TaskGrepHit, TaskGrepResults};
+pub use symbols::{task_symbols, TaskSymbol, TaskSymbols};
 mod handoff;
 mod lifecycle;
 #[cfg(test)]
@@ -243,6 +250,17 @@ pub struct TaskChangedFile {
     /// Runs of changed lines in the file's patch, each the Diff's stop: a run
     /// ends at an unchanged line, a hunk's end, or a removal after additions.
     pub changes: u64,
+    /// Text lines in the patch; absent for an untracked file beyond the reader's size limit.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub lines: Option<ChangedLines>,
+}
+
+#[derive(
+    Debug, Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct ChangedLines {
+    pub added: u64,
+    pub removed: u64,
 }
 
 /// One commit in a Task's comparison. A Graph step's commits share the subject
@@ -412,9 +430,7 @@ fn task_error(message: impl std::fmt::Display) -> OpsError {
 pub(super) fn block_on_task<T>(
     future: impl std::future::Future<Output = OpsResult<T>>,
 ) -> OpsResult<T> {
-    tokio::runtime::Runtime::new()
-        .map_err(|error| task_error(format!("failed to build task runtime: {error}")))?
-        .block_on(future)
+    crate::runtime::block_on(future)
 }
 
 async fn task_store() -> OpsResult<SharedStore> {
@@ -697,8 +713,8 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskRunStart {
     /// A run of the Task's Graph from this step; the caller starts it as
-    /// `lf --task ISSUE graph run`. With `merges`, the run may merge the PR:
-    /// Auto is on, or no interactive step is left ahead, and nobody turned auto off.
+    /// `lf --task ISSUE graph run`. With `merges`, the run can reach a merging
+    /// step before stopping, and nobody turned auto off.
     /// With `stands_in`, a person asked for auto and the run sets out at that
     /// interactive step.
     Run {
@@ -711,6 +727,7 @@ pub enum TaskRunStart {
     /// that run carries on.
     Live {
         run: String,
+        merges: bool,
         graph_process: loopflow_model::id::LfProcessId,
     },
     /// The Task now waits at this interactive step; nothing runs.
@@ -850,16 +867,6 @@ impl From<crate::task_graph::Place> for RunStart {
             cursor: place.cursor(),
             place,
         }
-    }
-}
-
-impl TaskRunSelection {
-    /// Whether the run reaches `end`: it runs through interactive steps, or
-    /// none lies ahead. Such a run hands the Task off, granting merge authority.
-    pub fn reaches_end(&self, mode: TaskRunMode) -> bool {
-        self.start.as_ref().is_none_or(|start| {
-            mode.runs_through() || self.graph.next_interactive(&start.place).is_none()
-        })
     }
 }
 
@@ -1117,13 +1124,16 @@ async fn try_start_task_run(
         {
             auto::turn_on(store, task)?;
             if let Some(graph_process) = auto::running_graph(store, task, &carrier.id).await? {
-                let at = row.graph.step_name_of(cursor);
+                let place = row.graph.place_of(cursor);
+                let at = place.as_ref().map(|place| row.graph.step_name(place));
                 return Ok(Some(TaskRunStart::Live {
                     run: format!(
                         "{} at {}",
                         row.graph.name,
                         at.as_deref().unwrap_or(&row.step)
                     ),
+                    merges: place
+                        .is_some_and(|place| row.graph.reaches_landing(&place, true, merges)),
                     graph_process,
                 }));
             }
@@ -1142,7 +1152,6 @@ async fn try_start_task_run(
         auto_on,
         merges,
     )?;
-    let reaches_end = selection.reaches_end(mode);
     let TaskRunSelection {
         graph,
         take_up,
@@ -1182,12 +1191,8 @@ async fn try_start_task_run(
         .task_auto(&task.id)
         .map_err(task_error)?
         .map(|mark| mark.state);
-    let (on, can_merge) = match auto_state {
-        Some(loopflow_storage::sqlite::AutoState::On) => (true, true),
-        Some(loopflow_storage::sqlite::AutoState::Off) => (false, false),
-        None => (false, reaches_end),
-    };
-    let through = mode.runs_through() || on;
+    let through =
+        mode.runs_through() || auto_state == Some(loopflow_storage::sqlite::AutoState::On);
     let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
         .map_err(task_error)?
         .ok_or_else(|| task_error(format!("Task {issue} lost its graph while starting")))?;
@@ -1224,6 +1229,8 @@ async fn try_start_task_run(
             .map_err(task_error)?;
         return Ok(Some(TaskRunStart::Waiting(step)));
     }
+    let can_merge = auto_state != Some(loopflow_storage::sqlite::AutoState::Off)
+        && graph.reaches_landing(&start.place, through, merges);
     let label = if start.place == crate::task_graph::Place::default() {
         format!("{} from start", graph.name)
     } else {
@@ -3259,9 +3266,15 @@ pub fn prepare_conversation_beside(task: &Task) {
     let prepared = block_on_task(async {
         let store = task_store().await?;
         let worktree = task.worktree().map_err(task_error)?.clone();
-        crate::ops::human_session::primary::ensure_task(&store, &worktree, task.id.as_str(), None)
-            .await
-            .map_err(task_error)?;
+        crate::ops::human_session::primary::ensure_task(
+            &store,
+            &worktree,
+            task.id.as_str(),
+            None,
+            false,
+        )
+        .await
+        .map_err(task_error)?;
         Ok(())
     });
     if let Err(error) = prepared {

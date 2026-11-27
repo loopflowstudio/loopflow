@@ -157,6 +157,20 @@ impl OsProcess {
         macos::cwd(pid)
     }
 
+    /// Live OS threads in this process, read directly from the kernel without forking.
+    pub fn current_thread_count() -> u64 {
+        #[cfg(target_os = "macos")]
+        {
+            macos::thread_count(std::process::id())
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            std::fs::read_dir("/proc/self/task")
+                .map(|entries| entries.count() as u64)
+                .unwrap_or(0)
+        }
+    }
+
     #[cfg(not(target_os = "macos"))]
     pub fn cwd(pid: u32) -> Option<PathBuf> {
         std::fs::read_link(format!("/proc/{pid}/cwd")).ok()

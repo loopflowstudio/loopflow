@@ -119,6 +119,7 @@ pub(super) const REQUESTS: &[&str] = &[
     include_str!(
         "../../../loopflow-execution/tests/fixtures/dto/server/mobile_status_request.json"
     ),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/server_diagnostics.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_page.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_continue.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_create.json"),
@@ -279,6 +280,13 @@ const RESPONSES: &[(&str, &str, &str)] = &[
         "mobile_status",
         "mobile.status",
         include_str!("../../../loopflow-execution/tests/fixtures/dto/server/mobile_status.json"),
+    ),
+    (
+        "server_diagnostics_answer",
+        "server.diagnostics",
+        include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/server_diagnostics_answer.json"
+        ),
     ),
     (
         "remote",

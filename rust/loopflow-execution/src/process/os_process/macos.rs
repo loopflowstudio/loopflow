@@ -92,6 +92,28 @@ pub fn cwd(pid: u32) -> Option<PathBuf> {
     (!path.is_empty()).then(|| PathBuf::from(path.as_ref()))
 }
 
+pub fn thread_count(pid: u32) -> u64 {
+    let mut info = MaybeUninit::<libc::proc_taskinfo>::zeroed();
+    let size = size_of::<libc::proc_taskinfo>() as libc::c_int;
+    // SAFETY: `info` is writable for `size` bytes; libproc fills at most that
+    // and retains no pointer.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::c_int,
+            libc::PROC_PIDTASKINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if written != size {
+        return 0;
+    }
+    // SAFETY: libproc wrote the whole structure.
+    let info = unsafe { info.assume_init() };
+    u64::try_from(info.pti_threadnum).unwrap_or(0)
+}
+
 fn read_info(pid: u32) -> io::Result<Option<ProcessInfo>> {
     unsafe extern "C" {
         fn loopflow_read_process(pid: u32, output: *mut ProcessInfo) -> i32;

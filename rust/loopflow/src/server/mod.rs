@@ -39,8 +39,15 @@ fn raise_descriptor_limit() {
 
 pub fn run() -> anyhow::Result<()> {
     raise_descriptor_limit();
-    tokio::runtime::Builder::new_multi_thread()
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .max_blocking_threads(12)
+        .thread_keep_alive(std::time::Duration::from_secs(2))
+        .thread_name("lf-server")
         .enable_all()
-        .build()?
-        .block_on(service::run())
+        .build()?;
+    let _installed = loopflow_execution::runtime::install(runtime.handle().clone());
+    let result = runtime.block_on(service::run());
+    runtime.shutdown_timeout(std::time::Duration::from_secs(2));
+    result
 }

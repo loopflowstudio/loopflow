@@ -31,7 +31,7 @@ pub(super) fn registration_in(
     repo: &str,
 ) -> StoreResult<RepositoryRegistration> {
     let mut identities =
-        conn.prepare("SELECT id FROM repository_plans WHERE repo=?1 ORDER BY id")?;
+        conn.prepare_cached("SELECT id FROM repository_plans WHERE repo=?1 ORDER BY id")?;
     let identities = identities
         .query_map([repo], |row| row.get::<_, String>(0))?
         .map(|row| {
@@ -40,7 +40,7 @@ pub(super) fn registration_in(
         .collect::<StoreResult<Vec<_>>>()?;
     // Start from the bounded repository aliases even when measured history
     // makes the planner prefer scanning Tasks or checkouts.
-    let mut checkouts = conn.prepare(
+    let mut checkouts = conn.prepare_cached(
         "SELECT c.worktree,c.branch FROM repository_plans w
          CROSS JOIN tasks t ON t.repository_id=w.id
          CROSS JOIN task_checkouts c ON c.task_id=t.id
@@ -305,7 +305,7 @@ impl SqliteStore {
     pub fn repository_identity(&self, repo: &str) -> StoreResult<Option<RepositoryIdentity>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         // A single statement prevents a concurrent bind from mixing generations.
-        let mut statement = conn.prepare(
+        let mut statement = conn.prepare_cached(
             "SELECT selected.id, locator.id FROM repository_plans selected
              JOIN repository_plans locator ON locator.repo=selected.repo
              WHERE selected.repo=?1 AND selected.selected=1 ORDER BY locator.id",
@@ -335,7 +335,31 @@ impl SqliteStore {
     pub fn repository_paths(&self) -> StoreResult<Vec<PathBuf>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query =
-            conn.prepare("SELECT DISTINCT repo FROM repository_plans WHERE selected=1")?;
+            conn.prepare_cached("SELECT DISTINCT repo FROM repository_plans WHERE selected=1")?;
+        let paths = query
+            .query_map([], |row| row.get::<_, String>(0).map(PathBuf::from))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(paths)
+    }
+
+    /// Repositories on this Machine that have at least one unfinished Task or
+    /// non-retired Wave, for the periodic Git plan exchange.
+    pub fn active_plan_repository_paths(&self) -> StoreResult<Vec<PathBuf>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare_cached(
+            "SELECT DISTINCT r.repo FROM repository_plans r
+             WHERE EXISTS (
+                 SELECT 1 FROM tasks t
+                 WHERE t.repository_id=r.id
+                   AND t.abandoned_at IS NULL
+                   AND t.planning_state IS NOT 'completed'
+                   AND t.planning_deleted_at IS NULL
+             )
+             UNION
+             SELECT DISTINCT w.repo FROM waves w
+             WHERE w.retired_at IS NULL
+               AND EXISTS (SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1)",
+        )?;
         let paths = query
             .query_map([], |row| row.get::<_, String>(0).map(PathBuf::from))?
             .collect::<Result<Vec<_>, _>>()?;

@@ -688,6 +688,24 @@ fn edit_document(
     if matches!(preference, ["context", _]) {
         return edit::context_field(document, &written, preference, value, root);
     }
+    let mut value = value;
+    if let [prefix @ .., "machine"] = written.as_slice() {
+        if let Some(incoming) = value.as_mut().filter(|v| v.is_string()) {
+            let existing_jobs = prefix
+                .iter()
+                .try_fold(&*document, |node, key| node.get(*key))
+                .and_then(|block| block.get("machine"))
+                .and_then(|machine| machine.get("jobs"))
+                .filter(|jobs| !jobs.is_null())
+                .cloned();
+            if let Some(jobs) = existing_jobs {
+                super::placement::expand_shorthand(incoming)?;
+                if let Some(map) = incoming.as_mapping_mut() {
+                    map.insert("jobs".into(), jobs);
+                }
+            }
+        }
+    }
     if let [prefix @ .., "machine", field] = written.as_slice() {
         if let Some(placement) = prefix
             .iter()
@@ -1127,6 +1145,47 @@ mod tests {
         assert!(read().tasks.is_none());
         assert_eq!(read().capacity.as_deref(), Some("pool"));
         assert_eq!(read().session.as_deref(), Some("worker"));
+    }
+
+    #[test]
+    fn machine_jobs_coexists_with_machine_shorthand_and_is_global_only() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let repo = tempfile::tempdir().unwrap();
+
+        // machine.jobs is host-local/global only, not repo-scoped.
+        assert!(set(repo.path(), None, false, false, "machine.jobs", Some("4")).is_err());
+        // Zero is rejected.
+        assert!(set(repo.path(), None, true, false, "machine.jobs", Some("0")).is_err());
+
+        // Setting machine.jobs after machine: mini expands shorthand and keeps both.
+        let path = set(repo.path(), None, true, false, "machine", Some("mini")).unwrap();
+        set(repo.path(), None, true, false, "machine.jobs", Some("4")).unwrap();
+        let read = || {
+            serde_yaml_ng::from_value::<crate::config::placement::Placement>(
+                super::read(&path).unwrap()["machine"].clone(),
+            )
+            .unwrap()
+        };
+        assert_eq!(read().tasks.as_deref(), Some("mini"));
+        assert_eq!(read().session.as_deref(), Some("mini"));
+        assert_eq!(read().jobs, Some(4));
+
+        // Setting machine: studio shorthand preserves the existing host-local machine.jobs.
+        set(repo.path(), None, true, false, "machine", Some("studio")).unwrap();
+        assert_eq!(read().tasks.as_deref(), Some("studio"));
+        assert_eq!(read().session.as_deref(), Some("studio"));
+        assert_eq!(read().jobs, Some(4));
+
+        // Repo-level machine: worker shorthand does not wipe out global machine.jobs.
+        set(repo.path(), None, false, false, "machine", Some("worker")).unwrap();
+        let resolved = crate::config::load_config(Some(repo.path()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(resolved.machine.tasks.as_deref(), Some("worker"));
+        assert_eq!(resolved.machine.jobs, Some(4));
     }
 
     #[test]

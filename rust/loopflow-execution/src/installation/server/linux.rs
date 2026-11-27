@@ -1,12 +1,10 @@
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result};
 use std::fs;
 use std::io;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::net::UnixStream;
-use std::os::unix::process::CommandExt;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
+
+use super::{checked, detached, label};
 
 pub(super) fn user_manager() -> Result<bool> {
     let result = Command::new("systemctl")
@@ -38,126 +36,108 @@ pub(super) fn user_manager() -> Result<bool> {
     anyhow::bail!("systemd user manager: {}", error.trim())
 }
 
-pub(super) fn start_detached(home: &Path, executable: &Path, replace: bool) -> Result<()> {
+pub(super) fn register_default(home: &Path, executable: &Path, replace: bool) -> Result<()> {
+    let directory = crate::installation::account_home()?.join(".config/systemd/user");
+    let unit = format!("{}.service", label(home, "server"));
+    let legacy = format!("{}.service", label(home, "machine"));
+    if !user_manager()? {
+        // Our units install into default.target.wants. A missing bus cannot
+        // answer is-enabled, but its enablement and mask are still on disk.
+        for name in [&unit, &legacy] {
+            let path = directory.join(name);
+            if path.symlink_metadata().is_ok() {
+                anyhow::ensure!(
+                    directory.join("default.target.wants").join(name).exists()
+                        && path.canonicalize()? != Path::new("/dev/null"),
+                    "Loopflow server is disabled; enable {name} with systemctl --user"
+                );
+            }
+        }
+        return detached::start(home, executable, replace);
+    }
+    fs::create_dir_all(&directory)?;
+    // An existing disabled or masked unit is a person's choice, not first use.
+    for name in [&unit, &legacy] {
+        if directory.join(name).symlink_metadata().is_ok() {
+            let enabled = Command::new("systemctl")
+                .args(["--user", "is-enabled", name])
+                .output()?;
+            anyhow::ensure!(
+                enabled.status.success(),
+                "Loopflow server is disabled; enable {name} with systemctl --user"
+            );
+        }
+    }
+    if directory.join(&legacy).exists() {
+        checked(Command::new("systemctl").args(["--user", "disable", "--now", &legacy]))?;
+        fs::remove_file(directory.join(&legacy))?;
+    }
+    let quote = |value: &str| {
+        format!(
+            "\"{}\"",
+            value
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r")
+                .replace('%', "%%")
+        )
+    };
+    let executable_argument = quote(&executable.display().to_string().replace('$', "$$"));
+    let home_environment = quote(&format!("LF_HOME={}", home.display()));
+    let binary_environment = quote(&format!("LF_BIN={}", executable.display()));
+    fs::write(
+        directory.join(&unit),
+        format!(
+            "[Unit]\nDescription=Loopflow server\n[Service]\nExecStart={executable_argument} server run\nEnvironment={home_environment}\nEnvironment={binary_environment}\nRestart=on-failure\nKillMode=process\n[Install]\nWantedBy=default.target\n"
+        ),
+    )?;
+    checked(Command::new("systemctl").args(["--user", "daemon-reload"]))?;
+    checked(Command::new("systemctl").args(["--user", "enable", "--now", &unit]))?;
     if replace {
-        let socket = crate::machine::socket_path()?;
-        if let Err(error) = retire_server(&socket) {
-            // It may have exited between the readiness probe and replacement.
-            match UnixStream::connect(&socket) {
-                Err(io)
-                    if matches!(
-                        io.kind(),
-                        io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
-                    ) => {}
-                _ => return Err(error),
-            }
-        }
+        checked(Command::new("systemctl").args(["--user", "restart", &unit]))?;
     }
-    let logs = home.join("logs");
-    fs::create_dir_all(&logs)?;
-    let log = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
-        .open(logs.join("server.log"))?;
-    let mut command = Command::new(executable);
-    for (key, _) in std::env::vars_os() {
-        if key.as_encoded_bytes().starts_with(b"LF_") {
-            command.env_remove(key);
-        }
-    }
-    command
-        .args(["server", "run"])
-        .current_dir(home)
-        .env("LF_HOME", home)
-        .env("LF_BIN", executable)
-        .stdin(Stdio::null())
-        .stdout(log.try_clone()?)
-        .stderr(log);
-    // SAFETY: setsid is async-signal-safe and affects only the child.
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() < 0 {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    let mut child = command.spawn().context("start detached lf server run")?;
-    std::thread::spawn(move || {
-        let _ = child.wait();
-    });
     Ok(())
 }
 
-/// Only the server accepting connections on this Machine's private socket.
-/// Pin the process before checking its arguments and socket again: a reused
-/// numeric pid must never receive the signal.
-fn retire_server(path: &Path) -> Result<()> {
-    let peer = || -> io::Result<i32> {
-        let socket = UnixStream::connect(path)?;
-        let mut cred = libc::ucred {
-            pid: 0,
-            uid: 0,
-            gid: 0,
-        };
-        let mut size = std::mem::size_of_val(&cred) as libc::socklen_t;
-        // SAFETY: the connected socket and the credential output buffer are live.
-        let result = unsafe {
-            libc::getsockopt(
-                socket.as_raw_fd(),
-                libc::SOL_SOCKET,
-                libc::SO_PEERCRED,
-                (&raw mut cred).cast(),
-                &mut size,
-            )
-        };
-        if result < 0 {
-            return Err(io::Error::last_os_error());
+/// Retire any legacy custom-home systemd unit left by an older `lf`.
+pub(super) fn retire_legacy_custom_home(home: &Path) -> Result<()> {
+    let Ok(account_home) = crate::installation::account_home() else {
+        return Ok(());
+    };
+    let directory = account_home.join(".config/systemd/user");
+    let units = [
+        format!("{}.service", label(home, "server")),
+        format!("{}.service", label(home, "machine")),
+    ];
+    let present: Vec<&String> = units
+        .iter()
+        .filter(|name| directory.join(name).symlink_metadata().is_ok())
+        .collect();
+    if present.is_empty() {
+        return Ok(());
+    }
+    let has_manager = user_manager().unwrap_or(false);
+    for name in present {
+        if has_manager {
+            let _ = Command::new("systemctl")
+                .args(["--user", "disable", "--now", name])
+                .output();
         }
-        Ok(cred.pid)
-    };
-    let pid = peer()?;
-    // SAFETY: pidfd_open returns a new descriptor or an error.
-    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
-    if fd < 0 {
-        return Err(io::Error::last_os_error().into());
+        let _ = fs::remove_file(directory.join(name));
     }
-    // SAFETY: the descriptor was just created and has no other owner.
-    let fd = unsafe { OwnedFd::from_raw_fd(fd as i32) };
-    let args = crate::process::OsProcess::arguments(pid as u32)?;
-    ensure!(
-        args.is_some_and(|args| args.len() == 3 && args[1..] == ["server", "run"])
-            && peer()? == pid,
-        "another process is listening on {}",
-        path.display()
-    );
-    // SAFETY: the signal addresses only this pinned process, without siginfo.
-    let result = unsafe {
-        libc::syscall(
-            libc::SYS_pidfd_send_signal,
-            fd.as_raw_fd(),
-            libc::SIGTERM,
-            std::ptr::null::<libc::siginfo_t>(),
-            0,
-        )
-    };
-    if result < 0 {
-        return Err(io::Error::last_os_error().into());
+    if has_manager {
+        let _ = Command::new("systemctl")
+            .args(["--user", "daemon-reload"])
+            .output();
     }
-    let mut poll = libc::pollfd {
-        fd: fd.as_raw_fd(),
-        events: libc::POLLIN,
-        revents: 0,
-    };
-    // SAFETY: poll has one initialized descriptor and a bounded wait.
-    let result = unsafe { libc::poll(&raw mut poll, 1, 10_000) };
-    if result < 0 {
-        return Err(io::Error::last_os_error().into());
-    }
-    ensure!(
-        result > 0,
-        "previous Loopflow server did not exit within 10s"
-    );
     Ok(())
+}
+
+pub(super) fn retire_self_if_registered() {
+    if std::env::var_os("INVOCATION_ID").is_none() {
+        return;
+    }
+    let home = crate::store::lf_home_dir();
+    let _ = retire_legacy_custom_home(&home);
 }

@@ -284,11 +284,7 @@ pub fn resolve_managed_wave_sync(
         return Err(WaveResolveError::NoContext);
     }
     std::thread::spawn(move || {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("current-thread runtime always builds");
-        runtime.block_on(async move {
+        crate::runtime::block_on(async move {
             let store = crate::store::open_existing_store()
                 .await
                 .map_err(|error| WaveResolveError::Registry(error.to_string()))?;

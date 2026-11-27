@@ -41,7 +41,7 @@ fn logs_in(
     // Entries the tracker has not stamped yet share whole-second `at` values;
     // insertion order keeps a claim and the move after it in the order they happened.
     // Two Machines that gave their entries one order settle it by machine id.
-    let mut statement = conn.prepare(
+    let mut statement = conn.prepare_cached(
         "SELECT o.id,o.kind,coalesce(p.name,o.person),o.person_key,o.machine_id,o.machine_label,
              o.at,o.writer_machine_id,o.task_id,o.person_id,o.seen,
              CASE WHEN o.seen IS NOT NULL THEN o.ordered_at END

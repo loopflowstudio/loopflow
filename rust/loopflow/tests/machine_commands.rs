@@ -2303,6 +2303,92 @@ fn set_machine_changes_local_preferences_without_copying_or_moving_work() {
     );
 }
 
+#[test]
+fn search_reads_a_checkout_known_only_to_the_addressed_machine() {
+    let machines = preview_machines();
+    let repo = loopflow_test_support::TestRepo::new();
+    let remote = machines.root.path().join("remote/store");
+    let registered =
+        support::register_task_without_pr(&remote, repo.path(), "main", &repo.head_sha());
+    let store = loopflow_execution::store::open_sqlite(&remote.join("loopflow.db")).unwrap();
+    let repository = store
+        .repository_id(repo.path().to_str().unwrap())
+        .unwrap()
+        .unwrap();
+    repo.create_file(
+        "nested/remote-only.swift",
+        "// peerReader\r\n😀 Reader\nstruct A {\n func read() {}\n}\n",
+    );
+    repo.create_file("src/B.swift", "struct B {\n func read() {}\n}");
+    let _server = loopflow_test_support::MachineServer::start(env!("CARGO_BIN_EXE_lf"), &remote);
+    let result = machines.json(&[
+        "--machine",
+        "mini",
+        "--repo-id",
+        repository.as_str(),
+        "task",
+        "find",
+        registered.task.id.as_str(),
+        "--json",
+        "--",
+        "rmt",
+    ]);
+    assert_eq!(
+        result["paths"],
+        serde_json::json!(["nested/remote-only.swift"])
+    );
+    assert_eq!(result["latest_scratch_page"], Value::Null);
+    let matches = machines.json(&[
+        "--machine",
+        "mini",
+        "--repo-id",
+        repository.as_str(),
+        "task",
+        "grep",
+        registered.task.id.as_str(),
+        "--json",
+        "--whole-word",
+        "--",
+        "Reader",
+    ]);
+    let hits = matches["hits"].as_array().unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0]["path"], "nested/remote-only.swift");
+    assert_eq!(hits[0]["line"], 2);
+    assert_eq!(hits[0]["start"], 5);
+    assert_eq!(hits[0]["end"], 11);
+    assert_eq!(matches["truncated"], false);
+    let symbols = |path: Option<&str>| {
+        let mut args = vec![
+            "--machine",
+            "mini",
+            "--repo-id",
+            repository.as_str(),
+            "task",
+            "symbols",
+            registered.task.id.as_str(),
+            "read",
+            "--json",
+        ];
+        if let Some(path) = path {
+            args.extend(["--path", path]);
+        }
+        machines.json(&args)
+    };
+    let all = symbols(None);
+    let definitions = all["hits"].as_array().unwrap();
+    assert_eq!(definitions.len(), 2);
+    assert_eq!(definitions[0]["container"], "A");
+    assert_eq!(definitions[0]["line"], 4);
+    assert_eq!(definitions[1]["container"], "B");
+    assert_eq!(definitions[1]["line"], 2);
+    assert_eq!(all["truncated"], false);
+    assert_eq!(
+        symbols(Some("src/B.swift"))["hits"],
+        serde_json::json!([definitions[1]])
+    );
+}
+
 /// Claude's project directory for a checkout.
 fn claude_project(path: &Path) -> String {
     path.to_string_lossy()
@@ -5125,6 +5211,7 @@ fn server_routed_task_workspace() {
             "machine_label": "mini",
             "checkout": null,
             "revision": null,
+            "scratch_pages": [],
         })
     );
 

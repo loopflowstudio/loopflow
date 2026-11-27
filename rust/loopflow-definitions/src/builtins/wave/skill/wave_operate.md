@@ -66,7 +66,7 @@ that fits:
   merge they didn't approve.
 - **Finish merged work.** Let a live Graph finish. Otherwise, when the
   outcome holds, run `lf task complete <issue>` and reread status. Retry
-  completion alone, never by rerunning gate or re-arming a merged PR.
+  completion alone, never by re-arming a merged PR.
 
 Tasks progress independently of this pass; their Graphs do the work, so don't
 perform a Graph's steps here. `lf task run <issue-id>` continues a Task you

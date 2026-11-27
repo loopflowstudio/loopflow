@@ -100,8 +100,7 @@ pub fn repository_identity(
 )> {
     let repo = loopflow_execution::repository::containing(directory)?
         .ok_or_else(|| anyhow!("run `lf repo` in a repository"))?;
-    let runtime = tokio::runtime::Runtime::new()?;
-    let identity = runtime.block_on(async {
+    let identity = loopflow_execution::runtime::block_on(async {
         let store = loopflow_execution::store::open_store(
             &loopflow_execution::store::storage_config_from_env()?,
         )
@@ -215,6 +214,12 @@ fn launch_task(cli: &Cli) -> Option<&str> {
         Some(Commands::Session {
             cmd: SessionCommand::Resume { connection, .. },
         }) if connection.task.is_some() => connection.task.as_deref(),
+        Some(Commands::Task {
+            cmd:
+                TaskCommand::Find { issue, .. }
+                | TaskCommand::Grep { issue, .. }
+                | TaskCommand::Symbols { issue, .. },
+        }) => Some(issue),
         Some(Commands::Steer {
             target: Some(target),
             ..
@@ -636,7 +641,7 @@ fn context_scope(
     let Some(repo) = repo else {
         return Ok(None);
     };
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         use loopflow_execution::ops::human_session::{connection_scope, SessionTarget};
         use loopflow_execution::session::PrimaryScope;
         Ok(
@@ -740,15 +745,14 @@ pub fn location(
     let request = request
         .map(str::to_string)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let readings = tokio::runtime::Runtime::new()?.block_on(
-        loopflow_execution::ops::task_location::observe(
+    let readings =
+        loopflow_execution::runtime::block_on(loopflow_execution::ops::task_location::observe(
             &store,
             &repository,
             &task,
             peers,
             &request,
-        ),
-    )?;
+        ))?;
     if json {
         println!("{}", serde_json::to_string_pretty(&readings)?);
     } else {

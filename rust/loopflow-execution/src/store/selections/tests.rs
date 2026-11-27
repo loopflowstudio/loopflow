@@ -411,11 +411,6 @@ fn sidebar_step_follows_the_captured_cursor_and_disappears_without_a_graph() {
     assert_eq!(row().working_group, Some(Shipping));
     mark(loopflow_storage::sqlite::AutoState::Off);
     assert_eq!(row().working_group, Some(Active));
-    let verify = serde_json::to_string(&graph.find("verify").unwrap().cursor()).unwrap();
-    store
-        .advance_task_graph_run(&id, &carrier, &verify)
-        .unwrap();
-    assert_eq!(row().working_group, Some(Shipping));
     let past_end = serde_json::to_string(&crate::graph::runner::ExecutionCursor {
         index: graph.steps.len(),
         ..Default::default()
@@ -424,6 +419,7 @@ fn sidebar_step_follows_the_captured_cursor_and_disappears_without_a_graph() {
     store
         .advance_task_graph_run(&id, &carrier, &past_end)
         .unwrap();
+    assert_eq!(row().working_group, Some(Shipping));
     assert_eq!(row().graph_step.as_deref(), Some("review"));
     store.set_task_graph_step(&id, "end").unwrap();
     run_from("end", &past_end);

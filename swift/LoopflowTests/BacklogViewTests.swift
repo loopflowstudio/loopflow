@@ -284,9 +284,8 @@ struct BacklogViewTests {
              "sources": [], "paths": []]
         }
         let catalog = [
-            try entry("code", "Build, deliver and verify. You try it.", [
-                node(0, "implement"), node(1, "demo", interactive: true), node(2, "land --wait-and-fix", kind: "op"),
-                node(3, "verify")]),
+            try entry("code", "Build and deliver. You try it.", [
+                node(0, "implement"), node(1, "demo", interactive: true), node(2, "land --wait-and-fix", kind: "op")]),
             try entry("auto", "Request to merged PR.", [node(0, "implement"), node(1, "land --wait-and-fix", kind: "op")]),
             try entry("incident", "Unbreak it.", [node(0, "unbreak")]),
             try entry("build", "Build the plan in chunks.", [node(0, "implement")], includedBy: ["code", "auto"]),
@@ -294,7 +293,7 @@ struct BacklogViewTests {
             try entry("vsm-operate", "Operate a Wave.", [node(0, "s1")], runs: "wave"),
         ]
         let code = try #require(StartFlow(catalog[0]))
-        #expect(code.stops == 1 && !code.merges && code.consequence == "1 stop" && code.summary == "Build, deliver and verify")
+        #expect(code.stops == 1 && !code.merges && code.consequence == "1 stop" && code.summary == "Build and deliver")
         #expect(StartFlow(catalog[1])?.consequence == "merges without asking")
         #expect(StartFlow(catalog[2])?.consequence == "never stops")
         // Start's menu and New's chooser read one layout: pieces and undescribed

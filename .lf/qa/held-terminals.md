@@ -14,10 +14,10 @@ the terminal: send Ctrl-D through the view. Emit `ESC]7501;state=blocked:app=cla
 To exercise an install, copy each build aside and point `LF_BIN` at a symlink:
 a relay replaced across a `held.sock` revision execs `LF_BIN`. A copy with a
 few appended bytes, re-signed with `codesign -f -s -`, runs as a distinct build
-(its own holder). A managed launch with the server stopped readies
-`com.loopflow.server.<hash>` under launchd for the private home; `launchctl
-kickstart -k gui/$UID/<label>` then restarts it the way an install does. Boot
-that label out afterwards. A managed launch is held only when a terminal
+(its own holder). A managed launch with the server stopped starts a detached `lf server run` for
+the private home (never a launchd job); running `lf install server` with a
+different build replaces it cleanly, and removing `$LF_HOME` stops both the
+server and its holders. A managed launch is held only when a terminal
 views it: `lf resume --task … | tail` or `< /dev/null > file` runs unheld
 under its own owner. To make server readiness fail without touching launchd,
 point `LF_BIN` at a wrapper that exits 1 for `install server` and execs the
@@ -40,11 +40,11 @@ from `lf` with `LF_BIN` naming that path (`lf install server`, or
 build: its `lf server status` still reports `ready`, with an
 `executable_sha256` that is not its own. A live holder
 keeps serving new terminals; stop it (the `lf holder run` under your `bin/`
-path) and the next `lf desktop shell <task> --checkout <path> --id <id>
---create` fails naming both builds. `lf install server` from the replaced
-path restarts a launchd-run server; nothing restarts a foreground one. A
-failed `--create` keeps its `--id`: retry with a new one. The holder the
-server started from the new build exits within a minute on its own.
+path) and the next `lf desktop shell <task> --id <id>
+--create` fails naming both builds. `lf install server` from the replaced path restarts the detached private-home
+server (or the launchd-run server on `~/.lf`). A failed `--create` keeps its
+`--id`: retry with a new one. The holder the server started from the new build
+exits within a minute on its own.
 
 For final bridge reasons, attach through `session.attach` and consume the viewer
 frames described in `transport/README.md`. Check one final `0x07` Close before
@@ -90,3 +90,24 @@ and prefixes the last argument, lf's remote command, with `. <remote env>;`.
 remote-TTY view is `ssh -tt <host> '<env>; lf resume --task <id>'`; read the
 stand-in's log over SSH. Stop the remote server by `lsof -t` on its store,
 then its `lf holder run`, and delete the directory: that disk is nearly full.
+
+# Titles
+
+The server writes a held terminal's title as `ESC]0;<name>BEL` into its
+output stream; log the view's PTY output and grep it. A viewer under tmux
+renames its own window: run the view with `TMUX=/tmp/fake,1,0 TMUX_PANE=%7`
+and a `tmux` script first on `PATH` that appends its arguments to a file.
+Have the stand-in dump `env | grep -E '^(LF_|CLAUDE)'` to a file at start
+(`ps eww` shows no environment for a holder's child); piping hook JSON
+(`session_id` = its `--session-id`, `cwd`) into
+`env $(cat agent.env) lf __context-block --moment stop` from the checkout
+yields the turn, so the title gains `· Available`. Availability by quiet
+time (120 s after `observed_at`) needs `program_status` NULL: one OSC 7501
+report leaves `{"seen":true}` for good, so use a fresh conversation, then
+`lf steer <task> '…'` and fire `--moment tool` to deliver it, which sets
+`yielded=0`; the title turns Available 120 s later with no revision moving
+(`select * from store_revisions` before and after). A Task at an
+interactive step needs `graph:` in `.lf/config.yaml` committed and merged
+into the Task's checkout before `lf task run`. `sample <server> 1` shows
+`title-reader` in `recv` when nothing is due and `recv_timeout` when a
+deadline is armed.

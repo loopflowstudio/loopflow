@@ -1,10 +1,9 @@
 //! Checkout admission serializes membership changes and execution before SQLite writes.
 
 use std::collections::BTreeMap;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::path::{Path, PathBuf};
 
-use fs2::FileExt;
 use sha2::{Digest, Sha256};
 
 use crate::{StoreError, StoreResult};
@@ -44,36 +43,17 @@ impl SqliteStore {
 
     fn lock_checkout_path(root: &Path, cwd: &Path, exclusive: bool) -> StoreResult<File> {
         let name = hex::encode(Sha256::digest(cwd.as_os_str().as_encoded_bytes()));
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(root.join(name))
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        loop {
-            let acquired = if exclusive {
-                FileExt::try_lock_exclusive(&file)
-            } else {
-                FileExt::try_lock_shared(&file)
-            };
-            match acquired {
-                Ok(()) => break,
-                Err(error)
-                    if error.kind() == std::io::ErrorKind::WouldBlock
-                        && std::time::Instant::now() < deadline =>
-                {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-                Err(error) => {
-                    return Err(StoreError::InvalidData(format!(
-                        "checkout admission unavailable for {}: {error}",
-                        cwd.display()
-                    )))
-                }
-            }
-        }
-        Ok(file)
+        crate::lock_file::lock_with_timeout_verified(
+            &root.join(name),
+            exclusive,
+            std::time::Duration::from_secs(2),
+            std::time::Duration::from_millis(10),
+        )
+        .map_err(|error| {
+            StoreError::InvalidData(format!(
+                "checkout admission unavailable for {}: {error}",
+                cwd.display()
+            ))
+        })
     }
 }

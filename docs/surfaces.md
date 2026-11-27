@@ -31,14 +31,20 @@ lf open --task LOO-12 --host desktop          # open in Loopflow Desktop
   `lf --task LOO-12 open --link --format markdown` (paste into PRs, Slack, or
   notes; installing `lf` registers the `loopflow:` URL handler).
 
-To present docs in Desktop:
+The Desktop presentation command opens a finished page or selects lines
+in a file for review.
 
 ```bash
-lf open --host desktop --file docs/usage.md --file README.md
+lf desktop files scratch/explore.html
+lf desktop files src/parser.rs:24-31 --mode diff
 ```
 
-Opens those files in Desktop's Files pane (rendered Markdown/HTML, keeping
-active drafts intact) without launching a conversation or editor.
+A path opens in **Read** by default. Desktop keeps the prior reading position
+in Files’ jump history and preserves drafts, Undo and terminal focus. During
+active editing or Diff review in a visible pane, the path appears in **Open & Scratch** with a
+dismissible `Presented <path> · Open` bar. Dismissing it keeps the file in the
+rail. Presenting from a zoomed conversation reveals the file beside it and
+keeps keyboard focus in the terminal. An unattached Desktop returns exit status 4.
 
 `lf session rename SESSION 'Resume repair'` updates the
 terminal title via standard OSC sequences, plus native cmux tabs/workspaces and
@@ -59,7 +65,12 @@ The native macOS app reads the same local store as `lf`; it keeps no copy of its
   `lf task unpause` without `--run` lifts the hold and starts nothing.
   The Auto switch can be turned off during a hold.
 - **Task workspace:** three resizable panes: `session` (conversation), `shell`
-  (at the Task's worktree), and `browser` (Files, Graph log, local dev URLs).
+  (at the Task's worktree), and `browser` (**Brief**, **Diff**, **Files**, Graph
+  log, local dev URLs). **Files** opens files read-only by default with one-key
+  **Edit** (⌃⌘E), checkout-wide **⌘P** fuzzy find and **⇧⌘F** grep, **⌘F**
+  in-file find, **⌘-click** / `gd` jump to definition with **⌘[** / **⌘]** jump
+  history, line comments shared with **Diff** (⌘↩), and quiet update notices for
+  `scratch/` writes.
 - **Dashboards:** saved side-by-side grids of Tasks selected by query. Each
   tile is headed by the Task's sidebar row, with the sentence saying where its
   workflow stands.
@@ -245,7 +256,7 @@ What do you want?
 
 In Product ▾, running feature ▾, Product's default
 
-☺ explore   plan   build   ☺ ship-review   deliver   verify
+☺ explore   plan   build   ☺ ship-review   deliver
 You take part at explore and ship-review.
 
                                         Cancel   File   Start ⌘↩
@@ -277,7 +288,7 @@ request stays on screen with "Not started.", the error, **Try again** and
 Open a filed Task and it says what Start will do, in the sheet's words:
 
 ```text
-[▶]   [Run: explore ▾]   plan   build   ☺ ship-review   deliver   verify       Auto ◯   ✓
+[▶]   [Run: explore ▾]   plan   build   ☺ ship-review   deliver       Auto ◯   ✓
 
 Not started
 
@@ -300,24 +311,25 @@ the repository's. ▾ lists the others, each with its description and how many
 times it stops for you:
 
 ```text
-✓ feature                 Explore, build, deliver and verify      2 stops
-  code                    Build, deliver and verify               1 stop
-  redesign                Rethink a started Task                  1 stop
-  research                Investigate and report, with no PR      1 stop
+✓ feature                 Explore, build and deliver                 2 stops
+  code                    Build and deliver                          1 stop
+  redesign                Rethink a started Task                     1 stop
+  research                Investigate and report, with no PR         1 stop
   More ›
   Run without stopping
-  deep-clean              Delete what an area no longer needs     never stops
-  incident                Restore first, then fix the cause       never stops
-  optimize                Move one number                         never stops
-  queue                   Compress, integrate upstream changes    never stops
-  task-design             Draft the Task design                   never stops
+  deep-clean              Delete what an area no longer needs        never stops
+  incident                Restore first, then fix the cause          never stops
+  optimize                Move one number                            never stops
+  quick                   Build a small, clear change and land it    merges without asking
+  task-design             Draft the Task design                      never stops
 ```
 
 Several Tasks whose workflows differ show the split,
 `Start 3: feature 2, code 1`, and the menu opens with "Each Task's own
 workflow"; clicking Start runs each on its own. Pick a workflow below it to run
 all of them on that one. Workflows under "Run without stopping" never wait for
-you. **More ›** holds the pieces other
+you; one that lands the PR before any stop, like `quick`, reads **merges without
+asking** (`lf task auto off` still holds before `land`). **More ›** holds the pieces other
 Graphs include, such as `build` and `deliver`, and Graphs with no
 `description:` ([describe a Graph](orchestration.md#describe-a-graph)). A
 Graph that runs for a Wave is not offered for a Task. The

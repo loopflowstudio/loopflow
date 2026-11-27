@@ -1179,19 +1179,35 @@ fn task_changes_count_each_files_stops_before_any_patch_is_read() {
         .map(|(path, count)| (path.to_string(), *count))
         .collect::<std::collections::BTreeMap<_, _>>();
     assert_eq!(
-        super::snapshot::count_changes(diff.patch.as_bytes()),
+        super::snapshot::count_changes(diff.patch.as_bytes())
+            .into_iter()
+            .map(|(p, c)| (p, c.stops))
+            .collect::<std::collections::BTreeMap<_, _>>(),
         nonzero
     );
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/fixtures/review/change_counts.patch");
     assert_eq!(
-        super::snapshot::count_changes(&std::fs::read(fixture).unwrap()),
+        super::snapshot::count_changes(&std::fs::read(fixture).unwrap())
+            .into_iter()
+            .map(|(p, c)| (p, c.stops))
+            .collect::<std::collections::BTreeMap<_, _>>(),
         nonzero
     );
     let adjacent =
         b"diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n+new\n-old\n+again\n-more\n";
     // A removal right after additions starts a new stop, as the Diff reads it.
-    assert_eq!(super::snapshot::count_changes(adjacent)["x"], 3);
+    let count = super::snapshot::count_changes(adjacent)["x"];
+    let quoted = b"diff --git a/x b/x\n--- \"a/na\\303\\257ve\"\n+++ \"b/na\\303\\257ve\"\n@@ -1 +1 @@\n-old\n+new\n";
+    assert_eq!(super::snapshot::count_changes(quoted)["naïve"].stops, 1);
+    assert_eq!(count.stops, 3);
+    assert_eq!(
+        count.lines,
+        Some(super::ChangedLines {
+            added: 2,
+            removed: 2
+        })
+    );
 }
 
 #[test]

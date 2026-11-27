@@ -1,7 +1,8 @@
-//! One filesystem watch per provider home, held by the Machine server. Events
-//! are hints: they make the shared observation cache read a changed
-//! transcript's turn again, and its reconcile interval catches what they miss.
-//! Every subscription reading that transcript shares the one reading.
+//! Shared filesystem watch for provider transcript homes, routed through
+//! [`crate::observe::Cache`]'s single process-wide watcher. Events are hints:
+//! they make the observation cache read a changed transcript's turn again, and
+//! its reconcile interval catches what they miss. Every subscription reading
+//! that transcript shares the one reading.
 //!
 //! OpenCode writes every conversation into one SQLite store, and FSEvents
 //! reports no write to it while OpenCode holds it open. OpenCode snapshots
@@ -10,75 +11,22 @@
 //! a query on that store, a few milliseconds.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 
-use notify::{RecursiveMode, Watcher};
+use crate::observe::{Cache, TranscriptWatchGuard};
 
-use crate::observe::Cache;
-use loopflow_harness::HarnessKind;
-
-/// Watch each harness's shared home until the returned watchers drop. A home
-/// that is missing or cannot be watched is logged and left to the reconcile
-/// interval.
-pub fn watch(cache: &Arc<Cache>) -> Vec<notify::RecommendedWatcher> {
-    HarnessKind::ALL
-        .into_iter()
-        .map(|kind| {
-            let harness = kind.harness();
-            let home = harness.transcript_home();
-            (
-                harness.transcript_root(&home).0,
-                harness.transcript_watch_store(&home),
-            )
-        })
-        .filter(|(root, _)| root.is_dir())
-        .filter_map(
-            |(root, store)| match watch_root(&root, store, Arc::downgrade(cache)) {
-                Ok(watcher) => Some(watcher),
-                Err(error) => {
-                    tracing::warn!(root = %root.display(), %error, "Could not watch transcripts");
-                    None
-                }
-            },
-        )
-        .collect()
-}
-
-/// Watch `root`; every event under it hints `store` when one is given, else
-/// the transcript files it names.
-fn watch_root(
-    root: &Path,
-    store: Option<PathBuf>,
-    cache: Weak<Cache>,
-) -> notify::Result<notify::RecommendedWatcher> {
-    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-        if let Some(cache) = cache.upgrade() {
-            hint(&cache, event, store.as_deref());
-        }
-    })?;
-    watcher.watch(root, RecursiveMode::Recursive)?;
-    Ok(watcher)
-}
-
-fn hint(cache: &Cache, event: notify::Result<notify::Event>, store: Option<&Path>) {
-    let event = match event {
-        Ok(event) if event.kind.is_access() => return,
-        Ok(event) if !event.need_rescan() => event,
-        Ok(_) | Err(_) => return cache.hint_transcript(None, true),
-    };
-    // A new OpenCode conversation is a row, not a file; raw discovery finds
-    // it at its own interval.
-    let created = event.kind.is_create() && store.is_none();
-    for path in transcripts(&event.paths, store) {
-        cache.hint_transcript(Some(&path), created);
-    }
+/// Watch each harness's shared home through `cache`'s single shared filesystem
+/// watcher until the returned guard drops. A home that is missing or cannot be
+/// watched is logged and left to the reconcile interval.
+pub fn watch(cache: &Arc<Cache>) -> TranscriptWatchGuard {
+    cache.watch_transcripts()
 }
 
 /// The transcripts an event on `paths` changes: `store` when the watch is
 /// OpenCode's, else the `.jsonl` files among them. FSEvents may name a file
 /// by its resolved path; facts keep the spelling they were read with, so both
 /// are hinted.
-fn transcripts(paths: &[PathBuf], store: Option<&Path>) -> Vec<PathBuf> {
+pub(crate) fn transcripts(paths: &[PathBuf], store: Option<&Path>) -> Vec<PathBuf> {
     let changed = match store {
         Some(store) => vec![store.to_path_buf()],
         None => paths
@@ -102,6 +50,7 @@ fn transcripts(paths: &[PathBuf], store: Option<&Path>) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use std::io::Write;
+    use std::time::SystemTime;
 
     use super::*;
     use loopflow_harness::transcript::live::TurnState;
@@ -131,23 +80,22 @@ mod tests {
             .unwrap()
             .write_all(format!("{ENDED}\n").as_bytes())
             .unwrap();
-        cache.refresh_local();
+        cache.refresh_due_at(SystemTime::now());
         assert!(
             subscribers.iter().all(|(_, seen)| !seen.changed()),
             "the reconcile interval has not passed and no event arrived"
         );
 
-        hint(
-            &cache,
-            Ok(
-                notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Any))
-                    .add_path(path.clone()),
-            ),
-            None,
+        for hinted in transcripts(std::slice::from_ref(&path), None) {
+            cache.hint_transcript(Some(&hinted), false);
+        }
+        // The hint makes it due after TURN_HINTED, not immediately.
+        cache.refresh_due_at(SystemTime::now());
+        assert!(subscribers.iter().all(|(_, seen)| !seen.changed()));
+
+        cache.refresh_due_at(
+            SystemTime::now() + crate::observe::TURN_HINTED + std::time::Duration::from_millis(10),
         );
-        // The hint makes it due a second from now, not at once.
-        std::thread::sleep(std::time::Duration::from_millis(1100));
-        cache.refresh_local();
         assert!(subscribers.iter().all(|(_, seen)| seen.changed()));
         let (after, _) = cache.capture(read);
         let after = after.unwrap();

@@ -190,6 +190,8 @@ fn planning_statements_do_not_grow_with_its_tasks() {
         }
     };
     create(2);
+    // The first CLI plan read after task creation performs the one-time remote fetch.
+    let _ = planning_statements(home.path(), repo.path());
     let (fewer, _) = planning_statements(home.path(), repo.path());
     create(4);
     let (statements, plan) = planning_statements(home.path(), repo.path());

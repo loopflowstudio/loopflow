@@ -1,5 +1,0 @@
-description: Compress, integrate upstream changes, then gate the branch.
-steps:
-- compress
-- graph: refresh
-- gate

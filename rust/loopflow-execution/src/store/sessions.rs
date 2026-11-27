@@ -78,7 +78,21 @@ impl Store {
         let scope = scope.clone();
         let caller = crate::journal::current_lf_process_id();
         run_sqlite(&self.sqlite, move |store| {
-            ensure_primary_session(&store, &scope, session, caller.as_ref())
+            ensure_primary_session(&store, &scope, session, caller.as_ref(), None)
+        })
+        .await
+    }
+
+    pub async fn ensure_primary_session_for_person(
+        &self,
+        scope: &crate::session::PrimaryScope,
+        session: LfSession,
+        at: i64,
+    ) -> StoreResult<LfSession> {
+        let scope = scope.clone();
+        let caller = crate::journal::current_lf_process_id();
+        run_sqlite(&self.sqlite, move |store| {
+            ensure_primary_session(&store, &scope, session, caller.as_ref(), Some(at))
         })
         .await
     }
@@ -215,12 +229,13 @@ pub fn ensure_primary_session(
     scope: &PrimaryScope,
     mut session: LfSession,
     caller: Option<&LfProcessId>,
+    person_start_at: Option<i64>,
 ) -> StoreResult<LfSession> {
     if let Some(current) = store.primary_session(scope)? {
         return Ok(current);
     }
     discover_session_repo(&mut session)?;
-    store.ensure_primary_session(scope, session, caller)
+    store.ensure_primary_session(scope, session, caller, person_start_at)
 }
 
 /// Name the repository holding the Session's cwd. This runs Git, so callers
@@ -525,6 +540,7 @@ mod tests {
                 ..candidate(&checkout)
             },
             None,
+            None,
         )
         .unwrap();
         std::fs::remove_dir(&checkout).unwrap();
@@ -533,7 +549,8 @@ mod tests {
             Some(scope.clone())
         );
         assert_eq!(
-            super::ensure_primary_session(&store, &scope, candidate(&checkout), None).unwrap(),
+            super::ensure_primary_session(&store, &scope, candidate(&checkout), None, None)
+                .unwrap(),
             session
         );
     }

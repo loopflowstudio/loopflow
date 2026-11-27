@@ -1,11 +1,11 @@
-description: Build the plan in chunks, then review the finished change whole.
+description: Build the plan pass by pass, review the whole change, then simplify and try it.
 steps:
 - loop:
     - loop:
-        - implement         # one reviewable end-to-end pass
         - cmd: sync
-        - realign           # regroup the remaining work, or move on to review
-    - compress
-    - qa
-    - concept-review        # decides: the finished change, whole
+        - implement         # decides: another planned pass, or ready for review
+    - concept-review        # read-only: writes scratch/concept-review.html
+    - realign               # decides: takes the review into the plan; rework, or move on
+- compress
+- qa
 - pr-publish

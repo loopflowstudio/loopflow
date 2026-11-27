@@ -6,7 +6,7 @@
 use std::io;
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
@@ -16,11 +16,12 @@ use loopflow_model::id::TerminalId;
 
 use super::held::Source;
 use super::input::{self, PendingInput};
+use super::registry::StoreWork;
 use super::wire::{CloseReason, Event, Incoming, Reply, Request, Tag};
 use super::{
     close_viewers, deliver, dimensions, end_viewers, lifetime, native, output, place_events,
-    provider_exit_code, publish_reports, release_viewer_hold, selected_directory, snapshot,
-    viewer_hold, Settling, Sizing, Span, Viewer, HEARTBEAT_TIMEOUT, LIMIT,
+    provider_exit_code, publish_reports, selected_directory, snapshot, viewer_hold, Settling,
+    Sizing, Span, Viewer, HEARTBEAT_TIMEOUT, LIMIT,
 };
 use loopflow_storage::sqlite::ViewerHold;
 
@@ -31,26 +32,6 @@ pub(super) struct Chunk {
     pub raw: bool,
     /// The PTY position after these bytes.
     pub end: u64,
-}
-
-/// End what a Desktop shell left running in its terminal's session, off the
-/// host's loop: stragglers get up to three seconds.
-fn end_jobs(source: &Source, terminal: &TerminalId) -> Result<()> {
-    if !crate::journal::process_ledger()?.is_shell_terminal(terminal)? {
-        return Ok(());
-    }
-    // The holder made the shell its session's leader.
-    let session = source.pid();
-    let terminal = terminal.clone();
-    std::thread::spawn(move || {
-        let settled = crate::os_process::terminate_shell_jobs(session)
-            .map_err(anyhow::Error::from)
-            .and_then(|()| Ok(crate::journal::process_ledger()?.settle_shell_jobs(&terminal)?));
-        if let Err(error) = settled {
-            tracing::error!(%terminal, %error, "Shell job cleanup remains pending");
-        }
-    });
-    Ok(())
 }
 
 /// What one pass over a hosted execution came to.
@@ -97,6 +78,7 @@ pub(super) struct Hosted {
     /// that takes it up later has it too.
     kept: Option<std::path::PathBuf>,
     execution_directory_reported: bool,
+    execution_directory_requested: bool,
     title: crate::terminal_title::OutputTitle,
     /// The Program Status viewers were last sent.
     reported_status: Option<loopflow_model::program_status::Records>,
@@ -137,6 +119,11 @@ impl Hosted {
             watchers
                 .lifetime
                 .watch(id.clone(), waker.try_clone()?, Arc::clone(&attachment));
+        let title = crate::terminal_title::OutputTitle::new(
+            id.clone(),
+            waker.try_clone()?,
+            watchers.titles.clone(),
+        );
         Ok(Self {
             control_key,
             viewers: Vec::new(),
@@ -163,7 +150,8 @@ impl Hosted {
             departure: None,
             kept: None,
             execution_directory_reported: false,
-            title: crate::terminal_title::OutputTitle::new(&id, &watchers.titles),
+            execution_directory_requested: false,
+            title,
             reported_status: None,
             replayed_through: 0,
             id,
@@ -215,8 +203,17 @@ impl Hosted {
         self.output.program_status()
     }
 
+    /// Record the provider's confirmed directory once the worker verified its
+    /// agent process in the store.
+    pub fn confirm_directory(&mut self, cwd: &std::path::Path) {
+        if !self.execution_directory_reported {
+            self.output.directory(cwd);
+            self.execution_directory_reported = true;
+        }
+    }
+
     /// Serve every connection, move input and output, and judge the ending.
-    pub fn pass(&mut self, child: &mut Source) -> Result<Pass> {
+    pub fn pass(&mut self, child: &mut Source, worker: &mpsc::Sender<StoreWork>) -> Result<Pass> {
         let child_pid = child.pid();
         let previous_owner = self.sizing.id().map(str::to_owned);
         let mut size_change = false;
@@ -559,24 +556,23 @@ impl Hosted {
             .viewers
             .iter()
             .any(|v| self.sizing.held_by(v) && !v.catching_up);
+        self.title.set_viewed(self.viewers.iter().any(Viewer::live));
         if let Some(name) = self.title.tick() {
             self.output.title(&name);
         }
         child.forward(&mut self.pending_input);
         for chunk in child.read(16) {
             // An exec handoff announces before exec. The provider's first
-            // output establishes that it reached its configured directory.
-            if !self.execution_directory_reported {
+            // output establishes that it reached its configured directory;
+            // confirm asynchronously on the store worker, at most once.
+            if !self.execution_directory_reported && !self.execution_directory_requested {
                 if let Some(record) = &self.exit_record {
-                    let connected = crate::journal::process_ledger()
-                        .and_then(|store| store.agent_state(&record.attachment.agent_process_id))
-                        .ok()
-                        .flatten()
-                        .is_some_and(|agent| agent.pid.is_some() && agent.ended_at.is_none());
-                    if connected {
-                        self.output.directory(&record.cwd);
-                        self.execution_directory_reported = true;
-                    }
+                    self.execution_directory_requested = true;
+                    let _ = worker.send(StoreWork::ConfirmDirectory {
+                        terminal: self.id.clone(),
+                        agent_process_id: record.attachment.agent_process_id.clone(),
+                        cwd: record.cwd.clone(),
+                    });
                 }
             }
             let answering = answering && chunk.end > self.replayed_through;
@@ -648,7 +644,10 @@ impl Hosted {
             }
         }
         if let Some(status) = status {
-            end_jobs(child, &self.id)?;
+            let _ = worker.send(StoreWork::EndShellJobs {
+                terminal: self.id.clone(),
+                pid: child.pid(),
+            });
             if let Some(record) = self.exit_record.take() {
                 self.settling = Some(Settling::spawn(
                     record,
@@ -726,8 +725,7 @@ impl Hosted {
                 if !child.outcome_unknown() {
                     close_viewers(&mut self.viewers, self.close_reason);
                 }
-                release_viewer_hold(&self.id, self.observed_hold);
-                snapshot::leave(&self.id, &self.output);
+                self.leave_on_worker(worker);
                 return Ok(Pass::Ended(code, self.settling.take()));
             }
         }
@@ -736,6 +734,7 @@ impl Hosted {
             self.observed_hold,
             time::OffsetDateTime::now_utc().unix_timestamp(),
         );
+        self.title.set_viewed(self.viewers.iter().any(Viewer::live));
         if hold != self.observed_hold {
             self.observed_hold = hold;
             self.viewing.send(hold);
@@ -748,7 +747,6 @@ impl Hosted {
                 answering,
                 Span::Aside { through: None },
             );
-            snapshot::leave(&self.id, &self.output);
             if let Some(viewer) = self
                 .viewers
                 .iter_mut()
@@ -758,10 +756,23 @@ impl Hosted {
                 let _ = viewer.flush();
             }
             // A held terminal has no process to signal: the notice ends it.
-            release_viewer_hold(&self.id, self.observed_hold);
+            self.leave_on_worker(worker);
             child.retire();
         }
         Ok(Pass::Continue)
+    }
+
+    fn leave_on_worker(&self, worker: &mpsc::Sender<StoreWork>) {
+        if let Some(bytes) = snapshot::encode(&self.output) {
+            let _ = worker.send(StoreWork::LeaveSnapshot {
+                terminal: self.id.clone(),
+                bytes,
+            });
+        }
+        let _ = worker.send(StoreWork::ReleaseViewerHold {
+            terminal: self.id.clone(),
+            previous: self.observed_hold,
+        });
     }
 
     /// A paste the departed writer left open ends with it.
@@ -869,7 +880,6 @@ impl Hosted {
             .chain(deadline)
             .chain(Some(Instant::now() + Duration::from_secs(10)))
             .chain(child.retry_at())
-            .chain(Some(self.title.deadline()))
             .chain(self.settling.as_ref().and_then(Settling::deadline))
             .min()
     }

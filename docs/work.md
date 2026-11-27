@@ -365,11 +365,21 @@ laptop$ lf task create 'plan smoke'
 plan smoke · 3e1c9a
 laptop$ lf repo tracker
 Plan: Git origin.
+
+mini$ lf task create 'from mini'
+from mini · 8b4d2e
+mini$ lf task list
+3e1c9a · — · plan smoke
+8b4d2e · — · from mini
 ```
 
-The Task is on the remote in seconds and `lf task list` on the mini shows it
-within a minute; the
-first `lf task list` in a fresh clone reads the remote before it answers. A
+The Task is on the remote in seconds. In a fresh clone, the first command that
+reads the plan (`lf task list`, `lf wave list`, `lf wave show`, `lf wave status`,
+`lf wave plan`, `lf plan list`, `lf plan board`, or `lf repo tracker`) reads the
+remote before it answers, even if you already ran `lf task create` there first.
+Later reads answer from this Machine's local store without fetching. If that
+first read fails or takes more than five seconds, the command still answers from
+the local store and waits a minute before trying again on a later read. A
 teammate who clones the repository sees the same plan, and their Tasks appear
 in yours: no account and no server, only push access to the repository.
 
@@ -383,7 +393,8 @@ Every command saves on this Machine first, so nothing waits on the network.
 Each Machine pushes its plan to a ref of its own on the remote
 (`refs/loopflow/plan/<machine id>`) as part of the save, for five seconds at
 most. Its server fetches the others’ refs about every 30 seconds while it owns
-open Tasks in the repository and once a minute otherwise. A running Graph step
+open Tasks in the repository, and once a minute while the repository has open
+Tasks or Waves here. A running Graph step
 keeps checking its repository if the server exits. `lf task sync <issue>` does
 both now. The refs stay out of
 `git branch`, `git status` and a plain clone. A repository with no remote reads
@@ -465,7 +476,15 @@ loses nothing; `lf machine list` marks the hub.
 A repository with no remote can still use a hub. With no ref to tell its
 clones they are the same repository, say so once: `lf config repo` prints the
 repository id on the first Machine and `lf config repo --bind <id>` sets it in
-each other clone, the hub's included.
+each other clone, the hub's included. The first plan read after binding pulls
+the plan from the hub before it answers:
+
+```text
+mini$ lf config repo --bind 6f9a2c40-…
+6f9a2c40-…
+mini$ lf task list
+3e1c9a · — · plan smoke
+```
 
 A Machine still running an earlier `lf` keeps reading the old
 `refs/loopflow/planning/*` and sees none of these changes until it updates. A
@@ -592,10 +611,11 @@ crosses storage, auth, or public APIs.
 ```
 
 `MEMORY.md` beside it holds what later Tasks need: decisions, dead ends and facts.
-Agents update it as work ships, and `realign` keeps
-plan, code, and memory in sync. Both files are ordinary Markdown in Git,
-reviewed in PRs. Check each file's context footprint with
-`lf context --wave billing`.
+The Wave's conversation (`wave-session`, opened with `lf resume --wave billing`)
+curates it—promoting lessons from child Waves, replacing stale guidance, and
+retiring the largest stale sections when `lf context --wave billing` exceeds its
+limit. Both `GOAL.md` and `MEMORY.md` are ordinary Markdown in Git, reviewed in
+PRs.
 
 ### Defaults per Wave
 

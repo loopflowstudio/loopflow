@@ -195,7 +195,8 @@ struct WorkPalette: View {
                     Button("Search all Work") { model.navigation.palette = .search }.buttonStyle(LoopflowButtonStyle())
                 }
             }
-            PaletteSearchField(text: $search, move: move, submit: {
+            PaletteSearchField(text: $search, placeholder: "Go to a Task, Wave or repository",
+                               identifier: "work-palette-search", move: move, submit: {
                 if let id = selection { activate(id) }
             }, cancel: { model.navigation.palette = nil })
             .frame(height: 24)
@@ -440,35 +441,45 @@ struct WorkflowCatalogInspector: View {
 
 /// The field editor owns arrows while typing; handle its navigation commands
 /// directly rather than relying on SwiftUI's unfocused move-command responder.
-private struct PaletteSearchField: NSViewRepresentable {
+struct PaletteSearchField: NSViewRepresentable {
     @Environment(\.palette) private var palette
     @Binding var text: String
+    let placeholder: String
+    let identifier: String
     let move: (Int) -> Void
     let submit: () -> Void
     let cancel: () -> Void
 
+    var focusOnMount = true
+    var submitBackwards: (() -> Void)?
+
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
     func makeNSView(context: Context) -> SearchField {
         let field = SearchField()
+        field.focusOnMount = focusOnMount
         field.isBordered = false
         field.focusRingType = .none
         field.drawsBackground = false
         field.font = NSFont(name: Typography.sansFace, size: Typography.textSize) ?? .systemFont(ofSize: Typography.textSize)
-        field.placeholderString = "Go to a Task, Wave or repository"
-        field.setAccessibilityIdentifier("work-palette-search")
+        field.setAccessibilityIdentifier(identifier)
         field.delegate = context.coordinator
         return field
     }
     func updateNSView(_ field: SearchField, context: Context) {
         context.coordinator.parent = self
         field.textColor = NSColor(palette.text)
+        // The system placeholder gray disappears on dark theme surfaces.
+        field.placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [
+            .foregroundColor: NSColor(palette.textTertiary), .font: field.font ?? NSFont.systemFont(ofSize: Typography.textSize),
+        ])
         if let editor = field.currentEditor() as? NSTextView { editor.applyPalette(palette) }
         if field.stringValue != text { field.stringValue = text }
     }
     final class SearchField: NSTextField {
+        var focusOnMount = true
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            window?.makeFirstResponder(self)
+            if focusOnMount { window?.makeFirstResponder(self) }
         }
     }
     @MainActor final class Coordinator: NSObject, NSTextFieldDelegate {
@@ -479,10 +490,16 @@ private struct PaletteSearchField: NSViewRepresentable {
             parent.text = field.stringValue
         }
         func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            guard !textView.hasMarkedText() else { return false }
             switch selector {
             case #selector(NSResponder.moveDown(_:)): parent.move(1)
             case #selector(NSResponder.moveUp(_:)): parent.move(-1)
-            case #selector(NSResponder.insertNewline(_:)): parent.submit()
+            case #selector(NSResponder.insertNewline(_:)):
+                if NSEvent.modifierFlags.contains(.shift), let previous = parent.submitBackwards { previous() }
+                else { parent.submit() }
+            case #selector(NSResponder.insertLineBreak(_:)), #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+                guard let previous = parent.submitBackwards, NSEvent.modifierFlags.contains(.shift) else { return false }
+                previous()
             case #selector(NSResponder.cancelOperation(_:)): parent.cancel()
             default: return false
             }

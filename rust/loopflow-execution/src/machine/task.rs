@@ -117,8 +117,7 @@ impl crate::machine::wire::Selection {
     /// What this `lf` runs with in `directory`, for a request it sends to
     /// another Machine.
     pub fn capture(directory: &Path, source: Option<TaskSource>) -> Result<Self> {
-        let origin =
-            tokio::runtime::Runtime::new()?.block_on(crate::machine::connection::local_machine())?;
+        let origin = crate::runtime::block_on(crate::machine::connection::local_machine())?;
         Ok(Self {
             profile: crate::config::remote::outgoing(Some(directory), origin.id.as_str())?,
             participant: crate::config::participant_name_in(directory)?,

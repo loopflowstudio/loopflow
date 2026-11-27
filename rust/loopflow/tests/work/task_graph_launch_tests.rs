@@ -1151,7 +1151,7 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
             // Merged work is checked at a last interactive step before `end`.
             (
                 ".lf/graphs/verified.yaml",
-                "- graph: proof\n- interactive: {name: demo, id: review}\n- graph: land-proof\n- interactive: {name: verify, id: check}\n",
+                "- graph: proof\n- interactive: {name: demo, id: review}\n- graph: land-proof\n- interactive: {name: research, id: check}\n",
             ),
         ] {
             let path = repo.path().join(path);
@@ -4123,7 +4123,8 @@ fn auto_on_a_running_task_reports_its_run_and_starts_nothing() {
         String::from_utf8_lossy(&shipped.stderr)
     );
     assert!(text.contains("at review running as Graph run"), "{text}");
-    assert!(text.contains("merges:"), "{text}");
+    // `feature` here has no landing step, so even with auto on it omits `merges:`.
+    assert!(!text.contains("merges:"), "{text}");
     assert!(
         task.text_status().contains("auto: on by "),
         "{}",
@@ -4134,6 +4135,70 @@ fn auto_on_a_running_task_reports_its_run_and_starts_nothing() {
     assert_eq!(task.graph()["position"], at("end"));
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
     assert_eq!(stand_ins(&task).len(), 1);
+}
+
+#[test]
+fn merges_warning_follows_reachable_landing_steps() {
+    let task = stand_in_task();
+    task.repo.create_file(
+        ".lf/graphs/post-merge-stop.yaml",
+        "- graph: proof\n- interactive: {name: demo, id: review}\n- cmd: pr land\n- interactive: {name: research, id: check}\n",
+    );
+    task.repo.stage_all();
+    task.repo.commit("Define post-merge-stop Graph");
+
+    // Non-landing Graph with no interactive stops omits `merges:`.
+    let no_merge = task.task_run(&["task", "run", "INF-123", "proof"]);
+    assert!(no_merge.success(), "{}", no_merge.text);
+    assert!(!no_merge.text.contains("merges:"), "{}", no_merge.text);
+    // Reaching `end` completed the Task; reopen it for the post-merge-stop checks.
+    task.ok(&["task", "reopen", "INF-123"]);
+
+    // Custom Graph with a post-merge stop omits `merges:` before the pre-merge stop.
+    let before_review = task.task_run(&["task", "run", "INF-123", "post-merge-stop"]);
+    assert!(before_review.success(), "{}", before_review.text);
+    assert_eq!(task.graph()["position"], at("review"));
+    assert!(
+        !before_review.text.contains("merges:"),
+        "{}",
+        before_review.text
+    );
+
+    // Continuing past `review` crosses `pr land` before `check`, so it warns `merges:`.
+    let crossing_land = task.task_run(&["task", "run", "INF-123"]);
+    assert!(
+        crossing_land.text.contains("merges:"),
+        "{}",
+        crossing_land.text
+    );
+
+    // Turning auto on while a landing Graph is live reports `merges:`.
+    fs::write(task.home.path().join("hold"), "").unwrap();
+    let mut first = command(
+        task.repo.path(),
+        task.home.path(),
+        &["-b", "task", "run", "INF-123", "--from", "review"],
+    )
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null())
+    .spawn()
+    .unwrap();
+    wait_for("the stand-in", || !stand_ins(&task).is_empty());
+    let live = task.run(&["--task", "INF-123", "task", "auto", "on"]);
+    let text = String::from_utf8_lossy(&live.stdout);
+    assert!(
+        live.status.success(),
+        "{text}{}",
+        String::from_utf8_lossy(&live.stderr)
+    );
+    assert!(text.contains("at review running as Graph run"), "{text}");
+    assert!(text.contains("merges:"), "{text}");
+    // Turn auto off so the live run stops cleanly at `pr land`.
+    task.run(&["--task", "INF-123", "task", "auto", "off"]);
+    fs::remove_file(task.home.path().join("hold")).unwrap();
+    assert!(first.wait().unwrap().success());
+    assert_eq!(task.graph()["position"], at("pr land"));
 }
 
 #[test]
@@ -4573,7 +4638,7 @@ fn an_auto_run_blocked_at_verification_waits_there_without_building_again() {
     .unwrap();
     task.repo.create_file(
         ".lf/graphs/verifying.yaml",
-        "- loop:\n    - graph: proof\n    - interactive: {name: verify, id: check}\n",
+        "- loop:\n    - graph: proof\n    - interactive: {name: research, id: check}\n",
     );
     task.repo.stage_all();
     task.repo.commit("Define the verifying Graph");

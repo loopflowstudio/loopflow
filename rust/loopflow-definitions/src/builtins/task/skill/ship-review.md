@@ -5,14 +5,14 @@ action_style: conversational
 ---
 Make what ships understood, and decide what happens to everything the run left outside it.
 
-The work is built and the PR is published. Concept review and gate own
+The work is built and the PR is published. Concept review and CI own
 whether the change is right. This is not a code review and not a go/no-go.
 
 **Gather what exists before writing anything.**
 
-- `scratch/plan.md`: what was to be built, what remains, choices agents made.
-- `scratch/concept-review.html`: what the review found, and what it put
-  outside this PR.
+- `scratch/plan.md`: what was to be built, what remains, choices agents made,
+  and `## Deferred findings` written by `realign`.
+- `scratch/concept-review.html`: the review page behind those findings.
 - What `qa` used and saw, and what it says is still wrong.
 - `git log` against the base: each step's commit says what that step changed.
 - `scratch/questions.md`: what was left open.
@@ -22,20 +22,25 @@ whether the change is right. This is not a code review and not a go/no-go.
 write it as `lf help tour` describes.
 
 **Write `scratch/ship-review.html`.** One self-contained file, readable in
-light and dark, in this order:
+light and dark, borrowing the repository's palette, type and layout when it
+has a visual language (a design system, the app, its docs, internal tools), in
+this order:
 
 1. What ships, in the person's terms: what they will do differently and what
    they will see, with real output.
 2. How to try it: the built thing at the place to start, the command ready to
    type or the window open.
 3. What is likeliest to surprise them: choices made on their behalf, what was
-   passed over, behavior that changed on purpose.
+   passed over, behavior that changed on purpose. When the diff touches
+   security-relevant code—auth, credentials or secrets, telemetry or outbound
+   data, untrusted input, or deployment—call out what changed and suggest
+   running `lf security-review` before delivering.
 4. Findings: everything left outside the PR, each with a proposal. Fix here,
    its own Task, or drop.
 5. Numbered questions, so "2b" is a complete answer.
 
 Show the thing instead of describing it, and keep real code and real output
-larger than the commentary. Say the page's path.
+larger than the commentary. Present the finished page with `lf desktop files scratch/ship-review.html` and give its path.
 
 **Hold a high bar for a Task.** File one only for what is clearly important
 and too big or too scope-expanding to fix here. A small thing is fixed here

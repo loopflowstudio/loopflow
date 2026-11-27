@@ -11,7 +11,6 @@ struct WorkflowLineTests {
     private static let code: [TaskGraph.Step] = [
         .init(name: "plan", interactive: false), .init(name: "build", interactive: false),
         .init(name: "ship-review", interactive: true), .init(name: "deliver", interactive: false),
-        .init(name: "verify", interactive: false),
     ]
 
     private func graph(_ position: TaskGraph.Position, current: Int?, sentence: String) -> TaskGraph {

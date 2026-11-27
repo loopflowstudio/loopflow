@@ -961,8 +961,12 @@ lf desktop do page -p tiles page=2\n  lf desktop do zoom -p backlog on=true"
         #[command(flatten)]
         target: DesktopTargetArgs,
     },
-    /// Show the Task's Files in the browser
+    /// Show the Task's Files, optionally presenting a checkout-relative path
     Files {
+        #[arg(value_name = "PATH[:LINE[-END]]")]
+        path: Option<String>,
+        #[arg(long, requires = "path", value_parser = ["read", "diff"])]
+        mode: Option<String>,
         #[command(flatten)]
         target: DesktopTargetArgs,
     },
@@ -1167,6 +1171,9 @@ impl TaskCommand {
             | Self::Changes { .. }
             | Self::Context { .. }
             | Self::Runs { .. }
+            | Self::Find { .. }
+            | Self::Grep { .. }
+            | Self::Symbols { .. }
             | Self::Files { .. }
             | Self::File { .. }
             | Self::Wait { .. } => false,
@@ -1387,6 +1394,12 @@ pub enum ServerCommand {
     Connect,
     /// Report local readiness without registering or starting anything.
     Status,
+    /// Live runtime counters from the local server (threads, SQLite opens, spawns, held facts).
+    Diagnostics {
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Configure private mobile access using this host's signed-in Tailscale installation.
     Mobile {
         /// Stop remote access without stopping local Sessions.
@@ -2366,6 +2379,36 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
+    /// Find declarations of a name in this Task's checkout
+    Symbols {
+        issue: String,
+        name: String,
+        /// Limit the search to this checkout-relative file
+        #[arg(long)]
+        path: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Search for literal text in this Task's checkout
+    Grep {
+        issue: String,
+        query: String,
+        /// Match only at word boundaries
+        #[arg(long)]
+        whole_word: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Find files anywhere in this Task's checkout, including scratch
+    Find {
+        issue: String,
+        query: Option<String>,
+        /// Maximum paths to return
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(long)]
+        json: bool,
+    },
     /// List one directory in this Task's worktree
     Files {
         issue: String,
@@ -2525,6 +2568,9 @@ impl TaskCommand {
             | Self::Changes { issue, .. }
             | Self::Context { issue, .. }
             | Self::Runs { issue, .. }
+            | Self::Find { issue, .. }
+            | Self::Grep { issue, .. }
+            | Self::Symbols { issue, .. }
             | Self::Files { issue, .. }
             | Self::File { issue, .. }
             | Self::Save { issue, .. }
@@ -2560,6 +2606,9 @@ impl TaskCommand {
             | Self::Changes { issue, .. }
             | Self::Context { issue, .. }
             | Self::Runs { issue, .. }
+            | Self::Find { issue, .. }
+            | Self::Grep { issue, .. }
+            | Self::Symbols { issue, .. }
             | Self::Files { issue, .. }
             | Self::File { issue, .. }
             | Self::Save { issue, .. }

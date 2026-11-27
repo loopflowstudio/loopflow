@@ -388,9 +388,9 @@ fn remote_open(
     if args.no_focus {
         argv.push("--no-focus".into());
     }
-    let bytes = tokio::runtime::Runtime::new()?.block_on(
-        loopflow_execution::machine::ssh::request(&machine, &argv, None),
-    )?;
+    let bytes = loopflow_execution::runtime::block_on(loopflow_execution::machine::ssh::request(
+        &machine, &argv, None,
+    ))?;
     serde_json::from_slice(&bytes)
         .context("Remote workspace receipt is unavailable; creation may have succeeded")
 }

@@ -5,7 +5,6 @@
 use loopflow_execution::store::session_projection;
 mod cmux;
 mod conversation;
-mod files;
 mod herdr;
 mod rex;
 mod tmux;
@@ -704,8 +703,7 @@ fn qualifier_for(
 /// Every conversation the shared reader judges available, as Work targets
 /// where they are a Work's primary and exact Sessions otherwise.
 fn available(cli: &crate::lf::Cli) -> Result<(Vec<Resolved>, Vec<String>)> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    let store = runtime.block_on(loopflow_execution::store::open_store(
+    let store = loopflow_execution::runtime::block_on(loopflow_execution::store::open_store(
         &loopflow_execution::store::storage_config_from_env()
             .context("resolve the shared Loopflow store")?,
     ))?;
@@ -720,27 +718,28 @@ fn available(cli: &crate::lf::Cli) -> Result<(Vec<Resolved>, Vec<String>)> {
             ContextFact::Bound { value, .. } => Some(value),
             _ => None,
         });
-    let records = runtime.block_on(loopflow_execution::ops::human_session::list(
-        &store,
-        &loopflow_execution::session::SessionFilter {
-            on: None,
-            orphan: false,
-            repo: if scoped {
-                loopflow_execution::repository::current()?.map(|repo| repo.to_string())
-            } else {
-                None
+    let records =
+        loopflow_execution::runtime::block_on(loopflow_execution::ops::human_session::list(
+            &store,
+            &loopflow_execution::session::SessionFilter {
+                on: None,
+                orphan: false,
+                repo: if scoped {
+                    loopflow_execution::repository::current()?.map(|repo| repo.to_string())
+                } else {
+                    None
+                },
+                task: cli.task.clone(),
+                wave: None,
+                primary: None,
+                search: None,
+                headless: false,
+                available: true,
+                raw: true,
+                limit: 0,
+                after: None,
             },
-            task: cli.task.clone(),
-            wave: None,
-            primary: None,
-            search: None,
-            headless: false,
-            available: true,
-            raw: true,
-            limit: 0,
-            after: None,
-        },
-    ))?;
+        ))?;
     let caller = loopflow_execution::journal::agent_caller().map(|caller| caller.session_id);
     let mut targets: Vec<Resolved> = Vec::new();
     let mut unknown = Vec::new();
@@ -1156,9 +1155,6 @@ pub struct OpenArgs {
     /// Reveal an existing conversation view; create nothing
     #[arg(long, conflicts_with_all = ["workspace", "available"])]
     pub focus: bool,
-    /// Present original files in an attached Desktop Files view
-    #[arg(long = "file", value_name = "PATH", conflicts_with_all = ["session", "link", "here", "tab", "focus", "workspace", "available"])]
-    pub files: Vec<PathBuf>,
     /// Open the repository or Wave overview: started, unfinished Tasks as tabs
     #[arg(long)]
     pub workspace: bool,
@@ -1181,7 +1177,6 @@ impl OpenArgs {
             here: false,
             tab: false,
             focus: false,
-            files: Vec::new(),
             workspace: true,
             available: false,
             no_focus: false,
@@ -1302,9 +1297,6 @@ pub fn url_links(directory: &Path, url: &str) -> Result<Vec<WorkLink>> {
 }
 
 pub fn explain(cli: &crate::lf::Cli, args: &OpenArgs, json: bool) -> Result<()> {
-    if !args.files.is_empty() {
-        return files::run(cli, args, true);
-    }
     if args.opens_workspace() {
         let mut selection = args.selection.clone();
         selection.json = json;
@@ -1330,9 +1322,6 @@ pub fn explain(cli: &crate::lf::Cli, args: &OpenArgs, json: bool) -> Result<()> 
 }
 
 pub fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
-    if !args.files.is_empty() {
-        return files::run(cli, args, false);
-    }
     if args.opens_workspace() {
         return run_workspace(cli, args);
     }

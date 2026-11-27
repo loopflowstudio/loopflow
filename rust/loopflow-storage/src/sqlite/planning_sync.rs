@@ -145,7 +145,7 @@ pub(super) fn task_tracker_actions_in(
     tasks: &[TaskId],
 ) -> StoreResult<HashMap<TaskId, TrackerActions>> {
     let ids = ids_json(tasks.iter().map(TaskId::as_str));
-    let mut statement = conn.prepare(
+    let mut statement = conn.prepare_cached(
         "SELECT t.id,w.repo,p.id FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
          LEFT JOIN projects p ON p.id=t.project_id WHERE t.id IN (SELECT value FROM json_each(?1))",
     )?;

@@ -65,10 +65,10 @@ Audit auth changes on this branch. Fix missing validation and untested paths.
 
 ```yaml
 # .lf/graphs/ship-api.yaml
-- interactive: design   # stops for you; writes scratch/plan.md
-- implement             # commits its work on the branch
-- audit                 # runs on Codex per its frontmatter
-- gate                  # publishes the PR so CI starts, then reviews while CI runs
+- interactive: design       # stops for you; writes scratch/plan.md
+- implement                 # commits its work on the branch
+- audit                     # runs on Codex per its frontmatter
+- cmd: land --wait-and-fix  # syncs, clears scratch, and merges when CI passes
 ```
 
 ```bash
@@ -78,9 +78,9 @@ lf task run <ID> ship-api       # run a Task through it, pausing at design
 lf -b task run <ID> ship-api    # run every step headless to a merged PR
 ```
 
-Built-in Graphs (`feature`, `code`, `auto`, `research`, `optimize`) work out of
+Built-in Graphs (`feature`, `code`, `quick`, `research`, `optimize`) work out of
 the box and are templates you can customize (`lf graph customize feature`).
-Extend built-in Skills with `extends: builtin` instead of forking them.
+Extend built-in or repository Skills with `extends: lf:<name>` or `extends: <name>` instead of forking them.
 
 **3. Organize Tasks into Waves.** A Wave is an area of work with its own goal
 (`GOAL.md`), memory (`MEMORY.md`) and plan, and its own setup for every Task in

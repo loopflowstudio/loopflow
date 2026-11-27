@@ -60,7 +60,7 @@ liveness is not permission. A run listed in status is not a live process: its
 5. **Finish merged work.** Merging doesn't complete a Task. After a verified
    merge with no live Graph, when the outcome holds, run
    `lf task complete <issue>` and reread status. It is safe to repeat; retry
-   it alone, never by rerunning gate or steps that succeeded.
+   it alone, never by rerunning steps that succeeded.
 
 ## Disposition
 

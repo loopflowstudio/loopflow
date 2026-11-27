@@ -82,18 +82,18 @@ final class TaskFileObservation {
 
     /// Direct vnode events cover open documents promptly, including temporary
     /// volumes excluded by FSEvents. Parent observation reconnects replaced names.
-    func watch(_ relative: String) {
-        watched.insert(relative)
-        attachAncestors(relative)
-    }
-
-    private func attachAncestors(_ relative: String) {
-        var path = URL(fileURLWithPath: root).appendingPathComponent(relative)
-        while path.path == root || path.path.hasPrefix(root + "/") {
-            attach(path.path)
-            if path.path == root { break }
-            path.deleteLastPathComponent()
+    func watch(_ documents: Set<String>) {
+        var paths = Set<String>()
+        for document in documents {
+            var url = URL(fileURLWithPath: root).appendingPathComponent(document)
+            while url.path == root || url.path.hasPrefix(root + "/") {
+                if !paths.insert(url.path).inserted || url.path == root { break }
+                url.deleteLastPathComponent()
+            }
         }
+        for path in watched.subtracting(paths) { resources.sources.removeValue(forKey: path)?.cancel() }
+        watched = paths
+        for path in paths { attach(path) }
     }
 
     private func attach(_ path: String) {
@@ -110,7 +110,7 @@ final class TaskFileObservation {
                     source.cancel()
                     self.resources.sources[path] = nil
                 }
-                for relative in self.watched { self.attachAncestors(relative) }
+                for path in self.watched { self.attach(path) }
                 self.notify([path])
             }
         }

@@ -147,8 +147,12 @@ installing or repairing anything. Recovery reconnects; it does not re-register a
 disabled background item or change the selected build.
 
 The current macOS package uses a signed app's bundled helper with SMAppService;
-Linux uses a user systemd service. Development data directories have separate
-supervisor identities. Registration lives under `installation/`, outside Machine routing.
+Linux uses a user systemd service. Only the default Machine (`~/.lf`) is
+registered with the OS supervisor. Custom `LF_HOME` directories run a detached
+`lf server run` process that exits when its home is removed or after 10 minutes
+with no clients, held terminals, or unfinished Graphs or agents; holders in any
+home also close their PTYs and exit when their home is removed. Registration
+lives under `installation/`, outside Machine routing.
 
 Server replacement must leave holders and Graph processes alive under the
 actual OS supervisor. `setsid()` alone proves no such isolation. Validate
@@ -183,10 +187,12 @@ and Work ownership are unchanged. Native terminal relays use `LF_SERVER` and
 Installation retires the old supervisor job before registering the server job.
 The old bundled plist is only an SMAppService migration descriptor: inspect
 approval, then unregister; never register it from new code. Disabled choices
-remain respected. Custom-home jobs and systemd units migrate their hashed labels;
-the `machine.sock` address and singleton lock stay stable. Relays from before
-the namespace change can recover to the same listener; old and new executables
-cannot listen concurrently. No socket alias or second path exists.
+remain respected. Default-home Linux systemd units migrate their hashed labels,
+and custom homes boot out any legacy hashed launchd or systemd registration on
+first use instead of registering a new one; the `machine.sock` address and
+singleton lock stay stable. Relays from before the namespace change can recover
+to the same listener; old and new executables cannot listen concurrently. No
+socket alias or second path exists.
 No Work, credential or remote-setting files move in this local cutover.
 
 Remote admission lives under `lf server mobile`, with the owner's Tailscale

@@ -540,7 +540,7 @@
       "oneOf": [
         {
           "const": "extends",
-          "description": "`extends: builtin`: the builtin's text with the file's appended.",
+          "description": "Extends the builtin of the same name (`extends: lf:<name>`, `extends: <name>`, or `extends: builtin`).",
           "type": "string"
         },
         {
@@ -621,6 +621,25 @@
           "type": "object"
         }
       ]
+    },
+    "ChangedLines": {
+      "properties": {
+        "added": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "removed": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "added",
+        "removed"
+      ],
+      "type": "object"
     },
     "Check": {
       "properties": {
@@ -2469,6 +2488,13 @@
         "description": {
           "type": "string"
         },
+        "extends": {
+          "description": "Parent skill named by `extends:` (`lf:<name>` for a builtin, or `<name>`),\nwhen the skill extends another.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "invocation": {
           "type": "string"
         },
@@ -2488,7 +2514,8 @@
         "source",
         "description",
         "invocation",
-        "builtin"
+        "builtin",
+        "extends"
       ],
       "type": "object"
     },
@@ -6555,6 +6582,104 @@
         },
         {
           "additionalProperties": false,
+          "description": "Find declarations of a name in the Task checkout.",
+          "properties": {
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.files.symbols",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "issue",
+            "name",
+            "path"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/TaskSymbols"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Search the Task checkout for literal text.",
+          "properties": {
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.files.grep",
+              "type": "string"
+            },
+            "query": {
+              "type": "string"
+            },
+            "whole_word": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "issue",
+            "query",
+            "whole_word"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/TaskGrepResults"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf task find <issue> [query]`: matching paths across the Task checkout.",
+          "properties": {
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.files.find",
+              "type": "string"
+            },
+            "limit": {
+              "format": "uint",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "query": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "issue",
+            "query",
+            "limit"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/TaskFileInventory"
+          }
+        },
+        {
+          "additionalProperties": false,
           "description": "`lf task files <issue> <path> [--cursor <cursor>] [--show-ignored]`:\none page of a Task checkout directory's immediate entries.",
           "properties": {
             "cursor": {
@@ -7561,6 +7686,7 @@
             {
               "builtin": null,
               "description": "Find why the code misbehaves, fix the cause, and verify the original workflow.",
+              "extends": null,
               "invocation": "lf debug [message]",
               "kind": "skill",
               "name": "debug",
@@ -7569,6 +7695,7 @@
             {
               "builtin": "extends",
               "description": "Use the change the way the people it is for will use it, and fix what breaks.",
+              "extends": "lf:qa",
               "invocation": "lf qa [message]",
               "kind": "skill",
               "name": "qa",
@@ -7576,7 +7703,17 @@
             },
             {
               "builtin": null,
-              "description": "design, implement, gate, land",
+              "description": "Turn the next slice of the plan into working code.",
+              "extends": "implement",
+              "invocation": "lf card-implement [message]",
+              "kind": "skill",
+              "name": "card-implement",
+              "source": ".lf/skills/card-implement.md"
+            },
+            {
+              "builtin": null,
+              "description": "design, implement, land",
+              "extends": null,
               "invocation": "lf code [message]",
               "kind": "graph",
               "name": "code",
@@ -8854,6 +8991,43 @@
       ],
       "type": "object"
     },
+    "ServerDiagnostics": {
+      "additionalProperties": false,
+      "description": "What `server.diagnostics` answers: live counters for the serving process.",
+      "properties": {
+        "held_facts": {
+          "description": "External facts currently held by open subscriptions.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "spawns": {
+          "description": "Cumulative subprocesses spawned by the server.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "store_opens": {
+          "description": "Cumulative SQLite connections opened since this server started.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "threads": {
+          "description": "Live OS threads in the server process.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "threads",
+        "store_opens",
+        "spawns",
+        "held_facts"
+      ],
+      "type": "object"
+    },
     "ServerMessage": {
       "description": "One message from the server.",
       "oneOf": [
@@ -9867,6 +10041,34 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/PlanChanges"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Live runtime counters for the serving process: OS threads, cumulative\nSQLite opens, spawned subprocesses, and held observation facts.",
+          "examples": [
+            {
+              "kind": "server.diagnostics"
+            }
+          ],
+          "properties": {
+            "kind": {
+              "const": "server.diagnostics",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/ServerDiagnostics"
+          },
+          "x-result-example": {
+            "held_facts": 11,
+            "spawns": 2,
+            "store_opens": 4,
+            "threads": 16
           }
         }
       ]
@@ -12181,6 +12383,17 @@
         "committed": {
           "type": "boolean"
         },
+        "lines": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChangedLines"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Text lines in the patch; absent for an untracked file beyond the reader's size limit."
+        },
         "old_path": {
           "type": [
             "string",
@@ -12207,7 +12420,8 @@
         "staged",
         "unstaged",
         "untracked",
-        "changes"
+        "changes",
+        "lines"
       ],
       "type": "object"
     },
@@ -13561,6 +13775,38 @@
       ],
       "type": "object"
     },
+    "TaskFileInventory": {
+      "properties": {
+        "latest_scratch_page": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "scratch": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "paths",
+        "scratch",
+        "latest_scratch_page",
+        "truncated"
+      ],
+      "type": "object"
+    },
     "TaskFileKind": {
       "enum": [
         "file",
@@ -13683,7 +13929,7 @@
       "type": "string"
     },
     "TaskFilesRevision": {
-      "description": "A Task's file invalidation on this Machine. `checkout` and `revision` are\nnull until the Task has a checkout here; readers rescan on a new revision,\nincluding when multiple changes coalesce while their connection is busy.",
+      "description": "A Task's file invalidation on this Machine. `checkout` and `revision` are\nnull until the Task has a checkout here; `revision` moves only on working-tree\nor Git metadata changes, while `scratch_pages` tracks ignored `scratch/`\nMarkdown/HTML writes independently so remote readers skip `git diff`.",
       "properties": {
         "checkout": {
           "type": [
@@ -13706,6 +13952,12 @@
             "null"
           ]
         },
+        "scratch_pages": {
+          "items": {
+            "$ref": "#/$defs/TaskScratchPage"
+          },
+          "type": "array"
+        },
         "task_id": {
           "type": "string"
         }
@@ -13715,7 +13967,8 @@
         "machine_id",
         "machine_label",
         "checkout",
-        "revision"
+        "revision",
+        "scratch_pages"
       ],
       "type": "object"
     },
@@ -13839,6 +14092,69 @@
           "type": "object"
         }
       ]
+    },
+    "TaskGrepHit": {
+      "properties": {
+        "end": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "excerpt": {
+          "type": "string"
+        },
+        "excerpt_start": {
+          "description": "Byte offset of the excerpt in the same source line.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "line": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "start": {
+          "description": "Half-open UTF-8 byte offsets in the source line at this revision.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "start",
+        "end",
+        "revision",
+        "excerpt_start",
+        "excerpt"
+      ],
+      "type": "object"
+    },
+    "TaskGrepResults": {
+      "properties": {
+        "hits": {
+          "items": {
+            "$ref": "#/$defs/TaskGrepHit"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hits",
+        "truncated"
+      ],
+      "type": "object"
     },
     "TaskOverview": {
       "description": "Workspace facts without the Task's full history.",
@@ -14509,7 +14825,7 @@
               ]
             },
             "merges": {
-              "description": "The run may merge the PR: auto is on, or no interactive step is\nleft ahead, and nobody turned auto off.",
+              "description": "The run can reach a merging step before stopping, and nobody turned\nauto off.",
               "type": "boolean"
             },
             "run": {
@@ -14659,6 +14975,22 @@
         "updated_at",
         "provider",
         "owner"
+      ],
+      "type": "object"
+    },
+    "TaskScratchPage": {
+      "description": "One eligible Markdown or HTML page under `scratch/` with a metadata stamp\nderived from modification time and byte length.",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "stamp": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "stamp"
       ],
       "type": "object"
     },
@@ -15106,6 +15438,56 @@
         "completed_at",
         "due_date",
         "assignee"
+      ],
+      "type": "object"
+    },
+    "TaskSymbol": {
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "line": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "name",
+        "kind",
+        "line",
+        "container"
+      ],
+      "type": "object"
+    },
+    "TaskSymbols": {
+      "properties": {
+        "hits": {
+          "items": {
+            "$ref": "#/$defs/TaskSymbol"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hits",
+        "truncated"
       ],
       "type": "object"
     },
@@ -19375,7 +19757,7 @@
   ],
   "title": "Loopflow server protocol",
   "x-min-revision": 10,
-  "x-revision": 10,
+  "x-revision": 11,
   "x-terminal-close": {
     "payload": {
       "$ref": "#/$defs/Close"

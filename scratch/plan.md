@@ -1,8 +1,30 @@
 # LOO-1118: rentals receive a repository-scoped, expiring GitHub token
 
-Pass 1 is built; Passes 2 and 3 wait on the GitHub App's client id (see
-"Needs a person"). `scratch/concept-review.html` (at `6d9c5c7988`) reviewed the
-kickoff plan; its findings are folded in below and listed under "Review".
+Passes 1 and 2 are built. Pass 3 (rentals use the token) is next and needs no
+person. The four probes under "Unanswered until the app exists" need a person
+twice: see "Needs a person now". `scratch/concept-review.html` (at
+`6d9c5c7988`) reviewed the kickoff plan; its findings are folded in below and
+listed under "Review".
+
+## Needs a person now
+
+Nothing has been asked of GitHub with an app token: no install, no code typed.
+Both steps act as a person on github.com, so no run here takes them.
+
+1. Install the app on one repository: open
+   `https://github.com/apps/loopflow-studio`, Install, "Only select
+   repositories", `loopflowstudio/loopflow`. Whether the install completes
+   with no private key generated is itself unprobed.
+2. From a terminal in a checkout of that repository, with this branch's `lf`
+   and a private `LF_HOME` (the migration is unmerged):
+   `lf ondemand login github`, then type the printed code at
+   `https://github.com/login/device` as the account `gh` is signed in to.
+
+That one run answers whether GitHub issues a refresh token for
+`scope=offline_access`, whether `repository_id` restricts the token, and
+whether `/user/installations` lists what a restricted token reaches (the check
+the build relies on; see Pass 2). Probes 1 to 4 then need the stored grant and
+a rental or any box with `gh`.
 
 ## Outcome
 
@@ -259,12 +281,25 @@ Survives: Linear's renewed token, OpenCode and Codex sign-in when listed in
    repository id, empty `logins` signs in to no agent. Nothing learned about
    the token. The docs for Passes 2 and 3 are already written, so
    `docs/subscriptions.md`, `docs/ops.md` and `docs/security.md` describe a
-   GitHub token rentals do not hold yet, and `documented_commands` fails on
-   `lf ondemand login github`. This branch does not land before Pass 3.
-2. **Mint and prove.** Needs the registered app. Grant table and migration,
-   the compiled client id, `lf ondemand login github`, refresh, and the four
-   probes. Shows whether refresh keeps the restriction; if it does not, the
-   plan switches to the no-refresh shape before Pass 3.
+   GitHub token rentals do not hold yet. This branch does not land before Pass 3.
+2. **Mint, unproven.** Built at `adc26b51db`: `github_rental_grants`, the compiled
+   client id, `lf ondemand login github`, renewal
+   (`rust/loopflow-execution/src/rental/github.rs`), `docs/security.md` on
+   what installing the app trusts. Tested against a stand-in only. Changed
+   from the plan: instead of reading this repository and one other, every
+   mint and renewal asks `GET /user/installations` and each
+   `/user/installations/<id>/repositories` what the token reaches and keeps
+   it only when that is exactly the one repository. A read of the repository
+   passes for any token when it is public, so it could not show a missing
+   install. This also makes probe 1 safe before it is answered: a renewed
+   token that lost its restriction is discarded, not handed out. Not built:
+   the probes. `rentals.github_repository` joins the migration in Pass 3.
+   Findings for Pass 3: `renew` takes the grant it read, so two `lf` renewing
+   one repository at once race for the refresh token and the loser is told
+   to approve again; Pass 3 takes `credentials::credential_lock("github")`
+   around read-then-renew. `credentials::github_login` and
+   `LF_TEST_MACHINE_GITHUB_URL` are gone; `rental::github::login_of` and the
+   `TEST_GITHUB_URL` task-local replace them.
 3. **Rentals use it.** Approval at first placement, the `connect` branch for
    rentals, always-send and replace-on-different, the GitHub row that asks
    GitHub, re-send on refresh, the no-terminal stop, the cut in `mark_ended`,
@@ -308,10 +343,6 @@ Written ahead of the build, describing intended behavior:
 - `docs/ops.md` "Rental credentials" bullet.
 - `docs/security.md` "Credentials over SSH": a Rentals bullet, and first
   contact forwarding neither agent nor X11.
-
-`documented_commands` checks doc examples against Clap, so
-`lf ondemand login github` fails it until Pass 2 adds the command. Pass 1
-lands with that example held back or the command stubbed in Clap.
 
 Questions the writing raised (also in `scratch/questions.md`):
 

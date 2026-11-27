@@ -81,3 +81,20 @@
   (the Machine forwards checked pushes with its own token, as Claude Code on
   the web does on Anthropic's side), a per-rental deploy key, a hand-made
   fine-grained token, or an app each person registers.
+
+## Raised by Pass 2
+
+- **What a token reaches is asked through `/user/installations`,** not by the
+  plan's two repository reads. Unprobed: whether that listing, for a token
+  restricted by `repository_id`, shows only the one repository. If it shows
+  every repository of the installation, every approval fails with "reaches N
+  more" and the check has to become the two reads.
+- **A check that cannot reach GitHub after a renewal loses the grant.** The
+  refresh token is spent by then and the new tokens are not stored until the
+  check passes, so a dropped connection costs one more typed code. Storing
+  first would keep the grant but leave an unchecked token in the store.
+- **`lf ondemand login github` always asks for a new code,** also when the
+  repository already has a working grant. Whether a second device approval
+  ends the first one's tokens is probe 2.
+- **`LF_APPROVE_MACHINE` is `rentals`** for this approval: no Machine exists
+  yet when it is asked.

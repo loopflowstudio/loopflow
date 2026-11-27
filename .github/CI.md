@@ -13,11 +13,10 @@ starts immediately. Real code conflicts keep `scratch/` on disk for
 `sync-conflicts` and clear before pushing once resolved; pure stacked-scratch
 conflicts drop automatically. Scratch-free PRs run the full test matrix in
 parallel. Implement/compress only build changed code and run its focused test;
-CI runs the suites and
-`lf land --wait-and-fix` (`ci-fix`) repairs failures; see the verification
-cadence in [AGENTS.md](../AGENTS.md#when-to-run-what). Required checks run
-unattended; defer unavailable checks to capable CI and leave people's judgment
-to demo/review. Neither blocks earlier Graph steps.
+CI runs the suites and `lf land --wait-and-fix` (`ci-fix`) repairs failures;
+see the verification cadence in [AGENTS.md](../AGENTS.md#when-to-run-what).
+Required checks run unattended; defer unavailable checks to capable CI and
+leave people's judgment to demo/review. Neither blocks earlier Graph steps.
 
 For checkpoint PRs, `scratch-clear` reports deferred tests and `tests-result`
 and the matrix jobs skip. That is not a passing test result, though

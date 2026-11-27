@@ -13,16 +13,17 @@ Automatic dependency updates stop; dependencies change by hand."
 
 ## State
 
-The change is committed as `0586cdf9f4` on `jack-heart/remove-dependabot`
-(base `472bacbd64`): four files, 4 insertions, 163 deletions.
+Built, on `jack-heart/remove-dependabot` (base `472bacbd64`):
 
-- `.github/dependabot.yml` deleted (weekly uv, cargo, swift, github-actions).
-- `.github/workflows/dependabot-auto.yml` deleted (`pull_request_target`
-  auto-merge with `DEPENDABOT_MERGE_TOKEN`, close-on-red).
-- `.github/CI.md`: Dependabot section gone, one mention reworded.
-- `scripts/testing.md`: table row no longer names Dependabot.
+- `0586cdf9f4`: `.github/dependabot.yml` and
+  `.github/workflows/dependabot-auto.yml` deleted; `.github/CI.md` and
+  `scripts/testing.md` no longer describe them.
+- `.github/CI.md` short line reflowed (uncommitted until the next commit).
 
-What remains: review, PR, land, then the cleanup outside the repository.
+Not built: the outcome's claim about workflow action versions. All 76
+`uses:` lines that name an outside action point at a tag or branch its
+upstream owner can move, so a build step still changes with no PR. Pass 1
+closes that.
 
 ## Findings
 
@@ -40,8 +41,15 @@ What remains: review, PR, land, then the cleanup outside the repository.
   they notify and open nothing, so they stay as the signal for a hand bump.
 - **Nothing is in flight.** `gh pr list --author app/dependabot --state open`
   is `[]`.
-- **No other updater exists.** No Renovate config, no scheduled
-  `cargo update` or `uv lock --upgrade` under `.github/` or `scripts/`.
+- **No other updater opens PRs, but build steps update themselves.** No
+  Renovate config, no scheduled `cargo update` or `uv lock --upgrade` under
+  `.github/` or `scripts/`. Libraries are content-addressed: `Cargo.lock`,
+  `uv.lock`, `website/uv.lock`, `swift/Package.resolved` with
+  `-disableAutomaticPackageResolution`, `libghostty-vt` by SHA-256 in
+  `build.rs`. Actions are not: 39 of the 76 `uses:` lines are four
+  individually-owned repositories, and `rust-toolchain` and `rust-cache` run
+  in the job that compiles the release `lf`; `setup-uv` runs in the job that
+  later imports the Developer ID certificate.
 - **The token lives in two places**, not one: the `DEPENDABOT_MERGE_TOKEN`
   Actions secret (`gh secret list`) and a Doppler secret of the same name
   (`doppler secrets --only-names`), plus the GitHub PAT both hold.
@@ -50,12 +58,35 @@ What remains: review, PR, land, then the cleanup outside the repository.
   `dependabot/cargo/rusqlite-0.43.0`,
   `dependabot/github_actions/actions/download-artifact-8`.
 
-## Decision (made for review)
+## Decisions (made for review, not settled)
 
-Remove, don't tame. Passed over: keeping Dependabot with a `cooldown`, no
-auto-merge and required review. That keeps a write-scoped PAT and a
-`pull_request_target` workflow alive to save a `cargo update` now and then, and
-the brief already chose removal.
+Source for the second to fifth: `scratch/concept-review.html`, whose questions
+nobody has answered. Each takes the review's recommended option.
+
+- **Remove, don't tame.** Passed over: keeping Dependabot with a `cooldown`,
+  no auto-merge and required review. That keeps a write-scoped PAT and a
+  `pull_request_target` workflow alive to save a `cargo update` now and then,
+  and the brief already chose removal.
+- **Lock build steps in this PR.** Every outside action is pinned to a
+  40-hex commit SHA with the tag in a trailing comment. Without it the
+  outcome sentence is false: a moved `v2` reaches the job that compiles the
+  release `lf` faster than the one-week path the brief describes, and leaves
+  no commit to revert. Passed over: pinning only the four non-GitHub actions
+  (two rules to remember); replacing actions with `run:` steps (changes
+  caching); landing the removal alone and filing the lock as its own Task;
+  narrowing the outcome to libraries only.
+- **"By hand" means someone chose to start the bump**, not that someone read
+  it. A bump Task with auto on can still merge unread. No new rule; the PR
+  body says this so "by hand" is not read as "reviewed". Passed over: bump
+  Tasks that always stop for a person, which needs a way to mark such a Task
+  that does not exist.
+- **The compiler and tools keep floating**: Rust `stable`, latest uv, latest
+  nextest, `brew install xcodegen`, `ubuntu-latest`. Passed over: a
+  `rust-toolchain.toml`, which makes every Rust release a bump Task.
+- **A person revokes the PAT**; an agent may then delete the two secrets and
+  the five branches. Whether anything else uses that PAT could not be checked
+  from here; if it is shared, keep it and delete only the two
+  `DEPENDABOT_MERGE_TOKEN` entries.
 
 ## Acceptance check
 
@@ -66,7 +97,11 @@ git grep -il dependabot -- ':!release'              # no output
 ls .github/dependabot.yml .github/workflows/dependabot-auto.yml   # both: No such file
 gh workflow list --all | grep -i dependabot         # no output, or disabled/absent
 gh pr list --author app/dependabot --state open     # empty, and still empty a week on
+grep -rhE 'uses: +[^. ]' .github | grep -vE '@[0-9a-f]{40}( |$)'   # no output
 ```
+
+The last line is the check for pass 1: every outside action is at a commit.
+Local `uses: ./.github/workflows/…` calls are exempt.
 
 After the outside cleanup:
 
@@ -87,35 +122,73 @@ alone does not revoke it. Revoke first, then delete.
 ## Exclusions
 
 - Release notes that mention Dependabot: shipped records, unchanged.
-- Workflow actions pinned by mutable tag (`actions/checkout@v7`,
-  `astral-sh/setup-uv@v7`, `dtolnay/rust-toolchain@stable`,
-  `Swatinem/rust-cache@v2`, `taiki-e/install-action@nextest`, …) still move
-  when upstream moves the tag. That is a second automatic-update path this
-  Task leaves alone; see `scratch/questions.md`.
+- The compiler, uv, nextest, xcodegen and the runner image (decision above).
 - A written procedure or cadence for hand bumps. "By hand" means an ordinary
-  Task; nothing new is documented.
-- Turning off Dependabot alerts.
+  Task; `third_party/README.md` already covers the notice inventory.
+- Turning off Dependabot alerts. They notify and open nothing, and are the
+  only remaining prompt for a bump.
+- Showing how far behind the lockfiles are. Stale is the chosen trade.
 
-## What goes
+## Deferred findings
 
-Already gone in `0586cdf9f4`: both files and the docs above. Survives: CI,
-merge queue, release and package workflows, untouched.
+From `scratch/concept-review.html`. Separate outcomes, not built here, not
+filed. `lf land` clears `scratch/`, so each needs a Task before landing or it
+is lost.
 
-## Pass (one)
+- **Release builders resolve without `--locked`.**
+  `.github/workflows/package-build.yml:66` runs `cargo build --release` bare.
+  One CI job runs `cargo fetch --locked`, so a stale lock fails before merge,
+  but the builder itself would resolve fresh versions quietly. Takes: add
+  `--locked` on that line.
+- **No age floor on a bump.** The brief names "no cooldown"; a hand bump still
+  takes whatever was published this morning. Takes: a Task giving bumps a
+  minimum release age, starting with uv's `exclude-newer`; a Cargo equivalent
+  was not verified.
 
-1. Review `0586cdf9f4`. One cosmetic nit to fix in passing: the reworded
-   paragraph in `.github/CI.md` (lines 14–17) leaves a short line, "CI runs the
-   suites and"; reflow it.
-2. PR and land. No build or test: the diff is YAML deletions and prose. CI's
-   own run on the PR shows the remaining workflows still parse.
-3. After merge, outside the repository (irreversible, so a person does these
-   or says to):
-   - revoke the GitHub PAT behind `DEPENDABOT_MERGE_TOKEN`;
-   - `gh secret delete DEPENDABOT_MERGE_TOKEN`;
-   - delete `DEPENDABOT_MERGE_TOKEN` from Doppler;
-   - delete the five `dependabot/*` branches on origin.
+## Passes
+
+### 1. Lock the build steps (next)
+
+Delivers: an action changes only in a commit here. Teaches whether the
+pinned forms of the two branch-named actions behave the same in CI.
+
+- 76 `uses:` lines across 7 workflow files, 8 SHAs to look up
+  (`gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`):
+  `actions/checkout@v7` (23), `astral-sh/setup-uv@v7` (19),
+  `dtolnay/rust-toolchain@stable` (9), `Swatinem/rust-cache@v2` (8),
+  `actions/upload-artifact@v7` (7), `actions/cache@v6` with its `/restore`
+  and `/save` subpaths (5, one SHA), `taiki-e/install-action@nextest` (3),
+  `actions/download-artifact` (2).
+- `dtolnay/rust-toolchain@stable` and `taiki-e/install-action@nextest` name a
+  branch that selects the tool. At a SHA they need `with: toolchain: stable`
+  and `with: tool: nextest`; check each action's README at the pinned commit.
+- `actions/download-artifact` is `@v8` in `ci.yml` and `@v7` in the signing
+  job, a half-applied Dependabot bump. Pin both to the v8 commit, matching
+  `upload-artifact`'s major only if v8 reads v7 uploads; otherwise pin each
+  where it is and say so.
+- `.github/CI.md` gets one sentence: actions are pinned by commit, and a
+  bump is an ordinary PR.
+- No local build. The PR's CI run is the test: every workflow parses and the
+  matrix passes on the pinned actions. `release.yml` and `main-packages.yml`
+  do not run on a PR; read their diff against `package-build.yml`'s.
+
+### 2. Review, PR, land
+
+The PR body carries: "by hand" means started by a person, not reviewed by
+one; the compiler and tools still float; the two deferred findings, filed as
+Tasks first.
+
+### 3. After merge, outside the repository
+
+Irreversible, so a person does these or says to. Order matters:
+
+1. revoke the GitHub PAT behind `DEPENDABOT_MERGE_TOKEN` (a person);
+2. `gh secret delete DEPENDABOT_MERGE_TOKEN`;
+3. delete `DEPENDABOT_MERGE_TOKEN` from Doppler;
+4. delete the five `dependabot/*` branches on origin.
 
 ## Done when
 
-A week passes with no Dependabot PR, the token is revoked and absent from both
-stores, and origin has no `dependabot/*` branch.
+Every outside action in `.github/` is at a commit SHA, a week passes with no
+Dependabot PR, the token is revoked and absent from both stores, and origin
+has no `dependabot/*` branch.

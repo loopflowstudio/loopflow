@@ -11,13 +11,12 @@ branch-added `scratch/` files once against the integration target on the head
 they are about to push, and push that clean head once so the full test matrix
 starts immediately. Real code conflicts keep `scratch/` on disk for
 `sync-conflicts` and clear before pushing once resolved; pure stacked-scratch
-conflicts drop automatically. Scratch-free PRs, including small changes and
-Dependabot updates, run the full test matrix in parallel. Implement/compress
-only build changed code and run its focused test; CI runs the suites and
-`lf land --wait-and-fix` (`ci-fix`) repairs failures; see the verification
-cadence in [AGENTS.md](../AGENTS.md#when-to-run-what). Required checks run
-unattended; defer unavailable checks to capable CI and leave people's judgment
-to demo/review. Neither blocks earlier Graph steps.
+conflicts drop automatically. Scratch-free PRs run the full test matrix in
+parallel. Implement/compress only build changed code and run its focused test;
+CI runs the suites and `lf land --wait-and-fix` (`ci-fix`) repairs failures;
+see the verification cadence in [AGENTS.md](../AGENTS.md#when-to-run-what).
+Required checks run unattended; defer unavailable checks to capable CI and
+leave people's judgment to demo/review. Neither blocks earlier Graph steps.
 
 For checkpoint PRs, `scratch-clear` reports deferred tests and `tests-result`
 and the matrix jobs skip. That is not a passing test result, though
@@ -161,27 +160,35 @@ source-line detail. Local Cargo profiles are unchanged.
 runs the same architecture command every Monday and retains its JSON report for
 90 days; four consecutive runs are the time-based architecture KR evidence.
 
-## Dependabot
-
-Dependabot checks weekly and groups minor/patch updates by ecosystem. Its
-auto-merge workflow uses the `DEPENDABOT_MERGE_TOKEN` Actions secret, sourced
-from Doppler, with repository Contents and Pull requests write access. Renew
-the token before expiry. The built-in `GITHUB_TOKEN` cannot enqueue PRs into
-the required merge queue. Successful PR CI explicitly enqueues the unchanged
-Dependabot head when it is not already queued; queue CI still gates merging.
+## Dependencies
 
 ```bash
-gh pr list --author app/dependabot
-gh run list --workflow CI
+grep -rhE 'uses: +[^. ]' .github/workflows | grep -vE '@[0-9a-f]{40}( |$)'   # no output: every action is at a commit
 ```
 
-Weekly dependency PRs come from `.github/dependabot.yml` for `uv`, `cargo`, `swift`, and `github-actions`.
+Nothing updates a dependency automatically. Libraries are locked by content:
+`Cargo.lock`, `uv.lock`, `website/uv.lock`, `swift/Package.resolved` and the
+`libghostty-vt` SHA-256 in `rust/loopflow-terminal/build.rs`. Every outside
+action in a workflow is pinned to a full commit SHA, with the tag it came from
+in a trailing comment, so a tag its owner moves changes nothing here.
 
-`.github/workflows/dependabot-auto.yml` keeps those PRs zero-touch:
-- enable squash auto-merge when a Dependabot PR opens or reopens
-- when the `CI` workflow fails on a pull-request run, comment and close the matching PR
+A bump is an ordinary Task and PR that someone chose to start:
 
-Keep `workflow_run.workflows: ["CI"]` in sync with `.github/workflows/ci.yml`. Renaming the CI workflow without updating the Dependabot workflow disables the close-on-red path.
+```bash
+cargo update -p <crate>                                   # then scripts/third_party.py refresh
+uv lock --upgrade-package <name>
+gh api repos/<owner>/<action>/commits/<tag> --jq .sha     # the commit for a new action tag
+```
+
+CI on that PR is the check. GitHub's vulnerability alerts stay on as the
+prompt; they notify and open no PR.
+
+The compiler and most tools are not pinned: Rust `stable`, the latest uv,
+Homebrew's xcodegen and the `ubuntu-latest` image. `rust-toolchain` and
+`install-action` are pinned on their `stable` and `nextest` branches, whose
+commits default to that tool, so neither needs a `with:` input. The
+`install-action` commit also fixes the nextest version (0.9.152) and its
+checksum; nextest moves when that pin does.
 
 ## Main packages
 

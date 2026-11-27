@@ -58,11 +58,9 @@ Choices made for review (headless; none is settled, each can be undone):
   rests on a GitHub behaviour nobody has confirmed (environment secrets under a
   Dependabot `pull_request_target`). If #2054 stalls, the merge token stays a
   repository secret a branch can read until it lands.
-- **This builds on LOO-1120.** If #2054 is merged when the build starts, rebase
-  on main; if it is still open, `lf sync LOO-1120`. Then no workflow names a
-  repository secret, the lint needs no exemption, and the `main-packages.yml`
-  conflict is resolved once. Passed over: a named exemption for
-  `dependabot-auto.yml` in the lint.
+- **This builds on LOO-1120.** The sync brings in the Dependabot workflow
+  removal and pinned actions. The lint needs no Dependabot exemption.
+  Keep the action pins when editing `main-packages.yml`.
 - **The release preflight runs the settings check.** Passed over: no script,
   commands in `.github/CI.md` only; a script a person runs when they think of
   it. Depends on the cron host's `gh` token being able to list environment
@@ -120,9 +118,9 @@ Choices made for review (headless; none is settled, each can be undone):
 - **Dependabot is leaving.** PR #2054 (LOO-1120, branch
   `jack-heart/remove-dependabot`, open on 2026-11-26) deletes
   `dependabot-auto.yml`; its plan revokes the merge token and deletes the
-  secret from GitHub and Doppler. It also pins the `uses:` lines in
-  `main-packages.yml`, and one of its hunks carries the
-  `|| github.sha` line as context, so the two PRs conflict there textually.
+  secret from GitHub and Doppler. Its `main-packages.yml` pins include
+  `download-artifact` v8.0.2, which fails on digest mismatches that v7
+  warned about. The first main packaging run exercises that change.
 - **The release preflight** is `scripts/publish_release.py:161-166`
   (`security find-identity`, `gh auth status`).
 - **`deployment: false` and branch policies.** GitHub's page says reviewers and
@@ -295,8 +293,8 @@ daily notarization check and its issue; the daily release.
 
 ## Passes
 
-Nothing is built yet. One pass: sync onto LOO-1120 or main, the two workflow
-edits, the test file, the check script and its preflight call, the docs. It
+Remaining in the build pass: the two workflow edits, the test file, the check
+script and its preflight call, and any corrections to the docs. The pass
 teaches whether the host's token can read environment settings. The settings
 steps and the probe follow at ship-review and teach whether `deployment: false`
 keeps the refusal.

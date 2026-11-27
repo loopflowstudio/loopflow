@@ -3,6 +3,8 @@
 Assumptions taken with nobody in the conversation; each is reversible unless
 marked.
 
+- The sync keeps this Task's plan, review, and questions at their existing
+  paths. LOO-1120 keeps its notes on its own branch.
 - The Task's promise is written by holder: push access cannot sign; an admin
   token still can, with one API call the next release preflight reports.
   Alternatives: "a branch cannot sign"; hold until agents stop holding admin.

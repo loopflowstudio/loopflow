@@ -1,0 +1,68 @@
+/* Default review page theme tokens (light and dark).
+ * Override per repository in `.lf/theme.css` (CSS custom properties only). */
+:root {
+  --lf-bg: #faf8f5;
+  --lf-surface: #fffdf9;
+  --lf-surface-muted: #f3eee7;
+  --lf-surface-element: #ece6dd;
+  --lf-border: #e6dfd6;
+  --lf-border-strong: #d6ccc0;
+  --lf-text: #2a2624;
+  --lf-text-secondary: #5f5752;
+  --lf-text-tertiary: #65605d;
+  --lf-accent: #722f37;
+  --lf-accent-hover: #5e2630;
+  --lf-accent-text: #faf8f5;
+  --lf-working-ink: #2f629f;
+  --lf-working-fill: #d5dde6;
+  --lf-warning-ink: #7f5a19;
+  --lf-warning-fill: #e4dccd;
+  --lf-failure-ink: #a64038;
+  --lf-failure-fill: #ecd9d5;
+  --lf-success-ink: #386c48;
+  --lf-success-fill: #d7dfd6;
+  --lf-highlight: rgba(114, 47, 55, 0.14);
+  --lf-highlight-active: rgba(114, 47, 55, 0.28);
+  --lf-highlight-line: rgba(114, 47, 55, 0.45);
+  --lf-shadow: 0 8px 26px rgba(42, 38, 36, 0.14);
+  --lf-shadow-sm: 0 3px 12px rgba(42, 38, 36, 0.08);
+  --lf-bubble-bg: #24201e;
+  --lf-bubble-text: #faf8f5;
+  --lf-bubble-border: #3a3430;
+  --lf-font-serif: "Old Standard TT", Georgia, "Times New Roman", serif;
+  --lf-font-sans: "Atkinson Hyperlegible Next", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --lf-font-mono: "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --lf-bg: #181615;
+    --lf-surface: #201d1b;
+    --lf-surface-muted: #282422;
+    --lf-surface-element: #312c29;
+    --lf-border: #38322e;
+    --lf-border-strong: #4a423d;
+    --lf-text: #efeae4;
+    --lf-text-secondary: #b9afa6;
+    --lf-text-tertiary: #8f857d;
+    --lf-accent: #c96b76;
+    --lf-accent-hover: #d8838d;
+    --lf-accent-text: #181615;
+    --lf-working-ink: #7eb2f0;
+    --lf-working-fill: #203147;
+    --lf-warning-ink: #e0b25c;
+    --lf-warning-fill: #3d311c;
+    --lf-failure-ink: #e67c73;
+    --lf-failure-fill: #452422;
+    --lf-success-ink: #7cc490;
+    --lf-success-fill: #213828;
+    --lf-highlight: rgba(201, 107, 118, 0.22);
+    --lf-highlight-active: rgba(201, 107, 118, 0.38);
+    --lf-highlight-line: rgba(201, 107, 118, 0.65);
+    --lf-shadow: 0 10px 30px rgba(0, 0, 0, 0.44);
+    --lf-shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.30);
+    --lf-bubble-bg: #efeae4;
+    --lf-bubble-text: #181615;
+    --lf-bubble-border: #d6ccc0;
+  }
+}

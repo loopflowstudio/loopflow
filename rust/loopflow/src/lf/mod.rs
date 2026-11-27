@@ -246,9 +246,7 @@ impl Cli {
 
     pub fn may_launch_agent(&self) -> bool {
         match &self.command {
-            None
-            | Some(Commands::External(_) | Commands::Inline { .. })
-            | Some(Commands::Discord { .. }) => true,
+            None | Some(Commands::External(_) | Commands::Inline { .. }) => true,
             Some(Commands::Skill { cmd }) => matches!(cmd, SkillCommand::External(_)),
             Some(Commands::Graph { cmd }) => {
                 matches!(cmd, GraphCommand::Run | GraphCommand::External(_))
@@ -519,6 +517,14 @@ pub enum Commands {
     },
     /// Open one conversation here, in a sibling tab, or a repository/Wave overview
     Open(commands::open::OpenArgs),
+    /// Build and open interactive review pages
+    #[command(
+        after_help = "Authoring contract (scratch/<name>.page.html → scratch/<name>.html):\n\n  Source files contain body HTML only (no <html>, <head>, <style>, or <script>).\n  Compile with `lf page build <source> [--base <rev>]` and present with\n  `lf page open <page>` (opens in Desktop Files or browser; prints URL quietly\n  when headless).\n\nTags and controls:\n  <lf-diff path=\"…\" [lines=\"40-68\"]>   Real hunks from Loopflow's diff engine\n    <lf-note line=\"52\">…</lf-note>       Toggleable note on a new-side line\n    <lf-note old-line=\"48\">…</lf-note>   Toggleable note on a deleted line\n  <lf-file path=\"…\" [lines=\"1-40\"]>    Numbered lines from disk for unchanged code\n  <lf-component name=\"decision\" id=\"f1\" title=\"…\" recommendation=\"File Task\">\n                                         Finding card (Fix here / File Task / Drop)\n  <lf-component name=\"before-after\">    Side-by-side <slot name=\"before\"> / <slot name=\"after\">\n  <div data-choice=\"id\" data-label=\"…\"><button data-value=\"…\">…</button></div>\n                                         Single-select choice queued for ⌘↩\n  <div data-multiselect=\"id\" data-label=\"…\"><button data-value=\"…\">…</button></div>\n                                         Multi-select choice queued for ⌘↩\n  <div data-question=\"q1\" data-label=\"…\"><textarea></textarea></div>\n                                         Free-text answer queued for ⌘↩\n  `data-label` names the item in the ⌘↩ reply and renders as its heading on a\n  bare control; add a direct <p>/<label>/<h3>/<h4>/<legend> child for a fuller\n  selectable prompt while keeping `data-label` concise.\n  <button data-lf='{\"kind\":\"task.create\",\"title\":\"…\"}'>…</button>\n                                         Immediate confirmed Machine Operation (in-place receipt;\n                                         partial JSON is expanded and validated at build time)\n\nBuild checks (fail naming element and line):\n  Missing repo path in <lf-diff>, <lf-file>, or [data-path]; path/range absent\n  from diff; unknown 7-40 hex SHA in <code> (add data-no-check to skip); invalid\n  data-lf operation; forbidden <html>, <head>, <style>, or <script> tags.\n\nWriting rules:\n  Show real code, diffs, and command output over commentary. Mark proposed work\n  apart from existing code. Number questions so short replies like \"2b\" answer\n  unambiguously. Omit passing test counts, routine CI status, and filler choices.\n  Customize styling with `.lf/theme.css` and components with `.lf/components/<name>/`."
+    )]
+    Page {
+        #[command(subcommand)]
+        cmd: PageCommand,
+    },
     /// Run an inline prompt
     #[command(name = ":")]
     Inline {
@@ -652,11 +658,6 @@ pub enum Commands {
     Scratch {
         #[command(subcommand)]
         cmd: ScratchCommand,
-    },
-    /// Bridge new Discord messages to finite Wave Sessions
-    Discord {
-        #[command(subcommand)]
-        cmd: DiscordCommand,
     },
     /// Internal provider turn-boundary hook: context at startup and compaction,
     /// steers at tool and prompt boundaries, Linear fetch at turn end.
@@ -1136,13 +1137,14 @@ impl Commands {
             Self::Repo { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
             Self::Config { cmd } => cmd.changes_work(),
             Self::Self_ { cmd } => cmd.changes_work(),
-            Self::List { .. } | Self::Help { .. } | Self::Docs { .. } | Self::Context { .. } => {
-                false
-            }
+            Self::List { .. }
+            | Self::Help { .. }
+            | Self::Docs { .. }
+            | Self::Context { .. }
+            | Self::Page { .. } => false,
             Self::Open(_)
             | Self::Inline { .. }
             | Self::Scratch { .. }
-            | Self::Discord { .. }
             | Self::ContextBlock { .. }
             | Self::External(_) => true,
         }
@@ -1364,6 +1366,36 @@ impl WtCommand {
 pub enum HolderCommand {
     /// Hold PTYs and their agents until the last one ends.
     Run,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PageCommand {
+    /// Compile a body-only page fragment (`scratch/<name>.page.html`) into a self-contained page
+    Build {
+        /// Path to the `.page.html` fragment to compile
+        source: PathBuf,
+        /// Override the diff base revision (default: Task diff base or repository default branch)
+        #[arg(long, value_name = "REV")]
+        base: Option<String>,
+    },
+    /// Open a compiled review page in Desktop Files or the browser, or print its loopback URL
+    Open {
+        /// Path to the compiled HTML page
+        page: PathBuf,
+        /// Where to open the page (default: automatic based on caller host)
+        #[arg(long, value_enum, default_value_t = PageHost::Auto)]
+        host: PageHost,
+        /// Print the loopback URL without opening a browser or Desktop
+        #[arg(long)]
+        print: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PageHost {
+    Auto,
+    Desktop,
+    Browser,
 }
 
 #[derive(Debug, Subcommand)]
@@ -3691,7 +3723,6 @@ mod tests {
                 "lf", "--wave", "product", "config", "set", "machine", "mini",
             ],
             vec!["lf", "config", "unset", "agent", "--global"],
-            vec!["lf", "discord", "serve", "product"],
             vec!["lf", "machine", "doctor", "--plan", "--json"],
             vec!["lf", "wave", "sync", "product"],
             vec![
@@ -4492,10 +4523,4 @@ mod tests {
             .expect("unknown names remain eligible for skill discovery");
         assert!(matches!(cli.command, Some(Commands::External(_))));
     }
-}
-
-#[derive(Debug, Subcommand)]
-pub enum DiscordCommand {
-    /// Poll a configured channel and post each Session's final answer
-    Serve { wave: String },
 }

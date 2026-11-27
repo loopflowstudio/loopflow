@@ -126,6 +126,11 @@ behind: an unreachable branch, a hidden command, a second resolver. Find them
 first. If three building blocks exist for one job and none works, the change
 removes all three. It does not add a fourth.
 
+Removing a feature removes everything only it used: prompt text, enum
+variants, config keys, lock files, secrets, bot accounts, running services.
+Follow each deleted caller to what it leaves unused. What lives outside the
+repository (a token to revoke, a secret to delete) is named as a step left.
+
 Treat the codebase as your own. Leave it better than you found it: delete the
 dead code you pass, merge the duplicate you notice, and make the clear
 improvement even when the task doesn't strictly need it.

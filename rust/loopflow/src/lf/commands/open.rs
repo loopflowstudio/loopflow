@@ -915,7 +915,7 @@ impl DesktopApp {
 
 /// Where an agent caller's own conversation is viewed now. Its environment
 /// names the terminal it launched in, which may since be closed or left.
-fn viewed_placement() -> Option<(OpenHost, String)> {
+pub(crate) fn viewed_placement() -> Option<(OpenHost, String)> {
     let caller = loopflow_execution::journal::agent_caller()?;
     let store = loopflow_execution::store::read_existing_registry()
         .ok()

@@ -17,34 +17,24 @@ pub enum WaveConfigError {
     },
 }
 
-/// One existing Discord guild text channel bound to this Wave's chat.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(tag = "provider", rename_all = "snake_case", deny_unknown_fields)]
-#[non_exhaustive]
-pub enum WaveChatConfig {
-    Local,
-    Discord {
-        guild_id: String,
-        channel_id: String,
-    },
-}
-
-/// Keys only a Wave's `config.yaml` carries; every other key is shared
+/// The key only a Wave's `config.yaml` carries; every other key is shared
 /// `Config` layered over the repository's (see `crate::config::load_wave_config`).
-/// `linear` held the Initiative a Wave linked; released lf still reads it, so
-/// it stays a Wave key that nothing here reads.
-const WAVE_ONLY_KEYS: [&str; 3] = ["id", "linear", "chat"];
+const WAVE_ONLY_KEYS: [&str; 1] = ["id"];
 
-/// The Wave's own identity and bindings from its `config.yaml`.
+/// Keys released lf reads from a Wave's `config.yaml` and nothing here does.
+/// They stay out of the shared layer, where they would warn as unknown
+/// settings in every checkout that still carries them. `linear` held the
+/// Initiative a Wave linked; `chat` held a chat channel. LOO-1121 deletes
+/// the list.
+const RETIRED_WAVE_KEYS: [&str; 2] = ["linear", "chat"];
+
+/// The Wave's own identity from its `config.yaml`.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WaveConfig {
     pub id: Option<loopflow_model::id::WaveId>,
-    /// One external presentation binding. Discord is the only supported
-    /// provider and remains a concrete variant rather than a registry.
-    pub chat: Option<WaveChatConfig>,
 }
 
-/// Read the Wave's identity and bindings.
+/// Read the Wave's identity.
 pub fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
     match try_read_wave_config(repo, name) {
         Ok(config) => config,
@@ -55,7 +45,7 @@ pub fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
     }
 }
 
-/// Read the Wave's identity and bindings and surface a malformed file to
+/// Read the Wave's identity and surface a malformed file to
 /// callers that must fail closed before starting external side effects.
 pub(crate) fn try_read_wave_config(
     repo: &Path,
@@ -69,25 +59,8 @@ pub(crate) fn try_read_wave_config(
         .map_err(|source| WaveConfigError::Parse { path, source })
 }
 
-/// Read only the external chat binding, so malformed unrelated Wave policy
-/// cannot prevent an independent bridge from reading its binding.
-pub fn try_read_wave_chat_config(
-    repo: &Path,
-    name: &str,
-) -> Result<Option<WaveChatConfig>, WaveConfigError> {
-    let Some((path, mapping)) = read_wave_file(repo, name)? else {
-        return Ok(None);
-    };
-    let Some(chat) = mapping.get("chat") else {
-        return Ok(None);
-    };
-    serde_yaml_ng::from_value(chat.clone())
-        .map(Some)
-        .map_err(|source| WaveConfigError::Parse { path, source })
-}
-
 /// The Wave's shared `Config` values and the file they came from, without
-/// its own identity and bindings.
+/// its own identity.
 pub(crate) fn read_wave_layer(
     repo: &Path,
     name: &str,
@@ -95,8 +68,8 @@ pub(crate) fn read_wave_layer(
     let Some((path, mut mapping)) = read_wave_file(repo, name)? else {
         return Ok(None);
     };
-    for key in WAVE_ONLY_KEYS {
-        mapping.remove(key);
+    for key in WAVE_ONLY_KEYS.iter().chain(&RETIRED_WAVE_KEYS) {
+        mapping.remove(*key);
     }
     Ok(Some((path, Value::Mapping(mapping))))
 }
@@ -182,8 +155,11 @@ fn parse_goal_settings(path: &Path, content: &str) -> Mapping {
     let mut mapping = parse_mapping(path, content);
     let shared = crate::config::wave_config_keys();
     mapping.retain(|key, _| {
-        key.as_str()
-            .is_some_and(|key| WAVE_ONLY_KEYS.contains(&key) || shared.contains(key))
+        key.as_str().is_some_and(|key| {
+            WAVE_ONLY_KEYS.contains(&key)
+                || RETIRED_WAVE_KEYS.contains(&key)
+                || shared.contains(key)
+        })
     });
     mapping
 }
@@ -305,10 +281,7 @@ pub(crate) fn update_wave_config(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        read_wave_config, read_wave_layer, read_wave_summary, try_read_wave_chat_config,
-        try_read_wave_config, update_wave_config, WaveChatConfig, WaveConfigError,
-    };
+    use super::{read_wave_config, read_wave_layer, read_wave_summary, update_wave_config};
     use std::path::Path;
 
     struct ConfigRepo {
@@ -355,6 +328,18 @@ mod tests {
             std::fs::read_to_string(unrelated.join("config.yaml")).unwrap(),
             original
         );
+    }
+
+    #[test]
+    fn retired_wave_keys_stay_out_of_the_shared_layer() {
+        let repo = ConfigRepo::new();
+        repo.write_config(
+            "agent: claude\nchat:\n  channel_id: \"1\"\nlinear:\n  initiative: lin-123\n",
+        );
+        let layer = repo.layer();
+        assert_eq!(layer["agent"].as_str(), Some("claude"));
+        assert!(layer.get("chat").is_none());
+        assert!(layer.get("linear").is_none());
     }
 
     #[test]
@@ -441,47 +426,6 @@ mod tests {
             read_wave_summary(temp.path(), "scan").expect("summary"),
             "Keep the system boring."
         );
-    }
-
-    #[test]
-    fn discord_chat_config_is_typed_and_invalid_bindings_fail_closed() {
-        let temp = ConfigRepo::new();
-        temp.write_config("chat:\n  provider: discord\n  guild_id: guild\n  channel_id: channel\n");
-        let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        assert!(matches!(
-            config.chat,
-            Some(WaveChatConfig::Discord { guild_id, channel_id })
-                if guild_id == "guild" && channel_id == "channel"
-        ));
-
-        // `deny_unknown_fields` rejects a stale `machine_id`, so the binding fails closed.
-        temp.write_config(
-            "chat:\n  provider: discord\n  machine_id: home_1\n  guild_id: guild\n  channel_id: channel\n",
-        );
-        assert!(matches!(
-            try_read_wave_chat_config(temp.path(), "scan"),
-            Err(WaveConfigError::Parse { .. })
-        ));
-
-        temp.write_config("chat:\n  provider: discord\n  guild_id: guild\n");
-        assert!(matches!(
-            try_read_wave_chat_config(temp.path(), "scan"),
-            Err(WaveConfigError::Parse { .. })
-        ));
-
-        temp.write_config("chat:\n  provider: local\n");
-        assert!(matches!(
-            try_read_wave_config(temp.path(), "scan")
-                .expect("local config")
-                .and_then(|config| config.chat),
-            Some(WaveChatConfig::Local)
-        ));
-
-        temp.write_config("agent: [not-a-string]\n");
-        assert!(matches!(
-            try_read_wave_chat_config(temp.path(), "scan"),
-            Ok(None)
-        ));
     }
 
     #[test]

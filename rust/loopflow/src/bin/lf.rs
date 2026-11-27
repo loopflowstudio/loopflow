@@ -2769,6 +2769,14 @@ fn dispatch_here(
             .transpose()?;
         return loopflow::lf::commands::open::run(&cli, open);
     }
+    if let Some(Commands::Page { cmd }) = &cli.command {
+        let _cwd = cli
+            .wt
+            .as_deref()
+            .map(|name| CwdGuard::enter(&loopflow::lf::commands::ops::resolve_worktree(name)?))
+            .transpose()?;
+        return loopflow::lf::commands::page::run(&cli, cmd);
+    }
 
     let _worktree_cwd = cli
         .wt
@@ -3151,8 +3159,8 @@ fn execute_command(
 ) -> anyhow::Result<()> {
     match &cli.command {
         Some(Commands::Inline { .. }) => unreachable!("inline prompts dispatch as launches"),
-        Some(Commands::Desktop { .. } | Commands::Open(_)) => {
-            unreachable!("Desktop and opening dispatch precede Work preparation")
+        Some(Commands::Desktop { .. } | Commands::Open(_) | Commands::Page { .. }) => {
+            unreachable!("Desktop, opening, and page dispatch precede Work preparation")
         }
         Some(Commands::Config { cmd }) => match cmd {
             loopflow::lf::ConfigCommand::Import {
@@ -3454,11 +3462,6 @@ fn execute_command(
         Some(Commands::List { .. } | Commands::Help { .. } | Commands::Docs { .. }) => {
             unreachable!("inspection returned before execution")
         }
-        Some(Commands::Discord {
-            cmd: loopflow::lf::DiscordCommand::Serve { wave },
-        }) => in_repo_runtime(args, |repo| {
-            loopflow::lf::commands::discord::serve(repo, wave)
-        }),
         Some(Commands::Self_ {
             cmd: loopflow::lf::SelfCommand::Install { .. },
         }) => {

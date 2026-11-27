@@ -45,12 +45,13 @@ use delivery::{
 };
 mod snapshot;
 pub use snapshot::task_workspace_context;
+pub use snapshot::{
+    checkout_file_diff, task_changes, task_diff, task_file, task_snapshot, MAX_BINARY_DATA_BYTES,
+    MAX_FILE_BYTES,
+};
 use snapshot::{
     file_snapshot, git_output, git_output_bytes, read_task_snapshot, resolve_file_base,
     validate_task_relative_path,
-};
-pub use snapshot::{
-    task_changes, task_diff, task_file, task_snapshot, MAX_BINARY_DATA_BYTES, MAX_FILE_BYTES,
 };
 pub mod auto;
 mod file_save;

@@ -50,7 +50,7 @@ def render_case(case: dict, renderer: Path) -> dict:
         environment.update(
             HOME=str(home), LF_HOME=str(home / ".lf"), LF_USER_NAME="Evaluation Participant"
         )
-        argv = [str(renderer), "--repo", str(repo), "--surface", "headless"]
+        argv = [str(renderer), "--repo", str(repo), "--mode", "headless"]
         if case["skill"]:
             argv += ["--skill", case["skill"]]
         if case["no_loopflow"]:

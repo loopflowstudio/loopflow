@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1119 concept review: who can start an agent</title>
+<style>
+:root {
+  --background: #faf8f5; --surface: #fffdf9; --surface-muted: #f3eee7;
+  --border: #e6dfd6; --border-strong: #d6ccc0;
+  --text: #2a2624; --text-secondary: #5f5752;
+  --accent: #722f37;
+  --working-ink: #2f629f; --working-fill: #d5dde6;
+  --warning-ink: #7f5a19; --warning-fill: #e4dccd;
+  --failure-ink: #a64038; --failure-fill: #ecd9d5;
+  --success-ink: #386c48; --success-fill: #d7dfd6;
+  --font-serif: 'Old Standard TT', Georgia, serif;
+  --font-sans: 'Atkinson Hyperlegible Next', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'Spline Sans Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #1b1817; --surface: #23201e; --surface-muted: #2b2725;
+    --border: #3a3431; --border-strong: #4a433f;
+    --text: #ece6df; --text-secondary: #b3a9a1;
+    --accent: #d98a94;
+    --working-ink: #8fb6e6; --working-fill: #24303d;
+    --warning-ink: #d9b66a; --warning-fill: #3a3222;
+    --failure-ink: #e59a92; --failure-fill: #402825;
+    --success-ink: #93c7a1; --success-fill: #25342a;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--background); color: var(--text);
+  font: 16px/1.55 var(--font-sans); }
+main { max-width: 1040px; margin: 0 auto; padding: 48px 24px 96px; }
+h1 { font: 400 38px/1.15 var(--font-serif); margin: 0 0 12px; }
+h2 { font: 400 26px/1.2 var(--font-serif); margin: 56px 0 12px; }
+h3 { font-size: 17px; margin: 28px 0 6px; }
+p { margin: 0 0 12px; max-width: 74ch; }
+.lede { font-size: 18px; color: var(--text-secondary); }
+code, pre { font-family: var(--font-mono); font-size: 13.5px; }
+code { background: var(--surface-muted); padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 14px 16px; overflow-x: auto; margin: 0 0 12px; line-height: 1.5; }
+pre code { background: none; padding: 0; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0 8px; font-size: 15px; }
+th { text-align: left; font-weight: 600; color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-strong); padding: 8px 10px; }
+td { vertical-align: top; border-bottom: 1px solid var(--border); padding: 10px; }
+td:first-child { width: 4%; color: var(--text-secondary); }
+td:nth-child(2) { width: 24%; }
+td:nth-child(3) { width: 30%; }
+.tag { display: inline-block; font-size: 12.5px; font-weight: 600; padding: 1px 8px;
+  border-radius: 999px; white-space: nowrap; }
+.yes { color: var(--success-ink); background: var(--success-fill); }
+.no { color: var(--failure-ink); background: var(--failure-fill); }
+.built { color: var(--success-ink); background: var(--success-fill); }
+.planned { color: var(--working-ink); background: var(--working-fill); }
+.proposed { color: var(--warning-ink); background: var(--warning-fill); }
+.outside { color: var(--text-secondary); background: var(--surface-muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 16px 0 0; font-size: 14px;
+  color: var(--text-secondary); }
+.walk { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 14px 0; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px 18px; }
+.card h3 { margin-top: 0; }
+.card ol { margin: 0; padding-left: 20px; }
+.card li { margin-bottom: 6px; }
+.callout { border-left: 3px solid var(--accent); background: var(--surface);
+  padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 16px 0; }
+.proposal { border: 1px dashed var(--warning-ink); }
+.del { color: var(--failure-ink); text-decoration: line-through; }
+.add { color: var(--success-ink); }
+.q { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px 18px; margin: 14px 0; }
+.q h3 { margin: 0 0 8px; }
+.q ul { margin: 6px 0 0; padding-left: 20px; }
+.q li { margin-bottom: 6px; }
+.rec { font-weight: 600; color: var(--accent); }
+@media (max-width: 760px) { .walk { grid-template-columns: 1fr; } table { font-size: 14px; } }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Who can start an agent, and what it is told about who is reading</h1>
+<p class="lede">Concept review for LOO-1119, "Remove the Discord bridge", at
+<code>e577962da2</code> against base <code>472bacbd64</code>.</p>
+
+<p><strong>The area taken:</strong> the bridge was the one place a message from
+someone other than the Machine's own person started an agent. So the review
+covers that launch path and the three things it left in the code: the prompt's
+idea of who is reading (<code>Surface</code>), a Wave's own config keys, and the
+secrets lf strips before starting an agent. The docs that named the bridge are
+in it too.</p>
+
+<div class="legend">
+  <span><span class="tag built">built</span> committed on this branch</span>
+  <span><span class="tag planned">planned</span> in <code>scratch/plan.md</code>, not built</span>
+  <span><span class="tag proposed">proposed</span> new in this review</span>
+  <span><span class="tag outside">outside</span> a fact outside the repository</span>
+</div>
+
+<h2>One interaction, before and after</h2>
+<div class="walk">
+  <div class="card">
+    <h3>Before: a message in the channel</h3>
+    <ol>
+      <li>Someone types in the bound Discord channel.</li>
+      <li><code>lf discord serve product</code> polls and sees it.</li>
+      <li>A headless agent starts for the Wave with permissions skipped.</li>
+      <li>Its final answer is posted back.</li>
+    </ol>
+    <p style="margin-top:10px"><strong>Failure:</strong> the someone is any
+    non-bot member. Nothing asked who they were; <code>guild_id</code> was never
+    read. <strong>Recovery:</strong> none short of stopping the process.</p>
+  </div>
+  <div class="card">
+    <h3>After: no message can do that</h3>
+    <ol>
+      <li><code>lf discord serve product</code> → "unrecognized subcommand".</li>
+      <li>An agent starts only from this Machine's account: a terminal, Desktop,
+      a Task Graph, or an SSH peer that already holds that account.</li>
+    </ol>
+    <p style="margin-top:10px"><strong>Failure that survives the merge:</strong>
+    an old <code>lf</code> already running the bridge keeps answering, and the
+    token stays valid. Both live outside the repository; see rows 9 and 10.</p>
+  </div>
+</div>
+
+<div class="callout">
+The bridge treated "a message arrived" as "the Machine's person asked". lf has
+no type for <em>who asked</em>, and with the bridge gone it needs none: every
+remaining launch comes from someone who already has the account. Deleting was
+the smaller and truer fix than an allowlist. The concept comes back the day lf
+accepts any inbound trigger again (a webhook, a self-hosted server), and it
+has to arrive before the first such trigger, not after.
+</div>
+
+<h2>Do the person's concepts and the code's line up?</h2>
+<table>
+<thead><tr><th>#</th><th>What a person knows</th><th>What the code has</th><th>Match</th><th>What is wrong, and where it stands</th></tr></thead>
+<tbody>
+<tr>
+  <td>1</td>
+  <td>Talk to a Wave from Discord</td>
+  <td><span class="del">Commands::Discord</span>, <span class="del">commands/discord.rs</span>, <span class="del">run::answer_bound</span>, <span class="del">session_record::final_answer</span></td>
+  <td><span class="tag yes">yes</span></td>
+  <td>Gone on both sides. <span class="tag built">built</span></td>
+</tr>
+<tr>
+  <td>2</td>
+  <td>Who asked for this agent</td>
+  <td>Nothing</td>
+  <td><span class="tag yes">yes</span></td>
+  <td>Correct while every launch is local. A future inbound trigger is a
+  separate outcome: it needs a named author on the request and a rule for which
+  authors may start an agent, designed first.</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td>Is someone in this conversation? Two answers.</td>
+  <td><code>Surface</code>: <code>Cli</code>, <code>Ide</code>, <code>Mac</code>, <code>Iphone</code>, <code>Chat</code>, <code>Headless</code>. Three instruction files.</td>
+  <td><span class="tag no">no</span></td>
+  <td>Six names for two answers. Launchers build only <code>Cli</code> and
+  <code>Headless</code> (<code>run.rs:518</code>); <code>Ide</code>,
+  <code>Mac</code> and <code>Iphone</code> appear only in tests and all map to
+  the same text as <code>Cli</code>. Removing <code>Chat</code> is
+  <span class="tag planned">planned</span>; the other three are
+  <span class="tag proposed">proposed</span>. The biggest mismatch, below.</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td>(none: a person never sees this)</td>
+  <td>"surface" twice: the prompt's <code>Surface</code> enum, and a recorded Session's <code>surface: String</code> holding <code>"tui"</code> or <code>"headless"</code></td>
+  <td><span class="tag no">no</span></td>
+  <td>One name for two ideas, and the plan confuses them: its "Recorded Session
+  with surface <code>chat</code> reads as headless" describes a case that cannot
+  occur. The prompt's <code>Surface</code> is never stored
+  (<code>PromptComponents</code> and <code>GatherContextOpts</code> have no
+  serde), and the bridge's Sessions were recorded as <code>"headless"</code>.
+  So the <code>Ide</code> comment "retained for recorded app-launch context"
+  and the <code>Serialize</code>/<code>Deserialize</code> derives guard nothing
+  this review could find. <span class="tag proposed">proposed</span></td>
+</tr>
+<tr>
+  <td>5</td>
+  <td>A chat: a direct terminal conversation (<code>docs/glossary.md</code>)</td>
+  <td>"chat" five times: the launch kind, <code>Surface::Chat</code>, the Wave <code>chat:</code> key, <code>ContextAssetKind::Chat</code>, and "Wave Chat" in <code>swift/README.md</code></td>
+  <td><span class="tag no">no</span></td>
+  <td>After this work the word should mean the launch kind and nothing else
+  live. Two go with the plan. <code>ContextAssetKind::Chat</code> stays as a
+  marked historical record kind. The fifth is a leftover the branch walked
+  past: <code>swift/README.md:1049</code> still describes Wave Chat with
+  "backings", "backing epochs" and SSE, and no Swift source has any of it
+  (the only <code>chat</code> in Swift code is a sentence in
+  <code>SessionActionSheet.swift</code>). The branch deleted that paragraph's
+  Discord sentence and kept the rest. <span class="tag proposed">proposed</span>:
+  delete the paragraph's Wave Chat sentences.</td>
+</tr>
+<tr>
+  <td>6</td>
+  <td>A Wave's settings file</td>
+  <td><code>WaveConfig { id }</code>, <code>WAVE_ONLY_KEYS = ["id", "linear"]</code>, everything else layered as shared <code>Config</code></td>
+  <td><span class="tag no">no</span></td>
+  <td>The branch dropped <code>"chat"</code> from the list, so a leftover
+  <code>chat:</code> block now warns "unknown setting" on every command in each
+  checkout that predates the merge. Putting it back is
+  <span class="tag planned">planned</span> and right. What stays untrue is the
+  name: the list will hold one key a Wave carries and two that nothing reads,
+  while a second list, <code>RETIRED_SETTINGS</code>, exists for the same idea
+  ("the released lf wrote this; ignore it quietly"). Small; question 3.</td>
+</tr>
+<tr>
+  <td>7</td>
+  <td>Worker: a headless step of a Task Graph</td>
+  <td>Docs said "or Discord Wave reply"</td>
+  <td><span class="tag yes">yes</span></td>
+  <td>Glossary, sessions and server README now say one thing. <span class="tag built">built</span></td>
+</tr>
+<tr>
+  <td>8</td>
+  <td>The answer a run gave</td>
+  <td><code>transcript::answer::input_final_answer</code>; <code>run_bound_prompt</code> still returns a capture directory both callers drop</td>
+  <td><span class="tag yes">yes</span></td>
+  <td>One owner once <code>run_bound_prompt</code> folds into
+  <code>run_bound</code>. <span class="tag planned">planned</span></td>
+</tr>
+<tr>
+  <td>9</td>
+  <td>Secrets lf keeps away from agents</td>
+  <td><code>SESSION_AUTH_ENV = ["GH_TOKEN", "OPENCODE_API_KEY"]</code> and the <code>env_remove</code> chain in <code>harness/mod.rs</code>; <span class="del">LF_DISCORD_TOKEN</span></td>
+  <td><span class="tag no">no</span></td>
+  <td>Until the bot token is revoked, removing its name makes things worse in
+  one case: <code>doppler run -- lf …</code> now hands a live token to an agent
+  running with permissions skipped. The plan lists revocation as a post-merge
+  step. The order should be the other way round. <span class="tag outside">outside</span>
+  Question 2.</td>
+</tr>
+<tr>
+  <td>10</td>
+  <td>The bridge is off</td>
+  <td>A process, on whichever Machine started it</td>
+  <td><span class="tag yes">yes</span></td>
+  <td>Checked during this review with <code>pgrep -fl 'lf discord'</code>: none
+  running on this Machine, none on 100.96.227.95 (the cron host). The plan's
+  "not checked" for that host is now answered. Other Machines, if any ran it,
+  were not checked.</td>
+</tr>
+</tbody>
+</table>
+
+<h2>The biggest mismatch: six surfaces for one yes-or-no</h2>
+<p>The plan's own outcome reads "The prompt has two surface contracts, headless
+and human-present." The type should say the same thing. Taking out
+<code>Chat</code> alone leaves five names for two answers, three of them built
+by no launcher.</p>
+
+<div class="walk">
+  <div class="card">
+    <h3>After the plan as written</h3>
+<pre><code>pub enum Surface {
+    Cli,
+    /// Retained for recorded app-launch
+    /// context; no launcher emits this.
+    Ide,
+    Mac,
+    Iphone,
+    #[default]
+    #[serde(other)]
+    Headless,
+}
+
+match self {
+    Self::Headless =&gt; SURFACE_HEADLESS,
+    _ =&gt; SURFACE_HUMAN_PRESENT,
+}</code></pre>
+    <p>Files: <code>headless.md</code>, <code>human-present.md</code>.</p>
+  </div>
+  <div class="card proposal">
+    <h3>Proposed <span class="tag proposed">proposed</span></h3>
+<pre><code>pub enum Surface {
+    HumanPresent,
+    #[default]
+    Headless,
+}
+
+match self {
+    Self::Headless =&gt; SURFACE_HEADLESS,
+    Self::HumanPresent =&gt; SURFACE_HUMAN_PRESENT,
+}</code></pre>
+    <p>One variant per instruction file, named for it. <code>run.rs</code>
+    picks <code>HumanPresent</code> where it picks <code>Cli</code> today.
+    <code>lf-prompt --surface</code> takes <code>headless</code> or
+    <code>human-present</code>; its two callers
+    (<code>tests/e2e/test_smoke.sh</code>,
+    <code>scripts/evals/instruction_levels.py</code>) both pass
+    <code>headless</code>.</p>
+  </div>
+</div>
+
+<p><strong>Normal path:</strong> an interactive launch gets
+<code>human-present.md</code>, a headless one <code>headless.md</code>, as now.
+<strong>Failure:</strong> an unknown string still falls to headless, the safe
+side, since a headless agent never waits for a reply.
+<strong>What changes on purpose:</strong> <code>--surface cli</code>,
+<code>mac</code>, <code>iphone</code> and <code>ide</code> stop being distinct
+spellings and read as headless unless kept as aliases.
+<strong>The counterexample that would break it:</strong> a stored value that is
+read back into this enum. None was found: the store's <code>surface</code>
+column is the other "surface" (row 4). The check is to drop the serde derives
+and build; if it compiles, nothing reads one. A second counterexample is the
+iOS app in progress wanting phone-specific instructions. That would be a third
+instruction file and a third variant on the day it exists, not two unused names
+kept waiting for it.</p>
+
+<p><strong>Passed over:</strong> leaving the five variants (the plan as
+written). It is correct in every line and keeps a type that says more than the
+system knows. Reversible either way; nothing here ships a format.</p>
+
+<h2>Corrections to the plan that need no decision</h2>
+<ul>
+  <li><span class="tag proposed">proposed</span> Drop "Recorded Session with
+  surface <code>chat</code>: reads as headless" from the plan's absent states,
+  and the matching "No migration" finding. The case does not exist (row 4).
+  Adding <code>"chat"</code> to
+  <code>surface_parser_unknown_defaults_to_headless</code> then tests nothing a
+  person would notice; leave that test as it is.</li>
+  <li><span class="tag proposed">proposed</span> Delete the Wave Chat sentences
+  at <code>swift/README.md:1049–1053</code> (row 5).</li>
+  <li><span class="tag proposed">proposed</span> The mini-heart check is done:
+  no bridge running there or here (row 10).</li>
+  <li><span class="tag planned">planned</span> and still unbuilt:
+  <code>"chat"</code> back among the ignored Wave keys with its removal Task
+  filed and a test; <code>Surface::Chat</code>, <code>SURFACE_CHAT</code> and
+  <code>surfaces/chat.md</code> removed; <code>run_bound_prompt</code> folded;
+  <code>cargo fmt</code>.</li>
+</ul>
+
+<h2>Questions</h2>
+
+<div class="q">
+  <h3>1. Should the prompt's "who is reading" have two values or five?</h3>
+  <p>Nothing a person sees changes either way: an agent is told "someone is
+  here" or "nobody is here".</p>
+  <ul>
+    <li><strong>1a.</strong> <span class="rec">Recommended.</span> Two:
+    present and headless, in this change. The names Mac, iPhone and IDE
+    disappear from the code until one of them needs different instructions.</li>
+    <li><strong>1b.</strong> Five: remove only the chat one now, and file the
+    rest as its own Task.</li>
+    <li><strong>1c.</strong> Five, and leave it: the Mac and iPhone names are
+    wanted as placeholders for the apps.</li>
+  </ul>
+</div>
+
+<div class="q">
+  <h3>2. When does the Discord bot's token get revoked?</h3>
+  <p>Today lf removes that token from an agent's environment. After this merge
+  it does not know the name, so any <code>doppler run -- lf …</code> launch
+  passes the token to the agent for as long as the token works.</p>
+  <ul>
+    <li><strong>2a.</strong> <span class="rec">Recommended.</span> Before the
+    merge: revoke the token in Discord, delete <code>LF_DISCORD_TOKEN</code>
+    from Doppler, remove the bot from the guild. The PR then lists them as
+    done. Revoking can't be undone, and nothing still needs the token.</li>
+    <li><strong>2b.</strong> After the merge, as the plan has it. Between the
+    two, agents started under Doppler can read a working bot token.</li>
+    <li><strong>2c.</strong> Keep stripping the name in lf until a follow-up
+    removes it. This keeps a Discord name in the code that the Task says is
+    gone.</li>
+  </ul>
+</div>
+
+<div class="q">
+  <h3>3. How should lf treat a Wave config that still has a <code>chat:</code> block?</h3>
+  <p>About 111 worktrees of this repository carry one until they take the
+  merge. The plan already chooses silence over a warning on every command; the
+  open part is only how the code says so.</p>
+  <ul>
+    <li><strong>3a.</strong> <span class="rec">Recommended.</span> Silent, in a
+    list of its own: retired Wave keys (<code>linear</code>, <code>chat</code>),
+    each naming the Task that deletes it, apart from the one key a Wave really
+    owns (<code>id</code>).</li>
+    <li><strong>3b.</strong> Silent, as planned: <code>chat</code> beside
+    <code>linear</code> in the existing list, with a comment.</li>
+    <li><strong>3c.</strong> Let it warn. Each stale checkout says "skipping
+    chat: unknown setting" until it is updated; no ignored key and no removal
+    Task to carry.</li>
+  </ul>
+</div>
+
+</main>
+</body>
+</html>

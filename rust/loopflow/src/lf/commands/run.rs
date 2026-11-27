@@ -197,19 +197,6 @@ pub fn run_bound(
     run_bound_prompt(kind, skill, message, cli, binding).map(|_| ())
 }
 
-/// Run a channel request through the ordinary attributed launch and settlement
-/// path, and read its answer from the provider's transcript.
-pub(crate) fn answer_bound(
-    message: &str,
-    cli: &Cli,
-    binding: &loopflow_execution::ops::WorkBinding,
-) -> Result<Option<String>> {
-    match run_bound_prompt(LaunchKind::Worker, None, Some(message), cli, binding)? {
-        Some(dir) => loopflow_execution::session_record::final_answer(&dir),
-        None => Ok(None),
-    }
-}
-
 fn run_bound_prompt(
     kind: LaunchKind,
     skill: Option<&str>,

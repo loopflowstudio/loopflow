@@ -183,7 +183,7 @@ require it at startup.
 | Chat | No | In the caller's terminal, which owns its lifetime | `lf <skill>` at a terminal, including `lf research --task LOO-12` |
 | Batch | No | Headless under the caller, returning output to it | `lf -b <skill>` |
 | Work session | Yes | On a PTY in a holder, independent of its viewers | Task, Wave and repository conversations, or a conversation opened in a held terminal through Desktop or a framed `lf --machine` view |
-| Worker | Yes | Headless, with its lifetime set by the step or caller | Headless steps of `lf task run` or `lf task auto on`, landing's `ci-fix`, or a Discord Wave answer |
+| Worker | Yes | Headless, with its lifetime set by the step or caller | Headless steps of `lf task run` or `lf task auto on` or landing's `ci-fix` |
 
 The checkout, `--task` and `LF_AS` supply Task attribution. Usage counts toward
 that Task, and hooks on every launch read the Session's steers from the store,

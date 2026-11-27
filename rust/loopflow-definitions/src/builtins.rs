@@ -14,7 +14,7 @@ pub const SURFACE_HEADLESS: &str = include_str!("builtins/surfaces/headless.md")
 /// Shared contract for every surface with someone participating in the current conversation.
 pub const SURFACE_HUMAN_PRESENT: &str = include_str!("builtins/surfaces/human-present.md");
 
-/// Live chat channel (e.g. Discord): a person is reading, so the reply is a
+/// Live chat channel: a person is reading, so the reply is a
 /// plain, deliberate, addressed message — never a working transcript.
 pub const SURFACE_CHAT: &str = include_str!("builtins/surfaces/chat.md");
 

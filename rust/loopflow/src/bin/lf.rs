@@ -3454,11 +3454,6 @@ fn execute_command(
         Some(Commands::List { .. } | Commands::Help { .. } | Commands::Docs { .. }) => {
             unreachable!("inspection returned before execution")
         }
-        Some(Commands::Discord {
-            cmd: loopflow::lf::DiscordCommand::Serve { wave },
-        }) => in_repo_runtime(args, |repo| {
-            loopflow::lf::commands::discord::serve(repo, wave)
-        }),
         Some(Commands::Self_ {
             cmd: loopflow::lf::SelfCommand::Install { .. },
         }) => {

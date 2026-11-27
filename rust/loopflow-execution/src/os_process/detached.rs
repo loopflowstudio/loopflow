@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
-use super::{execution_context, shell_escape, DISCORD_TOKEN_ENV};
+use super::{execution_context, shell_escape};
 use loopflow_model::id::LfProcessId;
 
 const LAUNCHER_ENV: &str = "LF_LAUNCHER_FD";
@@ -393,7 +393,7 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
 
 /// Service credentials a new Session must receive explicitly. Native agent
 /// configuration and credentials follow the caller's environment.
-const SESSION_AUTH_ENV: &[&str] = &[DISCORD_TOKEN_ENV, "GH_TOKEN", "OPENCODE_API_KEY"];
+const SESSION_AUTH_ENV: &[&str] = &["GH_TOKEN", "OPENCODE_API_KEY"];
 
 #[cfg(test)]
 mod tests {
@@ -476,7 +476,6 @@ mod tests {
         let command = shell_command(std::path::Path::new("."), &argv, &[("LF_WAVE_ID", "infra")]);
 
         assert!(command.contains("unset "));
-        assert!(command.contains("LF_DISCORD_TOKEN"));
         assert!(command.contains("GH_TOKEN OPENCODE_API_KEY"));
         assert!(command
             .ends_with("exec env 'LF_WAVE_ID'='infra' 'lf' 'work' 'execute' 'task' 'tsk_123'"));
@@ -564,14 +563,13 @@ mod tests {
             &[
                 "/bin/sh".into(),
                 "-c".into(),
-                "printf '%s' \"${LF_AGENT_OVERRIDE-}${LF_DISCORD_TOKEN-}${GH_TOKEN-}\"".into(),
+                "printf '%s' \"${LF_AGENT_OVERRIDE-}${GH_TOKEN-}\"".into(),
             ],
             &[],
         );
         let output = std::process::Command::new("/bin/sh")
             .args(["-c", &command])
             .env("LF_AGENT_OVERRIDE", "claude")
-            .env("LF_DISCORD_TOKEN", "fixture-chat-token")
             .env("GH_TOKEN", "fixture-github-token")
             .output()
             .unwrap();

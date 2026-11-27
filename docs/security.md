@@ -93,5 +93,4 @@ authenticated phone access. See [Connect clients](server.md).
 - Local captures under `$LF_HOME/runs/` are owner-only (`0700` directories,
   `0600` files) and never uploaded to Linear, GitHub, or other Machines.
 - Recursive Markdown under `scratch/` and repo/Wave `MEMORY.md` enter agent
-  context automatically (symlinks are not followed). Keep secrets out of both
-  and inject bridge tokens like `LF_DISCORD_TOKEN` through Doppler.
+  context automatically (symlinks are not followed). Keep secrets out of both.

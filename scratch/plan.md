@@ -4,19 +4,27 @@ Finding 2 of the 2026-11-26 security review (`/Users/jack/src/loopflow/scratch/s
 
 ## Outcome
 
-Push access is no longer enough to sign as Loopflow. The Developer ID
+Nothing is signed as Loopflow without a commit on main. The Developer ID
 certificate and the notary key live in a GitHub environment whose branch policy
 is `main`; a job on any other ref that names it is refused before it reaches a
-runner, and a job that names no environment reads empty strings. Changing who
-can sign becomes a settings change, and the daily release notices it.
+runner, and a job that names no environment reads empty strings. No secret in
+the repository's settings can be read from a branch, and the daily release
+reports a setting that says otherwise while it is still in place.
 
-By holder:
+The ways to a signature:
 
-| Holder | Today | After |
-| --- | --- | --- |
-| Push access only (a write collaborator, a leaked Contents-write token, a rental once LOO-1118 scopes its token) | Push a branch and dispatch `Packages (main)`, or add an `on: push` workflow and read the p12 | Refused |
-| The admin `gh` token (every local agent Session; every rental until LOO-1118) | Same | One API call to widen the policy first; the next release preflight stops and names the change |
-| A process on the laptop with the Doppler login | Reads the p12 and notary key from `prd` | Unchanged |
+| Way in | Before | After the settings steps | What it leaves |
+| --- | --- | --- | --- |
+| Push a branch and dispatch `Packages (main)`, or add an `on: push` workflow | Works; the branch and its run can be deleted | Refused, or reads empty strings | |
+| Land a PR | Works | Works, as designed: it is how dev builds ship | The commit, its PR and its CI run, for good |
+| Widen the branch policy with an admin token (every local agent Session; every rental until LOO-1118), then use a branch | Not needed | Works | A line at the next release, only while still widened |
+| Read the p12 from Doppler `prd` on the laptop | Works | Works | Nothing on GitHub |
+
+Push access is still enough to sign, through a PR the holder queues itself:
+ruleset 11018096 on `main` (read 2026-11-26) is merge queue, required check
+`tests-result`, no required review, no bypass actors, no deletion or
+force-push. What the change buys is that the signature costs a commit on main
+that passed CI and cannot be removed.
 
 Nothing changes for `lf install --dev`: `Packages (main)` still signs and
 notarizes every green main commit, and the morning notarization check still
@@ -47,11 +55,31 @@ release with a message naming the difference.
 
 Choices made for review (headless; none is settled, each can be undone):
 
-- **The promise is written by holder**, as above, in this plan and in
-  `.github/CI.md`. Passed over: "a branch cannot sign" with the admin path as a
-  paragraph (true of branches, not of the tokens agents hold); holding this
-  Task until agents stop holding admin (scoped tokens are worth nothing while
-  repository secrets exist, so this goes first either way).
+- **The promise names a place, not a holder**: "Nothing is signed as Loopflow
+  without a commit on main", with the ways in and what each leaves, in this
+  plan and `.github/CI.md` (written). Passed over: "Push access is not enough
+  to sign" with a holder table, which the ruleset on main makes false; the
+  same table with its first row corrected, whose opening sentence stays false
+  and whose rows change with LOO-1118.
+- **The check starts from GitHub's list of environments**, not from the names
+  in workflow files. One rule: an environment that holds a secret allows
+  `main` only. Passed over: reading only the environments jobs name, which
+  never looks at `dev` (open, one secret, readable from a branch today).
+- **`dev` gets a `main` branch policy in the settings steps.** It can be
+  undone, it closes the read from a branch, and it keeps the daily release
+  from stopping on `dev` while its deletion is unanswered. Passed over:
+  deleting it, which discards a value nobody can read back.
+- **"Set and no job names it" is dropped from the check.** A secret no job
+  reads, in an environment only main can use, is not readable from a branch,
+  and with every environment read the line would stop the release on `dev`'s
+  webhook secret for good. Passed over: keeping it for environments a job
+  names, which keys the settings by the files again.
+- **`deployment: false` stays, and no use of `signing` is recorded beyond the
+  run.** The docs say the check sees a change still in place. Passed over:
+  dropping the key so every use shows under Deployments with its branch (an
+  entry per main commit and morning check; an admin can delete entries).
+- **The daily release stops when the settings are wrong**, as built. Passed
+  over: releasing with a warning nobody is made to read.
 - **No `dependabot` environment.** This Task covers the five signing secrets;
   LOO-1120 deletes the workflow and the sixth secret. Passed over: its own
   environment, which costs a workflow edit that conflicts with a deletion and
@@ -138,9 +166,10 @@ and the refusal message match them, or corrects the docs to what a run shows.
 
 ## What it does not stop
 
-The table's lower two rows. An agent holding the admin token can still change
-the policy through the API; the preflight notices on the next release, not
-before a signing run. Any local process can read the p12 from Doppler `prd`. A
+The table's last three rows. Anyone who can land a PR can sign what it
+contains. An agent holding the admin token can still change the policy through
+the API; the preflight notices at the next release if the change is still in
+place, not before a signing run. Any local process can read the p12 from Doppler `prd`. A
 merged PR that edits `release-loopflow.py` is signed as before: that is the
 product working, bounded by CI and the merge queue.
 
@@ -159,9 +188,9 @@ workflow diff and the check script.
 - `scripts/check_actions_secrets.py`: reads the workflows for each
   environment's secret names, reads live settings through `gh api` (names and
   policies), prints every disagreement and exits non-zero: a repository secret
-  exists; an environment a job names is missing, lacks a `main`-only branch
-  policy, or its secret names differ from what its jobs reference. A failed
-  read is reported as a failed read, never as "no secrets".
+  exists; any environment holding a secret lacks a `main`-only branch policy;
+  an environment a job names is missing, or lacks a name the job reads. A
+  failed read is reported as a failed read, never as "no secrets".
 - `scripts/publish_release.py`: the preflight calls the check.
 - `python/tests/test_workflow_secrets.py`:
   - every job in every workflow that mentions `secrets` other than
@@ -175,7 +204,7 @@ workflow diff and the check script.
 - `python/tests/test_release_automation.py:15-37` keeps passing unchanged.
 - Docs: `release/SCHEDULE.md:18,34,39`, the comment at
   `.github/workflows/release.yml:13-14`, `.github/CI.md:167,200-202,230`
-  (the holder table, environment secrets, the Doppler-to-environment copy
+  (the ways-in table, environment secrets, the Doppler-to-environment copy
   command, the check script and its preflight caller), `release/README.md:217`
   if its wording drifts.
 
@@ -199,7 +228,8 @@ The build leaves the exact commands in `.github/CI.md`.
 
 1. Before merge, additive: create `signing` with a custom branch policy of
    `main`; copy the five values from Doppler into it. Repository secrets stay,
-   so main keeps signing either way.
+   so main keeps signing either way. Give `dev` a custom branch policy of
+   `main` and delete the empty `pypi`.
 2. Probe, before merge, from the PR branch (it already carries `environment:`
    on `notarization-check.yml`, and main's copy has `workflow_dispatch`):
 
@@ -255,8 +285,8 @@ From the 2026-11-26 concept review (`scratch/concept-review.html`).
 
 - **Local agent Sessions hold admin on the repository.** LOO-1118 scopes the
   token rentals get; local Sessions need the same: a token that can push and
-  open PRs and cannot edit settings. Until then the middle row of the holder
-  table stays "one API call".
+  open PRs and cannot edit settings. Until then the admin row of the table
+  stays.
 - **The p12 and notary key are readable from the laptop's Doppler login.** They
   would move to a Doppler config the everyday login does not open, or leave
   Doppler once the cron host's keychain and the GitHub environment are both
@@ -269,15 +299,22 @@ From the 2026-11-26 concept review (`scratch/concept-review.html`).
 
 ## Review findings, placed
 
-- Outcome named "a branch" where the holders are tokens and Machines: outcome
-  rewritten by holder (made for review).
-- `dependabot` environment built for a workflow #2054 deletes: dropped (made
-  for review); build on LOO-1120.
-- Settings check with no caller: release preflight calls it (made for review).
-- `deployment: false` unverified against branch policy: probe moved before the
-  merge, with the fallback.
-- Admin tokens, Doppler reach, three copies: deferred above.
-- Rotation, deleting `dev`, the old Doppler token: questions, not plan steps.
+From `scratch/concept-review.html` as rewritten against the built change
+(e67affb9c0).
+
+- The promise named a holder and the ruleset on main makes it false: reworded
+  to "a commit on main" in the Outcome and `.github/CI.md` (made for review).
+- The check never reads an environment no workflow names, so `dev` passes:
+  next pass.
+- "The next release stops and names the change" overstated what a daily
+  reading sees: `.github/CI.md` and the Outcome now say "while still in
+  place". No record of uses added (made for review).
+- One rule under two names; the preflight error calls every line a signing
+  setting and says "differ" for a failed read: next pass.
+- A required review on main, agents holding admin, the p12 in Doppler:
+  separate outcomes; the last two are deferred above, the first is not
+  proposed (it ends agents landing their own PRs).
+- Deleting `dev`, rotation, the old Doppler token: questions, not plan steps.
 
 ## What goes
 
@@ -293,16 +330,37 @@ daily notarization check and its issue; the daily release.
 
 ## Passes
 
-- Built (one pass): synced onto LOO-1120; `environment: signing` on both jobs,
+- Built: synced onto LOO-1120; `environment: signing` on both jobs,
   `workflow_dispatch` and the `github.sha` fallbacks gone from
   `main-packages.yml`; `scripts/check_actions_secrets.py`, called by the
   release preflight; `python/tests/test_workflow_secrets.py`. The host's token
   reads the settings, so the preflight call stays.
 
+- Next (one pass): the check reads every environment.
+  - `read_settings` lists `environments` from GitHub (names, paginated) and
+    reads each one's policy and secret names; it takes no argument.
+    `Settings.environments` holds what exists, so a missing environment is an
+    absent key and `Environment | None` goes.
+  - `differences`: any environment with a secret and a policy other than
+    `main` only is reported, named by a job or not; an environment a job names
+    and GitHub lacks keeps "does not exist"; a name a job reads that is not
+    set stays; "is set and no job names it" goes, with its test case.
+  - `publish_release.check_release_host` raises "GitHub Actions secrets are
+    not main-only (.github/CI.md, "Signing secrets")" with the script's lines.
+    A failed read reaches the log as the script printed it.
+  - Tests: an open environment no job names is reported by name
+    (`environment dev: no branch policy by name; expected main only`); an
+    empty open one is not; the canned `_gh` answers include the environment
+    list.
+  - `.github/CI.md`: the paragraph on what the script names, and the admin
+    commands gain the `dev` policy.
+  - Run it live; today it should print the seven lines plus `dev`. Teaches
+    whether the host's `gh` can list environments (it read one by name).
+
 Left, for a person with admin at ship-review ("Order of settings changes"):
-create `signing`, copy the five values, run the probe (settles
-`deployment: false`), merge, delete the repository secrets, run the acceptance
-check.
+create `signing`, copy the five values, give `dev` a `main` policy, run the
+probe (settles `deployment: false`), merge, delete the repository secrets, run
+the acceptance check.
 
 Done when a branch run naming `signing` is refused, main still produces a
 notarized DMG, none of the five names is a repository secret, and the release

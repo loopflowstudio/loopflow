@@ -214,8 +214,8 @@ artifacts expired, `gh run rerun <id>`, or land a commit.
 
 ### Signing secrets
 
-Push access is not enough to sign as Loopflow. A branch that names the
-`signing` environment is refused before any step runs:
+Nothing is signed as Loopflow without a commit on main. A branch that names
+the `signing` environment is refused before any step runs:
 
 ```console
 $ gh workflow run notarization-check.yml --ref my-branch
@@ -237,13 +237,13 @@ environment:
   deployment: false   # read the secrets without a deployment record per run
 ```
 
-Who can sign:
+The ways to a signature, and what each leaves:
 
-| Holder | Can sign? |
+| Way in | What it leaves |
 |---|---|
-| Push access: a write collaborator, a token with Contents write | No. Any ref but `main` is refused, and main changes only through a merged PR. |
-| Repository admin, including an admin `gh` token | Yes, by widening the branch policy first. The next release stops and names the change. |
-| The Doppler login for `loopflow`/`prd` | Yes. The values live there. |
+| A landed PR | The commit, its PR and its CI run. Main takes a PR through the merge queue with `tests-result` green and no review, so anyone who can land can sign; that is how dev builds ship. Nobody can delete or force-push the commit. |
+| A branch policy widened by a repository admin, including an admin `gh` token | A line at the next release, while the change is still in place. A policy widened, used and put back before the release prints nothing. |
+| The Doppler login for `loopflow`/`prd` | Nothing on GitHub. The values live there. |
 
 `scripts/check_actions_secrets.py` compares the live settings with what the
 workflows name. It prints nothing when they agree; otherwise one line per

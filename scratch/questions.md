@@ -5,9 +5,16 @@ marked.
 
 - The sync keeps this Task's plan, review, and questions at their existing
   paths. LOO-1120 keeps its notes on its own branch.
-- The Task's promise is written by holder: push access cannot sign; an admin
-  token still can, with one API call the next release preflight reports.
-  Alternatives: "a branch cannot sign"; hold until agents stop holding admin.
+- The Task's promise is "nothing is signed as Loopflow without a commit on
+  main". Push access can still sign by landing its own PR: main asks for the
+  merge queue and `tests-result`, no review. Alternative: keep "push access is
+  not enough" with a corrected holder table.
+- `dev` gets a `main` branch policy in the settings steps, and the check stops
+  reporting a secret no job names. Alternative: the daily release stops on
+  `dev` until someone decides whether to delete it.
+- No record of each use of `signing` (`deployment: false` stays), so a policy
+  widened, used and put back before 10:00 is not seen. Alternative: drop the
+  key and read the Deployments list.
 - No `dependabot` environment: LOO-1120 (#2054) deletes that workflow and its
   token, and this builds on it. If #2054 stalls, `DEPENDABOT_MERGE_TOKEN`
   stays a branch-readable repository secret until it lands.
@@ -53,8 +60,6 @@ From the build (2026-11-26):
   reads names with `--paginate --jq`.
 - The repository belongs to an organization, so the check also reports
   organization secrets shared with it (none today). Not in the plan.
-- The check reports a secret set in `signing` that no job names. The plan said
-  "its secret names differ"; this is the other direction of that.
 - From merge until the six repository secrets are deleted (five signing,
   `DEPENDABOT_MERGE_TOKEN`), the release preflight stops the daily release.
   Today's live run prints those six lines and `environment signing: does not

@@ -22,6 +22,6 @@ and run `lf task run <issue> --from implement`.
 
 ## Asking for a decision
 
-**Frame choices in product behavior.** When a conflict or design clash needs a
-call, describe what changes for someone using the product under each option.
-Leave table names, flags, migration marks and SHAs out.
+Describe what each choice changes for someone using the product. When asking
+only some of a review page's questions in chat, label them with their page
+numbers and option letters (`Q3b`, `Q7a`) so a short reply works in both places.

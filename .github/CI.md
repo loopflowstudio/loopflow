@@ -205,11 +205,103 @@ Both macOS packages build on Apple Silicon runners. The Intel CLI is
 cross-compiled for `x86_64-apple-darwin` and smoke-tested under Rosetta.
 
 Its `desktop-app` job builds Loopflow.app around the ARM64 package's exact `lf`,
-signs and notarizes the DMG with the `APPLE_CERTIFICATE_BASE64`,
-`APPLE_CERTIFICATE_PASSWORD`, `NOTARY_KEY`, `NOTARY_KEY_ID` and `NOTARY_ISSUER`
-Actions secrets (copied from Doppler `loopflow`/`prd`), and uploads `Loopflow-dmg`.
+signs and notarizes the DMG with the secrets in the `signing` environment
+([Signing secrets](#signing-secrets)), and uploads `Loopflow-dmg`.
 `lf install --dev` installs the newest green run with `gh`, app included on a Mac.
 The artifacts expire after 14 days; releases stay the durable channel.
+
+The workflow runs only after CI passes on main. To rebuild a run whose
+artifacts expired, `gh run rerun <id>`, or land a commit.
+
+### Signing secrets
+
+Nothing is signed as Loopflow without a commit on main. A branch that names
+the `signing` environment is refused before any step runs:
+
+```console
+$ gh workflow run notarization-check.yml --ref my-branch
+$ gh run watch
+X Branch "my-branch" is not allowed to deploy to signing due to environment protection rules.
+```
+
+A job that names no environment reads every secret as an empty string.
+
+`Packages (main)` always runs as `main`, so the environment admits it whatever
+commit it checks out. Its `if` picks the commit: the head of a CI run that
+passed and was a push to `main`. A pull request from a fork's branch named
+`main` matches `branches: [main]` and stops at `event == 'push'`.
+
+The Developer ID certificate and the notary key (`APPLE_CERTIFICATE_BASE64`,
+`APPLE_CERTIFICATE_PASSWORD`, `NOTARY_KEY`, `NOTARY_KEY_ID`, `NOTARY_ISSUER`)
+are secrets of the `signing` environment, whose branch policy is `main`. Two
+jobs name it: `desktop-app` in `main-packages.yml` and `notarytool` in
+`notarization-check.yml`. The repository itself holds no Actions secrets.
+
+```yaml
+environment:
+  name: signing
+  deployment: false   # read the secrets without a deployment record per run
+```
+
+The ways to a signature, and what each leaves:
+
+| Way in | What it leaves |
+|---|---|
+| A landed PR | The commit, its PR and its CI run. Main takes a PR through the merge queue with `tests-result` green and no review, so anyone who can land can sign; that is how dev builds ship. Nobody can delete or force-push the commit. |
+| A branch policy widened by a repository admin, including an admin `gh` token | A line at the next release, while the change is still in place. A policy widened, used and put back before the release prints nothing. |
+| The Doppler login for `loopflow`/`prd` | Nothing on GitHub. The values live there. |
+
+`scripts/check_actions_secrets.py` holds the settings to one rule: an
+environment that holds a secret allows `main` only, and nothing else holds
+one. It lists every environment from GitHub, whether a workflow names it or
+not. It prints nothing when the rule holds; otherwise one line per secret or
+environment, and it exits non-zero:
+
+```console
+$ uv run python scripts/check_actions_secrets.py
+repository secret PROBE: any branch can read it; move it to an environment or delete it
+environment dev: no branch policy by name; expected main only
+environment signing: branch policy allows release/*; expected main only
+environment signing: NOTARY_ISSUER is named by notarization-check.yml and is not set
+```
+
+It also names an organization secret shared with the repository, an
+environment a job names that GitHub lacks, and a job that reads a secret
+without naming an environment. An environment that holds no secret is not
+reported. It needs a `gh` login that can read repository settings; a read that
+fails prints `could not read <path>: <reason>` and exits non-zero. The daily
+release runs it in its host preflight and stops with those lines under "GitHub
+Actions secrets are not main-only". `python/tests/test_workflow_secrets.py`
+fails a PR whose job reads a secret without declaring an environment.
+
+A new secret for CI goes in an environment with a branch policy, and the job
+that reads it names that environment. Never `gh secret set NAME` without
+`--env`.
+
+To create an environment, restrict an existing one (`dev`) or replace a value,
+as a repository admin. The value goes from Doppler to GitHub without reaching
+the terminal:
+
+```bash
+for environment in signing dev; do
+  gh api -X PUT "repos/{owner}/{repo}/environments/$environment" \
+    -F 'deployment_branch_policy[protected_branches]=false' \
+    -F 'deployment_branch_policy[custom_branch_policies]=true'
+  gh api -X POST "repos/{owner}/{repo}/environments/$environment/deployment-branch-policies" \
+    -f name=main -f type=branch
+done
+
+for name in APPLE_CERTIFICATE_BASE64 APPLE_CERTIFICATE_PASSWORD \
+    NOTARY_KEY NOTARY_KEY_ID NOTARY_ISSUER; do
+  doppler secrets get "$name" --plain -p loopflow -c prd |
+    gh secret set "$name" --env signing
+done
+
+uv run python scripts/check_actions_secrets.py
+```
+
+Create the environment before a workflow names it: GitHub creates a missing
+environment on first use with no branch policy.
 
 ### Notarization
 
@@ -228,14 +320,15 @@ before retrying. A failed wait keeps its submission; rerunning resumes it.
 `.github/workflows/notarization-check.yml` runs `xcrun notarytool history`
 with the same secrets every morning (13:17 UTC), so a broken account shows up
 before a package build hits it. Run it by hand with
-`gh workflow run notarization-check.yml`. A red run opens one issue titled
+`gh workflow run notarization-check.yml`; from any ref but `main` the `signing`
+environment refuses it. A red run opens one issue titled
 "Notarization is failing" quoting Apple's message, or comments on the open one;
 the next green run closes it.
 
 | Apple says | Fix |
 |---|---|
 | `403. A required agreement is missing or has expired` | The Account Holder accepts the new agreement at developer.apple.com. No code change; retrying fails until then. |
-| `401. Unauthenticated` | `NOTARY_KEY_ID`, `NOTARY_ISSUER` or `NOTARY_KEY` is wrong. Fix it in Doppler `loopflow`/`prd` and copy it to the Actions secrets. |
+| `401. Unauthenticated` | `NOTARY_KEY_ID`, `NOTARY_ISSUER` or `NOTARY_KEY` is wrong. Fix it in Doppler `loopflow`/`prd` and copy it to the `signing` environment ([Signing secrets](#signing-secrets)). |
 
 Loopflow ships native packages for all four targets. Workspace crates are private
 path dependencies; release publication and recovery verify native artifacts,

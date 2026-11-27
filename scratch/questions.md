@@ -126,9 +126,6 @@
 - **How long does a waiting placement wait?** Pass 4 makes the lock wait. The
   first rental of a repository holds it while a person types a code, so a
   second placement of that repository waits as long as the typing takes.
-- **Recording what a rental was sent as the token's expiry** assumes two
-  tokens of one repository never share an `expires_at`. A renewal within the
-  same second would; a counter on the grant would not.
 - **Does the ten-token limit cover App user tokens?** Probe 5 in the plan.
 
 ## Raised by Pass 4
@@ -148,3 +145,22 @@
 - **A template that listed `github` or `linear` shows without them** in
   `lf ondemand list`; the words stay in `~/.lf/config.yaml` until the
   template is added again.
+
+## Raised by the review after Pass 4 (`scratch/concept-review.html`, `73860d9940`)
+
+Adopted into Pass 5 with nobody here; each is reversible before it lands.
+
+- **`lf ondemand list` shows `GitHub until HH:MM` or `GitHub not delivered`**
+  per running rental, from the store. Passed over: `lf machine logins`
+  answering from the record; a notification.
+- **`lf ondemand login github` on an approved repository** renews and says
+  "already approved" instead of asking for a code.
+- **Placement asks GitHub about a stored token before renting,** three more
+  requests on every placement, over narrowing the docs sentence. Rare case:
+  the person revoked the approval or uninstalled the app inside 8 hours.
+- **An ending behind someone's code waits and says so,** over giving up after
+  a moment and leaving the token to expire.
+- **Does the list's GitHub state go in `lf ondemand list --json`?** A wire
+  field, so harder to take back than the text.
+- **File the two deferred findings as Tasks?** Asked again by this review:
+  both, automatic settling only, or neither yet. Still unanswered.

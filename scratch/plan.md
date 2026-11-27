@@ -1,10 +1,10 @@
 # LOO-1118: rentals receive a repository-scoped, expiring GitHub token
 
-Passes 1 to 4 are built and tested against a stand-in GitHub; no planned
-pass remains. Nothing has run against GitHub's real app or a real rental; the
+Passes 1 to 4 are built and tested against a stand-in GitHub. Pass 5 remains:
+see "Passes". Nothing has run against GitHub's real app or a real rental; the
 probes under "Unanswered until the app exists" need a person twice: see
-"Needs a person now". `scratch/concept-review.html` (written at `ca1dcb82d3`)
-reviewed the Pass 3 build; where each finding went is under "Review".
+"Needs a person now". `scratch/concept-review.html` (written at `73860d9940`)
+reviewed the build after Pass 4; where each finding went is under "Review".
 
 ## Needs a person now
 
@@ -232,7 +232,10 @@ Pass 2 answers these first:
    If it does, an eleventh approved repository ends the first one's grant
    without a word, and a rental past 8 h, which renews on every sign-in, can
    meet the hourly limit. Probe: approve an eleventh repository, or renew
-   eleven times in an hour.
+   eleven times in an hour. The cut at a repository's last ending is itself
+   a renewal, so Tasks run on rentals one after another renew once or twice
+   each: under an hourly limit of ten, a handful of back-to-back rentals an
+   hour meets it with no long rental involved.
 
 ## Security and privacy
 
@@ -349,6 +352,46 @@ Survives: Linear's renewed token, OpenCode and Codex sign-in when listed in
    Not covered by a test: the order in `place` (settle before `rent`) is read
    from the code; the install link is printed, not asserted; SSH itself is
    stood in by `credentials::TEST_SENDS`.
+5. **The record is read, and the approval is asked once.** Remaining. Made
+   for review from the review of the Pass 4 build; none of it is settled.
+   - `lf ondemand list` shows each running rental's GitHub state from the
+     store alone, no SSH and no request to GitHub: `GitHub until HH:MM` when
+     `rentals.github_token_expires_at` equals the repository's `expires_at`,
+     `GitHub not delivered` when it is behind, nothing for a rental with no
+     repository. The record is what this Machine sent, not what GitHub
+     thinks; `lf machine logins <rental>` stays the command that asks. If
+     the row is in `lf ondemand list --json`, the field joins the DTO and its
+     fixture.
+   - `lf ondemand login github` goes through `settle` like the other four
+     callers: with an approval stored for this account it renews, says
+     "already approved for <owner/name> as <login>" and asks for no code; a
+     code appears only with no approval or a refused renewal. `approve` as a
+     fifth path goes.
+   - Placement asks GitHub what the stored token reaches before renting (the
+     check `grant_from` makes at approval and renewal, three requests), so a
+     revoked approval or an uninstalled app stops the run before "Renting"
+     with the install link or a new code. Passed over: narrowing the
+     sentence in `docs/subscriptions.md:206` ("Everything GitHub can refuse
+     is asked before renting") to what is asked today.
+   - When the token ends before the rental does, the placement line says so
+     and names the renewal:
+     `GitHub on code-1 until 07:40, before the rental ends; lf machine login github code-1 renews.`
+     Planned since the first plan ("a printed stop time and a renew
+     command"); built as the time alone (`github.rs:637`).
+   - A command that finds the repository's lock held prints one line, e.g.
+     `waiting for the GitHub approval of loopflowstudio/loopflow in another
+     terminal`, then waits as it does now. Passed over: an ending that gives
+     up after a short wait; a settle that renews and sends to several rentals
+     is itself not short, so no bound tells a typing person from a busy
+     repository.
+   - `docs/subscriptions.md` follows each of these.
+   Tests, against the stand-in: the list shows "not delivered" for a rental
+   whose send failed and the new time for the one that got it; a second
+   `lf ondemand login github` requests no device code; a stored token the
+   stand-in no longer lets reach the repository stops placement before
+   `admit_rental`; the clause appears only when the token ends first.
+   Teaches: whether one read of the record is enough for a person to act on
+   a missed token before the deferred automatic renewal exists.
 
 ## Acceptance
 
@@ -408,33 +451,43 @@ Questions the writing raised (also in `scratch/questions.md`):
 ## Review
 
 What happened to each finding of `scratch/concept-review.html` (the review of
-the build, written at `ca1dcb82d3`). Every adoption is made for review; none
-is settled. The claims about the code were checked against
-`credentials.rs:155-195`, `github.rs:398-431` and `credentials.rs:693-704`.
+the build after Pass 4, written at `73860d9940`). Every adoption is made for
+review; none is settled. The earlier review's findings were all built in
+Pass 4. Checked against the code: `lf ondemand list` reads neither rental
+GitHub column, `approve` (`github.rs:647`) is called outside `settle`, the
+placement line is `github.rs:637`.
 
-- Which token a rental holds is not recorded (stranded rental after a failed
-  send, replaced repository never retired, stale "until"): Pass 4, record and
-  settle step.
-- Token before renting, `approve_first_rental`'s weaker check: Pass 4.
-- One refusing lock for every repository: Pass 4.
-- Install link shown only after a spent code: Pass 4.
-- Two doors for signing a rental in to GitHub: Pass 4.
-- `--logins github` accepted and inert: Pass 4, refused at `add`, dropped on
-  read. This reverses "stay accepted" in `scratch/questions.md`.
-- The ten-token limit: read; the docs do not say. Probe 5.
-- The GitHub row asking only for `ghu_` tokens: left as built, as the review
-  left it.
+- The record of what a rental was sent has one reader, the settle step; a
+  missed token is visible nowhere: Pass 5, `lf ondemand list`.
+- `lf ondemand login github` always spends a code and replaces a working
+  approval: Pass 5.
+- A stored token is trusted before renting while the docs say everything is
+  asked: Pass 5, ask GitHub; narrowing the docs was passed over.
+- The token's end printed without saying it is before the rental's: Pass 5.
+- An ending waits silently behind a person typing a code: Pass 5, one line.
+- A sign-in records the repository before it knows the outcome; 7 hours
+  counts as new; 10 minutes of margin: left as built, as the review left
+  them.
+- Storing "which token" as that token's expiry is sound (a renewal is several
+  round trips under the repository's lock): the open question in
+  `scratch/questions.md` is closed.
+- Back-to-back rentals and the hourly token limit: added to probe 5.
 - `lf ondemand login github` or `lf machine login github --rentals`: the
-  review recommends neither; the built name stays, the choice is in
+  built name stays; still a person's choice, in `scratch/questions.md`.
+- Automatic settling, Codex and OpenCode outliving the rental: deferred
+  below. Neither is filed as a Task; whether to file is in
   `scratch/questions.md`.
-- Automatic renewal, Codex and OpenCode outliving the rental: deferred below.
 
 ## Deferred findings
 
 - **The laptop renews a rental's GitHub token by itself.** Its server already
   visits each rental to collect Session history; renewing a token near its end
   on that visit removes the 8 h clock while the laptop is awake. After Pass 4
-  it is one call to settle a repository from that loop.
+  it is one call to settle a repository from that loop
+  (`settle_unattended`). It needs its own rule for when to renew: under the
+  7-hour rule a long rental would be renewed on every hourly visit. It is
+  also what delivers a missed token with nobody acting; until then
+  "not delivered" waits for the next command on that repository.
 - **Codex and OpenCode outlive the rental.** Codex's device login is a
   renewing grant written on the rental; OpenCode gets a renewing login or a
   copied raw key; nothing signs either out before the sandbox is deleted.

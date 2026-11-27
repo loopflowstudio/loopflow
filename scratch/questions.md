@@ -164,3 +164,19 @@ Adopted into Pass 5 with nobody here; each is reversible before it lands.
   field, so harder to take back than the text.
 - **File the two deferred findings as Tasks?** Asked again by this review:
   both, automatic settling only, or neither yet. Still unanswered.
+
+## Raised by Pass 5
+
+- **`lf ondemand login github` keeps a working approval without renewing
+  it.** The plan said it renews. Kept instead: a renewal ends the token
+  running rentals hold and spends one of the hourly tokens probe 5 asks
+  about. It does not show whether the grant still renews.
+- **Every attended settle asks GitHub about a stored token,** not only
+  placement: three requests on `lf machine login github <rental>`, six on a
+  placement (before renting and at the sign-in after).
+- **The list's GitHub state is text only.** `--json` is unchanged until the
+  wire question above is answered.
+- **A token already past its time still reads `GitHub until HH:MM`** in
+  `lf ondemand list` when it was the last one sent; the clock has no date.
+- **The waiting line goes to stderr of whatever waits,** the server's rental
+  check included.

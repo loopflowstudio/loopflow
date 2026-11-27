@@ -1,7 +1,7 @@
 # LOO-1118: rentals receive a repository-scoped, expiring GitHub token
 
-Passes 1 to 4 are built and tested against a stand-in GitHub. Pass 5 remains:
-see "Passes". Nothing has run against GitHub's real app or a real rental; the
+Passes 1 to 5 are built and tested against a stand-in GitHub; no pass remains.
+Nothing has run against GitHub's real app or a real rental; the
 probes under "Unanswered until the app exists" need a person twice: see
 "Needs a person now". `scratch/concept-review.html` (written at `73860d9940`)
 reviewed the build after Pass 4; where each finding went is under "Review".
@@ -352,46 +352,34 @@ Survives: Linear's renewed token, OpenCode and Codex sign-in when listed in
    Not covered by a test: the order in `place` (settle before `rent`) is read
    from the code; the install link is printed, not asserted; SSH itself is
    stood in by `credentials::TEST_SENDS`.
-5. **The record is read, and the approval is asked once.** Remaining. Made
-   for review from the review of the Pass 4 build; none of it is settled.
-   - `lf ondemand list` shows each running rental's GitHub state from the
-     store alone, no SSH and no request to GitHub: `GitHub until HH:MM` when
-     `rentals.github_token_expires_at` equals the repository's `expires_at`,
-     `GitHub not delivered` when it is behind, nothing for a rental with no
-     repository. The record is what this Machine sent, not what GitHub
-     thinks; `lf machine logins <rental>` stays the command that asks. If
-     the row is in `lf ondemand list --json`, the field joins the DTO and its
-     fixture.
-   - `lf ondemand login github` goes through `settle` like the other four
-     callers: with an approval stored for this account it renews, says
-     "already approved for <owner/name> as <login>" and asks for no code; a
-     code appears only with no approval or a refused renewal. `approve` as a
-     fifth path goes.
-   - Placement asks GitHub what the stored token reaches before renting (the
-     check `grant_from` makes at approval and renewal, three requests), so a
-     revoked approval or an uninstalled app stops the run before "Renting"
-     with the install link or a new code. Passed over: narrowing the
-     sentence in `docs/subscriptions.md:206` ("Everything GitHub can refuse
-     is asked before renting") to what is asked today.
-   - When the token ends before the rental does, the placement line says so
-     and names the renewal:
-     `GitHub on code-1 until 07:40, before the rental ends; lf machine login github code-1 renews.`
-     Planned since the first plan ("a printed stop time and a renew
-     command"); built as the time alone (`github.rs:637`).
-   - A command that finds the repository's lock held prints one line, e.g.
-     `waiting for the GitHub approval of loopflowstudio/loopflow in another
-     terminal`, then waits as it does now. Passed over: an ending that gives
-     up after a short wait; a settle that renews and sends to several rentals
-     is itself not short, so no bound tells a typing person from a busy
-     repository.
-   - `docs/subscriptions.md` follows each of these.
-   Tests, against the stand-in: the list shows "not delivered" for a rental
-   whose send failed and the new time for the one that got it; a second
-   `lf ondemand login github` requests no device code; a stored token the
-   stand-in no longer lets reach the repository stops placement before
-   `admit_rental`; the clause appears only when the token ends first.
-   Teaches: whether one read of the record is enough for a person to act on
-   a missed token before the deferred automatic renewal exists.
+5. **The record is read, and the approval is asked once.** Built at `99fd9808dc`,
+   made for review: `lf ondemand list` shows `GitHub until HH:MM` or
+   `GitHub not delivered` per live rental (`rental_github_delivery`, text
+   only, not in `--json`); `lf ondemand login github` is
+   `settle(until = now)` (`approve_ahead`); a settle with an asker asks
+   GitHub what a stored token reaches (`standing`); the placement line names
+   the renewal when the token ends first; a held lock prints one waiting
+   line. `approve` is gone. Changed from the plan:
+   - **An approval GitHub still honors is kept, not renewed,** by
+     `lf ondemand login github`: the three reach requests answer "does it
+     work", and a renewal would end what running rentals hold and count
+     against the token limit of probe 5. It renews only an expired or
+     rejected (401) token.
+   - **The check runs for every settle someone is present for,** so
+     `lf machine login github <rental>` and the sign-in after renting ask it
+     too: a placement asks twice, six requests. One rule, no flag.
+   - **A token that works but lost the repository is not renewed:** a
+     renewal reaches what the approval reaches. With a terminal it goes to
+     the install link and a new code; without, it stops with the install
+     link and the grant is kept.
+   - The waiting line is `Waiting for another lf to finish with GitHub for
+     <owner/name>; if it shows a code, approve it there`: the lock's holder
+     may be a renewal, not an approval.
+   Not covered by a test: the list's text (run by hand against a seeded
+   private store: `GitHub until 17:30`, `GitHub not delivered`, nothing for a
+   rental with no repository; `--json` unchanged); the waiting line is
+   printed, not asserted; `approve_ahead` itself reads the real `gh`, so the
+   test drives `settle` as it does.
 
 ## Acceptance
 

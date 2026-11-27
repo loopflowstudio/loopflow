@@ -15,7 +15,7 @@ struct GoldenCase {
     name: String,
     repo: String,
     skill: Option<String>,
-    surface: Option<Surface>,
+    surface: Option<String>,
     docs: Vec<String>,
     diff_files: bool,
     diff: bool,
@@ -90,7 +90,11 @@ fn golden_prompts_match() {
             skill: case.skill.clone(),
             message: None,
             operate: !case.no_loopflow,
-            surface: case.surface.unwrap_or_default(),
+            surface: case
+                .surface
+                .as_deref()
+                .map(|surface| surface.parse::<Surface>().expect("infallible"))
+                .unwrap_or_default(),
             docs: case.docs.clone(),
             files: Vec::new(),
             include_diff: case.diff,

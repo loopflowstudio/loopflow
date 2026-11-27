@@ -14,10 +14,6 @@ pub const SURFACE_HEADLESS: &str = include_str!("builtins/surfaces/headless.md")
 /// Shared contract for every surface with someone participating in the current conversation.
 pub const SURFACE_HUMAN_PRESENT: &str = include_str!("builtins/surfaces/human-present.md");
 
-/// Live chat channel: a person is reading, so the reply is a
-/// plain, deliberate, addressed message — never a working transcript.
-pub const SURFACE_CHAT: &str = include_str!("builtins/surfaces/chat.md");
-
 /// Returns the content of a built-in skill, if it exists.
 pub fn get_builtin_skill(name: &str) -> Option<&'static str> {
     BUILTIN_SKILLS.get(portable_name(name).as_str()).copied()

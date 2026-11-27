@@ -102,7 +102,7 @@ fn gather_context_with_inline_prompt() {
         skill: None,
         message: Some("Fix the bug in main.rs".to_string()),
         operate: false,
-        surface: Surface::Cli,
+        surface: Surface::HumanPresent,
         files: vec![],
         docs: vec![],
         wave: None,
@@ -261,7 +261,7 @@ fn gather_context_preserves_surface() {
         skill: Some("debug".to_string()),
         message: None,
         operate: false,
-        surface: Surface::Cli,
+        surface: Surface::HumanPresent,
         files: vec![],
         docs: vec![],
         wave: None,
@@ -271,7 +271,7 @@ fn gather_context_preserves_surface() {
     .unwrap();
 
     assert_eq!(auto.surface, Surface::Headless);
-    assert_eq!(interactive.surface, Surface::Cli);
+    assert_eq!(interactive.surface, Surface::HumanPresent);
 }
 
 // =============================================================================

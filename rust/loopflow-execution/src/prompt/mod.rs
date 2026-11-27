@@ -22,7 +22,6 @@ use crate::prompt::change::{Change, ChangeRange};
 use crate::repository::RepoId;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use serde::{Deserialize, Serialize};
 use tiktoken_rs::CoreBPE;
 use tracing::{debug, warn};
 
@@ -125,20 +124,11 @@ impl GatherContextOpts {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[non_exhaustive]
-#[serde(rename_all = "snake_case")]
+/// Whether someone is in the conversation the prompt opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Surface {
-    Cli,
-    /// Retained for recorded app-launch context; no launcher emits this surface.
-    Ide,
-    Mac,
-    Iphone,
-    /// A live chat channel where a person is reading. The reply
-    /// is the message they see, so the agent speaks plainly and deliberately.
-    Chat,
+    HumanPresent,
     #[default]
-    #[serde(other)]
     Headless,
 }
 
@@ -148,8 +138,7 @@ impl Surface {
     pub fn instructions(self) -> &'static str {
         match self {
             Self::Headless => loopflow_definitions::builtins::SURFACE_HEADLESS,
-            Self::Chat => loopflow_definitions::builtins::SURFACE_CHAT,
-            _ => loopflow_definitions::builtins::SURFACE_HUMAN_PRESENT,
+            Self::HumanPresent => loopflow_definitions::builtins::SURFACE_HUMAN_PRESENT,
         }
     }
 }
@@ -158,15 +147,10 @@ impl std::str::FromStr for Surface {
     type Err = std::convert::Infallible;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let surface = match value {
-            "cli" => Self::Cli,
-            "ide" => Self::Ide,
-            "mac" => Self::Mac,
-            "iphone" => Self::Iphone,
-            "chat" => Self::Chat,
+        Ok(match value {
+            "human-present" => Self::HumanPresent,
             _ => Self::Headless,
-        };
-        Ok(surface)
+        })
     }
 }
 
@@ -1876,23 +1860,13 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_interactive_surfaces_keep_questions_with_present_human() {
-        for surface in [Surface::Cli, Surface::Ide, Surface::Mac, Surface::Iphone] {
-            let components = PromptComponents {
-                surface,
-                ..Default::default()
-            };
-
-            let prompt = render_full_prompt(components);
-            assert!(
-                prompt.contains("Someone is in this conversation"),
-                "surface {surface:?}"
-            );
-            assert!(
-                prompt.contains("never\nstart another Session to reach them"),
-                "surface {surface:?}"
-            );
-        }
+    fn format_prompt_human_present_keeps_questions_with_present_human() {
+        let prompt = render_full_prompt(PromptComponents {
+            surface: Surface::HumanPresent,
+            ..Default::default()
+        });
+        assert!(prompt.contains("Someone is in this conversation"));
+        assert!(prompt.contains("never\nstart another Session to reach them"));
     }
 
     #[test]
@@ -2044,24 +2018,11 @@ mod tests {
     }
 
     #[test]
-    fn surface_parser_preserves_historical_ide() {
-        let parsed = "ide"
+    fn surface_parser_reads_human_present() {
+        let parsed = "human-present"
             .parse::<Surface>()
             .expect("surface parsing is infallible");
-        assert_eq!(parsed, Surface::Ide);
-    }
-
-    #[test]
-    fn chat_surface_speaks_plainly_and_is_distinct_from_headless() {
-        assert_eq!(
-            "chat".parse::<Surface>().expect("infallible"),
-            Surface::Chat
-        );
-        let chat = Surface::Chat.instructions();
-        assert!(chat.contains("live chat channel"));
-        assert!(chat.contains("Don't narrate how you work"));
-        assert_ne!(chat, Surface::Headless.instructions());
-        assert_ne!(chat, Surface::Cli.instructions());
+        assert_eq!(parsed, Surface::HumanPresent);
     }
 
     // ==========================================================================
@@ -2570,14 +2531,14 @@ mod tests {
 
         let opts = GatherContextOpts {
             repo_root: repo.to_path_buf(),
-            surface: Surface::Cli,
+            surface: Surface::HumanPresent,
             ..Default::default()
         };
 
         let result = gather_context(&opts);
         assert!(result.is_ok());
         let components = result.unwrap();
-        assert_eq!(components.surface, Surface::Cli);
+        assert_eq!(components.surface, Surface::HumanPresent);
     }
 
     #[test]

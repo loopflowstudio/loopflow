@@ -21,7 +21,7 @@ struct Args {
     #[arg(long)]
     skill: Option<String>,
 
-    /// Prompt surface (headless/cli/mac/iphone)
+    /// Prompt surface (headless/human-present)
     #[arg(long)]
     surface: Option<Surface>,
 

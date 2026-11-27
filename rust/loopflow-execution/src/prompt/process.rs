@@ -523,12 +523,7 @@ Test skill body.
         let tmp = create_repo_fixture();
         for agent in loopflow_harness::HarnessKind::ALL {
             let _selection = select_agent(agent.as_str());
-            for surface in [
-                Surface::Cli,
-                Surface::Mac,
-                Surface::Iphone,
-                Surface::Headless,
-            ] {
+            for surface in [Surface::HumanPresent, Surface::Headless] {
                 let prepared = prepare_process_prompt(
                     &default_test_config(),
                     ProcessPromptInput {
@@ -1011,8 +1006,8 @@ Test skill body.
         for (agent, surface) in [
             ("claude:sonnet", Surface::Headless),
             ("codex", Surface::Headless),
-            ("claude", Surface::Cli),
-            ("codex", Surface::Cli),
+            ("claude", Surface::HumanPresent),
+            ("codex", Surface::HumanPresent),
         ] {
             let _selection = select_agent(agent);
             let prepared = prepare_process_prompt(

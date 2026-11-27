@@ -7,7 +7,7 @@
   an agent started under `doppler run -c dev -- lf …` can read it, as it can
   every other secret in that config except `GH_TOKEN` and `OPENCODE_API_KEY`.
 - Assumed (made for review): `Surface` went to two variants in this change,
-  and the next pass deletes it for `harness::Mode`, with `lf-prompt --mode
+  and the pass after deleted it for `harness::Mode`, with `lf-prompt --mode
   headless|interactive` rejecting any other word. The steer named only
   `Surface::Chat`. Passed over: keeping "surface" as the prompt's own word
   for a future phone or unwatched-terminal prompt.
@@ -16,8 +16,12 @@
   `id`, with a removal Task filed in this change.
 - Assumed: one Task, LOO-1121, deletes both retired Wave keys. No existing
   Task named the `linear` key (`lf task list linear`), so it joins `chat`.
-- Assumed: the golden prompt cases parse `surface` with `FromStr` so the
-  serde derives could go; keeping the derive would spell the variant
-  `human_present` in YAML and `human-present` on the command line.
+- Assumed: the golden prompt cases parse `mode` with Clap's `ValueEnum`, as
+  `lf-prompt --mode` does, so the two words have one spelling and `Mode`
+  needs no serde derive.
+- Assumed: `Mode::default()` is headless, as `Surface`'s was, so
+  `GatherContextOpts` and `PromptComponents` keep `Default`.
+- Not checked: whether `builtin_skills_use_the_application_fallback` fails at
+  the parent commit on this Machine; it reads installed harnesses and logins.
 - Not checked: whether `lf discord serve` runs on a Machine other than this
   one and 100.96.227.95.

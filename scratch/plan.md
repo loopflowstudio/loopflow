@@ -59,40 +59,30 @@ Passed: execution `work::wave::config::` (7), the surface and prompt tests
 `cargo check -p loopflow --all-targets`, `scripts/check_architecture.py`.
 Left to CI: clippy, `lf::tests::`, `documented_commands::`, the suites.
 
-## Remaining: one pass
+- The prompt takes the launch's `harness::Mode`; `prompt::Surface` is deleted
+  (b95737849e). Made for review (concept review question 1a). Nothing needed the
+  prompt's value to differ from the launch's mode. Fields are named `mode`;
+  `Mode` gained `Default` (headless), `clap::ValueEnum` and `instructions()`.
+  Kept under the old word: `Kind::SurfaceInstructions`, `SURFACE_*` and
+  `builtins/surfaces/*.md` (trace kind and file names), and the recorded
+  Session `surface` string (deferred, below). Attribution labels now read
+  "Headless mode" / "Interactive mode".
 
-**The prompt takes the launch's `Mode`; `Surface` is deleted.** Made for
-review, not settled (concept review question 1a). After §2, `Surface {
-HumanPresent, Headless }` is `harness::Mode { Interactive, Headless }` under
-a second name: `run.rs:471-511` converts one into the other, and no launch
-sets them differently.
+What a run showed (2026-11-26): `lf-prompt --mode cli` exits 2 with "invalid
+value 'cli' for '--mode <MODE>' [possible values: interactive, headless]";
+`--surface headless` is "unexpected argument". `golden_prompt` passed with
+the rendered files untouched; `context_tests::` 16 passed; execution
+`prompt::` 101 passed, 1 failed:
+`prompt::process::tests::builtin_skills_use_the_application_fallback` got
+"opencode" where it expects "codex". It passes `Mode::Headless` as it passed
+`Surface::Headless`; the agent comes from `MachineAgents::choose`, which
+probes this Machine's installed harnesses and logins before the mode is
+read. Not run at the parent commit. Left to CI.
 
-- `Mode::instructions()` returns `SURFACE_HEADLESS` or
-  `SURFACE_HUMAN_PRESENT`; the two instruction files and their text stay.
-- `prompt::Surface`, its `FromStr` and its two parser tests go. Fields typed
-  `Surface` (`prompt/mod.rs:100,160`, `prompt/process.rs:27`) become `Mode`;
-  the conversion in `run.rs` goes; `agent/availability.rs:26-29` and
-  `ops/sync_execution.rs:294` take `Mode`.
-- `lf-prompt --surface` becomes `--mode headless|interactive`, a Clap value
-  enum, so a wrong word is an error naming the two. Callers:
-  `tests/e2e/test_smoke.sh`, `scripts/evals/instruction_levels.py`.
-- Golden cases (`tests/goldens/*.yaml`) rename the key to `mode`; rendered
-  prompts stay byte-identical. `context_tests.rs`, `golden_prompt.rs` follow.
+## Remaining
 
-Passed over: keeping `Surface` as the prompt module's own word (1c), because
-a phone or an unwatched held terminal may want its own instructions. No such
-launch exists; a third value brings a prompt type back on that day. Also
-passed over: doing it as its own Task after landing (1b); every file but
-`availability.rs` and `sync_execution.rs` is already in this diff.
-
-It will teach whether anything reads the prompt's value apart from the
-launch's mode: if a caller needs them to differ, the type stays and this
-section is rewritten.
-
-Check: `cargo check -p loopflow --all-targets`; execution `prompt::`;
-`golden_prompt`; `context_tests`; `lf-prompt --mode cli` exits non-zero.
-
-Then: review, PR, land.
+Review, PR, land. Deferred: typing the recorded Session `surface` string
+(`run.rs` `surface: &str`, `SessionCaptureSpec.surface`).
 
 ## Acceptance check
 

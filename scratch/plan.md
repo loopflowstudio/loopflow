@@ -1,6 +1,7 @@
 # LOO-1118: rentals receive a repository-scoped, expiring GitHub token
 
-Nothing is built. `scratch/concept-review.html` (at `6d9c5c7988`) reviewed the
+Pass 1 is built; Passes 2 and 3 wait on the GitHub App's client id (see
+"Needs a person"). `scratch/concept-review.html` (at `6d9c5c7988`) reviewed the
 kickoff plan; its findings are folded in below and listed under "Review".
 
 ## Outcome
@@ -240,10 +241,13 @@ Survives: Linear's renewed token, OpenCode and Codex sign-in when listed in
 
 ## Passes
 
-1. **What needs no app.** First contact (`-a -x`, Daytona host key, userinfo
-   redaction, `q()`); the empty-`logins` change, its error message and docs.
-   Delivers: a rental stops receiving the SSH agent and logins nobody listed.
-   Teaches nothing about the token.
+1. **What needs no app.** Built at `efaa6313d3`: first contact `-a -x`, Daytona
+   host key kept, `ssh://user@` elided in `connection_failure`, `q()` on the
+   repository id, empty `logins` signs in to no agent. Nothing learned about
+   the token. The docs for Passes 2 and 3 are already written, so
+   `docs/subscriptions.md`, `docs/ops.md` and `docs/security.md` describe a
+   GitHub token rentals do not hold yet, and `documented_commands` fails on
+   `lf ondemand login github`. This branch does not land before Pass 3.
 2. **Mint and prove.** Needs the registered app. Grant table and migration,
    the compiled client id, `lf ondemand login github`, refresh, and the four
    probes. Shows whether refresh keeps the restriction; if it does not, the

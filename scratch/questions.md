@@ -47,3 +47,16 @@
   app is registered.
 - **`lf ondemand login github` is in the docs before Clap has it**, so
   `documented_commands` fails until Pass 2.
+
+## Raised by Pass 1
+
+- **Owned Machines added as `ssh://jack@mini` lose the user in errors too.**
+  The elision is by route shape, not by rental, so the suggested
+  `ssh -- 'ssh://…@mini'` cannot be pasted. A plain `jack@mini` is untouched.
+  Narrowing it to rentals needs the caller to say which a route is.
+- **The no-agent error names `--logins codex` on `lf ondemand add <name>`.**
+  There is no command that edits a saved template's logins; `add` again with
+  the full flag set is the only way.
+- **Land Pass 1 alone?** The first-contact and `logins` fixes are real without
+  the app. Landing them alone means pulling the Pass 2 and 3 docs out of this
+  branch and the token work taking a second Task.

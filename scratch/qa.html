@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1119 QA: the Discord bridge is gone and launches read the same</title>
+<style>
+:root {
+  --background: #faf8f5; --surface: #fffdf9; --surface-muted: #f3eee7;
+  --border: #e6dfd6; --border-strong: #d6ccc0;
+  --text: #2a2624; --text-secondary: #5f5752;
+  --accent: #722f37;
+  --warning-ink: #7f5a19; --warning-fill: #e4dccd;
+  --failure-ink: #a64038; --failure-fill: #ecd9d5;
+  --success-ink: #386c48; --success-fill: #d7dfd6;
+  --font-serif: 'Old Standard TT', Georgia, serif;
+  --font-sans: 'Atkinson Hyperlegible Next', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'Spline Sans Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #1b1817; --surface: #23201e; --surface-muted: #2b2725;
+    --border: #3a3431; --border-strong: #4a433f;
+    --text: #ece6df; --text-secondary: #b3a9a1;
+    --accent: #d98a94;
+    --warning-ink: #d9b66a; --warning-fill: #3a3222;
+    --failure-ink: #e59a92; --failure-fill: #402825;
+    --success-ink: #93c7a1; --success-fill: #25342a;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--background); color: var(--text);
+  font: 16px/1.55 var(--font-sans); }
+main { max-width: 1040px; margin: 0 auto; padding: 48px 24px 96px; }
+h1 { font: 400 38px/1.15 var(--font-serif); margin: 0 0 12px; }
+h2 { font: 400 26px/1.2 var(--font-serif); margin: 56px 0 12px; }
+h3 { font-size: 17px; margin: 28px 0 6px; }
+p { margin: 0 0 12px; max-width: 74ch; }
+.lede { font-size: 18px; color: var(--text-secondary); }
+code, pre { font-family: var(--font-mono); font-size: 13.5px; }
+code { background: var(--surface-muted); padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 14px 16px; overflow-x: auto; margin: 0 0 12px; line-height: 1.5; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0 8px; font-size: 15px; }
+th { text-align: left; font-weight: 600; color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-strong); padding: 8px 10px; }
+td { vertical-align: top; border-bottom: 1px solid var(--border); padding: 10px; }
+.tag { display: inline-block; font-size: 12.5px; font-weight: 600; padding: 1px 8px;
+  border-radius: 999px; white-space: nowrap; }
+.ok { color: var(--success-ink); background: var(--success-fill); }
+.note { color: var(--warning-ink); background: var(--warning-fill); }
+.open { color: var(--failure-ink); background: var(--failure-fill); }
+.callout { border-left: 3px solid var(--accent); background: var(--surface);
+  padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 16px 0; }
+ul { padding-left: 20px; max-width: 74ch; }
+li { margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<main>
+<h1>The Discord bridge is gone and launches read the same</h1>
+<p class="lede">QA for LOO-1119 at <code>e8ca4c18b9</code>, run 2026-11-26 with
+this checkout's <code>target/debug/lf</code> against the installed
+<code>lf 0.16.0+6c2560bd0</code>, in disposable repositories under
+<code>/tmp/lf-qa-dsc</code> with a private <code>HOME</code> and
+<code>LF_HOME</code> and a stand-in <code>claude</code> that records what it
+is handed.</p>
+
+<div class="callout">Nothing broke and nothing was fixed. Every launch kind
+gets a byte-identical system prompt from both builds. The one thing that
+changed for a launched agent is the one the plan names:
+<code>LF_DISCORD_TOKEN</code> now reaches it. The bot's token is still not
+revoked.</div>
+
+<h2>Scenarios</h2>
+<table>
+<tr><th>What I did</th><th>What I saw</th><th></th></tr>
+<tr><td>Ran the removed command three ways</td>
+<td><code>lf discord serve product</code>, <code>lf discord</code> and
+<code>lf help discord</code> each exit 2 with "skill or graph not found:
+discord". <code>lf help</code> and <code>lf help --all</code> hold no Discord
+line; the installed build's <code>lf help discord</code> still prints "Bridge
+new Discord messages to finite Wave Sessions".</td>
+<td><span class="tag ok">works</span></td></tr>
+<tr><td>Headless batch, both builds:<br><code>lf -b -a claude probe 'hello there'</code></td>
+<td>Same argv, same first user message, and the 5,796-byte
+<code>session.context.md</code> is identical. It ends "Run mode is headless.
+Nobody is in this conversation…". Recorded <code>"surface": "headless"</code>.</td>
+<td><span class="tag ok">works</span></td></tr>
+<tr><td>Attended chat in a PTY, both builds:<br><code>script -q /dev/null lf -a claude probe 'hello there'</code></td>
+<td>The 5,502-byte <code>probe.context.md</code> is identical and ends
+"Someone is in this conversation. Ask here when a decision needs them…".
+Recorded <code>"surface": "tui"</code>.</td>
+<td><span class="tag ok">works</span></td></tr>
+<tr><td>A Task on a private branch server, Graph <code>- step: probe</code>
+then <code>- interactive: demo</code>:<br><code>lf task create 'Say hello from the qa graph' --run --json</code></td>
+<td>The Task's own conversation got the interactive text; the Graph worker
+(<code>-p</code>) got the headless text. No error or panic in the server log
+or <code>logs/lf.log</code>.</td>
+<td><span class="tag ok">works</span></td></tr>
+<tr><td>Set <code>LF_DISCORD_TOKEN</code> and <code>GH_TOKEN</code> to fake
+values in the launching shell</td>
+<td>Installed: the provider's environment has no
+<code>LF_DISCORD_TOKEN</code>. Branch: it is there in the batch, the Task
+conversation and the Graph worker. Nothing else differs between the two
+environments' variable names. <code>GH_TOKEN</code> is still removed from the
+Graph worker.</td>
+<td><span class="tag note">as planned</span></td></tr>
+<tr><td>Returning Wave: made with the installed <code>lf wave create talk</code>,
+then a <code>chat:</code> block, a <code>linear:</code> block,
+<code>agent: claude:haiku</code> and <code>bogus_key: 1</code> in its
+<code>config.yaml</code></td>
+<td><code>lf --wave talk config settings</code> prints the same output from
+both builds: one warning, for <code>bogus_key</code>, and
+<code>agent claude:haiku · Shared Wave</code>. <code>lf wave list</code> and
+<code>lf wave show talk</code> read it. A batch launch in the Wave passes
+<code>--model haiku</code>.</td>
+<td><span class="tag ok">works</span></td></tr>
+<tr><td>Wrong shape: <code>chat: 3</code></td>
+<td>No warning, no error; the agent setting still applies.</td>
+<td><span class="tag ok">works</span></td></tr>
+<tr><td><code>config.yaml</code> deleted, the same keys in <code>GOAL.md</code>
+frontmatter, then<br><code>lf --wave talk config set --shared agent claude:sonnet</code></td>
+<td>Settings read from the frontmatter with no warning. The edit writes a
+<code>config.yaml</code> that carries <code>id</code>, <code>chat</code> and
+<code>linear</code> along with the new agent, and the installed build then
+reads <code>claude:sonnet</code> from it.</td>
+<td><span class="tag ok">works</span></td></tr>
+<tr><td><code>lf-prompt</code></td>
+<td><code>--mode cli</code>: "invalid value 'cli' for '--mode &lt;MODE&gt;'
+[possible values: interactive, headless]", exit 2.
+<code>--surface headless</code>: "unexpected argument '--surface' found".
+Help reads "Whether someone is in the conversation the prompt opens".</td>
+<td><span class="tag ok">works</span></td></tr>
+<tr><td>Leftovers in what ships</td>
+<td><code>git grep -i discord -- rust swift docs python</code> finds nothing.
+<code>lf docs work|sessions|security|glossary</code> hold no "discord" or
+"chat:". What remains is the community invite link, release notes and two
+Wave <code>MEMORY.md</code> lines.</td>
+<td><span class="tag ok">works</span></td></tr>
+</table>
+
+<h2>Transcripts</h2>
+<h3>The removed command</h3>
+<pre>$ target/debug/lf discord serve product
+error: skill or graph not found: discord. Run `lf list skill` or `lf list graph` to discover definitions, or `lf : &lt;message&gt;` to send a message
+[exit 2]</pre>
+
+<h3>What a Task's two launches were told</h3>
+<pre>claude --name '34946c Say hello from' … --append-system-prompt-file …-task-session.context.md
+  Someone is in this conversation. Ask here when a decision needs them; never
+  start another Session to reach them. Start a separate contribution only for
+  independent work.
+  GH_TOKEN=qa-fake-gh
+  LF_DISCORD_TOKEN=qa-fake-discord
+
+claude -p --replay-user-messages --input-format stream-json … --append-system-prompt-file …-session.context.md
+  Run mode is headless. Nobody is in this conversation, so don't ask questions or
+  wait for a reply.
+  LF_DISCORD_TOKEN=qa-fake-discord</pre>
+
+<h3>Provider environment, installed against branch (variable names)</h3>
+<pre>15a16
+&gt; LF_DISCORD_TOKEN</pre>
+
+<h3>A Wave that still carries the block</h3>
+<pre>$ lf --wave talk config settings        # same from both builds
+warning: …/.lf/wave/talk/config.yaml:9: skipping bogus_key: unknown setting
+
+  Agents and context
+  SETTING  VALUE         FROM
+  agent    claude:haiku  Shared Wave</pre>
+
+<h2>Left behind</h2>
+<ul>
+<li>The private server and its holder were stopped by PID; no
+<code>target/debug/lf</code> process remains and no launchd job was
+registered for the private home.</li>
+<li><code>/tmp/lf-qa-dsc</code> holds the repositories, homes and captures.</li>
+<li><code>.lf/qa/launch-prompt.md</code> records how to compare what two
+builds hand a provider and how to drive Wave config keys.</li>
+</ul>
+
+<h2>Not reached</h2>
+<ul>
+<li>Codex, OpenCode, Pi and Antigravity launches. The mode text is composed
+before the harness is chosen; only Claude was driven.</li>
+<li>A real provider: every launch used the stand-in.</li>
+<li>Desktop. No Swift source changed.</li>
+<li>Clippy and the test suites, left to CI. The plan's one local failure,
+<code>builtin_skills_use_the_application_fallback</code>, was not rerun here
+or at the parent commit.</li>
+<li>Whether <code>lf discord serve</code> runs on another Machine.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ul>
+<li><span class="tag open">open</span> The Discord bot's token is still in
+Doppler <code>loopflow/dev</code> and no longer stripped, so after this merges
+a launch under that config hands it to the agent, and an installed
+<code>lf</code> older than this change can still run the bridge. Revoking it
+is a person's step.</li>
+<li><span class="tag note">not this change</span> A launch in a Wave prints
+each unknown-setting warning twice, on the installed build as well.</li>
+<li><span class="tag note">not this change</span> This Machine's
+<code>~/.lf/config.yaml:30</code> has
+<code>skills.security-review.deafult_agent</code>, a misspelt key that every
+<code>lf</code> command warns about and skips.</li>
+</ul>
+</main>
+</body>
+</html>

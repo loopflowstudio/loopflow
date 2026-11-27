@@ -130,3 +130,21 @@
   tokens of one repository never share an `expires_at`. A renewal within the
   same second would; a counter on the grant would not.
 - **Does the ten-token limit cover App user tokens?** Probe 5 in the plan.
+
+## Raised by Pass 4
+
+- **7 hours left counts as new.** Made with nobody here. A rental whose
+  deadline is past the token's expiry keeps a token with 7 h or more left
+  instead of renewing; it still stops before the rental does, and placement
+  prints when. The number is a guess between "renew every time" and "never".
+- **An ending can wait on a person.** The per-repository lock waits, and an
+  approval holds it while a code is typed. `lf machine end` and the server's
+  rental check for that repository wait with it, up to the code's 15 minutes.
+  A bounded wait for endings would leave the token to its own expiry instead.
+- **`lf ondemand login github` now reaches rentals over SSH** when the
+  repository has running ones, to send them the newly approved token.
+- **A rental whose provider deleted it** is tried over SSH by every settle of
+  its repository, and named each time, until this Machine reads it ended.
+- **A template that listed `github` or `linear` shows without them** in
+  `lf ondemand list`; the words stay in `~/.lf/config.yaml` until the
+  template is added again.

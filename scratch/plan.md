@@ -1,84 +1,10 @@
 # LOO-1118: rentals receive a repository-scoped, expiring GitHub token
 
-Passes 1, 2 and 3 are built and tested against a stand-in GitHub. Pass 4
-remains: see "Pass 4". Nothing has run against GitHub's real app or a real
-rental; the probes under "Unanswered until the app exists" need a person
-twice: see "Needs a person now". `scratch/concept-review.html` (written at
-`ca1dcb82d3`) reviewed the build; where each finding went is under "Review".
-
-## Pass 4: a rental's GitHub access is a record (remaining)
-
-Made for review, nobody was here to ask; none of it is settled.
-
-What the build showed (`credentials.rs` `connect_rental`, `rental/github.rs`):
-who needs a new token is known only inside the call that renewed.
-`connect_rental` renews, then `send(machine, …)?` returns on a failed SSH
-before the loop that re-sends to the repository's other rentals. They hold a
-dead token, nothing names them, and the retried placement finds a token that
-already covers it, so `renewed` is false and nobody is re-sent.
-
-Delivers:
-
-- **What each rental was sent.** `rentals` gains the expiry of the token the
-  rental was last sent, beside `github_repository_id` (same unmerged
-  migration, edited in place). A rental is behind when that is not its
-  repository's current `expires_at`.
-- **One step, settle a repository:** renew when the token does not cover its
-  live rentals; send to every live rental that is behind and record each send
-  that lands; with no live rental left, renew once so the last token stops.
-  Placement, `lf machine login github <rental>`, an ending and a replacement
-  (a rental signed in from another checkout) call it for each repository they
-  touched. A failed send names the rental and leaves it behind; the next
-  settle of that repository, from any command, sends it. `RentalToken.renewed`,
-  `RentalToken.replaced`, `RentalGithub.others` and `retire_token` as its own
-  rule go. A replaced repository with no holder left is retired, which the
-  build never does.
-- **The token before the rental.** `place` asks for a token that lasts until
-  the template's deadline before `rent`. A missing approval, a refused
-  renewal, a changed `gh` account, GitHub unreachable and a missing install
-  all stop before anything is billed; after renting only the SSH send is
-  left. `approve_first_rental` goes: it passes on any row
-  (`github.rs:408`), while `token_for` after renting needs a row for this
-  account that GitHub still renews.
-- **The lock is per repository and waits.** `credential_lock("github")` is one
-  file for every repository, refuses when held (`credentials.rs:702`), and is
-  held while a person types a code. Two placements of one repository show one
-  code; different repositories do not meet; an ending waits and makes its cut.
-- **The install link above the code,** every time a code is shown:
-  `First install the app on <owner/name>: https://github.com/apps/loopflow-studio`.
-  `lf` cannot see the install beforehand; only a token from this app can ask.
-- **One door.** `prepare` and `lf machine login github <rental>` differ only
-  in where the repository comes from; the GitHub branch in `prepare` and the
-  current-directory read inside `connect` become one argument.
-- **`--logins github` or `linear` on `lf ondemand add` is refused** with
-  "GitHub and Linear are signed in whenever the repository uses them;
-  --logins takes codex or opencode". Saved templates keep loading; the words
-  are dropped when read. Passed over: accepting them silently, as built.
-
-Counterexample kept: a rental its provider deleted still gets an SSH attempt
-until this Machine notices; the send fails, is logged, and stops when the
-rental reads ended.
-
-Passed over: sending to the others before the new rental, or ignoring the
-first send's error. It fixes the stranded rental and leaves a failed re-send
-unrecorded.
-
-Acceptance added, same stand-ins as below:
-
-- The send to a new rental fails after a renewal; the repository's other live
-  rental is still sent the new token, by that call or by the next command
-  that settles the repository, with no flag carried between them.
-- A rental signed in from a second repository's checkout: the first
-  repository's token stops working when no other rental holds it.
-- A stored grant GitHub refuses to renew, no terminal: placement fails before
-  `admit_rental`.
-- Two placements of one repository at once: both finish, one code shown.
-- `lf ondemand add --logins github` fails with the sentence above; a saved
-  template listing `github` loads.
-
-Teaches: whether one settle step can carry placement, renewal by hand, ending
-and replacement without the three flags, and so whether the deferred
-automatic renewal is one call from the server's rental visit.
+Passes 1 to 4 are built and tested against a stand-in GitHub; no planned
+pass remains. Nothing has run against GitHub's real app or a real rental; the
+probes under "Unanswered until the app exists" need a person twice: see
+"Needs a person now". `scratch/concept-review.html` (written at `ca1dcb82d3`)
+reviewed the Pass 3 build; where each finding went is under "Review".
 
 ## Needs a person now
 
@@ -218,8 +144,8 @@ no Task, and `mark_ended` hands the Tasks back first. One migration
 
 ## Behavior
 
-As built through Pass 3; Pass 4 above changes the approval check, the
-re-send, the ending and `--logins`.
+As planned through Pass 3; Pass 4 (under "Passes") replaced the approval
+check, the re-send, the ending and `--logins` described here.
 
 - **Approve** at the first placement of a repository from a terminal, inside
   `lf task run --rent`, before anything is rented, where `prepare` already
@@ -394,7 +320,35 @@ Survives: Linear's renewed token, OpenCode and Codex sign-in when listed in
    `admit_rental`) is read from the code; the stop itself is
    `no_terminal_and_no_command_approver_asks_github_for_nothing`. No
    placement was run against a real rental.
-4. **A rental's access is a record.** Remaining; see "Pass 4" at the top.
+4. **A rental's access is a record.** Built at `b12b2c59e3`, made for review:
+   `rentals.github_token_expires_at`; one step `github::settle` called by
+   placement (`settle_before_renting`, before `rent`), `github::sign_in`
+   (the one door, reached through `login::login`'s new `repo` argument),
+   endings and a rental moved to another repository (`settle_unattended`);
+   a per-repository lock that waits; the install link above every code;
+   `--logins github|linear` refused at `add` and dropped on read.
+   `RentalToken`, `connect_rental`, `RentalGithub`, `approve_first_rental`
+   and `retire_token` are gone. What it taught: one step does carry all four
+   callers with no flag between them, so the deferred automatic renewal is
+   `settle_unattended(repository_id)` from the server's rental visit.
+   Changed from the plan:
+   - **A token with 7 hours left counts as new** (`AS_GOOD_AS_NEW`). Without
+     it a rental past 8 h makes every settle renew, endings included, and a
+     placement would renew twice (before and after renting).
+   - **A sign-in clears what the rental was recorded as sent,** so
+     `lf machine login github <rental>` always sends; a settle from any other
+     caller skips rentals recorded as current.
+   - **Placement asks for 10 minutes past the quoted deadline**
+     (`ADMISSION_MARGIN`): the rental's own deadline is set at admission,
+     moments later.
+   - **`lf ondemand login github` sends the new token** to that repository's
+     running rentals, since a new approval makes them behind.
+   - The lock is taken with `spawn_blocking`; an ending waits behind a person
+     typing a code (up to the code's 15 minutes), the server's rental check
+     included.
+   Not covered by a test: the order in `place` (settle before `rent`) is read
+   from the code; the install link is printed, not asserted; SSH itself is
+   stood in by `credentials::TEST_SENDS`.
 
 ## Acceptance
 

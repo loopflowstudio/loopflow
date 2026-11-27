@@ -147,7 +147,7 @@ alone does not revoke it. Revoke first, then delete.
 ## Exclusions
 
 - Release notes that mention Dependabot: shipped records, unchanged.
-- The compiler, uv, nextest, xcodegen and the runner image (decision above).
+- The compiler, uv, xcodegen and the runner image (decision above).
 - A written procedure or cadence for hand bumps. "By hand" means an ordinary
   Task; `third_party/README.md` already covers the notice inventory.
 - Turning off Dependabot alerts. They notify and open nothing.

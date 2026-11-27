@@ -1426,6 +1426,7 @@ impl MachineCommand {
             Self::Ondemand { cmd } => match cmd {
                 OndemandCommand::List { .. } => false,
                 OndemandCommand::Add { .. }
+                | OndemandCommand::Login { .. }
                 | OndemandCommand::Max { .. }
                 | OndemandCommand::Rent { .. }
                 | OndemandCommand::Remove { .. } => true,
@@ -3226,6 +3227,11 @@ pub enum OndemandCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Approve a service for the rentals of the repository this checkout is of
+    Login {
+        #[arg(value_enum)]
+        service: RentalService,
+    },
     /// Change how many machines it rents at once; current machines stay
     Max { name: String, max: u32 },
     /// Rent a machine by hand; it lasts until its hours, its cap or `lf machine end`
@@ -3241,6 +3247,13 @@ pub enum OndemandCommand {
     },
     /// Forget it; its rentals' history stays
     Remove { name: String },
+}
+
+/// A service rentals sign in to with a login narrower than this Machine's own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum RentalService {
+    /// A token for the one repository, as you, renewed here
+    Github,
 }
 
 #[derive(Debug, Subcommand)]

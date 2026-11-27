@@ -53,7 +53,7 @@ pub(crate) async fn connect(
     let credential = match provider {
         Provider::GitHub => {
             let token = gh_token()?;
-            let login = github_login(token.expose_secret()).await?;
+            let login = crate::rental::github::login_of(token.expose_secret()).await?;
             if remote_has(machine, provider, &login).await? {
                 return Ok(());
             }
@@ -145,7 +145,7 @@ fn send(machine: &Machine, credential: &Credential) -> Result<()> {
     Ok(())
 }
 
-fn gh_token() -> Result<SecretString> {
+pub(crate) fn gh_token() -> Result<SecretString> {
     let output = Command::new("gh")
         .args(["auth", "token", "--hostname", "github.com"])
         .stderr(Stdio::null())
@@ -166,7 +166,7 @@ fn connecting(machine: &Machine, provider: Provider, login: &str) {
     );
 }
 
-fn foreground(batch: bool) -> bool {
+pub(crate) fn foreground(batch: bool) -> bool {
     use std::io::IsTerminal;
     // SAFETY: querying this process and stdin's foreground process group does not mutate either.
     let foreground = unsafe { libc::tcgetpgrp(libc::STDIN_FILENO) == libc::getpgrp() };
@@ -354,7 +354,7 @@ async fn install(store: &SharedStore, credential: Credential) -> Result<()> {
             if installed(store, Provider::GitHub, &login).await? {
                 return Ok(());
             }
-            if github_login(&token).await? != login {
+            if crate::rental::github::login_of(&token).await? != login {
                 bail!("GitHub credential identity mismatch");
             }
             let mut child = Command::new("gh")
@@ -559,33 +559,6 @@ fn credential_lock(provider: &str) -> Result<fs::File> {
         .open(directory.join(format!(".{provider}.machine-login.lock")))?;
     fs2::FileExt::try_lock_exclusive(&file).context("another machine login is in progress")?;
     Ok(file)
-}
-
-async fn github_login(token: &str) -> Result<String> {
-    #[cfg(test)]
-    let endpoint = std::env::var("LF_TEST_MACHINE_GITHUB_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:1/user".into());
-    #[cfg(not(test))]
-    let endpoint = "https://api.github.com/user";
-    let response = reqwest::Client::new()
-        .get(endpoint)
-        .header("User-Agent", "loopflow")
-        .bearer_auth(token)
-        .timeout(std::time::Duration::from_secs(15))
-        .send()
-        .await
-        .map_err(|_| anyhow!("GitHub identity request failed"))?;
-    if !response.status().is_success() {
-        bail!("GitHub rejected credential identity request");
-    }
-    let value: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|_| anyhow!("invalid GitHub identity response"))?;
-    value["login"]
-        .as_str()
-        .map(str::to_string)
-        .ok_or_else(|| anyhow!("GitHub identity missing login"))
 }
 
 async fn linear_login(token: &str) -> Result<String> {

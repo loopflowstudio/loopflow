@@ -250,6 +250,21 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
                 print_ondemand(listing);
             }
         }
+        OndemandCommand::Login {
+            service: crate::lf::RentalService::Github,
+        } => {
+            let (repository, login) = loopflow_execution::runtime::block_on(
+                loopflow_execution::rental::github::approve(
+                    sqlite,
+                    &std::env::current_dir()?,
+                    batch,
+                ),
+            )?;
+            println!(
+                "GitHub approved for {repository} as {login}; its rentals hold a token for \
+                 that repository only"
+            );
+        }
         OndemandCommand::Max { name, max } => {
             loopflow_execution::store::rentals::set_ondemand_max(sqlite, name, *max)?;
             println!("{name} rents at most {max} at once; current machines stay");

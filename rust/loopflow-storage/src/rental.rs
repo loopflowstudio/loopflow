@@ -883,6 +883,21 @@ pub fn give_back(
     GiveBack::End
 }
 
+/// The GitHub App user token one repository's rentals hold, and the grant that
+/// renews it. The grant never leaves this Machine.
+// Deliberately no Debug: tokens must never be logged.
+#[derive(Clone, PartialEq, Eq)]
+pub struct GithubRentalGrant {
+    /// GitHub's numeric repository id: the one repository the token reaches.
+    pub repository_id: i64,
+    /// `owner/name`, as GitHub spells it.
+    pub repository: String,
+    pub login: String,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: OffsetDateTime,
+}
+
 #[cfg(test)]
 #[path = "rental_tests.rs"]
 mod tests;

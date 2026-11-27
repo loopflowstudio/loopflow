@@ -86,6 +86,16 @@ lf --machine mini -a codex implement
   next checks, or the 8 hours pass. Codex, OpenCode and the forwarded Claude
   token are not narrowed for a rental: list in `--logins` only what the work
   needs. See [Rentals](subscriptions.md#rentals).
+- **The Loopflow Studio GitHub App:** installing it on a repository trusts
+  its owner, the `loopflowstudio` organization, with that repository. `lf`
+  holds only the app's public client id, and Loopflow runs no server and keeps
+  no key for it. An administrator of that organization can still create a key
+  for the app, and a key mints tokens for every repository the app is
+  installed on, with its permissions: contents, pull requests and workflows
+  write. Install it only on repositories you rent for, and uninstall it to end
+  that trust. Because the client id is public, anyone can start an approval
+  under the app's name: enter a device code only when your own `lf` printed
+  it.
 - **SSH agent forwarding:** SSH agent forwarding remains opt-in with
   `lf --machine <machine> --forward-agent`. A rental's first connection
   forwards neither the agent nor X11.

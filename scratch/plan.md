@@ -1,10 +1,84 @@
 # LOO-1118: rentals receive a repository-scoped, expiring GitHub token
 
-Passes 1, 2 and 3 are built; no pass remains. Nothing has run against
-GitHub's real app or a real rental. The four probes under "Unanswered until the app exists" need a person
-twice: see "Needs a person now". `scratch/concept-review.html` (at
-`6d9c5c7988`) reviewed the kickoff plan; its findings are folded in below and
-listed under "Review".
+Passes 1, 2 and 3 are built and tested against a stand-in GitHub. Pass 4
+remains: see "Pass 4". Nothing has run against GitHub's real app or a real
+rental; the probes under "Unanswered until the app exists" need a person
+twice: see "Needs a person now". `scratch/concept-review.html` (written at
+`ca1dcb82d3`) reviewed the build; where each finding went is under "Review".
+
+## Pass 4: a rental's GitHub access is a record (remaining)
+
+Made for review, nobody was here to ask; none of it is settled.
+
+What the build showed (`credentials.rs` `connect_rental`, `rental/github.rs`):
+who needs a new token is known only inside the call that renewed.
+`connect_rental` renews, then `send(machine, …)?` returns on a failed SSH
+before the loop that re-sends to the repository's other rentals. They hold a
+dead token, nothing names them, and the retried placement finds a token that
+already covers it, so `renewed` is false and nobody is re-sent.
+
+Delivers:
+
+- **What each rental was sent.** `rentals` gains the expiry of the token the
+  rental was last sent, beside `github_repository_id` (same unmerged
+  migration, edited in place). A rental is behind when that is not its
+  repository's current `expires_at`.
+- **One step, settle a repository:** renew when the token does not cover its
+  live rentals; send to every live rental that is behind and record each send
+  that lands; with no live rental left, renew once so the last token stops.
+  Placement, `lf machine login github <rental>`, an ending and a replacement
+  (a rental signed in from another checkout) call it for each repository they
+  touched. A failed send names the rental and leaves it behind; the next
+  settle of that repository, from any command, sends it. `RentalToken.renewed`,
+  `RentalToken.replaced`, `RentalGithub.others` and `retire_token` as its own
+  rule go. A replaced repository with no holder left is retired, which the
+  build never does.
+- **The token before the rental.** `place` asks for a token that lasts until
+  the template's deadline before `rent`. A missing approval, a refused
+  renewal, a changed `gh` account, GitHub unreachable and a missing install
+  all stop before anything is billed; after renting only the SSH send is
+  left. `approve_first_rental` goes: it passes on any row
+  (`github.rs:408`), while `token_for` after renting needs a row for this
+  account that GitHub still renews.
+- **The lock is per repository and waits.** `credential_lock("github")` is one
+  file for every repository, refuses when held (`credentials.rs:702`), and is
+  held while a person types a code. Two placements of one repository show one
+  code; different repositories do not meet; an ending waits and makes its cut.
+- **The install link above the code,** every time a code is shown:
+  `First install the app on <owner/name>: https://github.com/apps/loopflow-studio`.
+  `lf` cannot see the install beforehand; only a token from this app can ask.
+- **One door.** `prepare` and `lf machine login github <rental>` differ only
+  in where the repository comes from; the GitHub branch in `prepare` and the
+  current-directory read inside `connect` become one argument.
+- **`--logins github` or `linear` on `lf ondemand add` is refused** with
+  "GitHub and Linear are signed in whenever the repository uses them;
+  --logins takes codex or opencode". Saved templates keep loading; the words
+  are dropped when read. Passed over: accepting them silently, as built.
+
+Counterexample kept: a rental its provider deleted still gets an SSH attempt
+until this Machine notices; the send fails, is logged, and stops when the
+rental reads ended.
+
+Passed over: sending to the others before the new rental, or ignoring the
+first send's error. It fixes the stranded rental and leaves a failed re-send
+unrecorded.
+
+Acceptance added, same stand-ins as below:
+
+- The send to a new rental fails after a renewal; the repository's other live
+  rental is still sent the new token, by that call or by the next command
+  that settles the repository, with no flag carried between them.
+- A rental signed in from a second repository's checkout: the first
+  repository's token stops working when no other rental holds it.
+- A stored grant GitHub refuses to renew, no terminal: placement fails before
+  `admit_rental`.
+- Two placements of one repository at once: both finish, one code shown.
+- `lf ondemand add --logins github` fails with the sentence above; a saved
+  template listing `github` loads.
+
+Teaches: whether one settle step can carry placement, renewal by hand, ending
+and replacement without the three flags, and so whether the deferred
+automatic renewal is one call from the server's rental visit.
 
 ## Needs a person now
 
@@ -62,7 +136,9 @@ lf machine logins <rental>                                  # github  signed in
 it). Client id `Iv23likXtOBTpX1WyV4f`, app id 5957089, address
 `https://github.com/apps/loopflow-studio`. The name "Loopflow" was refused:
 "Name is reserved for the account @loopflow". Device flow on, user tokens
-expiring, no webhook, no private key generated. Permissions as listed below.
+expiring, no webhook, no private key generated. Repository permissions:
+Contents write, Pull requests write, Actions read, Checks read, Commit
+statuses read, Metadata read, Workflows write.
 It is installed nowhere yet: the four probes need it installed on a
 repository and a person to type the device code.
 
@@ -70,25 +146,6 @@ After registering, GitHub's page said "You must generate a private key in
 order to install your GitHub App", yet its Install page offered Install
 buttons with no key present. Whether install completes without a key is
 unprobed.
-
-## Needs a person (history: how the registration was framed)
-
-One GitHub App has to be registered on github.com before the token can be
-minted for real. Nothing here registers it: its name, owner and address show
-on every approval page and installation and cannot be quietly changed, and a
-permission added later asks every installation to approve again (removing one
-asks nobody). The open choice, also in `scratch/questions.md`:
-
-- **Owner and name.** Recommended by the review: one public "Loopflow" app
-  under `loopflowstudio`. A device-flow client id is public and the app has no
-  secret, key, webhook or server, so Loopflow operates nothing.
-- **Settings:** device flow enabled, user tokens expiring, no webhook.
-  Repository permissions: Contents write, Pull requests write, Actions read,
-  Checks read, Commit statuses read, Metadata read, Workflows write (see
-  Behavior).
-
-Its client id is then one compiled constant in `lf`. Until it exists, Pass 1
-is the only pass that can finish.
 
 ## Mechanism, and what was passed over
 
@@ -161,6 +218,9 @@ no Task, and `mark_ended` hands the Tasks back first. One migration
 
 ## Behavior
 
+As built through Pass 3; Pass 4 above changes the approval check, the
+re-send, the ending and `--logins`.
+
 - **Approve** at the first placement of a repository from a terminal, inside
   `lf task run --rent`, before anything is rented, where `prepare` already
   runs Codex and OpenCode sign-ins: device flow with `scope=offline_access`,
@@ -220,7 +280,7 @@ no Task, and `mark_ended` hands the Tasks back first. One migration
 - Refreshed token's login differs from the laptop's: discarded, as Linear does
   (`credentials.rs:74-77`).
 - App not installed on the repository: GitHub ignores `repository_id` rather
-  than failing, hence the two reads in the approve step.
+  than failing, hence the check of what the token reaches (Pass 2).
 - Non-GitHub origin: no GitHub sign-in, as today.
 
 ## Unanswered until the app exists
@@ -236,6 +296,17 @@ Pass 2 answers these first:
    `pr create`, `pr merge --auto`, `pr checks`? Does a push touching
    `.github/workflows/` go through?
 4. Is the old access token dead at once after a refresh?
+5. Is there a cap on grants per person and app? GitHub's "Token revoked due
+   to excess of tokens for an OAuth app with the same scope" says: "There is
+   a limit of ten tokens that are issued per user/application/scope
+   combination, and a rate limit of ten tokens created per hour." The pages
+   (`token-expiration-and-revocation`, `refreshing-user-access-tokens`,
+   `generating-a-user-access-token-for-a-github-app`, read 2026-11-27) do not
+   say whether it covers a GitHub App's `ghu_` tokens, which carry no scopes.
+   If it does, an eleventh approved repository ends the first one's grant
+   without a word, and a rental past 8 h, which renews on every sign-in, can
+   meet the hourly limit. Probe: approve an eleventh repository, or renew
+   eleven times in an hour.
 
 ## Security and privacy
 
@@ -323,6 +394,7 @@ Survives: Linear's renewed token, OpenCode and Codex sign-in when listed in
    `admit_rental`) is read from the code; the stop itself is
    `no_terminal_and_no_command_approver_asks_github_for_nothing`. No
    placement was run against a real rental.
+4. **A rental's access is a record.** Remaining; see "Pass 4" at the top.
 
 ## Acceptance
 
@@ -381,31 +453,34 @@ Questions the writing raised (also in `scratch/questions.md`):
 
 ## Review
 
-What happened to each finding of `scratch/concept-review.html` (`6d9c5c7988`).
-Every adoption is made for review; none is settled.
+What happened to each finding of `scratch/concept-review.html` (the review of
+the build, written at `ca1dcb82d3`). Every adoption is made for review; none
+is settled. The claims about the code were checked against
+`credentials.rs:155-195`, `github.rs:398-431` and `credentials.rs:693-704`.
 
-- One Loopflow app with a compiled client id, approval at first placement:
-  adopted. `forward.github_app` is gone. Registration is under "Needs a
-  person".
-- "Signed in" compared names in three places: adopted, all three change for
-  rentals.
-- Token cut hooked to two of three endings: adopted, moved to `mark_ended`.
-- One repository per rental, including by-hand renewal from another checkout:
-  adopted as stated behavior.
-- The no-agent error and `github`/`linear` in `--logins`: adopted. The kickoff
-  plan said the message "already says so"; it does not.
-- Workflows permission: the review dropped it; it is back in (2026-11-27).
-- Command name: `lf ondemand login github`.
-- 8 h and the sleeping-laptop gap: kept as the kickoff plan had them, stated
-  under tensions.
-- Rentals past 8 h, and the other logins outliving a rental: deferred below.
+- Which token a rental holds is not recorded (stranded rental after a failed
+  send, replaced repository never retired, stale "until"): Pass 4, record and
+  settle step.
+- Token before renting, `approve_first_rental`'s weaker check: Pass 4.
+- One refusing lock for every repository: Pass 4.
+- Install link shown only after a spent code: Pass 4.
+- Two doors for signing a rental in to GitHub: Pass 4.
+- `--logins github` accepted and inert: Pass 4, refused at `add`, dropped on
+  read. This reverses "stay accepted" in `scratch/questions.md`.
+- The ten-token limit: read; the docs do not say. Probe 5.
+- The GitHub row asking only for `ghu_` tokens: left as built, as the review
+  left it.
+- `lf ondemand login github` or `lf machine login github --rentals`: the
+  review recommends neither; the built name stays, the choice is in
+  `scratch/questions.md`.
+- Automatic renewal, Codex and OpenCode outliving the rental: deferred below.
 
 ## Deferred findings
 
 - **The laptop renews a rental's GitHub token by itself.** Its server already
   visits each rental to collect Session history; renewing a token near its end
-  on that visit removes the 8 h clock while the laptop is awake. Takes the
-  renew path from this work plus a call from that loop.
+  on that visit removes the 8 h clock while the laptop is awake. After Pass 4
+  it is one call to settle a repository from that loop.
 - **Codex and OpenCode outlive the rental.** Codex's device login is a
   renewing grant written on the rental; OpenCode gets a renewing login or a
   copied raw key; nothing signs either out before the sandbox is deleted.

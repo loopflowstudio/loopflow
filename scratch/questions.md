@@ -34,8 +34,10 @@
   laptop renewing by itself is a deferred finding.
 - **Empty `logins` drops Codex.** A template with no `logins` used to sign a
   rental in to Codex when the laptop was; it now needs `--logins codex`.
-- **`github` and `linear` stay accepted in `--logins` and do nothing.**
-  Rejecting them would break templates already saved with them.
+- **`github` and `linear` in `--logins`.** First made: accepted, doing
+  nothing, because rejecting them would break templates already saved with
+  them. Changed after the review of the build (Pass 4): refused at
+  `lf ondemand add`, dropped when a saved template is read.
 - **Owned Machines still get the laptop token.**
 - **File the two deferred findings as Tasks?** Automatic renewal; signing
   Codex and OpenCode out at give-back.
@@ -114,3 +116,17 @@
   repository; `lf machine login github <label>` from a checkout does it.
 - **The ending's renewal can wait on GitHub** (15 s a request, four requests)
   inside `lf machine end` and the server's rental check.
+
+## Raised by the review of the build (`scratch/concept-review.html`)
+
+- **The command that approves ahead of time:** `lf ondemand login github`
+  (built, documented) or `lf machine login github --rentals` (beside the
+  other GitHub sign-ins, where `lf machine logins` sends people). The review
+  recommends neither. Easy to change until this lands.
+- **How long does a waiting placement wait?** Pass 4 makes the lock wait. The
+  first rental of a repository holds it while a person types a code, so a
+  second placement of that repository waits as long as the typing takes.
+- **Recording what a rental was sent as the token's expiry** assumes two
+  tokens of one repository never share an `expires_at`. A renewal within the
+  same second would; a counter on the grant would not.
+- **Does the ten-token limit cover App user tokens?** Probe 5 in the plan.

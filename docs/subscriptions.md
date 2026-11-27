@@ -183,10 +183,16 @@ What the rental holds:
 - **Your name.** Commits and pull requests are yours, as they are from your
   own Machine.
 - **8 hours at most.** Placement prints when GitHub stops on that rental. The
-  token stops sooner, when the repository's last rental is given back.
+  token stops sooner, when the repository's last rental is given back. When it
+  stops before the rental does, placement says so and names the renewal:
+
+  ```text
+  GitHub on code-1 until 07:40, before the rental ends; `lf machine login github code-1` renews
+  ```
 
 ```bash
 lf ondemand login github          # approve ahead of time, from the repository's checkout
+lf ondemand list                  # each running rental: GitHub until 07:40, or not delivered
 lf machine logins code-1          # github reads signed out once the token stops
 lf machine login github code-1    # send a fresh token to a rental that outlasts it
 ```
@@ -194,7 +200,14 @@ lf machine login github code-1    # send a fresh token to a rental that outlasts
 `lf ondemand login github` is the approval by itself. Run it before a
 placement that has no terminal, such as a scheduled run, or set a
 [command approver](#choose-who-approves); a placement with neither stops
-before renting and names the command. A rental's `github` row in
+before renting and names the command. On a repository GitHub still honors an
+approval for, it says so and asks for nothing; a code appears only when there
+is no approval or GitHub no longer renews it.
+
+`lf ondemand list` shows what this Machine sent each running rental:
+`GitHub until 07:40`, or `GitHub not delivered` when the repository's current
+token never reached it. It reads the record here and asks neither the rental
+nor GitHub. A rental's `github` row in
 `lf machine logins` asks GitHub with the token the rental holds, so it reads
 signed out as soon as a push would fail. `lf machine login github <rental>`
 sends a fresh token for the repository whose checkout you run it from, in
@@ -204,7 +217,10 @@ Renewing a repository's token ends the one its rentals hold, so every rental
 of that repository is sent the new one. A rental that could not be reached is
 named, and the next placement, sign-in or ending for that repository sends it
 again. Everything GitHub can refuse is asked before renting, so a refusal
-bills nothing.
+bills nothing: a stored approval is checked with GitHub too, so one you
+revoked or an app you uninstalled stops the placement there. A command that
+finds another `lf` working on the same repository's token says it is waiting,
+then goes on once that one finishes or its code is approved.
 
 | Placement stops with | Do this |
 | --- | --- |

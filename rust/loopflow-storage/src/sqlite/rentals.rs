@@ -5,8 +5,8 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
 use crate::rental::{
-    self, GithubHolder, GithubRentalGrant, Hardware, OnDemand, Ownership, Provider, Rental,
-    RentalCost, RentalId, RentalState, Usd,
+    self, GithubDelivery, GithubHolder, GithubRentalGrant, Hardware, OnDemand, Ownership, Provider,
+    Rental, RentalCost, RentalId, RentalState, Usd,
 };
 use crate::rows::now_unix;
 use crate::token_crypto;
@@ -491,6 +491,26 @@ impl SqliteStore {
                 })
             },
         )
+    }
+
+    /// What `id` was sent for GitHub against its repository's grant; `None`
+    /// when it is signed in for no repository.
+    pub fn rental_github_delivery(&self, id: &RentalId) -> StoreResult<Option<GithubDelivery>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let row = conn
+            .query_row(
+                "SELECT r.github_token_expires_at,g.expires_at FROM rentals r
+                 LEFT JOIN github_rental_grants g ON g.repository_id=r.github_repository_id
+                 WHERE r.id=?1 AND r.github_repository_id IS NOT NULL",
+                [id.as_str()],
+                |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?)),
+            )
+            .optional()?;
+        row.map(|(sent, current)| match sent {
+            Some(sent) if Some(sent) == current => at(sent).map(GithubDelivery::Until),
+            _ => Ok(GithubDelivery::NotDelivered),
+        })
+        .transpose()
     }
 
     /// Reachable and added: the rental is running as this Machine.

@@ -907,6 +907,16 @@ pub struct GithubHolder {
     pub sent_expires_at: Option<OffsetDateTime>,
 }
 
+/// What this Machine recorded about the GitHub token a live rental holds. It
+/// is what was sent, not what GitHub would answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GithubDelivery {
+    /// It was sent its repository's current token, which stops at this time.
+    Until(OffsetDateTime),
+    /// Its repository's current token never reached it.
+    NotDelivered,
+}
+
 #[cfg(test)]
 #[path = "rental_tests.rs"]
 mod tests;

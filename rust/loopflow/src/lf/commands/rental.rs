@@ -20,13 +20,14 @@ use loopflow_execution::machine::{forward, login};
 use loopflow_execution::machine_records::CopyCounts;
 use loopflow_execution::provider_auth::Provider as LoginProvider;
 use loopflow_execution::rental::clock;
+use loopflow_execution::rental::github::Approval;
 use loopflow_execution::rental::recovery::{
     delete_sandbox, end as end_rental, give_back, held_ids, now, open_store, refresh_all,
 };
 use loopflow_execution::rental::sandbox::Sandboxes;
 use loopflow_model::durable::{CapacityDefault, Machine, RepositoryId};
 use loopflow_storage::rental::{
-    self, Hardware, OnDemand, Pool, PoolMachine, Provider, Rental, RentalState, Usd,
+    self, GithubDelivery, Hardware, OnDemand, Pool, PoolMachine, Provider, Rental, RentalState, Usd,
 };
 use loopflow_storage::sqlite::SqliteStore;
 
@@ -152,6 +153,9 @@ struct RentalListing {
     tasks: Vec<loopflow_model::durable::TaskId>,
     /// What has been copied from it, once anything has.
     copied: Option<CopyCounts>,
+    /// What a live rental was sent for GitHub, as recorded here.
+    #[serde(skip)]
+    github: Option<GithubDelivery>,
 }
 
 pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
@@ -244,17 +248,14 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
         OndemandCommand::Login {
             service: crate::lf::RentalService::Github,
         } => {
-            let (repository, login) = loopflow_execution::runtime::block_on(
-                loopflow_execution::rental::github::approve(
+            let approval = loopflow_execution::runtime::block_on(
+                loopflow_execution::rental::github::approve_ahead(
                     sqlite,
                     &std::env::current_dir()?,
                     batch,
                 ),
             )?;
-            println!(
-                "GitHub approved for {repository} as {login}; its rentals hold a token for \
-                 that repository only"
-            );
+            println!("{}", approval_line(&approval));
         }
         OndemandCommand::Max { name, max } => {
             loopflow_execution::store::rentals::set_ondemand_max(sqlite, name, *max)?;
@@ -309,6 +310,22 @@ fn require_ondemand(sqlite: &SqliteStore, name: &str) -> anyhow::Result<OnDemand
     })
 }
 
+fn approval_line(approval: &Approval) -> String {
+    let Approval {
+        repository,
+        login,
+        already,
+    } = approval;
+    if *already {
+        format!("GitHub is already approved for {repository} as {login}; nothing to type")
+    } else {
+        format!(
+            "GitHub approved for {repository} as {login}; its rentals hold a token for that \
+             repository only"
+        )
+    }
+}
+
 fn listing(sqlite: &SqliteStore, rental: Rental) -> anyhow::Result<RentalListing> {
     let (machine, tasks, copied) = match &rental.machine_id {
         Some(id) => (
@@ -319,11 +336,17 @@ fn listing(sqlite: &SqliteStore, rental: Rental) -> anyhow::Result<RentalListing
         ),
         None => (None, Vec::new(), None),
     };
+    let github = if rental.state.is_live() {
+        sqlite.rental_github_delivery(&rental.id)?
+    } else {
+        None
+    };
     Ok(RentalListing {
         rental,
         machine,
         tasks,
         copied,
+        github,
     })
 }
 
@@ -374,8 +397,13 @@ fn print_ondemand(listing: &OndemandListing) {
         let copied = entry
             .copied
             .map_or_else(String::new, |counts| format!(" · {counts} copied"));
+        let github = match entry.github {
+            Some(GithubDelivery::Until(at)) => format!(" · GitHub until {}", clock(at)),
+            Some(GithubDelivery::NotDelivered) => " · GitHub not delivered".to_string(),
+            None => String::new(),
+        };
         println!(
-            "  {name} · {when} · {} · {} · {cost}{how}{}{copied}",
+            "  {name} · {when} · {} · {} · {cost}{how}{}{copied}{github}",
             rental.hardware,
             rental.hardware.format_hourly_rate(rental.usd_per_hour),
             if tasks.is_empty() {

@@ -11,24 +11,28 @@ import WebKit
 struct TaskHTMLBridge {
     static let handlerName = "loopflow"
     static let clearScript = "window.__lfDesktopApplyState?.(null);"
+    static let pageStamp = #"<script type="application/json" id="lf-page">"#
 
     let store: TaskFilesStore
+    let path: String
 
     var clearGeneration: Int { store.comments.pageClearGeneration }
 
     func makeMessageHandler() -> any WKScriptMessageHandlerWithReply {
-        LoopflowScriptMessageHandler(store: store)
+        LoopflowScriptMessageHandler(store: store, path: path)
     }
 
-    func handle(_ body: Any) async -> (Any?, String?) {
+    func handle(
+        _ body: Any,
+        confirm: @MainActor (JSONValue) async -> Bool = { _ in false }
+    ) async -> (Any?, String?) {
         guard let payload = body as? [String: Any],
               let type = payload["type"] as? String else {
             return (nil, "Invalid bridge message")
         }
         switch type {
         case "ready":
-            guard let path = payload["path"] as? String,
-                  let buildID = payload["build_id"] as? String else {
+            guard let buildID = payload["build_id"] as? String else {
                 return (NSNull(), nil)
             }
             guard let saved = store.comments.pageReady(path: path, buildID: buildID) else {
@@ -37,8 +41,7 @@ struct TaskHTMLBridge {
             return ((try? Self.foundationObject(from: saved)) ?? NSNull(), nil)
 
         case "sync":
-            guard let path = payload["path"] as? String,
-                  let buildID = payload["build_id"] as? String,
+            guard let buildID = payload["build_id"] as? String,
                   let rawState = payload["state"],
                   let state = try? Self.jsonValue(from: rawState) else {
                 return (NSNull(), nil)
@@ -57,9 +60,11 @@ struct TaskHTMLBridge {
                let localDirectory = store.localRepository ?? store.measurementRepository {
                 fields["directory"] = .string(localDirectory)
             }
+            let operation = JSONValue.object(fields)
+            guard await confirm(operation) else { return (["cancelled": true], nil) }
             let requestID = payload["request_id"] as? String
             do {
-                let raw = try await store.sendPageOperation(.object(fields), requestID)
+                let raw = try await store.sendPageOperation(operation, requestID)
                 let result = try JSONSerialization.jsonObject(with: raw.bytes, options: .fragmentsAllowed)
                 return (["result": result], nil)
             } catch {
@@ -83,22 +88,52 @@ struct TaskHTMLBridge {
         let data = try JSONEncoder().encode(value)
         return try JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)
     }
+
+    fileprivate static func confirmOperation(_ operation: JSONValue) async -> Bool {
+        guard let window = NSApp.keyWindow, window.attachedSheet == nil,
+              case .string(let kind) = operation["kind"] else { return false }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(operation) else { return false }
+
+        let details = NSTextView.scrollableTextView()
+        details.frame = NSRect(x: 0, y: 0, width: 440, height: 160)
+        if let text = details.documentView as? NSTextView {
+            text.string = String(decoding: data, as: UTF8.self)
+            text.isEditable = false
+            text.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        }
+        let alert = NSAlert()
+        alert.messageText = "Run \(kind)?"
+        alert.informativeText = "Review the Machine operation requested by this page."
+        alert.accessoryView = details
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Run")
+        return await withCheckedContinuation { continuation in
+            alert.beginSheetModal(for: window) { response in
+                continuation.resume(returning: response == .alertSecondButtonReturn)
+            }
+        }
+    }
 }
 
 /// Weakly holds the store so `WKUserContentController` retains no cycle with `WebPage`.
 private final class LoopflowScriptMessageHandler: NSObject, WKScriptMessageHandlerWithReply {
     weak var store: TaskFilesStore?
+    let path: String
 
-    init(store: TaskFilesStore) {
+    init(store: TaskFilesStore, path: String) {
         self.store = store
+        self.path = path
     }
 
     func userContentController(
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage
     ) async -> (Any?, String?) {
-        guard let store else { return (NSNull(), nil) }
-        return await TaskHTMLBridge(store: store).handle(message.body)
+        guard message.frameInfo.isMainFrame, let store else { return (NSNull(), nil) }
+        return await TaskHTMLBridge(store: store, path: path)
+            .handle(message.body, confirm: TaskHTMLBridge.confirmOperation)
     }
 }
 

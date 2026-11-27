@@ -99,8 +99,9 @@ On the page:
   and clear when sent. Side-by-side HTML diffs in **Diff** stay read-only.
 - **Direct action buttons.** A button wired to a Loopflow operation (for
   example, **File Task now**) is separate from the reply queue. Clicking it
-  opens an inline confirmation showing the operation kind and fields, runs the
-  operation immediately, and replaces the button with an in-place receipt
+  shows the operation kind and fields inline in the browser or in a native
+  confirmation sheet in Desktop. Confirm to run it and replace the button
+  with an in-place receipt
   (`Filed LOO-1200`). It never enters the browser dock or Desktop's comments
   strip; if you also send queued notes with `⌘↩`, a short
   `[already ran: task.create → LOO-1200]` suffix rides along so the agent does

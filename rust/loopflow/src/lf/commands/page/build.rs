@@ -3,6 +3,7 @@
 //! validated `data-lf` operations, theme CSS, work stamp, and shared runtime.
 
 use std::collections::{BTreeMap, HashMap};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::LazyLock;
@@ -109,13 +110,20 @@ pub(super) fn build(cli: &Cli, source: &Path, base_override: Option<&str>) -> Re
         PAGE_RUNTIME_JS.replace("</script", "<\\/script"),
     );
 
-    if let Some(parent) = output_abs.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&output_abs, document)
+    write_page(&output_abs, &document)
         .with_context(|| format!("Could not write compiled page {}", output_path.display()))?;
 
     Ok(output_path)
+}
+
+fn write_page(path: &Path, document: &str) -> Result<()> {
+    let parent = path
+        .parent()
+        .context("Page output needs a parent directory")?;
+    let mut output = tempfile::NamedTempFile::new_in(parent)?;
+    output.write_all(document.as_bytes())?;
+    output.persist(path)?;
+    Ok(())
 }
 
 #[derive(Debug, Serialize)]

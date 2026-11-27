@@ -31,7 +31,9 @@
   let socket = null;
   let nextReqId = 1;
   const pending = new Map();
+  const cancelledAction = Symbol("cancelled action");
   let serverDisconnected = false;
+  let sendingReply = false;
 
   // Draft & receipt state.
   // Notes (prose & diff/file lines), choices, multiselects, questions, offline actions,
@@ -213,6 +215,12 @@
     refresh(true);
   }
 
+  function editNote(id, text) {
+    state.notes = state.notes.map((note) => note.id === id ? { ...note, text } : note);
+    sidebarEditingId = null;
+    refresh(true);
+  }
+
   function queueEntries() {
     const entries = [];
     for (const note of notesInDocumentOrder()) {
@@ -339,7 +347,6 @@
       try {
         desktopHandler.postMessage({
           type: "sync",
-          path: pagePath,
           build_id: buildId,
           state,
           items: queueItems(),
@@ -400,11 +407,10 @@
   // --- Loopback WebSocket carrier ---
 
   function loopbackWsUrl() {
-    if (window.location.protocol !== "http:" && window.location.protocol !== "https:") return null;
+    if (window.location.protocol !== "http:" || window.location.hostname !== "127.0.0.1") return null;
     const parts = window.location.pathname.split("/").filter(Boolean);
-    if (parts.length < 3 || parts[1] !== "f") return null;
-    const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    return wsProto + "//" + window.location.host + "/" + parts[0] + "/machine";
+    if (parts.length < 3 || parts[1] !== "f" || !/^[A-Za-z0-9_-]{43}$/.test(parts[0])) return null;
+    return "ws://" + window.location.host + "/" + parts[0] + "/machine";
   }
 
   function markDisconnected(reason) {
@@ -493,6 +499,7 @@
           })
         ).then((result) => {
           if (result && result.error) throw new Error(result.error);
+          if (result && result.cancelled) return cancelledAction;
           return result && result.result !== undefined ? result.result : result;
         });
       } catch (err) {
@@ -505,16 +512,19 @@
     return new Promise((resolve, reject) => {
       const id = "req-" + nextReqId++;
       pending.set(id, { resolve, reject });
-      socket.send(
-        JSON.stringify({
+      try {
+        socket.send(JSON.stringify({
           type: "request",
           id,
           operation,
           select: null,
           sender: null,
           request_id: requestId || null,
-        })
-      );
+        }));
+      } catch (error) {
+        pending.delete(id);
+        reject(error);
+      }
     });
   }
 
@@ -619,7 +629,9 @@
         slot: btn,
       };
       actions.push(action);
-      btn.addEventListener("click", () => openActionConfirm(action));
+      btn.addEventListener("click", (event) => {
+        if (event.isTrusted) openActionConfirm(action);
+      });
     });
   }
 
@@ -704,23 +716,27 @@
     }
 
     const requestId = randomId();
-    const runBtn = makeButton("Run", execute, "lf-btn-accent");
-    const wrap = el(
-      "span",
-      "lf-action-confirm",
-      el("span", { cls: "lf-action-summary", text: summarizeOperation(template) }),
-      runBtn,
-      makeButton("Cancel", () => showInSlot(action, action.btn))
-    );
-    showInSlot(action, wrap);
+    if (desktopHandler) execute();
+    else {
+      showInSlot(action, el(
+        "span",
+        "lf-action-confirm",
+        el("span", { cls: "lf-action-summary", text: summarizeOperation(template) }),
+        makeButton("Run", execute, "lf-btn-accent"),
+        makeButton("Cancel", () => showInSlot(action, action.btn))
+      ));
+    }
 
-    function execute() {
-      showInSlot(action, wrap);
-      runBtn.disabled = true;
-      runBtn.textContent = "Running…";
+    function execute(event) {
+      if (event && !event.isTrusted) return;
+      showInSlot(action, el("span", { cls: "lf-action-confirm", text: "Running…" }));
       const op = materializeOperation(template, requestId);
       sendOperation(op, requestId).then(
         (result) => {
+          if (result === cancelledAction) {
+            showInSlot(action, action.btn);
+            return;
+          }
           const text = formatReceipt(op.kind, result);
           state.receipts.push({ key: action.key, kind: op.kind, summary: resultTaskId(result) || text, text });
           refresh(true);
@@ -1118,10 +1134,7 @@
       openFloatingComposer(r, {
         anchorLabel: formatNoteAnchorLabel(note),
         initialText: note.text,
-        onSave: (val) => {
-          note.text = val;
-          refresh(true);
-        },
+        onSave: (val) => editNote(note.id, val),
       });
     }, "lf-btn-quiet");
 
@@ -1437,11 +1450,7 @@
           initialText: note.text,
           placeholder: "Edit comment… (⌘↩ to save)",
           stopProp: true,
-          onSave: (val) => {
-            note.text = val;
-            sidebarEditingId = null;
-            refresh(true);
-          },
+          onSave: (val) => editNote(note.id, val),
           onCancel: () => {
             sidebarEditingId = null;
             renderSidebar();
@@ -1529,8 +1538,8 @@
       document.body.append(ta);
       ta.select();
       try {
-        document.execCommand("copy");
-        resolve();
+        if (document.execCommand("copy")) resolve();
+        else reject(new Error("Clipboard is unavailable"));
       } catch (err) {
         reject(err);
       } finally {
@@ -1554,23 +1563,46 @@
   }
 
   function submitReply() {
-    if (desktopHandler) return;
+    if (desktopHandler || sendingReply) return;
     const items = queueItems();
     if (!items.length) return;
     const message = formatReplyMessage(items);
 
     if (hostMode === "loopback") {
+      // Retain edits made after the send, including receipts from actions
+      // that finish while the steer is in flight.
+      const sent = {
+        notes: new Set(state.notes),
+        choices: { ...state.choices },
+        multiselects: { ...state.multiselects },
+        questions: { ...state.questions },
+        offlineActions: new Set(state.offlineActions),
+        overall: state.overall,
+        receipts: new Set(state.receipts),
+      };
+      sendingReply = true;
       setStatus("Sending…", "");
       renderDock();
       sendOperation(buildSteerOperation(message), randomId()).then(
         (result) => {
-          const sentence =
-            (result && result.delivery && result.delivery.sentence) || "Steer saved.";
-          clearDrafts({ markReported: true });
-          setStatus(sentence, "ok");
-          renderDock();
+          sendingReply = false;
+          state.notes = state.notes.filter((note) => !sent.notes.has(note));
+          state.offlineActions = state.offlineActions.filter((action) => !sent.offlineActions.has(action));
+          for (const group of ["choices", "multiselects", "questions"]) {
+            for (const [key, value] of Object.entries(sent[group])) {
+              if (state[group][key] === value) delete state[group][key];
+            }
+          }
+          if (state.overall === sent.overall) state.overall = "";
+          for (const receipt of state.receipts) {
+            if (sent.receipts.has(receipt)) receipt.reported = true;
+          }
+          setStatus(result?.delivery?.sentence || "Steer saved.", "ok");
+          saveState();
+          refresh(false);
         },
         (err) => {
+          sendingReply = false;
           setStatus(errorMessage(err), "error");
           renderDock();
         }
@@ -1645,7 +1677,7 @@
     setPressed(dockPreviewBtn, dockPreviewOpen && hasItems);
     dockClearBtn.hidden = !hasItems;
 
-    dockSendBtn.disabled = !hasItems;
+    dockSendBtn.disabled = !hasItems || sendingReply;
     dockSendBtn.textContent =
       hostMode === "loopback" ? "Steer " + steerTargetLabel() + " ⌘↩" : "Copy reply ⌘↩";
 
@@ -1743,7 +1775,6 @@
     try {
       const reply = desktopHandler.postMessage({
         type: "ready",
-        path: pagePath,
         build_id: buildId,
       });
       if (reply && typeof reply.then === "function") {

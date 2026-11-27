@@ -93,10 +93,12 @@ authority.
   the token in constant time; WebSocket upgrades also require a same-origin
   `Origin: http://127.0.0.1:<port>` header. Everything else returns `404` with
   no body and no CORS headers.
-- **Page isolation:** served HTML carries
-  `Content-Security-Policy: default-src 'self' 'unsafe-inline' data: blob:; connect-src 'self'`,
-  `Referrer-Policy: no-referrer`, and `Cache-Control: no-store`, matching
-  Desktop's offline rule.
+- **Page isolation.** Browser review pages connect only to their own origin.
+  The server blocks framing and form submissions and sends
+  `Referrer-Policy: no-referrer` and `Cache-Control: no-store`. Open trusted
+  content using `lf page open`. Scripts on a served page have its Machine
+  capability. Desktop keeps its file renderer offline and asks for approval in
+  a native sheet before a page's operation reaches the Machine server.
 - **URL minting:** asking the server for a page URL (`page.url`) is permitted
   only over the local Unix socket and refused on Tailscale or loopback
   connections. Treat a printed loopback URL like a local session credential

@@ -128,7 +128,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> Carrier for Messages<S> {
 #[derive(Clone)]
 pub(super) struct LocalAuthority {
     pub(super) remote: mpsc::Sender<Control>,
-    pub(super) loopback: Arc<super::loopback::Handle>,
+    pub(super) loopback: Result<Arc<super::loopback::Handle>, String>,
 }
 
 /// Connections to this server and from it to other Machines.
@@ -268,7 +268,13 @@ pub(super) async fn run() -> Result<()> {
     let tickets = Arc::new(Tickets::default());
     let subscriptions = Arc::new(Subscriptions::default());
     let (remote_control, remote_requests) = mpsc::channel(8);
-    let (loopback_server, loopback_handle) = super::loopback::Loopback::bind(&path).await?;
+    let (loopback_server, loopback_handle) = match super::loopback::Loopback::bind(&path).await {
+        Ok((server, handle)) => (Some(server), Ok(handle)),
+        Err(error) => {
+            tracing::warn!(%error, "Browser review pages are unavailable");
+            (None, Err(format!("{error:#}")))
+        }
+    };
     let local_authority = LocalAuthority {
         remote: remote_control,
         loopback: loopback_handle,
@@ -298,15 +304,17 @@ pub(super) async fn run() -> Result<()> {
         subscriptions.clone(),
         terminals.clone(),
     );
-    let loopback = loopback_server.run(
-        instance.clone(),
-        executable_sha256.clone(),
-        slots.clone(),
-        clients.clone(),
-        tickets.clone(),
-        subscriptions.clone(),
-        terminals.clone(),
-    );
+    let loopback = loopback_server.map(|server| {
+        server.run(
+            instance.clone(),
+            executable_sha256.clone(),
+            slots.clone(),
+            clients.clone(),
+            tickets.clone(),
+            subscriptions.clone(),
+            terminals.clone(),
+        )
+    });
     let shutdown_instance = instance.clone();
     let client_activity = Arc::new(Notify::new());
     let lifetime = {
@@ -337,7 +345,12 @@ pub(super) async fn run() -> Result<()> {
     tracing::info!(%instance, socket = %path.display(), "Loopflow server ready");
     tokio::select! {
         result = remote => result,
-        result = loopback => result,
+        result = async {
+            match loopback {
+                Some(server) => server.await,
+                None => std::future::pending().await,
+            }
+        } => result,
         _ = peers.expiring() => unreachable!("peer expiry runs until shutdown"),
         _ = tickets.expiring() => unreachable!("ticket expiry runs until shutdown"),
         reason = lifetime => {
@@ -2249,7 +2262,10 @@ async fn served(
                     "Page URLs are only minted on the Machine itself",
                 ));
             };
-            let url = authority.loopback.url(&path)?;
+            let url = authority
+                .loopback
+                .map_err(|error| Error::new(ErrorCode::Unavailable, error))?
+                .url(&path)?;
             serde_json::to_value(super::wire::PageUrl { url }).map_err(unavailable)
         }
 
@@ -2839,7 +2855,7 @@ mod tests {
             Clients::default(),
             super::LocalAuthority {
                 remote: remote_control,
-                loopback: loopback_handle,
+                loopback: Ok(loopback_handle),
             },
             Arc::new(Tickets::default()),
             Arc::new(Subscriptions::default()),

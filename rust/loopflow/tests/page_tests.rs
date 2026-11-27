@@ -1,7 +1,7 @@
 //! Integration tests for review pages, loopback carrier, and `lf page`.
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{symlink, PermissionsExt};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -153,10 +153,12 @@ fn loopback_serves_page_enforces_admission_and_steers_task() {
         let client = reqwest::Client::new();
         let response = client.get(&url).send().await.unwrap();
         assert_eq!(response.status(), reqwest::StatusCode::OK);
-        assert_eq!(
-            response.headers().get("content-security-policy").unwrap(),
-            "default-src 'self' 'unsafe-inline' data: blob:; connect-src 'self'"
-        );
+        let csp = response.headers()["content-security-policy"]
+            .to_str()
+            .unwrap();
+        assert!(csp.contains("connect-src 'self'"));
+        assert!(csp.contains("frame-ancestors 'none'"));
+        assert!(csp.contains("form-action 'none'"));
         assert_eq!(
             response.headers().get("referrer-policy").unwrap(),
             "no-referrer"
@@ -413,6 +415,12 @@ fn page_build_expands_diffs_components_data_lf_and_rejects_broken_references() {
     )
     .unwrap();
 
+    let output_path = scratch.join("ship-review.html");
+    let outside = home.path().join("outside.txt");
+    fs::write(&outside, "Unrelated file").unwrap();
+    symlink(&outside, &output_path).unwrap();
+    symlink(&outside, repo.path().join("outside-link.txt")).unwrap();
+
     let built = lf_cmd(repo.path(), home.path())
         .args([
             "--task",
@@ -431,8 +439,8 @@ fn page_build_expands_diffs_components_data_lf_and_rejects_broken_references() {
         String::from_utf8_lossy(&built.stderr)
     );
 
-    let output_path = scratch.join("ship-review.html");
     assert!(output_path.is_file());
+    assert_eq!(fs::read_to_string(&outside).unwrap(), "Unrelated file");
     let html = fs::read_to_string(&output_path).unwrap();
 
     // Real diff lines (including untracked file `+` lines) and both line notes.
@@ -527,6 +535,12 @@ fn page_build_expands_diffs_components_data_lf_and_rejects_broken_references() {
         (
             "missing-path",
             "<h1>T</h1>\n<lf-file path=\"does/not/exist.rs\"></lf-file>\n",
+            "lf-file",
+            "line 2",
+        ),
+        (
+            "external-file",
+            "<h1>T</h1>\n<lf-file path=\"outside-link.txt\"></lf-file>\n",
             "lf-file",
             "line 2",
         ),

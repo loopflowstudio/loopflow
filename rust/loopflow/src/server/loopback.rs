@@ -27,6 +27,7 @@ use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use loopflow_execution::engine::{Error, ErrorCode};
 use loopflow_execution::transport::registry::Registry;
+use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
@@ -39,7 +40,7 @@ use super::subscriptions::Subscriptions;
 use super::ticket::{Admission, Tickets};
 use super::wire::MAX_BULK;
 
-const HTML_CSP: &str = "default-src 'self' 'unsafe-inline' data: blob:; connect-src 'self'";
+const PAGE_CSP: &str = "default-src 'self' 'unsafe-inline' data: blob:; connect-src 'self'; frame-ancestors 'none'; form-action 'none'; base-uri 'none'";
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
 
 /// Local-only capability minting handle for the running loopback listener.
@@ -362,7 +363,15 @@ async fn handle_file(encoded: &str) -> Response<Full<Bytes>> {
     let Some(path) = decode_absolute_path(encoded) else {
         return empty(StatusCode::NOT_FOUND);
     };
-    let Ok(metadata) = tokio::fs::metadata(&path).await else {
+    let Ok(file) = tokio::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(&path)
+        .await
+    else {
+        return empty(StatusCode::NOT_FOUND);
+    };
+    let Ok(metadata) = file.metadata().await else {
         return empty(StatusCode::NOT_FOUND);
     };
     if !metadata.is_file() {
@@ -371,9 +380,18 @@ async fn handle_file(encoded: &str) -> Response<Full<Bytes>> {
     if metadata.len() > MAX_BULK as u64 {
         return empty(StatusCode::PAYLOAD_TOO_LARGE);
     }
-    let Ok(bytes) = tokio::fs::read(&path).await else {
+    let mut bytes = Vec::new();
+    if file
+        .take(MAX_BULK as u64 + 1)
+        .read_to_end(&mut bytes)
+        .await
+        .is_err()
+    {
         return empty(StatusCode::NOT_FOUND);
-    };
+    }
+    if bytes.len() > MAX_BULK {
+        return empty(StatusCode::PAYLOAD_TOO_LARGE);
+    }
     let content_type = content_type_for(&path);
     let mut builder = Response::builder()
         .status(StatusCode::OK)
@@ -381,8 +399,8 @@ async fn handle_file(encoded: &str) -> Response<Full<Bytes>> {
         .header(REFERRER_POLICY, "no-referrer")
         .header(CACHE_CONTROL, "no-store")
         .header(X_CONTENT_TYPE_OPTIONS, "nosniff");
-    if content_type.starts_with("text/html") {
-        builder = builder.header(CONTENT_SECURITY_POLICY, HTML_CSP);
+    if content_type.starts_with("text/html") || content_type == "image/svg+xml" {
+        builder = builder.header(CONTENT_SECURITY_POLICY, PAGE_CSP);
     }
     builder
         .body(Full::new(Bytes::from(bytes)))
@@ -508,7 +526,7 @@ fn from_hex(byte: u8) -> Option<u8> {
 mod tests {
     use super::{
         constant_time_eq, decode_absolute_path, encode_absolute_path, preferred_port, Loopback,
-        HTML_CSP,
+        PAGE_CSP,
     };
     use crate::server::service::Clients;
     use crate::server::subscriptions::Subscriptions;
@@ -600,7 +618,7 @@ mod tests {
             assert_eq!(response.status(), reqwest::StatusCode::OK);
             assert_eq!(
                 response.headers().get("content-security-policy").unwrap(),
-                HTML_CSP
+                PAGE_CSP
             );
             assert_eq!(
                 response.headers().get("referrer-policy").unwrap(),

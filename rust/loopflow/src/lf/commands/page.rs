@@ -48,7 +48,7 @@ fn open(cli: &Cli, page: &Path, host: PageHost, print_only: bool) -> Result<()> 
         OpenRoute::Browser => {
             let url = mint_loopback_url(&resolved)?;
             loopflow_execution::platform::open_url_checked(&url)
-                .with_context(|| format!("Could not open browser for {url}"))?;
+                .with_context(|| format!("Could not open {} in the browser", page.display()))?;
             println!("{url}");
             Ok(())
         }

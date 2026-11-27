@@ -58,12 +58,12 @@ impl<'a> DiffExpander<'a> {
             out.push_str(&input[cursor..tag.start]);
             let line = line_at(input, tag.start);
             let args = parse_block_args(&tag, "lf-file", line)?;
-            let full = self.repo_root.join(&args.path);
-            if !full.is_file() {
-                bail!(
-                    "line {line}: <lf-file path=\"{}\"> does not exist in repository",
-                    args.path
-                );
+            let path = &args.path;
+            let full = self.repo_root.join(path).canonicalize().with_context(|| {
+                format!("line {line}: could not resolve <lf-file path=\"{path}\">")
+            })?;
+            if !full.starts_with(self.repo_root) || !full.is_file() {
+                bail!("line {line}: <lf-file path=\"{path}\"> must resolve to a file inside the repository");
             }
             let content = std::fs::read_to_string(&full).with_context(|| {
                 format!(

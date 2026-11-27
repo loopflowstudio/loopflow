@@ -2706,35 +2706,35 @@ struct TaskFilesTests {
 
     @Test func reviewPageBridgeRestoresSavedStateAndDropsStaleBuilds() async throws {
         let files = try twoFileStore()
-        let bridge = TaskHTMLBridge(store: files)
         let pagePath = "scratch/ship-review.html"
+        let bridge = TaskHTMLBridge(store: files, path: pagePath)
 
-        let initial = await bridge.handle(["type": "ready", "path": pagePath, "build_id": "b1"])
+        let initial = await bridge.handle(["type": "ready", "build_id": "b1"])
         #expect(initial.0 is NSNull && initial.1 == nil)
 
         _ = await bridge.handle([
-            "type": "sync", "path": pagePath, "build_id": "b1",
+            "type": "sync", "path": "scratch/another-page.html", "build_id": "b1",
             "state": Self.sampleReviewPageState, "items": Self.sampleReviewPageItems,
         ])
         #expect(files.comments.items.count == 2)
 
-        let restored = await bridge.handle(["type": "ready", "path": pagePath, "build_id": "b1"])
+        let restored = await bridge.handle(["type": "ready", "build_id": "b1"])
         let restoredDict = try #require(restored.0 as? [String: Any])
         #expect((restoredDict["notes"] as? [[String: Any]])?.count == 1)
 
         // Rebuilding with a new build_id clears stale state and items from the previous build.
-        let rebuilt = await bridge.handle(["type": "ready", "path": pagePath, "build_id": "b2"])
+        let rebuilt = await bridge.handle(["type": "ready", "build_id": "b2"])
         #expect(rebuilt.0 is NSNull)
         #expect(files.comments.items.isEmpty)
     }
 
     @Test func reviewPageCommentsSendOnOneLineWithDiffCommentsAndDoNotResurrect() async throws {
         let files = try twoFileStore()
-        let bridge = TaskHTMLBridge(store: files)
         let pagePath = "scratch/ship-review.html"
+        let bridge = TaskHTMLBridge(store: files, path: pagePath)
 
         _ = await bridge.handle([
-            "type": "sync", "path": pagePath, "build_id": "b1",
+            "type": "sync", "build_id": "b1",
             "state": Self.sampleReviewPageState, "items": Self.sampleReviewPageItems,
         ])
 
@@ -2773,7 +2773,7 @@ struct TaskFilesTests {
 
         // Returning to the page after an unmounted send resurrects no drafts; its receipt stays
         // drawn, reported, and rides on no later reply.
-        let afterSend = await bridge.handle(["type": "ready", "path": pagePath, "build_id": "b1"])
+        let afterSend = await bridge.handle(["type": "ready", "build_id": "b1"])
         let kept = try #require(afterSend.0 as? [String: Any])
         #expect(kept["notes"] == nil && kept["choices"] == nil)
         let receipts = try #require(kept["receipts"] as? [[String: Any]])
@@ -2794,13 +2794,22 @@ struct TaskFilesTests {
             captured.withLock { $0.append((op, reqID)) }
             return RawJSON(Data(#"{"task":{"identifier":"LOO-1201"}}"#.utf8))
         }
-        let bridge = TaskHTMLBridge(store: peerStore)
+        let bridge = TaskHTMLBridge(store: peerStore, path: "scratch/ship-review.html")
 
-        let opReply = await bridge.handle([
+        let action: [String: Any] = [
             "type": "operation",
             "request_id": "req-uuid-1",
             "operation": ["kind": "task.create", "directory": "/remote/checkout", "title": "Follow up"],
-        ])
+        ]
+        let cancelled = await bridge.handle(action)
+        #expect((cancelled.0 as? [String: Any])?["cancelled"] as? Bool == true)
+        #expect(captured.withLock { $0.isEmpty })
+
+        let opReply = await bridge.handle(action) { operation in
+            #expect(operation["kind"] == .string("task.create"))
+            #expect(operation["directory"] == .string("/local/repo"))
+            return true
+        }
         let opResult = try #require((opReply.0 as? [String: Any])?["result"] as? [String: Any])
         #expect((opResult["task"] as? [String: Any])?["identifier"] as? String == "LOO-1201")
         let forwarded = try #require(captured.withLock { $0.first })
@@ -2811,7 +2820,7 @@ struct TaskFilesTests {
         let errReply = await bridge.handle([
             "type": "operation",
             "operation": ["kind": "pr.land", "directory": "/remote/checkout"],
-        ])
+        ]) { _ in true }
         #expect((errReply.0 as? [String: Any])?["error"] as? String == "permission denied")
     }
 
@@ -2821,9 +2830,15 @@ struct TaskFilesTests {
 
         let htmlDoc = files.document(pagePath)
         await htmlDoc.reconcile(snapshot("<h1>Review</h1>", path: pagePath))
+        let plainHTML = try TaskFileReadingView(document: htmlDoc, store: files)
+            .inspect().find(TaskHTMLView.self).actualView()
+        #expect(plainHTML.bridge == nil)
+
+        let compiled = "<h1>Review</h1>\(TaskHTMLBridge.pageStamp){}</script>"
+        await htmlDoc.reconcile(snapshot(compiled, path: pagePath))
         let readingHTML = try TaskFileReadingView(document: htmlDoc, store: files)
             .inspect().find(TaskHTMLView.self).actualView()
-        #expect(readingHTML.bridge != nil)
+        #expect(readingHTML.bridge?.path == pagePath)
 
         let reviewFile = ReviewFile(path: pagePath, oldPath: nil, status: .modified, blocks: [])
         await files.workingTree.refresh()

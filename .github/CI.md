@@ -256,8 +256,10 @@ environment signing: branch policy allows release/*; expected main only
 environment signing: NOTARY_ISSUER is named by notarization-check.yml and is not set
 ```
 
-It needs a `gh` login that can read repository settings; a read that fails is
-reported as a failed read. The daily release runs it in its host preflight, so
+It also names an organization secret shared with the repository, a secret left
+in the environment that no job reads, and a job that reads a secret without
+naming an environment. It needs a `gh` login that can read repository settings;
+a read that fails prints `could not read <path>: <reason>` and exits non-zero. The daily release runs it in its host preflight, so
 a secret put back on the repository or a branch added to the policy stops that
 day's release with those lines. `python/tests/test_workflow_secrets.py` fails a
 PR whose job reads a secret without declaring an environment.

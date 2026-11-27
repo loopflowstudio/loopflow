@@ -44,3 +44,21 @@ From writing the docs (reversible):
   can change the wording; the doc follows.
 - The holder table in `.github/CI.md` says the Doppler login can sign. Is that
   row wanted in a checked-in public file?
+
+From the build (2026-11-26):
+
+- The cron host's `gh` login reads repository secret names, environment secret
+  names and branch policies (checked over SSH against `github-pages`), so the
+  preflight calls the check. Its `gh` is too old for `--slurp`; the script
+  reads names with `--paginate --jq`.
+- The repository belongs to an organization, so the check also reports
+  organization secrets shared with it (none today). Not in the plan.
+- The check reports a secret set in `signing` that no job names. The plan said
+  "its secret names differ"; this is the other direction of that.
+- From merge until the six repository secrets are deleted (five signing,
+  `DEPENDABOT_MERGE_TOKEN`), the release preflight stops the daily release.
+  Today's live run prints those six lines and `environment signing: does not
+  exist; the first job naming it creates it open`.
+- `actionlint` accepts `deployment: false`. Whether the branch policy still
+  refuses with it is the probe at ship-review, not run here: the environment
+  does not exist yet and creating it is an admin settings step.

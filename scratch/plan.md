@@ -293,11 +293,16 @@ daily notarization check and its issue; the daily release.
 
 ## Passes
 
-Remaining in the build pass: the two workflow edits, the test file, the check
-script and its preflight call, and any corrections to the docs. The pass
-teaches whether the host's token can read environment settings. The settings
-steps and the probe follow at ship-review and teach whether `deployment: false`
-keeps the refusal.
+- Built (one pass): synced onto LOO-1120; `environment: signing` on both jobs,
+  `workflow_dispatch` and the `github.sha` fallbacks gone from
+  `main-packages.yml`; `scripts/check_actions_secrets.py`, called by the
+  release preflight; `python/tests/test_workflow_secrets.py`. The host's token
+  reads the settings, so the preflight call stays.
+
+Left, for a person with admin at ship-review ("Order of settings changes"):
+create `signing`, copy the five values, run the probe (settles
+`deployment: false`), merge, delete the repository secrets, run the acceptance
+check.
 
 Done when a branch run naming `signing` is refused, main still produces a
 notarized DMG, none of the five names is a repository secret, and the release

@@ -176,7 +176,8 @@ def main() -> int:
         print(error)
         return 1
     lines = differences(secret_reads(), settings)
-    print("\n".join(lines), end="\n" if lines else "")
+    for line in lines:
+        print(line)
     return 1 if lines else 0
 
 

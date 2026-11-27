@@ -36,6 +36,6 @@ produces the CLI and app together into a per-worktree `local-bin/`.
 - A release is complete only after the tagged website is healthy and the GitHub Release is non-draft.
 - Failed website proof restores the previous image. The next daily run resumes an incomplete successful tag build.
 - Release-note generation reads the full release context, groups repetition, preserves decisions and unique facts, and never substitutes first-N commits or lines for summarization.
-- Secrets come from Doppler on the maintained host and never enter committed config. GitHub holds a copy of the signing secrets in the `signing` environment; the repository has no Actions secrets, every environment that holds one allows `main` only, and the daily release checks that ([Signing secrets](../.github/CI.md#signing-secrets)).
+- Secrets come from Doppler on the maintained host and never enter committed config. The daily release checks that no GitHub Actions secret can be read from a branch ([Signing secrets](../.github/CI.md#signing-secrets)).
 - Local updater scripts refuse to pull a non-default branch unless explicitly told not to pull.
 - Automation spend uses the company card feed as source of truth and stops for approval above $100/month.

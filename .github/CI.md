@@ -270,11 +270,9 @@ environment a job names that GitHub lacks, and a job that reads a secret
 without naming an environment. An environment that holds no secret is not
 reported. It needs a `gh` login that can read repository settings; a read that
 fails prints `could not read <path>: <reason>` and exits non-zero. The daily
-release runs it in its host preflight, so a secret put back on the repository,
-a branch added to a policy or a new open environment with a secret stops that
-day's release with those lines under "GitHub Actions secrets are not
-main-only". `python/tests/test_workflow_secrets.py` fails a
-PR whose job reads a secret without declaring an environment.
+release runs it in its host preflight and stops with those lines under "GitHub
+Actions secrets are not main-only". `python/tests/test_workflow_secrets.py`
+fails a PR whose job reads a secret without declaring an environment.
 
 A new secret for CI goes in an environment with a branch policy, and the job
 that reads it names that environment. Never `gh secret set NAME` without

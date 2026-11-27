@@ -183,10 +183,12 @@ gh api repos/<owner>/<action>/commits/<tag> --jq .sha     # the commit for a new
 CI on that PR is the check. GitHub's vulnerability alerts stay on as the
 prompt; they notify and open no PR.
 
-The compiler and tools are not pinned: Rust `stable`, the latest uv and
-nextest, Homebrew's xcodegen and the `ubuntu-latest` image. `rust-toolchain`
-and `install-action` pick their tool from `with:` (`toolchain: stable`,
-`tool: nextest`), since their pinned commit no longer names it.
+The compiler and most tools are not pinned: Rust `stable`, the latest uv,
+Homebrew's xcodegen and the `ubuntu-latest` image. `rust-toolchain` and
+`install-action` are pinned on their `stable` and `nextest` branches, whose
+commits default to that tool, so neither needs a `with:` input. The
+`install-action` commit also fixes the nextest version (0.9.152) and its
+checksum; nextest moves when that pin does.
 
 ## Main packages
 

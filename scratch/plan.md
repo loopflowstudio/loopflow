@@ -20,10 +20,7 @@ Built, on `jack-heart/remove-dependabot` (base `472bacbd64`):
   `scripts/testing.md` no longer describe them.
 - `.github/CI.md` short line reflowed (uncommitted until the next commit).
 
-Not built: the outcome's claim about workflow action versions. All 76
-`uses:` lines that name an outside action point at a tag or branch its
-upstream owner can move, so a build step still changes with no PR. Pass 1
-closes that.
+- Pass 1: every outside action pinned to a commit SHA.
 
 ## Findings
 
@@ -80,8 +77,8 @@ nobody has answered. Each takes the review's recommended option.
   body says this so "by hand" is not read as "reviewed". Passed over: bump
   Tasks that always stop for a person, which needs a way to mark such a Task
   that does not exist.
-- **The compiler and tools keep floating**: Rust `stable`, latest uv, latest
-  nextest, `brew install xcodegen`, `ubuntu-latest`. Passed over: a
+- **The compiler and tools keep floating**: Rust `stable`, latest uv,
+  `brew install xcodegen`, `ubuntu-latest` (nextest is fixed by its pin). Passed over: a
   `rust-toolchain.toml`, which makes every Rust release a bump Task.
 - **A person revokes the PAT**; an agent may then delete the two secrets and
   the five branches. Whether anything else uses that PAT could not be checked
@@ -147,34 +144,21 @@ is lost.
 
 ## Passes
 
-### 1. Lock the build steps (next)
+### 1. Lock the build steps (built, this commit)
 
-Delivers: an action changes only in a commit here. Teaches whether the
-pinned forms of the two branch-named actions behave the same in CI.
+All 76 `uses:` lines are at 8 commit SHAs. Learned:
 
-- 76 `uses:` lines across 7 workflow files, 8 SHAs to look up
-  (`gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`):
-  `actions/checkout@v7` (23), `astral-sh/setup-uv@v7` (19),
-  `dtolnay/rust-toolchain@stable` (9), `Swatinem/rust-cache@v2` (8),
-  `actions/upload-artifact@v7` (7), `actions/cache@v6` with its `/restore`
-  and `/save` subpaths (5, one SHA), `taiki-e/install-action@nextest` (3),
-  `actions/download-artifact` (2).
-- `dtolnay/rust-toolchain@stable` and `taiki-e/install-action@nextest` name a
-  branch that selects the tool. At a SHA they need `with: toolchain: stable`
-  and `with: tool: nextest`; check each action's README at the pinned commit.
-- `actions/download-artifact` is `@v8` in `ci.yml` and `@v7` in the signing
-  job, a half-applied Dependabot bump. Pin both to the v8 commit, matching
-  `upload-artifact`'s major only if v8 reads v7 uploads; otherwise pin each
-  where it is and say so.
-- Docs are written ahead of the code: `.github/CI.md` has a `## Dependencies`
-  section (pinned actions, the pin check, how a bump starts, what floats) and
-  `scripts/testing.md`'s owner table points at it. The section describes the
-  pinned state; its check command prints 76 lines until this pass lands. If
-  `download-artifact` ends up at two majors or the `with:` inputs differ,
-  correct the section.
-- No local build. The PR's CI run is the test: every workflow parses and the
-  matrix passes on the pinned actions. `release.yml` and `main-packages.yml`
-  do not run on a PR; read their diff against `package-build.yml`'s.
+- `rust-toolchain@stable` and `install-action@nextest` need no `with:`: the
+  branch commits default `toolchain: stable` and `tool: nextest`.
+- Pinning `install-action` also fixes nextest at 0.9.152 (its manifest carries
+  version and checksum), so nextest no longer floats. The "tools keep
+  floating" decision now holds for Rust, uv, xcodegen and the runner image.
+- Both `download-artifact` lines are at v8.0.2; `ci.yml` already read v7
+  uploads with v8. The signing job's move from v7 to v8 is untested until
+  `main-packages.yml` runs on main: v8 fails on a digest mismatch where v7
+  warned.
+- Not run here: the PR's CI is the test. `release.yml` and
+  `main-packages.yml` only call `package-build.yml`, which a PR does not run.
 
 ### 2. Review, PR, land
 

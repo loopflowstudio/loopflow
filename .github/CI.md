@@ -246,38 +246,47 @@ The ways to a signature, and what each leaves:
 | A branch policy widened by a repository admin, including an admin `gh` token | A line at the next release, while the change is still in place. A policy widened, used and put back before the release prints nothing. |
 | The Doppler login for `loopflow`/`prd` | Nothing on GitHub. The values live there. |
 
-`scripts/check_actions_secrets.py` compares the live settings with what the
-workflows name. It prints nothing when they agree; otherwise one line per
-difference, and it exits non-zero:
+`scripts/check_actions_secrets.py` holds the settings to one rule: an
+environment that holds a secret allows `main` only, and nothing else holds
+one. It lists every environment from GitHub, whether a workflow names it or
+not. It prints nothing when the rule holds; otherwise one line per secret or
+environment, and it exits non-zero:
 
 ```console
 $ uv run python scripts/check_actions_secrets.py
 repository secret PROBE: any branch can read it; move it to an environment or delete it
+environment dev: no branch policy by name; expected main only
 environment signing: branch policy allows release/*; expected main only
 environment signing: NOTARY_ISSUER is named by notarization-check.yml and is not set
 ```
 
-It also names an organization secret shared with the repository, a secret left
-in the environment that no job reads, and a job that reads a secret without
-naming an environment. It needs a `gh` login that can read repository settings;
-a read that fails prints `could not read <path>: <reason>` and exits non-zero. The daily release runs it in its host preflight, so
-a secret put back on the repository or a branch added to the policy stops that
-day's release with those lines. `python/tests/test_workflow_secrets.py` fails a
+It also names an organization secret shared with the repository, an
+environment a job names that GitHub lacks, and a job that reads a secret
+without naming an environment. An environment that holds no secret is not
+reported. It needs a `gh` login that can read repository settings; a read that
+fails prints `could not read <path>: <reason>` and exits non-zero. The daily
+release runs it in its host preflight, so a secret put back on the repository,
+a branch added to a policy or a new open environment with a secret stops that
+day's release with those lines under "GitHub Actions secrets are not
+main-only". `python/tests/test_workflow_secrets.py` fails a
 PR whose job reads a secret without declaring an environment.
 
 A new secret for CI goes in an environment with a branch policy, and the job
 that reads it names that environment. Never `gh secret set NAME` without
 `--env`.
 
-To create the environment or replace a value, as a repository admin. The value
-goes from Doppler to GitHub without reaching the terminal:
+To create an environment, restrict an existing one (`dev`) or replace a value,
+as a repository admin. The value goes from Doppler to GitHub without reaching
+the terminal:
 
 ```bash
-gh api -X PUT 'repos/{owner}/{repo}/environments/signing' \
-  -F 'deployment_branch_policy[protected_branches]=false' \
-  -F 'deployment_branch_policy[custom_branch_policies]=true'
-gh api -X POST 'repos/{owner}/{repo}/environments/signing/deployment-branch-policies' \
-  -f name=main -f type=branch
+for environment in signing dev; do
+  gh api -X PUT "repos/{owner}/{repo}/environments/$environment" \
+    -F 'deployment_branch_policy[protected_branches]=false' \
+    -F 'deployment_branch_policy[custom_branch_policies]=true'
+  gh api -X POST "repos/{owner}/{repo}/environments/$environment/deployment-branch-policies" \
+    -f name=main -f type=branch
+done
 
 for name in APPLE_CERTIFICATE_BASE64 APPLE_CERTIFICATE_PASSWORD \
     NOTARY_KEY NOTARY_KEY_ID NOTARY_ISSUER; do

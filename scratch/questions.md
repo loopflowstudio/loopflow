@@ -67,3 +67,16 @@ From the build (2026-11-26):
 - `actionlint` accepts `deployment: false`. Whether the branch policy still
   refuses with it is the probe at ship-review, not run here: the environment
   does not exist yet and creating it is an admin settings step.
+
+From the second build (2026-11-26):
+
+- `PUT environments/dev` with a custom branch policy is written in
+  `.github/CI.md` from GitHub's API shape and was not run here (admin settings
+  step). Whether the PUT leaves `dev`'s existing secret in place is expected
+  and unverified.
+- An environment set to "protected branches only" prints `no branch policy by
+  name`, the same line as an open one: main's ruleset is not a classic branch
+  protection, so that setting is not read as `main` only.
+- After the settings steps the preflight still stops the daily release on
+  `DEPENDABOT_MERGE_TOKEN` until LOO-1120 deletes it, and on `dev` until its
+  policy is set.

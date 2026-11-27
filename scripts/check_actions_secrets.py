@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare GitHub's live Actions secret settings with what the workflows name."""
+"""Report every GitHub Actions secret a branch other than main can read."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote
 
 import yaml
 
@@ -62,7 +63,7 @@ class Environment:
 class Settings:
     repository_secrets: frozenset[str]
     organization_secrets: frozenset[str]
-    environments: dict[str, Environment | None]  # None: does not exist
+    environments: dict[str, Environment]  # every environment GitHub lists
 
 
 class SettingsUnreadable(RuntimeError):
@@ -79,12 +80,10 @@ def _gh(path: str, jq: str) -> tuple[int, str, str]:
     return result.returncode, result.stdout, result.stderr
 
 
-def _read(path: str, jq: str, *, absent_ok: bool = False) -> list[str] | None:
+def _read(path: str, jq: str) -> list[str]:
     status, stdout, stderr = _gh(path, jq)
     if status == 0:
         return stdout.splitlines()
-    if absent_ok and "HTTP 404" in stderr:
-        return None
     reason = stderr.strip().splitlines()[-1] if stderr.strip() else f"gh exited {status}"
     raise SettingsUnreadable(f"could not read {path}: {reason}")
 
@@ -93,33 +92,36 @@ def _secret_names(path: str) -> frozenset[str]:
     return frozenset(_read(path, ".secrets[].name"))
 
 
-def _read_environment(name: str) -> Environment | None:
-    by_name = _read(
-        f"environments/{name}",
-        ".deployment_branch_policy.custom_branch_policies == true",
-        absent_ok=True,
-    )
-    if by_name is None:
-        return None
-    allowed_refs = None
-    if by_name == ["true"]:
-        rules = _read(
-            f"environments/{name}/deployment-branch-policies",
-            '.branch_policies[] | if .type == "branch" then .name else "\\(.type) \\(.name)" end',
-        )
-        allowed_refs = frozenset(rules)
-    return Environment(allowed_refs, _secret_names(f"environments/{name}/secrets"))
+_POLICY_AND_NAME = (
+    r'.environments[] | "\(.deployment_branch_policy.custom_branch_policies == true) \(.name)"'
+)
+# A tag rule reads "tag v*", so it never passes for the branch `main`.
+_ALLOWED_REF = r'.branch_policies[] | if .type == "branch" then .name else "\(.type) \(.name)" end'
 
 
-def read_settings(environments: set[str]) -> Settings:
+def _read_environments() -> dict[str, Environment]:
+    listed = _read("environments", _POLICY_AND_NAME)
+    environments = {}
+    for line in listed:
+        by_name, name = line.split(" ", 1)
+        path = f"environments/{quote(name, safe='')}"
+        allowed_refs = None
+        if by_name == "true":
+            rules = _read(f"{path}/deployment-branch-policies", _ALLOWED_REF)
+            allowed_refs = frozenset(rules)
+        environments[name] = Environment(allowed_refs, _secret_names(f"{path}/secrets"))
+    return environments
+
+
+def read_settings() -> Settings:
     return Settings(
         repository_secrets=_secret_names("actions/secrets"),
         organization_secrets=_secret_names("actions/organization-secrets"),
-        environments={name: _read_environment(name) for name in sorted(environments)},
+        environments=_read_environments(),
     )
 
 
-# Where they disagree
+# What a branch other than main can read
 
 
 def differences(reads: list[SecretRead], settings: Settings) -> list[str]:
@@ -146,35 +148,34 @@ def differences(reads: list[SecretRead], settings: Settings) -> list[str]:
         for name in read.names:
             workflows.setdefault(name, set()).add(read.workflow)
 
-    for environment, workflows in sorted(named.items()):
+    for environment in sorted(settings.environments.keys() | named.keys()):
         prefix = f"environment {environment}:"
-        live = settings.environments[environment]
+        live = settings.environments.get(environment)
         if live is None:
             lines.append(f"{prefix} does not exist; the first job naming it creates it open")
             continue
-        if live.allowed_refs is None:
+        # An environment holding nothing has nothing to read, whatever its policy.
+        if live.secrets and live.allowed_refs is None:
             lines.append(f"{prefix} no branch policy by name; expected main only")
-        elif live.allowed_refs != {"main"}:
+        elif live.secrets and live.allowed_refs != {"main"}:
             extra = ", ".join(sorted(live.allowed_refs - {"main"}))
             allows = f"allows {extra}" if extra else "allows no branch"
             lines.append(f"{prefix} branch policy {allows}; expected main only")
+        workflows = named.get(environment, {})
         for name in sorted(workflows.keys() - live.secrets):
             lines.append(
                 f"{prefix} {name} is named by {', '.join(sorted(workflows[name]))} and is not set"
             )
-        for name in sorted(live.secrets - workflows.keys()):
-            lines.append(f"{prefix} {name} is set and no job names it")
     return lines
 
 
 def main() -> int:
-    reads = secret_reads()
     try:
-        settings = read_settings({read.environment for read in reads if read.environment})
+        settings = read_settings()
     except SettingsUnreadable as error:
         print(error)
         return 1
-    lines = differences(reads, settings)
+    lines = differences(secret_reads(), settings)
     print("\n".join(lines), end="\n" if lines else "")
     return 1 if lines else 0
 

@@ -186,8 +186,8 @@ workflow diff and the check script.
   `workflow_dispatch`; revision is `github.event.workflow_run.head_sha`.
 - `.github/workflows/notarization-check.yml`: `environment:` on `notarytool`.
 - `scripts/check_actions_secrets.py`: reads the workflows for each
-  environment's secret names, reads live settings through `gh api` (names and
-  policies), prints every disagreement and exits non-zero: a repository secret
+  environment's secret names, lists every environment through `gh api` (names
+  and policies), prints every disagreement and exits non-zero: a repository secret
   exists; any environment holding a secret lacks a `main`-only branch policy;
   an environment a job names is missing, or lacks a name the job reads. A
   failed read is reported as a failed read, never as "no secrets".
@@ -304,13 +304,13 @@ From `scratch/concept-review.html` as rewritten against the built change
 
 - The promise named a holder and the ruleset on main makes it false: reworded
   to "a commit on main" in the Outcome and `.github/CI.md` (made for review).
-- The check never reads an environment no workflow names, so `dev` passes:
-  next pass.
+- The check never read an environment no workflow names, so `dev` passed:
+  built.
 - "The next release stops and names the change" overstated what a daily
   reading sees: `.github/CI.md` and the Outcome now say "while still in
   place". No record of uses added (made for review).
 - One rule under two names; the preflight error calls every line a signing
-  setting and says "differ" for a failed read: next pass.
+  setting and says "differ" for a failed read: built.
 - A required review on main, agents holding admin, the p12 in Doppler:
   separate outcomes; the last two are deferred above, the first is not
   proposed (it ends agents landing their own PRs).
@@ -336,26 +336,13 @@ daily notarization check and its issue; the daily release.
   release preflight; `python/tests/test_workflow_secrets.py`. The host's token
   reads the settings, so the preflight call stays.
 
-- Next (one pass): the check reads every environment.
-  - `read_settings` lists `environments` from GitHub (names, paginated) and
-    reads each one's policy and secret names; it takes no argument.
-    `Settings.environments` holds what exists, so a missing environment is an
-    absent key and `Environment | None` goes.
-  - `differences`: any environment with a secret and a policy other than
-    `main` only is reported, named by a job or not; an environment a job names
-    and GitHub lacks keeps "does not exist"; a name a job reads that is not
-    set stays; "is set and no job names it" goes, with its test case.
-  - `publish_release.check_release_host` raises "GitHub Actions secrets are
-    not main-only (.github/CI.md, "Signing secrets")" with the script's lines.
-    A failed read reaches the log as the script printed it.
-  - Tests: an open environment no job names is reported by name
-    (`environment dev: no branch policy by name; expected main only`); an
-    empty open one is not; the canned `_gh` answers include the environment
-    list.
-  - `.github/CI.md`: the paragraph on what the script names, and the admin
-    commands gain the `dev` policy.
-  - Run it live; today it should print the seven lines plus `dev`. Teaches
-    whether the host's `gh` can list environments (it read one by name).
+- Built: the check lists every environment from GitHub and holds each one
+  with a secret to `main` only; "is set and no job names it" is gone; the
+  preflight error reads "GitHub Actions secrets are not main-only". Live run
+  on 2026-11-26 printed the six repository secrets, `environment dev: no
+  branch policy by name; expected main only` and `environment signing: does
+  not exist…`. The release host's `gh` lists environments (`dev`,
+  `github-pages`, `pypi`).
 
 Left, for a person with admin at ship-review ("Order of settings changes"):
 create `signing`, copy the five values, give `dev` a `main` policy, run the

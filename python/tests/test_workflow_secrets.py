@@ -1,4 +1,3 @@
-import re
 import subprocess
 from pathlib import Path
 
@@ -21,8 +20,10 @@ def _settings(
     repository: set[str] = frozenset(),
     organization: set[str] = frozenset(),
     signing: Environment | None = Environment(frozenset({"main"}), SIGNING),
+    others: dict[str, Environment] = {},
 ) -> Settings:
-    return Settings(frozenset(repository), frozenset(organization), {"signing": signing})
+    environments = {**others, **({"signing": signing} if signing else {})}
+    return Settings(frozenset(repository), frozenset(organization), environments)
 
 
 def _write(tmp_path: Path, name: str, workflow: dict) -> None:
@@ -94,6 +95,12 @@ def test_matching_settings_print_nothing():
     assert check_actions_secrets.differences(READS, _settings()) == []
 
 
+def test_an_open_environment_holding_nothing_is_not_reported():
+    settings = _settings(others={"pypi": Environment(None, frozenset())})
+
+    assert check_actions_secrets.differences(READS, settings) == []
+
+
 @pytest.mark.parametrize(
     ("settings", "line"),
     [
@@ -129,8 +136,8 @@ def test_matching_settings_print_nothing():
             "notarization-check.yml and is not set",
         ),
         (
-            _settings(signing=Environment(frozenset({"main"}), SIGNING | {"OLD_KEY"})),
-            "environment signing: OLD_KEY is set and no job names it",
+            _settings(others={"dev": Environment(None, frozenset({"WEBHOOK_SECRET"}))}),
+            "environment dev: no branch policy by name; expected main only",
         ),
     ],
 )
@@ -150,22 +157,22 @@ def test_live_settings_are_read_by_name(monkeypatch):
             {
                 "actions/secrets": (0, "PROBE\n", ""),
                 "actions/organization-secrets": (0, "", ""),
-                "environments/signing": (0, "true\n", ""),
+                "environments": (0, "false open\ntrue signing\nfalse two words\n", ""),
                 "environments/signing/deployment-branch-policies": (0, "main\ntag v*\n", ""),
                 "environments/signing/secrets": (0, "NOTARY_KEY\n", ""),
-                "environments/open": (0, "false\n", ""),
                 "environments/open/secrets": (0, "", ""),
+                "environments/two%20words/secrets": (0, "WEBHOOK_SECRET\n", ""),
             }
         ),
     )
 
-    assert check_actions_secrets.read_settings({"signing", "open", "absent"}) == Settings(
+    assert check_actions_secrets.read_settings() == Settings(
         frozenset({"PROBE"}),
         frozenset(),
         {
-            "absent": None,
             "open": Environment(None, frozenset()),
             "signing": Environment(frozenset({"main", "tag v*"}), frozenset({"NOTARY_KEY"})),
+            "two words": Environment(None, frozenset({"WEBHOOK_SECRET"})),
         },
     )
 
@@ -198,5 +205,9 @@ def test_the_release_preflight_stops_on_a_changed_setting(monkeypatch):
     for name in publish_release.REQUIRED_SECRETS:
         monkeypatch.setenv(name, "set")
 
-    with pytest.raises(RuntimeError, match=re.escape(line)):
+    with pytest.raises(RuntimeError) as error:
         publish_release.check_release_host()
+
+    assert str(error.value) == (
+        'GitHub Actions secrets are not main-only (.github/CI.md, "Signing secrets"):\n' + line
+    )

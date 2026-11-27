@@ -66,6 +66,8 @@ pub enum TaskState {
     /// A Graph runs for it. Its auto setting says whether the run stands in
     /// at interactive steps or stops there for a person.
     Moving,
+    /// Execution is held until explicitly unpaused.
+    Paused,
     /// Completed independently of Graph position.
     Done,
     Abandoned,
@@ -78,6 +80,7 @@ impl TaskState {
             Self::Idle => "idle",
             Self::Active => "active",
             Self::Moving => "moving",
+            Self::Paused => "paused",
             Self::Done => "done",
             Self::Abandoned => "abandoned",
         }
@@ -89,6 +92,7 @@ impl TaskState {
             Self::Idle,
             Self::Active,
             Self::Moving,
+            Self::Paused,
             Self::Done,
             Self::Abandoned,
         ]
@@ -103,11 +107,6 @@ impl TaskState {
     /// State this Machine can report from its own records and the shared plan.
     pub fn observed_here(self, runs_elsewhere: bool) -> Option<Self> {
         (!runs_elsewhere || self.is_terminal() || self == Self::Moving).then_some(self)
-    }
-
-    /// Has a checkout and is still open and unheld.
-    pub fn is_started(&self) -> bool {
-        matches!(self, Self::Idle | Self::Active | Self::Moving)
     }
 
     /// Planning withdraws never-started work; started work follows execution.
@@ -136,10 +135,42 @@ impl TaskState {
 pub enum TaskSection {
     /// Waiting for someone to pick it up: unstarted, or started and unassigned.
     Backlog,
-    /// Someone's idle, active or moving Task, or a Task owned on another Machine.
+    /// Someone's idle, active, moving or paused Task, or a Task owned on another Machine.
     Working,
     Done,
     Abandoned,
+}
+
+/// The groups inside Working, in sidebar order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkingGroup {
+    Active,
+    Shipping,
+    Paused,
+}
+
+impl WorkingGroup {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Active => "Active",
+            Self::Shipping => "Shipping",
+            Self::Paused => "Paused",
+        }
+    }
+
+    /// Classify a Working Task before inspecting its Graph.
+    /// Returns `(group, inspect)` where `inspect` is true when a local captured
+    /// Graph can still place the Task in Shipping.
+    pub fn before_graph(paused: bool, auto_on: bool, observed_here: bool) -> (Self, bool) {
+        if paused {
+            (Self::Paused, false)
+        } else if auto_on {
+            (Self::Shipping, false)
+        } else {
+            (Self::Active, observed_here)
+        }
+    }
 }
 
 impl TaskSection {
@@ -152,7 +183,9 @@ impl TaskSection {
             _ if runs_elsewhere => Self::Working,
             TaskState::Unstarted => Self::Backlog,
             _ if !owned => Self::Backlog,
-            TaskState::Idle | TaskState::Active | TaskState::Moving => Self::Working,
+            TaskState::Idle | TaskState::Active | TaskState::Moving | TaskState::Paused => {
+                Self::Working
+            }
         }
     }
 }
@@ -239,7 +272,7 @@ impl GraphStepProcess {
 
 #[cfg(test)]
 mod tests {
-    use super::{TaskSection, TaskState};
+    use super::{TaskSection, TaskState, WorkingGroup};
 
     #[test]
     fn lifecycle_withdraws_only_never_started_work() {
@@ -264,11 +297,33 @@ mod tests {
         let of = TaskSection::of;
         assert_eq!(of(TaskState::Idle, true, false), TaskSection::Working);
         assert_eq!(of(TaskState::Moving, true, false), TaskSection::Working);
+        assert_eq!(of(TaskState::Paused, true, false), TaskSection::Working);
+        assert_eq!(of(TaskState::Paused, false, false), TaskSection::Backlog);
         assert_eq!(of(TaskState::Idle, false, false), TaskSection::Backlog);
         assert_eq!(of(TaskState::Moving, false, false), TaskSection::Backlog);
         assert_eq!(of(TaskState::Unstarted, true, false), TaskSection::Backlog);
         assert_eq!(of(TaskState::Unstarted, true, true), TaskSection::Working);
         assert_eq!(of(TaskState::Done, false, false), TaskSection::Done);
         assert_eq!(of(TaskState::Abandoned, true, true), TaskSection::Abandoned);
+    }
+
+    #[test]
+    fn working_group_before_graph_prioritizes_pause_then_auto() {
+        assert_eq!(
+            WorkingGroup::before_graph(true, true, true),
+            (WorkingGroup::Paused, false)
+        );
+        assert_eq!(
+            WorkingGroup::before_graph(false, true, true),
+            (WorkingGroup::Shipping, false)
+        );
+        assert_eq!(
+            WorkingGroup::before_graph(false, false, true),
+            (WorkingGroup::Active, true)
+        );
+        assert_eq!(
+            WorkingGroup::before_graph(false, false, false),
+            (WorkingGroup::Active, false)
+        );
     }
 }

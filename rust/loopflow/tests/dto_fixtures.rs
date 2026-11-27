@@ -31,7 +31,7 @@ fn roadmap_requires_shared_lifecycle_and_selection_states() {
     ))
     .unwrap();
     let row = &wire[0]["tasks"][0];
-    for field in ["lifecycle", "selection_states"] {
+    for field in ["lifecycle", "selection_states", "working_group"] {
         let mut missing = row.clone();
         missing.as_object_mut().unwrap().remove(field);
         assert!(serde_json::from_value::<RoadmapTask>(missing).is_err());
@@ -291,6 +291,11 @@ fn task_detail_says_each_fact_once() {
     );
     let graph = detail.graph.as_ref().unwrap();
     assert_eq!(graph.current_step, Some(2));
+    assert_eq!(graph.control.label, "demo · next: end");
+    assert_eq!(
+        graph.control.action,
+        loopflow_execution::task_graph::WorkflowAction::Run
+    );
     assert_eq!(graph.sentence, "Waiting for you at demo.");
     let conversation = detail
         .sessions
@@ -536,6 +541,11 @@ fn task_work_preserves_sessions_graph_runs_and_graph() {
         ]
     );
     assert_eq!(graph.current_step, Some(2));
+    assert_eq!(graph.control.label, "build · implement");
+    assert_eq!(
+        graph.control.action,
+        loopflow_execution::task_graph::WorkflowAction::Pause
+    );
     assert_eq!(
         graph.sentence,
         "build is running implement. You are next needed at demo."
@@ -1165,7 +1175,18 @@ fn task_overview_excludes_diagnostic_process_history() {
     let input = include_str!("../../../tests/fixtures/dto/task_overview.json");
     let overview: loopflow_execution::task_work::TaskOverview =
         serde_json::from_str(input).unwrap();
-    assert!(overview.graph.is_some());
+    assert_eq!(
+        overview.graph.as_ref().unwrap().control.action,
+        loopflow_execution::task_graph::WorkflowAction::Wait
+    );
+    assert_eq!(
+        serde_json::to_value(loopflow_execution::task_graph::WorkflowControl {
+            action: loopflow_execution::task_graph::WorkflowAction::Pausing,
+            label: "Pausing: deliver · land".into(),
+        })
+        .unwrap(),
+        serde_json::json!({"action": "pausing", "label": "Pausing: deliver · land"})
+    );
     assert_eq!(
         serde_json::to_value(overview).unwrap(),
         serde_json::from_str::<serde_json::Value>(input).unwrap()

@@ -3,6 +3,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use clap::Parser;
 use loopflow_execution::config::environment::EnvVarGuard;
+use loopflow_execution::engine::task::TaskRun;
 use loopflow_execution::graph::compile_graph;
 use loopflow_execution::graph::output::GraphOutput;
 use loopflow_execution::graph::return_target;
@@ -18,6 +19,7 @@ use loopflow_execution::graph::ConcreteStep;
 use loopflow_execution::graph::ConcreteXor;
 use loopflow_execution::graph::GraphDefinition;
 use loopflow_execution::journal::{self, LfEventFields, LfEventType, LfNode};
+use loopflow_execution::ops::task::{TaskRunMode, TaskRunStart};
 use loopflow_execution::ops::WorkBinding;
 use loopflow_execution::ops::{graph_process, tracker_events};
 use loopflow_execution::output::Colors;
@@ -218,15 +220,15 @@ impl TaskRunStopped {
 /// started again.
 /// `run` names the graph and where the run set out, for messages.
 ///
-/// With `release`, a bare run inside its execution owner lets its launcher go
-/// once the first attempt has registered, and carries on with its output in
-/// that attempt's log. `announce` hears the first registered Graph process
-/// and that log, before the launcher goes.
+/// A bare run inside its execution owner lets its launcher go once the first
+/// attempt has registered, and carries on with its output in that attempt's
+/// log. `announce` hears the first registered Graph process and that log,
+/// before the launcher goes.
 pub fn run_task_graph_for(
     cli: &Cli,
     task: &Task,
     run: &str,
-    release: bool,
+    cursor: i64,
     announce: &mut dyn FnMut(&LfProcessId, Option<&Path>) -> Result<()>,
 ) -> Result<()> {
     let checkout = task.worktree()?;
@@ -235,8 +237,7 @@ pub fn run_task_graph_for(
     let store = &store.sqlite;
     let process =
         journal::current_lf_process_id().context("a Task run requires a registered Process")?;
-    let cursor = store.latest_interrupt_id(&task.id)?;
-    let letting_go = release && lets_launcher_go(cli);
+    let letting_go = lets_launcher_go(cli);
     let mut released = false;
     let mut attempt = 1;
     // The error every failed attempt so far shared, if they all shared one.
@@ -273,7 +274,7 @@ pub fn run_task_graph_for(
         if status.success() {
             return Ok(());
         }
-        if store.latest_interrupt_id(&task.id)? > cursor {
+        if store.task_graph_stopped_since(&task.id, cursor)? {
             eprintln!("Task run interrupted; not starting it again.");
             return Err(loopflow_execution::process::CommandExit(130).into());
         }
@@ -380,22 +381,41 @@ pub fn carry_task_run(
     options: loopflow_execution::ops::task::TaskProcessOptions,
     json: bool,
 ) -> Result<()> {
-    use loopflow_execution::engine::task::TaskRun;
-    use loopflow_execution::ops::task::{TaskRunMode, TaskRunStart};
-    let mode = if cli.interactive {
+    let (task, start) = loopflow_execution::ops::task::task_place(
+        repo,
+        issue,
+        options,
+        task_run_mode(cli),
+        crate::lf::navigation::command_merges,
+    )?;
+    carry_placed_task(cli, task, start, json)
+}
+
+pub fn carry_unpaused_task(cli: &Cli, repo: &Path, issue: &str) -> Result<()> {
+    let placed = loopflow_execution::ops::task::unpause_task_run(
+        repo,
+        issue,
+        task_run_mode(cli),
+        crate::lf::navigation::command_merges,
+    )?;
+    let Some((task, start)) = placed else {
+        loopflow_execution::engine::launch::report(Ok(&None::<TaskRun>));
+        return Ok(());
+    };
+    carry_placed_task(cli, task, start, true)
+}
+
+fn task_run_mode(cli: &Cli) -> TaskRunMode {
+    if cli.interactive {
         TaskRunMode::InPlace
     } else if cli.batch {
         TaskRunMode::Headless
     } else {
         TaskRunMode::Stop
-    };
-    let (task, start) = loopflow_execution::ops::task::task_place(
-        repo,
-        issue,
-        options,
-        mode,
-        crate::lf::navigation::command_merges,
-    )?;
+    }
+}
+
+fn carry_placed_task(cli: &Cli, task: Task, start: TaskRunStart, json: bool) -> Result<()> {
     if !cli.interactive {
         loopflow_execution::ops::task::prepare_conversation_beside(&task);
     }
@@ -409,16 +429,17 @@ pub fn carry_task_run(
         }
         Ok(())
     };
-    let (step, merges) = match start {
+    let (step, merges, cursor) = match start {
         TaskRunStart::Run {
             step,
             merges,
             stands_in,
+            interrupt_cursor,
         } => {
             if let Some(step) = stands_in {
                 eprintln!("{issue}: standing in at {step}");
             }
-            (step, merges)
+            (step, merges, interrupt_cursor)
         }
         TaskRunStart::Live {
             run,
@@ -440,7 +461,7 @@ pub fn carry_task_run(
     };
     // This process carries the run; its Graph process writes where the
     // Task stopped. A run that never arrives leaves the Task to start it again.
-    run_task_graph_for(cli, &task, &step, true, &mut |graph, log| {
+    run_task_graph_for(cli, &task, &step, cursor, &mut |graph, log| {
         announce(&TaskRun::Running {
             issue: issue.clone(),
             run: step.clone(),
@@ -689,7 +710,10 @@ async fn interrupt_cursor(
     {
         return Ok(cursor);
     }
-    Ok(store.latest_interrupt_id(task).await?)
+    Ok(store
+        .latest_task_event(task)
+        .await?
+        .map_or(0, |event| event.id))
 }
 
 /// Run `future` to completion from this synchronous command.
@@ -966,8 +990,8 @@ impl RunningGraph<'_> {
         let (Some(task), Some(cursor)) = (&self.task, self.interrupt) else {
             return false;
         };
-        match self.store.sqlite.latest_interrupt_id(task) {
-            Ok(latest) => latest > cursor,
+        match self.store.sqlite.task_graph_stopped_since(task, cursor) {
+            Ok(stopped) => stopped,
             Err(error) => {
                 tracing::warn!(%error, "failed to read Task interrupts");
                 false
@@ -1113,8 +1137,9 @@ impl RunningGraph<'_> {
                 )
             })?;
         let status = status.context("could not execute Graph step")?;
-        // An interrupt during an operation takes effect once it has finished.
-        if signalled || self.interrupted() {
+        // An interrupted agent ends at once; a draining operation finishes and
+        // records its own exit so the runner advances past it before stopping.
+        if signalled || (kind == StepKind::Agent && self.interrupted()) {
             eprintln!("Graph {} interrupted at {label}.", self.graph);
             // Someone stopped it: a wait it was in no longer starts it again.
             if let Some(step) = &step {
@@ -1315,6 +1340,13 @@ impl SkillExecutor for &RunningGraph<'_> {
         if let Some(step) = self.stopped_landing()? {
             return Ok(SkillOutcome::StopsAt(step));
         }
+        if self.interrupted() {
+            eprintln!(
+                "Graph {} interrupted before {}.",
+                self.graph, skill.skill.name
+            );
+            return Ok(SkillOutcome::Interrupted);
+        }
         loopflow_execution::ops::tracker_events::sync_repository(
             &self.store,
             &self.cwd.to_string_lossy(),
@@ -1419,15 +1451,19 @@ impl SkillExecutor for &RunningGraph<'_> {
         ops: &loopflow_execution::graph::ConcreteCommand,
         _ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
+        let label = ops.item.display_name();
         if let Some(step) = self.stopped_landing()? {
             return Ok(SkillOutcome::StopsAt(step));
+        }
+        if self.interrupted() {
+            eprintln!("Graph {} interrupted before {label}.", self.graph);
+            return Ok(SkillOutcome::Interrupted);
         }
         loopflow_execution::ops::tracker_events::sync_repository(
             &self.store,
             &self.cwd.to_string_lossy(),
         )
         .await;
-        let label = ops.item.display_name();
         eprintln!("op: {label}");
         let argv = ops.item.argv();
         let parsed = crate::lf::navigation::normalize_args(argv.clone())
@@ -1650,7 +1686,7 @@ mod tests {
                 task_run: None,
                 interrupt: Some(
                     runtime
-                        .block_on(fixture.store.latest_interrupt_id(&task.id))
+                        .block_on(super::interrupt_cursor(&fixture.store, &task.id))
                         .unwrap(),
                 ),
             };
@@ -1670,6 +1706,90 @@ mod tests {
             assert_eq!(outcome, GraphOutcome::Interrupted);
             assert!(begun.elapsed() < std::time::Duration::from_secs(10));
             assert_eq!(fs::read_to_string(&started).unwrap().lines().count(), 1);
+        });
+    }
+
+    #[test]
+    fn a_draining_command_preserves_failure_and_advances_when_it_exits_zero() {
+        use crate::lf::Cli;
+        use clap::Parser;
+        use loopflow_execution::graph::runner::{ExecutionCursor, GraphOutcome, GraphRunner};
+        use loopflow_execution::graph::{Command, ConcreteCommand};
+        use loopflow_execution::test_support::planning_tasks::with_planning_task;
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::Mutex;
+
+        with_planning_task(|runtime, fixture, repo, task, _| {
+            let _env = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
+            let cli = Cli::try_parse_from(["lf", "--batch"]).unwrap();
+            let op = |name: &str| {
+                ConcreteStep::Command(ConcreteCommand {
+                    item: Command {
+                        command: name.into(),
+                        args: Vec::new(),
+                    },
+                    sources: Vec::new(),
+                })
+            };
+            let run_draining = |tag: &str, exit_code: i32, steps: &[ConcreteStep]| {
+                let started = fixture.directory.path().join(format!("started-{tag}"));
+                let release = fixture.directory.path().join(format!("release-{tag}"));
+                let child = fixture.directory.path().join(format!("lf-{tag}"));
+                fs::write(
+                    &child,
+                    format!(
+                        "#!/bin/sh\n: > '{}'\nwhile [ ! -f '{}' ]; do sleep 0.02; done\nexit {exit_code}\n",
+                        started.display(),
+                        release.display()
+                    ),
+                )
+                .unwrap();
+                fs::set_permissions(&child, fs::Permissions::from_mode(0o755)).unwrap();
+                std::env::set_var("LF_BIN", &child);
+                let running = super::RunningGraph {
+                    store: fixture.store.clone(),
+                    process: loopflow_model::id::LfProcessId::new(),
+                    graph: tag,
+                    steps,
+                    message: None,
+                    cwd: repo,
+                    launcher: &cli,
+                    position: Mutex::new(ExecutionCursor::default()),
+                    task: Some(task.id.clone()),
+                    task_run: None,
+                    interrupt: Some(
+                        runtime
+                            .block_on(super::interrupt_cursor(&fixture.store, &task.id))
+                            .unwrap(),
+                    ),
+                };
+                record_run(&running);
+                let result = runtime.block_on(async {
+                    let interrupt = async {
+                        while !started.exists() {
+                            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                        }
+                        fixture.store.append_interrupt(&task.id).await.unwrap();
+                        fs::write(&release, "").unwrap();
+                    };
+                    let runner = GraphRunner::new(&running);
+                    let (result, ()) = tokio::join!(runner.run(steps, 0), interrupt);
+                    result
+                });
+                (result, running.position.into_inner().unwrap())
+            };
+
+            // A draining command that exits non-zero fails instead of reading Interrupted.
+            let (failed, _) = run_draining("drain-fail", 1, &[op("first"), op("second")]);
+            assert!(
+                failed.is_err(),
+                "a non-zero draining command must fail, not read Interrupted: {failed:?}"
+            );
+
+            // A draining final command that exits 0 completes the Graph.
+            let (completed, cursor) = run_draining("drain-last", 0, &[op("final")]);
+            assert_eq!(completed.unwrap(), GraphOutcome::Completed);
+            assert_eq!(cursor.index, 1);
         });
     }
 

@@ -44,7 +44,7 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | A Graph's identity, state and step results | Its Graph process and child step processes in `processes` |
 | A Graph's name, launched graph, the Task it started for and each step's node | GraphProcess: `graph_processes` and `graph_process_steps`, appended by the Graph process |
 | A Task's graph and the step it stands at | `task_graphs`, one row per Task updated in place; written only by `lf task run` and its child Graph process |
-| A Task's state: unstarted, idle, active, moving, done | Read from its checkout, `task_graphs` step and its running Graph; never stored, and never read from the auto setting. `tasks.abandoned_at` is the one mark beside it |
+| A Task’s state | Derived from its outcome, pause hold, move, checkout and Graph. See [Task states](../orchestration.md). |
 | Large captured prompts, transcripts and output | Immutable or append-only payloads referenced by their owning records |
 | Credentials and provider-native conversation files | The execution Machine and its native client |
 | Current local liveness | OS process evidence matched to exact recorded PID/start identity |

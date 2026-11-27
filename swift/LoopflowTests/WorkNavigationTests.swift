@@ -1170,7 +1170,7 @@ struct WorkNavigationTests {
         #expect(workspace.multiplexer.focusedPaneId == pane)
     }
 
-    @Test("An unstarted Task's bar draws the workflow its first run takes up; before the catalog is read, its name alone")
+    @Test("An unstarted Task's bar draws the workflow its first run takes up once the catalog is read")
     func unstartedTaskBarDrawsItsWorkflow() async throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
@@ -1184,12 +1184,12 @@ struct WorkNavigationTests {
         #expect(task.graphName == "feature")
         let unstarted = try JSONDecoder().decode(TaskOverview.self, from: Data(#"{"sessions":[],"graph_processes":[],"graph":null}"#.utf8))
         let bar = TaskWorkflowBar(model: model, task: task, work: .available(unstarted))
-        #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-name").text().string() == "feature")
         #expect(throws: (any Error).self) { try bar.inspect().find(text: "pursue") }
         await model.loadGraphCatalog()
-        #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-name").text().string() == "feature")
-        #expect(try ["design", "pursue", "xor-route", "queue"].map { try bar.inspect().find(text: $0).string() }.count == 4)
-        _ = try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start")
+        // The first step grows into the chip; the rest are steps to start from.
+        _ = try bar.inspect().find(text: "Run: design")
+        #expect(try ["pursue", "xor-route", "queue"].map { try bar.inspect().find(text: $0).string() }.count == 3)
+        _ = try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-primary")
     }
 
     @Test("Workflow loading, absent and failed readings: a failure shows the last good one or nothing")

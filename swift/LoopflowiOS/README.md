@@ -34,8 +34,9 @@ own pair.
 
 The list shows one repository at a time: tap the title to switch, or pick
 **All repositories** to see each under its name. The filter button chooses what
-to show — **Started** (Desktop's sidebar: Working Tasks), **Ready for
-you**, **Working now**, **Backlog** or **Done** — in the Machine's order, within one Wave when you pick it there. Tasks
+to show — **Working** (Desktop's sidebar, grouped into **Active**, **Shipping**,
+and **Paused**), **Ready for you**, **Working now**, **Backlog** or **Done** —
+in the Machine's order, within one Wave when you pick it there. Tasks
 with a conversation come first; started Tasks nobody has opened a conversation
 for fold under "N without a conversation". Search covers title and checkout
 path. Pull to refresh.
@@ -51,7 +52,7 @@ LOO-5  Busy  Auto  implement
 
 The word is the one the Mac shows for that Task: what its conversation reports
 (**Blocked**, **Error**, **Busy**, **Available**), or its lifecycle word (**Unstarted**,
-**Idle**, **Active**, **Moving**, **Done**) while nothing reports. **Auto**
+**Idle**, **Active**, **Moving**, **Paused**, **Done**) while nothing reports. **Auto**
 follows while Auto-Ship is on. A Task whose reading carries
 neither says **Unavailable**. The row carries no stripe: colour is on the word.
 
@@ -74,38 +75,23 @@ the filter is empty, **Clear search** when the search matches nothing.
 
 ## Task
 
-Opening a Task opens its conversation and fits the terminal to the phone. Above
-it, one sentence says where the Task stands:
+Opening a Task fits its conversation to the phone. The workflow bar above it
+shows ▶/⏸ and the step the Task stands at. Tap ⏸ beside **build · implement** to
+pause the worker while keeping the conversation open. Tap ▶ to resume the
+interrupted step. At a human step such as ship-review, ▶ lifts the hold and
+waits for you. The next tap runs the step the chip names after **next:**.
 
-```text
-build is running implement. You are next needed at ship-review.
-```
-
-It is the sentence `lf task status` prints and the Mac's workflow bar shows,
-in full: it wraps rather than cuts, and it changes as the Task moves. Turned
-sideways, or on an iPad, the Graph's steps stand before it as they do on the
-Mac. A Task that has not taken up a Graph shows no sentence.
-
-**Task actions** in the toolbar holds what the Mac's workflow bar offers:
-
-- **Start** before the Task has run, **Run** once its Graph has stopped or is
-  waiting at a step. While a run carries the Task, neither is there.
-- **Auto-Ship** turns the Task's auto setting on and runs it, as
-  `lf task auto on` does; **Stop Auto-Ship** turns it off. Every Task that is
-  not completed has one of them.
-
-Each shows a line like "LOO-5 Auto-Ship requested" at the bottom of the
-screen. An action the Machine already knows it would refuse is greyed, and
-the reason stands in full under the workflow sentence; any other refusal shows
-in that line.
+Tap the chip to pick a starting point, pause at review, or interrupt the worker.
+Cleanup disables unpause until the worker stops.
+The **Auto** switch stays armed during a hold and can be switched off.
+Tap ✓ to complete the Task. **…** opens its PR, Sessions, Wave moves and copy actions.
 
 Under it, **Session · Files · Changes · Shell** switch what the screen shows.
-All four come through the one Machine the phone is paired with, which reaches
-the Task wherever it runs; a Task running on another Machine names it under
-the sentence (**On mini**).
+The paired Machine reaches the Task wherever it runs. When another Machine
+runs the Task, the workflow bar names it (**On mini**).
 
-- **Session** is the Task's conversation: its primary, as the Machine running
-  the Task saved it.
+- **Session** opens the Task's primary conversation. Pick a recorded Session
+  from **…** to open it in the same pane.
 - **Files** is the checkout's tree, changed files or not; a folder opens the
   next level and a file opens as it stands. It re-reads itself when the
   checkout changes or the Task moves.

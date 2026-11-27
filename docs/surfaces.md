@@ -57,6 +57,13 @@ The native macOS app reads the same local store as `lf`; it keeps no copy of its
 
 - **Sidebar (⌘1–9):** your [Working Tasks](#working-tasks-in-the-sidebar) in
   shared order (dragging reorders them for Wave views and CLI lists too).
+- **Paused Tasks:** opening a paused Task on Mac or iPhone opens its conversation.
+  Tap ▶ to resume the interrupted step. At review, at a landing stop with Auto off,
+  or at the end, ▶ lifts the hold and keeps the Task there. At **Waiting: land**,
+  turn on Auto to land or choose a step from **Start from**.
+  The chip beside ▶ shows **Pausing…** or **Unpausing…** while the Machine answers.
+  `lf task unpause` without `--run` lifts the hold and starts nothing.
+  The Auto switch can be turned off during a hold.
 - **Task workspace:** three resizable panes: `session` (conversation), `shell`
   (at the Task's worktree), and `browser` (**Brief**, **Diff**, **Files**, Graph
   log, local dev URLs). **Files** opens files read-only by default with one-key
@@ -106,16 +113,16 @@ lf desktop dashboard query attention 'state:available or state:blocked'
 ```
 
 Queries support `wave:`, `task:`, `kind:task|wave`, and
-`state:open|available|busy|blocked|error|unstarted|idle|active|moving|backlog|working|done|auto`
+`state:open|available|busy|blocked|error|unstarted|idle|active|moving|paused|backlog|working|done|auto`
 (`auto`: an open Task with auto on), combined with whitespace (AND), `or`, and parentheses.
 
 ### Changes show at once
 
-Actions in Desktop (Complete, Abandon, Reopen, Claim, Unassign, Move, Rename)
+Actions in Desktop (Complete, Abandon, Reopen, Claim, Unassign, Pause, Unpause, Move, Rename)
 update the UI on the click, including for remote Machines and the phone. If the
 Machine refuses, the row returns and a single bottom Notice explains why
-(auto-dismissing after 6 seconds; the **Auto** toggle's Notice carries **Undo**,
-which turns auto off).
+(auto-dismissing after 6 seconds; **Complete** posts a Notice with **Undo**,
+which reopens the Task).
 
 Completing a parent with open children asks before writing. In Desktop,
 **Complete Task…** opens a dialog naming the open children: when any open
@@ -134,6 +141,17 @@ connection returns. See [Connect clients](server.md) for connection recovery.
 
 ### Working Tasks in the sidebar
 
+Mac and iPhone show three groups within Working. **Active** holds the ordinary
+working rows. Turning auto off moves a Shipping Task to Active immediately
+if its Graph still has a landing ahead. It returns to Shipping after landing
+when only automatic steps remain.
+**Shipping** holds Tasks with auto on and Tasks on a landing Graph with no human
+step left before landing. Graphs such as `research` stay Active unless auto is on.
+**Paused** holds owned Tasks whose Graph is on hold, including those with auto on.
+Their rows still show the conversation’s status and fall back to Paused when
+it has none. Paused Tasks stay out of Portfolio Now. Each group keeps the
+shared Working order.
+
 In the default order, open the second Working Task and send a prompt. Its row
 stays second as the conversation turns Busy and then Available again.
 
@@ -145,7 +163,7 @@ arranged. Sidebar and phone rows show the current Graph step beside the status
 when the Machine reports it.
 
 Turn on **Sort by status** in a repository or Wave sidebar, or from **⌘K**,
-to group rows by Blocked, Error, Available, Idle and Busy. A Task with both
+to sort within each Working group by Blocked, Error, Available, Idle and Busy. A Task with both
 busy and available conversations sorts as Busy. Each group follows the shared
 Working order.
 Sending a prompt updates the open Task’s status, but its row stays in the
@@ -270,7 +288,7 @@ request stays on screen with "Not started.", the error, **Try again** and
 Open a filed Task and it says what Start will do, in the sheet's words:
 
 ```text
-feature   ☺ explore   plan   build   ☺ ship-review   deliver   Start
+[▶]   [Run: explore ▾]   plan   build   ☺ ship-review   deliver       Auto ◯   ✓
 
 Not started
 

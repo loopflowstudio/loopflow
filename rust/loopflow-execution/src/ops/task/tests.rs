@@ -4,6 +4,7 @@ use crate::durable::TaskState;
 use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::ops::pr_landing::{reconcile_pr_landing, wait_with_io, LandingIo, LandingObservation};
 use crate::store::{SharedStore, StorageConfig};
+use crate::task_graph::tests::test_merges;
 use crate::test_linear_input::SeedLinear;
 use crate::work::wave::Wave;
 use loopflow_model::durable::{WorkRef, WorkStatus};
@@ -540,14 +541,19 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
             .block_on(super::snapshot::read_task_snapshot(
                 &fixture.store,
                 fixture.task.clone(),
+                |_| false,
             ))
             .unwrap();
         assert_eq!(snapshot.execution.state, state);
         assert_eq!(snapshot.status, TaskState::Moving);
         assert_eq!(
-            crate::store::ownership::task_detail_facts(&fixture.store.sqlite, &[&fixture.task])
-                .unwrap()
-                .states[&fixture.task.id],
+            crate::store::ownership::task_detail_facts(
+                &fixture.store.sqlite,
+                &[&fixture.task],
+                test_merges
+            )
+            .unwrap()
+            .states[&fixture.task.id],
             TaskState::Moving
         );
         assert_eq!(
@@ -591,6 +597,7 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
         .block_on(super::snapshot::read_task_snapshot(
             &fixture.store,
             fixture.task.clone(),
+            |_| false,
         ))
         .unwrap();
     assert_eq!(
@@ -857,7 +864,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
         )
         .unwrap();
     assert_eq!(
-        crate::store::task_work::task_work(&fixture.store.sqlite, &fixture.task.id)
+        crate::store::task_work::task_work(&fixture.store.sqlite, &fixture.task.id, |_| false)
             .unwrap()
             .sessions
             .len(),
@@ -874,7 +881,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
             graphql_url: "http://127.0.0.1:1".into(),
         },
         || {
-            let snapshot = super::task_snapshot(&fixture.task).unwrap();
+            let snapshot = super::task_snapshot(&fixture.task, |_| false).unwrap();
             assert_eq!(snapshot.machine_id, Some(local.clone()));
             assert_eq!(snapshot.task_id, fixture.task.id.as_str());
             assert_eq!(snapshot.pr.as_ref().map(|pr| &pr.id), Some(&pr.id));
@@ -1008,7 +1015,10 @@ fn task_without_a_local_checkout_never_reads_a_local_path() {
                 .unwrap_err()
                 .to_string()
                 .contains(expected));
-            let work = crate::store::task_work::task_work(&fixture.store.sqlite, &fixture.task.id)
+            let work =
+                crate::store::task_work::task_work(&fixture.store.sqlite, &fixture.task.id, |_| {
+                    false
+                })
                 .unwrap();
             assert_eq!(
                 work.sessions
@@ -2001,16 +2011,16 @@ fn deleted_task_status_requires_explicit_history_lookup() {
             },
             || {
                 let repo = std::env::current_dir().unwrap();
-                let error = super::task_status(&repo, None).unwrap_err();
+                let error = super::task_status(&repo, None, |_| false).unwrap_err();
                 assert!(error.to_string().contains("Task was deleted"), "{error}");
-                let status = super::task_status(&repo, Some("HISTORY-1")).unwrap();
+                let status = super::task_status(&repo, Some("HISTORY-1"), |_| false).unwrap();
                 let snapshot = status.execution.as_ref().unwrap();
                 assert_eq!(
-                    super::task_status(&repo, Some(&snapshot.task_id)).unwrap(),
+                    super::task_status(&repo, Some(&snapshot.task_id), |_| false).unwrap(),
                     status
                 );
                 assert_eq!(
-                    super::task_status(&repo, Some(&snapshot.task_id)).unwrap(),
+                    super::task_status(&repo, Some(&snapshot.task_id), |_| false).unwrap(),
                     status
                 );
                 assert_eq!(snapshot.status, TaskState::Done);

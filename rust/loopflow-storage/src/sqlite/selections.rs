@@ -2,8 +2,8 @@
 use super::children::{TaskIdentifiers, TASK_VISIBLE};
 use super::sessions::{SessionProjection, SessionProjectionInputs};
 use super::task_work::{END, START};
-use super::SqliteStore;
-use crate::execution::{TaskSection, TaskState};
+use super::{AutoState, SqliteStore};
+use crate::execution::{TaskSection, TaskState, WorkingGroup};
 use crate::work::selection::{
     move_into_place, Arrangement, Dashboard, DashboardId, DashboardReading, DropSide, Selection,
     SelectionError, SelectionExpression, SelectionId, SelectionResolution, SelectionState,
@@ -16,7 +16,7 @@ use loopflow_model::id::{LfSessionId, WaveId};
 use loopflow_model::program_status::State;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
@@ -81,7 +81,7 @@ fn work_in(
     let identifiers = TaskIdentifiers::read(conn)?;
     let ids: Vec<_> = tasks.iter().map(|row| row.id.clone()).collect();
     let published = super::task_started::published_in(conn, &ids)?;
-    let auto_on = super::task_details::auto_on_in(
+    let auto = super::task_details::auto_states_in(
         conn,
         &super::children::ids_json(ids.iter().map(TaskId::as_str)),
     )?;
@@ -100,7 +100,7 @@ fn work_in(
                 task.lifecycle.observed_here(task.runs_elsewhere),
                 task.section(),
                 task.owned || published.contains(&task.id),
-                auto_on.contains(&task.id),
+                auto.get(&task.id).copied(),
                 activity,
             ),
             parent_wave: task.wave_id,
@@ -285,7 +285,7 @@ pub fn task_selection_states(
     state: Option<TaskState>,
     section: TaskSection,
     claimed_or_published: bool,
-    auto: bool,
+    auto: Option<AutoState>,
     activity: Option<&TaskActivity>,
 ) -> BTreeSet<SelectionState> {
     let mut states = activity.map_or_else(BTreeSet::new, |activity| activity.states.clone());
@@ -293,7 +293,7 @@ pub fn task_selection_states(
     if claimed_or_published && open {
         states.insert(SelectionState::Open);
     }
-    if auto && open {
+    if auto == Some(AutoState::On) && open {
         states.insert(SelectionState::Auto);
     }
     states.extend(state.map(|state| match state {
@@ -301,6 +301,7 @@ pub fn task_selection_states(
         TaskState::Idle => SelectionState::Idle,
         TaskState::Active => SelectionState::Active,
         TaskState::Moving => SelectionState::Moving,
+        TaskState::Paused => SelectionState::Paused,
         TaskState::Done | TaskState::Abandoned => SelectionState::Done,
     }));
     states.insert(match section {
@@ -470,6 +471,7 @@ impl<'a> RepositoryViews<'a> {
             .map(|key| {
                 let facts = self.by_key.get(&key);
                 ViewContent {
+                    working_group: None,
                     identifier: facts
                         .filter(|_| key.kind == WorkWorkspaceKind::Task)
                         .map(|item| item.name.clone()),
@@ -519,18 +521,52 @@ impl<'a> RepositoryViews<'a> {
     }
 }
 
-/// Resolve the captured cursor in execution, where the Graph's step names live.
-type RunningStep = fn(&str, &str) -> StoreResult<Option<String>>;
+/// Inputs for reading a Task's captured Graph once per tile.
+#[derive(Debug)]
+pub struct GraphTileInput<'a> {
+    pub graph: &'a str,
+    pub step: &'a str,
+    pub cursor: Option<&'a str>,
+    pub auto: Option<AutoState>,
+    pub need_ship: bool,
+}
+
+/// What a Task tile reads from its captured Graph in one parse.
+#[derive(Debug)]
+pub struct GraphTile {
+    pub running_step: Option<String>,
+    pub ships: bool,
+}
+
+/// Resolve a captured Graph once per Task tile.
+pub type GraphTileReader<'a> = &'a mut dyn FnMut(GraphTileInput<'_>) -> StoreResult<GraphTile>;
 
 fn fill_task_contents_in(
     conn: &Connection,
     plans: &mut [ViewPlan],
-    running_step: RunningStep,
+    graph_tile: GraphTileReader<'_>,
 ) -> StoreResult<()> {
     // A Task may appear in several plans. One row supplies all of its tiles.
     let mut tasks = HashMap::<String, Vec<&mut ViewContent>>::new();
+    let mut inspect = HashSet::<String>::new();
     for content in plans.iter_mut().flat_map(|plan| &mut plan.contents) {
         if content.identifier.is_some() {
+            if content.states.contains(&SelectionState::Working) {
+                let (group, check_graph) = WorkingGroup::before_graph(
+                    content.states.contains(&SelectionState::Paused),
+                    content.states.contains(&SelectionState::Auto),
+                    content.states.iter().any(|state| {
+                        matches!(
+                            state,
+                            SelectionState::Idle | SelectionState::Active | SelectionState::Moving
+                        )
+                    }),
+                );
+                content.working_group = Some(group);
+                if check_graph {
+                    inspect.insert(content.work.id.clone());
+                }
+            }
             tasks
                 .entry(content.work.id.clone())
                 .or_default()
@@ -542,12 +578,15 @@ fn fill_task_contents_in(
     }
     let mut query = conn.prepare_cached(
         "SELECT t.id,t.issue_title,s.id,c.worktree,(SELECT id FROM machines WHERE is_local=1),
-                g.step,g.run_start,CASE WHEN g.run_start IS NOT NULL THEN g.graph END
+                g.step,g.run_start,a.state,
+                CASE WHEN g.run_start IS NOT NULL OR t.id IN (SELECT value FROM json_each(?2))
+                     THEN g.graph END
          FROM tasks t
          LEFT JOIN task_primary_sessions p ON p.task_id=t.id
          LEFT JOIN agent_sessions s ON s.id=p.session_id AND s.completed_at IS NULL
          LEFT JOIN task_checkouts c ON c.task_id=t.id
          LEFT JOIN task_graphs g ON g.task_id=t.id
+         LEFT JOIN task_auto a ON a.task_id=t.id
          WHERE t.id IN (SELECT value FROM json_each(?1))",
     )?;
     let ids = super::children::ids_json(tasks.keys().map(String::as_str));
@@ -562,7 +601,10 @@ fn fill_task_contents_in(
     while let Some(row) = count_rows.next()? {
         open_children.insert(row.get(0)?, row.get(1)?);
     }
-    let mut rows = query.query([&ids])?;
+    let mut rows = query.query(params![
+        &ids,
+        super::children::ids_json(inspect.iter().map(String::as_str)),
+    ])?;
     while let Some(row) = rows.next()? {
         let id: String = row.get(0)?;
         let title: String = row.get(1)?;
@@ -574,19 +616,38 @@ fn fill_task_contents_in(
             }),
             None => None,
         };
-        let parked = row
-            .get::<_, Option<String>>(5)?
-            .filter(|step| !matches!(step.as_str(), START | END));
-        let step = match row.get::<_, Option<String>>(6)? {
-            Some(cursor) => running_step(&row.get::<_, String>(7)?, &cursor)?.or(parked),
-            None => parked,
+        let step_name = row.get::<_, Option<String>>(5)?;
+        let cursor = row.get::<_, Option<String>>(6)?;
+        let auto = row
+            .get::<_, Option<String>>(7)?
+            .as_deref()
+            .map(AutoState::parse)
+            .transpose()?;
+        let graph = row.get::<_, Option<String>>(8)?;
+        let tile = match (graph.as_deref(), step_name.as_deref()) {
+            (Some(graph), Some(step)) => graph_tile(GraphTileInput {
+                graph,
+                step,
+                cursor: cursor.as_deref(),
+                auto,
+                need_ship: inspect.contains(&id),
+            })?,
+            _ => GraphTile {
+                running_step: None,
+                ships: false,
+            },
         };
+        let parked = step_name.filter(|step| !matches!(step.as_str(), START | END));
+        let step = tile.running_step.or(parked);
         for content in tasks
             .remove(&id)
             .expect("query selects only the requested Tasks")
         {
             content.title.clone_from(&title);
             content.graph_step.clone_from(&step);
+            if tile.ships && content.working_group == Some(WorkingGroup::Active) {
+                content.working_group = Some(WorkingGroup::Shipping);
+            }
             content.primary_session.clone_from(&primary);
             content.location.clone_from(&location);
             content.open_children = Some(open_children.get(&id).copied().unwrap_or(0));
@@ -629,7 +690,7 @@ impl SqliteStore {
         selection: Selection,
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
-        running_step: RunningStep,
+        graph_tile: GraphTileReader<'_>,
     ) -> StoreResult<Option<ViewPlan>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let Some(snapshot) = inputs.pin(&mut conn)? else {
@@ -637,7 +698,7 @@ impl SqliteStore {
         };
         let work = work_in(&snapshot, repository, projection)?;
         let mut plan = RepositoryViews::read(&snapshot, repository, &work)?.selected(selection)?;
-        fill_task_contents_in(&snapshot, std::slice::from_mut(&mut plan), running_step)?;
+        fill_task_contents_in(&snapshot, std::slice::from_mut(&mut plan), graph_tile)?;
         Ok(Some(plan))
     }
 
@@ -650,7 +711,7 @@ impl SqliteStore {
         repos: &[String],
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
-        running_step: RunningStep,
+        graph_tile: GraphTileReader<'_>,
     ) -> StoreResult<Option<Vec<ViewPlan>>> {
         let selection = match source {
             Some(source) => Selection::parse(source, None).map_err(StoreError::from)?,
@@ -681,7 +742,7 @@ impl SqliteStore {
                 );
             }
         }
-        fill_task_contents_in(&snapshot, &mut plans, running_step)?;
+        fill_task_contents_in(&snapshot, &mut plans, graph_tile)?;
         Ok(Some(plans))
     }
 
@@ -691,7 +752,7 @@ impl SqliteStore {
         repository: &RepositoryId,
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
-        running_step: RunningStep,
+        graph_tile: GraphTileReader<'_>,
     ) -> StoreResult<Option<Vec<ViewPlan>>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let Some(snapshot) = inputs.pin(&mut conn)? else {
@@ -715,7 +776,7 @@ impl SqliteStore {
         for saved in &views.catalog {
             plans.push(views.plan(saved.selection.clone(), Some(saved))?);
         }
-        fill_task_contents_in(&snapshot, &mut plans, running_step)?;
+        fill_task_contents_in(&snapshot, &mut plans, graph_tile)?;
         Ok(Some(plans))
     }
 
@@ -998,7 +1059,7 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use super::{task_order_in, task_selection_states};
+    use super::{task_order_in, task_selection_states, AutoState};
     use crate::execution::{TaskSection, TaskState};
     use crate::work::selection::SelectionState;
     use std::collections::BTreeSet;
@@ -1025,7 +1086,7 @@ mod tests {
                 state.observed_here(true),
                 TaskSection::Working,
                 true,
-                true,
+                Some(AutoState::On),
                 None,
             );
             assert_eq!(states, BTreeSet::from([Open, Working, Auto]));
@@ -1036,8 +1097,13 @@ mod tests {
             (TaskState::Abandoned, SelectionState::Done),
         ] {
             let section = TaskSection::of(state, true, true);
-            let states =
-                task_selection_states(state.observed_here(true), section, true, true, None);
+            let states = task_selection_states(
+                state.observed_here(true),
+                section,
+                true,
+                Some(AutoState::On),
+                None,
+            );
             assert!(states.contains(&expected));
         }
     }

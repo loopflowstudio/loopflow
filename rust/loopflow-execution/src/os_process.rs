@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
@@ -7,6 +8,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
+
+use crate::process::OsProcess;
+use loopflow_storage::sqlite::task_pause::StoppingSession;
 
 pub const DISCORD_TOKEN_ENV: &str = "LF_DISCORD_TOKEN";
 
@@ -480,67 +484,133 @@ mod tests {
     }
 }
 
-/// Ordinary jobs belong to the fresh OS session created for a terminal child.
-/// Job control changes process groups, so killing only the leader's group leaks
-/// background/stopped jobs. Daemons that create a different session are separate.
-#[derive(Debug, Clone)]
-pub(crate) struct TerminalJobs {
-    session: Arc<std::sync::Mutex<u32>>,
-}
-
-impl TerminalJobs {
-    pub fn new(session: u32) -> Self {
-        Self {
-            session: Arc::new(std::sync::Mutex::new(session)),
-        }
-    }
-
-    pub(crate) fn terminate(&self) -> std::io::Result<()> {
-        let mut session = self.session.lock().expect("owned shell session lock");
-        terminate_terminal_jobs(*session)?;
-        *session = 0;
-        Ok(())
-    }
-}
-
-impl Drop for TerminalJobs {
-    fn drop(&mut self) {
-        let _ = self.terminate();
-    }
-}
-
-fn terminate_terminal_jobs(session: u32) -> std::io::Result<()> {
+/// The terminal holder created the shell's OS session before launch.
+pub(crate) fn terminate_shell_jobs(session: u32) -> std::io::Result<()> {
     if session <= 1 {
         return Ok(());
     }
-    let deadline = Instant::now() + Duration::from_secs(3);
-    loop {
-        let members = crate::process::OsProcess::session(session)?;
-        if members.is_empty() {
-            return Ok(());
-        }
-        for process in members {
-            // SAFETY: recheck session membership immediately before signaling;
-            // this never targets by cwd or another owner's process group.
-            unsafe {
-                if libc::getsid(process.pid as i32) == session as i32 {
-                    libc::kill(process.pid as i32, libc::SIGKILL);
+    terminate_session_jobs(
+        session,
+        OsProcess::session(session)?,
+        &[(libc::SIGKILL, Duration::from_secs(3))],
+    )
+}
+
+/// A worker is the leader of the OS session created before its provider execs.
+pub(crate) fn terminate_worker_jobs(pid: u32, started: i64) -> Result<()> {
+    let members = OsProcess::session(pid)?;
+    anyhow::ensure!(
+        members.is_empty() || members.iter().any(|p| p.matches_start(pid, started)),
+        "AgentProcess {pid} no longer owns the OS session"
+    );
+    stop_worker_members(pid, members)
+}
+
+pub(crate) fn settle_worker_session(saved: &StoppingSession) -> Result<()> {
+    stop_worker_members(saved.session, remaining_session_members(saved)?)
+}
+
+pub(crate) fn remaining_session_members(saved: &StoppingSession) -> Result<Vec<OsProcess>> {
+    let members = OsProcess::session(saved.session)?;
+    let recorded: HashMap<_, _> = saved.members.iter().copied().collect();
+    if members.is_empty() || members.iter().any(|p| known_member(&recorded, p)) {
+        return Ok(members);
+    }
+    // A different leader proves that the kernel recycled the session.
+    if members.iter().any(|p| p.pid == saved.session) {
+        return Ok(Vec::new());
+    }
+    anyhow::bail!(
+        "cannot confirm ownership of the remaining jobs in OS session {}",
+        saved.session
+    )
+}
+
+fn known_member(births: &HashMap<u32, i64>, member: &OsProcess) -> bool {
+    births
+        .get(&member.pid)
+        .is_some_and(|birth| member.matches_start(member.pid, *birth))
+}
+
+fn stop_worker_members(session: u32, members: Vec<OsProcess>) -> Result<()> {
+    terminate_session_jobs(
+        session,
+        members,
+        &[
+            (libc::SIGTERM, TERMINATE_GRACE),
+            (libc::SIGKILL, KILL_GRACE),
+        ],
+    )?;
+    Ok(())
+}
+
+/// The first reading belongs to a verified session. Carry identities across
+/// readings so a recycled session number grants no authority over new jobs.
+fn terminate_session_jobs(
+    session: u32,
+    mut members: Vec<OsProcess>,
+    signals: &[(i32, Duration)],
+) -> std::io::Result<()> {
+    if members.is_empty() {
+        return Ok(());
+    }
+    for &(signal, grace) in signals {
+        let deadline = Instant::now() + grace;
+        let mut signaled = HashMap::new();
+        loop {
+            for member in &members {
+                if !known_member(&signaled, member) {
+                    signal_session_job(session, member, signal)?;
+                    signaled.insert(member.pid, member.started_at);
                 }
             }
+            let survivors = OsProcess::session(session)?;
+            if survivors.is_empty() {
+                return Ok(());
+            }
+            // At least one member must still pin the original session ID.
+            if !survivors.iter().any(|p| known_member(&signaled, p)) {
+                return Err(std::io::Error::other(format!(
+                    "cannot establish ownership of remaining jobs in OS session {session}: {}",
+                    OsProcess::describe(&survivors)
+                )));
+            }
+            members = survivors;
+            if Instant::now() >= deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(25));
         }
-        if Instant::now() >= deadline {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "Shell jobs have not settled",
-            ));
-        }
-        thread::sleep(Duration::from_millis(20));
     }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        format!(
+            "jobs in OS session {session} have not settled: {}",
+            OsProcess::describe(&members)
+        ),
+    ))
+}
+
+fn signal_session_job(session: u32, member: &OsProcess, signal: i32) -> std::io::Result<()> {
+    if !OsProcess::observe(member.pid)?
+        .is_some_and(|p| p.matches_start(member.pid, member.started_at))
+        || OsProcess::session_id(member.pid)? != Some(session)
+    {
+        return Ok(());
+    }
+    // SAFETY: this positive PID still has the captured birth and session.
+    if unsafe { libc::kill(member.pid as i32, signal) } == -1 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ESRCH) {
+            return Err(error);
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod terminal_jobs_tests {
-    use super::{ProcessGroupGuard, TerminalJobs};
+    use super::{terminate_shell_jobs, ProcessGroupGuard};
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
@@ -568,7 +638,6 @@ mod terminal_jobs_tests {
             });
         }
         let mut shell = command.spawn().unwrap();
-        let jobs = TerminalJobs::new(shell.id());
         let deadline = Instant::now() + Duration::from_secs(3);
         let pids = loop {
             let pids = std::fs::read_to_string(&receipt)
@@ -582,7 +651,7 @@ mod terminal_jobs_tests {
             assert!(Instant::now() < deadline, "shell did not report its jobs");
             std::thread::sleep(Duration::from_millis(10));
         };
-        jobs.terminate().unwrap();
+        terminate_shell_jobs(shell.id()).unwrap();
         shell.wait().unwrap();
         for pid in pids {
             assert!(crate::process::OsProcess::read(pid)

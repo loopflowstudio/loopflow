@@ -214,8 +214,8 @@ struct DashboardTile: View {
     /// Where the Task's workflow stands, in its sentence. It yields only to
     /// what a program asks, which the row above already prints; a condition's
     /// reason on the row does not hide it.
-    static func workflow(_ graph: TaskGraph, status: SessionProgramStatus, auto: Bool, setup: String?) -> WorkflowLine? {
-        status.ask == nil ? WorkflowLine(graph: graph, auto: auto, setup: setup, sentenceOnly: true) : nil
+    static func workflow(_ graph: TaskGraph, status: SessionProgramStatus, setup: String?) -> WorkflowLine? {
+        status.ask == nil ? WorkflowLine(graph: graph, setup: setup) : nil
     }
 
     var body: some View {
@@ -258,9 +258,8 @@ struct DashboardTile: View {
                     .padding([.top, .trailing], Spacing.sm)
                 }
                 if let task, let workflow = model.taskWork[task.task.id].value?.graph,
-                   let line = Self.workflow(workflow, status: status, auto: model.taskExecution[task.task.id].value?.auto?.state == .on,
-                                            setup: task.task.setupPosition) {
-                    line.lineLimit(1).truncationMode(.tail).help(line.sentence ?? workflow.sentence)
+                   let line = Self.workflow(workflow, status: status, setup: task.task.setupPosition) {
+                    line.lineLimit(1).truncationMode(.tail).help(line.sentence)
                         .padding(.horizontal, Spacing.md).padding(.bottom, Spacing.sm)
                 }
             }.background(palette.surface)

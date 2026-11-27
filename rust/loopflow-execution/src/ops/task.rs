@@ -54,6 +54,7 @@ pub use snapshot::{
 };
 pub mod auto;
 mod file_save;
+pub mod pause;
 pub mod run_recovery;
 pub use directory::{task_files, TaskDirectory, TaskFileEntry, TaskFileKind};
 pub use file_save::{task_save, TaskFileRecovery, TaskFileSave};
@@ -718,6 +719,7 @@ pub enum TaskRunStart {
     /// interactive step.
     Run {
         step: String,
+        interrupt_cursor: i64,
         merges: bool,
         stands_in: Option<String>,
     },
@@ -745,6 +747,47 @@ pub fn task_place(
     mode: TaskRunMode,
     merges: fn(&[String]) -> bool,
 ) -> OpsResult<(Task, TaskRunStart)> {
+    place_task_run(repo, issue, options, mode, merges, |store, task| {
+        pause::admit_launch(&store.sqlite, &task.id)
+    })
+}
+
+/// Lift the hold and claim the saved cursor under the same admission lock.
+pub fn unpause_task_run(
+    repo: &Path,
+    issue: &str,
+    mode: TaskRunMode,
+    merges: fn(&[String]) -> bool,
+) -> OpsResult<Option<(Task, TaskRunStart)>> {
+    let Some((id, admission)) = pause::release(issue, true, merges)? else {
+        return Ok(None);
+    };
+    place_task_run(
+        repo,
+        id.as_str(),
+        TaskProcessOptions::default(),
+        mode,
+        merges,
+        |_, _| Ok(admission),
+    )
+    .map(Some)
+    .map_err(|error| {
+        crate::engine::Error::new(
+            crate::engine::ErrorCode::OutcomeUnknown,
+            format!("{issue} unpaused; {error}"),
+        )
+        .into()
+    })
+}
+
+fn place_task_run(
+    repo: &Path,
+    issue: &str,
+    options: TaskProcessOptions,
+    mode: TaskRunMode,
+    merges: fn(&[String]) -> bool,
+    admit: impl FnOnce(&SharedStore, &Task) -> OpsResult<std::fs::File>,
+) -> OpsResult<(Task, TaskRunStart)> {
     let TaskProcessOptions {
         graph,
         from,
@@ -753,7 +796,7 @@ pub fn task_place(
         ..
     } = options.clone();
     let source = remote::source_for_task(issue)?;
-    let mut task = prepare_task(repo, issue, options, None, source)?;
+    let (mut task, _admission) = prepare_task_with(repo, issue, options, None, source, admit)?;
     block_on_task(async {
         let store = task_store().await?;
         let reason = reason
@@ -1143,12 +1186,13 @@ async fn try_start_task_run(
     }
     // Auto on runs through the interactive steps, standing in at each;
     // off, no run merges.
-    let auto = store
+    let auto_state = store
         .sqlite
         .task_auto(&task.id)
         .map_err(task_error)?
         .map(|mark| mark.state);
-    let through = mode.runs_through() || auto == Some(loopflow_storage::sqlite::AutoState::On);
+    let through =
+        mode.runs_through() || auto_state == Some(loopflow_storage::sqlite::AutoState::On);
     let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
         .map_err(task_error)?
         .ok_or_else(|| task_error(format!("Task {issue} lost its graph while starting")))?;
@@ -1167,16 +1211,25 @@ async fn try_start_task_run(
         }
         return Ok(Some(TaskRunStart::Ended));
     };
-    // Starting at an interactive step without running past it puts the Task there.
+    // Starting at a step this run stops before (interactive without running
+    // through, or landing with auto off) waits there without spawning a Graph.
     let interactive = graph.interactive_at(&start.place);
-    if let Some(step) = interactive.filter(|_| !through) {
+    let stop = interactive
+        .filter(|_| !through)
+        .map(str::to_owned)
+        .or_else(|| {
+            (auto_state == Some(loopflow_storage::sqlite::AutoState::Off))
+                .then(|| graph.landing_at(&start.place, merges))
+                .flatten()
+        });
+    if let Some(step) = stop {
         store
             .sqlite
-            .set_task_graph_step(&task.id, step)
+            .set_task_graph_step(&task.id, &step)
             .map_err(task_error)?;
-        return Ok(Some(TaskRunStart::Waiting(step.to_owned())));
+        return Ok(Some(TaskRunStart::Waiting(step)));
     }
-    let merges = auto != Some(loopflow_storage::sqlite::AutoState::Off)
+    let can_merge = auto_state != Some(loopflow_storage::sqlite::AutoState::Off)
         && graph.reaches_landing(&start.place, through, merges);
     let label = if start.place == crate::task_graph::Place::default() {
         format!("{} from start", graph.name)
@@ -1196,7 +1249,12 @@ async fn try_start_task_run(
     }
     Ok(Some(TaskRunStart::Run {
         step: label,
-        merges,
+        interrupt_cursor: store
+            .sqlite
+            .latest_task_event(&task.id)
+            .map_err(task_error)?
+            .map_or(0, |event| event.id),
+        merges: can_merge,
         stands_in: interactive.filter(|_| auto_on).map(str::to_owned),
     }))
 }
@@ -1306,6 +1364,18 @@ fn prepare_task(
     recover_from: Option<&str>,
     source: Option<remote::TaskSource>,
 ) -> OpsResult<Task> {
+    prepare_task_with(repo, issue, options, recover_from, source, |_, _| Ok(()))
+        .map(|(task, ())| task)
+}
+
+fn prepare_task_with<T>(
+    repo: &Path,
+    issue: &str,
+    options: TaskProcessOptions,
+    recover_from: Option<&str>,
+    source: Option<remote::TaskSource>,
+    admit: impl FnOnce(&SharedStore, &Task) -> OpsResult<T>,
+) -> OpsResult<(Task, T)> {
     options.validate_directive(None)?;
     block_on_task(async {
         let store = task_store().await?;
@@ -1319,6 +1389,7 @@ fn prepare_task(
             Some(task) => task,
             None => fetch_from_tracker(&main, issue, super::linear::LinearRefresh::Auto).await?,
         };
+        let admission = admit(&store, &task)?;
         let destination = store
             .task_execution_route(&task.id)
             .await
@@ -1396,7 +1467,7 @@ fn prepare_task(
         if let Some(source) = &source {
             source.require_checkout(&task)?;
         }
-        Ok(task)
+        Ok((task, admission))
     })
 }
 
@@ -2707,7 +2778,11 @@ pub struct TaskStatus {
     pub comments: Option<loopflow_model::comment::TaskComments>,
 }
 
-pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
+pub fn task_status(
+    repo: &Path,
+    issue: Option<&str>,
+    merges: fn(&[String]) -> bool,
+) -> OpsResult<TaskStatus> {
     block_on_task(async {
         let store = task_store().await?;
         super::tracker_events::sync_repository(&store, &repo.to_string_lossy()).await;
@@ -2749,7 +2824,7 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
             .as_ref()
             .and_then(|read| read.refresh_error.clone());
         let mut result = match (task, inspection) {
-            (Some(task), _) => registered_task_status(&store, task).await?,
+            (Some(task), _) => registered_task_status(&store, task, merges).await?,
             (None, inspection) => {
                 let mut result = TaskStatus {
                     sync: None,
@@ -2792,8 +2867,14 @@ pub async fn read_task_status(
     store: &SharedStore,
     repo: &Path,
     selector: &str,
+    merges: fn(&[String]) -> bool,
 ) -> OpsResult<TaskStatus> {
-    registered_task_status(store, registered_task(&store.sqlite, repo, selector)?).await
+    registered_task_status(
+        store,
+        registered_task(&store.sqlite, repo, selector)?,
+        merges,
+    )
+    .await
 }
 
 pub fn registered_task(store: &SqliteStore, repo: &Path, selector: &str) -> OpsResult<Task> {
@@ -2804,13 +2885,18 @@ pub fn registered_task(store: &SqliteStore, repo: &Path, selector: &str) -> OpsR
         .ok_or_else(|| task_error(format!("Task {selector} is not registered")))
 }
 
-pub async fn registered_task_status(store: &SharedStore, mut task: Task) -> OpsResult<TaskStatus> {
+pub async fn registered_task_status(
+    store: &SharedStore,
+    mut task: Task,
+    merges: fn(&[String]) -> bool,
+) -> OpsResult<TaskStatus> {
     let tracker_state = store
         .sqlite
         .task_tracker_state(&task.id)
         .map_err(task_error)?;
     let (overview, graph_processes) =
-        crate::store::task_work::task_overview(&store.sqlite, &task.id).map_err(task_error)?;
+        crate::store::task_work::task_overview(&store.sqlite, &task.id, merges)
+            .map_err(task_error)?;
     let ownership =
         crate::store::ownership::task_ownership(&store.sqlite, &task.id).map_err(task_error)?;
     let local = store.local_machine().await.map_err(task_error)?.id;
@@ -2826,7 +2912,7 @@ pub async fn registered_task_status(store: &SharedStore, mut task: Task) -> OpsR
         tracker_state,
         planning_error: None,
         planning_stale: false,
-        execution: Some(snapshot::snapshot_here(store, task.clone(), local).await?),
+        execution: Some(snapshot::snapshot_here(store, task.clone(), local, merges).await?),
         ownership: Some(ownership),
         overview: Some(overview),
         graph_processes,
@@ -3768,7 +3854,7 @@ pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
             .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
             .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
         let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
-        let receipt = match live_execution(&store, &task).await? {
+        let receipt = match live_execution(&store.sqlite, &task)? {
             Some(target) => {
                 store.append_interrupt(&task.id).await.map_err(task_error)?;
                 super::child::WorkControlReceipt::Interrupt { work, target }
@@ -3788,11 +3874,10 @@ pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
 /// Graph while its own process lives, otherwise another open Process in its
 /// work, such as a Task run between Graph attempts or a Task Session. Unknown
 /// liveness counts as live.
-async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<String>> {
+fn live_execution(store: &SqliteStore, task: &Task) -> OpsResult<Option<String>> {
     use crate::ops::task_execution::TaskExecutionState;
     use crate::store::ProcessIdentityEvidence;
     let graph = store
-        .sqlite
         .latest_task_graph(&task.id)
         .map_err(task_error)?
         .filter(|graph| {
@@ -3800,18 +3885,12 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
                 != ProcessIdentityEvidence::Dead
         });
     if let Some(graph) = graph {
-        let name = graph.name.clone();
-        let facts = store
-            .sqlite
-            .graph_execution_facts([&graph], &[&task.id])
-            .map_err(task_error)?;
-        let (execution, _) = crate::ops::task_execution::execution_of_latest_graph(
-            &store.sqlite,
+        let execution = crate::ops::task_execution::task_execution(
+            store,
             task,
+            store.task_state(&task.id).map_err(task_error)?,
             Some(&graph),
-            &facts,
         )
-        .await
         .map_err(task_error)?;
         let step = execution.step.unwrap_or_default();
         let position = match execution.state {
@@ -3823,11 +3902,11 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
             TaskExecutionState::Idle | TaskExecutionState::Blocked => None,
         };
         if let Some(position) = position {
-            return Ok(Some(format!("stopped Graph {name} {position}")));
+            return Ok(Some(format!("stopped Graph {} {position}", graph.name)));
         }
     }
-    let work = store.sqlite.task_open_work(&task.id).map_err(task_error)?;
-    let open = crate::ops::task_execution::unresolved_work(&store.sqlite, &work)?;
+    let work = store.task_open_work(&task.id).map_err(task_error)?;
+    let open = crate::ops::task_execution::unresolved_work(store, &work)?;
     Ok(open.first().map(|(work, evidence)| {
         let unknown = match evidence {
             ProcessIdentityEvidence::Unknown => " (liveness unknown)",
@@ -3841,10 +3920,14 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
 }
 
 /// [`task_wait_reading`] in the Machine's store.
-pub fn task_wait_now(issue: &str, until: TaskWaitUntil) -> OpsResult<Option<(TaskSnapshot, bool)>> {
+pub fn task_wait_now(
+    issue: &str,
+    until: TaskWaitUntil,
+    merges: fn(&[String]) -> bool,
+) -> OpsResult<Option<(TaskSnapshot, bool)>> {
     block_on_task(async {
         let store = task_store().await?;
-        task_wait_reading(&store, issue, until).await
+        task_wait_reading(&store, issue, until, merges).await
     })
 }
 
@@ -3853,6 +3936,7 @@ pub fn task_wait(
     issue: &str,
     until: TaskWaitUntil,
     timeout: Option<std::time::Duration>,
+    merges: fn(&[String]) -> bool,
 ) -> OpsResult<Option<(TaskSnapshot, bool)>> {
     block_on_task(async {
         let store = task_store().await?;
@@ -3862,7 +3946,10 @@ pub fn task_wait(
                 return Ok(None);
             };
             if reached || timeout.is_some_and(|limit| started.elapsed() >= limit) {
-                return Ok(Some((read_task_snapshot(&store, task).await?, reached)));
+                return Ok(Some((
+                    read_task_snapshot(&store, task, merges).await?,
+                    reached,
+                )));
             }
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
@@ -3875,11 +3962,15 @@ pub async fn task_wait_reading(
     store: &SharedStore,
     issue: &str,
     until: TaskWaitUntil,
+    merges: fn(&[String]) -> bool,
 ) -> OpsResult<Option<(TaskSnapshot, bool)>> {
     let Some((task, reached)) = task_wait_condition(store, issue, until).await? else {
         return Ok(None);
     };
-    Ok(Some((read_task_snapshot(store, task).await?, reached)))
+    Ok(Some((
+        read_task_snapshot(store, task, merges).await?,
+        reached,
+    )))
 }
 
 async fn task_wait_condition(

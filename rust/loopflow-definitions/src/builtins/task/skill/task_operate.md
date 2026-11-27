@@ -6,6 +6,7 @@ action_style: procedural
 ---
 Move the Task as far forward as its Graph allows.
 
+A paused Task stays quiet. Report its saved position and stop unless asked to unpause it.
 With no live Graph run, nobody else takes this Task's next step, so it is
 yours. Make routine decisions yourself, ask for judgment in this conversation,
 then continue. Headless, exit when done or stuck. A Task with no owner is
@@ -65,6 +66,8 @@ liveness is not permission. A run listed in status is not a live process: its
 
 Finish with one, and what showed it:
 
+- **paused** — held by `lf task pause`: its saved step, and
+  `lf task unpause <issue>` to lift the hold. `lf task run` is refused.
 - **moving** — a live Graph run, left alone.
 - **acted** — you continued, repaired or delivered it, and reread status.
 - **available** — a review, demo, choice or merge click someone can take up,

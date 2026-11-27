@@ -292,14 +292,15 @@ async fn relay_task(
         ""
     };
     eprintln!("Arrived on {place}{at}{carried}");
-    let stopped = moved_task.stopped.is_some().then(|| StoppedRun {
-        identifier: name.clone(),
-        from,
-        task: task.id.clone(),
-        place: place.clone(),
-        repository: crate::ops::task::repository_for_task(store, &task)
-            .map_err(|error| error.to_string()),
-    });
+    let stopped =
+        (moved_task.paused.is_none() && moved_task.stopped.is_some()).then(|| StoppedRun {
+            identifier: name.clone(),
+            from,
+            task: task.id.clone(),
+            place: place.clone(),
+            repository: crate::ops::task::repository_for_task(store, &task)
+                .map_err(|error| error.to_string()),
+        });
     Ok((
         crate::store::ownership::task_ownership(&store.sqlite, &task.id)?,
         stopped,

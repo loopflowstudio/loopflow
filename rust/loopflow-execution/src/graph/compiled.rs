@@ -416,7 +416,7 @@ mod tests {
         // A Task that takes the Graph up reads the same steps and stops.
         for name in ["code", "conditional"] {
             let captured = CapturedGraph::load(name, repo.path()).unwrap().unwrap();
-            let task = TaskGraph::read(&captured, "start".into(), None, None);
+            let task = TaskGraph::read(&captured, "start".into(), None, None, None, |_| false);
             let outline = outline(name).unwrap();
             assert_eq!(task.steps, outline.steps, "{name}");
             assert_eq!(task.interactive_steps, outline.interactive_steps, "{name}");

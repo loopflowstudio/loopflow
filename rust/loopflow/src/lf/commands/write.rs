@@ -296,6 +296,30 @@ writes! {
     } => loopflow_model::comment::TaskComments;
     { issue, message, .. } => task::report(directory, issue, None, message)?,
 
+    /// Stop work and hold the Task on its execution Machine. Returns the pause receipt.
+    #[serde(rename = "task.pause")]
+    TaskPause { directory: PathBuf, issue: String } => String;
+    { issue, .. } => match remote {
+        Some(remote) => remote.call()?,
+        None => loopflow_execution::ops::task::pause::pause(issue)?,
+    },
+
+    /// Lift the hold. With run, resume automatic work. Return the run or null when the Task stays at its step.
+    #[serde(rename = "task.unpause")]
+    TaskUnpause { directory: PathBuf, issue: String, run: bool } => Option<task::TaskRun>;
+    { issue, run, .. } => match remote {
+        Some(remote) => remote.call()?,
+        None => task::unpause(
+            directory,
+            issue,
+            *run,
+            None,
+            false,
+            environment,
+            crate::lf::navigation::command_merges,
+        )?,
+    },
+
     /// `lf task interrupt <issue> --json`.
     #[serde(rename = "task.interrupt")]
     TaskInterrupt { directory: PathBuf, issue: String } => loopflow_execution::ops::task::TaskControlResult;
@@ -1118,6 +1142,8 @@ macro_rules! directory_of {
             | Write::TrackerAnswer { directory, .. }
             | Write::TaskSteer { directory, .. }
             | Write::TaskReport { directory, .. }
+            | Write::TaskPause { directory, .. }
+            | Write::TaskUnpause { directory, .. }
             | Write::TaskInterrupt { directory, .. }
             | Write::TaskMove { directory, .. }
             | Write::TaskSave { directory, .. }
@@ -1198,12 +1224,20 @@ impl Write {
     /// elsewhere, with the write naming that Work exactly. `None` runs it here.
     /// A steer handles its carrier fallback inside `steer_task` instead.
     fn remote(&self) -> anyhow::Result<Option<Remote>> {
-        use loopflow_execution::machine::task::{remote_ownership_writer, remote_task};
+        use loopflow_execution::machine::task::{
+            remote_ownership_writer, remote_pause, remote_task,
+        };
         let (route, launching) = match self {
             Self::SessionResume { .. } | Self::SessionNew { .. } => return self.remote_session(),
             Self::TaskRun { issue, .. } | Self::TaskAutoOn { issue, .. } => {
                 (remote_task(issue, None)?, true)
             }
+            Self::TaskUnpause {
+                issue,
+                run,
+                directory,
+            } => (remote_task(issue, Some(directory))?, *run),
+            Self::TaskPause { issue, directory } => (remote_pause(issue, Some(directory))?, false),
             Self::TaskSave {
                 issue, directory, ..
             } => (remote_task(issue, Some(directory))?, false),
@@ -1232,6 +1266,8 @@ impl Write {
             *issue = route.peer_selector;
         } else if let Self::TaskRun { issue, .. }
         | Self::TaskAutoOn { issue, .. }
+        | Self::TaskPause { issue, .. }
+        | Self::TaskUnpause { issue, .. }
         | Self::TaskAutoOff { issue, .. }
         | Self::TaskClaim { issue, .. }
         | Self::TaskUnassign { issue, .. } = &mut write

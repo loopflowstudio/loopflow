@@ -146,6 +146,7 @@
         }
       },
       "run_control": {
+        "pausing": false,
         "unavailable": "Task is complete"
       },
       "runtime": {
@@ -265,6 +266,7 @@
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
       },
       "lifecycle": "done",
+      "working_group": null,
       "selection_states": [
         "done"
       ]
@@ -431,6 +433,10 @@
         "work": {
           "graph": {
             "current_step": null,
+            "control": {
+              "action": "done",
+              "label": "Done"
+            },
             "interactive_steps": [],
             "name": "delivery",
             "position": {
@@ -553,6 +559,10 @@
       "overview": {
         "graph": {
           "current_step": null,
+          "control": {
+            "action": "done",
+            "label": "Done"
+          },
           "interactive_steps": [],
           "name": "delivery",
           "position": {
@@ -774,6 +784,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task is complete"
         },
         "runtime": {
@@ -893,6 +904,7 @@
           "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
         },
         "lifecycle": "done",
+        "working_group": null,
         "selection_states": [
           "done"
         ]
@@ -1139,6 +1151,7 @@
         }
       },
       "run_control": {
+        "pausing": false,
         "unavailable": "Task is complete"
       },
       "runtime": {
@@ -1258,6 +1271,7 @@
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
       },
       "lifecycle": "done",
+      "working_group": null,
       "selection_states": [
         "done"
       ]
@@ -1424,6 +1438,10 @@
         "work": {
           "graph": {
             "current_step": 1,
+            "control": {
+              "action": "pause",
+              "label": "task complete FIX-1"
+            },
             "interactive_steps": [],
             "name": "delivery",
             "position": {
@@ -1533,6 +1551,10 @@
       "overview": {
         "graph": {
           "current_step": 1,
+          "control": {
+            "action": "pause",
+            "label": "task complete FIX-1"
+          },
           "interactive_steps": [],
           "name": "delivery",
           "position": {
@@ -1741,6 +1763,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task is complete"
         },
         "runtime": {
@@ -1860,6 +1883,7 @@
           "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
         },
         "lifecycle": "done",
+        "working_group": null,
         "selection_states": [
           "done"
         ]
@@ -2106,6 +2130,7 @@
         }
       },
       "run_control": {
+        "pausing": false,
         "unavailable": null
       },
       "runtime": {
@@ -2189,6 +2214,7 @@
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
       },
       "lifecycle": "moving",
+      "working_group": "active",
       "selection_states": [
         "open",
         "moving",
@@ -2349,6 +2375,10 @@
         "work": {
           "graph": {
             "current_step": 1,
+            "control": {
+              "action": "pause",
+              "label": "task complete FIX-1"
+            },
             "interactive_steps": [],
             "name": "delivery",
             "position": {
@@ -2458,6 +2488,10 @@
       "overview": {
         "graph": {
           "current_step": 1,
+          "control": {
+            "action": "pause",
+            "label": "task complete FIX-1"
+          },
           "interactive_steps": [],
           "name": "delivery",
           "position": {
@@ -2666,6 +2700,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": null
         },
         "runtime": {
@@ -2749,6 +2784,7 @@
           "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
         },
         "lifecycle": "moving",
+        "working_group": "active",
         "selection_states": [
           "open",
           "moving",

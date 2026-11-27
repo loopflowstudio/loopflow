@@ -24,6 +24,8 @@ use loopflow_model::id::LfProcessId;
 
 const LAUNCHER_ENV: &str = "LF_LAUNCHER_FD";
 const RELEASED: &str = "released";
+/// Set by a launcher that a person started from a terminal.
+const WATCHED_ENV: &str = "LF_LAUNCHER_WATCHED";
 
 /// How often a waiting launcher copies new output.
 const TAIL_INTERVAL: Duration = Duration::from_millis(50);
@@ -31,8 +33,13 @@ const TAIL_INTERVAL: Duration = Duration::from_millis(50);
 /// This process's end of its launcher's pipe, until it lets the launcher go.
 static LAUNCHER: OnceLock<Mutex<Option<File>>> = OnceLock::new();
 
+/// Whether the launcher of this process was started from a terminal.
+static WATCHED: OnceLock<bool> = OnceLock::new();
+
 /// Take the launcher's pipe. Nested processes never inherit it.
 pub fn initialize() {
+    let _ = WATCHED.set(std::env::var_os(WATCHED_ENV).is_some());
+    std::env::remove_var(WATCHED_ENV);
     let Some(fd) = std::env::var(LAUNCHER_ENV)
         .ok()
         .and_then(|fd| fd.parse::<RawFd>().ok())
@@ -55,6 +62,38 @@ pub fn launched() -> bool {
     LAUNCHER
         .get()
         .is_some_and(|launcher| launcher.lock().expect("launcher lock").is_some())
+}
+
+/// Whether a person reads what this process prints: its launcher was started
+/// from a terminal and still copies this output there. Nothing they type
+/// arrives here.
+pub fn watched() -> bool {
+    if !WATCHED.get().copied().unwrap_or_default() {
+        return false;
+    }
+    let Some(launcher) = LAUNCHER.get() else {
+        return false;
+    };
+    let launcher = launcher.lock().expect("launcher lock");
+    let Some(pipe) = launcher.as_ref() else {
+        return false;
+    };
+    // An interrupted launcher closed its end of the pipe. macOS reports that
+    // only to a poll that asks whether the pipe can be written.
+    let mut poll = libc::pollfd {
+        fd: pipe.as_raw_fd(),
+        events: libc::POLLOUT,
+        revents: 0,
+    };
+    // SAFETY: one valid pollfd, polled without waiting.
+    let answered = unsafe { libc::poll(&mut poll, 1, 0) };
+    answered >= 0 && poll.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) == 0
+}
+
+/// Mark `command`, about to be launched detached, as read by a person at this
+/// process's terminal.
+pub fn watch(command: &mut Command) {
+    command.env(WATCHED_ENV, "1");
 }
 
 /// Tell the launcher which Process this is. A launcher that stopped listening

@@ -430,6 +430,19 @@ Survives: Linear's renewed token, OpenCode and Codex sign-in when listed in
    Not covered by a test: an approval (not a renewal) whose check gets no
    answer still loses its code, as before.
 
+7. **Placement can ask from `lf task run`.** Found by running it: `lf task
+   run` re-executes itself detached (`transport::detach_current`) before it
+   places the Task, so `foreground` was never true there and a first rental
+   always stopped with "this run has no terminal to ask in", from a terminal
+   too. The launcher now says it was started from a terminal
+   (`LF_LAUNCHER_WATCHED`, `os_process::detached::watched`) and a device
+   approval counts that as someone to show a code to. Interrupting the
+   launcher ends the approval within one poll, so the repository's lock is
+   not held for the code's 15 minutes. Codex and OpenCode sign-ins at
+   placement still need `foreground` and still cannot ask there, as on main.
+   Not covered by a test: it needs GitHub's device endpoint in a real `lf`;
+   run by hand from a PTY (`.lf/qa/rented-machines.md`).
+
 ## Acceptance
 
 Headless, with GitHub's endpoints stood in the way `LF_TEST_MACHINE_GITHUB_URL`

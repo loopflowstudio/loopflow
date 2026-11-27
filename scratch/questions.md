@@ -216,3 +216,18 @@ Adopted with nobody here; reversible before it lands:
 - **GitHub's refusal is printed above a new code.** The refusal's own advice
   ("run `lf ondemand login github` …") sits right above the code that already
   answers it.
+
+## Raised by QA (2026-11-27)
+
+- **A template's Codex or OpenCode sign-in cannot ask from `lf task run
+  --rent` either:** the run has left its terminal by then, on main as here.
+  The GitHub approval now asks through the launcher; the agent sign-ins were
+  left alone.
+- **`the approver for GitHub exited with exit status: 1; rentals was not
+  signed in`** is what a declining command approver prints: the approval's
+  Machine name is the word `rentals`.
+- **A run with no terminal waits behind another `lf`'s untyped code** (up to
+  15 minutes) before it stops with "no terminal to ask in".
+- **`forward.env` naming `CLAUDE_CODE_OAUTH_TOKEN` with no value here** gets
+  the "would have no agent login" stop, which tells the person to set what
+  they already set.

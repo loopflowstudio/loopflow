@@ -284,8 +284,17 @@ async fn approve_repository(
     let repository_id = repository.id.to_string();
     let deadline = SystemTime::now() + Duration::from_secs(device.expires_in);
     let mut interval = Duration::from_secs(device.interval);
+    // A code shown through `lf task run`'s launcher has a reader only while
+    // that launcher runs; interrupting it ends the approval, as it would in
+    // the foreground.
+    let relayed = !matches!(approver, Some(Approver::Command { .. }))
+        && !crate::machine::credentials::foreground(asker.batch)
+        && crate::os_process::detached::watched();
     let issued = loop {
         tokio::time::sleep(interval).await;
+        if relayed && !crate::os_process::detached::watched() {
+            bail!("the GitHub approval for {name} was interrupted");
+        }
         let reply = token_request(&[
             ("client_id", APP_CLIENT_ID),
             ("device_code", &device.device_code),
@@ -432,9 +441,12 @@ pub(crate) struct Asker<'a> {
 
 impl Asker<'_> {
     /// A command approver needs no terminal; a browser needs a person at one.
+    /// A code is only read, so the terminal `lf task run` left will do while
+    /// its launcher still prints there.
     fn can_ask(&self) -> bool {
         matches!(self.approver, Some(Approver::Command { .. }))
             || crate::machine::credentials::foreground(self.batch)
+            || (!self.batch && crate::os_process::detached::watched())
     }
 }
 

@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1118 QA: a rental's GitHub access, run for real up to the code</title>
+<style>
+:root {
+  --background: #faf8f5; --surface: #fffdf9; --surface-muted: #f3eee7;
+  --border: #e6dfd6; --border-strong: #d6ccc0;
+  --text: #2a2624; --text-secondary: #5f5752; --accent: #722f37;
+  --warning-ink: #7f5a19; --warning-fill: #e4dccd;
+  --failure-ink: #a64038; --failure-fill: #ecd9d5;
+  --success-ink: #386c48; --success-fill: #d7dfd6;
+  --font-serif: 'Old Standard TT', Georgia, serif;
+  --font-sans: 'Atkinson Hyperlegible Next', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'Spline Sans Mono', ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #1b1817; --surface: #23201e; --surface-muted: #2b2725;
+    --border: #3a3431; --border-strong: #4a433f;
+    --text: #ece6dd; --text-secondary: #b5ada3; --accent: #d98a94;
+    --warning-ink: #d9b36a; --warning-fill: #3a3122;
+    --failure-ink: #e8958d; --failure-fill: #40261f;
+    --success-ink: #8fc49f; --success-fill: #223327;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--background); color: var(--text); font: 16px/1.55 var(--font-sans); }
+main { max-width: 980px; margin: 0 auto; padding: 48px 24px 96px; }
+h1, h2, h3 { font-family: var(--font-serif); line-height: 1.2; }
+h1 { font-size: 2.1rem; margin: 0 0 12px; }
+h2 { font-size: 1.5rem; margin: 52px 0 12px; padding-top: 20px; border-top: 1px solid var(--border-strong); }
+h3 { font-size: 1.12rem; margin: 30px 0 6px; }
+p.lede { color: var(--text-secondary); max-width: 70ch; }
+pre { background: var(--surface-muted); border: 1px solid var(--border); border-radius: 6px;
+  padding: 12px 14px; overflow-x: auto; font: 13px/1.5 var(--font-mono); white-space: pre-wrap; }
+code { font: 0.9em var(--font-mono); }
+table { border-collapse: collapse; width: 100%; background: var(--surface); }
+th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+th { color: var(--text-secondary); font-weight: 600; }
+.ok, .fixed, .open { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 0.85em; white-space: nowrap; }
+.ok { color: var(--success-ink); background: var(--success-fill); }
+.fixed { color: var(--warning-ink); background: var(--warning-fill); }
+.open { color: var(--failure-ink); background: var(--failure-fill); }
+</style>
+</head>
+<body>
+<main>
+<h1>A rental's GitHub access, run for real up to the code</h1>
+<p class="lede">The branch <code>lf</code> (debug build at <code>00bfdec9fe</code> plus the repair below) on a
+private Machine, speaking to the real github.com and the registered Loopflow Studio app. Rentals were a
+stand-in provider and SSH run locally. Nobody installed the app or typed a code, so no token was ever
+issued: everything after the code is unchecked.</p>
+
+<table>
+<tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>Real GitHub issues a device code for the app, with <code>scope=offline_access</code></td><td><span class="ok">works</span></td></tr>
+<tr><td><code>lf task run --rent</code> from a terminal asks for the approval</td><td><span class="fixed">broken, fixed</span></td></tr>
+<tr><td>^C during that approval leaves nothing running</td><td><span class="fixed">broken by the first fix, fixed</span></td></tr>
+<tr><td>No terminal: placement and <code>lf ondemand login github</code> stop before renting</td><td><span class="ok">works</span></td></tr>
+<tr><td>Two <code>lf</code> on one repository: the second says it is waiting</td><td><span class="ok">works</span></td></tr>
+<tr><td>Command approver receives the page and code</td><td><span class="ok">works</span></td></tr>
+<tr><td><code>--logins github|linear|claude</code> refused; saved <code>codex, github</code> reads as <code>codex</code></td><td><span class="ok">works</span></td></tr>
+<tr><td>Empty <code>logins</code> signs in to no agent; the stop names <code>--logins codex</code></td><td><span class="ok">works</span></td></tr>
+<tr><td>First contact carries <code>-a -x</code>; Daytona keeps its host key, Modal's is forgotten</td><td><span class="ok">works</span></td></tr>
+<tr><td>A route's user never reaches an error</td><td><span class="ok">works</span></td></tr>
+<tr><td>Non-GitHub origin: rented, cloned, handed off, Graph started, given back</td><td><span class="ok">works</span></td></tr>
+<tr><td>Hand-rented box: GitHub sign-in asks, list reads <code>GitHub not delivered</code>, ending is clean</td><td><span class="ok">works</span></td></tr>
+<tr><td>Install, approval, the token on a rental, renewal, the cut at the last ending</td><td><span class="open">not reached</span></td></tr>
+</table>
+
+<h2>What broke, and the repair</h2>
+
+<h3>1. The first rental of a repository could never ask from <code>lf task run</code></h3>
+<p><code>lf task run</code> re-executes itself detached before it places the Task. The approval asked for a
+foreground terminal, so from a real terminal it printed this and stopped, every time:</p>
+<pre>$ lf task run bbf516 --rent code          (in a PTY)
+Error: rentals have no GitHub approval for loopflowstudio/loopflow and this run has no terminal to ask in; run `lf ondemand login github` from a terminal in its checkout, or set a command approver (`approvers.github`)</pre>
+<p>The process asking GitHub had no terminal at all (<code>pid pgid tpgid tty</code>, read from a
+<code>gh</code> wrapper):</p>
+<pre>lf task run …            44170 44170     0 ??
+lf ondemand login github 44301 44301 44301 ttys115</pre>
+<p>Repair: the launcher tells its detached child it was started from a terminal
+(<code>LF_LAUNCHER_WATCHED</code>, <code>os_process::detached::watched</code>); a device approval, which
+only shows a code, counts that as someone to ask. After:</p>
+<pre>$ lf task run bbf516 --rent code          (in a PTY)
+Rentals need GitHub for loopflowstudio/loopflow.
+First install the app on loopflowstudio/loopflow: https://github.com/apps/loopflow-studio
+Approve at https://github.com/login/device with code XXXX-XXXX</pre>
+
+<h3>2. ^C then left the detached run polling GitHub for 15 minutes</h3>
+<p>With the first repair alone, interrupting left the child alive holding the repository's lock, and the next
+command for that repository hung behind it:</p>
+<pre>^C
+51207  00:09 /tmp/lf-qa-1118/bin/lf task run bbf516 --rent code      (still running)
+$ lf task run bbf516 --rent code
+Waiting for another lf to finish with GitHub for loopflowstudio/loopflow; if it shows a code, approve it there
+(no answer in 120 s)</pre>
+<p>Repair: an approval shown through the launcher ends when the launcher's pipe closes. macOS reports that
+only to a <code>poll</code> asking for writability; the first attempt asked for nothing and saw nothing. After:</p>
+<pre>^C
+t+1s detached runs: 1
+t+3s detached runs: 1
+t+4s detached runs: 0
+$ lf task run bbf516 --rent code          (no terminal)
+Error: rentals have no GitHub approval for loopflowstudio/loopflow and this run has no terminal to ask in; …
+uv.log: (empty: nothing rented)        rentals: 0</pre>
+
+<h2>What ran as built</h2>
+
+<h3>Approval ahead of time</h3>
+<pre>$ lf ondemand login github                (terminal)
+Rentals need GitHub for loopflowstudio/loopflow.
+First install the app on loopflowstudio/loopflow: https://github.com/apps/loopflow-studio
+Approve at https://github.com/login/device with code XXXX-XXXX
+^C
+open.log: open https://github.com/login/device        grants stored: 0
+
+$ lf ondemand login github                (no terminal; -b the same)
+Error: rentals have no GitHub approval for loopflowstudio/loopflow and this run has no terminal to ask in; run `lf ondemand login github` from a terminal in its checkout, or set a command approver (`approvers.github`)
+$ lf ondemand login github                (origin is a local path)
+Error: /private/tmp/lf-qa-1118/plain-repo has no GitHub origin
+$ lf ondemand login linear
+error: invalid value 'linear' for '&lt;SERVICE&gt;'  [possible values: github]
+
+second lf, same repository, while the first shows its code:
+Waiting for another lf to finish with GitHub for loopflowstudio/loopflow; if it shows a code, approve it there
+
+approvers.github.command (declines), no terminal:
+Rentals need GitHub for loopflowstudio/loopflow.
+First install the app on loopflowstudio/loopflow: https://github.com/apps/loopflow-studio
+Error: the approver for GitHub exited with exit status: 1; rentals was not signed in
+approver saw: provider=github machine=rentals url=https://github.com/login/device code=XXXX-XXXX</pre>
+
+<h3>Templates</h3>
+<pre>$ lf ondemand add code --provider daytona … --logins codex,github
+Error: GitHub and Linear are signed in whenever the repository uses them; --logins takes codex or opencode
+$ lf ondemand add code … --logins claude
+Error: Claude reaches a rental as a forwarded token: run `claude setup-token`, …
+$ lf task run bbf516 --rent code          (no forwarded token, no logins)
+Error: a rental from code would have no agent login: forward CLAUDE_CODE_OAUTH_TOKEN (…), or sign it in to Codex (`--logins codex` on `lf ondemand add code`)
+
+home made by the released lf (0.16.0+59bddd734) with --logins codex,github, opened by the branch:
+old · 2 vCPU 4 GB on daytona · 0/2 · $0.16614/h ≤ $1.00/h · 4h · signs in codex
+(config.yaml still lists github; the migration added the grant table and both rental columns)</pre>
+
+<h3>Stand-in rentals</h3>
+<pre>$ lf ondemand rent code                   (Daytona stand-in, route ssh://SECRETTOKEN1@sandbox1.invalid)
+Rented code-1: 2 vCPU 4 GB at $0.16614/h, at most $0.66456 until 16:57
+ssh [-a] [-x] [-o] [StrictHostKeyChecking=accept-new] [-o] [BatchMode=yes] [-o] [ConnectTimeout=10] [--] [ssh://SECRETTOKEN1@sandbox1.invalid] [uname -m]
+ssh-keygen.log: (empty)
+$ lf ondemand rent mod                    (Modal stand-in)
+ssh-keygen.log: ssh-keygen -R sandbox2.invalid
+
+$ lf machine logins code-1
+claude       forwarded    CLAUDE_CODE_OAUTH_TOKEN
+codex        unknown
+github       signed out
+…
+$ lf machine login github code-1          (terminal, from the GitHub checkout)
+Rentals need GitHub for loopflowstudio/loopflow.
+First install the app … Approve at https://github.com/login/device with code XXXX-XXXX
+^C
+$ lf ondemand list
+  code-1 · running until 16:57 · 2 vCPU 4 GB · $0.16614/h · uptime estimate $0.001107 · by hand · GitHub not delivered
+$ lf machine login github code-1          (from the non-GitHub checkout)
+Error: /private/tmp/lf-qa-1118/plain-repo has no GitHub origin; run this from a checkout of the repository the rental works in
+
+sandbox made unreachable, SSH repeating the user in its error:
+Error: machine "ssh://…@sandbox1.invalid": needs-sign-in: run `ssh -o ControlPath=none -- 'ssh://…@sandbox1.invalid'` to set up SSH key access, then retry; …@sandbox1.invalid: Permission denied (publickey).
+
+$ lf task run aeddee --rent code          (origin is a local path: no GitHub asked)
+Renting 2 vCPU 4 GB on daytona at $0.16614/h until 16:57
+Cloning into 'plain-repo'...
+Owner: QA on code-2
+aeddee · code from start running as Graph run 132730d5-…
+$ lf machine end code-1
+Returned code-1 (0 sessions copied; uptime estimate $0.002492)
+$ lf machine end code-2
+aeddee back on Jacks-MacBook-Pro-2
+Returned code-2 (0 sessions copied; uptime estimate $0.000738)</pre>
+
+<h2>Not reached</h2>
+<p>The app is installed nowhere (<code>loopflowstudio</code> has graphite-app, xcode-cloud and railway-app),
+and installing it and approving a code act as a person on github.com. So unchecked: whether the token is
+limited to one repository, whether <code>/user/installations</code> shows that, whether a renewal keeps it,
+<code>gh</code> taking a <code>ghu_</code> token on a rental, the re-send to other rentals, the cut at the
+last ending, <code>GitHub until HH:MM</code>, and a real provider. The steps are in
+<code>scratch/plan.md</code> under "Needs a person now".</p>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li>A template's Codex or OpenCode sign-in still cannot ask from <code>lf task run --rent</code>, for the same
+reason the GitHub approval could not. Same on main; left alone.</li>
+<li>A run with no terminal waits behind another <code>lf</code>'s untyped code (up to 15 minutes) before it
+stops with "no terminal to ask in".</li>
+<li><code>forward.env</code> naming <code>CLAUDE_CODE_OAUTH_TOKEN</code> with no value in this directory gets
+"would have no agent login", which tells the person to set what they already set.</li>
+<li>"rentals was not signed in" when a command approver declines.</li>
+<li>The SSH command an error suggests for a Daytona route has <code>…@</code> in it and cannot be pasted
+(known since Pass 1).</li>
+</ol>
+</main>
+</body>
+</html>

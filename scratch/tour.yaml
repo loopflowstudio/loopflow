@@ -1,0 +1,22 @@
+at: 0769b44b695db9f7c66f542839b666688cd73d77
+first:
+  - path: .github/CI.md
+    why: The promise, the ways to a signature, admin commands
+  - path: .github/workflows/main-packages.yml
+    why: Environment on desktop-app; dispatch and github.sha gone
+  - path: .github/workflows/notarization-check.yml
+    why: Environment on notarytool
+  - path: scripts/check_actions_secrets.py
+    why: Reads live settings, prints each secret a branch reads
+  - path: scripts/publish_release.py
+    why: Release preflight calls the check and stops
+  - path: python/tests/test_workflow_secrets.py
+    why: Lint on workflows, and the check's comparison
+  - path: release/SCHEDULE.md
+    why: Invariants reworded to what workflows hold
+  - path: release/README.md
+  - path: .lf/qa/github-settings.md
+    why: How to try settings changes on the probe repository
+hide:
+  - path: scratch/
+    why: Working notes, cleared on land

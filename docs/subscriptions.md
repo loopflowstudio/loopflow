@@ -170,7 +170,7 @@ Renting 4 vCPU 8 GB on daytona at $0.40/h until 03:40
 GitHub on code-1 until 07:40
 ```
 
-Once per repository, install the [Loopflow GitHub App](https://github.com/apps/loopflow)
+Once per repository, install the [Loopflow Studio GitHub App](https://github.com/apps/loopflow-studio)
 on it. A repository's first rental then asks for one approval, before anything
 is rented; later rentals of that repository ask for nothing.
 
@@ -201,7 +201,7 @@ place of the one the rental held.
 
 | Placement stops with | Do this |
 | --- | --- |
-| The Loopflow app is not installed on the repository | Install it from the link printed, then place again; that placement asks for a new code |
+| The Loopflow Studio app is not installed on the repository | Install it from the link printed, then place again; that placement asks for a new code |
 | No approval for this repository and no terminal | `lf ondemand login github` in its checkout |
 | The approving GitHub account is not the one `gh` is signed in to here | Approve as the `gh` account |
 

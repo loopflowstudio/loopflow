@@ -34,7 +34,22 @@ ssh <rental> 'cd ~/src/loopflow && git push --dry-run'      # works
 lf machine logins <rental>                                  # github  signed in
 ```
 
-## Needs a person
+## The app (registered 2026-11-27)
+
+"Loopflow Studio", owned by `loopflowstudio`, public (any account can install
+it). Client id `Iv23likXtOBTpX1WyV4f`, app id 5957089, address
+`https://github.com/apps/loopflow-studio`. The name "Loopflow" was refused:
+"Name is reserved for the account @loopflow". Device flow on, user tokens
+expiring, no webhook, no private key generated. Permissions as listed below.
+It is installed nowhere yet: the four probes need it installed on a
+repository and a person to type the device code.
+
+After registering, GitHub's page said "You must generate a private key in
+order to install your GitHub App", yet its Install page offered Install
+buttons with no key present. Whether install completes without a key is
+unprobed.
+
+## Needs a person (history: how the registration was framed)
 
 One GitHub App has to be registered on github.com before the token can be
 minted for real. Nothing here registers it: its name, owner and address show
@@ -79,7 +94,7 @@ Findings (GitHub docs, read 2026-11-26):
 - Installation tokens: 1 h, minted with a JWT signed by the app's private key,
   restrictable by `repository_ids` and `permissions`.
 - Fine-grained PATs: created in the web UI only, expiry in whole days (1–366).
-- No Loopflow GitHub App exists; `loopflowstudio` has graphite-app, xcode-cloud
+- Before 2026-11-27 no Loopflow GitHub App existed; `loopflowstudio` has graphite-app, xcode-cloud
   and railway-app installed. The laptop's `gh` token carries `repo`, `workflow`,
   `write:packages`, `gist`, `read:org`.
 
@@ -309,8 +324,8 @@ Questions the writing raised (also in `scratch/questions.md`):
 2. **Does a command approver let a placement with no terminal approve?** The
    docs say yes, as `approvers` already promises for every sign-in; "Absent
    and error states" above says such a placement stops.
-3. **The app's address.** The docs link `https://github.com/apps/loopflow`;
-   the slug is whatever the registration gets.
+3. **The app's address** is `https://github.com/apps/loopflow-studio`; the
+   docs link it.
 4. **Sample output wording** (`Rentals need GitHub for …`, `GitHub on code-1
    until 07:40`) is made for the docs; the build matches it or the docs
    follow.

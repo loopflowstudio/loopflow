@@ -47,8 +47,7 @@
   see the missing install before showing a code?
 - **No terminal, but a command approver is set:** does placement approve
   through it (docs say yes) or stop (plan's absent states say stop)?
-- **App address in the docs** is `https://github.com/apps/loopflow` until the
-  app is registered.
+- **App address in the docs** is `https://github.com/apps/loopflow-studio`.
 - **`lf ondemand login github` is in the docs before Clap has it**, so
   `documented_commands` fails until Pass 2.
 
@@ -64,3 +63,21 @@
 - **Land Pass 1 alone?** The first-contact and `logins` fixes are real without
   the app. Landing them alone means pulling the Pass 2 and 3 docs out of this
   branch and the token work taking a second Task.
+
+## Raised 2026-11-27: what customers trust
+
+- **Installing the shared app trusts its owner.** An admin of `loopflowstudio`
+  can generate a private key for the app at any time and with it mint tokens
+  for every repository any customer installed it on: Contents write and
+  Workflows write, so code and, through a workflow, Actions secrets. Stated
+  from how GitHub Apps work, not probed. Neither the plan nor
+  `docs/security.md` says so yet.
+- **Device codes can be phished.** The client id is public; anyone can start
+  an approval and have a customer type the code on GitHub's real page under
+  the real app name. The token reaches only repositories where that customer
+  installed the app.
+- **Passed over, for now.** Jack, after hearing both: "ok, i guess the trust
+  us model is best then for now". The alternatives were nothing on the rental
+  (the Machine forwards checked pushes with its own token, as Claude Code on
+  the web does on Anthropic's side), a per-rental deploy key, a hand-made
+  fine-grained token, or an app each person registers.

@@ -134,10 +134,8 @@
   deadline is past the token's expiry keeps a token with 7 h or more left
   instead of renewing; it still stops before the rental does, and placement
   prints when. The number is a guess between "renew every time" and "never".
-- **An ending can wait on a person.** The per-repository lock waits, and an
-  approval holds it while a code is typed. `lf machine end` and the server's
-  rental check for that repository wait with it, up to the code's 15 minutes.
-  A bounded wait for endings would leave the token to its own expiry instead.
+- **An ending can wait on a person.** No longer: see "Raised by the review
+  after Pass 6".
 - **`lf ondemand login github` now reaches rentals over SSH** when the
   repository has running ones, to send them the newly approved token.
 - **A rental whose provider deleted it** is tried over SSH by every settle of
@@ -206,3 +204,15 @@ Adopted with nobody here; each is reversible before it lands:
   the first. Someone wanting the second rents another.
 - **An approval whose check gets no answer still loses its code.** Only the
   renewal stores first. Storing an unchecked approval first would keep it too.
+
+## Raised by the review after Pass 6 (`scratch/concept-review.html`)
+
+Adopted with nobody here; reversible before it lands:
+
+- **An ending never waits for the repository's lock.** It tries once; held,
+  it does nothing. `lf machine end` goes the same way, though a person runs
+  it. When the holder was not about to replace the token and the rental was
+  the repository's last, that token lives out its 8 hours.
+- **GitHub's refusal is printed above a new code.** The refusal's own advice
+  ("run `lf ondemand login github` …") sits right above the code that already
+  answers it.

@@ -405,9 +405,11 @@ fn covers(grant: &GithubRentalGrant, until: OffsetDateTime) -> bool {
 
 /// One settle of a repository at a time: its grant has a single refresh
 /// token, and what each rental holds is read and written around it. A second
-/// `lf` says it is waiting and waits here, also while a person types the
-/// first one's code, then finds what the first one left.
-async fn repository_lock(repository: &Repository) -> Result<std::fs::File> {
+/// `lf` with someone watching (`wait`) says it is waiting and waits here, also
+/// while a person types the first one's code, then finds what the first one
+/// left. An ending gets `None` instead: it runs inside this Machine's one
+/// recovery pass, which must not stand behind an untyped code.
+async fn repository_lock(repository: &Repository, wait: bool) -> Result<Option<std::fs::File>> {
     let directory = crate::store::lf_home_dir().join("accounts");
     std::fs::create_dir_all(&directory)?;
     let file = std::fs::OpenOptions::new()
@@ -417,17 +419,18 @@ async fn repository_lock(repository: &Repository) -> Result<std::fs::File> {
         .write(true)
         .open(directory.join(format!(".github-rentals-{}.lock", repository.id)))?;
     match fs2::FileExt::try_lock_exclusive(&file) {
-        Ok(()) => return Ok(file),
-        Err(held) if held.kind() == fs2::lock_contended_error().kind() => eprintln!(
+        Ok(()) => return Ok(Some(file)),
+        Err(held) if held.kind() != fs2::lock_contended_error().kind() => return Err(held.into()),
+        Err(_) if !wait => return Ok(None),
+        Err(_) => eprintln!(
             "Waiting for another lf to finish with GitHub for {}; if it shows a code, approve \
              it there",
             repository.name
         ),
-        Err(error) => return Err(error.into()),
     }
     tokio::task::spawn_blocking(move || {
         fs2::FileExt::lock_exclusive(&file)?;
-        Ok(file)
+        Ok(Some(file))
     })
     .await?
 }
@@ -467,14 +470,29 @@ pub(crate) struct Settled {
 /// grant is renewed once so the token the last rental held stops working.
 ///
 /// Placement, an approval ahead of time, a sign-in by hand and an ending all
-/// come here; a rental one of them could not reach is sent by the next.
+/// come here; a rental one of them could not reach is sent by the next. An
+/// ending (no `asker`) that finds another `lf` settling the repository does
+/// nothing.
 pub(crate) async fn settle(
     sqlite: &SqliteStore,
     repository: &Repository,
     until: Option<OffsetDateTime>,
     asker: Option<&Asker<'_>>,
 ) -> Result<Settled> {
-    let _lock = repository_lock(repository).await?;
+    let nothing = Settled {
+        expires_at: None,
+        approved: false,
+        unsent: Vec::new(),
+    };
+    let Some(_lock) = repository_lock(repository, asker.is_some()).await? else {
+        // Whoever holds it is settling this repository now. A token this
+        // ending would have cut stops at its own expiry.
+        tracing::info!(
+            repository = %repository.name,
+            "another lf is settling GitHub; this ending leaves it to that one"
+        );
+        return Ok(nothing);
+    };
     let need = sqlite
         .rentals_holding_github(repository.id)?
         .iter()
@@ -484,18 +502,15 @@ pub(crate) async fn settle(
     let stored = sqlite
         .github_rental_grant(repository.id)?
         .filter(|stored| asker.is_none_or(|asker| stored.login == asker.login));
-    let nothing = Settled {
-        expires_at: None,
-        approved: false,
-        unsent: Vec::new(),
-    };
     let asking = asker.filter(|asker| can_ask(asker.approver, asker.batch));
     let (grant, approved) = match (stored, need) {
         (Some(stored), Some(need)) => {
             match (usable(sqlite, repository, stored, need).await?, asking) {
                 (Ok(grant), _) => (grant, false),
-                // GitHub's refusal: only a new approval answers it.
-                (Err(_), Some(asker)) => {
+                // GitHub's refusal: only a new approval answers it, and the
+                // person asked for one is told why.
+                (Err(refusal), Some(asker)) => {
+                    eprintln!("{refusal}");
                     (approve_repository(sqlite, repository, asker).await?, true)
                 }
                 (Err(refusal), None) => bail!(refusal),
@@ -1455,6 +1470,35 @@ mod tests {
             .await;
         assert!(first.is_ok() && second.is_ok());
         assert_eq!(codes(&requests.lock().await), 1);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
+    async fn an_ending_does_not_wait_behind_another_lf_settling_its_repository() {
+        let _env = crate::journal::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("LF_HOME", dir.path().to_str().unwrap());
+        let store = renting(dir.path(), Vec::new());
+        store
+            .put_github_rental_grant(&grant(42, "ghu_HELD", 6))
+            .unwrap();
+        let (url, requests) = spawn(renewal(42, "ghu_CUT", 8)).await;
+        let repository = repository_42();
+        // A placement showing a code holds the lock for as long as the code lives.
+        let placement = super::repository_lock(&repository, true).await.unwrap();
+
+        TEST_GITHUB_URL
+            .scope(url.clone(), settle(&store, &repository, None, None))
+            .await
+            .unwrap();
+        assert_eq!(renewals(&requests.lock().await), 0);
+
+        drop(placement);
+        TEST_GITHUB_URL
+            .scope(url, settle(&store, &repository, None, None))
+            .await
+            .unwrap();
+        assert_eq!(renewals(&requests.lock().await), 1);
     }
 
     #[tokio::test]

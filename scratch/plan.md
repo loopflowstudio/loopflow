@@ -1,9 +1,10 @@
 # LOO-1118: rentals receive a repository-scoped, expiring GitHub token
 
 Passes 1 to 6 are built and tested against a stand-in GitHub. No further pass
-is worth building before the run under "Needs a person now". Nothing has run against GitHub's real app or a
-real rental. `scratch/concept-review.html` (written at `0419415ca1`) reviewed
-the build after Pass 5; where each finding went is under "Review".
+is worth building before the run under "Needs a person now". Nothing has run
+against GitHub's real app or a real rental. `scratch/concept-review.html`
+(written at `06628a5477`) reviewed the build after Pass 6; where each finding
+went is under "Review".
 
 ## Needs a person now
 
@@ -487,27 +488,37 @@ Questions the writing raised (also in `scratch/questions.md`):
 ## Review
 
 What happened to each finding of `scratch/concept-review.html` (the review of
-the build after Pass 5, written at `0419415ca1`). Every adoption is made for
-review; none is settled. The two earlier reviews' findings were built in
-Passes 4 and 5. Checked against the code: `reach` sums
-`/user/installations`, `sign_in_as` prefers the directory's origin
-(`github.rs:694`), `renew` stores after `grant_from` (`github.rs:351-352`).
+the build after Pass 6, written at `06628a5477`). Every adoption is made for
+review; none is settled. Earlier reviews' findings were built in Passes 4 to
+6.
 
-- "Reaches one repository" is checked by a listing whose answer for a
-  restricted token is unknown, and a one-repository install cannot show it:
-  the first run under "Needs a person now" now installs on two.
-- The renew command can move a rental to the directory's repository and end
-  the token its Task uses: built in Pass 6.
-- A dropped connection during a renewal loses the approval: built in Pass 6.
-- Two beliefs about a renewed token (settle trusts it, renew re-checks it):
-  one after Pass 6, every token is asked about before it is sent; probe 1
-  says whether the check of a renewed one can go.
-- `lf ondemand list` printed `GitHub until 17:00` an hour after: fixed here,
-  `GitHub ended 17:00` (`rust/loopflow/src/lf/commands/rental.rs`,
-  `docs/subscriptions.md`). Type-checked; no test covers the list's text.
+- Giving a rental back could wait up to 15 minutes on another `lf`'s untyped
+  code, inside the server's one recovery pass: fixed here. A settle with
+  nobody to ask (`settle_unattended`, every ending, `lf machine end`
+  included) tries the repository's lock once and does nothing when it is
+  held (`repository_lock(…, wait)`, `rental/github.rs`). Passed over:
+  waiting, as built in Pass 4. What it costs: when the holder was only
+  confirming an approval and this rental was the repository's last, the
+  token is not cut and stops at its own 8 hours; a rental left behind waits
+  for the next command on the repository. Test:
+  `an_ending_does_not_wait_behind_another_lf_settling_its_repository`.
+  `docs/subscriptions.md` says so.
+- A new code after a refused approval gave no reason: fixed here. `settle`
+  prints GitHub's refusal above the code. The sentence ends "run
+  `lf ondemand login github` in its checkout to approve again" with the code
+  right below it; printed, not asserted.
+- An ending with the lock free still asks GitHub (up to three requests) and
+  SSHes to each rental that is behind, inside the recovery pass, each
+  bounded by its timeout: left as built; it moves with automatic settling
+  (deferred below).
+- What rests on GitHub's answers (restriction, renewal keeping it, `gh`
+  taking `ghu_`, the old token dying, the token cap): the probes under
+  "Needs a person now" and "Unanswered until the app exists".
 - One shared token per repository, the cut at the last ending, six requests
-  a placement, an ending waiting behind a code, `lf ondemand login github`
-  keeping a working approval: left as built, as the review left them.
+  a placement, a first approval that loses its code when its check gets no
+  answer, `lf ondemand login github` keeping a working approval, a
+  hand-rented box staying with its first repository, a person's command
+  waiting behind another `lf`: left as built, as the review left them.
 - The name `lf ondemand login github`, GitHub state in `--json`, filing the
   deferred findings: a person's choices, in `scratch/questions.md`.
 - Automatic settling, Codex and OpenCode outliving the rental: deferred
@@ -522,7 +533,9 @@ Passes 4 and 5. Checked against the code: `reach` sums
   (`settle_unattended`). It needs its own rule for when to renew: under the
   7-hour rule a long rental would be renewed on every hourly visit. It is
   also what delivers a missed token with nobody acting; until then
-  "not delivered" waits for the next command on that repository.
+  "not delivered" waits for the next command on that repository. It needs
+  its own place to run, outside the recovery pass, and would take over the
+  re-send an ending does there today.
 - **Codex and OpenCode outlive the rental.** Codex's device login is a
   renewing grant written on the rental; OpenCode gets a renewing login or a
   copied raw key; nothing signs either out before the sandbox is deleted.

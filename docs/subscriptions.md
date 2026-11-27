@@ -224,7 +224,10 @@ revoked or an app you uninstalled stops the placement there. A renewal that
 loses its connection to GitHub keeps your approval: the next command checks
 the new token before any rental gets it, and asks for no code. A command that
 finds another `lf` working on the same repository's token says it is waiting,
-then goes on once that one finishes or its code is approved.
+then goes on once that one finishes or its code is approved. A rental given
+back at that moment does not wait: the other `lf` is settling the repository,
+and a token nothing ended early stops by itself within 8 hours. When a stored
+approval is refused, the reason is printed above the new code.
 
 | Placement stops with | Do this |
 | --- | --- |

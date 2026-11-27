@@ -166,8 +166,12 @@ pinned forms of the two branch-named actions behave the same in CI.
   job, a half-applied Dependabot bump. Pin both to the v8 commit, matching
   `upload-artifact`'s major only if v8 reads v7 uploads; otherwise pin each
   where it is and say so.
-- `.github/CI.md` gets one sentence: actions are pinned by commit, and a
-  bump is an ordinary PR.
+- Docs are written ahead of the code: `.github/CI.md` has a `## Dependencies`
+  section (pinned actions, the pin check, how a bump starts, what floats) and
+  `scripts/testing.md`'s owner table points at it. The section describes the
+  pinned state; its check command prints 76 lines until this pass lands. If
+  `download-artifact` ends up at two majors or the `with:` inputs differ,
+  correct the section.
 - No local build. The PR's CI run is the test: every workflow parses and the
   matrix passes on the pinned actions. `release.yml` and `main-packages.yml`
   do not run on a PR; read their diff against `package-build.yml`'s.

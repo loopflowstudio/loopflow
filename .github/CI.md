@@ -160,6 +160,34 @@ source-line detail. Local Cargo profiles are unchanged.
 runs the same architecture command every Monday and retains its JSON report for
 90 days; four consecutive runs are the time-based architecture KR evidence.
 
+## Dependencies
+
+```bash
+grep -rhE 'uses: +[^. ]' .github/workflows | grep -vE '@[0-9a-f]{40}( |$)'   # no output: every action is at a commit
+```
+
+Nothing updates a dependency automatically. Libraries are locked by content:
+`Cargo.lock`, `uv.lock`, `website/uv.lock`, `swift/Package.resolved` and the
+`libghostty-vt` SHA-256 in `rust/loopflow-terminal/build.rs`. Every outside
+action in a workflow is pinned to a full commit SHA, with the tag it came from
+in a trailing comment, so a tag its owner moves changes nothing here.
+
+A bump is an ordinary Task and PR that someone chose to start:
+
+```bash
+cargo update -p <crate>                                   # then scripts/third_party.py refresh
+uv lock --upgrade-package <name>
+gh api repos/<owner>/<action>/commits/<tag> --jq .sha     # the commit for a new action tag
+```
+
+CI on that PR is the check. GitHub's vulnerability alerts stay on as the
+prompt; they notify and open no PR.
+
+The compiler and tools are not pinned: Rust `stable`, the latest uv and
+nextest, Homebrew's xcodegen and the `ubuntu-latest` image. `rust-toolchain`
+and `install-action` pick their tool from `with:` (`toolchain: stable`,
+`tool: nextest`), since their pinned commit no longer names it.
+
 ## Main packages
 
 `.github/workflows/main-packages.yml` builds the same native `lf` tarballs as the release workflow for every main commit CI passes, from a full-history checkout so `build.rs` sees origin/main's migration order. Each runner extracts its tarball and runs:

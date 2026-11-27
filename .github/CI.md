@@ -11,9 +11,9 @@ branch-added `scratch/` files once against the integration target on the head
 they are about to push, and push that clean head once so the full test matrix
 starts immediately. Real code conflicts keep `scratch/` on disk for
 `sync-conflicts` and clear before pushing once resolved; pure stacked-scratch
-conflicts drop automatically. Scratch-free PRs, including small changes and
-Dependabot updates, run the full test matrix in parallel. Implement/compress
-only build changed code and run its focused test; CI runs the suites and
+conflicts drop automatically. Scratch-free PRs run the full test matrix in
+parallel. Implement/compress only build changed code and run its focused test;
+CI runs the suites and
 `lf land --wait-and-fix` (`ci-fix`) repairs failures; see the verification
 cadence in [AGENTS.md](../AGENTS.md#when-to-run-what). Required checks run
 unattended; defer unavailable checks to capable CI and leave people's judgment
@@ -160,28 +160,6 @@ source-line detail. Local Cargo profiles are unchanged.
 `.github/workflows/architecture-drift.yml`
 runs the same architecture command every Monday and retains its JSON report for
 90 days; four consecutive runs are the time-based architecture KR evidence.
-
-## Dependabot
-
-Dependabot checks weekly and groups minor/patch updates by ecosystem. Its
-auto-merge workflow uses the `DEPENDABOT_MERGE_TOKEN` Actions secret, sourced
-from Doppler, with repository Contents and Pull requests write access. Renew
-the token before expiry. The built-in `GITHUB_TOKEN` cannot enqueue PRs into
-the required merge queue. Successful PR CI explicitly enqueues the unchanged
-Dependabot head when it is not already queued; queue CI still gates merging.
-
-```bash
-gh pr list --author app/dependabot
-gh run list --workflow CI
-```
-
-Weekly dependency PRs come from `.github/dependabot.yml` for `uv`, `cargo`, `swift`, and `github-actions`.
-
-`.github/workflows/dependabot-auto.yml` keeps those PRs zero-touch:
-- enable squash auto-merge when a Dependabot PR opens or reopens
-- when the `CI` workflow fails on a pull-request run, comment and close the matching PR
-
-Keep `workflow_run.workflows: ["CI"]` in sync with `.github/workflows/ci.yml`. Renaming the CI workflow without updating the Dependabot workflow disables the close-on-red path.
 
 ## Main packages
 

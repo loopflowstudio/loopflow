@@ -47,8 +47,8 @@ asks nobody). The open choice, also in `scratch/questions.md`:
   secret, key, webhook or server, so Loopflow operates nothing.
 - **Settings:** device flow enabled, user tokens expiring, no webhook.
   Repository permissions: Contents write, Pull requests write, Actions read,
-  Checks read, Commit statuses read, Metadata read. No Workflows permission
-  (see Behavior).
+  Checks read, Commit statuses read, Metadata read, Workflows write (see
+  Behavior).
 
 Its client id is then one compiled constant in `lf`. Until it exists, Pass 1
 is the only pass that can finish.
@@ -160,11 +160,9 @@ no Task, and `mark_ended` hands the Tasks back first. One migration
   `rentals.github_repository`; when no live rental holds that repository,
   refresh the grant so the handed-out token stops working. A failed call to
   GitHub is logged and never fails the ending.
-- **No Workflows permission** (made for review; passed over: allow it, so any
-  Task can run on a rental). With it a rental could push a branch carrying a
-  workflow that reads the repository's Actions secrets. Without it GitHub
-  refuses a push that adds or edits `.github/workflows/`, and that Task
-  finishes on an owned Machine.
+- **Workflows write**, so any Task can run on a rental, including one that
+  edits `.github/workflows/`. What it costs: a rental can push a branch
+  carrying a workflow that reads the repository's Actions secrets.
 - **Owned Machines** (`lf machine login github <ssh box>`) keep receiving the
   laptop token: the person's own hardware, unchanged.
 - **Empty `logins`:** `sign_ins` returns the template's list and nothing else;
@@ -198,8 +196,8 @@ Pass 2 answers these first:
    half-day), and no re-send.
 2. Do two device grants (two repositories) coexist for one person and app?
 3. Does `gh` accept `ghu_` for `auth login --with-token`, `repo clone`,
-   `pr create`, `pr merge --auto`, `pr checks`? What does a push touching
-   `.github/workflows/` print?
+   `pr create`, `pr merge --auto`, `pr checks`? Does a push touching
+   `.github/workflows/` go through?
 4. Is the old access token dead at once after a refresh?
 
 ## Security and privacy
@@ -332,7 +330,7 @@ Every adoption is made for review; none is settled.
   adopted as stated behavior.
 - The no-agent error and `github`/`linear` in `--logins`: adopted. The kickoff
   plan said the message "already says so"; it does not.
-- Workflows permission: dropped from the app.
+- Workflows permission: the review dropped it; it is back in (2026-11-27).
 - Command name: `lf ondemand login github`.
 - 8 h and the sleeping-laptop gap: kept as the kickoff plan had them, stated
   under tensions.

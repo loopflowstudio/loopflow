@@ -77,8 +77,9 @@ lf --machine mini -a codex implement
   permissions (`0600`). Linear tokens in SQLite are encrypted using an
   owner-only `provider-token.key`.
 - **Rentals:** a rented Machine never receives your `gh` token. It gets a
-  GitHub App user token that acts as you in the one repository it runs,
-  cannot change `.github/workflows/`, and expires 8 hours after issue. The
+  GitHub App user token that acts as you in the one repository it runs and
+  expires 8 hours after issue. It can change `.github/workflows/`, so a
+  rental can push a workflow that reads that repository's Actions secrets. The
   grant that renews it stays encrypted on your Machine. Giving back a
   repository's last rental ends the token then; a rental its provider deletes
   while your Machine is asleep leaves the token working until your Machine

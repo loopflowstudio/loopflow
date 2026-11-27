@@ -12,8 +12,9 @@
   Heart if it needs to be a person". An organization can own an app, so the
   owner is `loopflowstudio`. Registration itself: "go ahead and do it".
 - **Its permissions.** Adding one later asks every installation to approve
-  again; removing one asks nobody. The plan starts without Workflows, so a
-  Task that edits `.github/workflows/` cannot push from a rental.
+  again; removing one asks nobody. The plan started without Workflows.
+  Answered 2026-11-27, Jack: "i would add the workflow perm". The app is
+  registered with Workflows write.
 
 ## Made with nobody here; reversible before build
 

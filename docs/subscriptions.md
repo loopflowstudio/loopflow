@@ -181,9 +181,6 @@ What the rental holds:
   dependency kept in a second repository does not clone there.
 - **Your name.** Commits and pull requests are yours, as they are from your
   own Machine.
-- **No workflow edits.** GitHub refuses a push from a rental that adds or
-  changes a file under `.github/workflows/`. Run that Task on a Machine you
-  own.
 - **8 hours at most.** Placement prints when GitHub stops on that rental. The
   token stops sooner, when the repository's last rental is given back.
 

@@ -239,8 +239,8 @@ impl Mode {
     /// knows where a real dependency should route.
     pub fn instructions(self) -> &'static str {
         match self {
-            Self::Interactive => loopflow_definitions::builtins::SURFACE_HUMAN_PRESENT,
-            Self::Headless => loopflow_definitions::builtins::SURFACE_HEADLESS,
+            Self::Interactive => loopflow_definitions::builtins::MODE_INTERACTIVE,
+            Self::Headless => loopflow_definitions::builtins::MODE_HEADLESS,
         }
     }
 }

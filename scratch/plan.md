@@ -63,10 +63,13 @@ Left to CI: clippy, `lf::tests::`, `documented_commands::`, the suites.
   (b95737849e). Made for review (concept review question 1a). Nothing needed the
   prompt's value to differ from the launch's mode. Fields are named `mode`;
   `Mode` gained `Default` (headless), `clap::ValueEnum` and `instructions()`.
-  Kept under the old word: `Kind::SurfaceInstructions`, `SURFACE_*` and
-  `builtins/surfaces/*.md` (trace kind and file names), and the recorded
-  Session `surface` string (deferred, below). Attribution labels now read
-  "Headless mode" / "Interactive mode".
+  The instruction text follows the type: `MODE_HEADLESS`, `MODE_INTERACTIVE`
+  and `builtins/modes/{headless,interactive}.md` (file contents unchanged, so
+  the rendered prompt is the same bytes). Kept under the old word: the trace
+  kind `Kind::SurfaceInstructions` (`surface_instructions` is in a SQL `CHECK`
+  since the first migration) and the recorded Session `surface` string
+  (deferred, below). Attribution labels read "Headless mode" / "Interactive
+  mode".
 
 What a run showed (2026-11-26): `lf-prompt --mode cli` exits 2 with "invalid
 value 'cli' for '--mode <MODE>' [possible values: interactive, headless]";
@@ -90,7 +93,7 @@ Review, PR, land. Deferred: typing the recorded Session `surface` string
 target/debug/lf discord serve product     # → skill or graph not found: discord, exit 2
 target/debug/lf help | grep -ci discord   # → 0
 git grep -n -i 'discord' -- rust swift docs python   # → nothing
-git grep -n 'prompt::Surface\|SURFACE_CHAT' -- rust   # → nothing
+git grep -n -E 'prompt::Surface|\bSURFACE_|builtins/surfaces' -- rust   # → nothing
 target/debug/lf-prompt --mode cli   # → Clap error naming headless, interactive
 # a Wave config.yaml with a chat: block → `lf --wave <w> config settings` prints no warning
 cargo test -p loopflow-execution --lib work::wave::config:: prompt::
@@ -136,18 +139,19 @@ review. Other Machines were not checked.
 
 ## Concept review, answered
 
-Each finding of `scratch/concept-review.html` at 200d4e486a (it replaces the
-page written at e577962da2, whose findings §1 to §3 built):
+Each finding of `scratch/concept-review.html` at f342908097 (it replaces the
+page at 200d4e486a, whose findings the Mode pass built):
 
-- "Is someone in this conversation" is three types (`Mode`, `Surface`, the
-  recorded `surface` string) → the first two merge in the remaining pass,
-  made for review; the third is deferred below.
-- `FromStr for Surface` cannot fail, so `--surface cli` is silently headless
-  → goes with `Surface`; `--mode` rejects a wrong word.
-- Four doc comments in `work/wave/config.rs` said "identity and bindings"
-  for a struct that holds an id → fixed here (uncommitted).
-- Token still alive in Doppler `loopflow/dev` and no longer stripped → open
-  question, above. An old installed `lf` can still run the bridge until then.
+- The mode's instruction text was still named for a surface (`SURFACE_*`,
+  `builtins/surfaces/human-present.md`) → renamed here to the mode's words.
+  `cargo check -p loopflow-execution` passed; `golden_prompt` not rerun, the
+  two files' contents did not change.
+- The recorded Session keeps its own copy as a word (`"tui"`, `"headless"`,
+  and `interactive: bool` derived from it) → separate outcome, deferred below.
+- Token still stored in Doppler `loopflow/dev` and no longer stripped → the
+  open question above, unchanged. An old installed `lf` can still run the
+  bridge until it is revoked.
+- Who asked for this agent → deferred below, unchanged.
 - Everything else on the page matches and is built.
 
 ## Deferred findings
@@ -157,10 +161,15 @@ page written at e577962da2, whose findings §1 to §3 built):
   account. The first inbound trigger (a webhook, a self-hosted server) needs
   a named author on the request and a rule for which authors may start an
   agent, designed before that trigger is built. Nothing to do in this Task.
-- **Type the recorded Session `surface` string.** `run.rs:647,692` write
-  `"tui"` or `"headless"` from the same `Mode`. A `Mode`-typed field on
-  `SessionCaptureSpec` that writes the same two strings: no migration, about
-  thirty literal sites, read by replay and Session lists.
+- **Type the recorded Session `surface` string.** `run.rs` `run_prompt`
+  writes `"tui"` or `"headless"` from the same `Mode`. A `Mode`-typed field on
+  `SessionCaptureSpec` that writes the same two words under the same key: no
+  migration. Two readers disagree and both must keep working:
+  `session_record/capture.rs` treats any word but `"headless"` as interactive,
+  `commands/replay.rs` requires exactly `"headless"`. About 27 hand-spelled
+  sites, mostly harness test fixtures; one (`transport.rs`, the resume
+  delegation table) writes `"interactive"`, which no launch writes. No Task
+  is filed for it.
 
 ## Exclusions
 

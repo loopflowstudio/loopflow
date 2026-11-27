@@ -8,11 +8,11 @@ use crate::name::portable_name;
 /// Launcher guidance every launch carries: how to work, Tasks and notes.
 pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
 
-/// Headless preamble — the only surface that needs one (no user is present).
-pub const SURFACE_HEADLESS: &str = include_str!("builtins/surfaces/headless.md");
+/// What a headless launch is told: nobody is in the conversation.
+pub const MODE_HEADLESS: &str = include_str!("builtins/modes/headless.md");
 
-/// Shared contract for every surface with someone participating in the current conversation.
-pub const SURFACE_HUMAN_PRESENT: &str = include_str!("builtins/surfaces/human-present.md");
+/// What an interactive launch is told: someone is in the conversation.
+pub const MODE_INTERACTIVE: &str = include_str!("builtins/modes/interactive.md");
 
 /// Returns the content of a built-in skill, if it exists.
 pub fn get_builtin_skill(name: &str) -> Option<&'static str> {

@@ -306,6 +306,11 @@ pub enum ServerOperation {
     MobileConfigure {
         configuration: Option<super::mobile::Configuration>,
     },
+    /// A capability URL for a local review page served over loopback; same-user
+    /// local socket only.
+    #[serde(rename = "page.url")]
+    #[schemars(extend("x-result" = generator.subschema_for::<PageUrl>()))]
+    PageUrl { path: std::path::PathBuf },
     /// A ticket for a connection that carries one request of `bytes` bytes,
     /// larger than `limits.max_message`; answers `{ticket}`. The uploaded
     /// request is answered here under its own id.
@@ -359,6 +364,13 @@ pub struct ServerDiagnostics {
     pub spawns: u64,
     /// External facts currently held by open subscriptions.
     pub held_facts: u64,
+}
+
+/// What `page.url` answers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PageUrl {
+    pub url: String,
 }
 
 /// What `plan.apply` answers.

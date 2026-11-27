@@ -140,6 +140,24 @@ over WebSocket on the host's Tailscale address: one text frame per message on
 bytes. Setup saves the endpoint, owner and enabled choice in Machine-local
 `mobile.yaml`.
 
+The loopback carrier (`loopback.rs`, `lf page open`) binds a `127.0.0.1`
+listener (a port derived from the socket path, so pages keep their origin and
+`localStorage` across restarts; ephemeral when taken) with a 32-byte random token held only in memory (never
+written to disk or printed by `lf server status`). `GET /<token>/f/<absolute path>`
+serves files capped at `MAX_BULK` with `Referrer-Policy: no-referrer`,
+`Cache-Control: no-store`, and `X-Content-Type-Options: nosniff`. HTML and
+SVG responses also get a content security policy that limits connections to
+their origin and blocks framing, form submissions and base URL overrides.
+`GET /<token>/machine` upgrades same-origin WebSockets into `service::session`
+reusing `Messages<S>` (`Admission::Local`, `local_authority: None`). Every
+request checks `Host: 127.0.0.1:<port>` and the token in constant time; upgrades
+also require `Origin: http://127.0.0.1:<port>`. Anything else answers `404` with
+an empty body and no CORS headers. There is no `/ticket` route on loopback.
+`page.url` mints a capability URL over the local Unix socket only and is refused
+on both Tailscale and loopback connections.
+If the loopback listener cannot bind, the Unix socket and other carriers still
+serve. `lf page open` reports the bind error when it asks for a browser URL.
+
 `mobile/tailscale.rs` uses the Tailscale LocalAPI. On macOS it discovers the
 App Store endpoint via `IPNExtension` and the Standalone endpoint via
 `/Library/Tailscale/ipnport`. The default daemon socket is
@@ -545,7 +563,8 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `desktop.<verb>` | `lf desktop enter`, `send`, `send-key`, `capture`, `zoom`, `focus`, `close`, `reopen`, `move`, `resize`, `browse`, … | CLI only, executed by the app |
 | `view.select` | `lf desktop view list --all` | read |
 | `session.continue` | the phone's Continue | held-terminal launch |
-| `mobile.status`, `.configure` | `lf server mobile` | remote endpoint setup |
+| `mobile.status`, `.configure` | `lf server mobile` | remote endpoint setup (local Unix socket only) |
+| `page.url` | `lf page open` | mint a loopback capability URL for a local review page (local Unix socket only) |
 | `request.upload` | none | upload ticket for an oversized request |
 
 "CLI handler; not served" is an operation only the CLI dispatcher runs today;

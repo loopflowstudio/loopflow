@@ -30,12 +30,11 @@ When a question helps, make it specific and number it so "2b" is a complete
 answer: "does the shortcut or the menu feel more natural?", "was the result
 where you expected it?". Never "does this look good?".
 
-A page helps when there's something to compare. Write `scratch/demo.html` with
-before and after, or two variants side by side, and the numbered questions:
-one self-contained file, light and dark. When the repository has a visual
-language (a design system, the app, its docs, internal tools), borrow its
-palette, type and layout. Present it with `lf desktop files scratch/demo.html`
-and give its path.
+A page helps when there's something to compare. Write `scratch/demo.page.html`
+following `lf help page` with `<lf-component name="before-after">` or variants
+side by side and numbered questions, compile with
+`lf page build scratch/demo.page.html`, and present with
+`lf page open scratch/demo.html`.
 
 ## Keep their words
 

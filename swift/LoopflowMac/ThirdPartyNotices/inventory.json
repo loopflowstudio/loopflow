@@ -1,6 +1,6 @@
 {
   "inputs": {
-    "Cargo.lock": "6ffbcfc9a9e6ada86cfbb076bdc2439ab9f7aa1ac10ee3ae2e6c621a2683bdde",
+    "Cargo.lock": "4f4051fbd8bd3b2d6a704c5f70137b13c3051014d7d672d177455b7e52afbe43",
     "swift/GhosttyKitPatches/0001-command-blocks.patch": "304566cfebd53802689026ba72271297c1487a661f979b9986fe25c5dd6f3e11",
     "swift/GhosttyKitPatches/0002-embedded-login-session.patch": "a487a5fbbed854105bfacde7eb5885313fa45ae5cb8cfb7887af56ae41595288",
     "swift/GhosttyKitPatches/0003-program-status.patch": "4f658df88384d38dc9b4f044ee1099190698e3d7e5a71c36b26c479af69170d8",
@@ -1894,6 +1894,15 @@
       }
     },
     {
+      "id": "httpdate@1.0.3",
+      "scope": "lf",
+      "license": "MIT OR Apache-2.0",
+      "source": {
+        "url": "https://static.crates.io/crates/httpdate/httpdate-1.0.3.crate",
+        "sha256": "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
+      }
+    },
+    {
       "id": "hybrid-array@0.4.15",
       "scope": "lf",
       "license": "MIT OR Apache-2.0",
@@ -3262,5 +3271,5 @@
       }
     }
   ],
-  "notices_sha256": "a4a98e4a4d2be741b5e7cbdcd93ee9f40520874b4898d80beecafb28fbaf51f4"
+  "notices_sha256": "c096ba352a5dc3ef06f71949d92d6810c17799de03b6de3a6a8767e047440cde"
 }

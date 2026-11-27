@@ -1,0 +1,12 @@
+<div class="lf-decision" data-decision-id="{{id}}">
+  <div class="lf-decision-head">
+    <span class="lf-decision-title">{{title}}</span>
+    <span class="lf-decision-rec">Recommended: {{recommendation}}</span>
+  </div>
+  <div class="lf-decision-body"><slot></slot></div>
+  <div data-choice="{{id}}" data-label="{{title}}">
+    <button type="button" data-value="Fix here">Fix here</button>
+    <button type="button" data-value="File Task">File Task</button>
+    <button type="button" data-value="Drop">Drop</button>
+  </div>
+</div>

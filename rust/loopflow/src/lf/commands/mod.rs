@@ -21,6 +21,7 @@ mod machine_credentials;
 pub mod mutation;
 pub mod open;
 pub mod ops;
+pub mod page;
 pub mod people;
 pub mod read;
 pub mod rental;

@@ -706,6 +706,42 @@ struct ServerClientTests {
         }
         await server.stop()
     }
+
+    @Test func rawOperationForwardsJSONPayloadWithRequestId() async throws {
+        let peer = try ServerPeer()
+        let seenRequestID = Mutex<String?>(nil)
+        let seenKind = Mutex<String?>(nil)
+        peer.serve { message, respond in
+            guard message["type"] as? String == "request" else { return true }
+            seenRequestID.set(message["request_id"] as? String)
+            seenKind.set((message["operation"] as? [String: Any])?["kind"] as? String)
+            if (message["operation"] as? [String: Any])?["kind"] as? String == "task.create" {
+                respond(["type": "response", "revisions": NSNull(), "id": message["id"]!, "trace_id": "trace",
+                         "result": ["task": ["identifier": "LOO-1202"]]])
+            } else {
+                respond(["type": "error", "revisions": NSNull(), "id": message["id"]!, "code": "invalid",
+                         "message": "bad operation", "data": NSNull()])
+            }
+            return true
+        }
+        let op = JSONValue.object([
+            "kind": .string("task.create"),
+            "directory": .string("/repo"),
+            "title": .string("From page"),
+        ])
+        let raw = try await ServerClient.rawOperation(op, requestID: "req-raw-1", location: peer.location)
+        let decoded = try raw.decode(JSONValue.self)
+        #expect(decoded["task"]["identifier"] == .string("LOO-1202"))
+        #expect(seenRequestID.get() == "req-raw-1")
+        #expect(seenKind.get() == "task.create")
+
+        do {
+            _ = try await ServerClient.rawOperation(.object(["kind": .string("unknown.op")]), location: peer.location)
+            Issue.record("Expected ServerError")
+        } catch let error as ServerError {
+            #expect(error.code == .invalid && error.message == "bad operation")
+        }
+    }
 }
 
 /// A tiny lock around one value, for test coordination across threads.

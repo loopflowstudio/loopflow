@@ -13,8 +13,8 @@
   owner is `loopflowstudio`. Registration itself: "go ahead and do it".
 - **Its permissions.** Adding one later asks every installation to approve
   again; removing one asks nobody. The plan started without Workflows.
-  Answered 2026-11-27, Jack: "i would add the workflow perm". The app is
-  registered with Workflows write.
+  Answered 2026-11-27, Jack: "i would add the workflow perm". The app gets
+  Workflows write when it is registered.
 
 ## Made with nobody here; reversible before build
 

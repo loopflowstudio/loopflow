@@ -89,6 +89,13 @@ Choices made for review (headless; none is settled, each can be undone):
 - **This builds on LOO-1120.** The sync brings in the Dependabot workflow
   removal and pinned actions. The lint needs no Dependabot exemption.
   Keep the action pins when editing `main-packages.yml`.
+- **The lint names no jobs and no environment.** It fails when a job reads a
+  secret without an environment; the settings check holds whatever environment
+  the job names to `main` only. That is the rule `.github/CI.md` gives for a
+  new secret. Passed over: pinning the readers to `desktop-app` and
+  `notarytool` and the name to `signing`, so that a new reader is a test edit
+  in its PR; the workflow diff already shows it, and it is a second list of
+  names.
 - **The release preflight runs the settings check.** Passed over: no script,
   commands in `.github/CI.md` only; a script a person runs when they think of
   it. Depends on the cron host's `gh` token being able to list environment
@@ -196,7 +203,10 @@ workflow diff and the check script.
   - every job in every workflow that mentions `secrets` other than
     `secrets.GITHUB_TOKEN` (including `secrets: inherit` and `toJSON(secrets)`)
     declares `environment:`; no workflow-level `env:` names a secret;
-  - `main-packages.yml` has no `workflow_dispatch` and no `github.sha`;
+  - `main-packages.yml` is triggered by `workflow_run` on `branches: [main]`
+    only, has no `github.sha`, its `packages` job requires a successful run
+    whose event was `push`, and every checkout in a job naming an environment
+    takes `workflow_run.head_sha`;
   - the check script's comparison, fed canned settings: clean passes, and each
     disagreement above is reported by name.
   The lint reads files a branch can rewrite; it catches an honest slip before
@@ -299,22 +309,34 @@ From the 2026-11-26 concept review (`scratch/concept-review.html`).
 
 ## Review findings, placed
 
-From `scratch/concept-review.html` as rewritten against the built change
-(e67affb9c0).
+From `scratch/concept-review.html` as rewritten at 63b0e8bf9e, after the
+second build.
 
-- The promise named a holder and the ruleset on main makes it false: reworded
-  to "a commit on main" in the Outcome and `.github/CI.md` (made for review).
-- The check never read an environment no workflow names, so `dev` passed:
-  built.
-- "The next release stops and names the change" overstated what a daily
-  reading sees: `.github/CI.md` and the Outcome now say "while still in
-  place". No record of uses added (made for review).
-- One rule under two names; the preflight error calls every line a signing
-  setting and says "differ" for a failed read: built.
-- A required review on main, agents holding admin, the p12 in Doppler:
-  separate outcomes; the last two are deferred above, the first is not
-  proposed (it ends agents landing their own PRs).
-- Deleting `dev`, rotation, the old Doppler token: questions, not plan steps.
+- The environment guards the secret and an `if` guards the commit, and only
+  the first was named: `Packages (main)` runs as `main` from `workflow_run`,
+  so `signing` admits it whatever it checks out, and `branches: [main]`
+  matches a fork's branch named `main`. `event == 'push'` is what keeps a pull
+  request's head unsigned. Fixed here with no behaviour change: a comment on
+  the `if`, a paragraph in `.github/CI.md`, and
+  `test_packages_sign_only_a_push_to_main_that_passed_ci`. The fork walk is
+  from GitHub's documented `workflow_run` behaviour, not run against this
+  repository.
+- The lint pinned the two reader jobs and the name `signing`, against the
+  docs' rule for a new secret: the pins are gone (made for review, above).
+- `release/README.md` said "GitHub's signing settings" and
+  `release/SCHEDULE.md` "GitHub holds one copy": both reworded to the rule
+  the check holds.
+- "`NOTARY_ISSUER` is named by … and is not set" prints under the main-only
+  header though it is about a missing value: kept, as the review says. During
+  the settings steps it is the only thing that shows a missing environment
+  value falling back to the repository secret.
+- An ancestor-of-`origin/main` step in `desktop-app`, and the settings check
+  run inside Actions: passed over by the review; not built.
+- A required review on main, agents holding admin, the p12 in Doppler, three
+  copies of the identity: separate outcomes, deferred above or not proposed.
+- The promise's wording, a record of each use, `dev`, whether the release
+  stops, the Doppler row in a public file, rotation, the old Doppler token:
+  unanswered, in `scratch/questions.md`.
 
 ## What goes
 
@@ -344,7 +366,11 @@ daily notarization check and its issue; the daily release.
   not exist…`. The release host's `gh` lists environments (`dev`,
   `github-pages`, `pypi`).
 
-Left, for a person with admin at ship-review ("Order of settings changes"):
+- Fixed in realign: the `if` that picks the signed commit is named and
+  tested; the lint lost its pinned job list; two release-doc sentences.
+  `uv run pytest python/tests/test_workflow_secrets.py`: 21 passed.
+
+Nothing is left to build. Left, for a person with admin at ship-review ("Order of settings changes"):
 create `signing`, copy the five values, give `dev` a `main` policy, run the
 probe (settles `deployment: false`), merge, delete the repository secrets, run
 the acceptance check.

@@ -209,7 +209,7 @@ Evidence and links: `git show e03537f7ca:scratch/release-research.md`.
 | Cadence | Workflow | What it does | Ships? |
 |---------|----------|--------------|--------|
 | Green main | `Packages (main)` | Builds every native `lf` tarball for the commit, extracts each package, and smoke-tests `--version`; signs and notarizes a Loopflow.dmg bundling the ARM64 `lf` | `lf install --dev` installs it; artifacts expire after 14 days |
-| Daily | Loopflow host `release-run` crontab line | Checks host credentials and GitHub's signing settings, opens and lands a patch release when commits landed, waits for hosted builds, then publishes and deploys | Yes |
+| Daily | Loopflow host `release-run` crontab line | Checks host credentials and that no GitHub Actions secret can be read from a branch, opens and lands a patch release when commits landed, waits for hosted builds, then publishes and deploys | Yes |
 | Tag | `Release build` | Builds and smoke-tests the four native tarballs on GitHub's target machines; stores workflow artifacts for the host publisher | No |
 | Local | `scripts/install.py local` | Build `lf` and `Loopflow.app` into `local-bin/` | No |
 | Local | `lf install` | Download, verify, and promote the stable control plane and Mac app | Yes, installed Machine |

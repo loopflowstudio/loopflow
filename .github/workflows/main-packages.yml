@@ -11,6 +11,10 @@ on:
 
 jobs:
   packages:
+    # The signed commit is a push to main that passed CI. This workflow always
+    # runs as main, so the `signing` environment admits it whatever it checks
+    # out, and `branches: [main]` also matches a fork's branch named main:
+    # `event == 'push'` keeps a pull request's head out of desktop-app.
     if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
     uses: ./.github/workflows/package-build.yml
     with:

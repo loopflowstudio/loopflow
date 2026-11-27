@@ -226,6 +226,11 @@ X Branch "my-branch" is not allowed to deploy to signing due to environment prot
 
 A job that names no environment reads every secret as an empty string.
 
+`Packages (main)` always runs as `main`, so the environment admits it whatever
+commit it checks out. Its `if` picks the commit: the head of a CI run that
+passed and was a push to `main`. A pull request from a fork's branch named
+`main` matches `branches: [main]` and stops at `event == 'push'`.
+
 The Developer ID certificate and the notary key (`APPLE_CERTIFICATE_BASE64`,
 `APPLE_CERTIFICATE_PASSWORD`, `NOTARY_KEY`, `NOTARY_KEY_ID`, `NOTARY_ISSUER`)
 are secrets of the `signing` environment, whose branch policy is `main`. Two

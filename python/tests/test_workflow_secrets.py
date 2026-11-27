@@ -33,20 +33,34 @@ def _write(tmp_path: Path, name: str, workflow: dict) -> None:
 def test_every_secret_a_workflow_reads_comes_from_an_environment():
     reads = check_actions_secrets.secret_reads()
 
+    assert reads
     assert [read for read in reads if read.environment is None] == []
-    assert {(read.workflow, read.job) for read in reads} == {
-        ("main-packages.yml", "desktop-app"),
-        ("notarization-check.yml", "notarytool"),
-    }
-    assert {read.environment for read in reads} == {"signing"}
 
 
-def test_packages_cannot_be_dispatched_from_a_branch():
+def test_packages_sign_only_a_push_to_main_that_passed_ci():
     text = (ROOT / ".github/workflows/main-packages.yml").read_text()
     workflow = yaml.load(text, Loader=yaml.BaseLoader)
+    head = "${{ github.event.workflow_run.head_sha }}"
 
     assert set(workflow["on"]) == {"workflow_run"}
+    assert workflow["on"]["workflow_run"]["branches"] == ["main"]
     assert "github.sha" not in text
+
+    packages = workflow["jobs"]["packages"]
+    assert "github.event.workflow_run.conclusion == 'success' &&" in packages["if"]
+    assert "&& github.event.workflow_run.event == 'push'" in packages["if"]
+    assert "||" not in packages["if"]
+    assert packages["with"]["revision"] == head
+
+    signing = [job for job in workflow["jobs"].values() if "environment" in job]
+    assert signing and all(job["needs"] == "packages" for job in signing)
+    checkouts = [
+        step
+        for job in signing
+        for step in job["steps"]
+        if step.get("uses", "").startswith("actions/checkout@")
+    ]
+    assert checkouts and all(step["with"]["ref"] == head for step in checkouts)
 
 
 @pytest.mark.parametrize(

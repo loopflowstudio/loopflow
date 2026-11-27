@@ -80,3 +80,12 @@ From the second build (2026-11-26):
 - After the settings steps the preflight still stops the daily release on
   `DEPENDABOT_MERGE_TOKEN` until LOO-1120 deletes it, and on `dev` until its
   policy is set.
+
+From the second review (2026-11-26):
+
+- The lint no longer pins the secret-reading jobs or the name `signing`; a
+  third job reading from its own main-only environment passes. Alternative:
+  keep the list so a new reader is always a test edit in its PR.
+- The fork-PR walk (a fork's branch named `main` fires `workflow_run`, the
+  run is on ref `main`, `event == 'push'` skips it) is from GitHub's docs and
+  was not run against this repository.

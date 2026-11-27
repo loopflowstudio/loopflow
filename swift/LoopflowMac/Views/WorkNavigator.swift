@@ -222,8 +222,6 @@ struct WorkNavigator: View {
                     Image(systemName: "exclamationmark.triangle").help(unavailableReason)
                 } else if let count {
                     Text("\(count)").font(Typography.meta).monospacedDigit().help("\(count) working Tasks")
-                } else {
-                    Text("…").foregroundStyle(palette.textTertiary)
                 }
             }.font(Typography.text).padding(Spacing.sm)
                 .frame(maxWidth: .infinity, alignment: .leading)

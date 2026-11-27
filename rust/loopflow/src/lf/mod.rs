@@ -232,16 +232,6 @@ impl Cli {
         self.repo.is_some() || self.repository.is_some()
     }
 
-    /// The command merges a PR, or asks GitHub to merge it.
-    pub fn merges(&self) -> bool {
-        matches!(
-            &self.command,
-            Some(Commands::Pr {
-                cmd: Some(PrCommand::Land { .. } | PrCommand::Arm { .. })
-            })
-        )
-    }
-
     /// `lf task auto on`: the Task's run, asked for auto.
     pub fn turns_auto_on(&self) -> bool {
         matches!(

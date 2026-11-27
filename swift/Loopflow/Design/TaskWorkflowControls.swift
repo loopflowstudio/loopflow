@@ -79,7 +79,7 @@ public struct TaskWorkflowControls<Items: View>: View {
                 Text(step.name)
             }
             .foregroundStyle(index < actions.chip ? palette.textSecondary : palette.textTertiary)
-            .padding(.horizontal, 4)
+            .padding(.horizontal, Spacing.xs)
             .frame(height: transport)
             .contentShape(Rectangle())
         }
@@ -110,14 +110,14 @@ public struct TaskWorkflowControls<Items: View>: View {
             }
             items()
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: Spacing.xs) {
                 // Folded on a narrow pane, the chip truncates before Auto and ✓ move.
                 Text(pending ?? actions.control?.label ?? "Reading workflow…").lineLimit(1).truncationMode(.tail)
                     .font(Typography.textStrong)
                 Image(systemName: "chevron.down").imageScale(.small)
             }
             .foregroundStyle(ink)
-            .padding(.horizontal, 7)
+            .padding(.horizontal, Spacing.sm)
             .frame(height: transport)
             .background(RoundedRectangle(cornerRadius: 6).fill(ink.opacity(0.12)))
             .contentShape(Rectangle())

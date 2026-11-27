@@ -275,7 +275,7 @@ struct BacklogViewTests {
                 .map { ["name": $0["label"], "skill": $0["label"], "description": NSNull()] }
             let json: [String: Any] = ["name": name, "description": description ?? NSNull(), "source": NSNull(),
                                        "compiled": ["name": name, "steps": steps], "composition": NSNull(), "unavailable": NSNull(),
-                                       "workflow": ["steps": [[String: Any]](), "interactive_steps": stops, "sentence": ""],
+                                       "workflow": ["start": ["action": "run", "label": "Run"], "steps": [[String: Any]](), "interactive_steps": stops, "sentence": ""],
                                        "included_by": includedBy, "runs": runs]
             return try JSONDecoder().decode(GraphCatalogEntry.self, from: JSONSerialization.data(withJSONObject: json))
         }

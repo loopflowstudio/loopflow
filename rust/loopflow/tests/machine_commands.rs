@@ -2890,7 +2890,7 @@ fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it()
     assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
     assert_eq!(plan.remote.task_pause(&task).unwrap(), Some(hold));
     assert_eq!(plan.local.task_pause(&task).unwrap(), None);
-    assert!(!plan
+    assert!(plan
         .remote
         .task_conversations_here()
         .unwrap()
@@ -6053,7 +6053,7 @@ fn served_pause_holds_the_remote_cursor_and_status_names_unpause() {
     assert_success(&status);
     let status: Value = serde_json::from_slice(&status.stdout).unwrap();
     let issue = status["task"]["identifier"].as_str().unwrap();
-    let refusal = format!("Task is paused; run `lf task unpause {issue}` to lift the hold");
+    let refusal = format!("Task is paused; run `lf task unpause --run {issue}` to resume it");
     assert_eq!(receipt, format!("{issue} paused"));
     assert_eq!(status["task"]["state"], "paused");
     assert_eq!(status["task"]["reason"], refusal);

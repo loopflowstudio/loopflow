@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1120 concept review: how outside code reaches what ships</title>
+<style>
+:root {
+  --background: #faf8f5; --surface: #fffdf9; --surface-muted: #f3eee7;
+  --border: #e6dfd6; --border-strong: #d6ccc0;
+  --text: #2a2624; --text-secondary: #5f5752;
+  --accent: #722f37;
+  --working-ink: #2f629f; --working-fill: #d5dde6;
+  --warning-ink: #7f5a19; --warning-fill: #e4dccd;
+  --failure-ink: #a64038; --failure-fill: #ecd9d5;
+  --success-ink: #386c48; --success-fill: #d7dfd6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #1c1917; --surface: #24201e; --surface-muted: #2c2724;
+    --border: #3a3430; --border-strong: #4a423c;
+    --text: #ece6dd; --text-secondary: #b5ada3;
+    --accent: #d98a94;
+    --working-ink: #8fb4e3; --working-fill: #26323f;
+    --warning-ink: #d9b36a; --warning-fill: #3a3122;
+    --failure-ink: #e58f86; --failure-fill: #402724;
+    --success-ink: #8cc49b; --success-fill: #24352a;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--background); color: var(--text);
+  font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 24px 96px; }
+h1 { font-size: 30px; line-height: 1.2; margin: 0 0 12px; }
+h2 { font-size: 21px; margin: 56px 0 12px; }
+h3 { font-size: 16px; margin: 0 0 6px; }
+p { margin: 0 0 14px; }
+.lede { font-size: 18px; color: var(--text-secondary); max-width: 760px; }
+code, pre { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+code { background: var(--surface-muted); padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--surface-muted); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 14px; overflow-x: auto; margin: 0; }
+pre code { background: none; padding: 0; }
+table { width: 100%; border-collapse: collapse; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+th, td { text-align: left; vertical-align: top; padding: 11px 14px; border-bottom: 1px solid var(--border); }
+th { font-size: 14px; color: var(--text-secondary); font-weight: 600; background: var(--surface-muted); }
+tr:last-child td { border-bottom: 0; }
+td.fit { width: 64px; }
+.tag { display: inline-block; font-size: 13px; font-weight: 600; padding: 1px 9px; border-radius: 999px; white-space: nowrap; }
+.yes { color: var(--success-ink); background: var(--success-fill); }
+.no { color: var(--failure-ink); background: var(--failure-fill); }
+.part { color: var(--warning-ink); background: var(--warning-fill); }
+.built { color: var(--success-ink); background: var(--success-fill); }
+.proposed { color: var(--working-ink); background: var(--working-fill); }
+.outside { color: var(--warning-ink); background: var(--warning-fill); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin: 0 0 14px; }
+.card.big { border-color: var(--failure-ink); }
+.card.prop { border-style: dashed; border-color: var(--working-ink); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
+.path { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0 14px; }
+.path span { border: 1px solid var(--border-strong); background: var(--surface); border-radius: 6px; padding: 4px 10px; font-size: 14px; }
+.path span.gate { border-color: var(--success-ink); color: var(--success-ink); }
+.path span.nogate { border-color: var(--failure-ink); color: var(--failure-ink); border-style: dashed; }
+.path i { color: var(--text-secondary); font-style: normal; }
+.muted { color: var(--text-secondary); }
+ol.q > li { margin-bottom: 22px; }
+ol.q ol { list-style: lower-alpha; margin-top: 6px; }
+ol.q ol li { margin-bottom: 6px; }
+.rec { color: var(--accent); font-weight: 600; }
+ul { margin: 0 0 14px; padding-left: 22px; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>How outside code reaches what ships</h1>
+<p class="lede">The area taken: every route by which code nobody here wrote gets into <code>main</code>, the signed dev build and the release. LOO-1120 removes one route, Dependabot. Reviewed as the whole supply path with commit <code>0586cdf9f4</code> in it, because the Task's outcome is a claim about that path, not about two YAML files.</p>
+
+<p>
+  <span class="tag built">built</span> committed on this branch &nbsp;
+  <span class="tag proposed">proposed</span> not built, waits for an answer &nbsp;
+  <span class="tag outside">outside the repo</span> needs a person
+</p>
+
+<h2>What was found</h2>
+<div class="card">
+<p><strong>The deletion is right and complete for what it names.</strong> Removing instead of taming holds up: the deleted workflow was the repository's only <code>pull_request_target</code> trigger, it merged on <code>user.login == 'dependabot[bot]'</code>, and it needed a write-scoped token to enter the merge queue. Nothing else in the tree reads any of it. Live checks today: security-update PRs are off (<code>{"enabled":false}</code>), no open Dependabot PR, five stale <code>dependabot/*</code> branches on origin.</p>
+<p style="margin:0"><strong>The outcome sentence is not yet true.</strong> <code>scratch/plan.md</code> promises that "workflow action versions change only in a PR a person or their agent wrote." They don't, before or after this change. That is the biggest mismatch, below.</p>
+</div>
+
+<h2>One interaction, walked</h2>
+
+<div class="two">
+<div class="card">
+<h3>Normal: someone wants a newer crate</h3>
+<p class="muted">After this change.</p>
+<div class="path"><span>a Task</span><i>→</i><span><code>cargo update -p x</code></span><i>→</i><span><code>third_party.py refresh</code></span><i>→</i><span class="gate">PR + CI + queue</span><i>→</i><span>main</span></div>
+<p style="margin:0">One owner, one commit, revertable. The notice inventory already has a written update procedure in <code>third_party/README.md</code>, so "by hand" has a home.</p>
+</div>
+<div class="card">
+<h3>Failure: an upstream release is malicious</h3>
+<p class="muted">Three routes, one closed.</p>
+<div class="path"><span>crate / wheel / Swift package</span><i>→</i><span class="gate">lockfile PR</span><i>→</i><span>main</span></div>
+<div class="path"><span>action tag moved (<code>@v2</code>)</span><i>→</i><span class="nogate">no PR, no commit</span><i>→</i><span>next CI run</span></div>
+<div class="path"><span>new Rust stable, uv, nextest, xcodegen</span><i>→</i><span class="nogate">no PR, no commit</span><i>→</i><span>next build</span></div>
+</div>
+</div>
+<div class="card">
+<h3>Recovery</h3>
+<p style="margin:0">A bad lockfile bump is one <code>git revert</code>, and history says exactly which versions were in which build. A bad action tag has nothing to revert: the repository never recorded which commit of the action ran. Only the Actions run log shows it, for as long as the log is kept.</p>
+</div>
+
+<h2>Do the concepts line up?</h2>
+<table>
+<tr><th>What a person knows</th><th>What the code has</th><th class="fit">Match</th><th>What is wrong</th></tr>
+<tr>
+  <td><strong>The exact version we are on</strong> of a library</td>
+  <td><code>Cargo.lock</code> (425 packages), <code>uv.lock</code> (51), <code>website/uv.lock</code>, <code>swift/Package.resolved</code> with <code>-disableAutomaticPackageResolution</code>; libghostty-vt by SHA-256 in <code>build.rs</code></td>
+  <td><span class="tag yes">yes</span></td>
+  <td>One record per ecosystem, content-addressed. Nothing to change.</td>
+</tr>
+<tr>
+  <td><strong>The exact version we are on</strong> of a build step</td>
+  <td><code>uses: owner/action@v7</code>: 76 lines, 8 actions, every one by a tag or branch the upstream owner can move. 39 of those lines are four individually-owned or third-party repos: <code>astral-sh/setup-uv</code>, <code>dtolnay/rust-toolchain</code>, <code>Swatinem/rust-cache</code>, <code>taiki-e/install-action</code></td>
+  <td><span class="tag no">no</span></td>
+  <td>One name, "pinned", for two ideas. A lockfile entry is a hash; <code>@v2</code> is a pointer someone else holds. <code>rust-toolchain</code> and <code>rust-cache</code> run in the job that compiles the release <code>lf</code>; <code>setup-uv</code> runs in the job that later imports the Developer ID certificate.</td>
+</tr>
+<tr>
+  <td><strong>An update</strong>: moving to a newer version</td>
+  <td>Was <code>.github/dependabot.yml</code> on a weekly timer. Now an ordinary Task and a lockfile commit <span class="tag built">built</span></td>
+  <td><span class="tag yes">yes</span></td>
+  <td>The lifecycle (open, auto-merge, close-on-red, token renewal) became nothing at all. 91 Dependabot commits in the last 12 months stop; most were weekly <code>ruff</code> patch bumps.</td>
+</tr>
+<tr>
+  <td><strong>Who decided</strong> an update</td>
+  <td>Was the PR author's login. Now whoever ran the Task <span class="tag built">built</span></td>
+  <td><span class="tag part">partly</span></td>
+  <td>"By hand" in the brief, "authored in a Task" in the code. With auto on, a bump Task can run <code>cargo update</code>, pass CI and merge with nobody reading it. The difference from Dependabot is that someone chose to start it, not that someone read it.</td>
+</tr>
+<tr>
+  <td><strong>How long a release has been out</strong> before we take it (the brief's "no cooldown")</td>
+  <td>Nothing</td>
+  <td><span class="tag no">no</span></td>
+  <td>A concept the person named and the code has never had. A hand bump today still takes whatever was published this morning. Bumps are now rare, which shrinks the window; it does not close it.</td>
+</tr>
+<tr>
+  <td><strong>Being told</strong> a dependency is vulnerable</td>
+  <td>GitHub vulnerability alerts (on); security-update PRs (off)</td>
+  <td><span class="tag yes">yes</span></td>
+  <td>Alerts notify and open nothing. This is the only remaining prompt for a bump, and it lives in GitHub settings, not in the repository.</td>
+</tr>
+<tr>
+  <td><strong>A key that can merge to main</strong></td>
+  <td><code>DEPENDABOT_MERGE_TOKEN</code> as an Actions secret, the same name in Doppler, and the GitHub PAT behind both <span class="tag outside">outside the repo</span></td>
+  <td><span class="tag no">no</span></td>
+  <td>After merge the code has no reader for it, and the key still works. Three copies of one thing, and deleting two of them does not revoke the third.</td>
+</tr>
+<tr>
+  <td><strong>The compiler and tools</strong> that build the release</td>
+  <td><code>@stable</code> with no <code>rust-toolchain.toml</code>; latest uv; latest nextest; <code>brew install xcodegen</code>; <code>ubuntu-latest</code></td>
+  <td><span class="tag part">partly</span></td>
+  <td>These float by design and nobody thinks of them as dependencies until one breaks a build. Same shape as the action tags, with more trusted publishers.</td>
+</tr>
+</table>
+
+<h2>The biggest mismatch</h2>
+<div class="card big">
+<h3>"Automatic dependency updates stop" is true for libraries and false for build steps</h3>
+<p>The Task removes the updater that opened a PR, ran the full matrix and left a commit. The updater that remains does none of those: when an action's owner (or whoever holds their account) moves <code>v2</code>, the next run on <code>main</code> executes the new code inside the job that builds the release tarballs. That route is faster than the one-week path the brief describes, and it is silent.</p>
+<p style="margin:0">Dependabot was also the thing that would have kept SHA pins fresh. With it gone, a SHA pin simply stays where it is until someone moves it, which is the stated outcome.</p>
+</div>
+
+<div class="two">
+<div class="card">
+<h3>Before and today</h3>
+<pre><code>- uses: actions/checkout@v7
+- uses: dtolnay/rust-toolchain@stable
+- uses: Swatinem/rust-cache@v2
+- uses: taiki-e/install-action@nextest</code></pre>
+<p class="muted" style="margin:10px 0 0">Upstream decides what runs. No record here.</p>
+</div>
+<div class="card prop">
+<h3>Recommended <span class="tag proposed">proposed</span></h3>
+<pre><code>- uses: actions/checkout@&lt;40-hex sha&gt;  # v7
+- uses: dtolnay/rust-toolchain@&lt;sha&gt;
+  with: { toolchain: stable }
+- uses: Swatinem/rust-cache@&lt;sha&gt;      # v2
+- uses: taiki-e/install-action@&lt;sha&gt;
+  with: { tool: nextest }</code></pre>
+<p class="muted" style="margin:10px 0 0">The workflow file is the record. An action changes only in a commit.</p>
+</div>
+</div>
+<p><strong>Passed over:</strong> pinning only the four non-GitHub actions (smaller diff, but leaves two rules to remember); replacing actions with plain <code>run:</code> steps (larger, changes caching behaviour); leaving it as an unfiled note in <code>scratch/questions.md</code>, which <code>lf land</code> deletes.</p>
+<p><strong>Cost:</strong> 76 mechanical line edits across 7 workflow files, 8 SHAs to look up. The Rust compiler itself still floats on <code>stable</code>; pinning that is a separate, smaller question (5b).</p>
+
+<h2>Everything else, marked</h2>
+<table>
+<tr><th>Finding</th><th>Where it belongs</th></tr>
+<tr><td>Reflow the short line "CI runs the suites and" in <code>.github/CI.md</code> lines 14 to 17.</td><td>This work. Already in the plan.</td></tr>
+<tr><td>Revoke the PAT, then delete the Actions secret and the Doppler secret, then delete the five <code>dependabot/*</code> branches. Whether anything else uses that same PAT could not be checked from here.</td><td>This work, <span class="tag outside">outside the repo</span>, after merge. Order matters: revoke first.</td></tr>
+<tr><td>The mutable-tags note exists only in <code>scratch/questions.md</code>, which landing clears. If it is not done here it needs a filed Task before landing, or it is lost.</td><td>This work, whichever way question 1 goes.</td></tr>
+<tr><td><code>actions/download-artifact</code> is at <code>@v8</code> in <code>ci.yml</code> and <code>@v7</code> in the signing job: a half-applied Dependabot bump.</td><td>Settled by the pin change; otherwise a one-line separate fix.</td></tr>
+<tr><td>The release builders run <code>cargo build --release</code> without <code>--locked</code>. One CI job runs <code>cargo fetch --locked</code>, so a stale lock fails before merge; the builders themselves would quietly resolve fresh versions.</td><td>Separate outcome: add <code>--locked</code> to <code>package-build.yml</code>. One line.</td></tr>
+<tr><td>Nothing gives a release time to be caught before it is taken. uv supports a date ceiling (<code>exclude-newer</code>); an equivalent for Cargo was not verified.</td><td>Separate outcome, question 3.</td></tr>
+<tr><td>Nothing shows how far behind the lockfiles are. Alerts cover known vulnerabilities only.</td><td>Not proposed. Stale is the chosen trade.</td></tr>
+</table>
+
+<h2>What survives, what changes on purpose</h2>
+<ul>
+<li><strong>Survives:</strong> every lockfile, CI, the merge queue, package and release workflows, vulnerability alerts, release notes that mention Dependabot.</li>
+<li><strong>Changes on purpose:</strong> dependencies go stale until someone bumps them. Weekly <code>ruff</code> bumps end.</li>
+<li><strong>Counterexample that breaks the outcome as written:</strong> a moved action tag. Kept above as the main finding.</li>
+<li><strong>Counterexample that does not:</strong> GitHub opening security PRs with no config. Checked: the setting is off.</li>
+</ul>
+
+<h2>Questions</h2>
+<ol class="q">
+<li><strong>Should build steps be locked the same way libraries are, in this Task?</strong>
+  Today, if the owner of one of the eight actions changes what <code>v7</code> points at, the next build of the dev app and the release runs their new code, and nothing in the repository changes.
+  <ol>
+    <li><span class="rec">Recommended.</span> Lock all eight in this PR. Afterwards an action changes only when a commit here changes it, which is what the Task says it delivers.</li>
+    <li>Land the Dependabot removal alone and file the lock as its own Task now, before landing clears the note.</li>
+    <li>Leave build steps floating and narrow the Task's stated outcome to libraries only.</li>
+  </ol>
+</li>
+<li><strong>When a dependency bump is done "by hand", does a person read it before it merges?</strong>
+  A bump is a Task. With auto on, an agent can update a lockfile, pass CI and merge without anyone looking.
+  <ol>
+    <li><span class="rec">Recommended.</span> No extra rule. Someone chose to start the bump; that is the "hand". Say so in the PR so the word is not read as "reviewed".</li>
+    <li>Bump Tasks always stop for a person before merging. This needs a way to mark such a Task, which does not exist today.</li>
+  </ol>
+</li>
+<li><strong>Should a bump refuse releases younger than some age?</strong>
+  The brief names "no cooldown" as part of what went wrong. Most malicious releases are pulled within days, so taking only releases older than, say, two weeks avoids most of them.
+  <ol>
+    <li>Not now. Bumps are rare enough.</li>
+    <li><span class="rec">Recommended.</span> File a separate Task to give hand bumps an age floor, starting with Python where the tool supports it directly.</li>
+  </ol>
+</li>
+<li><strong>The merge key: who revokes it, and is it used anywhere else?</strong>
+  The plan leaves revoking the PAT and deleting both stored copies to a person, because it cannot be undone.
+  <ol>
+    <li><span class="rec">Recommended.</span> A person revokes the PAT on GitHub after merge; an agent may then delete the two secrets and the five branches.</li>
+    <li>An agent does all of it after merge, on a clear yes.</li>
+    <li>The PAT is shared with something else: keep it, delete only the two <code>DEPENDABOT_MERGE_TOKEN</code> entries.</li>
+  </ol>
+</li>
+<li><strong>How far does "nothing updates itself" go?</strong>
+  The Rust compiler, uv, the test runner and the CI machine image also move on their own.
+  <ol>
+    <li><span class="rec">Recommended.</span> Stop at libraries and build steps. The compiler and tools keep floating.</li>
+    <li>Also fix the Rust compiler version in the repository, so a new compiler arrives in a commit. Each new Rust release then needs a bump Task.</li>
+  </ol>
+</li>
+</ol>
+
+</main>
+</body>
+</html>

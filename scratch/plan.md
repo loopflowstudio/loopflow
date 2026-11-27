@@ -191,10 +191,10 @@ against the tag or branch in its comment. Learned:
   `main-packages.yml` runs on main: v8 fails on a digest mismatch where v7
   warned. If it breaks, that commit's dev package does not publish; recovery
   is reverting `73646d3af2`.
-- No pinned action has run. PR #2054 showed 2 checks passed and 15 skipped:
-  with `scratch/` files on the branch it is a checkpoint PR. The first real
-  run is when landing clears `scratch/`. `package-build.yml` runs only from
-  main and release.
+- Every pinned action has run (2026-11-27, `scratch/qa.html`): a scratch-free
+  copy of the branch, draft PR #2055, passed the whole CI matrix (run
+  45957957036) and a dispatched `architecture-drift`. Not run before merge:
+  `main-packages.yml`, `package-build.yml`, `macos-main.yml`, `release.yml`.
 - Until merge the deleted workflow still fires on every PR from main's copy
   and skips.
 

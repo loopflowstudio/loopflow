@@ -27,6 +27,12 @@ variants.
   review) the Wave Chat sentences about backings, backing epochs and SSE. No
   Swift source has any of it.
 
+- Docs pass (uncommitted): `docs/dev/reference.md` no longer lists chat among
+  what a Wave holds, and its vocabulary appendix calls `project:<slug>` a work
+  binding, not an "authored chat reference". No other shipped doc needs an
+  edit: nothing documents `lf-prompt --surface` outside its Clap help (§2),
+  and a leftover `chat:` block is silent, so no doc mentions it.
+
 Checked at kickoff: `cargo check -p loopflow --all-targets` clean; the focused
 suites under Acceptance passed. Nothing has been rebuilt since.
 

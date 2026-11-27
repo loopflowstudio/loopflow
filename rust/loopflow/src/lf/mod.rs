@@ -3214,9 +3214,10 @@ pub enum OndemandCommand {
         /// Above this hourly price nothing is rented
         #[arg(long, value_name = "USD")]
         max_usd_per_hour: loopflow_storage::rental::Usd,
-        /// Providers each rental is signed in to as it starts (codex, github,
-        /// linear or opencode); unset, each of those signed in here. Claude
-        /// arrives with each launch as the token `forward.env` names
+        /// Agent providers each rental is signed in to as it starts (codex or
+        /// opencode); unset, none. GitHub and Linear are signed in whenever
+        /// the repository uses them. Claude arrives with each launch as the
+        /// token `forward.env` names
         #[arg(long, value_delimiter = ',', value_name = "PROVIDER")]
         logins: Vec<loopflow_execution::provider_auth::Provider>,
     },

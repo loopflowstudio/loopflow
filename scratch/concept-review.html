@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1117 concept review: who can sign as Loopflow</title>
+<style>
+:root {
+  --background: #faf8f5; --surface: #fffdf9; --surface-muted: #f3eee7;
+  --border: #e6dfd6; --border-strong: #d6ccc0;
+  --text: #2a2624; --text-secondary: #5f5752;
+  --accent: #722f37;
+  --working-ink: #2f629f; --working-fill: #d5dde6;
+  --warning-ink: #7f5a19; --warning-fill: #e4dccd;
+  --failure-ink: #a64038; --failure-fill: #ecd9d5;
+  --success-ink: #386c48; --success-fill: #d7dfd6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #1c1917; --surface: #24201d; --surface-muted: #2c2723;
+    --border: #3a342f; --border-strong: #4a433c;
+    --text: #ece6dd; --text-secondary: #b5ada3;
+    --accent: #d98e98;
+    --working-ink: #9dc0ee; --working-fill: #24364d;
+    --warning-ink: #e0bd7a; --warning-fill: #43371f;
+    --failure-ink: #f0a39b; --failure-fill: #4a2824;
+    --success-ink: #9fd0ad; --success-fill: #24382a;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--background); color: var(--text);
+  font: 16px/1.55 'Atkinson Hyperlegible Next', -apple-system, 'Helvetica Neue', sans-serif; }
+main { max-width: 1040px; margin: 0 auto; padding: 48px 28px 96px; }
+h1, h2 { font-family: 'Old Standard TT', Georgia, serif; font-weight: 400; line-height: 1.2; }
+h1 { font-size: 2.3rem; margin: 0 0 12px; }
+h2 { font-size: 1.6rem; margin: 56px 0 14px; padding-top: 20px; border-top: 1px solid var(--border); }
+h3 { font-size: 1.02rem; margin: 26px 0 8px; }
+p { margin: 0 0 14px; max-width: 76ch; }
+li { max-width: 76ch; margin-bottom: 6px; }
+code, pre, .mono { font-family: 'Spline Sans Mono', ui-monospace, Menlo, monospace; font-size: 0.86em; }
+code { background: var(--surface-muted); padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--surface-muted); border: 1px solid var(--border); border-radius: 8px;
+  padding: 14px 16px; overflow-x: auto; line-height: 1.5; margin: 0 0 14px; }
+pre code { background: none; padding: 0; }
+.lede { font-size: 1.1rem; color: var(--text-secondary); }
+table { width: 100%; border-collapse: collapse; margin: 10px 0 18px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px; overflow: hidden; font-size: 0.93rem; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+th { background: var(--surface-muted); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+.tag { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 0.8rem; font-weight: 600; white-space: nowrap; }
+.yes { background: var(--success-fill); color: var(--success-ink); }
+.no { background: var(--failure-fill); color: var(--failure-ink); }
+.part { background: var(--warning-fill); color: var(--warning-ink); }
+.exists { background: var(--surface-muted); color: var(--text-secondary); border: 1px solid var(--border-strong); }
+.proposed { background: var(--working-fill); color: var(--working-ink); border: 1px dashed var(--working-ink); }
+.cell-ok { background: var(--success-fill); color: var(--success-ink); }
+.cell-bad { background: var(--failure-fill); color: var(--failure-ink); }
+.cell-mid { background: var(--warning-fill); color: var(--warning-ink); }
+.box { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin: 14px 0; }
+.box.big { border-left: 4px solid var(--accent); }
+.box.prop { border: 1px dashed var(--working-ink); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
+.q { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; margin: 14px 0; }
+.q h3 { margin-top: 0; }
+.rec { color: var(--accent); font-weight: 600; }
+.legend span { margin-right: 14px; }
+small { color: var(--text-secondary); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Who can sign as Loopflow</h1>
+<p class="lede">Concept review of the LOO-1117 plan, before anything is built. Branch
+<code>jack/loo-1117-signing-and-notary-secrets-are-unreachable-from-any-branch-but-main</code> at
+<code>238fbcce1c</code>: the plan and its questions are committed, no workflow has changed.</p>
+
+<p><strong>The area taken:</strong> every place the Developer ID identity and the notary key live, and
+every holder that can use them: Doppler <code>loopflow</code>/<code>prd</code>, the cron host that signs
+releases, and GitHub Actions that signs each green main commit. The plan covers the third. The other two
+decide what the third is worth, so they are on the page.</p>
+
+<p class="legend"><span><span class="tag exists">exists today</span></span>
+<span><span class="tag proposed">proposed by the plan</span></span>
+<span><span class="tag proposed">★ proposed by this review</span></span></p>
+
+<h2>The verdict in four lines</h2>
+<ul>
+<li>The plan's mechanism is right and small: a <code>signing</code> environment whose branch policy is
+<code>main</code>, named by the two jobs that sign or ask Apple. Build it.</li>
+<li>Its outcome sentence, "A branch cannot sign", is true of branches and not of the actors the security
+review named. Every agent Session and every rental holds an admin token that can widen the policy in one
+API call, and every local agent can read the p12 straight from Doppler.</li>
+<li>The <code>dependabot</code> environment is planned for a workflow that open PR #2054 (LOO-1120)
+deletes, along with its secret. Drop it from this plan.</li>
+<li>The one check of the real settings, <code>scripts/check_actions_secrets.py</code>, has no caller after
+ship day. Give it one or do not write it.</li>
+</ul>
+
+<h2>One interaction, walked</h2>
+
+<div class="two">
+<div class="box">
+<h3>Normal path <span class="tag proposed">proposed</span></h3>
+<p>A PR merges. CI goes green on main. <code>Packages (main)</code> starts from <code>workflow_run</code>,
+so its ref is <code>refs/heads/main</code>. <code>desktop-app</code> names <code>signing</code>; the policy
+matches; the job reads five secrets, signs, notarizes, uploads <code>Loopflow-dmg</code>.
+<code>lf install --dev</code> installs it. Nobody sees a difference from today.</p>
+</div>
+<div class="box">
+<h3>Failure: a branch tries <span class="tag proposed">proposed</span></h3>
+<p>Something with push access pushes a branch with an edited <code>release-loopflow.py</code>, or a new
+<code>on: push</code> workflow. A job that names <code>signing</code> is refused before a runner starts. A
+job that names no environment reads empty strings, because the repository holds no secrets.</p>
+</div>
+<div class="box">
+<h3>Failure: Apple rejects the key <span class="tag exists">exists</span></h3>
+<p>The morning check goes red and opens "Notarization is failing". The fix is in Doppler, then one copy
+command, now with <code>--env signing</code>. The next green run closes the issue.</p>
+</div>
+<div class="box">
+<h3>Recovery: rebuild a package by hand <span class="tag proposed">proposed</span></h3>
+<p><code>workflow_dispatch</code> leaves <code>main-packages.yml</code>. A failed or expired build comes
+back with <code>gh run rerun &lt;id&gt;</code>, which reruns the same commit on the same ref. Simpler than
+today: one fewer trigger and no <code>|| github.sha</code> fallbacks.</p>
+</div>
+</div>
+
+<p>The counterexample that breaks the walk is in the second box. "Something with push access" is, today,
+never <em>only</em> push access. That is the biggest mismatch below.</p>
+
+<h2>Do the concepts line up?</h2>
+
+<table>
+<tr><th style="width:24%">What a person knows</th><th style="width:30%">What the code and settings have</th><th style="width:8%">Match</th><th>What is wrong, where it is no</th></tr>
+
+<tr><td>Only what merged to main gets signed.</td>
+<td><span class="tag proposed">proposed</span> Environment <code>signing</code>, branch policy <code>main</code>; <code>environment:</code> on <code>desktop-app</code> and <code>notarytool</code>.</td>
+<td><span class="tag yes">yes</span></td>
+<td>One rule, stated once, in the place GitHub enforces it.</td></tr>
+
+<tr><td>Who is able to sign as Loopflow.</td>
+<td><span class="tag exists">exists</span> Three holders: GitHub Actions, Doppler <code>prd</code> (readable by any process on the laptop), the cron host's keychain. Plus the admin <code>gh</code> token, which edits the environment's policy.</td>
+<td><span class="tag no">no</span></td>
+<td>The plan's outcome names "a branch". The holders that matter are tokens and Machines. See the next section.</td></tr>
+
+<tr><td>The signing identity is one thing.</td>
+<td><span class="tag exists">exists</span> A Doppler value, a hand-copied GitHub copy, and a keychain item on the host.</td>
+<td><span class="tag part">partly</span></td>
+<td>One idea in three places, copied by hand. It stays: the morning check catches a stale notary key, the next main commit catches a stale certificate. Passed over below: fetching from Doppler at run time.</td></tr>
+
+<tr><td>"GitHub workflows use no signing credentials."</td>
+<td><span class="tag exists">exists</span> <code>release/SCHEDULE.md:18,34,39</code> and <code>release.yml:13-14</code> say so. False since 2026-10-30.</td>
+<td><span class="tag no">no</span> → <span class="tag yes">yes</span></td>
+<td>The plan rewrites the sentences to what is true: one workflow signs, from main, through one environment. Right call; see "Passed over" for making the old sentence true instead.</td></tr>
+
+<tr><td>The Dependabot merge token.</td>
+<td><span class="tag proposed">proposed</span> Its own <code>dependabot</code> environment and an <code>environment:</code> on <code>enable-auto-merge</code>.</td>
+<td><span class="tag no">no</span></td>
+<td>One thing owned by two Tasks. PR #2054 deletes <code>dependabot-auto.yml</code>, and LOO-1120's plan revokes the PAT and deletes the secret from GitHub and Doppler. This plan builds a home for something on its way out, and carries an unverified GitHub behaviour (environment secrets under a Dependabot <code>pull_request_target</code>) only for its sake.</td></tr>
+
+<tr><td>"The repository holds no secrets" stays true.</td>
+<td><span class="tag proposed">proposed</span> A hermetic lint over the workflow files, and a hand-run script that reads live settings.</td>
+<td><span class="tag no">no</span></td>
+<td>An action with no owner. The rule lives in settings. The lint reads files, which a branch rewrites freely; it catches an honest slip before merge and nothing else. The script reads the real thing and nobody is due to run it after ship day.</td></tr>
+
+<tr><td>Run the notarization check by hand.</td>
+<td><span class="tag exists">exists</span> <code>gh workflow run notarization-check.yml</code>, kept. From a branch the environment refuses it.</td>
+<td><span class="tag yes">yes</span></td><td></td></tr>
+
+<tr><td>Nothing.</td>
+<td><span class="tag exists">exists</span> Environments <code>dev</code> (holds <code>LFD_GITHUB_WEBHOOK_SECRET</code>, 2026-02-13) and <code>pypi</code> (empty). No workflow names them.</td>
+<td><span class="tag no">no</span> → gone</td>
+<td>Settings the person never sees. The plan deletes them. The webhook secret's value cannot be read back from GitHub once deleted; lfd, its reader, left the repository on 2026-09-27.</td></tr>
+
+<tr><td>Nothing.</td>
+<td><span class="tag proposed">proposed</span> <code>deployment: false</code> on each job.</td>
+<td><span class="tag part">check</span></td>
+<td>Keeps "deployed to signing" out of the history. GitHub's page says reviewers and wait timers still apply with it and names "restrict which branches can use certain secrets via environment branch policies, without deployment tracking" as a use; its table has no branch-policy row. The plan's demo is the test, so it runs before the merge, not after. If the probe is not refused, drop the key and accept the deployment records.</td></tr>
+</table>
+
+<h2>The biggest mismatch: "a branch" is not who signs</h2>
+
+<div class="box big">
+<p>The security review named three attackers: "an agent Session under the maintainer's <code>gh</code>, the
+token copied to a rental in finding 3, a prompt-injected Task". All three hold the same admin token
+(<code>gh repo view</code> reports <code>ADMIN</code> for it), and two of the three run on the laptop,
+where AGENTS.md tells every agent to fetch secrets from Doppler.</p>
+</div>
+
+<table>
+<tr><th style="width:27%">Holder</th><th>Today</th><th>After the plan</th></tr>
+<tr><td><strong>Push access only.</strong> A write collaborator, a leaked Contents-write PAT, a rental once LOO-1118 gives it a repository-scoped token.</td>
+<td class="cell-bad">Push a branch, dispatch <code>Packages (main)</code>: own binary signed and notarized. Or add an <code>on: push</code> workflow and read the p12.</td>
+<td class="cell-ok">Refused. This is the whole of what the environment buys, and it is real.</td></tr>
+<tr><td><strong>The admin <code>gh</code> token.</strong> Every agent Session on the laptop; every rental until LOO-1118 lands.</td>
+<td class="cell-bad">Same two commands.</td>
+<td class="cell-mid">One more API call first, to add a branch to the policy. It lands in the organization's audit log. Nothing reads that log.</td></tr>
+<tr><td><strong>A process on the laptop.</strong> Any local agent, with the maintainer's Doppler login.</td>
+<td class="cell-bad">Reads <code>APPLE_CERTIFICATE_BASE64</code> and <code>NOTARY_KEY</code> from <code>prd</code>. Never needed GitHub.</td>
+<td class="cell-bad">Unchanged.</td></tr>
+</table>
+
+<div class="two">
+<div class="box">
+<h3>Before: what the plan says <span class="tag proposed">proposed</span></h3>
+<p>"A branch cannot sign." Demo: a probe branch is refused. Admin access is one paragraph under "What it
+does not stop".</p>
+</div>
+<div class="box prop">
+<h3>After: what this review recommends <span class="tag proposed">★</span></h3>
+<p>"Push access is no longer enough to sign; changing who can sign is a settings change, and it is
+noticed." Same mechanism, plus the settings check gets a daily caller, and LOO-1118 is named as the Task
+that moves rentals from the middle row to the top one.</p>
+</div>
+</div>
+
+<p>Nothing here argues against building the environment. Scoped tokens are worthless while repository
+secrets exist, so this is the first step whichever order the rest comes in. The change is in what the
+Task claims and in closing the one loop it leaves open.</p>
+
+<h3>This work</h3>
+<ol>
+<li><strong>Drop the <code>dependabot</code> environment.</strong> The plan keeps one environment, five
+secrets, two jobs. <code>dependabot-auto.yml</code> is untouched here, so the two PRs do not conflict.
+"<code>gh secret list</code> prints nothing" becomes true when LOO-1120's secret deletion is also done;
+this Task's own check is that none of the five signing names is a repository secret.</li>
+<li><strong>State the outcome by holder</strong>, as in the table above, in the plan and in
+<code>.github/CI.md</code>.</li>
+<li><strong>Probe before the merge.</strong> The PR branch already carries <code>environment:</code> on
+<code>notarization-check.yml</code>, and that workflow has <code>workflow_dispatch</code> on main. Once the
+environment exists, <code>gh workflow run notarization-check.yml --ref &lt;this branch&gt;</code> must be
+refused. That settles <code>deployment: false</code> with the real thing while the repository secrets are
+still there to fall back on.</li>
+<li><strong>Give the settings check a caller</strong> (question 3).</li>
+</ol>
+
+<h3>Separate outcomes</h3>
+<ul>
+<li><strong>Agents stop holding admin on the repository.</strong> LOO-1118 does it for rentals. Local
+Sessions would need the same: a token that can push and open PRs and cannot edit settings. Without it the
+middle row stays amber.</li>
+<li><strong>The p12 and notary key leave the laptop's reach.</strong> They would live where only the cron
+host and the GitHub environment can read them: a Doppler config the maintainer's everyday login does not
+open, or no Doppler copy at all once both consumers are loaded. Until then the bottom row stays red, and
+no GitHub setting changes it.</li>
+</ul>
+
+<h2>Passed over, and why</h2>
+<table>
+<tr><th style="width:30%">Design</th><th>What it would give</th><th>Why not</th></tr>
+<tr><td>The cron host signs main builds; GitHub only compiles.</td>
+<td>The sentence in <code>SCHEDULE.md</code> becomes true again. No environment, no lint, no settings check.</td>
+<td><code>lf install --dev</code> reads the DMG from the Actions run, and the host cannot add an artifact to a finished run. It needs a second channel and a poller on the host, and dev builds stop when the host is down. The laptop rows of the table do not move either.</td></tr>
+<tr><td>The job fetches secrets from Doppler by OIDC, bound to <code>refs/heads/main</code>.</td>
+<td>GitHub holds nothing; no hand copy; one source.</td>
+<td>Not verified that the Doppler plan in use offers it. The trust moves to a Doppler setting an admin can also edit. Worth a look if the hand copy ever drifts in practice.</td></tr>
+<tr><td>Required reviewers on <code>signing</code>.</td>
+<td>An admin token could not sign without a person clicking.</td>
+<td>It stops per-commit signing, which is the feature. Already excluded by the plan.</td></tr>
+<tr><td>Keep <code>workflow_dispatch</code> on <code>main-packages.yml</code>, guarded on main.</td>
+<td>A hand trigger.</td>
+<td><code>gh run rerun</code> covers it. A guard in the file protects nothing a branch cannot delete.</td></tr>
+</table>
+
+<p><strong>Cannot be undone once done:</strong> deleting the <code>dev</code> environment discards
+<code>LFD_GITHUB_WEBHOOK_SECRET</code> unless a copy exists elsewhere. Revoking the Developer ID
+certificate, if rotation is chosen, cannot be reversed and reaches DMGs already shipped. Everything else
+in the plan is restored from Doppler with one command per secret.</p>
+
+<h2>Questions</h2>
+
+<div class="q">
+<h3>1. What should this Task promise?</h3>
+<p>After it ships, a token that can only push cannot get anything signed. A token with admin, which is
+what every agent and rental holds today, still can, with one extra step that leaves a log entry.</p>
+<p><strong>1a.</strong> <span class="rec">Recommended.</span> Ship it with that promise, written by
+holder. Rentals move to "cannot" when LOO-1118 lands; local agents wait for their own Task.</p>
+<p><strong>1b.</strong> Ship it as "a branch cannot sign" and leave the admin path as a paragraph.</p>
+<p><strong>1c.</strong> Hold this until agents stop holding admin, and ship both together.</p>
+</div>
+
+<div class="q">
+<h3>2. Does the Dependabot merge token get its own environment?</h3>
+<p>PR #2054 removes Dependabot's workflow, and its plan revokes the token.</p>
+<p><strong>2a.</strong> <span class="rec">Recommended.</span> No. This Task covers the five signing
+secrets; LOO-1120 deletes the sixth. If #2054 stalls, the token stays a repository secret a branch can
+read until it lands.</p>
+<p><strong>2b.</strong> Yes, as planned, so the repository is empty of secrets from this Task alone,
+whatever happens to #2054. Costs an environment, a workflow edit that conflicts with a deletion, and a
+GitHub behaviour nobody has confirmed.</p>
+</div>
+
+<div class="q">
+<h3>3. Who notices if the signing settings change later?</h3>
+<p>The settings are the protection. Someone, or something holding the admin token, could add a branch to
+the policy or put a secret back at repository level. Today nothing would say so.</p>
+<p><strong>3a.</strong> <span class="rec">Recommended.</span> The daily release on the cron host checks
+them in its preflight, beside the checks it already runs (<code>gh auth status</code>, the keychain
+identity). A changed setting stops that day's release with a message naming the difference.</p>
+<p><strong>3b.</strong> Nothing checks. The commands go in <code>.github/CI.md</code> for the day it is
+set up, and the script is not written.</p>
+<p><strong>3c.</strong> As planned: the script exists and a person runs it when they think of it.</p>
+</div>
+
+<div class="q">
+<h3>4. Rotate the signing identity?</h3>
+<p>The secrets were readable by anything with push access from 2026-10-30 to today. The one branch run on
+record is the feature's own (run 41111152406). Runs of branch workflows since deleted were not counted.</p>
+<p><strong>4a.</strong> <span class="rec">Recommended.</span> Rotate the notary API key only. It is a
+new key in App Store Connect and one Doppler edit; nothing already shipped is affected.</p>
+<p><strong>4b.</strong> Rotate nothing.</p>
+<p><strong>4c.</strong> Rotate the certificate too. Check first what revoking the old one does to DMGs
+people have already downloaded.</p>
+</div>
+
+<div class="q">
+<h3>5. Delete the two unused environments?</h3>
+<p><code>dev</code> holds one webhook secret from February for a service that no longer exists in the
+repository. <code>pypi</code> is empty.</p>
+<p><strong>5a.</strong> <span class="rec">Recommended.</span> Delete both.</p>
+<p><strong>5b.</strong> Keep <code>dev</code>; something outside the repository still uses that webhook.</p>
+</div>
+
+<div class="q">
+<h3>6. Was the old Doppler token revoked?</h3>
+<p><code>DOPPLER_TOKEN_PRD</code> is already gone from the repository's secrets, and Doppler lists no
+service tokens for <code>prd</code> now. Whether the token that secret held was one of those cannot be
+read back.</p>
+<p><strong>6a.</strong> It was revoked. Nothing to do.</p>
+<p><strong>6b.</strong> Not sure. Then Doppler's activity log is the place to look, and that is a person's
+login.</p>
+</div>
+
+</main>
+</body>
+</html>

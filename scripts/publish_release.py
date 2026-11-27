@@ -172,7 +172,7 @@ def check_release_host() -> None:
     if settings.returncode != 0:
         raise RuntimeError(
             'GitHub Actions secrets are not main-only (.github/CI.md, "Signing secrets"):\n'
-            + settings.stdout.strip()
+            + (settings.stdout + settings.stderr).strip()
         )
     _run(["flyctl", "status", "-a", "loopflow-website"], capture=True)
     _r2_client().head_bucket(Bucket="downloads")

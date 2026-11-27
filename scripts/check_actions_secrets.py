@@ -71,12 +71,15 @@ class SettingsUnreadable(RuntimeError):
 
 
 def _gh(path: str, jq: str) -> tuple[int, str, str]:
-    result = subprocess.run(
-        ["gh", "api", "--paginate", f"repos/{{owner}}/{{repo}}/{path}", "--jq", jq],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["gh", "api", "--paginate", f"repos/{{owner}}/{{repo}}/{path}", "--jq", jq],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        return 127, "", "gh is not installed"
     return result.returncode, result.stdout, result.stderr
 
 

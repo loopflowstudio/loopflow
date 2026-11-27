@@ -44,9 +44,10 @@ environment:
 ```
 
 `deployment: false` reads the environment's secrets without a deployment
-record on every main commit and morning check. Whether the branch policy still
-refuses with it set is settled by the probe below, before the merge. If the
-probe is not refused, drop the key and accept the records.
+record on every main commit and morning check. The branch policy still refuses
+with it set: seen on `loopflowstudio/actions-settings-probe` on 2026-11-27
+(QA pass below). The probe in the settings steps repeats it on this
+repository.
 
 **The settings check has a caller.** `scripts/check_actions_secrets.py` runs in
 the release preflight (`scripts/publish_release.py`, beside `gh auth status`).
@@ -369,6 +370,18 @@ daily notarization check and its issue; the daily release.
 - Fixed in realign: the `if` that picks the signed commit is named and
   tested; the lint lost its pinned job list; two release-doc sentences.
   `uv run pytest python/tests/test_workflow_secrets.py`: 21 passed.
+
+- QA, 2026-11-27, on the private probe repository
+  `loopflowstudio/actions-settings-probe` (`.lf/qa/github-settings.md`): with
+  `deployment: false`, a branch dispatch and a pull request naming `signing`
+  were refused with no step and no runner ("Branch "side" is not allowed to
+  deploy to signing due to environment protection rules."); main read the
+  secret; an `on: push` branch workflow naming no environment read length 0;
+  no deployment record was written. A job naming a missing environment
+  created it open. The `.github/CI.md` commands ran verbatim; the `PUT` kept
+  `dev`'s secret. Each changed setting printed its line. Fixed: the preflight
+  dropped the check's stderr, so a crashed check read as "not main-only" with
+  nothing under it; a missing `gh` was a traceback.
 
 Nothing is left to build. Left, for a person with admin at ship-review ("Order of settings changes"):
 create `signing`, copy the five values, give `dev` a `main` policy, run the

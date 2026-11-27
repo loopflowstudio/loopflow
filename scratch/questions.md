@@ -89,3 +89,16 @@ From the second review (2026-11-26):
 - The fork-PR walk (a fork's branch named `main` fires `workflow_run`, the
   run is on ref `main`, `event == 'push'` skips it) is from GitHub's docs and
   was not run against this repository.
+
+From QA (2026-11-27):
+
+- A private repository, `loopflowstudio/actions-settings-probe`, was created
+  to run the settings steps and the probe away from the signing keys. It holds
+  dummy values only. The local `gh` login lacks `delete_repo`, so it stays
+  until someone deletes it; `.lf/qa/github-settings.md` describes reusing it.
+- Answered there: the branch policy refuses with `deployment: false`, and the
+  `PUT` that restricts `dev` keeps its secret. Seen on a private repository on
+  the organization's Team plan, not on the public one.
+- A failed read in the preflight still prints under "GitHub Actions secrets
+  are not main-only", followed by `could not read …`. Alternative: its own
+  heading.

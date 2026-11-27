@@ -204,6 +204,33 @@ def test_a_failed_read_is_not_an_empty_answer(monkeypatch, capsys):
     )
 
 
+def test_a_missing_gh_is_a_failed_read(monkeypatch, capsys):
+    def run(*_, **__):
+        raise FileNotFoundError("gh")
+
+    monkeypatch.setattr(check_actions_secrets.subprocess, "run", run)
+
+    assert check_actions_secrets.main() == 1
+    assert capsys.readouterr().out == "could not read actions/secrets: gh is not installed\n"
+
+
+def test_the_release_preflight_shows_why_the_check_crashed(monkeypatch):
+    def run(cmd, **_):
+        if cmd[-1].endswith("check_actions_secrets.py"):
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="No module named 'yaml'\n")
+        return subprocess.CompletedProcess(cmd, 0, stdout="Developer ID Application", stderr="")
+
+    monkeypatch.setattr(publish_release, "_run", run)
+    monkeypatch.setattr(publish_release.shutil, "which", lambda command: command)
+    monkeypatch.setattr(publish_release.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(publish_release.platform, "machine", lambda: "arm64")
+    for name in publish_release.REQUIRED_SECRETS:
+        monkeypatch.setenv(name, "set")
+
+    with pytest.raises(RuntimeError, match="No module named 'yaml'"):
+        publish_release.check_release_host()
+
+
 def test_the_release_preflight_stops_on_a_changed_setting(monkeypatch):
     line = "environment signing: branch policy allows release/*; expected main only"
 

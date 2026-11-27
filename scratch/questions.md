@@ -25,3 +25,8 @@
   the parent commit on this Machine; it reads installed harnesses and logins.
 - Not checked: whether `lf discord serve` runs on a Machine other than this
   one and 100.96.227.95.
+- Assumed at ship review, with nobody in the conversation: the work goes on
+  to delivery. No Task was filed. The token steps stay in the PR body; the
+  recorded `surface` string, the doubled Wave warning and the misspelt
+  `deafult_agent` key in `~/.lf/config.yaml` are on
+  `scratch/ship-review.html` as questions 1 to 4, unanswered.

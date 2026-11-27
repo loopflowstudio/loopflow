@@ -130,6 +130,14 @@ Choices made for review (headless; none is settled, each can be undone):
   certain secrets via environment branch policies, without deployment
   tracking" as a use; its table has no branch-policy row. Not yet seen on a
   real run.
+## Docs written first
+
+Intended behavior, written before the build: `.github/CI.md` (Main packages,
+new "Signing secrets" section, Notarization), `release/SCHEDULE.md`,
+`release/README.md` (Automation rhythm). The build makes the script's output
+and the refusal message match them, or corrects the docs to what a run shows.
+`release.yml:13-14` is left as it is: that workflow names no secrets.
+
 ## What it does not stop
 
 The table's lower two rows. An agent holding the admin token can still change

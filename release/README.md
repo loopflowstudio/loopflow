@@ -209,14 +209,15 @@ Evidence and links: `git show e03537f7ca:scratch/release-research.md`.
 | Cadence | Workflow | What it does | Ships? |
 |---------|----------|--------------|--------|
 | Green main | `Packages (main)` | Builds every native `lf` tarball for the commit, extracts each package, and smoke-tests `--version`; signs and notarizes a Loopflow.dmg bundling the ARM64 `lf` | `lf install --dev` installs it; artifacts expire after 14 days |
-| Daily | Loopflow host `release-run` crontab line | Checks host credentials, opens and lands a patch release when commits landed, waits for hosted builds, then publishes and deploys | Yes |
+| Daily | Loopflow host `release-run` crontab line | Checks host credentials and GitHub's signing settings, opens and lands a patch release when commits landed, waits for hosted builds, then publishes and deploys | Yes |
 | Tag | `Release build` | Builds and smoke-tests the four native tarballs on GitHub's target machines; stores workflow artifacts for the host publisher | No |
 | Local | `scripts/install.py local` | Build `lf` and `Loopflow.app` into `local-bin/` | No |
 | Local | `lf install` | Download, verify, and promote the stable control plane and Mac app | Yes, installed Machine |
 
 GitHub owns compilation, credential-free except the `dev` app: `Packages (main)`
-signs and notarizes it with the Developer ID and notary Actions secrets (sourced
-from Doppler `loopflow`/`prd`). The maintained Loopflow host owns the release's
+signs and notarizes it with the Developer ID and notary secrets of the `signing`
+environment, which only `main` can use ([Signing secrets](../.github/CI.md#signing-secrets)).
+The maintained Loopflow host owns the release's
 credentialed boundary: DMG signing/notarization, crates.io, R2, Fly deployment,
 and the GitHub Release. It deploys the website from the exact tag and requires
 `/healthz` to report that tag. If the proof fails it restores the previous Fly

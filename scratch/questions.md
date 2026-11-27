@@ -31,3 +31,14 @@ Needs a person; not in the plan's steps until answered:
 - `DOPPLER_TOKEN_PRD` was already absent from repository secrets on
   2026-11-26, and `loopflow`/`prd` lists no service tokens now. Was the token
   behind it revoked? Doppler's activity log answers it.
+
+From writing the docs (reversible):
+
+- The docs give a rule for later secrets: every CI secret lives in an
+  environment with a branch policy, and `gh secret set` is never run without
+  `--env`. The plan only said "there are no repository secrets".
+- The check script's lines are worded in `.github/CI.md` before the script
+  exists (`repository secret NAME: …`, `environment signing: …`). The build
+  can change the wording; the doc follows.
+- The holder table in `.github/CI.md` says the Doppler login can sign. Is that
+  row wanted in a checked-in public file?

@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1120 ship review: no bot changes a dependency</title>
+<style>
+:root {
+  --background: #faf8f5; --surface: #fffdf9; --surface-muted: #f3eee7;
+  --border: #e6dfd6; --border-strong: #d6ccc0;
+  --text: #2a2624; --text-secondary: #5f5752;
+  --accent: #722f37;
+  --working-ink: #2f629f; --working-fill: #d5dde6;
+  --warning-ink: #7f5a19; --warning-fill: #e4dccd;
+  --failure-ink: #a64038; --failure-fill: #ecd9d5;
+  --success-ink: #386c48; --success-fill: #d7dfd6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #1c1917; --surface: #24201e; --surface-muted: #2c2724;
+    --border: #3a3430; --border-strong: #4a423c;
+    --text: #ece6dd; --text-secondary: #b5ada3;
+    --accent: #d98a94;
+    --working-ink: #8fb4e3; --working-fill: #26323f;
+    --warning-ink: #d9b36a; --warning-fill: #3a3122;
+    --failure-ink: #e58f86; --failure-fill: #402724;
+    --success-ink: #8cc49b; --success-fill: #24352a;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--background); color: var(--text);
+  font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 24px 96px; }
+h1 { font-size: 30px; line-height: 1.2; margin: 0 0 12px; }
+h2 { font-size: 21px; margin: 56px 0 12px; }
+h3 { font-size: 16px; margin: 0 0 6px; }
+p { margin: 0 0 14px; }
+.lede { font-size: 18px; color: var(--text-secondary); max-width: 760px; }
+code, pre { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+code { background: var(--surface-muted); padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--surface-muted); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 14px; overflow-x: auto; margin: 0 0 14px; }
+pre code { background: none; padding: 0; }
+pre .del { color: var(--failure-ink); }
+pre .add { color: var(--success-ink); }
+pre .c { color: var(--text-secondary); }
+table { width: 100%; border-collapse: collapse; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin: 0 0 14px; }
+th, td { text-align: left; vertical-align: top; padding: 11px 14px; border-bottom: 1px solid var(--border); }
+th { font-size: 14px; color: var(--text-secondary); font-weight: 600; background: var(--surface-muted); }
+tr:last-child td { border-bottom: 0; }
+td.num { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tag { display: inline-block; font-size: 13px; font-weight: 600; padding: 1px 9px; border-radius: 999px; white-space: nowrap; }
+.filed { color: var(--working-ink); background: var(--working-fill); }
+.drop { color: var(--text-secondary); background: var(--surface-muted); }
+.yours { color: var(--warning-ink); background: var(--warning-fill); }
+.done { color: var(--success-ink); background: var(--success-fill); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin: 0 0 14px; }
+.card.warn { border-color: var(--warning-ink); }
+.muted { color: var(--text-secondary); }
+ol.q > li { margin-bottom: 22px; }
+ol.q ol { list-style: lower-alpha; margin-top: 6px; }
+ol.q ol li { margin-bottom: 6px; }
+.rec { color: var(--accent); font-weight: 600; }
+ul { margin: 0 0 14px; padding-left: 22px; }
+li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>No bot changes a dependency</h1>
+<p class="lede">LOO-1120, PR <a href="https://github.com/loopflowstudio/loopflow/pull/2054">#2054</a>, branch <code>jack-heart/remove-dependabot</code> at <code>7571ff9ab8</code>. Written 2026-11-26 with nobody in the conversation: nothing here records a reaction, and the questions at the bottom are unanswered.</p>
+
+<h2>1. What ships</h2>
+
+<p>Dependabot stops opening PRs, and nothing merges one for it. A crate, a Python package, a Swift package or a workflow action moves only when someone starts a Task that moves it. A tag an action's owner re-points changes nothing here either: all 76 outside <code>uses:</code> lines name a commit.</p>
+
+<pre><code><span class="del">- .github/dependabot.yml                    41 lines   weekly updates for uv, cargo, swift, github-actions
+- .github/workflows/dependabot-auto.yml     96 lines   auto-merge on author, DEPENDABOT_MERGE_TOKEN,
+                                                       the only pull_request_target trigger</span>
+
+<span class="del">-      - uses: dtolnay/rust-toolchain@stable
+-      - uses: Swatinem/rust-cache@v2</span>
+<span class="add">+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
++      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3</span></code></pre>
+
+<p>What is pinned, counted from the branch today:</p>
+
+<pre><code>  23 actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+  19 astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+   9 dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+   8 Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+   7 actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+   3 taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+   2 actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+   5 actions/cache (+restore, +save)@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0</code></pre>
+
+<p>What you do differently: a bump is a Task you start. <code>.github/CI.md</code> § Dependencies carries the commands:</p>
+
+<pre><code>cargo update -p &lt;crate&gt;                                   <span class="c"># then scripts/third_party.py refresh</span>
+uv lock --upgrade-package &lt;name&gt;
+gh api repos/&lt;owner&gt;/&lt;action&gt;/commits/&lt;tag&gt; --jq .sha     <span class="c"># the commit for a new action tag</span></code></pre>
+
+<p>What you stop seeing: the weekly Dependabot PRs, and the "Dependabot zero-touch" check on every PR. Stored data, commands and screens don't change.</p>
+
+<h2>2. How to try it</h2>
+
+<p>From <code>/Users/jack/src/loopflow.remove-dependabot</code>. Each was run for this page; the output is what came back.</p>
+
+<pre><code>$ grep -rhE 'uses: +[^. ]' .github/workflows | grep -vE '@[0-9a-f]{40}( |$)'
+<span class="c">(no output, exit 1: every action is at a commit)</span>
+
+$ ls .github/dependabot.yml .github/workflows/dependabot-auto.yml
+ls: .github/dependabot.yml: No such file or directory
+ls: .github/workflows/dependabot-auto.yml: No such file or directory
+
+$ gh pr list --author app/dependabot --state open --json number
+[]
+
+$ git ls-remote --heads origin 'dependabot/*' | wc -l
+       5        <span class="c"># stale branches; step 4 of the cleanup below</span></code></pre>
+
+<p>The pins under real CI: a scratch-free copy of the branch ran the whole matrix as draft PR #2055, run <a href="https://github.com/loopflowstudio/loopflow/actions/runs/45957957036">45957957036</a>, success in 15m27s, no tag reference fetched in any job. <code>scratch/qa.html</code> has the table. #2054 itself is a checkpoint, so its own checks read 2 pass, 15 skipped, and two of the skipped are the deleted workflow firing from main's copy.</p>
+
+<h2>3. What is likeliest to surprise you</h2>
+
+<div class="card warn">
+<h3>The brief asked for a deletion. The PR also rewrites 76 lines in eight workflows.</h3>
+<p>The concept review found that deleting Dependabot left a faster route open: a moved <code>v2</code> tag reaches the job that compiles the release <code>lf</code> with no commit here to revert. So every action is pinned in this PR. Passed over: landing the deletion alone and filing the pins as their own Task.</p>
+</div>
+
+<div class="card warn">
+<h3>The signing job's first run on these pins is the merge commit.</h3>
+<p><code>main-packages.yml</code>, <code>package-build.yml</code>, <code>macos-main.yml</code> and <code>release.yml</code> run only from <code>main</code> or a release tag. In the signing job <code>download-artifact</code> moves v7 → v8.0.2, and v8 fails on a digest mismatch where v7 warned. The same v7.0.2 upload / v8.0.2 download pair carried archives to nine Linux test shards; it has not run on macOS. If it breaks, that commit's dev package does not publish. Recovery: revert <code>73646d3af2</code>.</p>
+</div>
+
+<div class="card">
+<h3>"By hand" does not mean "read".</h3>
+<p>A bump Task with auto on still merges without a person opening it. No rule was added; the PR body says so.</p>
+</div>
+
+<div class="card">
+<h3>Nothing tells you a version here is vulnerable.</h3>
+<p>Alerts are on and have never fired: 0 alerts in any state across 425 Rust packages, GitHub's dependency graph lists 0 manifests for the repository, and GitHub does not alert on actions pinned by commit. <code>.github/CI.md</code> now says this instead of calling alerts the prompt. LOO-1123.</p>
+</div>
+
+<div class="card">
+<h3>Choices made on your behalf</h3>
+<ul>
+<li><b>Nextest stopped floating.</b> The <code>install-action</code> pin is the v2.90.3 release with <code>tool: nextest</code>, which fixes nextest at 0.9.151. It was first pinned to a commit 14 hours old; that was moved back to one 18 days old.</li>
+<li><b>One pin is younger than two weeks.</b> <code>rust-toolchain</code> is 11 days old; its <code>stable</code> branch has no tags to move back to.</li>
+<li><b>One pin is unsigned.</b> The <code>install-action</code> commit carries no verified signature; the other seven do.</li>
+<li><b>The compiler and tools still float:</b> Rust <code>stable</code>, the latest uv, Homebrew's xcodegen, <code>ubuntu-latest</code>.</li>
+<li><b>Release notes that mention Dependabot are untouched.</b> Shipped records.</li>
+<li><b>A new file:</b> <code>.lf/qa/ci-workflows.md</code>, how to run edited workflows before landing a checkpoint PR.</li>
+</ul>
+</div>
+
+<div class="card">
+<h3>Security review</h3>
+<p>The diff deletes the only user of a write-scoped PAT and the only <code>pull_request_target</code> workflow, and edits the workflows that build, sign and publish releases. The plan's reading is that this only removes attack surface. Release publishing is on this repository's list all the same: <code>lf security-review</code> before delivering is the suggestion, and nobody was here to take or decline it.</p>
+</div>
+
+<h2>4. Findings left outside the PR</h2>
+
+<table>
+<tr><th>Finding</th><th>Proposal</th><th></th></tr>
+<tr><td><code>package-build.yml:66</code> runs <code>cargo build --release</code> with no <code>--locked</code>; the release builder would resolve fresh versions quietly if the lock were stale.</td><td>Its own Task. One flag, but in a workflow that cannot run before merge, and this PR already carries one of those.</td><td><span class="tag filed">LOO-1122</span></td></tr>
+<tr><td>Nothing says a pinned dependency has a known vulnerability.</td><td>Its own Task: look at the dependency graph setting, then decide what covers the rest.</td><td><span class="tag filed">LOO-1123</span></td></tr>
+<tr><td>A hand bump takes whatever was published this morning. The brief named "no cooldown".</td><td>Its own Task: a minimum release age, starting with uv's <code>exclude-newer</code>.</td><td><span class="tag filed">LOO-1124</span></td></tr>
+<tr><td>Every job's checkout cleanup prints <code>fatal: No url found for submodule path 'vendor/ghostty' in .gitmodules</code>, git exit 128. Main's last green run has it too.</td><td>Drop. Not from this change, and nothing fails.</td><td><span class="tag drop">drop</span></td></tr>
+<tr><td>GitHub's own "Dependabot Updates" entry may stay listed as active in <code>gh workflow list</code> after the config is gone.</td><td>Drop. Only visible after merge; the acceptance check allows it.</td><td><span class="tag drop">drop</span></td></tr>
+<tr><td><code>~/.lf/config.yaml:30</code> spells <code>skills.security-review.deafult_agent</code>; every <code>lf</code> command warns and skips it, so that skill is not on the agent the line names.</td><td>Yours: a personal file outside the repository. Left as found.</td><td><span class="tag yours">yours</span></td></tr>
+</table>
+
+<p>Fixed here: <code>scratch/plan.md</code> said the three deferred findings were unfiled; it now names their Tasks.</p>
+
+<h3>After merge, outside the repository</h3>
+<p>In this order. Step 1 cannot be undone and is a person's.</p>
+<ol>
+<li>Revoke the GitHub PAT behind <code>DEPENDABOT_MERGE_TOKEN</code>. If anything else uses it, keep it and do only 2 and 3.</li>
+<li><code>gh secret delete DEPENDABOT_MERGE_TOKEN</code></li>
+<li>Delete <code>DEPENDABOT_MERGE_TOKEN</code> from Doppler. The brief did not name this copy.</li>
+<li>Delete the five <code>dependabot/*</code> branches on origin.</li>
+<li>Switch on "Require actions to be pinned to a full-length commit SHA". Until then nothing refuses a new <code>@v4</code>.</li>
+</ol>
+
+<h2>5. Questions</h2>
+<p class="muted">All still yours. The option marked taken is what the PR does today.</p>
+
+<ol class="q">
+<li>The pins ride in this PR, though the brief only asked to remove Dependabot.
+  <ol>
+  <li><span class="rec">Taken.</span> Land both together.</li>
+  <li>Split: land the deletion, pin in a second PR.</li>
+  </ol>
+</li>
+<li>The signing job first runs on <code>download-artifact</code> v8 at the merge commit.
+  <ol>
+  <li><span class="rec">Taken.</span> Land; if the dev package fails to publish, revert <code>73646d3af2</code>.</li>
+  <li>Put that one line back on a v7 commit and move it in its own PR.</li>
+  </ol>
+</li>
+<li>Is the PAT behind <code>DEPENDABOT_MERGE_TOKEN</code> used by anything else?
+  <ol>
+  <li>No: revoke it, then an agent deletes both stored copies and the five branches.</li>
+  <li>Yes: keep it; delete only the two <code>DEPENDABOT_MERGE_TOKEN</code> entries.</li>
+  </ol>
+</li>
+<li>Should a bump Task stop for a person before it merges?
+  <ol>
+  <li><span class="rec">Taken.</span> No new rule.</li>
+  <li>Yes. Needs a way to mark such a Task, which does not exist.</li>
+  </ol>
+</li>
+<li>Three follow-up Tasks are filed, unstarted (LOO-1122, 1123, 1124).
+  <ol>
+  <li><span class="rec">Taken.</span> Leave them in the backlog.</li>
+  <li>Fold <code>--locked</code> (LOO-1122) into this PR.</li>
+  <li>Abandon one or more; say which.</li>
+  </ol>
+</li>
+<li>Run <code>lf security-review</code> on this diff before it lands?
+  <ol>
+  <li>Yes.</li>
+  <li>No: it removes a token and a trigger and pins what was already running.</li>
+  </ol>
+</li>
+<li>Pin the Rust compiler too?
+  <ol>
+  <li><span class="rec">Taken.</span> No; it floats and the docs say so.</li>
+  <li>Yes, a <code>rust-toolchain.toml</code>; every Rust release becomes a bump Task.</li>
+  </ol>
+</li>
+</ol>
+
+</main>
+</body>
+</html>

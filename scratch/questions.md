@@ -21,3 +21,9 @@ recommended option for each, marked as made for review.
   setting, after merge.
 - **Keep a pin to code published 14 hours earlier?** Taken: no; the
   `install-action` pin moved to v2.90.3 (18 days old, nextest 0.9.151).
+
+## Ship review, 2026-11-26
+
+Nobody was in the conversation. No answer was given to any question on
+`scratch/ship-review.html`; its seven questions are open. `lf security-review`
+was suggested there and not run.

@@ -155,21 +155,20 @@ alone does not revoke it. Revoke first, then delete.
 
 ## Deferred findings
 
-From `scratch/concept-review.html`. Separate outcomes, not built here, not
-filed. `lf land` clears `scratch/`, so each needs a Task before landing or it
-is lost.
+From `scratch/concept-review.html`. Separate outcomes, not built here, each
+filed as its own Task.
 
-- **Release builders resolve without `--locked`.**
+- **Release builders resolve without `--locked`** (LOO-1122)**.**
   `.github/workflows/package-build.yml:66` runs `cargo build --release` bare.
   One CI job runs `cargo fetch --locked`, so a stale lock fails before merge,
   but the builder itself would resolve fresh versions quietly. Takes: add
   `--locked` on that line.
-- **Nothing says a version here is vulnerable.** Takes: a person looks once
+- **Nothing says a version here is vulnerable** (LOO-1123)**.** Takes: a person looks once
   at Settings → Advanced Security → Dependency graph and switches it on if it
   is off; then a Task for what alerts still cannot cover (SHA-pinned actions,
   probably `uv.lock`). A scheduled audit that files a Task is one answer,
   decided in that Task: it is a new thing on a timer.
-- **No age floor on a bump.** The brief names "no cooldown"; a hand bump still
+- **No age floor on a bump** (LOO-1124)**.** The brief names "no cooldown"; a hand bump still
   takes whatever was published this morning. Takes: a Task giving bumps a
   minimum release age, starting with uv's `exclude-newer`; a Cargo equivalent
   was not verified.

@@ -205,8 +205,9 @@ approval for, it says so and asks for nothing; a code appears only when there
 is no approval or GitHub no longer renews it.
 
 `lf ondemand list` shows what this Machine sent each running rental:
-`GitHub until 07:40`, or `GitHub not delivered` when the repository's current
-token never reached it. It reads the record here and asks neither the rental
+`GitHub until 07:40`, `GitHub ended 07:40` once that time has passed, or
+`GitHub not delivered` when the repository's current token never reached it.
+It reads the record here and asks neither the rental
 nor GitHub. A rental's `github` row in
 `lf machine logins` asks GitHub with the token the rental holds, so it reads
 signed out as soon as a push would fail. `lf machine login github <rental>`

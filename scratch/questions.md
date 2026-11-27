@@ -146,24 +146,34 @@
   `lf ondemand list`; the words stay in `~/.lf/config.yaml` until the
   template is added again.
 
-## Raised by the review after Pass 4 (`scratch/concept-review.html`, `73860d9940`)
+## Raised by the reviews after Pass 4 and Pass 5 (`scratch/concept-review.html`)
 
-Adopted into Pass 5 with nobody here; each is reversible before it lands.
+Still a person's choice, asked by every review so far:
 
-- **`lf ondemand list` shows `GitHub until HH:MM` or `GitHub not delivered`**
-  per running rental, from the store. Passed over: `lf machine logins`
-  answering from the record; a notification.
-- **`lf ondemand login github` on an approved repository** renews and says
-  "already approved" instead of asking for a code.
-- **Placement asks GitHub about a stored token before renting,** three more
-  requests on every placement, over narrowing the docs sentence. Rare case:
-  the person revoked the approval or uninstalled the app inside 8 hours.
-- **An ending behind someone's code waits and says so,** over giving up after
-  a moment and leaving the token to expire.
+- **The command that approves ahead of time:** `lf ondemand login github`
+  (built, documented, named in every stop) or
+  `lf machine login github --rentals`.
 - **Does the list's GitHub state go in `lf ondemand list --json`?** A wire
-  field, so harder to take back than the text.
-- **File the two deferred findings as Tasks?** Asked again by this review:
-  both, automatic settling only, or neither yet. Still unanswered.
+  field, so harder to take back than the text. Text only today.
+- **File the two deferred findings as Tasks?** Both, automatic settling only,
+  or neither yet.
+
+Adopted with nobody here; each is reversible before it lands:
+
+- **The first real run installs the app on two private repositories,** so it
+  shows whether the token is limited to one. Over one, as first planned.
+- **`lf machine login github <rental>` renews the rental's recorded
+  repository from any directory** (Pass 6). A rental no longer moves to
+  another repository; someone wanting a second repository on a box rents
+  another.
+- **A renewal stores the new tokens before checking them** (Pass 6), so a
+  dropped connection keeps the approval. An unchecked token sits in the store
+  until the next check.
+- **`lf ondemand list` says `GitHub ended HH:MM`** once the time has passed.
+- From the review after Pass 4, built in Pass 5: the list's GitHub state;
+  placement asking GitHub about a stored token (three more requests, over
+  narrowing the docs sentence); an ending behind someone's code waits and
+  says so.
 
 ## Raised by Pass 5
 
@@ -176,7 +186,7 @@ Adopted into Pass 5 with nobody here; each is reversible before it lands.
   placement (before renting and at the sign-in after).
 - **The list's GitHub state is text only.** `--json` is unchanged until the
   wire question above is answered.
-- **A token already past its time still reads `GitHub until HH:MM`** in
-  `lf ondemand list` when it was the last one sent; the clock has no date.
+- **The list's clock has no date,** so `GitHub ended 17:00` reads the same
+  a day later.
 - **The waiting line goes to stderr of whatever waits,** the server's rental
   check included.

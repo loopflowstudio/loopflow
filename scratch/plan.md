@@ -1,30 +1,55 @@
 # LOO-1118: rentals receive a repository-scoped, expiring GitHub token
 
-Passes 1 to 5 are built and tested against a stand-in GitHub; no pass remains.
-Nothing has run against GitHub's real app or a real rental; the
-probes under "Unanswered until the app exists" need a person twice: see
-"Needs a person now". `scratch/concept-review.html` (written at `73860d9940`)
-reviewed the build after Pass 4; where each finding went is under "Review".
+Passes 1 to 5 are built and tested against a stand-in GitHub. Pass 6 remains
+(under "Passes"); after it, no further pass is worth building before the run
+under "Needs a person now". Nothing has run against GitHub's real app or a
+real rental. `scratch/concept-review.html` (written at `0419415ca1`) reviewed
+the build after Pass 5; where each finding went is under "Review".
 
 ## Needs a person now
 
 Nothing has been asked of GitHub with an app token: no install, no code typed.
-Both steps act as a person on github.com, so no run here takes them.
+Both steps act as a person on github.com, so no run here takes them. Checked
+2026-11-27: `loopflowstudio` has graphite-app, xcode-cloud and railway-app
+installed, not Loopflow Studio.
 
-1. Install the app on one repository: open
+**Made for review:** the first run installs on two repositories, not one.
+With one install `/user/installations` lists one repository whether or not
+GitHub restricted the token, so the check (`reach`, `github.rs:159`) passes
+either way and the run would not show the restriction. Passed over: one
+repository, which exercises approval and renewal only.
+
+1. Install the app on two private repositories: open
    `https://github.com/apps/loopflow-studio`, Install, "Only select
-   repositories", `loopflowstudio/loopflow`. Whether the install completes
-   with no private key generated is itself unprobed.
-2. From a terminal in a checkout of that repository, with this branch's `lf`
+   repositories", `loopflowstudio/loopflow` and one other private repository.
+   Whether the install completes with no private key generated is itself
+   unprobed.
+2. From a terminal in a checkout of the first, with this branch's `lf`
    and a private `LF_HOME` (the migration is unmerged):
    `lf ondemand login github`, then type the printed code at
    `https://github.com/login/device` as the account `gh` is signed in to.
+3. Read the second repository with the stored token: it must be refused.
+   Renew once and repeat both (probe 1).
 
-That one run answers whether GitHub issues a refresh token for
-`scope=offline_access`, whether `repository_id` restricts the token, and
-whether `/user/installations` lists what a restricted token reaches (the check
-the build relies on; see Pass 2). Probes 1 to 4 then need the stored grant and
-a rental or any box with `gh`.
+What each answer means:
+
+- Approval passes and the second read is refused: the restriction holds and
+  the check sees it. The build stands. If the renewed token is still
+  restricted, the re-check after a renewal can go (three requests a renewal).
+- Approval prints `reaches 1 more than …; discarded`: the token may be
+  restricted but the listing shows the whole installation. The check becomes
+  a read of a second installed repository that must fail; with one install
+  there is nothing to check.
+- The second read succeeds: there is no repository-scoped user token and the
+  mechanism is the wrong one. Pass 1, the approval flow and the record of
+  what each rental was sent survive.
+- A renewed token loses the restriction: the renewal, the re-send, the cut at
+  the last ending and the lock go, about half of `rental/github.rs` (probe 1's
+  fallback).
+
+That run also answers whether GitHub issues a refresh token for
+`scope=offline_access`. Probes 2 to 5 then need the stored grant and a rental
+or any box with `gh`.
 
 ## Outcome
 
@@ -211,7 +236,7 @@ check, the re-send, the ending and `--logins` described here.
 
 ## Unanswered until the app exists
 
-Pass 2 answers these first:
+The run under "Needs a person now" answers the first:
 
 1. Does a refreshed token keep the `repository_id` restriction? If not, the
    design changes to: no `offline_access`, a fresh device approval whenever the
@@ -380,6 +405,32 @@ Survives: Linear's renewed token, OpenCode and Codex sign-in when listed in
    rental with no repository; `--json` unchanged); the waiting line is
    printed, not asserted; `approve_ahead` itself reads the real `gh`, so the
    test drives `settle` as it does.
+6. **A rental's repository is set once, and a dropped connection keeps the
+   approval.** Not built; both made for review from the review after Pass 5.
+   - `lf machine login github <rental>` renews the repository the rental is
+     recorded for, from any directory. The directory is read only for a
+     rental with none recorded (one made with `lf ondemand rent`), and that
+     first sign-in sets it. In `sign_in_as` (`github.rs:681`) the record wins
+     over `origin_repository`. Goes: `moved`, the "it is now for … only"
+     line, the settle of the repository left behind,
+     `set_rental_github_repository` returning the one before,
+     `a_rental_moved_to_another_repository_stops_the_token_it_held`, and
+     "moved to another repository" in the docs (`docs/subscriptions.md:212-214`
+     says the checkout chooses) and in the comments at `github.rs:433,577`.
+     Passed over: keeping the move for someone who rented by hand, signed in
+     for A and wants B on the same box; they rent another.
+   - `renew` (`github.rs:334`) stores what GitHub issued before asking what it
+     reaches. "Reaches more" or another account discards it; no answer keeps
+     it, and the next settle someone is present for checks it (`standing`).
+     Open inside the pass: an unattended settle does not run `standing`, so a
+     stored-unchecked token could be sent by an ending's re-send; either the
+     row carries "unchecked" or an unattended settle checks one. Passed over:
+     dropping the re-check after renewal, which waits on probe 1.
+   Tests: a sign-in run from another repository's checkout sends the rental
+   its recorded repository's token and asks for no code; a renewal whose
+   reach requests fail leaves a grant the next settle renews from or checks,
+   with no code asked. Teaches whether the settle step gets smaller with no
+   move in it.
 
 ## Acceptance
 
@@ -439,32 +490,30 @@ Questions the writing raised (also in `scratch/questions.md`):
 ## Review
 
 What happened to each finding of `scratch/concept-review.html` (the review of
-the build after Pass 4, written at `73860d9940`). Every adoption is made for
-review; none is settled. The earlier review's findings were all built in
-Pass 4. Checked against the code: `lf ondemand list` reads neither rental
-GitHub column, `approve` (`github.rs:647`) is called outside `settle`, the
-placement line is `github.rs:637`.
+the build after Pass 5, written at `0419415ca1`). Every adoption is made for
+review; none is settled. The two earlier reviews' findings were built in
+Passes 4 and 5. Checked against the code: `reach` sums
+`/user/installations`, `sign_in_as` prefers the directory's origin
+(`github.rs:694`), `renew` stores after `grant_from` (`github.rs:351-352`).
 
-- The record of what a rental was sent has one reader, the settle step; a
-  missed token is visible nowhere: Pass 5, `lf ondemand list`.
-- `lf ondemand login github` always spends a code and replaces a working
-  approval: Pass 5.
-- A stored token is trusted before renting while the docs say everything is
-  asked: Pass 5, ask GitHub; narrowing the docs was passed over.
-- The token's end printed without saying it is before the rental's: Pass 5.
-- An ending waits silently behind a person typing a code: Pass 5, one line.
-- A sign-in records the repository before it knows the outcome; 7 hours
-  counts as new; 10 minutes of margin: left as built, as the review left
-  them.
-- Storing "which token" as that token's expiry is sound (a renewal is several
-  round trips under the repository's lock): the open question in
-  `scratch/questions.md` is closed.
-- Back-to-back rentals and the hourly token limit: added to probe 5.
-- `lf ondemand login github` or `lf machine login github --rentals`: the
-  built name stays; still a person's choice, in `scratch/questions.md`.
+- "Reaches one repository" is checked by a listing whose answer for a
+  restricted token is unknown, and a one-repository install cannot show it:
+  the first run under "Needs a person now" now installs on two.
+- The renew command can move a rental to the directory's repository and end
+  the token its Task uses: Pass 6.
+- A dropped connection during a renewal loses the approval: Pass 6.
+- Two beliefs about a renewed token (settle trusts it, renew re-checks it):
+  probe 1 says which; the re-check stays until then.
+- `lf ondemand list` printed `GitHub until 17:00` an hour after: fixed here,
+  `GitHub ended 17:00` (`rust/loopflow/src/lf/commands/rental.rs`,
+  `docs/subscriptions.md`). Type-checked; no test covers the list's text.
+- One shared token per repository, the cut at the last ending, six requests
+  a placement, an ending waiting behind a code, `lf ondemand login github`
+  keeping a working approval: left as built, as the review left them.
+- The name `lf ondemand login github`, GitHub state in `--json`, filing the
+  deferred findings: a person's choices, in `scratch/questions.md`.
 - Automatic settling, Codex and OpenCode outliving the rental: deferred
-  below. Neither is filed as a Task; whether to file is in
-  `scratch/questions.md`.
+  below.
 
 ## Deferred findings
 

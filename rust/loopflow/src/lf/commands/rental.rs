@@ -398,6 +398,9 @@ fn print_ondemand(listing: &OndemandListing) {
             .copied
             .map_or_else(String::new, |counts| format!(" · {counts} copied"));
         let github = match entry.github {
+            Some(GithubDelivery::Until(at)) if at <= time::OffsetDateTime::now_utc() => {
+                format!(" · GitHub ended {}", clock(at))
+            }
             Some(GithubDelivery::Until(at)) => format!(" · GitHub until {}", clock(at)),
             Some(GithubDelivery::NotDelivered) => " · GitHub not delivered".to_string(),
             None => String::new(),

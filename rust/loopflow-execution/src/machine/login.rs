@@ -28,7 +28,7 @@ const PAGE_DEADLINE: Duration = Duration::from_secs(60);
 pub const CLAUDE_TOKEN_ENV: &str = "CLAUDE_CODE_OAUTH_TOKEN";
 
 /// Sign `machine` in to `provider`. A Machine whose route is `local` is this
-/// one. A rental is signed in to GitHub for the repository `repo` is a
+/// one. A rental's first GitHub sign-in is for the repository `repo` is a
 /// checkout of; nothing else reads `repo`.
 pub async fn login(
     machine: &Machine,

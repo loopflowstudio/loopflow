@@ -658,14 +658,9 @@ mod tests {
         store.set_rental_github_repository(&rental.id, 42).unwrap();
         store.put_github_rental_grant(&grant()).unwrap();
         let ok = |body| json_response(StatusCode::OK, body);
-        let (url, _) = crate::runtime::block_on(spawn(vec![
-            ok(json!({
-                "access_token": "ghu_UNHELD", "refresh_token": "ghr_NEXT", "expires_in": 28800
-            })),
-            ok(json!({ "login": "jack" })),
-            ok(json!({ "total_count": 1, "installations": [{ "id": 7 }] })),
-            ok(json!({ "total_count": 1, "repositories": [{ "id": 42 }] })),
-        ]));
+        let (url, requests) = crate::runtime::block_on(spawn(vec![ok(json!({
+            "access_token": "ghu_UNHELD", "refresh_token": "ghr_NEXT", "expires_in": 28800
+        }))]));
         // Its provider deleted the sandbox; this Machine only notices.
         let (api, _) = answering("null");
         crate::rental::github::TEST_GITHUB_URL.sync_scope(url, || {
@@ -674,6 +669,8 @@ mod tests {
         assert_eq!(store.rental(&rental.id).unwrap().state, RentalState::Ended);
         let renewed = store.github_rental_grant(42).unwrap().unwrap();
         assert!(renewed.access_token == "ghu_UNHELD");
+        // No rental is sent the new token, so nothing asks what it reaches.
+        assert_eq!(crate::runtime::block_on(requests.lock()).len(), 1);
     }
 
     #[test]

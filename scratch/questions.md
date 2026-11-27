@@ -190,3 +190,19 @@ Adopted with nobody here; each is reversible before it lands:
   a day later.
 - **The waiting line goes to stderr of whatever waits,** the server's rental
   check included.
+
+## Raised by Pass 6
+
+- **An ending that leaves other rentals of the repository running now asks
+  GitHub what the stored token reaches** (three requests) before re-sending
+  to any that are behind. Chosen over a stored "unchecked" mark on the grant:
+  one rule, no column. While GitHub is unreachable such an ending re-sends
+  nothing; the next command for the repository does.
+- **A renewed token that reaches more than the repository stays in the
+  store,** never sent. Before, the old spent tokens stayed instead. Either
+  way the next attended command asks for a new code.
+- **A hand-rented box cannot be moved to a second repository.** Its first
+  GitHub sign-in sets the repository; a sign-in from another checkout renews
+  the first. Someone wanting the second rents another.
+- **An approval whose check gets no answer still loses its code.** Only the
+  renewal stores first. Storing an unchecked approval first would keep it too.

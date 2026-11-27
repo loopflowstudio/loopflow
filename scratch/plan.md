@@ -1,8 +1,7 @@
 # LOO-1118: rentals receive a repository-scoped, expiring GitHub token
 
-Passes 1 to 5 are built and tested against a stand-in GitHub. Pass 6 remains
-(under "Passes"); after it, no further pass is worth building before the run
-under "Needs a person now". Nothing has run against GitHub's real app or a
+Passes 1 to 6 are built and tested against a stand-in GitHub. No further pass
+is worth building before the run under "Needs a person now". Nothing has run against GitHub's real app or a
 real rental. `scratch/concept-review.html` (written at `0419415ca1`) reviewed
 the build after Pass 5; where each finding went is under "Review".
 
@@ -35,7 +34,8 @@ What each answer means:
 
 - Approval passes and the second read is refused: the restriction holds and
   the check sees it. The build stands. If the renewed token is still
-  restricted, the re-check after a renewal can go (three requests a renewal).
+  restricted, the check of a renewed token can go (three requests a renewal;
+  the second `reach` in `usable`).
 - Approval prints `reaches 1 more than …; discarded`: the token may be
   restricted but the listing shows the whole installation. The check becomes
   a read of a second installed repository that must fail; with one install
@@ -199,9 +199,7 @@ check, the re-send, the ending and `--logins` described here.
   (`login.rs:345-350` reads a name from `hosts.yml` today), so a dead token
   reads signed out.
 - **Renew by hand:** `lf machine login github <rental label>` runs the same
-  path, taking the repository from the checkout it is run in. Run from a
-  second repository it replaces the first and says so: `gh` keeps one token
-  per account, so a rental reaches one repository.
+  path for the rental's recorded repository, from any directory (Pass 6).
 - **Placement prints** the time GitHub stops on that rental.
 - **Ending** (`rental/recovery.rs` `mark_ended`, the one place `give_back`,
   `delete_sandbox` and `refresh` all reach): clear
@@ -406,31 +404,30 @@ Survives: Linear's renewed token, OpenCode and Codex sign-in when listed in
    printed, not asserted; `approve_ahead` itself reads the real `gh`, so the
    test drives `settle` as it does.
 6. **A rental's repository is set once, and a dropped connection keeps the
-   approval.** Not built; both made for review from the review after Pass 5.
-   - `lf machine login github <rental>` renews the repository the rental is
-     recorded for, from any directory. The directory is read only for a
-     rental with none recorded (one made with `lf ondemand rent`), and that
-     first sign-in sets it. In `sign_in_as` (`github.rs:681`) the record wins
-     over `origin_repository`. Goes: `moved`, the "it is now for … only"
-     line, the settle of the repository left behind,
-     `set_rental_github_repository` returning the one before,
-     `a_rental_moved_to_another_repository_stops_the_token_it_held`, and
-     "moved to another repository" in the docs (`docs/subscriptions.md:212-214`
-     says the checkout chooses) and in the comments at `github.rs:433,577`.
-     Passed over: keeping the move for someone who rented by hand, signed in
-     for A and wants B on the same box; they rent another.
-   - `renew` (`github.rs:334`) stores what GitHub issued before asking what it
-     reaches. "Reaches more" or another account discards it; no answer keeps
-     it, and the next settle someone is present for checks it (`standing`).
-     Open inside the pass: an unattended settle does not run `standing`, so a
-     stored-unchecked token could be sent by an ending's re-send; either the
-     row carries "unchecked" or an unattended settle checks one. Passed over:
-     dropping the re-check after renewal, which waits on probe 1.
-   Tests: a sign-in run from another repository's checkout sends the rental
-   its recorded repository's token and asks for no code; a renewal whose
-   reach requests fail leaves a grant the next settle renews from or checks,
-   with no code asked. Teaches whether the settle step gets smaller with no
-   move in it.
+   approval.** Built at PASS6, made for review. `sign_in_as` uses the
+   rental's recorded repository and never reads the directory's origin for
+   it; the move, its line, its settle and its test are gone. `renew` stores
+   what GitHub issued and asks nothing; `usable` is the one place a token is
+   checked (`Standing` and `grant_from` are gone). The settle step did get
+   smaller. Changed from the plan:
+   - **Every settle that sends a token asks GitHub what it reaches first,**
+     with or without someone present. That closes the open point (an ending's
+     re-send of a stored, unchecked token) with no "unchecked" column: three
+     more requests on an ending that leaves other rentals of the repository
+     running, and such an ending re-sends nothing while GitHub is unreachable.
+   - **The cut at the last ending asks nothing of the new token,** one request
+     where there were four: no rental is sent it, and the next settle checks
+     it.
+   - **A renewed token that reaches more stays stored and is never sent.**
+     Each later settle asks again and gets the same refusal, or a new code
+     when someone is present.
+   - **A recorded repository with no grant does not count as set:** the first
+     sign-in records before it approves, so a failed approval leaves a record
+     that never had a token, and the directory is read again.
+   - **No answer from GitHub no longer leads to a new code.** Only GitHub's
+     refusal does; a failed request stops the command.
+   Not covered by a test: an approval (not a renewal) whose check gets no
+   answer still loses its code, as before.
 
 ## Acceptance
 
@@ -500,10 +497,11 @@ Passes 4 and 5. Checked against the code: `reach` sums
   restricted token is unknown, and a one-repository install cannot show it:
   the first run under "Needs a person now" now installs on two.
 - The renew command can move a rental to the directory's repository and end
-  the token its Task uses: Pass 6.
-- A dropped connection during a renewal loses the approval: Pass 6.
+  the token its Task uses: built in Pass 6.
+- A dropped connection during a renewal loses the approval: built in Pass 6.
 - Two beliefs about a renewed token (settle trusts it, renew re-checks it):
-  probe 1 says which; the re-check stays until then.
+  one after Pass 6, every token is asked about before it is sent; probe 1
+  says whether the check of a renewed one can go.
 - `lf ondemand list` printed `GitHub until 17:00` an hour after: fixed here,
   `GitHub ended 17:00` (`rust/loopflow/src/lf/commands/rental.rs`,
   `docs/subscriptions.md`). Type-checked; no test covers the list's text.

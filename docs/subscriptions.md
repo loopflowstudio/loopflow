@@ -211,15 +211,18 @@ It reads the record here and asks neither the rental
 nor GitHub. A rental's `github` row in
 `lf machine logins` asks GitHub with the token the rental holds, so it reads
 signed out as soon as a push would fail. `lf machine login github <rental>`
-sends a fresh token for the repository whose checkout you run it from, in
-place of the one the rental held.
+sends the rental a fresh token for its repository, from any directory. A
+rental's repository is set once: one from `lf ondemand rent` has none until
+its first GitHub sign-in, which takes the checkout you run it from.
 
 Renewing a repository's token ends the one its rentals hold, so every rental
 of that repository is sent the new one. A rental that could not be reached is
 named, and the next placement, sign-in or ending for that repository sends it
 again. Everything GitHub can refuse is asked before renting, so a refusal
 bills nothing: a stored approval is checked with GitHub too, so one you
-revoked or an app you uninstalled stops the placement there. A command that
+revoked or an app you uninstalled stops the placement there. A renewal that
+loses its connection to GitHub keeps your approval: the next command checks
+the new token before any rental gets it, and asks for no code. A command that
 finds another `lf` working on the same repository's token says it is waiting,
 then goes on once that one finishes or its code is approved.
 

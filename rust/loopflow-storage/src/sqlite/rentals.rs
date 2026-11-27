@@ -418,31 +418,23 @@ impl SqliteStore {
     }
 
     /// Records that `id` is being signed in for GitHub repository
-    /// `repository_id`, and returns the repository it held before. Whatever
-    /// it was sent earlier is no longer assumed held: the next send that
-    /// reaches it is recorded.
+    /// `repository_id`. Whatever it was sent earlier is no longer assumed
+    /// held: the next send that reaches it is recorded.
     pub fn set_rental_github_repository(
         &self,
         id: &RentalId,
         repository_id: i64,
-    ) -> StoreResult<Option<i64>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let before = tx
-            .query_row(
-                "SELECT github_repository_id FROM rentals WHERE id=?1",
-                [id.as_str()],
-                |row| row.get::<_, Option<i64>>(0),
-            )
-            .optional()?
-            .ok_or(StoreError::NotFound)?;
-        tx.execute(
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
             "UPDATE rentals SET github_repository_id=?2,github_token_expires_at=NULL
              WHERE id=?1",
             params![id.as_str(), repository_id],
         )?;
-        tx.commit()?;
-        Ok(before)
+        if changed == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
     }
 
     /// Records that `id` now holds its repository's token expiring at

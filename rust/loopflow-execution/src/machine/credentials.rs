@@ -43,8 +43,8 @@ enum Credential {
 const LINEAR_ACCESS_HOURS: f64 = 24.0;
 const _: () = assert!(loopflow_storage::rental::MAX_HOURS <= LINEAR_ACCESS_HOURS);
 
-/// `repo` is the checkout whose repository a rental is signed in to GitHub
-/// for; no other sign-in reads it.
+/// `repo` is the checkout whose repository a rental's first GitHub sign-in
+/// is for; no other sign-in reads it.
 pub(crate) async fn connect(
     machine: &Machine,
     provider: Provider,

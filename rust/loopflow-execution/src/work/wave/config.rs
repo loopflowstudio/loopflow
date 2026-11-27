@@ -17,11 +17,16 @@ pub enum WaveConfigError {
     },
 }
 
-/// Keys only a Wave's `config.yaml` carries; every other key is shared
+/// The key only a Wave's `config.yaml` carries; every other key is shared
 /// `Config` layered over the repository's (see `crate::config::load_wave_config`).
-/// `linear` held the Initiative a Wave linked; released lf still reads it, so
-/// it stays a Wave key that nothing here reads.
-const WAVE_ONLY_KEYS: [&str; 2] = ["id", "linear"];
+const WAVE_ONLY_KEYS: [&str; 1] = ["id"];
+
+/// Keys released lf reads from a Wave's `config.yaml` and nothing here does.
+/// They stay out of the shared layer, where they would warn as unknown
+/// settings in every checkout that still carries them. `linear` held the
+/// Initiative a Wave linked; `chat` held a chat channel. LOO-1121 deletes
+/// the list.
+const RETIRED_WAVE_KEYS: [&str; 2] = ["linear", "chat"];
 
 /// The Wave's own identity and bindings from its `config.yaml`.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -63,8 +68,8 @@ pub(crate) fn read_wave_layer(
     let Some((path, mut mapping)) = read_wave_file(repo, name)? else {
         return Ok(None);
     };
-    for key in WAVE_ONLY_KEYS {
-        mapping.remove(key);
+    for key in WAVE_ONLY_KEYS.iter().chain(&RETIRED_WAVE_KEYS) {
+        mapping.remove(*key);
     }
     Ok(Some((path, Value::Mapping(mapping))))
 }
@@ -150,8 +155,11 @@ fn parse_goal_settings(path: &Path, content: &str) -> Mapping {
     let mut mapping = parse_mapping(path, content);
     let shared = crate::config::wave_config_keys();
     mapping.retain(|key, _| {
-        key.as_str()
-            .is_some_and(|key| WAVE_ONLY_KEYS.contains(&key) || shared.contains(key))
+        key.as_str().is_some_and(|key| {
+            WAVE_ONLY_KEYS.contains(&key)
+                || RETIRED_WAVE_KEYS.contains(&key)
+                || shared.contains(key)
+        })
     });
     mapping
 }
@@ -320,6 +328,18 @@ mod tests {
             std::fs::read_to_string(unrelated.join("config.yaml")).unwrap(),
             original
         );
+    }
+
+    #[test]
+    fn retired_wave_keys_stay_out_of_the_shared_layer() {
+        let repo = ConfigRepo::new();
+        repo.write_config(
+            "agent: claude\nchat:\n  channel_id: \"1\"\nlinear:\n  initiative: lin-123\n",
+        );
+        let layer = repo.layer();
+        assert_eq!(layer["agent"].as_str(), Some("claude"));
+        assert!(layer.get("chat").is_none());
+        assert!(layer.get("linear").is_none());
     }
 
     #[test]

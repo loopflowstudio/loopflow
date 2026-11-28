@@ -426,10 +426,14 @@ final class SessionsWorkspace {
             if task?.lifecycle == .unstarted { throw TaskNotStarted() }
             throw RegistryQueryError("Where this Task runs is not known yet; open its conversation.")
         }
+        let placeMachine = machine == localMachineId ? nil : machine
+        // With no checkout named here, the one Files read from the owner is it.
+        let named = place.flatMap { $0.machineId == machine && !$0.worktree.isEmpty ? $0.worktree : nil }
+        let read = taskFiles.flatMap { $0.machine == placeMachine && !$0.cwd.isEmpty ? $0.cwd : nil }
         return FilesPlace(taskId: task?.runtime?.workId ?? taskId,
-                          machine: machine == localMachineId ? nil : machine,
+                          machine: placeMachine,
                           label: owner == machine ? task?.runtime?.owner?.machine.label : nil,
-                          cwd: (place?.machineId == machine ? place?.worktree : nil) ?? "")
+                          cwd: named ?? read ?? "")
     }
 
     /// The Task's Files store. `follow` moves a retained store to this content's

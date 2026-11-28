@@ -48,11 +48,12 @@ started it.
 
 ## Design decisions made for review
 
-Four headless concept reviews asked these questions; nobody answered them.
+Five headless concept reviews asked these questions; nobody answered them.
 Each recommended direction is adopted and marked for `ship-review` to raise.
-Numbers refer to the second review (after Pass 1); the fourth review
-(`scratch/concept-review.html`) re-asks them as Q2–Q4 and adds Q1 (zoom)
-and Q5 (scope).
+Numbers below refer to the second review (after Pass 1). The fifth review
+(`scratch/concept-review.html`, after Pass 5) asks them as Q1 zoom, Q2
+checkout files, Q3 `TERM_PROGRAM`, Q4 remote hostnames, Q5 scope, each
+recommending the built behavior.
 
 - **Checkout files (Q2 → 2a).** A file inside the Task's active checkout opens
   in the Files pane at `#L<n>`. Passed over: the default app for every file,
@@ -97,6 +98,13 @@ and Q5 (scope).
 - Pass 3 (`04c2f98af7`): New held terminals report `TERM_PROGRAM=ghostty` and remove the caller's `TERM_PROGRAM_VERSION`.
 - Pass 4 (`98c105742`): Remote links use `task.file`, hover and click share the `TerminalHyperlink` classifier, and tile clicks enter the Task with Files beside its Session.
 - Pass 5 (`75d691696`): Remote clicks supply the Files snapshot, zoomed terminals restore the split with focus intact, unfocused terminals get ⌘-hover, and the Work resolver owns address validation.
+- Fifth-review fixes (realign after Pass 5): the hover preview clears when
+  the window resigns key, a sheet attaches, the pointer leaves an unfocused
+  terminal, or a link opens (`GhosttyTerminalView.clearLinkHover`); a
+  snapshot handed to an already-showing file is dropped when Files unmounts
+  (`TaskFilesView.onDisappear`); `SessionsWorkspace.filesPlace` falls back to
+  the checkout Files read from the owner on the same Machine, so a remote
+  shell opened before its Session routes checkout links.
 
 ## Acceptance check
 
@@ -120,6 +128,13 @@ with one mocked remote read and verified that manual Refresh still reads.
 All four `documented_commands` tests passed.
 The native hover fixture, signed Xcode build, live local and remote demos,
 and Codex output check remain for CI and QA.
+
+The fifth-review fixes passed the same three suites (31 tests, with
+`remoteShellUsesTheCheckoutFilesReadFromTheOwner` new). The hover-pill and
+snapshot-flag fixes have no headless test; QA checks them: ⌘-click a web
+link and release ⌘ in the browser (no pill left behind), and ⌘-click a
+remote file already open in Read mode, switch Tasks and back (the file
+reads again).
 
 Demo (Dev app): start a Task from Desktop so the server launches its Session.
 Ask the agent for `[the PR](https://github.com/…)`, a checkout file at a line,

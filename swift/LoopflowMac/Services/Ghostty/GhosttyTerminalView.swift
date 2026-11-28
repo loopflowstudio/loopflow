@@ -729,6 +729,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     @objc private func windowKeyChanged(_ notification: Notification) {
         guard let window, notification.object as? NSWindow === window else { return }
         syncSurfaceFocus()
+        // ⌘ is often released in the app a click just activated.
+        if !window.isKeyWindow { clearLinkHover() }
     }
 
     /// Last values sent to the current surface. SwiftUI calls updateNSView on every
@@ -1422,13 +1424,15 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     private func updateUnfocusedLinkHover(with event: NSEvent) {
         guard let window, window.isKeyWindow, event.window === window,
-              window.firstResponder !== self, window.attachedSheet == nil,
-              let surface, let content = window.contentView,
+              window.firstResponder !== self, let surface, let content = window.contentView,
               event.modifierFlags.contains(.command) || hoveredLink != nil else { return }
+        guard window.attachedSheet == nil else { return clearLinkHover() }
         let location = window.mouseLocationOutsideOfEventStream
         let windowPoint = content.superview?.convert(location, from: nil) ?? location
-        guard let hit = content.hitTest(windowPoint), hit === self || hit.isDescendant(of: self),
-              !ghostty_surface_mouse_captured(surface) else { return }
+        guard let hit = content.hitTest(windowPoint), hit === self || hit.isDescendant(of: self) else {
+            return clearLinkHover()
+        }
+        guard !ghostty_surface_mouse_captured(surface) else { return }
         let point = convert(location, from: nil)
         let mods = event.modifierFlags.ghosttyMods
         // Ghostty ignores stationary pointer updates. Leave and re-enter to
@@ -1530,6 +1534,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     func openLink(_ link: TerminalHyperlink) async {
         guard window != nil, surface != nil else { return }
         showLinkNotice(nil)
+        clearLinkHover()
         await onOpenLink(link) { [weak self] in self?.showLinkNotice($0) }
     }
 
@@ -1545,6 +1550,14 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
                 self?.updateLinkFeedback()
             }
         }
+    }
+
+    /// Drop the preview and Ghostty's hover when the pointer or ⌘ can leave
+    /// without this view seeing it.
+    private func clearLinkHover() {
+        guard hoveredLink != nil else { return }
+        showLinkTarget(nil)
+        if let surface { ghostty_surface_mouse_pos(surface, -1, -1, GHOSTTY_MODS_NONE) }
     }
 
     func showLinkTarget(_ target: String?) {

@@ -181,6 +181,19 @@ struct TerminalHyperlinkTests {
         await #expect(throws: RegistryQueryError.self) { try await open("/peer/checkout/offline") }
     }
 
+    @Test @MainActor func remoteShellUsesTheCheckoutFilesReadFromTheOwner() throws {
+        let workspace = SessionsWorkspace(key: .init(repository: "repo", kind: .task, id: "task"),
+                                          title: "Task", location: nil, localMachineId: "local")
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("Placing Files needs no read.") }
+        let unnamed = WorkspaceIdentity(machineId: "peer", worktree: "")
+        #expect(try workspace.filesPlace(taskId: "task", task: nil, location: unnamed).cwd == "")
+
+        _ = workspace.files(at: .init(taskId: "task", machine: "peer", label: nil, cwd: "/peer/checkout"), query: query)
+        #expect(try workspace.filesPlace(taskId: "task", task: nil, location: unnamed).cwd == "/peer/checkout")
+        let elsewhere = WorkspaceIdentity(machineId: "other", worktree: "")
+        #expect(try workspace.filesPlace(taskId: "task", task: nil, location: elsewhere).cwd == "")
+    }
+
     @Test(arguments: [false, true], [false, true]) @MainActor
     func terminalFileOpensBesideTheSession(fromTile: Bool, sessionZoomed: Bool) async throws {
         let checkout = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

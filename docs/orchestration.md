@@ -158,7 +158,7 @@ outer loop, then runs `compress` and `qa` once after the design settles.
 ```
 
 Any Skill can be the deciding step of a loop: it returns `advance`, `iterate`
-(with direction), or `blocked` (with a question).
+(with direction), or `blocked` (with a reason).
 
 During a Graph run, each `iterate` launches the loop’s Skills again in fresh conversations.
 For work that needs several passes, `kickoff` groups it into 2–4 substantial
@@ -187,10 +187,12 @@ repeats, including the decision itself.
 Decision pass 3. Iterating repeats 2 steps, back to sync.
 ```
 
-When a Skill defines its own loop rules, those take precedence over the default
-criteria. By default, a decider looks for a substantial next pass, keeps
-iterating past 5 when real work is left, and returns `blocked` when passes
-repeat without converging. `lf task status` shows the reason the decider gave.
+When a Skill defines its own rules for `advance` and `iterate`, the decider
+follows them. By default, a decider looks for a substantial next pass and can
+keep iterating past five when the work warrants it. Every decider returns
+`blocked` when passes repeat without converging, the last pass made no progress,
+a failure repeats with nothing learned, or progress needs missing input.
+`lf task status` shows the reason the decider gave.
 If the step succeeds and the Graph then fails, status shows the Graph error.
 
 ### Docs-first (`write-docs`) and QA playbooks (`.lf/qa/`)

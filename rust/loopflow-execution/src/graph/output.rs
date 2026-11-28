@@ -6,15 +6,17 @@ use crate::graph::runner::SkillOutcome;
 use crate::graph::transitions::{GraphDecision, GraphVerdict};
 use crate::graph::ConcreteStep;
 
-/// Fallback criteria for steps whose skills give no loop decision rules.
+/// Shared stop criteria and default advance and iterate criteria for loop decisions.
 const DECISION_CRITERIA: &str = "
 
 This step also decides a loop. Do the step's work first, then judge from its results.
-If the skill gives its own loop decision rules, follow those. Otherwise use these defaults.
+
+- blocked when passes repeat without converging, the last pass made no progress, a failure repeats with nothing learned, or you need input you can't supply. This applies to every decider. The Graph stops here. Give the reason.
+
+If the skill gives its own rules for advance and iterate, follow those. Otherwise use these defaults.
 
 - advance when what this step requires is done. Later obligations belong to later steps.
 - iterate when the last pass made progress and you can name a substantial next pass within scope and the result it should produce. Aim to finish within five passes. Continue past five when the work warrants it.
-- blocked when passes repeat without converging, the last pass made no progress, a failure repeats with nothing learned, or you need input you can't supply. The Graph stops here. Give the reason.
 
 Leave checks that can't run here to CI or review. Report them as deferred. Carry the next action and the paths it needs in the summary.";
 
@@ -151,9 +153,13 @@ mod tests {
             GraphOutput::append_step_instructions(step, &mut message),
             Some(GraphOutput::Decision)
         );
-        let (_, defaults) = message
-            .split_once("If the skill gives its own loop decision rules, follow those. Otherwise use these defaults.")
+        let (shared, defaults) = message
+            .split_once("If the skill gives its own rules for advance and iterate, follow those. Otherwise use these defaults.")
             .expect("the runner defers to realign's rule to iterate on small fixes");
+        assert!(shared.contains("- blocked when passes repeat without converging"));
+        assert!(shared.contains("the last pass made no progress"));
+        assert!(shared.contains("a failure repeats with nothing learned"));
+        assert!(defaults.contains("- advance when"));
         assert!(defaults.contains("substantial next pass"));
     }
 

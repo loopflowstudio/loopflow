@@ -29,8 +29,7 @@ When reconciling a fresh concept review, triage its findings below. Otherwise,
 look once for a concept, type or path the design could do without, or a simpler
 form of what it built. Put any in-scope code or test fix in the plan, however
 small. Fix clear mismatches in user docs under `docs/` or in `README.md` files
-here. Send changes to skills, goldens, agent guides, QA playbooks and source
-comments through implementation.
+here. Queue other file changes for implementation.
 
 **What is next?** Regroup what remains into end-to-end passes, aiming for
 five or fewer across the Task. Name what the next pass will deliver and
@@ -51,8 +50,7 @@ work needs.
 When `scratch/concept-review.html` has findings the plan has not answered, give
 each one a place:
 
-- **Plan or user-docs mismatch:** fix it here. Record any docs fix in the plan
-  so `ship-review` can account for the review row.
+- **Plan or user-docs mismatch:** fix it here. Record any docs fix in the plan.
 - **In-scope code or test fix, conceptual rework, or missing promised
   behavior:** write it into the plan as the next pass.
 - **Separate outcome:** list it in the plan under `## Deferred findings` (which
@@ -78,8 +76,9 @@ When deciding a loop:
 - Return `advance` when no implementation work remains. Plan and user-docs
   fixes made here, deferred work and findings already answered in the plan do
   not need another pass.
-- Return `blocked` with the question on a design choice that can't be undone
-  once shipped.
+- Return `blocked` when repeated passes fail to converge on an in-scope fix
+  or when progress needs a design choice that can't be undone once shipped.
+  Give the reason for stopping.
 
 Outside a loop (`plan`, `refresh`, or standalone), there is no `blocked`
 verdict: record any open irreversible choice in `scratch/questions.md` and

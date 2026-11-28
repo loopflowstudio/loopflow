@@ -1,0 +1,3073 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept review: links in Loopflow Sessions and Desktop</title>
+<style>
+/* Loopflow repository review page theme (DESIGN.md / Loopflow Light & Dark tokens). */
+:root {
+  --lf-bg: #faf8f5;
+  --lf-surface: #fffdf9;
+  --lf-surface-muted: #f3eee7;
+  --lf-surface-element: #ece6dd;
+  --lf-border: #e6dfd6;
+  --lf-border-strong: #d6ccc0;
+  --lf-text: #2a2624;
+  --lf-text-secondary: #5f5752;
+  --lf-text-tertiary: #65605d;
+  --lf-accent: #722f37;
+  --lf-accent-hover: #5e2630;
+  --lf-accent-text: #faf8f5;
+  --lf-working-ink: #2f629f;
+  --lf-working-fill: #d5dde6;
+  --lf-warning-ink: #7f5a19;
+  --lf-warning-fill: #e4dccd;
+  --lf-failure-ink: #a64038;
+  --lf-failure-fill: #ecd9d5;
+  --lf-success-ink: #386c48;
+  --lf-success-fill: #d7dfd6;
+  --lf-highlight: rgba(114, 47, 55, 0.14);
+  --lf-highlight-active: rgba(114, 47, 55, 0.28);
+  --lf-highlight-line: rgba(114, 47, 55, 0.45);
+  --lf-shadow: 0 8px 26px rgba(42, 38, 36, 0.14);
+  --lf-shadow-sm: 0 3px 12px rgba(42, 38, 36, 0.08);
+  --lf-bubble-bg: #24201e;
+  --lf-bubble-text: #faf8f5;
+  --lf-bubble-border: #3a3430;
+  --lf-font-serif: "Old Standard TT", Georgia, "Times New Roman", serif;
+  --lf-font-sans: "Atkinson Hyperlegible Next", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --lf-font-mono: "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --lf-bg: #181615;
+    --lf-surface: #201d1b;
+    --lf-surface-muted: #282422;
+    --lf-surface-element: #312c29;
+    --lf-border: #38322e;
+    --lf-border-strong: #4a423d;
+    --lf-text: #efeae4;
+    --lf-text-secondary: #b9afa6;
+    --lf-text-tertiary: #8f857d;
+    --lf-accent: #c96b76;
+    --lf-accent-hover: #d8838d;
+    --lf-accent-text: #181615;
+    --lf-working-ink: #7eb2f0;
+    --lf-working-fill: #203147;
+    --lf-warning-ink: #e0b25c;
+    --lf-warning-fill: #3d311c;
+    --lf-failure-ink: #e67c73;
+    --lf-failure-fill: #452422;
+    --lf-success-ink: #7cc490;
+    --lf-success-fill: #213828;
+    --lf-highlight: rgba(201, 107, 118, 0.22);
+    --lf-highlight-active: rgba(201, 107, 118, 0.38);
+    --lf-highlight-line: rgba(201, 107, 118, 0.65);
+    --lf-shadow: 0 10px 30px rgba(0, 0, 0, 0.44);
+    --lf-shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.30);
+    --lf-bubble-bg: #efeae4;
+    --lf-bubble-text: #181615;
+    --lf-bubble-border: #d6ccc0;
+  }
+}
+
+/* Base layout and component styles for compiled Loopflow review pages. */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--lf-bg);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+main.lf-page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 44px 24px max(168px, var(--lf-dock-room, 0px));
+}
+
+h1 {
+  font-family: var(--lf-font-serif);
+  font-size: 32px;
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  font-variant-ligatures: no-common-ligatures;
+  margin: 0 0 12px;
+}
+
+h2 {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 32px 0 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--lf-border);
+}
+
+h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 20px 0 8px;
+}
+
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 22px; }
+li { margin-bottom: 4px; }
+
+code, pre {
+  font-family: var(--lf-font-mono);
+  font-size: 12.5px;
+}
+
+code {
+  background: var(--lf-surface-muted);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+pre {
+  background: var(--lf-surface);
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 16px;
+  font-size: 14px;
+}
+
+th, td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--lf-border);
+  vertical-align: top;
+}
+
+th {
+  color: var(--lf-text-secondary);
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+/* Meta bar & server status banner */
+.lf-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: var(--lf-text-secondary);
+  font-size: 12.5px;
+  margin-bottom: 24px;
+}
+
+.lf-meta code { font-size: 12px; }
+
+.lf-banner {
+  background: var(--lf-warning-fill);
+  color: var(--lf-warning-ink);
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 13.5px;
+}
+
+/* Diff and File blocks */
+.lf-codeblock {
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  background: var(--lf-surface);
+  margin: 14px 0;
+  overflow: hidden;
+}
+
+.lf-codeblock-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--lf-surface-muted);
+  border-bottom: 1px solid var(--lf-border);
+  font-size: 12.5px;
+}
+
+.lf-codeblock-path {
+  font-family: var(--lf-font-mono);
+  color: var(--lf-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lf-codeblock-scroll { overflow-x: auto; }
+
+.lf-code-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+  font-family: var(--lf-font-mono);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.lf-code-table td {
+  border: 0;
+  padding: 0 8px;
+  white-space: pre;
+}
+
+.lf-code-table td.lf-ln {
+  width: 1%;
+  min-width: 38px;
+  text-align: right;
+  color: var(--lf-text-tertiary);
+  user-select: none;
+  border-right: 1px solid var(--lf-border);
+  font-variant-numeric: tabular-nums;
+  position: relative;
+}
+
+.lf-code-table tr.lf-code-row td.lf-ln { cursor: pointer; }
+
+.lf-code-table tr.lf-code-row td.lf-ln-old,
+.lf-code-table tr.lf-code-row td.lf-ln-single {
+  min-width: 52px;
+  padding-left: 24px;
+}
+
+.lf-code-table .lf-gutter-plus {
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border-radius: 4px;
+  border: none;
+  background: var(--lf-accent);
+  color: var(--lf-accent-text);
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.lf-code-table tr.lf-code-row:hover .lf-gutter-plus,
+.lf-code-table .lf-gutter-plus:focus-visible {
+  opacity: 1;
+}
+
+/* A noted row keeps its diff tint; only the gutter carries the note. */
+.lf-code-table tr.lf-code-row.lf-row-has-note td.lf-ln { background: var(--lf-highlight-active); }
+
+.lf-code-table tr.lf-code-row.lf-row-has-note td.lf-ln:first-child {
+  box-shadow: inset 3px 0 0 var(--lf-accent);
+}
+
+.lf-code-table tr.lf-code-row.lf-row-selecting td { background: var(--lf-working-fill); }
+
+.lf-code-table td.lf-sign {
+  width: 18px;
+  text-align: center;
+  user-select: none;
+  padding: 0 2px;
+}
+
+.lf-code-table tr.lf-add { background: var(--lf-success-fill); }
+.lf-code-table tr.lf-add td.lf-sign { color: var(--lf-success-ink); }
+.lf-code-table tr.lf-del { background: var(--lf-failure-fill); }
+.lf-code-table tr.lf-del td.lf-sign { color: var(--lf-failure-ink); }
+.lf-code-table tr.lf-hunk td {
+  background: var(--lf-surface-muted);
+  color: var(--lf-text-secondary);
+  padding: 3px 10px;
+}
+
+.lf-code-table tr.lf-line-note td {
+  white-space: normal;
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  background: var(--lf-surface-element);
+  color: var(--lf-text);
+  padding: 6px 12px;
+  border-top: 1px solid var(--lf-border);
+  border-bottom: 1px solid var(--lf-border);
+}
+
+.lf-codeblock.lf-notes-hidden tr.lf-line-note { display: none; }
+
+/* Builtin components */
+.lf-decision {
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  background: var(--lf-surface);
+  padding: 14px 16px;
+  margin: 14px 0;
+}
+
+.lf-decision-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.lf-decision-title {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.lf-decision-rec {
+  font-size: 12px;
+  color: var(--lf-text-secondary);
+}
+
+.lf-before-after {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.lf-before-after-pane {
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  background: var(--lf-surface);
+  padding: 12px 14px;
+}
+
+.lf-before-after-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--lf-text-secondary);
+  margin-bottom: 8px;
+}
+
+/* Controls: choices, questions, direct actions */
+[data-choice], [data-multiselect] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* Draw `data-label` as a heading only when the control has no selectable prompt child;
+   a decision card shows its title instead. */
+:is([data-choice], [data-multiselect], [data-question])[data-label]:not(:has(> p, > label, > h3, > h4, > legend))::before {
+  content: attr(data-label);
+  display: block;
+  flex-basis: 100%;
+  margin: 10px 0 2px;
+  font-weight: 600;
+}
+
+:is([data-choice], [data-multiselect]) > :is(p, label, h3, h4, legend) {
+  flex-basis: 100%;
+  margin: 10px 0 2px;
+}
+
+.lf-decision [data-choice][data-label]::before { content: none; }
+
+button {
+  appearance: none;
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  line-height: 1.2;
+  padding: 6px 11px;
+  border-radius: 4px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  cursor: pointer;
+}
+
+button:hover { background: var(--lf-surface-muted); }
+
+button.is-selected,
+button[aria-pressed="true"],
+button.lf-btn-accent {
+  background: var(--lf-accent);
+  border-color: var(--lf-accent);
+  color: var(--lf-accent-text);
+}
+
+button.lf-btn-accent:hover {
+  background: var(--lf-accent-hover);
+  border-color: var(--lf-accent-hover);
+}
+
+button.lf-btn-quiet {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-color: var(--lf-border);
+  color: var(--lf-text-secondary);
+}
+
+button.lf-btn-quiet.is-selected,
+button.lf-btn-quiet[aria-pressed="true"] {
+  background: var(--lf-accent);
+  border-color: var(--lf-accent);
+  color: var(--lf-accent-text);
+}
+
+[data-question] { margin: 14px 0; }
+
+[data-question] textarea, [data-question] input[type="text"] {
+  width: 100%;
+  min-height: 60px;
+  padding: 8px 10px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 4px;
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 14px;
+  resize: vertical;
+}
+
+/* Direct action confirmation & receipt */
+.lf-action-confirm,
+.lf-action-receipt,
+.lf-action-error {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  border-radius: 4px;
+}
+
+.lf-action-confirm,
+.lf-action-error {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lf-action-confirm {
+  padding: 6px 10px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 6px;
+  background: var(--lf-surface-muted);
+}
+
+.lf-action-summary {
+  font-family: var(--lf-font-mono);
+  font-size: 12px;
+  color: var(--lf-text-secondary);
+}
+
+.lf-action-receipt {
+  gap: 6px;
+  padding: 5px 10px;
+  background: var(--lf-success-fill);
+  color: var(--lf-success-ink);
+  font-weight: 600;
+}
+
+.lf-action-error {
+  padding: 5px 10px;
+  background: var(--lf-failure-fill);
+  color: var(--lf-failure-ink);
+}
+
+/* Warm-underlined cross-element note highlights */
+.lf-hl {
+  background: var(--lf-highlight);
+  border-bottom: 2px solid var(--lf-highlight-line, var(--lf-accent));
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.lf-hl:hover { background: var(--lf-highlight-active, var(--lf-highlight)); }
+
+.lf-pulse-ring {
+  outline: 2px solid var(--lf-accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* Notion-style floating selection bubble */
+.lf-float-pill {
+  position: fixed;
+  z-index: 960;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px;
+  border-radius: 8px;
+  background: var(--lf-bubble-bg, var(--lf-text));
+  color: var(--lf-bubble-text, var(--lf-bg));
+  border: 1px solid var(--lf-bubble-border, var(--lf-border-strong));
+  box-shadow: var(--lf-shadow, 0 8px 26px rgba(0, 0, 0, 0.2));
+  font-size: 12px;
+}
+
+.lf-float-pill button {
+  background: transparent;
+  border: none;
+  color: var(--lf-bubble-text, var(--lf-bg));
+  padding: 4px 8px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.lf-float-pill button:hover { background: rgba(128, 128, 128, 0.24); }
+
+.lf-float-pill-sep {
+  width: 1px;
+  height: 14px;
+  background: rgba(128, 128, 128, 0.35);
+}
+
+/* Floating comment composer & hover cards */
+.lf-float-composer,
+.lf-hover-card {
+  position: fixed;
+  background: var(--lf-surface);
+  border: 1px solid var(--lf-border-strong);
+  box-shadow: var(--lf-shadow, 0 8px 26px rgba(0, 0, 0, 0.18));
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.lf-float-composer {
+  z-index: 970;
+  width: min(320px, calc(100vw - 16px));
+  padding: 10px;
+  border-radius: 9px;
+}
+
+.lf-hover-card {
+  z-index: 950;
+  width: min(290px, calc(100vw - 16px));
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+
+.lf-anchor-quote {
+  font-size: 11.5px;
+  color: var(--lf-text-secondary);
+  border-left: 2px solid var(--lf-border-strong);
+  padding-left: 7px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lf-card-body {
+  color: var(--lf-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lf-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.lf-float-composer textarea,
+.lf-sidebar-item textarea {
+  width: 100%;
+  min-height: 56px;
+  padding: 6px 8px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 5px;
+  background: var(--lf-bg);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  resize: vertical;
+}
+
+.lf-sidebar-item textarea { background: var(--lf-surface); }
+
+/* Top-right Comments toggle + collapsible slide-over sidebar */
+.lf-comments-toggle {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  z-index: 920;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  font-size: 12.5px;
+  font-weight: 500;
+  box-shadow: var(--lf-shadow-sm, 0 3px 12px rgba(0, 0, 0, 0.08));
+}
+
+.lf-comments-toggle.has-notes { border-color: var(--lf-accent); }
+
+.lf-comments-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--lf-accent);
+  color: var(--lf-accent-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.lf-comments-count[hidden] { display: none; }
+
+.lf-sidebar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(340px, 92vw);
+  z-index: 940;
+  background: var(--lf-surface);
+  border-left: 1px solid var(--lf-border-strong);
+  box-shadow: var(--lf-shadow, 0 8px 26px rgba(0, 0, 0, 0.18));
+  display: flex;
+  flex-direction: column;
+  transform: translateX(104%);
+  transition: transform 0.18s ease;
+}
+
+.lf-sidebar.is-open { transform: translateX(0); }
+
+.lf-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--lf-border);
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.lf-sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lf-sidebar-empty {
+  font-size: 13px;
+  color: var(--lf-text-tertiary);
+  padding: 6px 2px;
+}
+
+.lf-sidebar-item {
+  padding: 9px 11px;
+  border: 1px solid var(--lf-border);
+  border-radius: 7px;
+  background: var(--lf-bg);
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lf-sidebar-item:hover { border-color: var(--lf-accent); }
+
+/* Fixed T3 Code-style attached-chip composer dock (hidden in Loopflow Desktop) */
+.lf-dock {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 1000;
+  width: min(820px, calc(100vw - 24px));
+  padding: 9px 12px;
+  background: var(--lf-surface);
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 11px;
+  box-shadow: var(--lf-shadow, 0 8px 28px rgba(0, 0, 0, 0.16));
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lf-dock-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  max-height: 92px;
+  overflow-y: auto;
+}
+
+.lf-dock[hidden],
+.lf-dock-chips[hidden] { display: none; }
+
+.lf-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-bg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.lf-chip:hover { border-color: var(--lf-accent); }
+
+.lf-chip-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--lf-surface-element);
+  color: var(--lf-text-secondary);
+  flex-shrink: 0;
+}
+
+.lf-chip-tag.tag-note { background: var(--lf-highlight); color: var(--lf-accent); }
+.lf-chip-tag.tag-lines { background: var(--lf-working-fill); color: var(--lf-working-ink); }
+.lf-chip-tag.tag-choice { background: var(--lf-success-fill); color: var(--lf-success-ink); }
+.lf-chip-tag.tag-answer { background: var(--lf-warning-fill); color: var(--lf-warning-ink); }
+.lf-chip-tag.tag-run { background: var(--lf-failure-fill); color: var(--lf-failure-ink); }
+
+.lf-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+}
+
+.lf-chip-x {
+  border: none;
+  background: transparent;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--lf-text-tertiary);
+}
+
+.lf-chip-x:hover {
+  background: transparent;
+  color: var(--lf-failure-ink);
+}
+
+.lf-dock-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.lf-dock-input {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 6px;
+  background: var(--lf-bg);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 13.5px;
+}
+
+.lf-dock-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.lf-dock-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.lf-dock-preview {
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: var(--lf-bg);
+  border: 1px solid var(--lf-border);
+  font-family: var(--lf-font-mono);
+  font-size: 11.5px;
+  color: var(--lf-text-secondary);
+  word-break: break-word;
+  max-height: 84px;
+  overflow-y: auto;
+}
+
+.lf-dock-status {
+  font-size: 12.5px;
+  color: var(--lf-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lf-dock-status.is-error { color: var(--lf-failure-ink); }
+.lf-dock-status.is-ok { color: var(--lf-success-ink); }
+
+</style>
+</head>
+<body>
+<main class="lf-page">
+<h1>Concept review: links in Loopflow Sessions and Desktop</h1>
+
+<p class="lf-meta">
+  <span>Task <code>LOO-1126</code></span>
+  <span>Stage: pre-implementation (reviewing <code>scratch/plan.md</code>)</span>
+  <span>Base: <code>6deb3b0450</code></span>
+</p>
+
+<p><strong>Area reviewed:</strong> links across Loopflow Sessions and Desktop — from a program inside a held terminal emitting a link (web URL, file path, or <code>loopflow://</code> Work address), through held-terminal identity and VT relay, into Desktop's embedded Ghostty panes and existing Work/Files routers. Widening from Ghostty's <code>OPEN_URL</code> callback to this whole path exposes where treating Desktop like an external terminal clashes with what Desktop already owns.</p>
+
+<h2>Do the concepts line up?</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>What a person knows and does</th>
+      <th>What the code and plan model</th>
+      <th>Aligned?</th>
+      <th>What is wrong</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Click a link in Desktop</strong> — wherever it appears (Session, shell, brief, review page), it opens in the right place.</td>
+      <td>No single owner. Four separate paths today (<code>GhosttyManager.action_cb</code> drops clicks; <code>LoopflowApp.handleDeepLink</code>; <code>TaskBriefView</code>'s <code>openURL</code>; <code>TaskHTMLView.TaskHTMLLinks</code>). The plan adds a fifth isolated opener (<code>TerminalLink</code>) inside <code>Services/Ghostty/</code>.</td>
+      <td><strong>No</strong></td>
+      <td>Action with no single owner. Putting dispatch inside the low-level Ghostty singleton cuts it off from workspace, checkout, Machine, and in-app navigation.</td>
+    </tr>
+    <tr>
+      <td><strong>Click a Loopflow Work link</strong> (<code>loopflow://repo/task/LOO-1127</code>) that an agent or <code>lf open --link</code> printed.</td>
+      <td><code>WorkUrl</code> (<code>work/link.rs</code>) and <code>LoopflowApp.handleDeepLink</code> already own Work addresses, yet <code>plan.md</code> puts every non-<code>http/https/mailto/file</code> scheme behind an untrusted-scheme alert and <code>NSWorkspace.shared.open</code>.</td>
+      <td><strong>No</strong></td>
+      <td>One idea under two paths. Clicking Loopflow's own link inside Loopflow Desktop shows a warning alert and bounces through macOS Launch Services — which on Dev builds can wake the installed release app or CLI applet instead of this app.</td>
+    </tr>
+    <tr>
+      <td><strong>Click a file link</strong> (<code>file:///…/scripts/test.py#L42</code>), locally or in a remote Session.</td>
+      <td>Desktop already has <code>TaskFilesStore.openPresentation</code> (line navigation, read-only rendering, remote Machine reads). <code>plan.md</code> drops <code>#L&lt;n&gt;</code>, checks local disk only, refuses scripts/executables, and hands off to <code>NSWorkspace.shared.open</code>.</td>
+      <td><strong>No</strong></td>
+      <td>One action split into two incompatible models. Opening via Launch Services discards line numbers, refuses repo scripts like <code>scripts/test.py</code> for safety, breaks on remote Sessions, and risks opening a same-path file on this Mac instead of the remote Machine.</td>
+    </tr>
+    <tr>
+      <td><strong>A Session's terminal</strong> — always Loopflow's held terminal, regardless of where it was started or where you view it.</td>
+      <td><code>transport/registry.rs</code> inherits the caller's environment and only defaults unset/empty <code>TERM</code> and <code>COLORTERM</code>. <code>plan.md</code> defaults <code>TERM_PROGRAM=ghostty</code> only when unset or empty.</td>
+      <td><strong>No</strong></td>
+      <td>One name for two ideas: <code>TERM_PROGRAM</code> in <code>start.env</code> names the <em>starter's</em> terminal, not the held <code>libghostty-vt</code> terminal. Sessions started from Apple Terminal or <code>tmux</code> keep <code>Apple_Terminal</code>/<code>tmux</code> and stay linkless; Sessions started from iTerm2 or Warp carry the wrong identity and a mismatched <code>TERM_PROGRAM_VERSION</code>.</td>
+    </tr>
+    <tr>
+      <td><strong>Transient pane feedback</strong> — see the hovered link target, a copy confirmation, or why a clicked link was blocked.</td>
+      <td>Three unrelated slots: <code>copyConfirmation</code> in the top pane strip (which hides when <code>showsStrip == false</code>, e.g. a solo shell pane), <code>connectionBar</code> at the top of the mount, and a proposed bottom-corner hover pill.</td>
+      <td><strong>No</strong></td>
+      <td><code>plan.md</code> refers to "the pane's existing notice," which in code is literally <code>copyConfirmation</code> in the top strip — absent on single shell panes and wired through a Copy-specific notification.</td>
+    </tr>
+    <tr>
+      <td><strong>Inspect a paused or reconnecting Session</strong> — scroll, select, copy, Find, and hover/click links while remote input is paused.</td>
+      <td><code>GhosttyMetalView.flagsChanged</code> returns early when <code>!connectionAcceptsInput</code>, while <code>mouseMoved</code> and <code>mouseDown</code> still reach Ghostty.</td>
+      <td><strong>No</strong></td>
+      <td>Local modifier state is gated behind remote PTY writeability. Holding ⌘ over a link in a reconnecting or ended pane does not highlight the link until the pointer moves.</td>
+    </tr>
+    <tr>
+      <td><strong>Hyperlink transport through relay and snapshot</strong> — links survive reattach and repaint.</td>
+      <td><code>loopflow-terminal</code> (<code>0001-vt-hyperlinks.patch</code>) and <code>transport/snapshot.rs</code> preserve OSC 8 across live repaint and <code>.ghostsnp</code> snapshots.</td>
+      <td><strong>Yes</strong></td>
+      <td>Held terminal state and repaint already model OSC 8 cleanly.</td>
+    </tr>
+    <tr>
+      <td><strong>Untrusted link boundary</strong> — program output cannot trigger arbitrary apps or scripts on a click.</td>
+      <td>Ghostty fails closed on OSC 8 today; <code>plan.md</code> introduces an explicit validation step and always returns <code>true</code> from <code>action_cb</code>.</td>
+      <td><strong>Yes (needs workspace routing)</strong></td>
+      <td>Right threat model, wrong layer: once checkout files go to read-only Files and Work links go to validated in-app routing, safety gets stronger while blocking fewer legitimate clicks.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Biggest mismatch: Desktop acting as a dumb external terminal</h2>
+
+<p><code>GhosttyManager.action_cb</code> sits at the bottom of the stack with no reference to the workspace, checkout, Machine, or <code>WorkLinkRouter</code>. Because <code>plan.md</code> handles clicks right there with <code>NSWorkspace.shared.open</code> as its only opener, Loopflow Desktop treats its own Work links as foreign schemes and kicks its own checkout files out to macOS — throwing away line numbers, refusing executable repo scripts, and failing on remote Sessions.</p>
+
+<div class="lf-codeblock" data-path="scratch/plan.md"><div class="lf-codeblock-header"><span class="lf-codeblock-path">scratch/plan.md:79-105</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,156 @@</td></tr>
+<tr class="lf-add lf-code-row" data-line="79"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">79</td><td class="lf-sign">+</td><td>Shows: in the Dev app, an agent Session&#39;s Markdown link turns the cursor to a</td></tr>
+<tr class="lf-add lf-code-row" data-line="80"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">80</td><td class="lf-sign">+</td><td>hand under ⌘ and opens the browser on click. If the action never arrives for a</td></tr>
+<tr class="lf-add lf-code-row" data-line="81"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">81</td><td class="lf-sign">+</td><td>relayed Session, the fault is in the relay and pass 2 changes shape.</td></tr>
+<tr class="lf-add lf-code-row" data-line="82"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">82</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="83"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">83</td><td class="lf-sign">+</td><td>Tests: `TerminalLinkTests` (headless) over the decision table, including</td></tr>
+<tr class="lf-add lf-code-row" data-line="84"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">84</td><td class="lf-sign">+</td><td>`file:///tmp/x.command`, a symlink to an app, `https:relative`, a bidi override,</td></tr>
+<tr class="lf-add lf-code-row" data-line="85"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">85</td><td class="lf-sign">+</td><td>`#L12`. One `.requiresDisplay` case in `TerminalFeedbackTests`: feed</td></tr>
+<tr class="lf-add lf-code-row" data-line="86"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">86</td><td class="lf-sign">+</td><td>`ESC ] 8 ;; https://example.com ESC \ text` to a surface, ⌘-click the cell,</td></tr>
+<tr class="lf-add lf-code-row" data-line="87"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">87</td><td class="lf-sign">+</td><td>assert the opener closure received the URL.</td></tr>
+<tr class="lf-add lf-code-row" data-line="88"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">88</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="89"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">89</td><td class="lf-sign">+</td><td>### Pass 2: server-started Sessions print links</td></tr>
+<tr class="lf-add lf-code-row" data-line="90"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">90</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="91"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">91</td><td class="lf-sign">+</td><td>`registry.rs:548` already says &quot;A GUI or service launch may have no terminal</td></tr>
+<tr class="lf-add lf-code-row" data-line="92"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">92</td><td class="lf-sign">+</td><td>environment of its own&quot; and defaults `TERM` and `COLORTERM`. Add</td></tr>
+<tr class="lf-add lf-code-row" data-line="93"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">93</td><td class="lf-sign">+</td><td>`TERM_PROGRAM=ghostty` to that list, only when absent or empty. The program&#39;s</td></tr>
+<tr class="lf-add lf-code-row" data-line="94"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">94</td><td class="lf-sign">+</td><td>terminal is lf&#39;s held libghostty-vt terminal, which keeps OSC 8 through repaint</td></tr>
+<tr class="lf-add lf-code-row" data-line="95"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">95</td><td class="lf-sign">+</td><td>and snapshot (`ghostty-vt-patches/0001-vt-hyperlinks.patch`), so the name is</td></tr>
+<tr class="lf-add lf-code-row" data-line="96"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">96</td><td class="lf-sign">+</td><td>what the program is talking to. An inherited `rex` or `ghostty` stays.</td></tr>
+<tr class="lf-add lf-code-row" data-line="97"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">97</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="98"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">98</td><td class="lf-sign">+</td><td>Made for review. Passed over:</td></tr>
+<tr class="lf-add lf-code-row" data-line="99"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">99</td><td class="lf-sign">+</td><td>- `FORCE_HYPERLINK=1`: the agent&#39;s children inherit it, and</td></tr>
+<tr class="lf-add lf-code-row" data-line="100"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">100</td><td class="lf-sign">+</td><td>  `supports-hyperlinks` honors it with no TTY, so tool output piped back to the</td></tr>
+<tr class="lf-add lf-code-row" data-line="101"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">101</td><td class="lf-sign">+</td><td>  model would fill with escape sequences. `TERM_PROGRAM` is checked only on a</td></tr>
+<tr class="lf-add lf-code-row" data-line="102"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">102</td><td class="lf-sign">+</td><td>  TTY.</td></tr>
+<tr class="lf-add lf-code-row" data-line="103"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">103</td><td class="lf-sign">+</td><td>- a `loopflow` name: no program recognizes it, so nothing changes.</td></tr>
+<tr class="lf-add lf-code-row" data-line="104"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">104</td><td class="lf-sign">+</td><td>- setting it from Desktop per pane: the 29 are started by the server, not a</td></tr>
+<tr class="lf-add lf-code-row" data-line="105"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">105</td><td class="lf-sign">+</td><td>  pane.</td></tr>
+</tbody></table></div></div>
+
+<p>Desktop already owns both destinations. <code>LoopflowApp.handleDeepLink</code> resolves <code>loopflow://</code> Work addresses inside this running app, and <code>DesktopActions</code> already opens any checkout path (local or remote Machine) at a line range inside the Files pane:</p>
+
+<div class="lf-codeblock" data-path="swift/LoopflowMac/LoopflowApp.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/LoopflowApp.swift:250-278</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-code-row" data-line="250"><td class="lf-ln lf-ln-single">250</td><td>    /// Work addresses resolve only through Rust&#39;s shared owners (`lf open --link`).</td></tr>
+<tr class="lf-code-row" data-line="251"><td class="lf-ln lf-ln-single">251</td><td>    /// An ambiguous or unknown address changes nothing and reports the qualified choices.</td></tr>
+<tr class="lf-code-row" data-line="252"><td class="lf-ln lf-ln-single">252</td><td>    @MainActor</td></tr>
+<tr class="lf-code-row" data-line="253"><td class="lf-ln lf-ln-single">253</td><td>    private func handleDeepLink(_ url: URL) {</td></tr>
+<tr class="lf-code-row" data-line="254"><td class="lf-ln lf-ln-single">254</td><td>        guard url.scheme == &quot;loopflow&quot; else { return }</td></tr>
+<tr class="lf-code-row" data-line="255"><td class="lf-ln lf-ln-single">255</td><td>        switch url.host {</td></tr>
+<tr class="lf-code-row" data-line="256"><td class="lf-ln lf-ln-single">256</td><td>        case &quot;open&quot; where url.path.isEmpty &amp;&amp; viewItems(url) != nil:</td></tr>
+<tr class="lf-code-row" data-line="257"><td class="lf-ln lf-ln-single">257</td><td>            // `lf desktop view` names a selection expression, not a Work address.</td></tr>
+<tr class="lf-code-row" data-line="258"><td class="lf-ln lf-ln-single">258</td><td>            guard let (repoPath, expression) = viewItems(url) else { return }</td></tr>
+<tr class="lf-code-row" data-line="259"><td class="lf-ln lf-ln-single">259</td><td>            requestRepository(repoPath, .view(expression: expression, address: url.absoluteString))</td></tr>
+<tr class="lf-code-row" data-line="260"><td class="lf-ln lf-ln-single">260</td><td>        case &quot;portfolio&quot; where url.path.isEmpty:</td></tr>
+<tr class="lf-code-row" data-line="261"><td class="lf-ln lf-ln-single">261</td><td>            openWindow(id: &quot;portfolio&quot;)</td></tr>
+<tr class="lf-code-row" data-line="262"><td class="lf-ln lf-ln-single">262</td><td>        case &quot;sessions&quot; where url.path.isEmpty:</td></tr>
+<tr class="lf-code-row" data-line="263"><td class="lf-ln lf-ln-single">263</td><td>            NotificationCenter.default.post(name: .openSessions, object: nil)</td></tr>
+<tr class="lf-code-row" data-line="264"><td class="lf-ln lf-ln-single">264</td><td>        case &quot;update&quot; where url.path.isEmpty:</td></tr>
+<tr class="lf-code-row" data-line="265"><td class="lf-ln lf-ln-single">265</td><td>            AppUpdater.shared.checkForUpdates()</td></tr>
+<tr class="lf-code-row" data-line="266"><td class="lf-ln lf-ln-single">266</td><td>        default:</td></tr>
+<tr class="lf-code-row" data-line="267"><td class="lf-ln lf-ln-single">267</td><td>            taskLinks.receiveAddress { isLatest in</td></tr>
+<tr class="lf-code-row" data-line="268"><td class="lf-ln lf-ln-single">268</td><td>                do {</td></tr>
+<tr class="lf-code-row" data-line="269"><td class="lf-ln lf-ln-single">269</td><td>                    let query = RegistryQueryLocal.shared</td></tr>
+<tr class="lf-code-row" data-line="270"><td class="lf-ln lf-ln-single">270</td><td>                    let resolved = try await query.workLink(url)</td></tr>
+<tr class="lf-code-row" data-line="271"><td class="lf-ln lf-ln-single">271</td><td>                    let link = LinkedWork(resolved)</td></tr>
+<tr class="lf-code-row" data-line="272"><td class="lf-ln lf-ln-single">272</td><td>                    var path = resolved.target.repositoryPath</td></tr>
+<tr class="lf-code-row" data-line="273"><td class="lf-ln lf-ln-single">273</td><td>                    if case .task(let task) = link, let repo = task.repo { path = repo }</td></tr>
+<tr class="lf-code-row" data-line="274"><td class="lf-ln lf-ln-single">274</td><td>                    try await openRepository(path, link: link, address: resolved.url, raises: isLatest)</td></tr>
+<tr class="lf-code-row" data-line="275"><td class="lf-ln lf-ln-single">275</td><td>                } catch { reportOpeningError(error) }</td></tr>
+<tr class="lf-code-row" data-line="276"><td class="lf-ln lf-ln-single">276</td><td>            }</td></tr>
+<tr class="lf-code-row" data-line="277"><td class="lf-ln lf-ln-single">277</td><td>        }</td></tr>
+<tr class="lf-code-row" data-line="278"><td class="lf-ln lf-ln-single">278</td><td>    }</td></tr>
+</tbody></table></div></div>
+
+<div class="lf-codeblock" data-path="swift/LoopflowMac/DesktopActions.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/DesktopActions.swift:552-571</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-code-row" data-line="552"><td class="lf-ln lf-ln-single">552</td><td>            let request = FilesBrowserState.Presentation(path: path, lines: lines, mode: mode == &quot;diff&quot; ? .diff : .read)</td></tr>
+<tr class="lf-code-row" data-line="553"><td class="lf-ln lf-ln-single">553</td><td>            let workspace = try context.task</td></tr>
+<tr class="lf-code-row" data-line="554"><td class="lf-ln lf-ln-single">554</td><td>            let task = context.model.task(id: workspace.key.id)?.task</td></tr>
+<tr class="lf-code-row" data-line="555"><td class="lf-ln lf-ln-single">555</td><td>            if let pane = workspace.multiplexer.browserPane, workspace.multiplexer.isVisible(pane) {</td></tr>
+<tr class="lf-code-row" data-line="556"><td class="lf-ln lf-ln-single">556</td><td>                switch pane.content.selectedBrowserTab {</td></tr>
+<tr class="lf-code-row" data-line="557"><td class="lf-ln lf-ln-single">557</td><td>                case .files, .changes:</td></tr>
+<tr class="lf-code-row" data-line="558"><td class="lf-ln lf-ln-single">558</td><td>                    let files = try workspace.files(for: pane.content, task: task, query: RegistryQueryLocal.shared)</td></tr>
+<tr class="lf-code-row" data-line="559"><td class="lf-ln lf-ln-single">559</td><td>                    if files.holdsPresentation {</td></tr>
+<tr class="lf-code-row" data-line="560"><td class="lf-ln lf-ln-single">560</td><td>                        files.browser.offer(request)</td></tr>
+<tr class="lf-code-row" data-line="561"><td class="lf-ln lf-ln-single">561</td><td>                        return browserOutcome(workspace)</td></tr>
+<tr class="lf-code-row" data-line="562"><td class="lf-ln lf-ln-single">562</td><td>                    }</td></tr>
+<tr class="lf-code-row" data-line="563"><td class="lf-ln lf-ln-single">563</td><td>                default: break</td></tr>
+<tr class="lf-code-row" data-line="564"><td class="lf-ln lf-ln-single">564</td><td>                }</td></tr>
+<tr class="lf-code-row" data-line="565"><td class="lf-ln lf-ln-single">565</td><td>            }</td></tr>
+<tr class="lf-code-row" data-line="566"><td class="lf-ln lf-ln-single">566</td><td>            let outcome = try show(.files, context)</td></tr>
+<tr class="lf-code-row" data-line="567"><td class="lf-ln lf-ln-single">567</td><td>            if let pane = workspace.multiplexer.browserPane {</td></tr>
+<tr class="lf-code-row" data-line="568"><td class="lf-ln lf-ln-single">568</td><td>                try workspace.files(for: pane.content, task: task, query: RegistryQueryLocal.shared).openPresentation(request)</td></tr>
+<tr class="lf-code-row" data-line="569"><td class="lf-ln lf-ln-single">569</td><td>            }</td></tr>
+<tr class="lf-code-row" data-line="570"><td class="lf-ln lf-ln-single">570</td><td>            return outcome</td></tr>
+<tr class="lf-code-row" data-line="571"><td class="lf-ln lf-ln-single">571</td><td>        },</td></tr>
+</tbody></table></div></div>
+
+<p>Meanwhile, Loopflow's own CLI and prompts actively emit <code>loopflow://</code> OSC 8 and Markdown links inside Sessions (<code>rust/loopflow/src/lf/commands/open.rs:1490</code>), so a person will hit that warning dialog on Loopflow's own links on day one.</p>
+
+<div class="lf-before-after">
+  <div class="lf-before-after-pane">
+    <div class="lf-before-after-label">Before</div>
+    
+    <p><strong>Plan as written (generic terminal opener in <code>GhosttyManager</code>)</strong></p>
+    <ol>
+      <li><code>GhosttyManager.action_cb</code> parses bytes into <code>TerminalLink</code>.</li>
+      <li><code>http/https/mailto</code> → <code>NSWorkspace.shared.open</code>.</li>
+      <li><code>file://…#L42</code> → drop <code>#L42</code>, check local disk, refuse scripts/executables, call <code>NSWorkspace.shared.open</code>. Remote checkout file → refused as missing.</li>
+      <li><code>loopflow://loopflow/task/LOO-1127</code> → unknown-scheme alert → Launch Services (can wake the wrong Desktop bundle).</li>
+      <li>Refusal text → crammed into <code>copyConfirmation</code> in the top strip (invisible on solo shell panes).</li>
+    </ol>
+  
+  </div>
+  <div class="lf-before-after-pane">
+    <div class="lf-before-after-label">After</div>
+    
+    <p><strong>Recommended (classify in Ghostty, route in the pane)</strong></p>
+    <ol>
+      <li><code>TerminalLink</code> stays pure: parses raw bytes, rejects control/bidi characters, and classifies into <code>.web(URL)</code>, <code>.work(URL)</code>, <code>.file(path, host, line)</code>, <code>.externalScheme(URL)</code>, or <code>.refused(reason)</code>.</li>
+      <li><code>GhosttyManager.action_cb</code> copies the bytes, forwards to <code>view.onOpenLink</code>, and always returns <code>true</code> for OSC 8 so Ghostty's fallback never runs.</li>
+      <li>The pane routes with its real context (<code>machineId</code>, checkout path, <code>WorkLinkRouter</code>, <code>showBrowser(.files)</code>):
+        <ul>
+          <li><strong>Work address</strong> (<code>loopflow://&lt;repo&gt;[/task/&lt;id&gt;|/wave/&lt;name&gt;]</code> only) → opens directly in this app via <code>WorkLinkRouter</code>, no alert.</li>
+          <li><strong>Checkout file</strong> (local or remote Machine) → opens read-only in Desktop's Files pane at <code>#L&lt;n&gt;</code>; safe for <code>scripts/*.py</code> and <code>*.sh</code>.</li>
+          <li><strong>Local file outside checkout</strong> (local Machine only) → existing Launch Services safety gate (resolve symlinks, refuse apps/scripts/executables).</li>
+          <li><strong>Web / mail</strong> → default app. <strong>Other schemes</strong> → confirm before dispatch.</li>
+        </ul>
+      </li>
+      <li>Hover preview and transient refusal notices share one bottom-corner overlay on <code>GhosttyTerminalMount</code>, visible whether or not the top strip is shown.</li>
+    </ol>
+  
+  </div>
+</div>
+
+
+<h2>Counterexamples that test this design</h2>
+
+<ul>
+  <li><strong>Malicious internal <code>loopflow://</code> action in terminal output</strong> (e.g. <code>loopflow://update</code> or <code>loopflow://open?repo=/tmp&amp;view=…</code>): auto-routing every <code>loopflow://</code> URL would let terminal output trigger app commands. Restricting in-app auto-routing strictly to parsed read-only Work addresses (<code>loopflow://&lt;repo&gt;[/task/&lt;id&gt;|/wave/&lt;name&gt;]</code>, matching <code>WorkUrl</code>) closes that hole; control hosts like <code>update</code> or <code>open</code> stay refused or prompted.</li>
+  <li><strong>Remote Session clicking <code>file:///tmp/notes.txt</code> (outside checkout)</strong>: if Desktop checks local disk without checking <code>terminal.machineId == localMachineId</code>, a click in a remote Session silently opens <em>this Mac's</em> <code>/tmp/notes.txt</code>. Routing by the pane's Machine opens remote checkout paths via Files (which reads from that Machine) and refuses non-checkout remote paths explicitly as "File is on another Machine."</li>
+  <li><strong><code>file://&lt;hostname&gt;/Users/…</code> from OSC 8 tools</strong>: RFC 8089 and tools like <code>ls --hyperlink</code> / <code>rg --hyperlink-format</code> emit the host's own hostname in the authority (e.g. <code>file://Jacks-MacBook.local/Users/…</code>). Local host matching must accept empty host, <code>localhost</code>, and <code>ProcessInfo.processInfo.hostName</code> (case-insensitive), not just empty/<code>localhost</code>.</li>
+  <li><strong>Symlink inside checkout pointing to an app or outside the repo</strong>: opening checkout paths in Desktop's Files pane goes through the server's read-only checkout reader (which never executes files and enforces checkout containment); local outside-checkout fallback still resolves symlinks before checking bundles, scripts, and the executable bit.</li>
+  <li><strong>Session started in Apple Terminal or <code>tmux</code>, then viewed in Desktop</strong>: inheriting non-empty <code>TERM_PROGRAM</code> leaves <code>Apple_Terminal</code> or <code>tmux</code> in place, so Claude still emits no OSC 8 links. Setting <code>TERM_PROGRAM=ghostty</code> unconditionally in <code>registry.rs</code> (and clearing stale <code>TERM_PROGRAM_VERSION</code>) matches the real PTY emulator (<code>libghostty-vt</code>) and fixes links no matter where the Session started.</li>
+  <li><strong>Clicking a link while a Session is reconnecting or ended</strong>: <code>GhosttyMetalView.flagsChanged</code> currently drops modifier events when <code>!connectionAcceptsInput</code>, breaking ⌘-hover affordance on a retained screen. Letting modifier flags update Ghostty's local state (without sending bytes to a paused PTY) keeps link inspection consistent with selection, copy, and Find.</li>
+</ul>
+
+<h2>Second mismatch: held terminal identity in <code>registry.rs</code></h2>
+
+<p><code>registry.rs</code> already strips the caller's relay and viewer variables because "a pane's relay variables describe that pane's viewer… neither is this child's." Yet lines 548–554 only <em>default</em> missing <code>TERM</code> and <code>COLORTERM</code>, and <code>plan.md</code> extends that pattern to <code>TERM_PROGRAM=ghostty</code>.</p>
+
+<div class="lf-codeblock" data-path="rust/loopflow-execution/src/transport/registry.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-execution/src/transport/registry.rs:527-555</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-code-row" data-line="527"><td class="lf-ln lf-ln-single">527</td><td>        let mut env: Vec&lt;(String, String)&gt; = start</td></tr>
+<tr class="lf-code-row" data-line="528"><td class="lf-ln lf-ln-single">528</td><td>            .env</td></tr>
+<tr class="lf-code-row" data-line="529"><td class="lf-ln lf-ln-single">529</td><td>            .into_iter()</td></tr>
+<tr class="lf-code-row" data-line="530"><td class="lf-ln lf-ln-single">530</td><td>            // A pane&#39;s relay variables describe that pane&#39;s viewer, and a</td></tr>
+<tr class="lf-code-row" data-line="531"><td class="lf-ln lf-ln-single">531</td><td>            // held handoff its own terminal; neither is this child&#39;s.</td></tr>
+<tr class="lf-code-row" data-line="532"><td class="lf-ln lf-ln-single">532</td><td>            .filter(|(name, _)| {</td></tr>
+<tr class="lf-code-row" data-line="533"><td class="lf-ln lf-ln-single">533</td><td>                ![</td></tr>
+<tr class="lf-code-row" data-line="534"><td class="lf-ln lf-ln-single">534</td><td>                    HELD_ENV,</td></tr>
+<tr class="lf-code-row" data-line="535"><td class="lf-ln lf-ln-single">535</td><td>                    WITHIN_ENV,</td></tr>
+<tr class="lf-code-row" data-line="536"><td class="lf-ln lf-ln-single">536</td><td>                    PARENT_ENV,</td></tr>
+<tr class="lf-code-row" data-line="537"><td class="lf-ln lf-ln-single">537</td><td>                    CONTROL_ENV,</td></tr>
+<tr class="lf-code-row" data-line="538"><td class="lf-ln lf-ln-single">538</td><td>                    STREAM_ENV,</td></tr>
+<tr class="lf-code-row" data-line="539"><td class="lf-ln lf-ln-single">539</td><td>                    &quot;LF_TERMINAL_ID&quot;,</td></tr>
+<tr class="lf-code-row" data-line="540"><td class="lf-ln lf-ln-single">540</td><td>                    &quot;LF_TERMINAL_TTY&quot;,</td></tr>
+<tr class="lf-code-row" data-line="541"><td class="lf-ln lf-ln-single">541</td><td>                    &quot;LF_SERVER&quot;,</td></tr>
+<tr class="lf-code-row" data-line="542"><td class="lf-ln lf-ln-single">542</td><td>                    &quot;LF_SERVER_STATUS&quot;,</td></tr>
+<tr class="lf-code-row" data-line="543"><td class="lf-ln lf-ln-single">543</td><td>                ]</td></tr>
+<tr class="lf-code-row" data-line="544"><td class="lf-ln lf-ln-single">544</td><td>                .contains(&amp;name.as_str())</td></tr>
+<tr class="lf-code-row" data-line="545"><td class="lf-ln lf-ln-single">545</td><td>            })</td></tr>
+<tr class="lf-code-row" data-line="546"><td class="lf-ln lf-ln-single">546</td><td>            .collect();</td></tr>
+<tr class="lf-code-row" data-line="547"><td class="lf-ln lf-ln-single">547</td><td>        // A GUI or service launch may have no terminal environment of its own.</td></tr>
+<tr class="lf-code-row" data-line="548"><td class="lf-ln lf-ln-single">548</td><td>        for (name, default) in [(&quot;TERM&quot;, &quot;xterm-256color&quot;), (&quot;COLORTERM&quot;, &quot;truecolor&quot;)] {</td></tr>
+<tr class="lf-code-row" data-line="549"><td class="lf-ln lf-ln-single">549</td><td>            match env.iter_mut().rev().find(|(key, _)| key == name) {</td></tr>
+<tr class="lf-code-row" data-line="550"><td class="lf-ln lf-ln-single">550</td><td>                Some((_, value)) if value.is_empty() =&gt; *value = default.into(),</td></tr>
+<tr class="lf-code-row" data-line="551"><td class="lf-ln lf-ln-single">551</td><td>                None =&gt; env.push((name.into(), default.into())),</td></tr>
+<tr class="lf-code-row" data-line="552"><td class="lf-ln lf-ln-single">552</td><td>                _ =&gt; {}</td></tr>
+<tr class="lf-code-row" data-line="553"><td class="lf-ln lf-ln-single">553</td><td>            }</td></tr>
+<tr class="lf-code-row" data-line="554"><td class="lf-ln lf-ln-single">554</td><td>        }</td></tr>
+<tr class="lf-code-row" data-line="555"><td class="lf-ln lf-ln-single">555</td><td>        env.push((HELD_ENV.into(), terminal.to_string()));</td></tr>
+</tbody></table></div></div>
+
+<p>A held terminal is always <code>libghostty-vt</code> — a viewer in Rex, Desktop, iPhone, or Apple Terminal attaches to it later. Inheriting <code>TERM_PROGRAM=Apple_Terminal</code> or <code>tmux</code> disables hyperlinks permanently for that Session; inheriting <code>TERM_PROGRAM=iTerm.app</code> or <code>WarpTerminal</code> invites terminal-specific escapes that <code>libghostty-vt</code> is not, and defaulting <code>TERM_PROGRAM</code> without clearing <code>TERM_PROGRAM_VERSION</code> pairs <code>ghostty</code> with another terminal's version string. Setting <code>TERM_PROGRAM=ghostty</code> unconditionally on held terminals and removing <code>TERM_PROGRAM_VERSION</code> makes the environment describe the real terminal the program talks to.</p>
+
+<p>Checking one counterexample: does anything inside a held terminal depend on <code>TERM_PROGRAM=rex</code>? Loopflow's own host detection (<code>terminal_host.rs</code>) checks <code>REX_SESSION</code>/<code>REX_BLOCK</code>, not <code>TERM_PROGRAM</code>, and held terminals already isolate the child from its viewer's terminal identity. Existing <code>registry_tests.rs</code> covers custom <code>TERM</code>/<code>COLORTERM</code> (such as <code>TERM=dumb</code>), which can stay caller-overridable while <code>TERM_PROGRAM</code> reflects the held VT engine.</p>
+
+<h2>Third mismatch: pane notices and paused input</h2>
+
+<div class="lf-codeblock" data-path="swift/LoopflowMac/Views/WorkspacePanesView.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/Views/WorkspacePanesView.swift:358-360</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-code-row" data-line="358"><td class="lf-ln lf-ln-single">358</td><td>    private var showsStrip: Bool { item != nil || (store.visibleLayout?.allPanes.count ?? 0) &gt; 1 }</td></tr>
+<tr class="lf-code-row" data-line="359"><td class="lf-ln lf-ln-single">359</td><td></td></tr>
+<tr class="lf-code-row" data-line="360"><td class="lf-ln lf-ln-single">360</td><td>    /// Show progress in the Refresh slot only when the pane already has content</td></tr>
+</tbody></table></div></div>
+
+<div class="lf-codeblock" data-path="swift/LoopflowMac/Views/WorkspacePanesView.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/Views/WorkspacePanesView.swift:505-512</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-code-row" data-line="505"><td class="lf-ln lf-ln-single">505</td><td>            if let copyConfirmation {</td></tr>
+<tr class="lf-code-row" data-line="506"><td class="lf-ln lf-ln-single">506</td><td>                Text(copyConfirmation)</td></tr>
+<tr class="lf-code-row" data-line="507"><td class="lf-ln lf-ln-single">507</td><td>                    .font(Typography.meta)</td></tr>
+<tr class="lf-code-row" data-line="508"><td class="lf-ln lf-ln-single">508</td><td>                    .foregroundStyle(theme.palette.text)</td></tr>
+<tr class="lf-code-row" data-line="509"><td class="lf-ln lf-ln-single">509</td><td>                    .lineLimit(1)</td></tr>
+<tr class="lf-code-row" data-line="510"><td class="lf-ln lf-ln-single">510</td><td>                    .allowsHitTesting(false)</td></tr>
+<tr class="lf-code-row" data-line="511"><td class="lf-ln lf-ln-single">511</td><td>                    .accessibilityIdentifier(&quot;terminal-copy-confirmation&quot;)</td></tr>
+<tr class="lf-code-row" data-line="512"><td class="lf-ln lf-ln-single">512</td><td>            }</td></tr>
+</tbody></table></div></div>
+
+<div class="lf-codeblock" data-path="swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift:1351-1359</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-code-row" data-line="1351"><td class="lf-ln lf-ln-single">1351</td><td>    override func flagsChanged(with event: NSEvent) {</td></tr>
+<tr class="lf-code-row" data-line="1352"><td class="lf-ln lf-ln-single">1352</td><td>        guard connectionAcceptsInput, !hasMarkedText() else { return }</td></tr>
+<tr class="lf-code-row" data-line="1353"><td class="lf-ln lf-ln-single">1353</td><td>        guard let surface else {</td></tr>
+<tr class="lf-code-row" data-line="1354"><td class="lf-ln lf-ln-single">1354</td><td>            super.flagsChanged(with: event)</td></tr>
+<tr class="lf-code-row" data-line="1355"><td class="lf-ln lf-ln-single">1355</td><td>            return</td></tr>
+<tr class="lf-code-row" data-line="1356"><td class="lf-ln lf-ln-single">1356</td><td>        }</td></tr>
+<tr class="lf-code-row" data-line="1357"><td class="lf-ln lf-ln-single">1357</td><td></td></tr>
+<tr class="lf-code-row" data-line="1358"><td class="lf-ln lf-ln-single">1358</td><td>        if let key = event.ghosttyModifierKey { ghostty_surface_key(surface, key) }</td></tr>
+<tr class="lf-code-row" data-line="1359"><td class="lf-ln lf-ln-single">1359</td><td>    }</td></tr>
+</tbody></table></div></div>
+
+<p>Two small seams in the existing view will bite Pass 1 if left as-is: a solo shell pane has <code>showsStrip == false</code>, so routing link refusals through <code>copyConfirmation</code> hides them there; and blocking <code>flagsChanged</code> when <code>!connectionAcceptsInput</code> stalls ⌘-hover feedback on reconnecting or ended screens.</p>
+
+<h2>Findings</h2>
+
+<div class="lf-decision" data-decision-id="f1">
+  <div class="lf-decision-head">
+    <span class="lf-decision-title">Route terminal links through the pane, not GhosttyManager</span>
+    <span class="lf-decision-rec">Recommended: Fix here</span>
+  </div>
+  <div class="lf-decision-body">
+  <p><strong>This work.</strong> Keep <code>TerminalLink</code> as a pure parser/classifier and pass clicks to an <code>onOpenLink</code> closure supplied by <code>WorkspacePanesView</code> (or a shared Desktop link router), rather than calling <code>NSWorkspace.shared.open</code> directly from <code>GhosttyManager.action_cb</code>. Always return <code>true</code> from <code>action_cb</code> for <code>OPEN_URL</code> so Ghostty's fallback never runs.</p>
+</div>
+  <div data-choice="f1" data-label="Route terminal links through the pane, not GhosttyManager">
+    <button type="button" data-value="Fix here">Fix here</button>
+    <button type="button" data-value="File Task">File Task</button>
+    <button type="button" data-value="Drop">Drop</button>
+  </div>
+</div>
+
+
+<div class="lf-decision" data-decision-id="f2">
+  <div class="lf-decision-head">
+    <span class="lf-decision-title">Open validated loopflow:// Work links inside this Desktop app</span>
+    <span class="lf-decision-rec">Recommended: Fix here</span>
+  </div>
+  <div class="lf-decision-body">
+  <p><strong>This work.</strong> Recognize strictly validated Work addresses (<code>loopflow://&lt;repo&gt;[/task/&lt;id&gt;|/wave/&lt;name&gt;]</code>) and dispatch them directly to Desktop's in-app <code>WorkLinkRouter</code> / <code>handleDeepLink</code> path with no warning alert and no Launch Services round-trip. Keep internal app-control routes (<code>loopflow://update</code>, <code>loopflow://open?view=…</code>) refused or prompted.</p>
+</div>
+  <div data-choice="f2" data-label="Open validated loopflow:// Work links inside this Desktop app">
+    <button type="button" data-value="Fix here">Fix here</button>
+    <button type="button" data-value="File Task">File Task</button>
+    <button type="button" data-value="Drop">Drop</button>
+  </div>
+</div>
+
+
+<div class="lf-decision" data-decision-id="f3">
+  <div class="lf-decision-head">
+    <span class="lf-decision-title">Open checkout file links in Desktop&#39;s Files pane at their line</span>
+    <span class="lf-decision-rec">Recommended: Fix here</span>
+  </div>
+  <div class="lf-decision-body">
+  <p><strong>This work (or confirm external-app preference in Q1).</strong> When a clicked <code>file://</code> link points inside the pane's checkout — on this Mac or a remote Machine — open it read-only in Desktop's Files pane via <code>TaskFilesStore.openPresentation</code>, preserving <code>#L&lt;n&gt;</code> and safely viewing scripts like <code>scripts/test.py</code>. Use the safe <code>NSWorkspace.shared.open</code> gate only for local files outside the checkout, and refuse non-checkout remote paths explicitly instead of checking this Mac's filesystem. Accept <code>ProcessInfo.processInfo.hostName</code> as a local <code>file://</code> host.</p>
+</div>
+  <div data-choice="f3" data-label="Open checkout file links in Desktop&#39;s Files pane at their line">
+    <button type="button" data-value="Fix here">Fix here</button>
+    <button type="button" data-value="File Task">File Task</button>
+    <button type="button" data-value="Drop">Drop</button>
+  </div>
+</div>
+
+
+<div class="lf-decision" data-decision-id="f4">
+  <div class="lf-decision-head">
+    <span class="lf-decision-title">Set TERM_PROGRAM=ghostty unconditionally for held terminals and clear TERM_PROGRAM_VERSION</span>
+    <span class="lf-decision-rec">Recommended: Fix here</span>
+  </div>
+  <div class="lf-decision-body">
+  <p><strong>This work.</strong> In <code>rust/loopflow-execution/src/transport/registry.rs</code>, set <code>TERM_PROGRAM=ghostty</code> and strip <code>TERM_PROGRAM_VERSION</code> on every held terminal instead of only when unset/empty. Every held terminal is <code>libghostty-vt</code>; inheriting <code>Apple_Terminal</code> or <code>tmux</code> still leaves Sessions without OSC 8 links.</p>
+</div>
+  <div data-choice="f4" data-label="Set TERM_PROGRAM=ghostty unconditionally for held terminals and clear TERM_PROGRAM_VERSION">
+    <button type="button" data-value="Fix here">Fix here</button>
+    <button type="button" data-value="File Task">File Task</button>
+    <button type="button" data-value="Drop">Drop</button>
+  </div>
+</div>
+
+
+<div class="lf-decision" data-decision-id="f5">
+  <div class="lf-decision-head">
+    <span class="lf-decision-title">Use the terminal mount&#39;s bottom-corner overlay for hover and link refusals; unblock modifier hover when paused</span>
+    <span class="lf-decision-rec">Recommended: Fix here</span>
+  </div>
+  <div class="lf-decision-body">
+  <p><strong>This work.</strong> Show both the <code>MOUSE_OVER_LINK</code> target preview and transient link-refusal messages in <code>GhosttyTerminalMount</code>'s bottom-corner overlay rather than reusing <code>copyConfirmation</code> in the top strip (which is hidden on solo shell panes). Allow modifier-only <code>flagsChanged</code> events to update Ghostty's local hover state when <code>!connectionAcceptsInput</code> without forwarding keystrokes.</p>
+</div>
+  <div data-choice="f5" data-label="Use the terminal mount&#39;s bottom-corner overlay for hover and link refusals; unblock modifier hover when paused">
+    <button type="button" data-value="Fix here">Fix here</button>
+    <button type="button" data-value="File Task">File Task</button>
+    <button type="button" data-value="Drop">Drop</button>
+  </div>
+</div>
+
+
+<div class="lf-decision" data-decision-id="f6">
+  <div class="lf-decision-head">
+    <span class="lf-decision-title">Unify link routing across Desktop&#39;s other views (TaskHTMLView and TaskBriefView)</span>
+    <span class="lf-decision-rec">Recommended: File Task</span>
+  </div>
+  <div class="lf-decision-body">
+  <p><strong>Separate outcome.</strong> <code>TaskHTMLView.TaskHTMLLinks</code> currently only opens <code>http/https/mailto</code> externally and lets <code>loopflow://</code> fall through into <code>WKWebView</code> navigation; <code>TaskBriefView</code> hands <code>loopflow://</code> to <code>.systemAction</code> (Launch Services) instead of the in-app router. Unifying all three surfaces on one Desktop link router is a small follow-up Task (~100 lines in Swift + tests).</p>
+</div>
+  <div data-choice="f6" data-label="Unify link routing across Desktop&#39;s other views (TaskHTMLView and TaskBriefView)">
+    <button type="button" data-value="Fix here">Fix here</button>
+    <button type="button" data-value="File Task">File Task</button>
+    <button type="button" data-value="Drop">Drop</button>
+  </div>
+</div>
+
+
+<div class="lf-decision" data-decision-id="f7">
+  <div class="lf-decision-head">
+    <span class="lf-decision-title">Clickable links in iPhone Sessions</span>
+    <span class="lf-decision-rec">Recommended: File Task</span>
+  </div>
+  <div class="lf-decision-body">
+  <p><strong>Separate outcome.</strong> <code>swift/LoopflowiOS/GhosttySurface.swift</code> ignores <code>GHOSTTY_ACTION_OPEN_URL</code>, Ghostty's iOS opener is unimplemented, and touch has no ⌘-click gesture. Designing a touch interaction (tap vs long-press preview sheet) and sharing <code>TerminalLink</code> classification across macOS and iOS belongs in its own Task.</p>
+</div>
+  <div data-choice="f7" data-label="Clickable links in iPhone Sessions">
+    <button type="button" data-value="Fix here">Fix here</button>
+    <button type="button" data-value="File Task">File Task</button>
+    <button type="button" data-value="Drop">Drop</button>
+  </div>
+</div>
+
+
+<h2>Questions</h2>
+
+<div data-choice="q1" data-label="1. Where should checkout file links open?">
+  <p><strong>1. When you ⌘-click a file inside the Session's checkout (for example <code>scripts/test.py#L42</code> or a source file in a remote Session), where should it open?</strong></p>
+  <p>Opening in Desktop's Files pane jumps to the exact line, lets you read executable scripts safely, and works on remote Machines. Opening in the macOS default app matches Rex for ordinary text files, but drops line numbers, must block scripts/executables for safety, and cannot open files on remote Machines.</p>
+  <button type="button" data-value="1a">1a — Desktop's Files pane at that line (default app only for local files outside the checkout) (Recommended)</button>
+  <button type="button" data-value="1b">1b — macOS default app for all local files, matching Rex (drop line numbers, block scripts, refuse remote files)</button>
+</div>
+
+<div data-choice="q2" data-label="2. Should held terminals always identify as ghostty?">
+  <p><strong>2. When a Session is started from another terminal (like Apple Terminal, <code>tmux</code>, or Rex), should Loopflow tell the agent its terminal is <code>ghostty</code> (Loopflow's held terminal engine) or keep the starter's terminal name?</strong></p>
+  <p>Always setting <code>ghostty</code> means links work consistently in Desktop no matter where the Session was started. Keeping the starter's name preserves <code>rex</code> when started from Rex, but leaves Sessions started from Apple Terminal or <code>tmux</code> without clickable links.</p>
+  <button type="button" data-value="2a">2a — Always identify held terminals as ghostty (consistent links from any starter) (Recommended)</button>
+  <button type="button" data-value="2b">2b — Only set ghostty when the starter had no terminal name (keep inherited rex, Apple_Terminal, etc.)</button>
+</div>
+
+<div data-choice="q3" data-label="3. How should Loopflow Work links open from a Session?">
+  <p><strong>3. When an agent prints a Loopflow link (such as a Task or Wave link from <code>lf open --link</code>) and you ⌘-click it in Desktop, should it jump straight to that Task/Wave in this window?</strong></p>
+  <p>Only read-only Task, Wave, and Repository links would open directly; app-control links like <code>loopflow://update</code> would still be blocked or confirmed. Without this, clicking Loopflow's own links prompts for confirmation and can open a different installed copy of Loopflow.</p>
+  <button type="button" data-value="3a">3a — Open Task/Wave/Repository links directly inside this Desktop app (Recommended)</button>
+  <button type="button" data-value="3b">3b — Treat loopflow:// like any other custom scheme (confirm first, hand to macOS)</button>
+</div>
+
+<div data-question="q4" data-label="4. Anything else to change before Pass 1?">
+  <p><strong>4. Any other link types, edge cases, or preferences to fold into the plan before implementation?</strong></p>
+  <textarea placeholder="Optional notes…"></textarea>
+</div>
+</main>
+<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1126"},"directory":"/Users/jack/src/loopflow.7b50cc-links-in-agent","base":"6deb3b0450fca0b42f3fb31511c2494f3b7a2591","head":"c97a78401f","path":"scratch/concept-review.html","build_id":"670bd1640520a55b","protocol":{"revision":11,"min_revision":10}}</script>
+<script>
+(function () {
+  "use strict";
+
+  const stampEl = document.getElementById("lf-page");
+  if (!stampEl) return;
+  let stamp;
+  try {
+    stamp = JSON.parse(stampEl.textContent || "{}");
+  } catch (_) {
+    return;
+  }
+
+  const pagePath = String(stamp.path || "scratch/page.html");
+  const buildId = String(stamp.build_id || "0");
+  const work = stamp.work || { kind: "repository" };
+  const directory = String(stamp.directory || "");
+  const protocol =
+    stamp.protocol && typeof stamp.protocol === "object" ? stamp.protocol : null;
+  const protocolRevision = Number(protocol && protocol.revision);
+  const protocolMinRevision = Number(protocol && protocol.min_revision);
+  const storageKey = "lf-page:" + pagePath + ":" + buildId;
+  const mainEl =
+    document.querySelector("main.lf-page") || document.querySelector("main") || document.body;
+
+  const desktopHandler =
+    window.webkit &&
+    window.webkit.messageHandlers &&
+    window.webkit.messageHandlers.loopflow;
+
+  let hostMode = desktopHandler ? "desktop" : "clipboard";
+  let socket = null;
+  let nextReqId = 1;
+  const pending = new Map();
+  const cancelledAction = Symbol("cancelled action");
+  let serverDisconnected = false;
+  let sendingReply = false;
+
+  // Draft & receipt state.
+  // Notes (prose & diff/file lines), choices, multiselects, questions, offline actions,
+  // and optional browser overall direction enter the reply queue.
+  // Executed direct `data-lf` receipts stay separate and only ride as a suffix on ⌘↩.
+  function emptyState() {
+    return {
+      notes: [],
+      choices: {},
+      multiselects: {},
+      questions: {},
+      offlineActions: [],
+      overall: "",
+      receipts: [],
+    };
+  }
+
+  let state = emptyState();
+
+  function oneLine(text) {
+    return String(text || "")
+      .replace(/[\r\n\t\x00-\x1f]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function buttonValue(btn) {
+    return btn.getAttribute("data-value") || oneLine(btn.textContent);
+  }
+
+  function resultTaskId(result) {
+    return result && ((result.task && result.task.identifier) || result.identifier);
+  }
+
+  function errorMessage(err) {
+    return String(err && err.message ? err.message : err);
+  }
+
+  function el(tag, opts, ...children) {
+    const node = document.createElement(tag);
+    if (typeof opts === "string") {
+      if (opts) node.className = opts;
+    } else if (opts) {
+      for (const [k, v] of Object.entries(opts)) {
+        if (v == null || v === false) continue;
+        if (k === "cls") node.className = v;
+        else if (k === "text") node.textContent = v;
+        else if (k === "on") {
+          for (const [ev, fn] of Object.entries(v)) node.addEventListener(ev, fn);
+        } else if (k === "attrs") {
+          for (const [ak, av] of Object.entries(v)) node.setAttribute(ak, av);
+        } else {
+          node[k] = v;
+        }
+      }
+    }
+    for (const child of children) {
+      if (child != null && child !== false) node.append(child);
+    }
+    return node;
+  }
+
+  function makeButton(label, onClick, className) {
+    return el("button", { type: "button", cls: className || "", text: label, on: { click: onClick } });
+  }
+
+  function setPressed(btn, active) {
+    btn.classList.toggle("is-selected", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+
+  function focusEnd(ta) {
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  }
+
+  function clearSelection() {
+    try {
+      window.getSelection().removeAllRanges();
+    } catch (_) {}
+  }
+
+  function randomId() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return window.crypto.randomUUID();
+    }
+    return "lf-" + Math.random().toString(16).slice(2) + "-" + Date.now().toString(16);
+  }
+
+  function shortPath(path) {
+    const parts = String(path || "").split("/");
+    return parts[parts.length - 1] || path;
+  }
+
+  function truncate(text, max) {
+    const s = oneLine(text);
+    return s.length > max ? s.slice(0, max - 1) + "…" : s;
+  }
+
+  function nearestSection(node) {
+    let cur = node && node.nodeType === 1 ? node : node && node.parentElement;
+    while (cur && cur !== document.body) {
+      let prev = cur.previousElementSibling;
+      while (prev) {
+        if (/^H[1-4]$/.test(prev.tagName)) return oneLine(prev.textContent);
+        prev = prev.previousElementSibling;
+      }
+      cur = cur.parentElement;
+    }
+    const h1 = document.querySelector("h1");
+    return h1 ? oneLine(h1.textContent) : "Top";
+  }
+
+  function formatLineSpan(note) {
+    const start = Number(note.lineStart);
+    const end = Number(note.lineEnd || note.lineStart);
+    const span = start === end ? String(start) : start + "–" + end;
+    return note.side === "old" ? "old:" + span : span;
+  }
+
+  function formatLineAnchor(note) {
+    return oneLine(note.path) + ":" + formatLineSpan(note);
+  }
+
+  function formatNoteAnchorLabel(note) {
+    if (note.kind === "line") return formatLineAnchor(note);
+    return "§ " + oneLine(note.section) + ' · "' + truncate(note.quote, 46) + '"';
+  }
+
+  function pulseElement(target) {
+    if (!target) return;
+    try {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+    } catch (_) {}
+    target.classList.add("lf-pulse-ring");
+    setTimeout(() => target.classList.remove("lf-pulse-ring"), 950);
+  }
+
+  function rowsForLineNote(note) {
+    const matched = [];
+    const attr = note.side === "old" ? "data-old-line" : "data-line";
+    const start = Number(note.lineStart);
+    const end = Number(note.lineEnd || note.lineStart);
+    for (const block of mainEl.querySelectorAll(".lf-codeblock[data-path]")) {
+      if (block.getAttribute("data-path") !== note.path) continue;
+      block.querySelectorAll("tr.lf-code-row[" + attr + "]").forEach((tr) => {
+        const ln = Number(tr.getAttribute(attr));
+        if (ln >= start && ln <= end) matched.push(tr);
+      });
+    }
+    return matched;
+  }
+
+  function noteAnchorElement(note) {
+    if (note.kind === "line") return rowsForLineNote(note)[0] || null;
+    return mainEl.querySelector('.lf-hl[data-lf-note-id="' + CSS.escape(note.id) + '"]');
+  }
+
+  function notesInDocumentOrder() {
+    if (state.notes.length <= 1) return state.notes.slice();
+    return state.notes
+      .map((note, idx) => ({ note, idx, el: noteAnchorElement(note) }))
+      .sort((a, b) => {
+        if (a.el && b.el && a.el !== b.el) {
+          const pos = a.el.compareDocumentPosition(b.el);
+          if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+          if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+        }
+        if (a.el !== b.el) return a.el ? -1 : 1;
+        return a.idx - b.idx;
+      })
+      .map((entry) => entry.note);
+  }
+
+  function deleteNote(id) {
+    state.notes = state.notes.filter((n) => n.id !== id);
+    if (sidebarEditingId === id) sidebarEditingId = null;
+    hideHoverCard();
+    refresh(true);
+  }
+
+  function editNote(id, text) {
+    state.notes = state.notes.map((note) => note.id === id ? { ...note, text } : note);
+    sidebarEditingId = null;
+    refresh(true);
+  }
+
+  function queueEntries() {
+    const entries = [];
+    for (const note of notesInDocumentOrder()) {
+      const text = oneLine(note.text);
+      const jump = () => pulseElement(noteAnchorElement(note));
+      const remove = () => deleteNote(note.id);
+      if (note.kind === "line") {
+        const anchor = formatLineAnchor(note);
+        entries.push({
+          tag: "lines",
+          summary: shortPath(note.path) + ":" + formatLineSpan(note) + " — " + text,
+          title: anchor + " — " + text,
+          ref: "`" + pagePath + "` § " + anchor + " — " + text,
+          jump,
+          remove,
+        });
+      } else {
+        const section = oneLine(note.section);
+        const quote = oneLine(note.quote);
+        entries.push({
+          tag: "note",
+          summary: '"' + truncate(quote, 26) + '" — ' + text,
+          title: section + ' › "' + quote + '" — ' + text,
+          ref: "`" + pagePath + "` § " + section + ' › "' + quote + '" ' + text,
+          jump,
+          remove,
+        });
+      }
+    }
+
+    function pushControl(tag, attr, key, label, val, remove) {
+      const summary = label + ": " + val;
+      entries.push({
+        tag,
+        summary,
+        title: summary,
+        ref: "`" + pagePath + "` § " + summary,
+        jump: () => pulseElement(document.querySelector("[" + attr + '="' + CSS.escape(key) + '"]')),
+        remove: () => {
+          remove();
+          refresh(true);
+        },
+      });
+    }
+
+    for (const [group, entry] of Object.entries(state.choices)) {
+      if (!entry || !entry.value) continue;
+      pushControl(
+        "choice",
+        "data-choice",
+        group,
+        oneLine(entry.label || group),
+        oneLine(entry.value),
+        () => delete state.choices[group]
+      );
+    }
+    for (const [group, entry] of Object.entries(state.multiselects)) {
+      if (!entry || !Array.isArray(entry.values) || entry.values.length === 0) continue;
+      pushControl(
+        "choice",
+        "data-multiselect",
+        group,
+        oneLine(entry.label || group),
+        entry.values.map(oneLine).join(", "),
+        () => delete state.multiselects[group]
+      );
+    }
+    for (const [qid, entry] of Object.entries(state.questions)) {
+      const ans = entry && oneLine(entry.answer);
+      if (!ans) continue;
+      pushControl(
+        "answer",
+        "data-question",
+        qid,
+        oneLine(entry.label || qid),
+        ans,
+        () => delete state.questions[qid]
+      );
+    }
+    for (const act of state.offlineActions) {
+      const summary = oneLine(act.summary);
+      entries.push({
+        tag: "run",
+        summary,
+        title: "Run: " + summary,
+        ref: "`" + pagePath + "` Run: " + summary,
+        jump: () => {
+          const found = actions.find((a) => a.key === act.key);
+          if (found) pulseElement(found.slot);
+        },
+        remove: () => {
+          state.offlineActions = state.offlineActions.filter((a) => a.id !== act.id);
+          refresh(true);
+        },
+      });
+    }
+    return entries;
+  }
+
+  function queueItems(entries) {
+    const items = (entries || queueEntries()).map((e) => e.ref);
+    const overall = oneLine(state.overall);
+    if (!desktopHandler && overall) {
+      items.push("`" + pagePath + "` Overall: " + overall);
+    }
+    return items;
+  }
+
+  function formatReplyMessage(items) {
+    if (!items.length) return "";
+    let message = items.map((ref, idx) => "(" + (idx + 1) + ") " + oneLine(ref)).join(" ");
+    const unreported = state.receipts.filter((r) => !r.reported);
+    if (unreported.length > 0) {
+      const ran = unreported
+        .map((r) => oneLine(r.kind + (r.summary ? " → " + r.summary : "")))
+        .join("; ");
+      message += " [already ran: " + ran + "]";
+    }
+    return oneLine(message);
+  }
+
+  function saveState() {
+    if (desktopHandler) {
+      try {
+        desktopHandler.postMessage({
+          type: "sync",
+          build_id: buildId,
+          state,
+          items: queueItems(),
+        });
+      } catch (_) {}
+      return;
+    }
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(state));
+    } catch (_) {}
+  }
+
+  function loadBrowserState() {
+    if (desktopHandler) return;
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") applyState(parsed);
+    } catch (_) {}
+  }
+
+  // `persist` marks an edit: the last send's sentence no longer describes the queue.
+  function refresh(persist) {
+    if (persist) setStatus("", "");
+    syncControlsFromState();
+    renderHighlights();
+    renderSidebar();
+    if (persist) saveState();
+    renderDock();
+  }
+
+  function applyState(loaded) {
+    if (!loaded || typeof loaded !== "object") {
+      state = emptyState();
+    } else {
+      state = {
+        notes: Array.isArray(loaded.notes) ? loaded.notes : [],
+        choices: loaded.choices && typeof loaded.choices === "object" ? loaded.choices : {},
+        multiselects:
+          loaded.multiselects && typeof loaded.multiselects === "object" ? loaded.multiselects : {},
+        questions: loaded.questions && typeof loaded.questions === "object" ? loaded.questions : {},
+        offlineActions: Array.isArray(loaded.offlineActions) ? loaded.offlineActions : [],
+        overall: typeof loaded.overall === "string" ? loaded.overall : "",
+        receipts: Array.isArray(loaded.receipts) ? loaded.receipts : [],
+      };
+    }
+    refresh(false);
+  }
+
+  // Desktop calls this with `null` after `ReviewComments.insert(into:)` sends the page's items;
+  // Swift has already updated its stored page state, so don't echo a redundant `sync` back.
+  window.__lfDesktopApplyState = function (loaded) {
+    if (loaded) applyState(loaded);
+    else clearDrafts({ markReported: true, persist: false });
+  };
+
+  // --- Loopback WebSocket carrier ---
+
+  function loopbackWsUrl() {
+    if (window.location.protocol !== "http:" || window.location.hostname !== "127.0.0.1") return null;
+    const parts = window.location.pathname.split("/").filter(Boolean);
+    if (parts.length < 3 || parts[1] !== "f" || !/^[A-Za-z0-9_-]{43}$/.test(parts[0])) return null;
+    return "ws://" + window.location.host + "/" + parts[0] + "/machine";
+  }
+
+  function markDisconnected(reason) {
+    hostMode = "clipboard";
+    serverDisconnected = true;
+    showBanner(reason || "Loopflow server disconnected — run lf page open " + pagePath);
+    renderDock();
+  }
+
+  function connectLoopback() {
+    if (desktopHandler) return;
+    const url = loopbackWsUrl();
+    if (!url) return;
+    if (!Number.isInteger(protocolRevision) || !Number.isInteger(protocolMinRevision)) {
+      markDisconnected("Review page is missing server protocol version — rebuild with lf page build");
+      return;
+    }
+    let ws;
+    try {
+      ws = new WebSocket(url);
+    } catch (_) {
+      markDisconnected("");
+      return;
+    }
+    let handshakeError = "";
+    let closingForUnload = false;
+    ws.addEventListener("open", () => {
+      ws.send(
+        JSON.stringify({
+          type: "hello",
+          revision: protocolRevision,
+          min_revision: protocolMinRevision,
+          client: { kind: "page", platform: "browser", name: "review-page", version: "1" },
+        })
+      );
+    });
+    ws.addEventListener("message", (event) => {
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch (_) {
+        return;
+      }
+      if (msg.type === "welcome") {
+        socket = ws;
+        hostMode = "loopback";
+        serverDisconnected = false;
+        hideBanner();
+        renderDock();
+        return;
+      }
+      if (msg.type === "error" && !msg.id) {
+        handshakeError = msg.message || msg.code || "Loopflow server rejected connection";
+        showBanner(handshakeError);
+        return;
+      }
+      if ((msg.type === "response" || msg.type === "error") && msg.id && pending.has(msg.id)) {
+        const entry = pending.get(msg.id);
+        pending.delete(msg.id);
+        if (msg.type === "response") entry.resolve(msg.result);
+        else entry.reject(new Error(msg.message || msg.code || "Server error"));
+      }
+    });
+    ws.addEventListener("close", () => {
+      if (socket === ws) socket = null;
+      for (const [, entry] of pending) entry.reject(new Error("Connection closed"));
+      pending.clear();
+      if (!closingForUnload) markDisconnected(handshakeError);
+    });
+    window.addEventListener("pagehide", () => {
+      closingForUnload = true;
+      try {
+        ws.close();
+      } catch (_) {}
+    });
+  }
+
+  function sendOperation(operation, requestId) {
+    if (desktopHandler) {
+      try {
+        return Promise.resolve(
+          desktopHandler.postMessage({
+            type: "operation",
+            operation,
+            request_id: requestId || null,
+          })
+        ).then((result) => {
+          if (result && result.error) throw new Error(result.error);
+          if (result && result.cancelled) return cancelledAction;
+          return result && result.result !== undefined ? result.result : result;
+        });
+      } catch (err) {
+        return Promise.reject(err);
+      }
+    }
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error("Loopflow server is not connected"));
+    }
+    return new Promise((resolve, reject) => {
+      const id = "req-" + nextReqId++;
+      pending.set(id, { resolve, reject });
+      try {
+        socket.send(JSON.stringify({
+          type: "request",
+          id,
+          operation,
+          select: null,
+          sender: null,
+          request_id: requestId || null,
+        }));
+      } catch (error) {
+        pending.delete(id);
+        reject(error);
+      }
+    });
+  }
+
+  // --- Banner ---
+
+  let bannerEl = null;
+  function showBanner(text) {
+    if (!bannerEl) {
+      bannerEl = el("div", "lf-banner");
+      mainEl.insertBefore(bannerEl, mainEl.firstChild);
+    }
+    bannerEl.textContent = text;
+    bannerEl.hidden = false;
+  }
+
+  function hideBanner() {
+    if (bannerEl) bannerEl.hidden = true;
+  }
+
+  // --- Controls & direct `data-lf` actions ---
+
+  // Each `data-lf` button and the element now standing in its place.
+  const actions = [];
+
+  function showInSlot(action, node) {
+    if (action.slot !== node) action.slot.replaceWith(node);
+    action.slot = node;
+  }
+
+  function wireControls() {
+    document.querySelectorAll("[data-notes-toggle]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const block = btn.closest(".lf-codeblock");
+        if (!block) return;
+        const hidden = block.classList.toggle("lf-notes-hidden");
+        btn.textContent = hidden ? "Show line notes" : "Hide line notes";
+      });
+    });
+
+    document.querySelectorAll("[data-choice]").forEach((groupEl) => {
+      const group = groupEl.getAttribute("data-choice");
+      const label = groupEl.getAttribute("data-label") || group;
+      groupEl.querySelectorAll("button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const value = buttonValue(btn);
+          if (state.choices[group] && state.choices[group].value === value) {
+            delete state.choices[group];
+          } else {
+            state.choices[group] = { label, value };
+          }
+          refresh(true);
+        });
+      });
+    });
+
+    document.querySelectorAll("[data-multiselect]").forEach((groupEl) => {
+      const group = groupEl.getAttribute("data-multiselect");
+      const label = groupEl.getAttribute("data-label") || group;
+      groupEl.querySelectorAll("button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const value = buttonValue(btn);
+          const current = (state.multiselects[group] && state.multiselects[group].values) || [];
+          const next = current.includes(value)
+            ? current.filter((v) => v !== value)
+            : current.concat([value]);
+          if (next.length === 0) delete state.multiselects[group];
+          else state.multiselects[group] = { label, values: next };
+          refresh(true);
+        });
+      });
+    });
+
+    document.querySelectorAll("[data-question]").forEach((box) => {
+      const qid = box.getAttribute("data-question");
+      const label = box.getAttribute("data-label") || qid;
+      let input = box.querySelector("textarea, input");
+      if (!input) {
+        input = el("textarea", { rows: 2 });
+        box.append(input);
+      }
+      input.addEventListener("input", () => {
+        const answer = input.value;
+        if (!oneLine(answer)) delete state.questions[qid];
+        else state.questions[qid] = { label, answer };
+        setStatus("", "");
+        saveState();
+        renderDock();
+      });
+    });
+
+    document.querySelectorAll("[data-lf]").forEach((btn, idx) => {
+      let template;
+      try {
+        template = JSON.parse(btn.getAttribute("data-lf") || "{}");
+      } catch (_) {
+        return;
+      }
+      const action = {
+        key: btn.getAttribute("data-lf-id") || "action-" + idx,
+        btn,
+        template,
+        slot: btn,
+      };
+      actions.push(action);
+      btn.addEventListener("click", (event) => {
+        if (event.isTrusted) openActionConfirm(action);
+      });
+    });
+  }
+
+  // Receipts and offline-queued actions outlive reloads; an action with neither shows its button.
+  function syncActionsFromState() {
+    for (const action of actions) {
+      const receipt = state.receipts.find((r) => r.key === action.key);
+      const offline = state.offlineActions.find((a) => a.key === action.key);
+      if (receipt) {
+        showInSlot(action, el("span", { cls: "lf-action-receipt", text: receipt.text || receipt.summary }));
+      } else if (offline) {
+        showInSlot(action, el("span", { cls: "lf-action-summary", text: "Offline — added to reply" }));
+      } else if (
+        action.slot.classList.contains("lf-action-receipt") ||
+        action.slot.classList.contains("lf-action-summary")
+      ) {
+        showInSlot(action, action.btn);
+      }
+    }
+  }
+
+  function syncControlsFromState() {
+    syncActionsFromState();
+    document.querySelectorAll("[data-choice]").forEach((groupEl) => {
+      const selected =
+        state.choices[groupEl.getAttribute("data-choice")] &&
+        state.choices[groupEl.getAttribute("data-choice")].value;
+      groupEl.querySelectorAll("button").forEach((btn) => setPressed(btn, selected === buttonValue(btn)));
+    });
+    document.querySelectorAll("[data-multiselect]").forEach((groupEl) => {
+      const entry = state.multiselects[groupEl.getAttribute("data-multiselect")];
+      const values = (entry && entry.values) || [];
+      groupEl.querySelectorAll("button").forEach((btn) => setPressed(btn, values.includes(buttonValue(btn))));
+    });
+    document.querySelectorAll("[data-question]").forEach((box) => {
+      let input = box.querySelector("textarea, input");
+      if (!input) {
+        input = el("textarea", { rows: 2 });
+        box.append(input);
+      }
+      const entry = state.questions[box.getAttribute("data-question")];
+      const saved = entry ? entry.answer : "";
+      if (input.value !== saved) input.value = saved;
+    });
+  }
+
+  function summarizeOperation(op) {
+    const parts = [op.kind || "operation"];
+    for (const [k, v] of Object.entries(op)) {
+      if (k === "kind" || k === "directory" || k === "request_id" || v === null || v === false || v === "") {
+        continue;
+      }
+      if (Array.isArray(v) && v.length === 0) continue;
+      parts.push(k + "=" + (typeof v === "string" ? v : JSON.stringify(v)));
+    }
+    return parts.join(" ");
+  }
+
+  function materializeOperation(template, requestId) {
+    const copy = JSON.parse(JSON.stringify(template));
+    if (copy.request_id === "__LF_REQUEST_ID__") copy.request_id = requestId;
+    return copy;
+  }
+
+  function formatReceipt(kind, result) {
+    if (result && typeof result === "object") {
+      const taskId = resultTaskId(result);
+      if (kind === "task.create" && taskId) return "Filed " + taskId;
+      if (result.delivery && result.delivery.sentence) return result.delivery.sentence;
+      if (taskId) return kind + " → " + taskId;
+      if (result.sentence) return result.sentence;
+    }
+    return "Ran " + kind;
+  }
+
+  function openActionConfirm(action) {
+    const template = action.template;
+    if (hostMode === "clipboard") {
+      state.offlineActions.push({ id: randomId(), key: action.key, summary: summarizeOperation(template) });
+      refresh(true);
+      return;
+    }
+
+    const requestId = randomId();
+    if (desktopHandler) execute();
+    else {
+      showInSlot(action, el(
+        "span",
+        "lf-action-confirm",
+        el("span", { cls: "lf-action-summary", text: summarizeOperation(template) }),
+        makeButton("Run", execute, "lf-btn-accent"),
+        makeButton("Cancel", () => showInSlot(action, action.btn))
+      ));
+    }
+
+    function execute(event) {
+      if (event && !event.isTrusted) return;
+      showInSlot(action, el("span", { cls: "lf-action-confirm", text: "Running…" }));
+      const op = materializeOperation(template, requestId);
+      sendOperation(op, requestId).then(
+        (result) => {
+          if (result === cancelledAction) {
+            showInSlot(action, action.btn);
+            return;
+          }
+          const text = formatReceipt(op.kind, result);
+          state.receipts.push({ key: action.key, kind: op.kind, summary: resultTaskId(result) || text, text });
+          refresh(true);
+        },
+        (err) => {
+          showInSlot(
+            action,
+            el("span", "lf-action-error", el("span", { text: errorMessage(err) }), makeButton("Retry", execute))
+          );
+        }
+      );
+    }
+  }
+
+  // --- Cross-element prose highlight anchoring ---
+
+  const EXCLUDED_TEXT_SELECTOR =
+    "button, textarea, input, script, style, .lf-gutter-plus, .lf-ln, .lf-sign, " +
+    ".lf-float-pill, .lf-float-composer, .lf-hover-card, .lf-sidebar, .lf-dock, " +
+    ".lf-comments-toggle, .lf-banner, .lf-action-confirm, .lf-action-receipt, .lf-action-error";
+
+  const BLOCK_TAGS = new Set([
+    "P", "DIV", "LI", "TR", "TD", "TH", "H1", "H2", "H3", "H4", "H5", "H6",
+    "PRE", "BLOCKQUOTE", "SECTION", "ARTICLE", "ASIDE", "HEADER", "FOOTER", "DT", "DD",
+  ]);
+
+  function nearestBlock(node) {
+    let cur = node && node.nodeType === 1 ? node : node && node.parentElement;
+    while (cur && cur !== mainEl) {
+      if (BLOCK_TAGS.has(cur.tagName)) return cur;
+      cur = cur.parentElement;
+    }
+    return mainEl;
+  }
+
+  function isExcludedTextNode(node) {
+    const parent = node.parentElement;
+    return (
+      !parent ||
+      Boolean(parent.closest(EXCLUDED_TEXT_SELECTOR)) ||
+      Boolean(parent.closest("[hidden]")) ||
+      Boolean(parent.closest(".lf-notes-hidden .lf-line-note"))
+    );
+  }
+
+  function buildNormalizedIndex(root) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let flat = "";
+    const positions = [];
+    let lastWasSpace = true;
+    let lastBlock = null;
+    let node;
+    while ((node = walker.nextNode())) {
+      if (!node.nodeValue || isExcludedTextNode(node)) continue;
+      const block = nearestBlock(node);
+      if (lastBlock && block !== lastBlock && !lastWasSpace) {
+        flat += " ";
+        positions.push(null);
+        lastWasSpace = true;
+      }
+      lastBlock = block;
+      const val = node.nodeValue;
+      for (let i = 0; i < val.length; i++) {
+        const ch = val[i];
+        if (/\s/.test(ch)) {
+          if (!lastWasSpace) {
+            flat += " ";
+            positions.push({ node, offset: i });
+            lastWasSpace = true;
+          }
+        } else {
+          flat += ch;
+          positions.push({ node, offset: i });
+          lastWasSpace = false;
+        }
+      }
+    }
+    if (flat.endsWith(" ")) {
+      flat = flat.slice(0, -1);
+      positions.pop();
+    }
+    return { flat, positions };
+  }
+
+  function findOccurrenceForRange(range, needle) {
+    if (!needle) return 0;
+    const index = buildNormalizedIndex(mainEl);
+    let rangeFlatPos = -1;
+    for (let i = 0; i < index.positions.length; i++) {
+      const p = index.positions[i];
+      if (!p) continue;
+      try {
+        if (range.comparePoint(p.node, p.offset) === 0) {
+          rangeFlatPos = i;
+          break;
+        }
+      } catch (_) {}
+    }
+    if (rangeFlatPos < 0) return 0;
+    let count = 0;
+    let from = 0;
+    while (from < rangeFlatPos) {
+      const hit = index.flat.indexOf(needle, from);
+      if (hit < 0 || hit >= rangeFlatPos) break;
+      count++;
+      from = hit + 1;
+    }
+    return count;
+  }
+
+  function findNormalizedRange(needle, occurrence) {
+    if (!needle) return null;
+    const index = buildNormalizedIndex(mainEl);
+    let hit = -1;
+    let from = 0;
+    const targetOcc = Math.max(0, Number(occurrence) || 0);
+    for (let occ = 0; occ <= targetOcc; occ++) {
+      const next = index.flat.indexOf(needle, from);
+      if (next < 0) break;
+      hit = next;
+      from = next + 1;
+    }
+    if (hit < 0) return null;
+    let s = hit;
+    let e = hit + needle.length - 1;
+    while (s <= e && !index.positions[s]) s++;
+    while (e >= s && !index.positions[e]) e--;
+    if (s > e || !index.positions[s] || !index.positions[e]) return null;
+    try {
+      const range = document.createRange();
+      range.setStart(index.positions[s].node, index.positions[s].offset);
+      range.setEnd(index.positions[e].node, index.positions[e].offset + 1);
+      return range;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function wrapRange(range, noteId) {
+    const walker = document.createTreeWalker(mainEl, NodeFilter.SHOW_TEXT);
+    const hits = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      if (!node.nodeValue || isExcludedTextNode(node)) continue;
+      try {
+        if (!range.intersectsNode(node)) continue;
+      } catch (_) {
+        continue;
+      }
+      const start = node === range.startContainer ? range.startOffset : 0;
+      const end = node === range.endContainer ? range.endOffset : node.nodeValue.length;
+      if (end > start && node.nodeValue.slice(start, end).trim()) {
+        hits.push({ node, start, end });
+      }
+    }
+    for (let i = hits.length - 1; i >= 0; i--) {
+      const { node: tn, start, end } = hits[i];
+      const text = tn.nodeValue;
+      const frag = document.createDocumentFragment();
+      if (start > 0) frag.append(text.slice(0, start));
+      frag.append(el("span", { cls: "lf-hl", text: text.slice(start, end), attrs: { "data-lf-note-id": noteId } }));
+      if (end < text.length) frag.append(text.slice(end));
+      if (tn.parentNode) tn.parentNode.replaceChild(frag, tn);
+    }
+  }
+
+  function unwrapAllHighlights() {
+    const spans = Array.from(mainEl.querySelectorAll("span.lf-hl[data-lf-note-id]"));
+    const parents = new Set();
+    for (let i = spans.length - 1; i >= 0; i--) {
+      const span = spans[i];
+      const parent = span.parentNode;
+      if (!parent) continue;
+      parents.add(parent);
+      while (span.firstChild) parent.insertBefore(span.firstChild, span);
+      parent.removeChild(span);
+    }
+    for (const parent of parents) {
+      if (parent.isConnected) parent.normalize();
+    }
+  }
+
+  let lastHighlightSig = "";
+
+  function renderHighlights() {
+    const sig = JSON.stringify(
+      state.notes.map((n) =>
+        n.kind === "line"
+          ? [n.id, "line", n.path, n.side, n.lineStart, n.lineEnd]
+          : [n.id, "prose", n.match || n.quote, n.occurrence || 0]
+      )
+    );
+    if (sig === lastHighlightSig) return;
+    lastHighlightSig = sig;
+
+    unwrapAllHighlights();
+    mainEl.querySelectorAll("tr.lf-code-row.lf-row-has-note").forEach((tr) => {
+      tr.classList.remove("lf-row-has-note");
+      tr.removeAttribute("data-lf-line-note-ids");
+    });
+
+    for (const note of state.notes) {
+      if (note.kind === "line") {
+        for (const tr of rowsForLineNote(note)) {
+          tr.classList.add("lf-row-has-note");
+          const existing = tr.getAttribute("data-lf-line-note-ids");
+          const list = existing ? existing.split(",") : [];
+          if (!list.includes(note.id)) list.push(note.id);
+          tr.setAttribute("data-lf-line-note-ids", list.join(","));
+        }
+      } else {
+        const range = findNormalizedRange(oneLine(note.match || note.quote), note.occurrence || 0);
+        if (range) wrapRange(range, note.id);
+      }
+    }
+  }
+
+  // --- Floating selection pill, composer, and hover cards (1c) ---
+
+  let floatPill = null;
+  let floatComposer = null;
+  let pendingSelection = null; // { range, rect, section, quote, match }
+  let hoverCardEl = null;
+  let hoverHideTimer = null;
+
+  function dismissFloatPill() {
+    if (floatPill) {
+      floatPill.remove();
+      floatPill = null;
+    }
+  }
+
+  function clearPendingSelection() {
+    pendingSelection = null;
+    dismissFloatPill();
+  }
+
+  function dismissFloatComposer() {
+    if (floatComposer) {
+      floatComposer.remove();
+      floatComposer = null;
+    }
+    mainEl.querySelectorAll("tr.lf-code-row.lf-row-selecting").forEach((tr) => {
+      tr.classList.remove("lf-row-selecting");
+    });
+  }
+
+  function dismissFloats() {
+    dismissFloatPill();
+    dismissFloatComposer();
+  }
+
+  function hideHoverCard() {
+    clearTimeout(hoverHideTimer);
+    if (hoverCardEl) {
+      hoverCardEl.remove();
+      hoverCardEl = null;
+    }
+  }
+
+  function clampFixedBox(box, rect, preferAbove) {
+    const w = box.offsetWidth;
+    const h = box.offsetHeight;
+    const dockAllowance = desktopHandler ? 12 : 96;
+    let top;
+    if (preferAbove) {
+      top = rect.top - h - 8;
+      if (top < 8) top = Math.min(window.innerHeight - h - dockAllowance, rect.bottom + 8);
+    } else {
+      top = rect.bottom + 8;
+      if (top + h > window.innerHeight - dockAllowance) {
+        top = Math.max(8, rect.top - h - 8);
+      }
+    }
+    top = Math.max(8, Math.min(window.innerHeight - h - 8, top));
+    const centered = preferAbove ? rect.left + rect.width / 2 - w / 2 : rect.left;
+    const left = Math.max(8, Math.min(window.innerWidth - w - 8, centered));
+    box.style.top = top + "px";
+    box.style.left = left + "px";
+  }
+
+  function buildNoteEditor({ initialText, placeholder, rows, onSave, onCancel, stopProp }) {
+    const ta = el("textarea", { rows: rows || 2, placeholder, value: initialText || "" });
+    const commit = () => {
+      const val = oneLine(ta.value);
+      if (val) onSave(val);
+    };
+    ta.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+        commit();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onCancel();
+      }
+    });
+    const wrap = (fn) => (e) => {
+      if (stopProp) e.stopPropagation();
+      fn();
+    };
+    const actionsEl = el(
+      "div",
+      "lf-card-actions",
+      makeButton("Cancel", wrap(onCancel), "lf-btn-quiet"),
+      makeButton("Save ⌘↩", wrap(commit), "lf-btn-accent")
+    );
+    return { ta, actionsEl };
+  }
+
+  function showFloatPill(rect, buttons) {
+    dismissFloatPill();
+    floatPill = el("div", "lf-float-pill");
+    buttons.forEach((b, idx) => {
+      if (idx > 0) floatPill.append(el("span", "lf-float-pill-sep"));
+      floatPill.append(
+        el("button", {
+          type: "button",
+          text: b.label,
+          on: {
+            mousedown: (e) => e.preventDefault(),
+            click: () => {
+              dismissFloatPill();
+              b.onClick();
+            },
+          },
+        })
+      );
+    });
+    document.body.append(floatPill);
+    clampFixedBox(floatPill, rect, true);
+  }
+
+  function saveProseNote(selInfo, text) {
+    const needle = selInfo.match;
+    state.notes.push({
+      id: randomId(),
+      kind: "prose",
+      section: selInfo.section,
+      quote: selInfo.quote.slice(0, 140),
+      match: needle,
+      occurrence: findOccurrenceForRange(selInfo.range, needle),
+      text: oneLine(text),
+    });
+    pendingSelection = null;
+    clearSelection();
+    refresh(true);
+  }
+
+  function openProseComposer(selInfo) {
+    openFloatingComposer(selInfo.rect, {
+      anchorLabel: formatNoteAnchorLabel({ kind: "prose", section: selInfo.section, quote: selInfo.quote }),
+      onSave: (val) => saveProseNote(selInfo, val),
+    });
+  }
+
+  function openFloatingComposer(rect, opts) {
+    dismissFloats();
+    hideHoverCard();
+
+    if (opts.selectedRows) {
+      for (const tr of opts.selectedRows) tr.classList.add("lf-row-selecting");
+    }
+
+    const { ta, actionsEl } = buildNoteEditor({
+      initialText: opts.initialText,
+      placeholder: opts.placeholder || "Add comment… (⌘↩ to save)",
+      onSave: (val) => {
+        dismissFloatComposer();
+        opts.onSave(val);
+      },
+      onCancel: dismissFloatComposer,
+    });
+
+    floatComposer = el(
+      "div",
+      "lf-float-composer",
+      el("div", { cls: "lf-anchor-quote", text: opts.anchorLabel }),
+      ta,
+      actionsEl
+    );
+    document.body.append(floatComposer);
+    clampFixedBox(floatComposer, rect, false);
+    focusEnd(ta);
+  }
+
+  function showHoverCard(targetEl, note) {
+    if (floatComposer) return;
+    hideHoverCard();
+
+    const editBtn = makeButton("Edit", () => {
+      const r = targetEl.getBoundingClientRect();
+      hideHoverCard();
+      openFloatingComposer(r, {
+        anchorLabel: formatNoteAnchorLabel(note),
+        initialText: note.text,
+        onSave: (val) => editNote(note.id, val),
+      });
+    }, "lf-btn-quiet");
+
+    hoverCardEl = el(
+      "div",
+      {
+        cls: "lf-hover-card",
+        on: {
+          mouseenter: () => clearTimeout(hoverHideTimer),
+          mouseleave: () => {
+            hoverHideTimer = setTimeout(hideHoverCard, 200);
+          },
+        },
+      },
+      el("div", { cls: "lf-anchor-quote", text: formatNoteAnchorLabel(note) }),
+      el("div", { cls: "lf-card-body", text: note.text }),
+      el("div", "lf-card-actions", editBtn, makeButton("Delete", () => deleteNote(note.id), "lf-btn-quiet"))
+    );
+    document.body.append(hoverCardEl);
+    clampFixedBox(hoverCardEl, targetEl.getBoundingClientRect(), false);
+  }
+
+  function wireSelectionNotes() {
+    document.addEventListener("mouseup", (event) => {
+      if (
+        event.target.closest(
+          ".lf-float-pill, .lf-float-composer, .lf-hover-card, .lf-sidebar, .lf-dock, .lf-comments-toggle, button, textarea, input, .lf-action-confirm, td.lf-ln"
+        )
+      ) {
+        return;
+      }
+
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) return clearPendingSelection();
+      const quote = oneLine(sel.toString());
+      if (!quote) return clearPendingSelection();
+
+      const range = sel.getRangeAt(0).cloneRange();
+      const containerEl =
+        range.commonAncestorContainer.nodeType === 1
+          ? range.commonAncestorContainer
+          : range.commonAncestorContainer.parentElement;
+      if (!containerEl || !mainEl.contains(containerEl)) return clearPendingSelection();
+
+      const selInfo = {
+        range,
+        rect: range.getBoundingClientRect(),
+        section: nearestSection(containerEl),
+        quote: quote.slice(0, 140),
+        match: quote.slice(0, 240),
+      };
+      pendingSelection = selInfo;
+
+      showFloatPill(selInfo.rect, [
+        { label: "Comment (c)", onClick: () => openProseComposer(selInfo) },
+        { label: "Flag", onClick: () => saveProseNote(selInfo, "Flagged for follow-up") },
+        {
+          label: "Copy",
+          onClick: () => {
+            copyText(quote).catch(() => {});
+            pendingSelection = null;
+            clearSelection();
+          },
+        },
+      ]);
+    });
+
+    document.addEventListener("mousedown", (event) => {
+      if (
+        floatComposer &&
+        !floatComposer.contains(event.target) &&
+        !event.target.closest(".lf-float-pill, .lf-gutter-plus, td.lf-ln")
+      ) {
+        dismissFloatComposer();
+      }
+    });
+
+    mainEl.addEventListener("mouseover", (event) => {
+      const hl = event.target.closest(".lf-hl[data-lf-note-id]");
+      if (hl) {
+        const note = state.notes.find((n) => n.id === hl.getAttribute("data-lf-note-id"));
+        if (note) showHoverCard(hl, note);
+        return;
+      }
+      const lnCell = event.target.closest("tr.lf-code-row.lf-row-has-note td.lf-ln");
+      if (lnCell) {
+        const tr = lnCell.closest("tr.lf-code-row");
+        const firstId = (tr.getAttribute("data-lf-line-note-ids") || "").split(",")[0];
+        const note = firstId ? state.notes.find((n) => n.id === firstId) : null;
+        if (note) showHoverCard(lnCell, note);
+      }
+    });
+
+    mainEl.addEventListener("mouseout", (event) => {
+      if (event.target.closest(".lf-hl[data-lf-note-id], tr.lf-code-row.lf-row-has-note td.lf-ln")) {
+        hoverHideTimer = setTimeout(hideHoverCard, 220);
+      }
+    });
+
+    mainEl.addEventListener("click", (event) => {
+      const hl = event.target.closest(".lf-hl[data-lf-note-id]");
+      if (!hl) return;
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) return;
+      openSidebar(hl.getAttribute("data-lf-note-id"));
+    });
+  }
+
+  // --- Diff & file gutter `+` and Shift+click line ranges (2a) ---
+
+  let lastGutterAnchor = null; // { block, newLine, oldLine }
+
+  function rowLineInfo(tr) {
+    const n = tr.getAttribute("data-line");
+    const o = tr.getAttribute("data-old-line");
+    const newLine = n !== null && n !== "" ? Number(n) : null;
+    const oldLine = o !== null && o !== "" ? Number(o) : null;
+    return newLine !== null || oldLine !== null ? { newLine, oldLine } : null;
+  }
+
+  function wireCodeBlocks() {
+    mainEl.querySelectorAll(".lf-codeblock[data-path]").forEach((block) => {
+      const path = block.getAttribute("data-path") || "";
+      if (!path) return;
+
+      block.querySelectorAll("tr.lf-code-row").forEach((tr) => {
+        const info = rowLineInfo(tr);
+        if (!info) return;
+        const firstLn = tr.querySelector("td.lf-ln");
+        if (!firstLn || firstLn.querySelector(".lf-gutter-plus")) return;
+        const label = info.newLine !== null ? "line " + info.newLine : "old line " + info.oldLine;
+        firstLn.insertBefore(
+          el("button", {
+            type: "button",
+            cls: "lf-gutter-plus",
+            text: "+",
+            title: "Comment on " + label + " (Shift+click for range)",
+            attrs: { "aria-label": "Comment on " + path + " " + label },
+          }),
+          firstLn.firstChild
+        );
+      });
+
+      block.addEventListener("mousedown", (event) => {
+        if (event.shiftKey && event.target.closest("td.lf-ln")) event.preventDefault();
+      });
+
+      block.addEventListener("click", (event) => {
+        const trigger = event.target.closest(".lf-gutter-plus, td.lf-ln");
+        if (!trigger) return;
+        const tr = trigger.closest("tr.lf-code-row");
+        const info = tr && rowLineInfo(tr);
+        if (!info) return;
+        event.preventDefault();
+        dismissFloatPill();
+        hideHoverCard();
+
+        let rangeSide = info.newLine !== null ? "new" : "old";
+        let lineStart = info.newLine !== null ? info.newLine : info.oldLine;
+        let lineEnd = lineStart;
+
+        if (event.shiftKey && lastGutterAnchor && lastGutterAnchor.block === block) {
+          if (lastGutterAnchor.newLine !== null && info.newLine !== null) {
+            rangeSide = "new";
+            lineStart = Math.min(lastGutterAnchor.newLine, info.newLine);
+            lineEnd = Math.max(lastGutterAnchor.newLine, info.newLine);
+          } else if (lastGutterAnchor.oldLine !== null && info.oldLine !== null) {
+            rangeSide = "old";
+            lineStart = Math.min(lastGutterAnchor.oldLine, info.oldLine);
+            lineEnd = Math.max(lastGutterAnchor.oldLine, info.oldLine);
+          }
+        }
+        lastGutterAnchor = { block, newLine: info.newLine, oldLine: info.oldLine };
+
+        const previewNote = { kind: "line", path, side: rangeSide, lineStart, lineEnd };
+        const selectedRows = rowsForLineNote(previewNote);
+        // Span the whole range so a composer that flips above it never covers it.
+        const firstRect = (selectedRows[0] || tr).getBoundingClientRect();
+        const anchorRow = selectedRows[selectedRows.length - 1] || tr;
+        const rowRect = anchorRow.getBoundingClientRect();
+        const codeCell = anchorRow.lastElementChild;
+        const codeLeft = codeCell ? codeCell.getBoundingClientRect().left : rowRect.left + 110;
+        const composerRect = {
+          top: firstRect.top,
+          bottom: rowRect.bottom,
+          left: codeLeft + 12,
+          right: rowRect.right,
+          width: Math.max(0, rowRect.right - codeLeft - 12),
+        };
+
+        openFloatingComposer(composerRect, {
+          anchorLabel: formatLineAnchor(previewNote),
+          placeholder:
+            lineStart === lineEnd
+              ? "Add comment… (Shift+click another line for range, ⌘↩ to save)"
+              : "Add comment… (⌘↩ to save)",
+          selectedRows: selectedRows.length ? selectedRows : [tr],
+          onSave: (val) => {
+            state.notes.push({
+              id: randomId(),
+              kind: "line",
+              path,
+              side: rangeSide,
+              lineStart,
+              lineEnd,
+              text: val,
+            });
+            refresh(true);
+          },
+        });
+      });
+    });
+  }
+
+  // --- Collapsible slide-over Comments sidebar (1c) ---
+
+  let commentsToggleBtn = null;
+  let commentsCountEl = null;
+  let sidebarEl = null;
+  let sidebarTitleEl = null;
+  let sidebarListEl = null;
+  let sidebarOpen = false;
+  let sidebarEditingId = null;
+
+  function closeSidebar() {
+    sidebarOpen = false;
+    sidebarEditingId = null;
+    renderSidebar();
+  }
+
+  function ensureSidebar() {
+    if (sidebarEl) return;
+
+    commentsCountEl = el("span", { cls: "lf-comments-count", hidden: true });
+    commentsToggleBtn = el(
+      "button",
+      {
+        type: "button",
+        cls: "lf-comments-toggle",
+        on: {
+          click: () => {
+            sidebarOpen = !sidebarOpen;
+            renderSidebar();
+          },
+        },
+      },
+      el("span", { text: "Comments" }),
+      commentsCountEl
+    );
+
+    sidebarTitleEl = el("span");
+    sidebarListEl = el("div", "lf-sidebar-list");
+    sidebarEl = el(
+      "aside",
+      { cls: "lf-sidebar", attrs: { "aria-label": "Comments sidebar" } },
+      el("div", "lf-sidebar-head", sidebarTitleEl, makeButton("Close", closeSidebar, "lf-btn-quiet")),
+      sidebarListEl
+    );
+    document.body.append(commentsToggleBtn, sidebarEl);
+  }
+
+  function openSidebar(focusNoteId) {
+    ensureSidebar();
+    sidebarOpen = true;
+    renderSidebar();
+    if (focusNoteId && sidebarListEl) {
+      const card = sidebarListEl.querySelector('[data-lf-sidebar-note="' + CSS.escape(focusNoteId) + '"]');
+      if (card) pulseElement(card);
+    }
+  }
+
+  function renderSidebar() {
+    ensureSidebar();
+    const ordered = notesInDocumentOrder();
+    const count = ordered.length;
+
+    commentsCountEl.textContent = String(count);
+    commentsCountEl.hidden = count === 0;
+    commentsToggleBtn.classList.toggle("has-notes", count > 0);
+    commentsToggleBtn.setAttribute("aria-expanded", sidebarOpen ? "true" : "false");
+
+    sidebarEl.classList.toggle("is-open", sidebarOpen);
+    sidebarTitleEl.textContent = count > 0 ? "Comments (" + count + ")" : "Comments";
+
+    sidebarListEl.innerHTML = "";
+    if (!count) {
+      sidebarListEl.append(
+        el("div", {
+          cls: "lf-sidebar-empty",
+          text: "No comments yet. Drag across text or click + on a code line to leave one.",
+        })
+      );
+      return;
+    }
+
+    for (const note of ordered) {
+      const item = el(
+        "div",
+        {
+          cls: "lf-sidebar-item",
+          attrs: { "data-lf-sidebar-note": note.id },
+          on: {
+            click: (e) => {
+              if (!e.target.closest("button, textarea")) pulseElement(noteAnchorElement(note));
+            },
+          },
+        },
+        el("div", { cls: "lf-anchor-quote", text: formatNoteAnchorLabel(note) })
+      );
+
+      if (sidebarEditingId === note.id) {
+        const { ta, actionsEl } = buildNoteEditor({
+          initialText: note.text,
+          placeholder: "Edit comment… (⌘↩ to save)",
+          stopProp: true,
+          onSave: (val) => editNote(note.id, val),
+          onCancel: () => {
+            sidebarEditingId = null;
+            renderSidebar();
+          },
+        });
+        item.append(ta, actionsEl);
+        setTimeout(() => focusEnd(ta), 0);
+      } else {
+        item.append(
+          el("div", { cls: "lf-card-body", text: note.text }),
+          el(
+            "div",
+            "lf-card-actions",
+            makeButton(
+              "Edit",
+              (e) => {
+                e.stopPropagation();
+                sidebarEditingId = note.id;
+                renderSidebar();
+              },
+              "lf-btn-quiet"
+            ),
+            makeButton(
+              "Delete",
+              (e) => {
+                e.stopPropagation();
+                deleteNote(note.id);
+              },
+              "lf-btn-quiet"
+            )
+          )
+        );
+      }
+      sidebarListEl.append(item);
+    }
+  }
+
+  // --- Browser T3 Code attached-chip composer dock (3b; hidden in Desktop) ---
+
+  let dockEl = null;
+  let dockChipsEl = null;
+  let dockPreviewEl = null;
+  let dockStatusEl = null;
+  let dockOverallInput = null;
+  let dockPreviewBtn = null;
+  let dockClearBtn = null;
+  let dockSendBtn = null;
+  let dockPreviewOpen = false;
+  let statusText = "";
+  let statusKind = "";
+
+  function setStatus(text, kind) {
+    statusText = text;
+    statusKind = kind || "";
+  }
+
+  function steerTargetLabel() {
+    if (work.kind === "task" && work.issue) return work.issue;
+    if (work.kind === "wave" && work.wave) return "wave " + work.wave;
+    if (work.kind === "session" && work.session) return "session";
+    return "repository";
+  }
+
+  function buildSteerOperation(message) {
+    if (work.kind === "task" && work.issue) {
+      return { kind: "task.steer", directory, issue: work.issue, message };
+    }
+    return {
+      kind: "session.steer",
+      directory,
+      session: work.kind === "session" ? work.session || null : null,
+      wave: work.kind === "wave" ? work.wave || null : null,
+      message,
+    };
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise((resolve, reject) => {
+      const ta = el("textarea", { value: text });
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.append(ta);
+      ta.select();
+      try {
+        if (document.execCommand("copy")) resolve();
+        else reject(new Error("Clipboard is unavailable"));
+      } catch (err) {
+        reject(err);
+      } finally {
+        ta.remove();
+      }
+    });
+  }
+
+  // Drop unsent drafts while keeping rendered receipts; mark receipts reported only after a reply is sent.
+  function clearDrafts(options) {
+    const markReported = Boolean(options && options.markReported);
+    const persist = !options || options.persist !== false;
+    const receipts = markReported
+      ? state.receipts.map((r) => Object.assign({}, r, { reported: true }))
+      : state.receipts.slice();
+    state = emptyState();
+    state.receipts = receipts;
+    sidebarEditingId = null;
+    hideHoverCard();
+    refresh(persist);
+  }
+
+  function submitReply() {
+    if (desktopHandler || sendingReply) return;
+    const items = queueItems();
+    if (!items.length) return;
+    const message = formatReplyMessage(items);
+
+    if (hostMode === "loopback") {
+      // Retain edits made after the send, including receipts from actions
+      // that finish while the steer is in flight.
+      const sent = {
+        notes: new Set(state.notes),
+        choices: { ...state.choices },
+        multiselects: { ...state.multiselects },
+        questions: { ...state.questions },
+        offlineActions: new Set(state.offlineActions),
+        overall: state.overall,
+        receipts: new Set(state.receipts),
+      };
+      sendingReply = true;
+      setStatus("Sending…", "");
+      renderDock();
+      sendOperation(buildSteerOperation(message), randomId()).then(
+        (result) => {
+          sendingReply = false;
+          state.notes = state.notes.filter((note) => !sent.notes.has(note));
+          state.offlineActions = state.offlineActions.filter((action) => !sent.offlineActions.has(action));
+          for (const group of ["choices", "multiselects", "questions"]) {
+            for (const [key, value] of Object.entries(sent[group])) {
+              if (state[group][key] === value) delete state[group][key];
+            }
+          }
+          if (state.overall === sent.overall) state.overall = "";
+          for (const receipt of state.receipts) {
+            if (sent.receipts.has(receipt)) receipt.reported = true;
+          }
+          setStatus(result?.delivery?.sentence || "Steer saved.", "ok");
+          saveState();
+          refresh(false);
+        },
+        (err) => {
+          sendingReply = false;
+          setStatus(errorMessage(err), "error");
+          renderDock();
+        }
+      );
+      return;
+    }
+
+    copyText(message).then(
+      () => {
+        setStatus(serverDisconnected ? "Copied reply (server disconnected)" : "Copied reply", "ok");
+        renderDock();
+      },
+      (err) => {
+        setStatus("Copy failed: " + errorMessage(err), "error");
+        renderDock();
+      }
+    );
+  }
+
+  function ensureDock() {
+    if (desktopHandler || dockEl) return;
+
+    dockChipsEl = el("div", "lf-dock-chips");
+    dockPreviewEl = el("div", { cls: "lf-dock-preview", hidden: true });
+    dockStatusEl = el("div", { cls: "lf-dock-status", hidden: true });
+
+    dockOverallInput = el("input", {
+      type: "text",
+      cls: "lf-dock-input",
+      placeholder: "Overall direction (optional)…",
+      attrs: { "aria-label": "Overall direction" },
+      on: {
+        input: () => {
+          state.overall = dockOverallInput.value;
+          setStatus("", "");
+          saveState();
+          updateDockMeta();
+        },
+      },
+    });
+
+    dockPreviewBtn = makeButton("Preview", () => {
+      dockPreviewOpen = !dockPreviewOpen;
+      updateDockMeta();
+    }, "lf-btn-quiet");
+    dockClearBtn = makeButton("Clear", () => clearDrafts({ markReported: false }), "lf-btn-quiet");
+    dockSendBtn = makeButton("", submitReply, "lf-btn-accent");
+
+    dockEl = el(
+      "div",
+      "lf-dock",
+      dockChipsEl,
+      dockPreviewEl,
+      dockStatusEl,
+      el("div", "lf-dock-row", dockOverallInput, el("div", "lf-dock-actions", dockPreviewBtn, dockClearBtn, dockSendBtn))
+    );
+    document.body.append(dockEl);
+    // Reserve the dock's height below the page so the last control stays reachable.
+    new ResizeObserver(() => {
+      document.documentElement.style.setProperty("--lf-dock-room", dockEl.offsetHeight + 40 + "px");
+    }).observe(dockEl);
+  }
+
+  function updateDockMeta(entries) {
+    if (desktopHandler || !dockEl) return;
+    const items = queueItems(entries);
+    const hasItems = items.length > 0;
+
+    if (dockOverallInput.value !== state.overall) dockOverallInput.value = state.overall;
+
+    dockPreviewBtn.hidden = !hasItems;
+    setPressed(dockPreviewBtn, dockPreviewOpen && hasItems);
+    dockClearBtn.hidden = !hasItems;
+
+    dockSendBtn.disabled = !hasItems || sendingReply;
+    dockSendBtn.textContent =
+      hostMode === "loopback" ? "Steer " + steerTargetLabel() + " ⌘↩" : "Copy reply ⌘↩";
+
+    dockPreviewEl.hidden = !(dockPreviewOpen && hasItems);
+    if (dockPreviewOpen && hasItems) dockPreviewEl.textContent = formatReplyMessage(items);
+
+    dockStatusEl.hidden = !statusText;
+    if (statusText) {
+      dockStatusEl.textContent = statusText;
+      dockStatusEl.className =
+        "lf-dock-status" + (statusKind === "error" ? " is-error" : statusKind === "ok" ? " is-ok" : "");
+    }
+  }
+
+  function renderDock() {
+    if (desktopHandler) return;
+    ensureDock();
+
+    const entries = queueEntries();
+    dockChipsEl.innerHTML = "";
+    dockChipsEl.hidden = entries.length === 0;
+    for (const entry of entries) {
+      dockChipsEl.append(
+        el(
+          "span",
+          { cls: "lf-chip", title: entry.title, on: { click: () => entry.jump() } },
+          el("span", { cls: "lf-chip-tag tag-" + entry.tag, text: entry.tag[0].toUpperCase() + entry.tag.slice(1) }),
+          el("span", { cls: "lf-chip-text", text: entry.summary }),
+          el("button", {
+            type: "button",
+            cls: "lf-chip-x",
+            text: "×",
+            title: "Remove",
+            attrs: { "aria-label": "Remove " + entry.tag },
+            on: {
+              click: (e) => {
+                e.stopPropagation();
+                entry.remove();
+              },
+            },
+          })
+        )
+      );
+    }
+
+    updateDockMeta(entries);
+  }
+
+  // --- Global keyboard shortcuts ---
+
+  document.addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      if (floatComposer && floatComposer.contains(document.activeElement)) return;
+      if (sidebarEl && sidebarEl.contains(document.activeElement) && document.activeElement.tagName === "TEXTAREA") {
+        return;
+      }
+      if (!desktopHandler && queueItems().length > 0) {
+        event.preventDefault();
+        submitReply();
+      }
+      return;
+    }
+
+    if (event.key === "Escape") {
+      if (floatComposer || floatPill || hoverCardEl) {
+        dismissFloats();
+        hideHoverCard();
+      } else if (sidebarOpen) {
+        closeSidebar();
+      }
+      return;
+    }
+
+    if (
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      event.key.toLowerCase() === "c" &&
+      pendingSelection &&
+      !(document.activeElement && document.activeElement.closest("input, textarea"))
+    ) {
+      event.preventDefault();
+      const selInfo = pendingSelection;
+      dismissFloatPill();
+      openProseComposer(selInfo);
+    }
+  });
+
+  wireControls();
+  wireCodeBlocks();
+  wireSelectionNotes();
+  renderSidebar();
+
+  if (desktopHandler) {
+    try {
+      const reply = desktopHandler.postMessage({
+        type: "ready",
+        build_id: buildId,
+      });
+      if (reply && typeof reply.then === "function") {
+        reply.then((loaded) => applyState(loaded), () => {});
+      }
+    } catch (_) {}
+  } else {
+    renderDock();
+    loadBrowserState();
+    connectLoopback();
+  }
+})();
+
+</script>
+</body>
+</html>

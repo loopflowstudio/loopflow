@@ -20,8 +20,8 @@ use super::registry::StoreWork;
 use super::wire::{CloseReason, Event, Incoming, Reply, Request, Tag};
 use super::{
     close_viewers, deliver, dimensions, end_viewers, lifetime, native, output, place_events,
-    provider_exit_code, publish_reports, selected_directory, snapshot, viewer_hold, Settling,
-    Sizing, Span, Viewer, HEARTBEAT_TIMEOUT, LIMIT,
+    provider_exit_code, publish_reports, snapshot, viewer_hold, Settling, Sizing, Span, Viewer,
+    HEARTBEAT_TIMEOUT, LIMIT,
 };
 use loopflow_storage::sqlite::ViewerHold;
 
@@ -285,7 +285,6 @@ impl Hosted {
                 attachment,
                 departure,
                 kept,
-                execution_directory_reported,
                 close_notice,
                 last_prompt_input,
                 ..
@@ -453,15 +452,6 @@ impl Hosted {
                                 attaching.push(viewer.id.clone());
                                 sizing.attach(viewer, focused.unwrap_or(true));
                                 viewer.reply(answers, viewer.attached_reply(sizing.id()));
-                                // Binding selects a directory for later connections;
-                                // the running provider keeps its own.
-                                if let Some(cwd) = exit_record
-                                    .as_deref()
-                                    .filter(|_| *execution_directory_reported)
-                                    .and_then(selected_directory)
-                                {
-                                    output.directory(&cwd);
-                                }
                                 if let Some(cwd) = output.current_directory() {
                                     viewer.event(Event::Directory {
                                         cwd: cwd.to_path_buf(),

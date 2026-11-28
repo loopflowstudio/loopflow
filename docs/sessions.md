@@ -247,6 +247,10 @@ New Sessions take their title from the request, Skill, or Task (a name you set
 is never overwritten by `--suggest`). Titles propagate via OSC terminal titles
 and host-specific tabs (cmux, tmux).
 
+`lf session bind` assigns an unfinished interactive Session to a Task without
+moving its directory; `lf resume` from an unowned worktree or `lf resume <TASK>`
+from anywhere continues it there ([Adopt work already in progress](work.md#adopt-work-already-in-progress)).
+
 When you open a Task, an empty pane shows a centered spinner after a short delay
 so fast opens don't flash; refreshing over saved output keeps the scrollback
 clear and shows progress in the pane strip. The terminal opens directly below

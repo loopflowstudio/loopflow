@@ -33,6 +33,37 @@ isolated `HOME`, set a repository-local identity first. A PTY driver waiting for
 text can match the repainted saved screen before the new provider reads input;
 wait for text only the new provider prints.
 
+# Binding a running chat to a Task with another checkout
+
+Two linked worktrees beside a private repository: one adopted by a Task
+(`lf task create '<words>' --worktree ../repo.task --json`), one left unowned.
+In the unowned one, start `lf -a agy` (stand-in `agy` that logs `pwd` and
+`exec sleep 600`) under a PTY driver run with `nohup … &` for minutes. A bare
+chat is not held: `agy` is the view's child, so closing the PTY ends the
+Session and `lf session bind` then refuses it ("Select an unfinished
+interactive Session…"). Bind while the driver runs, from any directory, and
+read `agent_sessions.cwd`, `task_primary_sessions` and the stand-in's `pwd`.
+`lf resume -a claude:fable` from the unowned worktree takes the chat over
+("Stopped the agy client…") into a held terminal; a later `lf resume --task`
+attaches to it and replays that line from the held screen. pyte renders the
+`ESC[<u` keyboard pop as `65535u`; it is not lf output.
+
+With the branch's `lf server run` up (detached, stdin `/dev/null`), the bound
+chat is a recovered Task conversation: `kill -9` the stand-in `agy` and
+`lf task status <task>` reads `starting`, then `running (started again …)`;
+the new `agy` (child of `lf holder run`, not of the PTY's `lf -a agy`) logs
+the conversation's own worktree. The stand-in never reports a conversation,
+so the Session has no provider history: `lf resume -a claude:fable` against
+that held terminal just attaches to agy and starts no claude. Check the
+harness switch against the live bare chat, before any recovery.
+
+For the released behavior, run the same script on a second home with
+`/Applications/Loopflow.app/Contents/MacOS/lf` copied into its `bin/`. Ending
+that chat (kill the driver, the stand-in and `lf -a agy`) registers
+`com.loopflow.server.<hash>` for the home and its recovery pass starts
+`lf session resume --request-id recover:<session>` in the Task's checkout.
+Boot that job out after checking its `LF_HOME` with `launchctl print`.
+
 # Headless Work and earlier-build owners
 
 Start the branch's `lf server run` with stdin closed before running

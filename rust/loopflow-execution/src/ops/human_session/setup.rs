@@ -103,8 +103,8 @@ async fn step<T>(
 }
 
 /// Check the Task out from local refs, taking the repository's ready checkout
-/// when one is waiting, move the conversation into it, and start the next ready
-/// checkout.
+/// when one is waiting, place an unstarted conversation, and start the next
+/// ready checkout.
 async fn checkout(
     store: &SharedStore,
     session: LfSession,

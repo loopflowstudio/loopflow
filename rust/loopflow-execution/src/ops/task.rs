@@ -2388,7 +2388,7 @@ async fn creation_record(
     id: &loopflow_model::durable::TaskId,
     title: &str,
     wave: Option<&str>,
-    selected: Option<&crate::session::LfSession>,
+    source: &adoption::Source,
     receipt: Option<Receipt<'_>>,
 ) -> OpsResult<Option<loopflow_storage::sqlite::creation::TaskCreationRecord>> {
     let Some(Receipt { identity, admit }) = receipt else {
@@ -2423,8 +2423,8 @@ async fn creation_record(
             )?)
         }
     };
-    let chosen = match (selected, existing) {
-        (Some(session), _) => Some(session.clone()),
+    let chosen = match (source.conversation(store, id)?, existing) {
+        (Some(session), _) => Some(session),
         (None, Some(task)) => {
             crate::ops::human_session::primary::task_conversation(store, &task.id)
                 .await
@@ -2504,13 +2504,12 @@ async fn file_task_in(
             &task.id,
             &task.title,
             None,
-            source.conversation(store)?.as_ref(),
+            &source,
             receipt,
         )
         .await?;
         let id = task.id.clone();
-        let task =
-            adoption::save(store, main, id, None, None, source, None, false, receipt).await?;
+        let task = adoption::save(store, main, id, None, source, None, receipt).await?;
         return store
             .get_task(&task.id)
             .await
@@ -2561,7 +2560,7 @@ async fn file_task_in(
         &creation.id,
         &creation.title,
         wave_slug.as_deref(),
-        source.conversation(store)?.as_ref(),
+        &source,
         receipt,
     )
     .await?;
@@ -2569,11 +2568,9 @@ async fn file_task_in(
         store,
         main,
         creation.id.clone(),
-        Some(creation),
-        selected.map(|wave| wave.id().clone()),
+        Some((creation, selected.map(|wave| wave.id().clone()))),
         source,
         acquisition,
-        false,
         receipt,
     )
     .await?;

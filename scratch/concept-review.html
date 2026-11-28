@@ -850,11 +850,11 @@ button.lf-btn-quiet[aria-pressed="true"] {
 <h1>LOO-1125 · Concept Review: Post-review reconciliation &amp; loop control</h1>
 
 <p>
-  <strong>Area reviewed:</strong> Post-review reconciliation and loop decision control across Loopflow's builtin Task Graphs (<code>build</code>, <code>plan</code>, <code>refresh</code>, <code>optimize</code>) — spanning <code>realign.md</code>, sibling deciding skills (<code>implement</code>, <code>optimize-plan</code>, <code>loop-or-next</code>), <code>concept-review</code> and <code>ship-review</code>, the loop-decision prompt injected by <code>GraphOutput</code> (<code>output.rs</code>), the Graph definitions (<code>build.yaml</code>, <code>refresh.yaml</code>), the instruction-level eval contract, and the guides (<code>docs/orchestration.md</code>, <code>AGENTS.md</code>, <code>.lf/qa/skills.md</code>). Widened past <code>realign.md</code> because changing how <code>DECISION_CRITERIA</code> splits shared stop rules from skill rules affects every loop decider in the catalog.
+  <strong>Area reviewed:</strong> Post-review reconciliation and loop decision control across Loopflow's builtin Task Graphs (<code>build</code>, <code>plan</code>, <code>refresh</code>, <code>optimize</code>) — spanning <code>realign.md</code>, sibling deciding skills (<code>implement</code>, <code>optimize-plan</code>, <code>loop-or-next</code>), <code>concept-review</code> and <code>ship-review</code>, the loop-decision contract injected by <code>GraphOutput</code> (<code>output.rs</code>), the Graph definitions (<code>build.yaml</code>, <code>refresh.yaml</code>, <code>plan.yaml</code>, <code>optimize.yaml</code>), the instruction-level eval contract, goldens, and guides (<code>docs/orchestration.md</code>, <code>AGENTS.md</code>, <code>.lf/qa/skills.md</code>). Widened past <code>realign.md</code> because changing how <code>DECISION_CRITERIA</code> splits shared stop rules from skill rules affects every loop decider in the catalog.
 </p>
 
 <p>
-  <strong>State of the work:</strong> Built and committed against base <code>6deb3b0450</code> through <code>34d2c2bfe3</code> (docs in <code>f6c35fa490</code>, Pass 1 in <code>7d0554d112</code>, Pass 2 in <code>41bce8d68a</code>). Every Pass 1 review finding (<code>3180e006f7</code>) is resolved: the non-convergence stop is back ahead of the fallback defaults, <code>build.yaml:8</code> matches <code>docs/orchestration.md:154</code>, and <code>realign.md</code> dropped both its Loopflow-specific file blocklist and its unbacked <code>ship-review</code> handoff claim. Live two-pass QA remains for <code>qa</code>.
+  <strong>State of the work:</strong> Built and committed against base <code>503b3ef9d3</code> through <code>8567d28f7e</code> (docs in <code>f6c35fa490</code>, Pass 1 in <code>7d0554d112</code>, Pass 2 in <code>41bce8d68a</code>, Pass 3 in <code>23467d441b</code>). Every built code, prompt, golden, and documentation mismatch from earlier passes is resolved — including Pass 3's fix letting a skill's own stop rule override the shared <code>blocked</code> default so <code>optimize-plan</code> can advance cleanly after reverted trials. No implementation rework remains on <code>HEAD</code>; only the reversible Q2 b inline-docs choice waits for human confirmation, and live two-pass verification remains for <code>qa</code>.
 </p>
 
 <h2>Do the concepts line up?</h2>
@@ -871,69 +871,67 @@ button.lf-btn-quiet[aria-pressed="true"] {
   <tbody>
     <tr>
       <td><strong>Any in-scope code or test fix gets built and re-reviewed</strong><br>When <code>concept-review</code> catches even a small code or test mismatch, <code>realign</code> queues it as the next pass and loops back through <code>implement</code> and <code>concept-review</code> before <code>compress</code>. Zero in-scope fixes advances immediately.</td>
-      <td><code>realign.md:28-32,50-56,71-81,98-101</code> + <code>output.rs</code> (<code>DECISION_CRITERIA</code> defers <code>advance</code>/<code>iterate</code> to skill rules) + <code>build.yaml:8</code> + <code>tests/goldens/builtin_realign.md</code> + <code>instruction_levels.json:88-102</code>.</td>
+      <td><code>realign.md:28-32,50-56,71-81,98-101</code> + <code>output.rs:10-21</code> + <code>build.yaml:8</code> + <code>tests/goldens/builtin_realign.md</code> + <code>instruction_levels.json:88-102</code>.</td>
       <td><strong>Yes</strong></td>
       <td>—</td>
     </tr>
     <tr>
       <td><strong>One reviewer, one simplifier, one planner in <code>build</code></strong><br><code>concept-review</code> reviews design fit read-only, <code>realign</code> triages those findings without inventing a second shape review on top of a fresh review, <code>implement</code> builds, <code>compress</code> simplifies.</td>
-      <td><code>realign.md:28-30</code> (triages only the fresh review when reconciling one; keeps one shape check for standalone/<code>refresh</code>) + <code>build.yaml</code> + <code>AGENTS.md:285,410,453</code> + <code>refresh.yaml:1</code>.</td>
+      <td><code>realign.md:28-30</code> (triages only the fresh review when reconciling one; keeps one shape check for standalone/<code>refresh</code>) + <code>build.yaml</code> + <code>AGENTS.md:285,415,458</code> + <code>refresh.yaml:1</code>.</td>
       <td><strong>Yes</strong></td>
       <td>—</td>
     </tr>
     <tr>
       <td><strong>Loop safety protects uncapped loops without overriding a skill's own stop rule</strong><br>Default and build deciders stop as <code>blocked</code> when passes fail to converge or make no progress, while an experiment loop like <code>optimize</code> can revert a failed trial, keep testing hypotheses, and finish with <code>advance</code> when out of ideas.</td>
-      <td><code>DECISION_CRITERIA</code> in <code>rust/loopflow-execution/src/graph/output.rs:10-21</code> + <code>docs/orchestration.md:190-195</code> + <code>realign.md:79-81</code> + <code>implement.md:97-112</code> + <code>optimize-plan.md:20-28</code>.</td>
-      <td><strong>No</strong></td>
-      <td><strong>Mismatch sharpened in <code>41bce8d68a</code>.</strong> <code>output.rs:14</code> and <code>docs/orchestration.md:192-194</code> now claim <em>"This applies to every decider"</em> on <code>blocked</code> for <em>"the last pass made no progress"</em> and limit skill overrides to <code>advance</code> and <code>iterate</code>. That directly contradicts <code>optimize-plan.md:24-28</code>, where reverted trials make zero metric progress, running out of ideas returns <code>advance</code>, and <code>blocked</code> is <em>only</em> for a broken harness or workload.</td>
+      <td><code>DECISION_CRITERIA</code> in <code>rust/loopflow-execution/src/graph/output.rs:10-21</code> (covered for <code>build</code>/<code>realign</code> and <code>optimize</code>/<code>optimize-plan</code> at <code>output.rs:140-166</code>) + <code>docs/orchestration.md:190-195</code> + <code>realign.md:71-81</code> + <code>implement.md:97-112</code> + <code>optimize-plan.md:20-28</code>.</td>
+      <td><strong>Yes</strong></td>
+      <td>—</td>
     </tr>
     <tr>
       <td><strong><code>realign</code> owns the plan, never tracked repository files</strong><br>One clear ownership line: <code>realign</code> writes <code>scratch/</code> (and Wave memory when asked); <code>implement</code> edits tracked repository files and runs focused checks, so <code>scratch/concept-review.html</code> never carries stale "No" rows.</td>
       <td><code>realign.md:30-32,53,76-78,99-100</code> (inline edits allowed for <code>docs/</code> and <code>README.md</code>; all other files queued for <code>implement</code>) + <code>docs/orchestration.md:173-179</code> + <code>scripts/evals/instruction_levels.py:11-22</code>.</td>
       <td><strong>No</strong></td>
-      <td><strong>Open design choice (honors <code>explore</code> Q2 b, already queued for review in <code>scratch/plan.md</code> &amp; <code>scratch/questions.md</code>).</strong> Pass 2 removed the Loopflow-specific file blocklist and the unbacked <code>ship-review</code> claim, leaving a cleaner rule. Even so, keeping the <code>docs/</code> + <code>README.md</code> exception leaves three file zones instead of one, skips <code>concept-review</code> and <code>documented_commands</code> on user-doc fixes, leaves stale "No" rows on <code>scratch/concept-review.html</code>, bakes a path convention into a generic builtin skill, and diverges from <code>instruction_levels.py</code>.</td>
+      <td><strong>Open reversible design choice (honors <code>explore</code> Q2 b, already answered in <code>scratch/plan.md</code> under <code>## Choice for review</code> and held in <code>scratch/questions.md</code>).</strong> Keeping the <code>docs/</code> + <code>README.md</code> exception creates three file zones instead of one, bakes a directory convention into a generic builtin skill, skips <code>concept-review</code> and doc checks (<code>documented_commands</code>) on inline doc fixes, leaves stale "No" rows on <code>scratch/concept-review.html</code> for those fixes, and diverges from <code>instruction_levels.py</code>'s action catalog.</td>
     </tr>
     <tr>
       <td><strong>Builtin Graphs, docs, goldens, and QA playbooks teach one rule</strong><br>Customized copies of builtin Graphs agree with <code>realign.md</code>, <code>docs/orchestration.md</code>, <code>AGENTS.md</code>, <code>tests/goldens/builtin_realign.md</code>, and <code>.lf/qa/skills.md</code>.</td>
-      <td><code>build.yaml:8</code>, <code>refresh.yaml:1</code>, <code>realign.md</code>, <code>tests/goldens/builtin_realign.md</code>, <code>docs/orchestration.md:154,172-181</code>, <code>AGENTS.md:285,410,453</code>, <code>.lf/qa/skills.md:55-61</code>.</td>
+      <td><code>build.yaml:8</code>, <code>refresh.yaml:1</code>, <code>realign.md</code>, <code>tests/goldens/builtin_realign.md</code>, <code>docs/orchestration.md:154,172-197</code>, <code>AGENTS.md:285,415,458</code>, <code>.lf/qa/skills.md:55-61</code>.</td>
       <td><strong>Yes</strong></td>
       <td>—</td>
     </tr>
     <tr>
       <td><strong>Review triage and non-loop behavior (<code>plan</code>, <code>refresh</code>, standalone)</strong><br>Deferred outcomes go under <code>## Deferred findings</code>; reversible headless choices are marked for review; non-loop runs never emit <code>blocked</code>.</td>
-      <td><code>realign.md:50-67,83-85</code> + <code>plan.yaml</code> + <code>refresh.yaml</code>.</td>
+      <td><code>realign.md:50-67,83-85</code> + <code>plan.yaml</code> + <code>refresh.yaml</code> + <code>instruction_levels.json:73-119</code>.</td>
       <td><strong>Yes</strong></td>
       <td>—</td>
     </tr>
   </tbody>
 </table>
 
-<h2>Actionable mismatch: "This applies to every decider" in <code>DECISION_CRITERIA</code> contradicts <code>optimize-plan</code></h2>
+<h2>Verified on <code>HEAD</code>: Shared loop defaults yield cleanly to skill rules</h2>
 
 <p>
-  Pass 2 (<code>41bce8d68a</code>) restored the non-convergence stop for <code>realign</code> and <code>implement</code> by moving the <code>blocked</code> bullet above the skill-override sentence and marking it mandatory for every decider. Walk a normal <code>optimize</code> run to see the counterexample:
+  Pass 3 (<code>23467d441b</code>) aligned <code>DECISION_CRITERIA</code> and <code>docs/orchestration.md</code> with every builtin loop decider. Walk the failure and recovery path across both loops:
 </p>
-<ol>
-  <li><strong>Pass 1:</strong> Hypothesis A cuts latency 15% and is kept. <code>optimize-plan</code> returns <code>iterate</code>.</li>
-  <li><strong>Pass 2:</strong> Hypothesis B regresses latency and is reverted. The branch now has zero new progress from Pass 2, and either Hypothesis C is ready or no worthwhile ideas remain.</li>
-  <li><strong><code>optimize-plan</code> decides:</strong> Its skill prompt says to <code>iterate</code> on the next hypothesis, <code>advance</code> when no clear way forward remains (so <code>compress → refresh → measure</code> keep Pass 1's 15% win), and return <code>blocked</code> <em>only</em> when the harness or workload has failed.</li>
-  <li><strong>What the runner appends at the end of the prompt:</strong> <code>DECISION_CRITERIA</code> now tells the model that <code>blocked</code> on <em>"the last pass made no progress"</em> or <em>"passes repeat without converging"</em> <em>"applies to every decider"</em>, and restricts skill overrides to <code>advance</code> and <code>iterate</code> only — instructing <code>optimize-plan</code> to abort the Graph as <code>blocked</code> instead of testing the next idea or advancing to <code>compress</code> and final measurement.</li>
-</ol>
+<ul>
+  <li><strong><code>build</code> (<code>realign</code>):</strong> On a small code mismatch, <code>realign</code>'s own <code>iterate</code> rule wins over the default's "substantial next pass". If repeated passes fail to converge, both <code>realign.md:79-81</code> and <code>output.rs:14</code> stop as <code>blocked</code> with the reason.</li>
+  <li><strong><code>optimize</code> (<code>optimize-plan</code>):</strong> After a reverted experiment makes zero metric progress, <code>optimize-plan.md:22-28</code> overrides the shared <code>blocked</code> default — iterating on the next hypothesis, advancing to <code>compress → refresh → measure</code> when out of ideas, and blocking only on a broken harness or workload.</li>
+</ul>
 
 <div class="lf-codeblock" data-path="rust/loopflow-execution/src/graph/output.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-execution/src/graph/output.rs:9-21</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
 <tr class="lf-hunk"><td colspan="4">@@ -6,15 +6,17 @@ use crate::graph::runner::SkillOutcome;</td></tr>
 <tr class="lf-del lf-code-row" data-old-line="9"><td class="lf-ln lf-ln-old">9</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>/// What every loop decision means, so a skill placed on a loop edge needs no</td></tr>
 <tr class="lf-del lf-code-row" data-old-line="10"><td class="lf-ln lf-ln-old">10</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>/// loop instructions of its own.</td></tr>
-<tr class="lf-add lf-code-row" data-line="9"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">9</td><td class="lf-sign">+</td><td>/// Shared stop criteria and default advance and iterate criteria for loop decisions.</td></tr>
+<tr class="lf-add lf-code-row" data-line="9"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">9</td><td class="lf-sign">+</td><td>/// Default loop decision criteria, with a skill&#39;s own rules taking precedence.</td></tr>
 <tr class="lf-ctx lf-code-row" data-old-line="11" data-line="10"><td class="lf-ln lf-ln-old">11</td><td class="lf-ln lf-ln-new">10</td><td class="lf-sign"> </td><td>const DECISION_CRITERIA: &amp;str = &quot;</td></tr>
 <tr class="lf-ctx lf-code-row" data-old-line="12" data-line="11"><td class="lf-ln lf-ln-old">12</td><td class="lf-ln lf-ln-new">11</td><td class="lf-sign"> </td><td></td></tr>
 <tr class="lf-ctx lf-code-row" data-old-line="13" data-line="12"><td class="lf-ln lf-ln-old">13</td><td class="lf-ln lf-ln-new">12</td><td class="lf-sign"> </td><td>This step also decides a loop. Do the step&#39;s work first, then judge from its results.</td></tr>
 <tr class="lf-ctx lf-code-row" data-old-line="14" data-line="13"><td class="lf-ln lf-ln-old">14</td><td class="lf-ln lf-ln-new">13</td><td class="lf-sign"> </td><td></td></tr>
-<tr class="lf-add lf-code-row" data-line="14"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">14</td><td class="lf-sign">+</td><td>- blocked when passes repeat without converging, the last pass made no progress, a failure repeats with nothing learned, or you need input you can&#39;t supply. This applies to every decider. The Graph stops here. Give the reason.</td></tr>
-<tr class="lf-line-note" data-notes><td colspan="4">Elevates "the last pass made no progress" to every decider unconditionally.</td></tr>
+<tr class="lf-add lf-code-row" data-line="14"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">14</td><td class="lf-sign">+</td><td>- Unless the skill says to handle that case differently, return blocked when passes repeat without converging, the last pass made no progress, a failure repeats with nothing learned, or you need input you can&#39;t supply. If you return blocked, the Graph stops here. Give the reason.</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Shared non-convergence and no-progress stop yields when a skill defines its own handling for that case.</td></tr>
 <tr class="lf-add lf-code-row" data-line="15"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">15</td><td class="lf-sign">+</td><td></td></tr>
 <tr class="lf-add lf-code-row" data-line="16"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">16</td><td class="lf-sign">+</td><td>If the skill gives its own rules for advance and iterate, follow those. Otherwise use these defaults.</td></tr>
-<tr class="lf-line-note" data-notes><td colspan="4">Restricts skill rules to advance and iterate, overriding optimize-plan's narrower blocked rule.</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Default advance/iterate criteria yield to skill-specific rules like realign's small-fix iterate rule.</td></tr>
 <tr class="lf-add lf-code-row" data-line="17"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">17</td><td class="lf-sign">+</td><td></td></tr>
 <tr class="lf-ctx lf-code-row" data-old-line="15" data-line="18"><td class="lf-ln lf-ln-old">15</td><td class="lf-ln lf-ln-new">18</td><td class="lf-sign"> </td><td>- advance when what this step requires is done. Later obligations belong to later steps.</td></tr>
 <tr class="lf-ctx lf-code-row" data-old-line="16" data-line="19"><td class="lf-ln lf-ln-old">16</td><td class="lf-ln lf-ln-new">19</td><td class="lf-sign"> </td><td>- iterate when the last pass made progress and you can name a substantial next pass within scope and the result it should produce. Aim to finish within five passes. Continue past five when the work warrants it.</td></tr>
@@ -943,59 +941,25 @@ button.lf-btn-quiet[aria-pressed="true"] {
 <tr class="lf-ctx lf-code-row" data-old-line="20" data-line="22"><td class="lf-ln lf-ln-old">20</td><td class="lf-ln lf-ln-new">22</td><td class="lf-sign"> </td><td></td></tr>
 </tbody></table></div></div>
 
-<div class="lf-codeblock" data-path="rust/loopflow-definitions/src/builtins/task/skill/optimize-plan.md"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-definitions/src/builtins/task/skill/optimize-plan.md:20-28</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
-<tr class="lf-code-row" data-line="20"><td class="lf-ln lf-ln-single">20</td><td>When the caller gives you a decision protocol:</td></tr>
-<tr class="lf-code-row" data-line="21"><td class="lf-ln lf-ln-single">21</td><td></td></tr>
-<tr class="lf-code-row" data-line="22"><td class="lf-ln lf-ln-single">22</td><td>- **Iterate** with the next hypothesis when one has a credible path to moving</td></tr>
-<tr class="lf-code-row" data-line="23"><td class="lf-ln lf-ln-single">23</td><td>  the number.</td></tr>
-<tr class="lf-code-row" data-line="24"><td class="lf-ln lf-ln-single">24</td><td>- **Advance** when the request&#39;s target is met, or when no clear way forward</td></tr>
-<tr class="lf-line-note" data-notes><td colspan="2">In optimize, running out of worthwhile ideas finishes with advance so compress, refresh, and final measurement run.</td></tr>
-<tr class="lf-code-row" data-line="25"><td class="lf-ln lf-ln-single">25</td><td>  remains. Running out of worthwhile ideas is how this finishes. Say what you</td></tr>
-<tr class="lf-code-row" data-line="26"><td class="lf-ln lf-ln-single">26</td><td>  ruled out and the best idea left.</td></tr>
-<tr class="lf-code-row" data-line="27"><td class="lf-ln lf-ln-single">27</td><td>- **Blocked** only when the harness or the workload has failed and no result can</td></tr>
-<tr class="lf-line-note" data-notes><td colspan="2">Direct contradiction with output.rs:14 ("This applies to every decider").</td></tr>
-<tr class="lf-code-row" data-line="28"><td class="lf-ln lf-ln-single">28</td><td>  be trusted.</td></tr>
-</tbody></table></div></div>
-
 <div class="lf-codeblock" data-path="docs/orchestration.md"><div class="lf-codeblock-header"><span class="lf-codeblock-path">docs/orchestration.md:190-196</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
-<tr class="lf-hunk"><td colspan="4">@@ -183,10 +187,13 @@ repeats, including the decision itself.</td></tr>
-<tr class="lf-add lf-code-row" data-line="190"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">190</td><td class="lf-sign">+</td><td>When a Skill defines its own rules for `advance` and `iterate`, the decider</td></tr>
-<tr class="lf-add lf-code-row" data-line="191"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">191</td><td class="lf-sign">+</td><td>follows them. By default, a decider looks for a substantial next pass and can</td></tr>
-<tr class="lf-add lf-code-row" data-line="192"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">192</td><td class="lf-sign">+</td><td>keep iterating past five when the work warrants it. Every decider returns</td></tr>
-<tr class="lf-line-note" data-notes><td colspan="4">Documents the same false universal right above the optimize section (line 226).</td></tr>
-<tr class="lf-add lf-code-row" data-line="193"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">193</td><td class="lf-sign">+</td><td>`blocked` when passes repeat without converging, the last pass made no progress,</td></tr>
-<tr class="lf-add lf-code-row" data-line="194"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">194</td><td class="lf-sign">+</td><td>a failure repeats with nothing learned, or progress needs missing input.</td></tr>
-<tr class="lf-add lf-code-row" data-line="195"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">195</td><td class="lf-sign">+</td><td>`lf task status` shows the reason the decider gave.</td></tr>
-<tr class="lf-add lf-code-row" data-line="196"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">196</td><td class="lf-sign">+</td><td>If the step succeeds and the Graph then fails, status shows the Graph error.</td></tr>
-<tr class="lf-ctx lf-code-row" data-old-line="190" data-line="197"><td class="lf-ln lf-ln-old">190</td><td class="lf-ln lf-ln-new">197</td><td class="lf-sign"> </td><td></td></tr>
-<tr class="lf-ctx lf-code-row" data-old-line="191" data-line="198"><td class="lf-ln lf-ln-old">191</td><td class="lf-ln lf-ln-new">198</td><td class="lf-sign"> </td><td>### Docs-first (`write-docs`) and QA playbooks (`.lf/qa/`)</td></tr>
-<tr class="lf-ctx lf-code-row" data-old-line="192" data-line="199"><td class="lf-ln lf-ln-old">192</td><td class="lf-ln lf-ln-new">199</td><td class="lf-sign"> </td><td></td></tr>
+<tr class="lf-hunk"><td colspan="4">@@ -183,10 +187,14 @@ repeats, including the decision itself.</td></tr>
+<tr class="lf-add lf-code-row" data-line="190"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">190</td><td class="lf-sign">+</td><td>Unless the Skill gives a different rule for the case, the decider returns</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Mirrors output.rs:14-19 in user documentation.</td></tr>
+<tr class="lf-add lf-code-row" data-line="191"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">191</td><td class="lf-sign">+</td><td>`blocked` when passes repeat without converging, the last pass made no progress,</td></tr>
+<tr class="lf-add lf-code-row" data-line="192"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">192</td><td class="lf-sign">+</td><td>a failure repeats with nothing learned, or progress needs missing input.</td></tr>
+<tr class="lf-add lf-code-row" data-line="193"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">193</td><td class="lf-sign">+</td><td>The decider also follows any `advance` and `iterate` rules the Skill defines.</td></tr>
+<tr class="lf-add lf-code-row" data-line="194"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">194</td><td class="lf-sign">+</td><td>By default, it looks for a substantial next pass and can keep iterating past</td></tr>
+<tr class="lf-add lf-code-row" data-line="195"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">195</td><td class="lf-sign">+</td><td>five when the work warrants it.</td></tr>
+<tr class="lf-add lf-code-row" data-line="196"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">196</td><td class="lf-sign">+</td><td>`lf task status` shows the reason the decider gave.</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="190" data-line="198"><td class="lf-ln lf-ln-old">190</td><td class="lf-ln lf-ln-new">198</td><td class="lf-sign"> </td><td></td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="191" data-line="199"><td class="lf-ln lf-ln-old">191</td><td class="lf-ln lf-ln-new">199</td><td class="lf-sign"> </td><td>### Docs-first (`write-docs`) and QA playbooks (`.lf/qa/`)</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="192" data-line="200"><td class="lf-ln lf-ln-old">192</td><td class="lf-ln lf-ln-new">200</td><td class="lf-sign"> </td><td></td></tr>
 </tbody></table></div></div>
 
-<div class="lf-before-after">
-  <div class="lf-before-after-pane">
-    <div class="lf-before-after-label">Before</div>
-    
-    <h4>Before (<code>HEAD</code>)</h4>
-    <p><code>DECISION_CRITERIA</code> says <code>blocked</code> on non-convergence or <em>"the last pass made no progress"</em> <em>"applies to every decider"</em>, and lets skills override only <code>advance</code> and <code>iterate</code>.</p>
-    <p><strong>Failure mode:</strong> Directly contradicts <code>optimize-plan.md:24-28</code> at the end of its prompt, risking a false <code>blocked</code> after a reverted experiment instead of trying the next hypothesis or advancing to <code>compress</code> and final measurement.</p>
-  
-  </div>
-  <div class="lf-before-after-pane">
-    <div class="lf-before-after-label">After</div>
-    
-    <h4>After (shared default stop that respects a skill's own stop rule)</h4>
-    <p><code>DECISION_CRITERIA</code> keeps the non-convergence / no-progress / repeated-failure / missing-input <code>blocked</code> rule ahead of the <code>advance</code>/<code>iterate</code> defaults, qualified by <em>"unless the skill says to handle that case differently"</em> (and mirrored in <code>docs/orchestration.md:190-195</code>).</p>
-    <p><strong>Result:</strong> <code>loop-or-next</code>, <code>implement</code>, and <code>realign</code> keep the non-convergence circuit breaker (none of them opt out), while <code>optimize-plan</code> keeps advancing cleanly when out of hypotheses after reverted trials.</p>
-  
-  </div>
-</div>
-
-
-<h2>Open design choice: Inline user-docs edits in <code>realign</code> (honors <code>explore</code> Q2 b)</h2>
+<h2>Biggest remaining mismatch: Inline user-docs exception in <code>realign</code> (open choice honoring <code>explore</code> Q2 b)</h2>
 
 <p>
-  Pass 2 cleaned up the two sharp edges in the built text of Q2 b: the Loopflow-specific file blocklist and the unbacked <code>ship-review</code> reconciliation claim are gone. What stays on <code>HEAD</code> is the core concept trade-off of Q2 b itself:
+  <code>HEAD</code> implements Jack's <code>explore</code> selection (Q2 b) cleanly, with no repo-specific blocklist and no false <code>ship-review</code> handoff claims. The one remaining conceptual seam is Q2 b itself — letting <code>realign</code> edit <code>docs/</code> and <code>README.md</code> inline while routing every other file through <code>implement</code>:
 </p>
 
 <div class="lf-codeblock" data-path="rust/loopflow-definitions/src/builtins/task/skill/realign.md"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-definitions/src/builtins/task/skill/realign.md:28-33</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
@@ -1009,7 +973,7 @@ button.lf-btn-quiet[aria-pressed="true"] {
 <tr class="lf-add lf-code-row" data-line="29"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">29</td><td class="lf-sign">+</td><td>look once for a concept, type or path the design could do without, or a simpler</td></tr>
 <tr class="lf-add lf-code-row" data-line="30"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">30</td><td class="lf-sign">+</td><td>form of what it built. Put any in-scope code or test fix in the plan, however</td></tr>
 <tr class="lf-add lf-code-row" data-line="31"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">31</td><td class="lf-sign">+</td><td>small. Fix clear mismatches in user docs under `docs/` or in `README.md` files</td></tr>
-<tr class="lf-line-note" data-notes><td colspan="4">Three file zones instead of one: scratch/ + Wave memory, docs/ + README.md inline, everything else through implement. Repositories whose user docs live under guide/ or book/ behave differently.</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Splits repository files into three zones (scratch + Wave memory, docs/ + README.md inline, everything else queued) and assumes user docs live under docs/ or README.md in every repo.</td></tr>
 <tr class="lf-add lf-code-row" data-line="32"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">32</td><td class="lf-sign">+</td><td>here. Queue other file changes for implementation.</td></tr>
 <tr class="lf-ctx lf-code-row" data-old-line="33" data-line="33"><td class="lf-ln lf-ln-old">33</td><td class="lf-ln lf-ln-new">33</td><td class="lf-sign"> </td><td></td></tr>
 </tbody></table></div></div>
@@ -1022,7 +986,7 @@ button.lf-btn-quiet[aria-pressed="true"] {
 <tr class="lf-del lf-code-row" data-old-line="53"><td class="lf-ln lf-ln-old">53</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>- **Small, clear mismatch:** fix it here, in plan, code, tests or docs.</td></tr>
 <tr class="lf-del lf-code-row" data-old-line="54"><td class="lf-ln lf-ln-old">54</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>- **Conceptual rework in the area this work touches, or missing promised</td></tr>
 <tr class="lf-add lf-code-row" data-line="53"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">53</td><td class="lf-sign">+</td><td>- **Plan or user-docs mismatch:** fix it here. Record any docs fix in the plan.</td></tr>
-<tr class="lf-line-note" data-notes><td colspan="4">Fixing a docs mismatch here returns advance without re-running concept-review, so scratch/concept-review.html keeps a stale "No" row for that finding and doc checks like documented_commands do not run during realign.</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Inline doc fixes advance without re-running concept-review, so scratch/concept-review.html keeps a stale "No" row for that finding and doc checks like documented_commands do not run in realign.</td></tr>
 <tr class="lf-add lf-code-row" data-line="54"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">54</td><td class="lf-sign">+</td><td>- **In-scope code or test fix, conceptual rework, or missing promised</td></tr>
 <tr class="lf-ctx lf-code-row" data-old-line="55" data-line="55"><td class="lf-ln lf-ln-old">55</td><td class="lf-ln lf-ln-new">55</td><td class="lf-sign"> </td><td>  behavior:** write it into the plan as the next pass.</td></tr>
 <tr class="lf-ctx lf-code-row" data-old-line="56" data-line="56"><td class="lf-ln lf-ln-old">56</td><td class="lf-ln lf-ln-new">56</td><td class="lf-sign"> </td><td>- **Separate outcome:** list it in the plan under `## Deferred findings` (which</td></tr>
@@ -1033,7 +997,7 @@ button.lf-btn-quiet[aria-pressed="true"] {
 <tr class="lf-code-row" data-line="12"><td class="lf-ln lf-ln-single">12</td><td>    &quot;implement&quot;: &quot;Edit the requested implementation.&quot;,</td></tr>
 <tr class="lf-code-row" data-line="13"><td class="lf-ln lf-ln-single">13</td><td>    &quot;verify&quot;: &quot;Run focused checks for the requested change.&quot;,</td></tr>
 <tr class="lf-code-row" data-line="14"><td class="lf-ln lf-ln-single">14</td><td>    &quot;write_scratch&quot;: &quot;Keep the current plan or proposed changes in scratch.&quot;,</td></tr>
-<tr class="lf-line-note" data-notes><td colspan="2">The instruction-level eval catalog has no edit_docs action; realign cases allow only inspect_work, write_scratch, and reply.</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="2">The instruction-level eval catalog has no edit_docs action; realign cases allow only inspect_work, write_scratch, edit_wave, and reply.</td></tr>
 <tr class="lf-code-row" data-line="15"><td class="lf-ln lf-ln-single">15</td><td>    &quot;inspect_work&quot;: &quot;Read Task or Wave state for the requested scope.&quot;,</td></tr>
 <tr class="lf-code-row" data-line="16"><td class="lf-ln lf-ln-single">16</td><td>    &quot;create_task&quot;: &quot;Create a new Task.&quot;,</td></tr>
 <tr class="lf-code-row" data-line="17"><td class="lf-ln lf-ln-single">17</td><td>    &quot;select_workflow&quot;: &quot;Select or start a Task Workflow.&quot;,</td></tr>
@@ -1049,41 +1013,41 @@ button.lf-btn-quiet[aria-pressed="true"] {
     <div class="lf-before-after-label">Before</div>
     
     <h4>Built on <code>HEAD</code> (Q2 b)</h4>
-    <p><code>realign</code> edits <code>scratch/</code> (and Wave memory when asked) plus clear user-doc mismatches under <code>docs/</code> and <code>README.md</code>; every other tracked file goes through <code>implement</code> and <code>concept-review</code>.</p>
-    <p><strong>Trade-off:</strong> Saves one <code>build</code> loop pass on a docs-only review finding, at the cost of a path-based exception in a generic builtin skill, skipped doc checks, and stale "No" rows on <code>scratch/concept-review.html</code> for inline doc fixes.</p>
+    <p><code>realign</code> writes <code>scratch/</code> (and Wave memory when asked) plus clear user-doc mismatches under <code>docs/</code> and <code>README.md</code>; every other tracked file goes through <code>implement</code> and <code>concept-review</code>.</p>
+    <p><strong>Trade-off:</strong> Saves one <code>build</code> pass when a review surfaces only a user-doc mismatch, at the cost of a path rule inside a generic builtin skill, skipped doc checks during <code>realign</code>, and stale "No" rows on <code>scratch/concept-review.html</code> for inline doc fixes.</p>
   
   </div>
   <div class="lf-before-after-pane">
     <div class="lf-before-after-label">After</div>
     
-    <h4>Simpler option (scratch-only <code>realign</code>)</h4>
-    <p>One rule for every repository: <code>realign</code> writes only <code>scratch/</code> (and Wave memory when asked). Every tracked repo fix — code, tests, or docs — goes through <code>implement</code> and <code>concept-review</code>.</p>
-    <p><strong>Trade-off:</strong> Zero path rules, 100% current <code>scratch/concept-review.html</code>, and a 1:1 match with <code>instruction_levels.py</code>; a docs-only review finding pays one extra <code>build</code> pass.</p>
+    <h4>Simpler model (scratch-only <code>realign</code>)</h4>
+    <p>One ownership rule for every repository: <code>realign</code> writes only <code>scratch/</code> (and Wave memory when asked). Every tracked repo fix — code, tests, or docs — goes through <code>implement</code> and <code>concept-review</code>.</p>
+    <p><strong>Trade-off:</strong> Zero path conventions, 100% fresh <code>scratch/concept-review.html</code>, focused doc checks run during <code>implement</code>, and a 1:1 match with <code>instruction_levels.py</code>; a docs-only review finding pays one extra <code>build</code> pass.</p>
   
   </div>
 </div>
 
 
 <p>
-  Because Jack explicitly selected Q2 b in <code>scratch/explore.html</code>, <code>scratch/plan.md</code> keeps Q2 b as built and carries the scratch-only alternative in <code>scratch/questions.md</code> for review rather than overturning his choice headlessly.
+  Because Jack explicitly selected Q2 b in <code>scratch/explore.html</code>, <code>scratch/plan.md</code> keeps Q2 b as built and carries the scratch-only alternative in <code>scratch/questions.md</code> so headless execution does not overturn his choice. No headless rework is needed for this item; it waits for Jack's confirmation at <code>ship-review</code>.
 </p>
 
 <h2>Findings</h2>
 
 <div class="lf-decision" data-decision-id="f1">
   <div class="lf-decision-head">
-    <span class="lf-decision-title">Let DECISION_CRITERIA respect a skill&#39;s own stop rule (fixes optimize-plan conflict)</span>
+    <span class="lf-decision-title">Keep Q2 b inline user-docs edits in realign, or switch to scratch-only</span>
     <span class="lf-decision-rec">Recommended: Fix here</span>
   </div>
   <div class="lf-decision-body">
   <p>
-    <strong>This work.</strong> In <code>41bce8d68a</code>, <code>rust/loopflow-execution/src/graph/output.rs:14-16</code> and <code>docs/orchestration.md:190-195</code> asserted that <code>blocked</code> on <em>"the last pass made no progress"</em> and non-convergence <em>"applies to every decider"</em> while limiting skill rules to <code>advance</code> and <code>iterate</code>. That contradicts <code>optimize-plan.md:24-28</code>, where reverted experiments make zero metric progress, running out of ideas returns <code>advance</code>, and <code>blocked</code> is only for a failed harness or workload.
+    <strong>This work — open reversible design choice already answered for headless execution in <code>scratch/plan.md</code> (<code>## Choice for review</code>) and <code>scratch/questions.md</code>.</strong> <code>HEAD</code> faithfully implements Jack's <code>explore</code> selection (Q2 b). The remaining trade-off is whether skipping an extra <code>build</code> pass on docs-only review findings is worth carrying a <code>docs/</code> + <code>README.md</code> path exception, skipping doc checks during <code>realign</code>, and leaving stale "No" rows on <code>scratch/concept-review.html</code> for inline doc fixes.
   </p>
   <p>
-    <strong>Recommendation:</strong> Keep the shared <code>blocked</code> stop ahead of the <code>advance</code>/<code>iterate</code> defaults, and qualify it with <em>"unless the skill says to handle that case differently"</em> in <code>output.rs:14</code> (updating <code>build_realign_uses_its_own_loop_rule</code> and <code>docs/orchestration.md:190-195</code> to match). That keeps the non-convergence stop active for <code>loop-or-next</code>, <code>implement</code>, and <code>realign</code> without breaking <code>optimize-plan</code>. <em>Passed over:</em> removing the shared <code>blocked</code> rule from <code>output.rs</code> (would leave <code>implement</code> and custom skills without a non-convergence stop).
+    <strong>Recommendation (for human decision):</strong> Make <code>realign</code> strictly <code>scratch/</code> + Wave memory so every tracked repo change is built, checked, and re-reviewed. <em>Passed over:</em> keeping Q2 b as built (saves a pass on docs-only review findings at the cost of a third file zone and stale doc review rows). Leave Q2 b as built until Jack answers Q1 below — headless <code>realign</code> should not iterate on this choice.
   </p>
 </div>
-  <div data-choice="f1" data-label="Let DECISION_CRITERIA respect a skill&#39;s own stop rule (fixes optimize-plan conflict)">
+  <div data-choice="f1" data-label="Keep Q2 b inline user-docs edits in realign, or switch to scratch-only">
     <button type="button" data-value="Fix here">Fix here</button>
     <button type="button" data-value="File Task">File Task</button>
     <button type="button" data-value="Drop">Drop</button>
@@ -1093,36 +1057,15 @@ button.lf-btn-quiet[aria-pressed="true"] {
 
 <div class="lf-decision" data-decision-id="f2">
   <div class="lf-decision-head">
-    <span class="lf-decision-title">Decide whether to drop the inline docs/ and README.md exception in realign</span>
-    <span class="lf-decision-rec">Recommended: Fix here</span>
-  </div>
-  <div class="lf-decision-body">
-  <p>
-    <strong>This work (reversible design choice — already recorded under <code>## Choice for review</code> in <code>scratch/plan.md</code> and <code>scratch/questions.md</code>).</strong> <code>HEAD</code> honors Jack's <code>explore</code> selection (Q2 b) cleanly without the Pass 1 blocklist or unbacked <code>ship-review</code> claim. The remaining trade-off is whether saving a pass on doc-only review findings is worth keeping a <code>docs/</code> + <code>README.md</code> path rule and stale doc review rows.
-  </p>
-  <p>
-    <strong>Recommendation:</strong> Make <code>realign</code> strictly <code>scratch/</code> + Wave memory so every tracked repo fix is built and re-reviewed. <em>Passed over:</em> keeping Q2 b as built (saves a pass on doc-only findings at the cost of a third file zone and stale doc rows). Leave Q2 b as built until Jack rules on Q1 below so headless execution does not overturn his <code>explore</code> choice.
-  </p>
-</div>
-  <div data-choice="f2" data-label="Decide whether to drop the inline docs/ and README.md exception in realign">
-    <button type="button" data-value="Fix here">Fix here</button>
-    <button type="button" data-value="File Task">File Task</button>
-    <button type="button" data-value="Drop">Drop</button>
-  </div>
-</div>
-
-
-<div class="lf-decision" data-decision-id="f3">
-  <div class="lf-decision-head">
     <span class="lf-decision-title">Trailing graph: refresh in optimize.yaml has no implement step after it</span>
     <span class="lf-decision-rec">Recommended: Drop</span>
   </div>
   <div class="lf-decision-body">
   <p>
-    <strong>Separate outcome (already under <code>## Deferred findings</code> in <code>scratch/plan.md</code>).</strong> <code>optimize.yaml</code> ends <code>compress → graph: refresh → measure</code>, so any non-conflict code drift <code>realign</code> writes into the plan there stays in <code>scratch/plan.md</code>. Add an <code>implement</code> branch to <code>optimize.yaml</code> only if real <code>optimize</code> runs surface post-sync code drift.
+    <strong>Separate outcome (already under <code>## Deferred findings</code> in <code>scratch/plan.md</code>).</strong> <code>optimize.yaml</code> ends <code>compress → graph: refresh → measure</code>, so any non-conflict code drift <code>realign</code> writes into the plan there stays in <code>scratch/plan.md</code>. Add an <code>implement</code> step or branch to <code>optimize.yaml</code> only if real <code>optimize</code> runs surface post-sync code drift.
   </p>
 </div>
-  <div data-choice="f3" data-label="Trailing graph: refresh in optimize.yaml has no implement step after it">
+  <div data-choice="f2" data-label="Trailing graph: refresh in optimize.yaml has no implement step after it">
     <button type="button" data-value="Fix here">Fix here</button>
     <button type="button" data-value="File Task">File Task</button>
     <button type="button" data-value="Drop">Drop</button>
@@ -1133,17 +1076,17 @@ button.lf-btn-quiet[aria-pressed="true"] {
 <h2>Questions</h2>
 
 <div data-choice="q1" data-label="Q1 · Inline doc fixes in realign">
-  <p>1. When a design review finds a mismatch in user documentation (for example, a guide or README describing old behavior) and nothing else needs changing, what should happen?</p>
-  <button data-value="a">A · Send doc fixes back through implementation and review too — <code>realign</code> only ever updates plans and notes, works the same in every repository without path rules, and never leaves a stale "No" row on the review page (Recommended)</button>
-  <button data-value="b">B · Keep inline user-doc fixes in <code>realign</code> (<code>docs/</code> and <code>README.md</code> only) to avoid an extra build pass for doc-only fixes, accepting stale "No" rows for those items</button>
+  <p>1. When a design review catches a mismatch only in user documentation (for example, a guide or README describing old behavior) and nothing in code or tests needs changing, what should happen?</p>
+  <button data-value="a">A · Send doc fixes back through implementation and review too — planning only ever updates plans and notes, works the same in every repository regardless of doc folder layout, runs doc checks, and never leaves a stale "No" row on the review page (Recommended)</button>
+  <button data-value="b">B · Keep inline user-doc fixes in <code>realign</code> (<code>docs/</code> and <code>README.md</code> only) so docs-only fixes finish without an extra build pass, accepting stale "No" rows for those items</button>
 </div>
 
 <div data-question="q2" data-label="Q2 · Anything else before shipping">
-  <p>2. Anything else to change in the post-review loop rules before finishing this Task?</p>
+  <p>2. Anything else to change in how post-review fixes and loop decisions behave before shipping?</p>
   <textarea rows="3" placeholder="Optional notes, or reply like: 1a"></textarea>
 </div>
 </main>
-<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1125"},"directory":"/Users/jack/src/loopflow.loo-1125-route-realign-code","base":"6deb3b0450fca0b42f3fb31511c2494f3b7a2591","head":"34d2c2bfe3","path":"scratch/concept-review.html","build_id":"dab66072e582eb1c","protocol":{"revision":11,"min_revision":10}}</script>
+<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1125"},"directory":"/Users/jack/src/loopflow.loo-1125-route-realign-code","base":"503b3ef9d393a4353aa684f376840b51dc7303e8","head":"8567d28f7e","path":"scratch/concept-review.html","build_id":"ebd88ceb986c54f6","protocol":{"revision":11,"min_revision":10}}</script>
 <script>
 (function () {
   "use strict";

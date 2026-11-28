@@ -995,9 +995,7 @@ fn select_task_run(
     let mut row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
         .map_err(task_error)?
         .filter(|row| requested.is_none_or(|name| row.graph.name == name));
-    let pending = row
-        .as_mut()
-        .and_then(crate::store::task_work::TaskGraphRow::prepare_continuation);
+    let pending = row.as_mut().and_then(|row| row.released_wait.take());
     let selected = match (row, requested) {
         (Some(row), _) => SelectedGraph::Continue(Box::new(row)),
         (None, Some(name)) => SelectedGraph::TakeUp(load_graph(name, "", checkout)?),

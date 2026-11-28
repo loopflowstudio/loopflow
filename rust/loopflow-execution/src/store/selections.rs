@@ -163,9 +163,8 @@ fn graph_tile_reader(
 ) -> impl FnMut(GraphTileInput<'_>) -> StoreResult<GraphTile> {
     let mut cached = crate::task_graph::cached_merges(merges);
     move |input| {
-        let graph: crate::task_graph::CapturedGraph = serde_json::from_str(input.graph)?;
-        let cursor: Option<crate::graph::runner::ExecutionCursor> =
-            input.cursor.map(serde_json::from_str).transpose()?;
+        let (graph, cursor) =
+            crate::task_graph::CapturedGraph::read_saved(input.graph, input.cursor)?;
         let running_step = cursor
             .as_ref()
             .and_then(|cursor| graph.step_name_of(cursor));

@@ -1325,19 +1325,17 @@ fn a_moved_capture_changes_sidebar_coordinates_only_when_the_run_is_claimed() {
             .unwrap()
     };
     assert_eq!(sidebar(), "implement");
-    let mut next = task_graph_row(&store, &task).unwrap().unwrap();
-    next.prepare_continuation();
-    assert_eq!(next.run.as_ref().unwrap().0.index, 2);
+    // The claim saved the worker, its breakpoint and the cursor between them.
+    let saved = store.task_graph_row(&task).unwrap().unwrap();
+    let saved_cursor: crate::graph::runner::ExecutionCursor =
+        serde_json::from_str(&saved.run.unwrap().0).unwrap();
+    assert_eq!(saved_cursor.index, 2);
     assert_eq!(
-        task_graph_row(&store, &task)
-            .unwrap()
-            .unwrap()
-            .run
-            .unwrap()
-            .0
-            .index,
-        1
+        serde_json::from_str::<crate::task_graph::CapturedGraph>(&saved.graph).unwrap(),
+        old.graph
     );
+    let next = task_graph_row(&store, &task).unwrap().unwrap();
+    assert_eq!(next.run.as_ref().unwrap().0.index, 2);
     let replacement = store.test_lf_process();
     assert!(start_task_graph_run(
         &store,

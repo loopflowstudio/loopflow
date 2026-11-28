@@ -125,6 +125,7 @@ mod tests {
         let row = |pid: Option<u32>| TaskGraphRow {
             stored_graph: String::new(),
             converted: false,
+            released_wait: None,
             breakpoint: None,
             graph: CapturedGraph {
                 name: "proof".into(),
@@ -166,6 +167,34 @@ mod tests {
         // Its end cleared the carrier's OS process: the run stopped.
         assert!(!running(row(None)));
     }
+    #[test]
+    fn a_released_wait_reads_as_the_worker_its_next_run_starts() {
+        let skill = |name, human| {
+            serde_json::json!({"Skill":{"skill":{"name":name}, "id":null, "human":human,
+                "returns":null, "sources":["legacy"]}})
+        };
+        let graph =
+            serde_json::json!({"name":"legacy","steps":[skill("note",true), skill("echo",false)]});
+        let row = super::decode_row(loopflow_storage::sqlite::task_work::SavedTaskGraphRow {
+            breakpoint: None,
+            graph: graph.to_string(),
+            step: "note".into(),
+            run: None,
+            auto: None,
+            pause: None,
+        })
+        .unwrap();
+        assert_eq!(
+            row.released_wait.as_ref().map(|cursor| cursor.index),
+            Some(0)
+        );
+        let read = read_task_graph(row, |_| false);
+        assert_eq!(read.sentence, "Waiting at note.");
+        assert_eq!(read.control.label, "Run: note");
+        let track: Vec<_> = read.steps.iter().map(|step| step.name.as_str()).collect();
+        assert_eq!(track, ["note", "after-note", "echo"]);
+    }
+
     #[test]
     fn moved_task_graph_json_keeps_nested_values_and_stored_bytes() {
         let home = tempfile::tempdir().unwrap();
@@ -235,6 +264,8 @@ mod tests {
 pub struct TaskGraphRow {
     stored_graph: String,
     converted: bool,
+    /// LOO-1100: where a released interactive wait resumes, as its worker.
+    pub released_wait: Option<ExecutionCursor>,
     pub breakpoint: Option<BreakpointArrival>,
     pub graph: CapturedGraph,
     pub step: String,
@@ -244,9 +275,10 @@ pub struct TaskGraphRow {
 }
 
 impl TaskGraphRow {
-    /// Resolve a released wait in its original coordinates before expanding
-    /// the capture and every saved cursor together. Reads alone do not write.
-    pub(crate) fn prepare_continuation(&mut self) -> Option<ExecutionCursor> {
+    /// LOO-1100: resolve a released wait in its original coordinates, then
+    /// expand the capture and every saved cursor together. Every reader sees
+    /// the worker and its breakpoint; only a run's claim writes the result.
+    fn expand_released(&mut self) {
         let mut pending = if self.run.is_none() && self.breakpoint.is_none() {
             self.graph
                 .interactive_step(&self.step)
@@ -265,7 +297,7 @@ impl TaskGraphRow {
                 )
                 .chain(pending.iter_mut()),
         );
-        pending
+        self.released_wait = pending;
     }
 }
 
@@ -298,7 +330,7 @@ pub struct TaskGraphRecord {
 }
 
 fn decode_row(row: SavedTaskGraphRow) -> StoreResult<TaskGraphRow> {
-    Ok(TaskGraphRow {
+    let mut row = TaskGraphRow {
         breakpoint: row
             .breakpoint
             .as_deref()
@@ -307,6 +339,7 @@ fn decode_row(row: SavedTaskGraphRow) -> StoreResult<TaskGraphRow> {
         graph: serde_json::from_str(&row.graph)?,
         stored_graph: row.graph,
         converted: false,
+        released_wait: None,
         step: row.step,
         run: row
             .run
@@ -315,7 +348,9 @@ fn decode_row(row: SavedTaskGraphRow) -> StoreResult<TaskGraphRow> {
             .map_err(crate::store::StoreError::from)?,
         auto: row.auto,
         pause: row.pause,
-    })
+    };
+    row.expand_released();
+    Ok(row)
 }
 pub fn task_graph_row(store: &SqliteStore, task: &TaskId) -> StoreResult<Option<TaskGraphRow>> {
     store.task_graph_row(task)?.map(decode_row).transpose()

@@ -96,6 +96,18 @@ impl Body {
 }
 
 impl CapturedGraph {
+    /// A saved capture and its run cursor as every reader sees them: a
+    /// released interactive step reads as its worker and breakpoint.
+    pub(crate) fn read_saved(
+        graph: &str,
+        cursor: Option<&str>,
+    ) -> serde_json::Result<(Self, Option<ExecutionCursor>)> {
+        let mut graph: Self = serde_json::from_str(graph)?;
+        let mut cursor: Option<ExecutionCursor> = cursor.map(serde_json::from_str).transpose()?;
+        graph.expand_interactive(cursor.iter_mut());
+        Ok((graph, cursor))
+    }
+
     /// Translate every position the Task carries alongside this definition.
     pub(crate) fn expand_interactive<'a>(
         &mut self,

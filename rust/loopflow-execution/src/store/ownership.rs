@@ -323,8 +323,8 @@ pub fn task_detail_facts(
     use loopflow_storage::sqlite::{GraphDetail, GraphDetailInput};
     let mut cached = crate::task_graph::cached_merges(merges);
     let mut graph_detail = |input: GraphDetailInput<'_>| -> StoreResult<GraphDetail> {
-        let graph: crate::task_graph::CapturedGraph = serde_json::from_str(input.graph)?;
-        let cursor = input.cursor.map(serde_json::from_str).transpose()?;
+        let (graph, cursor) =
+            crate::task_graph::CapturedGraph::read_saved(input.graph, input.cursor)?;
         if input.paused {
             Ok(GraphDetail::ResumesOnUnpause(graph.resumes_on_unpause(
                 input.step,

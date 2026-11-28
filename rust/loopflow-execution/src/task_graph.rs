@@ -255,7 +255,7 @@ impl CapturedGraph {
         } else if step == END {
             return true;
         } else {
-            self.interactive_step(step).or_else(|| self.find(step))
+            self.find(step)
         };
         let stop_at_landing = auto == Some(AutoState::Off);
         place.is_some_and(|place| !self.needs_review(&place, stop_at_landing, &mut merges))
@@ -284,11 +284,7 @@ impl CapturedGraph {
                 None => UnpauseEffect::Park(None),
             },
             None if step == START => UnpauseEffect::Resume,
-            None if step != END
-                && !at_breakpoint
-                && auto != Some(AutoState::Off)
-                && self.interactive_step(step).is_none() =>
-            {
+            None if step != END && !at_breakpoint && auto != Some(AutoState::Off) => {
                 UnpauseEffect::Resume
             }
             None => UnpauseEffect::Park(None),
@@ -445,11 +441,10 @@ impl CapturedGraph {
     }
 }
 
-/// Breakpoint name for `step`, or the unconverted released interactive stop name (LOO-1100).
+/// Breakpoint name for `step`.
 fn stop_name(step: &ConcreteStep) -> Option<&str> {
     match step {
         ConcreteStep::Breakpoint(stop) => Some(stop.name.as_str()),
-        ConcreteStep::Skill(skill) => skill.interactive_step(),
         _ => None,
     }
 }
@@ -650,7 +645,7 @@ pub enum WorkflowStepKind {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskGraphPosition {
     /// The Task stands at `start`, at `end`, at a landing wait (`auto: off`),
-    /// or at an unconverted released wait (LOO-1100).
+    /// or at a step its run stopped before.
     At { step: String },
     /// The Task is parked at breakpoint `step` for visit `arrival`.
     Breakpoint {
@@ -779,46 +774,22 @@ impl TaskGraph {
                         },
                         END.to_owned(),
                     ),
-                    step => match graph.interactive_step(step) {
-                        Some(place) => {
-                            let next = graph.after(&place).map(|next| {
-                                if top(&place) == top(&next) {
-                                    graph.step_name(&next)
-                                } else {
-                                    top_name(&next).to_owned()
-                                }
-                            });
-                            let chip = chip_step(Some(top_name(&place)), step);
+                    step => {
+                        let place = graph.find(step);
+                        let chip = chip_step(place.as_ref().map(top_name), step);
+                        let (sentence, control) = if auto == Some(AutoState::Off) {
                             (
-                                Some(place),
-                                format!("Waiting for you at {step}."),
+                                format!("Waiting at {step}: auto is off."),
                                 WorkflowControl {
-                                    action: WorkflowAction::Run,
-                                    label: format!(
-                                        "{step} · next: {}",
-                                        next.as_deref().unwrap_or(END)
-                                    ),
+                                    action: WorkflowAction::Wait,
+                                    label: format!("Waiting: {chip}"),
                                 },
-                                chip,
                             )
-                        }
-                        None => {
-                            let place = graph.find(step);
-                            let chip = chip_step(place.as_ref().map(top_name), step);
-                            let (sentence, control) = if auto == Some(AutoState::Off) {
-                                (
-                                    format!("Waiting at {step}: auto is off."),
-                                    WorkflowControl {
-                                        action: WorkflowAction::Wait,
-                                        label: format!("Waiting: {chip}"),
-                                    },
-                                )
-                            } else {
-                                (format!("Waiting at {step}."), WorkflowControl::run(&chip))
-                            };
-                            (place, sentence, control, chip)
-                        }
-                    },
+                        } else {
+                            (format!("Waiting at {step}."), WorkflowControl::run(&chip))
+                        };
+                        (place, sentence, control, chip)
+                    }
                 };
                 let sentence = match pause {
                     Some(PauseStage::Stopping) => format!("Pausing at {step}."),

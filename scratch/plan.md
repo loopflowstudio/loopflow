@@ -139,7 +139,7 @@ edges. [Exact reply](direction.md#exact-words--ship-review-jack-heart-2026-11-27
 
 ## Pass 7 · Align workflow track markers, paused/blocked chips, and paused breakpoint wakes
 
-Post-build concept review at `59f26fa51d` ([concept-review.html](concept-review.html)) found two model splits introduced during Pass 6’s merge with `lf task pause` and `TaskWorkflowControls`:
+Post-build concept review at `59f26fa51d` ([concept-review.html](concept-review.html)) found two model splits introduced during Pass 6’s merge with `lf task pause` and `TaskWorkflowControls`. Both are fixed: slice 1 in `4971b4dd5c`, slice 2 in `cc73f2d81a`, fixtures refreshed after the main merge in `b4b4f2aca6`.
 
 ### Experience and model
 

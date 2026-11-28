@@ -51,3 +51,7 @@ to `c3742012`. That conversation may show those two sends.
   - `"yes A"`
   - `"do it in 1098 and abandon 1099"`
 - Option A: VT-guarded held-terminal wake pasting the short trigger prompt (`"Read the waiting steers and Task updates for this Session."`) + `\r` so `PreInvocation` claims and stamps steers only after `agy` invokes the hook. LOO-1099 abandoned.
+
+# Ship-review answers (2026-11-27)
+
+- Jack Heart: `"1b 2a 3a 4a"` (drop Claude cross-session steer framing Task, drop `lf session steers | head` broken-pipe Task, keep 2s quiet pause, sync with `main` and deliver PR #2045).

@@ -27,8 +27,8 @@ struct TaskBriefTests {
     }
 
     @Test func stateNamesTheTopLevelStepTheBarMakesStrong() throws {
-        let steps: [TaskGraph.Step] = [.init(name: "plan", breakpoint: false), .init(name: "build", breakpoint: false),
-                                       .init(name: "after-ship-review", breakpoint: true)]
+        let steps: [TaskGraph.Step] = [.init(name: "plan", kind: .stage), .init(name: "build", kind: .stage),
+                                       .init(name: "after-ship-review", kind: .breakpoint)]
         let building = TaskGraph(name: "code", control: .init(action: .run, label: "Run: plan"), breakpoints: ["after-ship-review"],
             position: .run(step: "plan", at: "implement", lfProcessId: "p", running: true),
             steps: steps, currentStep: 1, sentence: "build is running implement.")

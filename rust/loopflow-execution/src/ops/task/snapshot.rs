@@ -83,16 +83,17 @@ pub(super) async fn snapshot_here(
     let mut breakpoint_evidence = None;
     if let Some(graph) = work_set.graph.as_ref() {
         match &graph.position {
-            crate::task_graph::TaskGraphPosition::Breakpoint { step, blocked, .. } => {
+            crate::task_graph::TaskGraphPosition::Breakpoint { step, blocker, .. } => {
+                let blocked = blocker.is_some();
                 let evidence = crate::ops::task_actions::BreakpointActionEvidence {
-                    blocked: *blocked,
+                    blocked,
                     sentence: graph.sentence.as_str(),
                 };
                 if status != crate::durable::TaskState::Paused
                     && evidence.owns_execution(execution.state)
                 {
                     // A run that parked ended its carrier; the Graph itself goes on.
-                    execution.reason = if *blocked {
+                    execution.reason = if blocked {
                         graph.sentence.clone()
                     } else {
                         format!(

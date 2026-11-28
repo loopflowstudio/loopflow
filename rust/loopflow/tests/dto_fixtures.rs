@@ -544,15 +544,16 @@ fn task_work_preserves_sessions_graph_runs_and_graph() {
     let line: Vec<_> = graph
         .steps
         .iter()
-        .map(|step| (step.name.as_str(), step.breakpoint))
+        .map(|step| (step.name.as_str(), step.kind))
         .collect();
+    use loopflow_execution::task_graph::WorkflowStepKind;
     assert_eq!(
         line,
         [
-            ("plan", false),
-            ("review-design", true),
-            ("build", false),
-            ("demo", true)
+            ("plan", WorkflowStepKind::Stage),
+            ("review-design", WorkflowStepKind::StageWithBreakpoint),
+            ("build", WorkflowStepKind::Stage),
+            ("demo", WorkflowStepKind::Breakpoint)
         ]
     );
     assert_eq!(graph.current_step, Some(2));
@@ -569,6 +570,24 @@ fn task_work_preserves_sessions_graph_runs_and_graph() {
         serde_json::to_value(work).unwrap(),
         serde_json::from_str::<serde_json::Value>(input).unwrap()
     );
+}
+
+#[test]
+fn a_breakpoint_position_requires_the_nullable_blocker() {
+    use loopflow_execution::task_graph::{TaskGraph, TaskGraphPosition};
+
+    let mut wire: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_graph_breakpoint.json"
+    ))
+    .unwrap();
+    let graph: TaskGraph = serde_json::from_value(wire.clone()).unwrap();
+    assert!(matches!(
+        graph.position,
+        TaskGraphPosition::Breakpoint { blocker: None, .. }
+    ));
+    assert_eq!(serde_json::to_value(graph).unwrap(), wire);
+    wire["position"].as_object_mut().unwrap().remove("blocker");
+    assert!(serde_json::from_value::<TaskGraph>(wire).is_err());
 }
 
 #[test]

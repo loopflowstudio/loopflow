@@ -31,19 +31,19 @@
     "steps": [
       {
         "name": "plan",
-        "breakpoint": false
+        "kind": "stage"
       },
       {
         "name": "review-design",
-        "breakpoint": true
+        "kind": "stage_with_breakpoint"
       },
       {
         "name": "build",
-        "breakpoint": false
+        "kind": "stage"
       },
       {
         "name": "demo",
-        "breakpoint": true
+        "kind": "breakpoint"
       }
     ],
     "current_step": 2,

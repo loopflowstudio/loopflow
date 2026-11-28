@@ -8,13 +8,23 @@ import Testing
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
     @Test func breakpointOffersContinuationForThePresentedArrival() throws {
-        let graph = try JSONDecoder().decode(TaskGraph.self, from: loadFixtureData("task_graph_breakpoint.json"))
-        #expect(graph.position == .breakpoint(step: "after-research", arrival: "11111111-1111-4111-8111-111111111111", blocked: false))
+        let data = try loadFixtureData("task_graph_breakpoint.json")
+        let graph = try JSONDecoder().decode(TaskGraph.self, from: data)
+        #expect(graph.position == .breakpoint(step: "after-research", arrival: "11111111-1111-4111-8111-111111111111", blocker: nil))
         #expect(graph.breakpoints == ["after-research"])
         #expect(graph.waitingStep == "after-research")
-        #expect(graph.steps.map(\.breakpoint) == [false, true])
+        #expect(graph.steps.map(\.kind) == [.stage, .breakpoint])
         #expect(graph.control.action == .continue)
         #expect(graph.control.label == "Continue")
+        #expect(try JSONDecoder().decode(TaskGraph.self, from: JSONEncoder().encode(graph)) == graph)
+
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var position = try #require(wire["position"] as? [String: Any])
+        position.removeValue(forKey: "blocker")
+        wire["position"] = position
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(TaskGraph.self, from: JSONSerialization.data(withJSONObject: wire))
+        }
     }
 
     @Test func screenReadsDecodeTheirCompletePayloads() throws {
@@ -465,7 +475,7 @@ struct DTOFixtureTests {
         #expect(graph.position == .run(step: "review-design", at: "implement", lfProcessId: work.graphProcesses[0].id, running: true))
         #expect(graph.waitingStep == nil)
         #expect(graph.steps.map(\.name) == ["plan", "review-design", "build", "demo"])
-        #expect(graph.steps.map(\.breakpoint) == [false, true, false, true])
+        #expect(graph.steps.map(\.kind) == [.stage, .stageWithBreakpoint, .stage, .breakpoint])
         #expect(graph.currentStep == 2)
         #expect(graph.control == WorkflowControl(action: .pause, label: "build · implement"))
         #expect(graph.sentence == "build is running implement. You are next needed at demo.")

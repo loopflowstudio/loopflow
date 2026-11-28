@@ -404,8 +404,10 @@ grows into a chip that says what is happening there.
 Click ⏸ to pause the worker and keep talking in the Task conversation. The chip
 reads **Paused: build · implement**. Click ▶ to resume an interrupted step.
 If you pause while reviewing a breakpoint, ▶ lifts the hold and returns to
-the same review. The person icon marks the breakpoint. Continue takes the
-worker's recommendation or you can reply in the Task conversation.
+the same review. Standalone breakpoints appear as person icons. A stage that
+contains a breakpoint shows its name beside the icon. Continue takes the
+worker's recommendation or you can reply in the Task conversation. When a
+worker is blocked, the track shows its reason and waits for a reply.
 
 Click a work stage to start from it. The chip menu can pick a starting point,
 interrupt a running step or pause at review. The Auto switch takes the

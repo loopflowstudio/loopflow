@@ -75,7 +75,7 @@ pub(crate) fn settled_task_position(
                 let arrival = serde_json::from_str::<BreakpointArrival>(&record)?;
                 TaskGraphPosition::Breakpoint {
                     step: row.step,
-                    blocked: arrival.blocked_reason().is_some(),
+                    blocker: arrival.blocked_reason().map(str::to_owned),
                     arrival: arrival.id,
                 }
             }

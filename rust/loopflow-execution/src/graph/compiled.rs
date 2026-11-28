@@ -365,7 +365,7 @@ mod tests {
     #[test]
     fn a_catalog_entry_outlines_the_workflow_a_task_would_show() {
         use super::graph_catalog;
-        use crate::task_graph::{CapturedGraph, TaskGraph};
+        use crate::task_graph::{CapturedGraph, TaskGraph, WorkflowStepKind};
         let repo = tempfile::tempdir().unwrap();
         let graphs = repo.path().join(".lf/graphs");
         std::fs::create_dir_all(&graphs).unwrap();
@@ -389,16 +389,16 @@ mod tests {
         let steps: Vec<_> = code
             .steps
             .iter()
-            .map(|step| (step.name.as_str(), step.breakpoint))
+            .map(|step| (step.name.as_str(), step.kind))
             .collect();
         assert_eq!(
             steps,
             [
-                ("plan", false),
-                ("build", false),
-                ("ship-review", false),
-                ("after-ship-review", true),
-                ("deliver", false),
+                ("plan", WorkflowStepKind::Stage),
+                ("build", WorkflowStepKind::Stage),
+                ("ship-review", WorkflowStepKind::Stage),
+                ("after-ship-review", WorkflowStepKind::Breakpoint),
+                ("deliver", WorkflowStepKind::Stage),
             ]
         );
         assert_eq!(code.breakpoints, ["after-ship-review"]);
@@ -416,7 +416,7 @@ mod tests {
         let stops: Vec<_> = conditional
             .steps
             .iter()
-            .filter(|step| step.breakpoint)
+            .filter(|step| step.kind == WorkflowStepKind::StageWithBreakpoint)
             .map(|step| step.name.as_str())
             .collect();
         assert_eq!(stops, ["xor-route"]);

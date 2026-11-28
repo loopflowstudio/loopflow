@@ -197,27 +197,27 @@
     "steps": [
       {
         "name": "review",
-        "breakpoint": false
+        "kind": "stage"
       },
       {
         "name": "xor-route",
-        "breakpoint": false
+        "kind": "stage"
       },
       {
         "name": "implement",
-        "breakpoint": false
+        "kind": "stage"
       },
       {
         "name": "loop-or-next",
-        "breakpoint": false
+        "kind": "stage"
       },
       {
         "name": "demo",
-        "breakpoint": false
+        "kind": "stage"
       },
       {
         "name": "loop-or-next",
-        "breakpoint": false
+        "kind": "stage"
       }
     ],
     "breakpoints": [],

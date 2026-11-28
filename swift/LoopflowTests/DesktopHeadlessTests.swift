@@ -453,7 +453,7 @@ struct DesktopHeadlessTests {
         _ = try stopped.inspect().find(text: "Run: implement")
 
         // A continued review is scoped to the visit the bar displayed.
-        let waiting = try view(position: ["kind": "breakpoint", "step": "demo", "arrival": process, "blocked": false])
+        let waiting = try view(position: ["kind": "breakpoint", "step": "demo", "arrival": process, "blocker": NSNull()])
         let next = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-primary").button()
         #expect(throws: (any Error).self) { try waiting.inspect().find(text: "demo") }
         try next.tap()
@@ -484,13 +484,11 @@ struct DesktopHeadlessTests {
 
         // Going back is the same command a person would type; Start from… in "…"
         // lists `start` and each top-level runnable work step, omitting standalone breakpoints.
-        for step in ["start", "plan", "build"] {
+        for step in ["start", "plan", "review-design", "build"] {
             _ = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move-\(step)")
         }
-        for stop in ["review-design", "demo"] {
-            #expect(throws: (any Error).self) {
-                try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move-\(stop)")
-            }
+        #expect(throws: (any Error).self) {
+            try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move-demo")
         }
         try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move-plan").button().tap()
         #expect(try await tapped(4) == ["task", "run", task.task.identifier, "--from", "plan", "--json"])
@@ -570,7 +568,7 @@ struct DesktopHeadlessTests {
         _ = try bar.find(viewWithAccessibilityIdentifier: "task-workflow-step-0")
         #expect(throws: (any Error).self) { try bar.find(viewWithAccessibilityIdentifier: "task-workflow-step-2") }
         let steps = try bar.find(viewWithAccessibilityIdentifier: "task-workflow-move")
-        for action in ["plan", "build", "Interrupt step", "Abandon…"] { _ = try steps.find(button: action) }
+        for action in ["plan", "review-design", "build", "Interrupt step", "Abandon…"] { _ = try steps.find(button: action) }
         // demo is a breakpoint in this fixture, so Start from leaves it out.
         #expect(throws: (any Error).self) { try steps.find(button: "demo") }
         #expect(throws: (any Error).self) { try steps.find(button: "Copy Task ID") }

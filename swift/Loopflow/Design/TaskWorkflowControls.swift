@@ -65,7 +65,14 @@ public struct TaskWorkflowControls<Items: View>: View {
             if index == actions.chip {
                 chip
             } else if !folded {
-                stepButton(step, index: index)
+                if step.kind == .breakpoint {
+                    stepLabel(step, index: index)
+                        .fixedSize()
+                        .help("Breakpoint: \(step.name)")
+                        .accessibilityIdentifier("task-workflow-step-\(index)")
+                } else {
+                    stepButton(step, index: index)
+                }
             }
         }
         if actions.chip >= actions.track.count { chip }
@@ -76,13 +83,16 @@ public struct TaskWorkflowControls<Items: View>: View {
             || actions.control?.action == .pause || actions.control?.action == .pausing
     }
 
-    private func stepButton(_ step: TaskGraph.Step, index: Int) -> some View {
-        Button { run(step.name) } label: {
-            WorkflowStepLabel(step: step, standalone: actions.breakpoints.contains(step.name))
+    private func stepLabel(_ step: TaskGraph.Step, index: Int) -> some View {
+        WorkflowStepLabel(step: step)
             .foregroundStyle(index < actions.chip ? palette.textSecondary : palette.textTertiary)
             .padding(.horizontal, Spacing.xs)
             .frame(height: transport)
-            .contentShape(Rectangle())
+    }
+
+    private func stepButton(_ step: TaskGraph.Step, index: Int) -> some View {
+        Button { run(step.name) } label: {
+            stepLabel(step, index: index).contentShape(Rectangle())
         }
         .buttonStyle(StepButtonStyle())
         .fixedSize()
@@ -115,8 +125,8 @@ public struct TaskWorkflowControls<Items: View>: View {
                 // Folded on a narrow pane, the chip truncates before Auto and ✓ move.
                 if pending == nil, actions.breakpointArrival != nil,
                    actions.track.indices.contains(actions.chip),
-                   actions.breakpoints.contains(actions.track[actions.chip].name) {
-                    WorkflowStepLabel(step: actions.track[actions.chip], standalone: true)
+                   actions.track[actions.chip].kind == .breakpoint {
+                    WorkflowStepLabel(step: actions.track[actions.chip])
                 } else {
                     Text(pending ?? actions.control?.label ?? "Reading workflow…").lineLimit(1).truncationMode(.tail)
                         .font(Typography.textStrong)

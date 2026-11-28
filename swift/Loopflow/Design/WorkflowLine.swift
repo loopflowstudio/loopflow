@@ -4,7 +4,6 @@ import SwiftUI
 /// part underneath. Steps and sentence come from Rust; this reads no step names.
 public struct WorkflowLine: View {
     let steps: [TaskGraph.Step]
-    let breakpoints: Set<String>
     /// Where the Task stands, or where you take part.
     public let sentence: String
     @Environment(\.palette) private var palette
@@ -12,7 +11,6 @@ public struct WorkflowLine: View {
     /// A Task's Graph sentence, with `setup` standing in before the run has started.
     public init(graph: TaskGraph, setup: String? = nil) {
         steps = []
-        breakpoints = []
         sentence = if graph.position == .at(step: TaskGraph.start), let setup {
             setup
         } else {
@@ -24,7 +22,6 @@ public struct WorkflowLine: View {
     /// under them where you take part.
     public init(outline: WorkflowOutline) {
         steps = outline.steps
-        breakpoints = Set(outline.breakpoints)
         sentence = outline.sentence
     }
 
@@ -52,7 +49,7 @@ public struct WorkflowLine: View {
 
     private var stepViews: some View {
         ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
-            WorkflowStepLabel(step: step, standalone: breakpoints.contains(step.name))
+            WorkflowStepLabel(step: step)
             .foregroundStyle(palette.textTertiary)
             .fixedSize()
             .accessibilityIdentifier("task-workflow-step-\(index)")
@@ -62,15 +59,14 @@ public struct WorkflowLine: View {
 
 struct WorkflowStepLabel: View {
     let step: TaskGraph.Step
-    let standalone: Bool
 
     var body: some View {
         HStack(spacing: Spacing.xxs) {
-            if step.breakpoint {
+            if step.kind != .stage {
                 Image(systemName: "person.fill").font(Typography.meta)
-                    .accessibilityLabel(standalone ? "Breakpoint \(step.name)" : "You take part")
+                    .accessibilityLabel(step.kind == .breakpoint ? "Breakpoint: \(step.name)" : "You take part")
             }
-            if !standalone { Text(step.name) }
+            if step.kind != .breakpoint { Text(step.name) }
         }
     }
 }

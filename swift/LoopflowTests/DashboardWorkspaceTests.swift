@@ -28,8 +28,8 @@ struct DashboardWorkspaceTests {
 
     @Test("A tile's workflow sentence yields only to what a program asks")
     func tileKeepsItsWorkflowSentenceUnlessAProgramAsks() throws {
-        let graph = TaskGraph(name: "code", control: .init(action: .continue, label: "Continue"), breakpoints: ["after-demo"], position: .breakpoint(step: "after-demo", arrival: "arr_1", blocked: false),
-                              steps: [.init(name: "build", breakpoint: false), .init(name: "after-demo", breakpoint: true)],
+        let graph = TaskGraph(name: "code", control: .init(action: .continue, label: "Continue"), breakpoints: ["after-demo"], position: .breakpoint(step: "after-demo", arrival: "arr_1", blocker: nil),
+                              steps: [.init(name: "build", kind: .stage), .init(name: "after-demo", kind: .breakpoint)],
                               currentStep: 1, sentence: "At breakpoint after-demo.")
         // No program reporting, whatever the row's own line says: the sentence shows.
         #expect(DashboardTile.workflow(graph, status: .unknown, setup: nil)?.sentence == "At breakpoint after-demo.")

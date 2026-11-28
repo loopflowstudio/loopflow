@@ -9,9 +9,9 @@ import ViewInspector
 @Suite("Workflow line")
 struct WorkflowLineTests {
     private static let code: [TaskGraph.Step] = [
-        .init(name: "plan", breakpoint: false), .init(name: "build", breakpoint: false),
-        .init(name: "after-ship-review", breakpoint: true), .init(name: "deliver", breakpoint: false),
-        .init(name: "after-verify", breakpoint: true),
+        .init(name: "plan", kind: .stage), .init(name: "build", kind: .stage),
+        .init(name: "after-ship-review", kind: .breakpoint), .init(name: "deliver", kind: .stage),
+        .init(name: "after-verify", kind: .breakpoint),
     ]
 
     private func graph(_ position: TaskGraph.Position, current: Int?, sentence: String) -> TaskGraph {
@@ -36,8 +36,8 @@ struct WorkflowLineTests {
     @Test("Standalone breakpoints show a person icon and composed stages retain their names")
     func outline() throws {
         let outline = WorkflowOutline(start: .init(action: .run, label: "Run: plan"),
-                                      steps: Self.code + [.init(name: "nested", breakpoint: true)],
-                                      breakpoints: ["after-ship-review", "after-verify", "inside-nested"],
+                                      steps: Self.code + [.init(name: "nested", kind: .stageWithBreakpoint)],
+                                      breakpoints: ["after-ship-review", "after-verify", "nested"],
                                       sentence: "You take part after ship-review.")
         let sheet = try WorkflowLine(outline: outline).inspect()
         let stop = try sheet.find(viewWithAccessibilityIdentifier: "task-workflow-step-2")

@@ -444,11 +444,11 @@
             "sentence": "At its end.",
             "steps": [
               {
-                "breakpoint": false,
+                "kind": "stage",
                 "name": "hold"
               },
               {
-                "breakpoint": false,
+                "kind": "stage",
                 "name": "task complete FIX-1"
               }
             ],
@@ -568,11 +568,11 @@
           "sentence": "At its end.",
           "steps": [
             {
-              "breakpoint": false,
+              "kind": "stage",
               "name": "hold"
             },
             {
-              "breakpoint": false,
+              "kind": "stage",
               "name": "task complete FIX-1"
             }
           ],
@@ -1448,11 +1448,11 @@
             "sentence": "task complete FIX-1 is running.",
             "steps": [
               {
-                "breakpoint": false,
+                "kind": "stage",
                 "name": "hold"
               },
               {
-                "breakpoint": false,
+                "kind": "stage",
                 "name": "task complete FIX-1"
               }
             ],
@@ -1559,11 +1559,11 @@
           "sentence": "task complete FIX-1 is running.",
           "steps": [
             {
-              "breakpoint": false,
+              "kind": "stage",
               "name": "hold"
             },
             {
-              "breakpoint": false,
+              "kind": "stage",
               "name": "task complete FIX-1"
             }
           ],
@@ -2381,11 +2381,11 @@
             "sentence": "task complete FIX-1 is running.",
             "steps": [
               {
-                "breakpoint": false,
+                "kind": "stage",
                 "name": "hold"
               },
               {
-                "breakpoint": false,
+                "kind": "stage",
                 "name": "task complete FIX-1"
               }
             ],
@@ -2492,11 +2492,11 @@
           "sentence": "task complete FIX-1 is running.",
           "steps": [
             {
-              "breakpoint": false,
+              "kind": "stage",
               "name": "hold"
             },
             {
-              "breakpoint": false,
+              "kind": "stage",
               "name": "task complete FIX-1"
             }
           ],

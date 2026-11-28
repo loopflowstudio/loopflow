@@ -179,7 +179,9 @@ Task status and `plan list` separate `graph_name` with its `graph_source`
 (`task`, `wave`, `repository` or `builtin`), `latest_graph_process`,
 `execution` and `run_control`. Task work and overview carry `graph`, a
 `TaskGraph` of name, breakpoints and position (`at`, `breakpoint` with its
-arrival ID, or `run`). A Task parked at a breakpoint carries
+arrival ID and nullable blocker, or `run`). Each workflow track step is a
+`stage`, a `stage_with_breakpoint`, or a standalone `breakpoint`. A Task
+parked at a breakpoint carries
 `SelectionState::Breakpoint`, puts its condition in Now (`waiting`, or
 `blocked` when the pending verdict is blocked) even when the checkout is clear,
 and sorts to the top of status-sorted Working Tasks. The latest

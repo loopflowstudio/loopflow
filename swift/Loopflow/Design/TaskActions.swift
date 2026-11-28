@@ -11,7 +11,6 @@ public struct TaskActions: Equatable {
     public let auto: Auto?
     public let completeReady: Bool
     public let steps: [String]
-    public let breakpoints: Set<String>
     public let breakpointArrival: String?
     public let breakpointBlocker: String?
     /// The Graph's top-level steps as the workflow track draws them.
@@ -59,14 +58,13 @@ public struct TaskActions: Equatable {
             control = outline?.start ?? WorkflowControl(action: .run, label: "Run")
         }
         primaryRefusal = (control?.action == .run || control?.action == .continue || row.runControl.pausing) ? runRefusal : nil
-        if let graph, case .breakpoint(_, let arrival, let blocked) = graph.position {
+        if !held, let graph, case .breakpoint(_, let arrival, let blocker) = graph.position {
             breakpointArrival = arrival
-            breakpointBlocker = blocked && !held ? graph.control.label : nil
+            breakpointBlocker = blocker
         } else {
             breakpointArrival = nil
             breakpointBlocker = nil
         }
-        breakpoints = Set(graph?.breakpoints ?? outline?.breakpoints ?? [])
         pause = held ? .unpause : row.lifecycle.isWorking ? .pause : nil
 
         if let graph {
@@ -81,10 +79,9 @@ public struct TaskActions: Equatable {
         }
 
         // The same track supplies Start from before and after Graph take-up.
-        var excluded = breakpoints
-        excluded.insert(TaskGraph.start)
-        steps = graph == nil && outline == nil ? [] : [TaskGraph.start] + track.map(\.name).filter {
-            excluded.insert($0).inserted
+        var seen: Set<String> = [TaskGraph.start]
+        steps = graph == nil && outline == nil ? [] : [TaskGraph.start] + track.compactMap { step in
+            step.kind != .breakpoint && seen.insert(step.name).inserted ? step.name : nil
         }
     }
 

@@ -191,19 +191,19 @@
       "steps": [
         {
           "name": "design",
-          "breakpoint": false
+          "kind": "stage"
         },
         {
           "name": "pursue",
-          "breakpoint": true
+          "kind": "stage_with_breakpoint"
         },
         {
           "name": "xor-route",
-          "breakpoint": false
+          "kind": "stage"
         },
         {
           "name": "queue",
-          "breakpoint": false
+          "kind": "stage"
         }
       ],
       "breakpoints": [

@@ -14100,8 +14100,11 @@
             "arrival": {
               "$ref": "#/$defs/LfProcessId"
             },
-            "blocked": {
-              "type": "boolean"
+            "blocker": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "kind": {
               "const": "breakpoint",
@@ -14115,7 +14118,7 @@
             "kind",
             "step",
             "arrival",
-            "blocked"
+            "blocker"
           ],
           "type": "object"
         },
@@ -16996,9 +16999,8 @@
     "WorkflowStep": {
       "description": "One top-level step of a Task's Graph.",
       "properties": {
-        "breakpoint": {
-          "description": "This step is a breakpoint or contains one, composed Graphs and XOR paths included.",
-          "type": "boolean"
+        "kind": {
+          "$ref": "#/$defs/WorkflowStepKind"
         },
         "name": {
           "type": "string"
@@ -17006,9 +17008,25 @@
       },
       "required": [
         "name",
-        "breakpoint"
+        "kind"
       ],
       "type": "object"
+    },
+    "WorkflowStepKind": {
+      "oneOf": [
+        {
+          "enum": [
+            "stage",
+            "breakpoint"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "stage_with_breakpoint",
+          "description": "Runnable stage with a breakpoint, including composed Graphs and XOR paths.",
+          "type": "string"
+        }
+      ]
     },
     "WorkingGroup": {
       "description": "The groups inside Working, in sidebar order.",

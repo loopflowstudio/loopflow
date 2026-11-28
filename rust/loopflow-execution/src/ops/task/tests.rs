@@ -3836,7 +3836,7 @@ async fn task_snapshot_owns_breakpoint_actions_across_pr_phases_and_blocked_auto
     assert_eq!(snap.actions.reason, "At breakpoint after-ship-review.");
     assert!(matches!(
         snap.work.graph.as_ref().unwrap().position,
-        crate::task_graph::TaskGraphPosition::Breakpoint { blocked: false, .. }
+        crate::task_graph::TaskGraphPosition::Breakpoint { blocker: None, .. }
     ));
 
     // Merging a PR while this Graph is parked leaves the review available.
@@ -3853,7 +3853,7 @@ async fn task_snapshot_owns_breakpoint_actions_across_pr_phases_and_blocked_auto
     assert_eq!(snap.actions.reason, "At breakpoint after-explore.");
 
     // 3. Blocked worker verdict under auto:on/-b (non-zero GraphHeld::EXIT) -> NoAction with blocked sentence
-    //    and `blocked: true` on TaskGraphPosition::Breakpoint.
+    //    and the worker's blocker on the position.
     pr.merge_commit = None;
     fx.store.update_task_pr(&pr).await.unwrap();
     park(
@@ -3876,7 +3876,8 @@ async fn task_snapshot_owns_breakpoint_actions_across_pr_phases_and_blocked_auto
         "At breakpoint after-ship-review. Blocked: Two incompatible schema migrations"
     );
     assert!(matches!(
-        snap.work.graph.as_ref().unwrap().position,
-        crate::task_graph::TaskGraphPosition::Breakpoint { blocked: true, .. }
+        &snap.work.graph.as_ref().unwrap().position,
+        crate::task_graph::TaskGraphPosition::Breakpoint { blocker: Some(reason), .. }
+            if reason == "Two incompatible schema migrations"
     ));
 }

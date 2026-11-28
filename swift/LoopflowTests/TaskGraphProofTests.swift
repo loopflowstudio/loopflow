@@ -60,7 +60,7 @@ struct TaskGraphTests {
         #expect(catalog.map(\.id) == ["feature", "broken"])
         let outline = try #require(catalog[0].workflow)
         #expect(outline.steps.map(\.name) == ["design", "pursue", "xor-route", "queue"])
-        #expect(outline.steps.map(\.breakpoint) == [false, true, false, false])
+        #expect(outline.steps.map(\.kind) == [.stage, .stageWithBreakpoint, .stage, .stage])
         #expect(outline.breakpoints == ["demo"] && outline.sentence == "You take part at demo.")
         #expect(catalog[1].source == ".lf/graphs/broken.yaml" && catalog[1].unavailable != nil && catalog[1].workflow == nil)
         #expect(catalog[0].compiled?.steps.count == 8 && catalog[1].unavailable != nil)

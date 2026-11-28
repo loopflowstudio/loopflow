@@ -17,11 +17,18 @@ struct TaskActionsTests {
         return try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
     }
 
-    private func work(_ control: WorkflowControl?) throws -> TaskOverview {
+    private func work(_ control: WorkflowControl?, breakpoint: (index: Int, blocker: String?)? = nil) throws -> TaskOverview {
         var wire = try #require(JSONSerialization.jsonObject(with: loadFixtureData("task_work.json")) as? [String: Any])
         if let control {
             var graph = try #require(wire["graph"] as? [String: Any])
             graph["control"] = ["action": control.action.rawValue, "label": control.label]
+            if let breakpoint {
+                let steps = try #require(graph["steps"] as? [[String: Any]])
+                let step = try #require(steps[breakpoint.index]["name"] as? String)
+                let position = TaskGraph.Position.breakpoint(step: step, arrival: "arr_1", blocker: breakpoint.blocker)
+                graph["position"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(position))
+                graph["current_step"] = breakpoint.index
+            }
             wire["graph"] = graph
         } else {
             wire["graph"] = NSNull()
@@ -62,7 +69,7 @@ struct TaskActionsTests {
         let row = try row(lifecycle: "moving")
         let actions = TaskActions(work: work, row: row, execution: nil)
         #expect(actions.track.map(\.name) == ["plan", "review-design", "build", "demo"] && actions.chip == 2)
-        #expect(actions.steps == ["start", "plan", "build"])
+        #expect(actions.steps == ["start", "plan", "review-design", "build"])
         var jumped: [String?] = []
         let bar = try TaskWorkflowControls(task: row, actions: actions, pending: nil, run: { jumped.append($0) },
             pause: { _ in }, interrupt: {}, toggleAuto: {}, complete: {}) { EmptyView() }.inspect()
@@ -74,8 +81,14 @@ struct TaskActionsTests {
         let stopped = TaskActions(work: try self.work(.init(action: .run, label: "Run: implement")), row: try self.row(), execution: nil)
         let idle = try TaskWorkflowControls(task: row, actions: stopped, pending: nil, run: { jumped.append($0) },
             pause: { _ in }, interrupt: {}, toggleAuto: {}, complete: {}) { EmptyView() }.inspect()
-        try idle.find(viewWithAccessibilityIdentifier: "task-workflow-step-3").button().tap()
-        #expect(jumped == ["demo"])
+        let stage = try idle.find(viewWithAccessibilityIdentifier: "task-workflow-step-1")
+        _ = try stage.find(text: "review-design")
+        try stage.button().tap()
+        #expect(jumped == ["review-design"])
+        let marker = try idle.find(viewWithAccessibilityIdentifier: "task-workflow-step-3")
+        #expect(try marker.find(ViewType.Image.self).actualImage().name() == "person.fill")
+        #expect(throws: (any Error).self) { try marker.button() }
+        #expect(throws: (any Error).self) { try idle.find(viewWithAccessibilityIdentifier: "task-workflow-move-demo") }
     }
 
     @MainActor @Test func aPendingPauseShowsTheHeldGlyph() throws {
@@ -161,27 +174,30 @@ struct TaskActionsTests {
         #expect(TaskActions(work: try work(nil), row: try row(auto: true), execution: execution).auto == .off)
     }
 
-    @MainActor @Test func blockedBreakpointsKeepTheirReasonWithoutOfferingContinue() throws {
+    @MainActor @Test func aBlockedBreakpointInAComposedStageShowsTheReasonOnce() throws {
         let row = try row(lifecycle: "active")
-        for blocked in [false, true] {
-            var json = try #require(JSONSerialization.jsonObject(with: loadFixtureData("task_work.json")) as? [String: Any])
-            var graph = try #require(json["graph"] as? [String: Any])
-            graph["control"] = ["action": blocked ? "wait" : "continue", "label": blocked ? "Choose a layout" : "Continue"]
-            graph["position"] = ["kind": "breakpoint", "step": "demo", "arrival": "arr_1", "blocked": blocked]
-            graph["current_step"] = 3
-            graph["sentence"] = blocked ? "At breakpoint demo. Blocked: choose a layout" : "At breakpoint demo."
-            json["graph"] = graph
-            let work = try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: json))
+        let blocker = "Choose a layout"
+        let work = try work(.init(action: .wait, label: "Blocked: review-design"), breakpoint: (1, blocker))
+        let actions = TaskActions(work: work, row: row, execution: nil)
+        let bar = try TaskWorkflowControls(task: row, actions: actions, pending: nil,
+            run: { _ in }, pause: { _ in }, interrupt: {}, toggleAuto: {}, complete: {}) { EmptyView() }.inspect()
+        let track = try bar.find(viewWithAccessibilityIdentifier: "task-workflow-track")
+        _ = try track.find(text: "Blocked: review-design")
+        _ = try bar.find(text: blocker)
+        #expect(throws: (any Error).self) { try track.find(text: blocker) }
+        #expect(throws: (any Error).self) { try bar.find(viewWithAccessibilityIdentifier: "task-workflow-primary") }
+    }
+
+    @MainActor @Test func aHeldBreakpointShowsTheHoldInTheChip() throws {
+        let row = try row(lifecycle: "paused")
+        for (action, label) in [(WorkflowControl.Action.pausing, "Pausing: demo"), (.unpause, "Paused: demo")] {
+            let work = try work(.init(action: action, label: label), breakpoint: (3, "Choose a layout"))
             let actions = TaskActions(work: work, row: row, execution: nil)
+            #expect(actions.breakpointArrival == nil && actions.breakpointBlocker == nil)
             let bar = try TaskWorkflowControls(task: row, actions: actions, pending: nil,
                 run: { _ in }, pause: { _ in }, interrupt: {}, toggleAuto: {}, complete: {}) { EmptyView() }.inspect()
-            if blocked {
-                #expect(actions.breakpointBlocker?.contains("Choose a layout") == true)
-                #expect(throws: (any Error).self) { try bar.find(viewWithAccessibilityIdentifier: "task-workflow-primary") }
-            } else {
-                #expect(actions.breakpointArrival == "arr_1")
-                #expect(try !bar.find(viewWithAccessibilityIdentifier: "task-workflow-primary").isDisabled())
-            }
+            _ = try bar.find(text: label)
+            #expect(throws: (any Error).self) { try bar.find(text: "Choose a layout") }
         }
     }
 }

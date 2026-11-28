@@ -52,7 +52,7 @@ struct RegistryQueryTests {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let detail = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/graph_detail.json"), encoding: .utf8)
         let expected = try JSONDecoder().decode(GraphProcessDetail.self, from: Data(detail.utf8))
-        let overview = "{\"sessions\":[],\"graph_processes\":[],\"graph\":{\"name\":\"feature\",\"control\":{\"action\":\"continue\",\"label\":\"Continue\"},\"breakpoints\":[\"after-demo\"],\"position\":{\"kind\":\"breakpoint\",\"step\":\"after-demo\",\"arrival\":\"11111111-1111-4111-8111-111111111111\",\"blocked\":false},\"steps\":[{\"name\":\"after-demo\",\"breakpoint\":true}],\"current_step\":0,\"sentence\":\"At breakpoint after-demo.\"}}"
+        let overview = "{\"sessions\":[],\"graph_processes\":[],\"graph\":{\"name\":\"feature\",\"control\":{\"action\":\"continue\",\"label\":\"Continue\"},\"breakpoints\":[\"after-demo\"],\"position\":{\"kind\":\"breakpoint\",\"step\":\"after-demo\",\"arrival\":\"11111111-1111-4111-8111-111111111111\",\"blocker\":null},\"steps\":[{\"name\":\"after-demo\",\"kind\":\"breakpoint\"}],\"current_step\":0,\"sentence\":\"At breakpoint after-demo.\"}}"
         let query = RegistryQuery(subscribeRead: { read in
             #expect(read == .taskGet(directory: "/", issue: "task"))
             let body = "{\"overview\":\(overview),\"graph_processes\":[\(detail)],\"comments\":{\"identifier\":\"task\",\"comments\":[],\"pending_sync\":[],\"conflicts\":{},\"refresh_error\":null},\"execution\":null,\"row\":null}"
@@ -70,7 +70,7 @@ struct RegistryQueryTests {
         #expect(frame.readAt == Revisions(["planning": 7]))
         guard case .task(let reading?) = frame.content else { Issue.record("Missing Task reading"); return }
         #expect(reading.graphProcesses == [expected])
-        #expect(reading.work.graph?.position == .breakpoint(step: "after-demo", arrival: "11111111-1111-4111-8111-111111111111", blocked: false))
+        #expect(reading.work.graph?.position == .breakpoint(step: "after-demo", arrival: "11111111-1111-4111-8111-111111111111", blocker: nil))
     }
 
     /// The JSON `read::tests::desktop_encodings_name_their_reads` decodes in Rust.

@@ -130,9 +130,8 @@ public struct WorkflowControl: Codable, Sendable, Hashable {
     public let label: String
 }
 
-/// The graph a Task took up and where the Task stands on it. An interactive
-/// step is where a person takes part in the Task conversation; `start` and
-/// `end` are implicit.
+/// The graph a Task took up and where the Task stands on it. A breakpoint is
+/// where a person takes part in the Task conversation. `start` and `end` are implicit.
 public struct TaskGraph: Codable, Sendable, Equatable {
     /// `at` waits at `start`, `end`, a landing wait, or a legacy unconverted stop.
     /// `breakpoint` is parked at a Graph breakpoint for a specific arrival.
@@ -140,11 +139,11 @@ public struct TaskGraph: Codable, Sendable, Equatable {
     /// longer running stopped, and the next `lf task run` starts it again at `at`.
     public enum Position: Codable, Sendable, Equatable {
         case at(step: String)
-        case breakpoint(step: String, arrival: String, blocked: Bool)
+        case breakpoint(step: String, arrival: String, blocker: String?)
         case run(step: String, at: String, lfProcessId: String, running: Bool)
 
         enum CodingKeys: String, CodingKey {
-            case kind, step, at, running, arrival, blocked
+            case kind, step, at, running, arrival, blocker
             case lfProcessId = "lf_process_id"
         }
 
@@ -156,7 +155,7 @@ public struct TaskGraph: Codable, Sendable, Equatable {
             case "breakpoint":
                 self = .breakpoint(step: try container.decode(String.self, forKey: .step),
                                    arrival: try container.decode(String.self, forKey: .arrival),
-                                   blocked: try container.decode(Bool.self, forKey: .blocked))
+                                   blocker: try container.decode(String?.self, forKey: .blocker))
             case "run":
                 self = .run(
                     step: try container.decode(String.self, forKey: .step),
@@ -175,11 +174,11 @@ public struct TaskGraph: Codable, Sendable, Equatable {
             case .at(let step):
                 try container.encode("at", forKey: .kind)
                 try container.encode(step, forKey: .step)
-            case .breakpoint(let step, let arrival, let blocked):
+            case .breakpoint(let step, let arrival, let blocker):
                 try container.encode("breakpoint", forKey: .kind)
                 try container.encode(step, forKey: .step)
                 try container.encode(arrival, forKey: .arrival)
-                try container.encode(blocked, forKey: .blocked)
+                try container.encode(blocker, forKey: .blocker)
             case .run(let step, let at, let lfProcessId, let running):
                 try container.encode("run", forKey: .kind)
                 try container.encode(step, forKey: .step)
@@ -199,9 +198,14 @@ public struct TaskGraph: Codable, Sendable, Equatable {
 
     /// One top-level step of the Graph, as the workflow line shows it.
     public struct Step: Codable, Sendable, Hashable {
+        public enum Kind: String, Codable, Sendable, Hashable {
+            case stage
+            case stageWithBreakpoint = "stage_with_breakpoint"
+            case breakpoint
+        }
+
         public let name: String
-        /// This step is a breakpoint or contains one, composed Graphs and XOR paths included.
-        public let breakpoint: Bool
+        public let kind: Kind
     }
 
     public static let start = "start"

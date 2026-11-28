@@ -497,8 +497,7 @@ pub fn breakpoint_sentence(
 
 /// The top-level steps as a person reads them, consecutive repeats collapsed,
 /// with the index in them of each top-level place. A composed step reads as
-/// the graph it came from, and `breakpoint` marks a breakpoint or a step that
-/// contains one (including composed Graphs and XOR paths).
+/// the graph it came from.
 struct WorkflowTrack {
     steps: Vec<WorkflowStep>,
     indices: Vec<u32>,
@@ -526,9 +525,24 @@ fn workflow(steps: &[ConcreteStep]) -> WorkflowTrack {
                 }
             }
         });
+        let kind = if sources.get(1).is_none() && matches!(step, ConcreteStep::Breakpoint(_)) {
+            WorkflowStepKind::Breakpoint
+        } else if breakpoint {
+            WorkflowStepKind::StageWithBreakpoint
+        } else {
+            WorkflowStepKind::Stage
+        };
         match line.last_mut() {
-            Some(last) if last.name == name => last.breakpoint |= breakpoint,
-            _ => line.push(WorkflowStep { name, breakpoint }),
+            Some(last)
+                if last.name == name
+                    && last.kind != WorkflowStepKind::Breakpoint
+                    && kind != WorkflowStepKind::Breakpoint =>
+            {
+                if kind == WorkflowStepKind::StageWithBreakpoint {
+                    last.kind = kind;
+                }
+            }
+            _ => line.push(WorkflowStep { name, kind }),
         }
         indices.push(u32::try_from(line.len() - 1).expect("a graph has few steps"));
     }
@@ -654,8 +668,16 @@ pub struct TaskGraph {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkflowStep {
     pub name: String,
-    /// This step is a breakpoint or contains one, composed Graphs and XOR paths included.
-    pub breakpoint: bool,
+    pub kind: WorkflowStepKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowStepKind {
+    Stage,
+    /// Runnable stage with a breakpoint, including composed Graphs and XOR paths.
+    StageWithBreakpoint,
+    Breakpoint,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -668,7 +690,8 @@ pub enum TaskGraphPosition {
     Breakpoint {
         step: String,
         arrival: loopflow_model::id::LfProcessId,
-        blocked: bool,
+        #[serde(deserialize_with = "Option::deserialize")]
+        blocker: Option<String>,
     },
     /// `lf task run` (`lf_process_id`) carries the Task on from `step`, and
     /// runs `at`. `running` is read from that Process: a run that ended
@@ -746,10 +769,11 @@ impl TaskGraph {
                     Some(PauseStage::Held) => format!("Paused at {step}. {unpause}"),
                     None => breakpoint_sentence(&step, stop),
                 };
-                let control = if let Some(reason) = blocker {
+                let chip = place.as_ref().map_or(step.as_str(), top_name).to_owned();
+                let control = if blocker.is_some() {
                     WorkflowControl {
                         action: WorkflowAction::Wait,
-                        label: reason.to_owned(),
+                        label: format!("Blocked: {chip}"),
                     }
                 } else {
                     WorkflowControl {
@@ -757,12 +781,11 @@ impl TaskGraph {
                         label: "Continue".into(),
                     }
                 };
-                let chip = step.clone();
                 (
                     TaskGraphPosition::Breakpoint {
                         step,
                         arrival: stop.id.clone(),
-                        blocked: blocker.is_some(),
+                        blocker: blocker.map(str::to_owned),
                     },
                     place.as_ref().map(top),
                     sentence,
@@ -1006,7 +1029,7 @@ pub(crate) mod tests {
         )
     }
 
-    use super::{CapturedGraph, TaskGraph, TaskGraphRun};
+    use super::{CapturedGraph, TaskGraph, TaskGraphRun, WorkflowStepKind};
     use loopflow_storage::sqlite::{Auto, AutoState};
 
     fn write(repo: &std::path::Path, path: &str, content: &str) {
@@ -1141,16 +1164,16 @@ pub(crate) mod tests {
         let steps: Vec<_> = start
             .steps
             .iter()
-            .map(|step| (step.name.as_str(), step.breakpoint))
+            .map(|step| (step.name.as_str(), step.kind))
             .collect();
         assert_eq!(
             steps,
             [
-                ("plan", false),
-                ("build", false),
-                ("ship-review", false),
-                ("after-ship-review", true),
-                ("deliver", false),
+                ("plan", WorkflowStepKind::Stage),
+                ("build", WorkflowStepKind::Stage),
+                ("ship-review", WorkflowStepKind::Stage),
+                ("after-ship-review", WorkflowStepKind::Breakpoint),
+                ("deliver", WorkflowStepKind::Stage),
             ]
         );
         assert_eq!(start.breakpoints, ["after-ship-review"]);
@@ -1221,6 +1244,55 @@ pub(crate) mod tests {
             blocked.sentence,
             "At breakpoint after-ship-review. Blocked: needs a layout decision"
         );
+        assert_eq!(blocked.control.label, "Blocked: after-ship-review");
+    }
+
+    #[test]
+    fn a_blocked_breakpoint_names_its_composed_stage_in_the_workflow() {
+        let repo = tempfile::tempdir().unwrap();
+        write(
+            repo.path(),
+            ".lf/graphs/parent.yaml",
+            "- nested-review\n- break: outer-review\n",
+        );
+        write(
+            repo.path(),
+            ".lf/graphs/nested-review.yaml",
+            "- implement\n- break: inside-review\n",
+        );
+        let graph = CapturedGraph::load("parent", repo.path()).unwrap().unwrap();
+        let stage = graph.find("nested-review").unwrap();
+        assert_eq!(graph.step_name(&stage), "implement");
+        let stop = graph.after(&stage).unwrap();
+        let mut cursor = stop.cursor();
+        cursor.leaf_mut().progress.verdict = Some(crate::graph::transitions::GraphVerdict {
+            decision: crate::graph::transitions::GraphDecision::Blocked,
+            summary: "Choose a layout".into(),
+        });
+        let arrival = crate::store::task_work::BreakpointArrival {
+            id: loopflow_model::id::LfProcessId::new(),
+            cursor,
+        };
+        let parked = TaskGraph::read(
+            &graph,
+            "inside-review".into(),
+            Some(&arrival),
+            None,
+            None,
+            None,
+            test_merges,
+        );
+        assert_eq!(parked.current_step, Some(0));
+        assert_eq!(parked.breakpoints, ["inside-review", "outer-review"]);
+        assert_eq!(parked.steps[0].name, "nested-review");
+        assert_eq!(parked.steps[0].kind, WorkflowStepKind::StageWithBreakpoint);
+        assert_eq!(parked.steps[1].kind, WorkflowStepKind::Breakpoint);
+        assert_eq!(parked.control.label, "Blocked: nested-review");
+        assert!(matches!(
+            parked.position,
+            super::TaskGraphPosition::Breakpoint { blocker: Some(reason), .. }
+                if reason == "Choose a layout"
+        ));
     }
 
     #[test]

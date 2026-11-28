@@ -154,8 +154,9 @@ Post-build concept review at `59f26fa51d` ([concept-review.html](concept-review.
 2. **Pause holds breakpoint handoffs; Unpause delivers an unread parked review once:**
    - `steers.rs:scopes()` gates `breakpoint:%` steers on `AND NOT EXISTS(SELECT 1 FROM task_pauses p WHERE p.task_id=tp.task_id)` (indexed PK lookup on `task_pauses`), matching `task_state_sql`, `selections.rs`, `waves.rs`, and `snapshot.rs`. A paused Task never wakes an idle primary or starts a quit primary in a held terminal for a breakpoint while shelved.
    - In `sqlite/task_pause.rs:release_task_pause`, when `settle_step.is_none()` and `task_graphs` is parked at a breakpoint (`run_start IS NULL AND breakpoint IS NOT NULL`), look up the `breakpoint:<task>` steer for that arrival ID. If it has no delivered receipt (`NOT EXISTS(SELECT 1 FROM steer_delivered WHERE steer_id=?1 AND delivered_at IS NOT NULL)`), delete any unstamped `steer_delivered` rows and the old `steers` row and re-save it via `steers::save_in` inside the same transaction (after deleting `task_pauses`). This gives the unread review a fresh `seq`, bumps revisions, and touches the steer marker so the watcher wakes or held-starts the primary once on unpause — while leaving already-delivered reviews quiet.
+   - An idle wake also publishes generic Task progress before claiming steers. At a held breakpoint, record the Graph's progress in the observation and let the review carry the arrival and its run outcome to the primary on unpause. Keep comments, PR changes, and notices to conductors flowing. Exercise the idle wake as well as the stopped-conversation queue.
 
-### Layer changes (start with slice 1)
+### Implementation
 
 - **Slice 1 (Rust DTO + Swift workflow controls — proves the UI/wire model immediately):**
   - `rust/loopflow-execution/src/task_graph.rs`: replace `WorkflowStep.breakpoint: bool` with `WorkflowStep.kind: WorkflowStepKind` (`stage` | `stage_with_breakpoint` | `breakpoint`); replace `TaskGraphPosition::Breakpoint.blocked: bool` with `blocker: Option<String>`; set blocked `WorkflowControl` label to `format!("Blocked: {chip}")`; update `ops/task/snapshot.rs` and `store/task_work.rs` (`blocker.is_some()`).
@@ -169,7 +170,12 @@ Post-build concept review at `59f26fa51d` ([concept-review.html](concept-review.
   - `rust/loopflow-storage/src/sqlite/task_pause.rs`: re-publish an unread parked breakpoint steer inside `release_task_pause` when `settle_step.is_none()`.
   - Tests: add storage/execution tests covering (a) draining command or unread breakpoint arriving while paused does not appear in `unread` / `read_steer_wakes`, (b) `release_task_pause` re-publishes an unread breakpoint steer once and wakes the primary, and (c) an already-delivered breakpoint steer is not re-delivered after pause + unpause.
 
+### November 27 checks
+
+- Both slices are implemented. The 104 focused Rust checks passed, including the CLI draining-command pause and unpause, the idle primary's watcher, stopped-primary wake eligibility, and the case where the review was already read before pausing. The schema, DTO, command docs, and formatter checks passed.
+- The focused headless Swift run passed across 10 suites and reported 143 tests, with the two optional display checks skipped. View tests cover the held chip, a standalone marker with no start action, a stage sharing a breakpoint name, and a blocker shown beside the track.
+- The SQL plan test found no growing-table scans. In an in-memory probe with 10,000 Tasks and primary Sessions, 40,000 steers, and 2,500 holds, median reads were 19.4 µs for paused eligibility, 10.1 µs for unpaused eligibility, and 2.2 µs for locating the review on unpause.
+
 ## Remaining
 
-- Execute Pass 7 (Slices 1 and 2 above), then run focused Rust (`loopflow-storage`, `loopflow-execution`, `loopflow` DTO/schema/graph tests) and Swift (`scripts/test_desktop.sh` across workflow/action/DTO/protocol suites) checks, plus `cargo fmt --all -- --check`.
 - Deferred to delivery: full CI suite run on the published head of PR #2042. LOO-1098 (Antigravity immediate idle wake) and LOO-1100 (retiring legacy `interactive:` readers) remain separate.

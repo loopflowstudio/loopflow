@@ -1,7 +1,11 @@
-at: 5dda742dde32d858a05cbdcf19bb02c48be2d8a4
+at: cc73f2d81af9d321aecd4a4d0e59c7be31d07c4f
 first:
   - path: docs/orchestration.md
     why: Follow a worker through review and continuation.
+  - path: docs/work.md
+    why: See when a held Task receives its review.
+  - path: swift/README.md
+    why: See how stages and breakpoint markers appear in Desktop.
   - path: rust/loopflow-definitions/src/builtins/task/graph/feature.yaml
     why: See where exploration and ship review finish.
   - path: rust/loopflow-definitions/src/builtins/task/skill/task_session.md
@@ -9,13 +13,13 @@ first:
   - path: rust/loopflow-execution/src/graph/mod.rs
     why: Compile named and unnamed markers across composed Graphs.
   - path: rust/loopflow-execution/src/task_graph.rs
-    why: Project one workflow track for Tasks and catalog entries.
+    why: Project stage kinds, arrivals, and blockers for both surfaces.
   - path: rust/loopflow-execution/src/store/task_work.rs
     why: Identify a visit by its carrier and saved cursor.
   - path: rust/loopflow-execution/src/task_graph/legacy.rs
     why: Translate released captures and their pending workers together.
   - path: rust/loopflow-execution/src/graph/transitions.rs
-    why: Distinguish a one-step reply from loop direction.
+    why: Scope review replies to the next step or loop.
   - path: rust/loopflow-execution/src/graph/runner.rs
     why: Carry the producer and verdict to the breakpoint.
   - path: rust/loopflow/src/lf/commands/graph.rs
@@ -23,7 +27,11 @@ first:
   - path: rust/loopflow-storage/src/sqlite/task_work.rs
     why: Park and enqueue the handoff in one transaction.
   - path: rust/loopflow-storage/src/sqlite/steers.rs
-    why: Deliver once to the current primary.
+    why: Deliver the current visit to the unpaused primary.
+  - path: rust/loopflow-storage/src/sqlite/task_pause.rs
+    why: Queue unread reviews when lifting the hold.
+  - path: rust/loopflow-execution/src/harness/task_updates.rs
+    why: Keep generic Graph progress from waking a held review.
   - path: rust/loopflow-execution/src/ops/task.rs
     why: Claim the arrival and apply the reply.
   - path: rust/loopflow-execution/src/ops/task/pause.rs
@@ -33,11 +41,13 @@ first:
   - path: rust/loopflow/src/lf/commands/waves.rs
     why: Carry the review and its arrival to Roadmap.
   - path: swift/Loopflow/Design/TaskActions.swift
-    why: Build menu choices from the displayed track.
+    why: Offer start actions for runnable stages.
   - path: swift/Loopflow/Design/TaskWorkflowControls.swift
-    why: Display the breakpoint marker and worker’s blocker.
+    why: Render static markers, pause chips, and the worker’s blocker.
   - path: swift/Loopflow/Models/NowProjection.swift
     why: Order Tasks waiting for review.
+  - path: rust/loopflow/src/server/wake.rs
+    why: Exercise the idle primary wake after unpause.
   - path: rust/loopflow/tests/work/graph_tests.rs
     why: Exercise delivery to the primary and next worker.
 hide:

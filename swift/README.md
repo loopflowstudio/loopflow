@@ -669,6 +669,15 @@ Terminals start from Desktop's own terminal settings. A launcher's `NO_COLOR`,
 `TERM`, pager and agent variables do not reach them, so provider CLIs keep their
 colors however Desktop was opened.
 
+Hold **⌘** over a hyperlink in a Session or Shell pane for a hand cursor and
+bottom-corner target preview, even when the pane strip is hidden or input is
+paused. **⌘-click** opens web and mail links in their default app, read-only
+Work links in this window, and checkout files (local or remote) in **Files** at
+`#L<n>`; executables outside the checkout, remote out-of-checkout paths, and
+app-control `loopflow://` routes are refused with a notice. Held terminals set
+`TERM_PROGRAM=ghostty` so Sessions started anywhere emit clickable links.
+[Links in terminal panes](../docs/surfaces.md#links-in-terminal-panes).
+
 If macOS cannot provide Ghostty's display link, terminals use timer rendering.
 The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.
 

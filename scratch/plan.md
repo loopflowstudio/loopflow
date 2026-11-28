@@ -220,3 +220,22 @@ passes on, can carry one. These must hold:
 ⌘-click on an agent's link in a Desktop Session opens it in the right place,
 the cursor and preview show it is a link, and a Task started from Desktop or
 from any terminal prints clickable links.
+
+## Docs
+
+- `docs/surfaces.md` (`### Links in terminal panes`)
+- `swift/README.md` (terminal link summary pointing to `docs/surfaces.md#links-in-terminal-panes`)
+
+### Questions raised while writing docs
+
+- **Remote `file://` hostnames:** `ls --hyperlink` and `rg` on a remote Machine
+  print `file://<remote-hostname>/…`, where `<remote-hostname>` is neither this
+  Mac's `hostName` nor necessarily the Loopflow Machine's short label. On a
+  local pane, a non-local `file://` host must be refused; on a remote pane,
+  should a `file://` URL with a non-empty host open in **Files** when its path
+  falls inside the remote pane's checkout?
+- **Relative file targets:** Pass 2's example mentions `scripts/test.py#L42`,
+  while `TerminalLink` refuses relative targets. Confirm whether checkout file
+  links are always absolute `file://` OSC 8 targets (with relative display text)
+  or whether scheme-less relative paths should resolve against the pane's
+  checkout.

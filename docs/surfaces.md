@@ -187,6 +187,35 @@ Queries support `wave:`, `task:`, `kind:task|wave`, and
 `state:open|available|busy|blocked|error|unstarted|idle|active|moving|paused|backlog|working|done|auto`
 (`auto`: an open Task with auto on), combined with whitespace (AND), `or`, and parentheses.
 
+### Links in terminal panes
+
+Hold **⌘** and hover over a link in a Session or Shell pane — a Markdown link
+from an agent, `ls --hyperlink` or `rg` output, or `lf open --task LOO-12 --link`.
+The cursor turns into a hand and the bottom corner shows the target URL or path,
+whether or not the pane strip is visible and even while a Session is
+reconnecting or ended. **⌘-click** opens it:
+
+| Link | Opens in |
+|---|---|
+| `https://…`, `http://…`, `mailto:…` | Default browser or mail app |
+| `loopflow://<repo>`, `…/task/<ID>`, `…/wave/<name>` | This Desktop window, with no alert |
+| File inside the pane's checkout (e.g. `file:///…/scripts/test.py#L42`) | **Files** at that line (read-only, including scripts), on this Mac or a remote Machine |
+| Local regular file or folder outside the checkout | Default app on this Mac |
+| Other URL schemes (e.g. `slack://…`) | Asks in an alert naming the target first |
+
+Terminal output is untrusted, so Desktop refuses app-control `loopflow://`
+routes (`open`, `update`, `portfolio`, `sessions`), local app bundles, scripts
+and executables outside the checkout, missing files, malformed or relative
+targets, fragments other than `#L<n>`, and control or bidirectional text
+characters. In a remote Session, a file outside the checkout is refused rather
+than looked up on your Mac. Refused clicks open nothing and say why in the
+bottom-corner notice.
+
+Every held terminal identifies itself as `TERM_PROGRAM=ghostty` (dropping any
+inherited `TERM_PROGRAM_VERSION`), so agents and CLIs emit clickable hyperlinks
+whether a Session started from Desktop, a Graph worker, or another terminal.
+Sessions already running keep their launch environment until their next start.
+
 ### Changes show at once
 
 Actions in Desktop (Complete, Abandon, Reopen, Claim, Unassign, Pause, Unpause, Move, Rename)

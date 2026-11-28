@@ -75,9 +75,8 @@ struct TaskFilesView: View {
                 await store.workingTree.refresh()
             }
         }
-        .task(id: "\(store.selection ?? "")|\(store.mode)") {
-            if store.mode != .diff { await store.loadFile() }
-        }
+        .task(id: "\(store.selection ?? "")|\(store.mode)") { await store.loadSelection() }
+        .onDisappear { store.endPresentation() }
         .onChange(of: store.selection) { store.find?.reset() }
         .onChange(of: store.mode) { store.find?.reset() }
         .onChange(of: store.selectedDocument?.editVersion) { store.jumps.dismiss() }

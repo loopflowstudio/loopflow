@@ -109,10 +109,15 @@ final class TaskFilesStore {
 
     var holdsPresentation: Bool { page == .changes || (page == .files && mode != .read) }
 
-    func openPresentation(_ request: FilesBrowserState.Presentation) {
+    func openPresentation(_ request: FilesBrowserState.Presentation, reusingSnapshot: Bool = false) {
         filePicker = nil
         let visit = request.lines.map { FileVisit(line: $0.lowerBound, showsSource: true, highlight: .lines($0)) }
         reveal(request.path, at: visit, mode: request.mode, from: jumps.position(in: self))
+        presentedFile = reusingSnapshot ? (request.path, machine, cwd) : nil
+        if reusingSnapshot {
+            fileGeneration += 1
+            error = nil
+        }
     }
 
     private(set) var scratchPaths: [String] = []
@@ -447,11 +452,7 @@ final class TaskFilesStore {
                     invalidate([path])
                     continue
                 }
-                if arriving.remove(path) != nil {
-                    await document.arrive(next)
-                } else {
-                    await document.reconcile(next)
-                }
+                await reconcileDocument(document, with: next)
             } catch is CancellationError {
                 return
             } catch { self.error = error.localizedDescription }
@@ -622,6 +623,14 @@ final class TaskFilesStore {
 
     var selectedDocument: TaskFileDocument? { selection.flatMap { documents[$0] } }
 
+    func reconcileDocument(_ document: TaskFileDocument, with snapshot: TaskFileSnapshot) async {
+        if arriving.remove(document.path) != nil {
+            await document.arrive(snapshot)
+        } else {
+            await document.reconcile(snapshot)
+        }
+    }
+
     func document(_ path: String) -> TaskFileDocument {
         if let document = documents[path] { return document }
         let document = TaskFileDocument(path: path)
@@ -680,7 +689,26 @@ final class TaskFilesStore {
         }
     }
 
+    // A terminal link may have read the file before revealing Files. Only
+    // the first automatic read of that presentation can reuse its result.
+    @ObservationIgnored private var presentedFile: (path: String, machine: String?, cwd: String)?
+
+    func endPresentation() { presentedFile = nil }
+
+    func loadSelection() async {
+        guard !Task.isCancelled else { return }
+        let presented = presentedFile
+        presentedFile = nil
+        guard mode != .diff else { return }
+        if let presented, mode == .read, presented.path == selection, presented.machine == machine, presented.cwd == cwd {
+            watchOpenFiles()
+        } else {
+            await loadFile()
+        }
+    }
+
     func loadFile() async {
+        presentedFile = nil
         fileGeneration += 1
         let generation = fileGeneration
         guard let path = selection else { return }

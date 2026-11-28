@@ -293,7 +293,7 @@ struct DashboardTile: View {
                         onFocus: { pane, _ in
                             if takesFocus { workspaces.focus(entry.key) }
                             entry.multiplexer.setFocusedPane(pane)
-                        }, face: pane)
+                        }, face: pane, onEnter: enter)
                         .equatable()
                 } else {
                     // The same placeholder as the pane; its button attaches here and the

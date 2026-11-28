@@ -2,6 +2,7 @@
 import AppKit
 import Foundation
 import GhosttyKit
+import IOKit
 import Loopflow
 import QuartzCore
 import Testing
@@ -9,6 +10,106 @@ import Testing
 
 @Suite("Terminal feedback")
 struct TerminalFeedbackTests {
+    @Test("Link hover shows the target or refusal and changes the cursor")
+    @MainActor
+    func hyperlinkHover() {
+        let view = GhosttyMetalView(terminal: .session("link-preview", machineId: fixtureMachineId))
+        view.setMouseShape(GHOSTTY_MOUSE_SHAPE_POINTER)
+        view.showLinkTarget("https://github.com@evil.example/")
+        #expect(view.linkFeedback.stringValue == "Invalid web link.")
+        #expect(view.terminalCursor == .operationNotAllowed)
+        view.showLinkTarget("https://example.com/%E2%80%AEtest")
+        #expect(view.linkFeedback.stringValue == "Invalid terminal link.")
+        view.showLinkTarget("")
+        #expect(view.linkFeedback.stringValue == "Invalid terminal link.")
+        #expect(view.terminalCursor == .operationNotAllowed)
+        view.setMouseShape(GHOSTTY_MOUSE_SHAPE_TEXT)
+        view.showLinkTarget("/tmp/file#L12")
+        #expect(view.linkFeedback.stringValue == "/tmp/file#L12")
+        #expect(view.terminalCursor == .pointingHand)
+        view.showLinkTarget(nil)
+        #expect(view.linkFeedback.isHidden)
+        #expect(view.terminalCursor == .iBeam)
+    }
+
+    @Test("A paused Session previews and opens its OSC 8 link", .requiresDisplay)
+    @MainActor
+    func sessionHyperlink() async throws {
+        final class PointerWindow: NSWindow {
+            var pointer = NSPoint.zero
+            override var isKeyWindow: Bool { true }
+            override var mouseLocationOutsideOfEventStream: NSPoint { pointer }
+        }
+        _ = NSApplication.shared
+        let manager = GhosttyManager.shared
+        manager.initialize()
+        let view = GhosttyMetalView(terminal: .session("link-proof", machineId: fixtureMachineId))
+        view.workingDirectory = NSTemporaryDirectory()
+        view.command = #"/bin/sh -c 'printf "\033]8;;https://example.com\007link-proof\033]8;;\007\n"; exec /bin/cat'"#
+        let mount = GhosttyTerminalMount(terminal: view)
+        let window = PointerWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 480),
+                                   styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = mount
+        defer { view.destroySurface(); window.contentView = nil }
+        mount.layoutSubtreeIfNeeded()
+        view.createSurface(manager: manager)
+        let surface = try #require(view.surface)
+        try #require(!view.connectionAcceptsInput)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while true {
+            if case .available(let text, _) = try view.readText(region: .screen, maxBytes: 8192),
+               text.contains("link-proof") { break }
+            try #require(ContinuousClock.now < deadline, "The Session did not print its hyperlink.")
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let grid = ghostty_surface_size(surface)
+        let scale = window.backingScaleFactor
+        let cell = NSPoint(x: GhosttyTerminalPadding.x + CGFloat(grid.cell_width_px) / scale / 2,
+                           y: view.bounds.height - GhosttyTerminalPadding.y - CGFloat(grid.cell_height_px) / scale / 2)
+        let point = view.convert(cell, to: nil)
+        let command = NSEvent.ModifierFlags.command.union(.init(rawValue: UInt(NX_DEVICELCMDKEYMASK)))
+        func mouse(_ type: NSEvent.EventType, _ flags: NSEvent.ModifierFlags = []) throws -> NSEvent {
+            try #require(NSEvent.mouseEvent(with: type, location: point, modifierFlags: flags, timestamp: 0,
+                                           windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                                           clickCount: 1, pressure: 1))
+        }
+        func modifiers(_ flags: NSEvent.ModifierFlags) throws -> NSEvent {
+            try #require(NSEvent.keyEvent(with: .flagsChanged, location: point, modifierFlags: flags, timestamp: 0,
+                                          windowNumber: window.windowNumber, context: nil, characters: "",
+                                          charactersIgnoringModifiers: "", isARepeat: false, keyCode: 0x37))
+        }
+        view.mouseMoved(with: try mouse(.mouseMoved))
+        #expect(view.linkFeedback.isHidden)
+        view.flagsChanged(with: try modifiers(command))
+        #expect(view.linkFeedback.stringValue == "https://example.com")
+        view.cursorUpdate(with: try mouse(.mouseMoved, command))
+        #expect(NSCursor.current == .pointingHand)
+        view.flagsChanged(with: try modifiers([]))
+        #expect(view.linkFeedback.isHidden)
+
+        window.pointer = point
+        try #require(window.makeFirstResponder(nil))
+        try #require(window.firstResponder !== view)
+        NSApp.sendEvent(try modifiers(command))
+        #expect(view.linkFeedback.stringValue == "https://example.com")
+        #expect(view.terminalCursor == .pointingHand)
+        NSApp.sendEvent(try modifiers([]))
+        #expect(view.linkFeedback.isHidden)
+        #expect(view.terminalCursor != .pointingHand)
+        #expect(window.firstResponder !== view)
+
+        var opened: TerminalHyperlink?
+        view.onOpenLink = { link, _ in opened = link }
+        view.mouseDown(with: try mouse(.leftMouseDown, command))
+        view.mouseUp(with: try mouse(.leftMouseUp, command))
+        let clickDeadline = ContinuousClock.now + .seconds(2)
+        while opened == nil {
+            try #require(ContinuousClock.now < clickDeadline, "Ghostty did not deliver the OSC 8 click.")
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(opened == .defaultApp(try #require(URL(string: "https://example.com"))))
+    }
+
     @Test("Host Copy, Paste and Find do not consume modified TUI shortcuts")
     func shortcutOwnership() {
         for (key, shortcut) in [("c", GhosttyTerminalShortcut.copy), ("v", .paste), ("f", .find)] {

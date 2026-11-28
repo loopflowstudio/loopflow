@@ -581,8 +581,8 @@ impl Registry {
         let mut env: Vec<(String, String)> = start
             .env
             .into_iter()
-            // A pane's relay variables describe that pane's viewer, and a
-            // held handoff its own terminal; neither is this child's.
+            // Relay variables, held handoffs and terminal identity describe
+            // the caller's terminal. The child runs in a new one.
             .filter(|(name, _)| {
                 ![
                     HELD_ENV,
@@ -594,6 +594,8 @@ impl Registry {
                     "LF_TERMINAL_TTY",
                     "LF_SERVER",
                     "LF_SERVER_STATUS",
+                    "TERM_PROGRAM",
+                    "TERM_PROGRAM_VERSION",
                 ]
                 .contains(&name.as_str())
             })
@@ -606,6 +608,7 @@ impl Registry {
                 _ => {}
             }
         }
+        env.push(("TERM_PROGRAM".into(), "ghostty".into()));
         env.push((HELD_ENV.into(), terminal.to_string()));
         env.push((WITHIN_ENV.into(), terminal.to_string()));
         env.push((PARENT_ENV.into(), holder.pid.to_string()));

@@ -669,6 +669,9 @@ Terminals start from Desktop's own terminal settings. A launcher's `NO_COLOR`,
 `TERM`, pager and agent variables do not reach them, so provider CLIs keep their
 colors however Desktop was opened.
 
+**⌘-click** a terminal link to open it. Hold **⌘** over it to preview the
+target. [Links in terminal panes](../docs/surfaces.md#links-in-terminal-panes).
+
 If macOS cannot provide Ghostty's display link, terminals use timer rendering.
 The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.
 

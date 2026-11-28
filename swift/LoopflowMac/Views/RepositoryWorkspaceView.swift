@@ -44,6 +44,7 @@ struct RepositoryWorkspaceView: View {
     let query: RegistryQuery
     let router: WorkLinkRouter
     let openRepository: (String, LinkedWork?) -> Void
+    var openResolvedWorkLink: ((WorkLink) async throws -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var resolutionError: String?
     @State private var validatedRequests: Set<UUID>?
@@ -55,7 +56,7 @@ struct RepositoryWorkspaceView: View {
             RepoView(portfolioService: portfolioService,
                      sessionWorkspaces: workspaces.registry(for: resolved.id), initialRepoPath: resolved.path,
                      query: query, taskLinks: router, repository: resolved.id, openingRequests: validatedRequests ?? [],
-                     openRepository: openRepository)
+                     openRepository: openRepository, openResolvedWorkLink: openResolvedWorkLink)
         }
         .task(id: requests) {
             // A new request may arrive between validation and registration.

@@ -187,6 +187,37 @@ Queries support `wave:`, `task:`, `kind:task|wave`, and
 `state:open|available|busy|blocked|error|unstarted|idle|active|moving|paused|backlog|working|done|auto`
 (`auto`: an open Task with auto on), combined with whitespace (AND), `or`, and parentheses.
 
+### Links in terminal panes
+
+Hold **⌘** over a link in a Session or Shell pane. The cursor turns into a
+hand and the bottom corner shows the target. **⌘-click** to open it. Errors
+appear in that corner. Links still work with the pane strip hidden or while
+a disconnected terminal shows its last screen.
+
+| Link | Opens in |
+|---|---|
+| `https://…`, `http://…`, `mailto:…` | Default browser or mail app |
+| A `loopflow://` Work address from `lf open --task LOO-12 --link` | The repository's Desktop window, after Desktop resolves the address |
+| A file in the Task's active checkout, such as `file:///…/scripts/test.py#L42` | **Files** in Read mode at the linked line |
+| Local folder or local document outside the pane’s active Task checkout | Default app on this Mac |
+| Another URL scheme, such as `slack://…` | A confirmation sheet shows the target before opening it |
+
+A checkout file opens beside the terminal and leaves keyboard focus there.
+Desktop enters the Task from a Dashboard tile and restores the split from a
+zoomed terminal.
+
+File paths must be absolute, exist, and contain no parent-directory segments.
+A file link can include a line as `#L<n>`. Remote file URLs can name the
+remote host and must point to a file inside the Task's active checkout.
+Repository and Wave Sessions, and local shells left behind when a Task
+moves, open local documents and folders in the default app. Desktop refuses
+to launch apps, scripts, and executables. It also refuses malformed links
+and targets containing control characters or bidirectional text controls.
+
+New held terminals set `TERM_PROGRAM=ghostty` and clear
+`TERM_PROGRAM_VERSION` so programs can detect hyperlink support from
+Desktop, Graph workers, or another terminal.
+
 ### Changes show at once
 
 Actions in Desktop (Complete, Abandon, Reopen, Claim, Unassign, Pause, Unpause, Move, Rename)

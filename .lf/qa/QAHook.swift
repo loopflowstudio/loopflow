@@ -1,6 +1,7 @@
 // Copy into swift/LoopflowMac/ for a local QA build; never commit it there. See desktop.md, "Driving the app with the screen locked".
 import AppKit
 import WebKit
+import GhosttyKit
 
 @MainActor
 enum QAHook {
@@ -318,6 +319,37 @@ enum QAHook {
             if window.performKeyEquivalent(with: event) { return "window" }
             let claimed = (NSApp.mainMenu?.items ?? []).filter { $0.submenu?.performKeyEquivalent(with: event) == true }.map(\.title)
             return "menus \(claimed)"
+        case "link":
+            // `link <hover|click|leave> <col> <row> [pane]`: ⌘-moves (and ⌘-clicks) over a terminal cell through
+            // the view's own mouse handlers, then prints the hover preview. `pane` picks the nth terminal.
+            let n = arg.split(separator: " ").map(String.init)
+            guard n.count >= 3, let col = Double(n[1]), let row = Double(n[2]) else { return "usage: link hover|click|leave col row [pane]" }
+            let all = windows.flatMap { terminalViews($0.contentView) }
+            let index = n.count > 3 ? Int(n[3]) ?? 0 : 0
+            guard all.indices.contains(index), let window = all[index].window, let surface = all[index].surface else {
+                return "no terminal \(index) of \(all.count)"
+            }
+            let view = all[index]
+            let size = ghostty_surface_size(surface)
+            let scale = window.backingScaleFactor
+            let x = GhosttyTerminalPadding.x + (col + 0.5) * Double(size.cell_width_px) / scale
+            let top = GhosttyTerminalPadding.y + (row + 0.5) * Double(size.cell_height_px) / scale
+            let local = NSPoint(x: x, y: view.bounds.height - top)
+            let location = n[0] == "leave" ? NSPoint(x: -50, y: -50) : view.convert(local, to: nil)
+            func event(_ type: NSEvent.EventType) -> NSEvent? {
+                NSEvent.mouseEvent(with: type, location: location, modifierFlags: n[0] == "leave" ? [] : .command,
+                                   timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                   context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+            }
+            event(.mouseMoved).map(view.mouseMoved)
+            if n[0] == "click" {
+                event(.leftMouseDown).map(view.mouseDown)
+                event(.leftMouseUp).map(view.mouseUp)
+            }
+            return linkState(view) + " cell \(size.cell_width_px)x\(size.cell_height_px) of \(all.count)"
+        case "linkstate":
+            let all = windows.flatMap { terminalViews($0.contentView) }
+            return all.enumerated().map { "\($0.offset): " + linkState($0.element) }.joined(separator: "\n")
         case "terminal":
             // Makes the first terminal pane first responder and prints its screen.
             for window in windows {
@@ -376,6 +408,18 @@ enum QAHook {
         if let terminal = view as? GhosttyMetalView, terminal.surface != nil { return terminal }
         for child in view.subviews { if let found = terminalView(child) { return found } }
         return nil
+    }
+
+    private static func terminalViews(_ view: NSView?) -> [GhosttyMetalView] {
+        guard let view else { return [] }
+        if let terminal = view as? GhosttyMetalView, terminal.surface != nil { return [terminal] }
+        return view.subviews.flatMap(terminalViews)
+    }
+
+    private static func linkState(_ view: GhosttyMetalView) -> String {
+        let feedback = view.linkFeedback.isHidden ? "-" : view.linkFeedback.stringValue
+        let cursor = view.terminalCursor == .pointingHand ? "hand" : view.terminalCursor == .operationNotAllowed ? "not-allowed" : "other"
+        return "feedback=\(feedback) cursor=\(cursor) responder=\(view.window?.firstResponder === view)"
     }
 
     private static func children(_ element: Any) -> [Any] {

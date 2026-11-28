@@ -1,0 +1,126 @@
+<h1>LOO-1126 QA: terminal links in Loopflow Desktop</h1>
+
+<p>Branch build <code>912a030f14</code>: <code>lf</code> plus an isolated Dev bundle
+(<code>com.loopflow.mac.qa1126.dev</code>) with the QA hook, on two private Machines
+on this Mac ("laptop" and "mini", the second behind a stand-in <code>ssh</code>). The
+agent was a stand-in <code>claude</code> that prints each target as an OSC 8 link
+(<code>.lf/qa/link-standin.py</code>). Hover and click went through the terminal
+view's own <code>mouseMoved</code>/<code>mouseDown</code>/<code>mouseUp</code> with ⌘
+held (<code>link</code> in <code>.lf/qa/QAHook.swift</code>). No real pointer or
+keyboard was used.</p>
+
+<h2>1. Sessions started by the server print links</h2>
+<p>The private server ran under <code>env -i</code>, so no <code>TERM_PROGRAM</code>
+existed to inherit. The held provider's environment (<code>ps -E</code>):</p>
+<pre>COLORTERM=truecolor
+TERM=xterm-256color
+TERM_PROGRAM=ghostty</pre>
+<p>Line 1 of the stand-in read <code>TERM_PROGRAM=ghostty TERM_PROGRAM_VERSION=None</code>
+in every pane: the laptop Task, the Task on mini, and a Desktop shell tab
+(<code>TP=ghostty</code>).</p>
+
+<h2>2. ⌘-hover: cursor and preview</h2>
+<p>Every OSC 8 target and the bare <code>https://example.org/plain-lf-qa</code> showed
+the hand cursor and the target in the preview. Targets that fail syntactic checks
+showed the reason and the not-allowed cursor:</p>
+<pre>row 1:  feedback=https://example.com/?lf-qa-1126 cursor=hand
+row 3:  feedback=file:///…/notes.txt#L3 cursor=hand        (second row of a soft-wrapped link)
+row 9:  feedback=Invalid web link. cursor=not-allowed       (https://u:p@example.com/)
+row 10: feedback=Use #L followed by a valid line number in a file link. cursor=not-allowed
+row 14: feedback=File links need a path without parent-directory segments. cursor=not-allowed
+row 21: feedback=https://example.org/plain-lf-qa cursor=hand  (plain text, no OSC 8)</pre>
+<img src="qa/13-light-hover.png" alt="Light theme: hovered file link underlined, target in the bottom-right preview" width="900">
+
+<h2>3. ⌘-click on this Mac</h2>
+<table>
+<tr><th>Link</th><th>What happened</th></tr>
+<tr><td><code>file://…/notes.txt#L3</code> (checkout)</td><td>Files opened <code>notes.txt</code> with line 3 highlighted; the terminal kept first responder</td></tr>
+<tr><td><code>file://…/docs/guide.md</code> (checkout)</td><td>Files opened the rendered Markdown</td></tr>
+<tr><td><code>https://example.com/?lf-qa-1126</code>, plain URL</td><td>No notice (<code>NSWorkspace.open</code> returned true); the preview cleared</td></tr>
+<tr><td><code>loopflow://demo/task/d8cd38</code></td><td>The same window moved to the second Task (<code>destination.work.id = task_d8cd38…</code>)</td></tr>
+<tr><td><code>x-lfqa://hello</code></td><td>"Open link in another app?" sheet. Open → "No app could open the link."; Cancel → nothing</td></tr>
+<tr><td><code>file:///bin/ls</code>, <code>file:///tmp/…/outside.sh</code></td><td>"Terminal links cannot open apps, scripts, or executable files."</td></tr>
+<tr><td><code>file://otherhost/…/notes.txt</code></td><td>"File is on another Machine."</td></tr>
+<tr><td><code>file://…/nope.txt</code></td><td>"File is missing or unreadable."</td></tr>
+<tr><td><code>loopflow://demo/task/zzzzzz</code></td><td>"Task resolution unavailable: Task "zzzzzz" is not registered. Nothing was opened."</td></tr>
+<tr><td><code>loopflow://app/settings</code></td><td>"Work links name a repository, /task/&lt;identifier&gt; or /wave/&lt;name&gt;; got /settings": no app-control route</td></tr>
+<tr><td><code>loopflow://demo</code> (repository)</td><td>Nothing visible: the Task stayed selected, no notice. <code>open loopflow://demo</code> from outside the app behaves the same way</td></tr>
+</table>
+<img src="qa/03-file-click.png" alt="Files pane at notes.txt line 3 after the click" width="900">
+<img src="qa/06-ext-sheet.png" alt="External scheme confirmation sheet" width="900">
+<img src="qa/14-crop.png" alt="Refusal notice in the light theme" width="900">
+
+<h2>4. ⌘-click on a Task running on mini</h2>
+<p>An unstarted Task was moved to mini with <code>lf task move</code>, then run there. Its
+Session pane showed the stand-in's output from mini's checkout
+(<code>/private/tmp/lfqa1126/mini/src/origin.385862-remote-links-qa</code>).</p>
+<table>
+<tr><th>Link</th><th>What happened</th></tr>
+<tr><td><code>file://…/notes.txt#L4</code></td><td>Files opened mini's <code>notes.txt</code> at line 4</td></tr>
+<tr><td><code>file://mini-host.example/…/notes.txt#L2</code></td><td>Opened at line 2 despite the foreign hostname, showing "two (edited on mini)", an edit made only in mini's checkout</td></tr>
+<tr><td><code>file://…/docs</code></td><td>"Folders on another Machine cannot open from a terminal link."</td></tr>
+<tr><td><code>file://…/nope.txt</code></td><td>"File is missing or unreadable."</td></tr>
+<tr><td><code>file:///etc/hosts</code></td><td>"File is on another Machine."</td></tr>
+</table>
+<img src="qa/09-remote-file.png" alt="Remote Task: Files at mini's notes.txt line 4" width="900">
+<img src="qa/10-crop.png" alt="Line 2 shows mini's edit" width="500">
+<p><strong>Snapshot reuse doesn't stick:</strong> I ⌘-clicked <code>notes.txt</code> while it was already open, switched to the other Task, edited line 5 on mini and switched back. Files showed the new line 5:</p>
+<img src="qa/11-crop.png" alt="Returning re-read the file" width="500">
+
+<h2>5. Zoom, Dashboard tiles and shells</h2>
+<ul>
+<li>Zoomed Session (<code>desktop zoom --on -p session</code>), then ⌘-click the checkout file:
+<code>zoomed_pane</code> became null, Files showed line 3 beside the Session, and the terminal kept focus.</li>
+<li>Working Tasks dashboard, ⌘-click the file link in a tile: the window entered the Task
+(<code>{"kind": "entered", "from": "working_tasks", …}</code>).</li>
+<li>Shell tab running <code>lf open --task d8cd38 --link</code>: lf's OSC 8 link covers
+"Second QA Task · d8cd38". Clicking it from the unfocused shell opened that Task. The
+trailing <code>loopflow://demo/task/d8cd38</code> text soft-wraps across two rows and isn't
+detected as a plain URL (Ghostty's regex stops at the wrap).</li>
+</ul>
+<img src="qa/17-unzoomed.png" alt="After the click in a zoomed Session: split restored with Files" width="900">
+
+<h2>6. Newer Desktop, older server</h2>
+<p>Mini's server was restarted from a copy of the installed <code>lf</code>
+(0.16.0+59bddd734) on the same store. The pane reattached. A file link still
+opened at its line, a missing file still read "File is missing or unreadable.",
+and the folder link showed the old server's own message, "Task file "docs" does not
+resolve to a file inside the Task worktree". The failure stayed inside the terminal, and
+other links kept working.</p>
+<img src="qa/15-crop.png" alt="Against the older server: line 2 still opens" width="500">
+
+<h2>What works now</h2>
+<p>Server-started Sessions print OSC 8. ⌘-hover shows the hand cursor and the target,
+or the reason for a refusal. ⌘-click routes web links, checkout files (local and
+remote, at the line), Work links and external schemes. The refusals all cover the
+plan's security list: executables, scripts, credentials, parent segments, app-control
+<code>loopflow://</code>, and other Machines' paths. Zoom and tiles behave as the
+plan describes. Nothing needed fixing.</p>
+
+<h2>Couldn't reach</h2>
+<ul>
+<li>A real pointer and the ⌘ key. The headless shell posts no CGEvents and the window
+was never key, so the unfocused-pane <code>flagsChanged</code> monitor and pill
+clearing on resign-key, which the plan lists for QA, are unchecked. Hovering the
+unfocused shell went through <code>mouseMoved</code> directly.</li>
+<li>What real Claude Code and Codex print. Only the stand-in ran: no provider was
+spent on the private Machines.</li>
+<li>Whether the web clicks reached the browser. Three <code>example.com</code> tabs may
+be open in the default browser from this run.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li><strong>The preview and notice look like terminal output.</strong> The label
+uses the terminal's own background and foreground with no border, so a long target
+or a refusal reads as a line the program printed (screenshots in §2 and §3). This is a
+styling decision, so it's described here rather than changed.</li>
+<li><strong><code>loopflow://&lt;repo&gt;</code> clicks show nothing</strong> when that
+repository's window already has a Task selected. This is existing app behavior for any
+repository link, not new to terminals.</li>
+<li><strong>Hover says yes, click says no</strong> for executables and scripts outside the
+checkout: hover shows the hand because the file check runs only on click.</li>
+<li><strong>A theme switch while the app runs</strong> (Light → Dark from the CLI) left the
+Ghostty surfaces light while the chrome and preview went dark. Not checked against
+<code>main</code>; outside this change's diff.</li>
+</ol>

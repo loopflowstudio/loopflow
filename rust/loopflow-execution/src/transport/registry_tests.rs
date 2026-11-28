@@ -146,20 +146,28 @@ fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
 }
 
 #[test]
-fn held_children_get_terminal_colors_when_the_caller_leaves_them_unset() {
+fn held_children_get_ghostty_identity_and_default_terminal_colors() {
     let _ledger = TestLedgerGuard::new();
     let place = holder();
     let registry = Registry::open(BUILD).unwrap();
     for (request, caller, expected) in [
         ("missing", vec![], "xterm-256color:truecolor"),
         (
-            "empty",
-            vec![("TERM", ""), ("COLORTERM", "")],
+            "apple-terminal",
+            vec![
+                ("TERM_PROGRAM", "Apple_Terminal"),
+                ("TERM", ""),
+                ("COLORTERM", ""),
+            ],
             "xterm-256color:truecolor",
         ),
         (
-            "custom",
-            vec![("TERM", "screen-256color"), ("COLORTERM", "24bit")],
+            "rex",
+            vec![
+                ("TERM_PROGRAM", "rex"),
+                ("TERM", "screen-256color"),
+                ("COLORTERM", "24bit"),
+            ],
             "screen-256color:24bit",
         ),
         ("partial", vec![("TERM", "dumb")], "dumb:truecolor"),
@@ -167,17 +175,20 @@ fn held_children_get_terminal_colors_when_the_caller_leaves_them_unset() {
         let mut start = shell(
             None,
             request,
-            r#"printf 'colors=%s:%s\n' "$TERM" "$COLORTERM"; read line"#,
+            r#"printf 'program=%s version=%s colors=%s:%s\n' "$TERM_PROGRAM" "${TERM_PROGRAM_VERSION-unset}" "$TERM" "$COLORTERM"; read line"#,
         );
+        start
+            .env
+            .push(("TERM_PROGRAM_VERSION".into(), "old-version".into()));
         start
             .env
             .extend(caller.into_iter().map(|(k, v)| (k.into(), v.into())));
         let terminal = registry.start(start).unwrap();
         let mut view = View::attach(&terminal);
-        view.wait_for(&format!("colors={expected}"));
+        view.wait_for(&format!("program=ghostty version=unset colors={expected}"));
         view.type_in(b"\n");
         drop(view);
-        wait_until("color probe settled", || {
+        wait_until("terminal environment probe settled", || {
             !place.terminal(terminal.as_str()).exists()
         });
     }

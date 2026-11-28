@@ -1,0 +1,31 @@
+at: f1abc07252c06c5736f9d8e38b0632aea67a0649
+first:
+  - path: docs/surfaces.md
+    why: What opens when someone clicks a terminal link
+  - path: swift/LoopflowMac/Services/Ghostty/TerminalHyperlink.swift
+    why: Validates targets and resolves local and remote files
+  - path: swift/LoopflowMac/Views/SessionsView.swift
+    why: Locates the active checkout on its owning Machine
+  - path: swift/LoopflowMac/Views/WorkspacePanesView.swift
+    why: Opens Work, checkout files, and external apps
+  - path: swift/LoopflowMac/TaskFilesStore.swift
+    why: Reuses the remote read for one Files presentation
+  - path: swift/LoopflowMac/LoopflowApp.swift
+    why: Opens resolved Work in its repository window
+  - path: swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift
+    why: Receives Ghostty link and cursor callbacks
+  - path: swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift
+    why: Shows targets and errors beside terminal output
+  - path: rust/loopflow-execution/src/ops/task/snapshot.rs
+    why: Distinguishes remote directories from missing files
+  - path: rust/loopflow-execution/src/transport/registry.rs
+    why: Advertises hyperlink support to held terminal programs
+  - path: swift/LoopflowTests/TerminalHyperlinkTests.swift
+    why: Exercises checkout routing, pane focus, and snapshot reuse
+  - path: swift/LoopflowTests/TerminalFeedbackTests.swift
+    why: Exercises cursor feedback and native hyperlink clicks
+  - path: rust/loopflow-execution/src/transport/registry_tests.rs
+    why: Checks the terminal identity a child receives
+hide:
+  - path: scratch/concept-review.html
+    why: Compiled copy of the review page source

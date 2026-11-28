@@ -12,6 +12,7 @@ struct WorkspacePanesView: View {
     let model: WorkModel
     let onFocus: (String, String?) -> Void
     var face: PaneState? = nil
+    var onEnter: (() -> Void)? = nil
 
     var body: some View {
         let store = workspace.multiplexer
@@ -42,7 +43,7 @@ struct WorkspacePanesView: View {
         MultiplexerNodeView(node: layout,
             focusedPaneId: isFocused ? workspace.multiplexer.focusedPaneId : "",
             sessions: sessions, workspace: workspace, model: model,
-            onFocus: onFocus)
+            onFocus: onFocus, onEnter: onEnter)
             .padding(PaneGeometry.spacing)
             .background(palette.surfaceMuted)
             .accessibilityIdentifier("sessions-multiplexer")
@@ -159,8 +160,7 @@ struct SessionOpeningView: View {
     }
 }
 
-/// Inputs compared without `onFocus`: a closure never compares equal, so it
-/// would re-run every pane on each parent render. It captures only references.
+/// Compare the pane inputs. The actions capture the owning view's references.
 extension WorkspacePanesView: Equatable {
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         MainActor.assumeIsolated {
@@ -192,6 +192,7 @@ private struct MultiplexerNodeView: View {
     let workspace: SessionsWorkspace
     let model: WorkModel
     let onFocus: (String, String?) -> Void
+    let onEnter: (() -> Void)?
 
     private var store: MultiplexerStore { workspace.multiplexer }
 
@@ -203,7 +204,7 @@ private struct MultiplexerNodeView: View {
                 pane: pane,
                 isFocused: pane.id == focusedPaneId,
                 sessions: sessions,
-                workspace: workspace, model: model, onFocus: onFocus
+                workspace: workspace, model: model, onFocus: onFocus, onEnter: onEnter
             )
             .id(pane.id)
         case .split(let axis, let first, let second, let ratio):
@@ -238,7 +239,7 @@ private struct MultiplexerNodeView: View {
             node: child,
             focusedPaneId: focusedPaneId,
             sessions: sessions,
-            workspace: workspace, model: model, onFocus: onFocus
+            workspace: workspace, model: model, onFocus: onFocus, onEnter: onEnter
         )
     }
 }
@@ -343,12 +344,14 @@ struct SessionPaneView: View {
     let workspace: SessionsWorkspace
     let model: WorkModel
     let onFocus: (String, String?) -> Void
+    var onEnter: (() -> Void)? = nil
 
     private var store: MultiplexerStore { workspace.multiplexer }
     private var hover: HoverFlag { workspace.stripHover(pane.id) }
     @State private var bellRinging = false
     @State private var terminalTitle: String?
     @State private var copyConfirmation: String?
+    @State private var externalLink: ExternalLinkConfirmation?
 
     private var item: SessionItem? {
         guard case .session(let id?, _) = pane.content else { return nil }
@@ -404,6 +407,11 @@ struct SessionPaneView: View {
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")
         .accessibilityIdentifier(item.map { "session-pane-\($0.id)" } ?? "session-pane-empty")
         .modifier(CreationPresentation(recovery: .shared, resource: .session(item?.id ?? ""), visible: item != nil))
+        .background {
+            Color.clear.sheet(item: $externalLink) { link in
+                TerminalExternalLinkSheet(link: link)
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttyTerminalBell)) { notification in
             guard let terminal = notification.object as? TerminalIdentity,
                   terminal == _terminalIdentity else { return }
@@ -811,7 +819,7 @@ struct SessionPaneView: View {
             VStack(spacing: 0) {
                 if !showsStrip { shellTabs.padding(PaneGeometry.inset) }
                 if let tab = pane.content.selectedShell,
-                          tab.location != nil, let terminal = tab.terminal {
+                          let location = tab.location, let terminal = tab.terminal {
                     if workspace.notStartedShells.contains(tab.id) {
                         EmptyState(title: "Not started", sentence: "This Task has no checkout on its Machine yet.") {
                             Button("Reconnect") { workspace.reconnectShell(tab) }
@@ -828,13 +836,14 @@ struct SessionPaneView: View {
                         }
                     } else if let command = try? workspace.shellAttachment(tab) {
                         GhosttyTerminalView(
-                repository: sessions.repoPath,
+                            repository: sessions.repoPath,
                             workingDirectory: NSHomeDirectory(),
                             argv: command,
                             terminal: terminal,
                             surfacePool: sessions.surfaces,
                             isFocused: isFocused,
-                            onFocus: focusPane
+                            onFocus: focusPane,
+                            onOpenLink: { await openTerminalLink($0, at: location, notice: $1) }
                         )
                         .id(tab.id)
                     } else {
@@ -974,11 +983,78 @@ struct SessionPaneView: View {
                 onSurfaceFailed: { reason in
                     sessions.recordPaneFailure(item, reason: reason)
                 },
-                onFocus: focusPane
+                onFocus: focusPane,
+                onOpenLink: { await openTerminalLink($0, at: location, notice: $1) }
             )
             .id(item.launchId)
         } else {
             EmptyState(title: "Session location unavailable")
+        }
+    }
+
+    func openTerminalLink(_ link: TerminalHyperlink, at location: WorkspaceIdentity,
+                          notice: @escaping TerminalLinkNotice) async {
+        do {
+            switch link {
+            case .defaultApp(let url):
+                if !NSWorkspace.shared.open(url) { notice("No app could open the link.") }
+            case .externalScheme(let url):
+                externalLink = ExternalLinkConfirmation(url: url, notice: notice)
+            case .work(let url):
+                guard let open = model.openResolvedWorkLink else {
+                    throw RegistryQueryError("This window cannot open Work links.")
+                }
+                let resolved = try await sessions.query.workLink(url)
+                try await open(resolved)
+            case .file(let file):
+                try await openTerminalFile(file, at: location)
+            case .refused(let reason):
+                notice(reason)
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            notice(error.localizedDescription)
+        }
+    }
+
+    private var activeFilesPlace: SessionsWorkspace.FilesPlace? {
+        guard workspace.key.kind == .task,
+              case .browser(let taskId, _, _, let location)? = store.browserPane?.content else { return nil }
+        let task = model.task(id: workspace.key.id)?.task
+        guard let place = try? workspace.filesPlace(taskId: taskId, task: task, location: workspace.location ?? location),
+              let machine = place.machine ?? workspace.localMachineId else { return nil }
+        if let owner = task?.ownerMachineId ?? workspace.owner, owner != machine { return nil }
+        return place
+    }
+
+    private func openTerminalFile(_ file: TerminalHyperlink.File, at location: WorkspaceIdentity) async throws {
+        let place = activeFilesPlace
+        let destination = try await file.destination(from: location, localMachine: workspace.localMachineId,
+                                                     files: place, query: sessions.query)
+        switch destination {
+        case .document(let url):
+            guard NSWorkspace.shared.open(url) else { throw RegistryQueryError("No app could open the file.") }
+        case .checkout(let path, let snapshot):
+            // A remote read can finish after the Task moves. Only reveal the
+            // file in the checkout the click addressed.
+            guard let place, place == activeFilesPlace else {
+                throw RegistryQueryError("The Task’s checkout moved before the file could open.")
+            }
+            let files = workspace.files(at: place, query: sessions.query)
+            if let snapshot {
+                await files.reconcileDocument(files.document(path), with: snapshot)
+                try Task.checkCancellation()
+                guard place == activeFilesPlace, files.machine == place.machine, files.cwd == place.cwd else {
+                    throw RegistryQueryError("The Task’s checkout moved before the file could open.")
+                }
+            }
+            let filesLocation = WorkspaceIdentity(machineId: location.machineId, worktree: place.cwd)
+            guard store.showBrowser(.files, location: filesLocation, focus: false) != nil else {
+                throw RegistryQueryError("The Files pane is unavailable.")
+            }
+            files.openPresentation(.init(path: path, lines: file.line.map { $0...$0 }), reusingSnapshot: snapshot != nil)
+            onEnter?()
         }
     }
 
@@ -1041,6 +1117,47 @@ struct SessionPaneView: View {
         case .browser:
             nil
         }
+    }
+}
+
+private struct ExternalLinkConfirmation: Identifiable {
+    let url: URL
+    let notice: TerminalLinkNotice
+    var id: URL { url }
+}
+
+private struct TerminalExternalLinkSheet: View {
+    let link: ExternalLinkConfirmation
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            Text("Open link in another app?")
+                .font(Typography.lede)
+            ScrollView {
+                Text(link.url.absoluteString)
+                    .font(Typography.text)
+                    .foregroundStyle(palette.textSecondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 120)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .buttonStyle(LoopflowButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                Button("Open") {
+                    dismiss()
+                    if !NSWorkspace.shared.open(link.url) { link.notice("No app could open the link.") }
+                }
+                .buttonStyle(LoopflowButtonStyle(.accent))
+            }
+        }
+        .padding(Spacing.xl)
+        .frame(width: 420)
+        .background(palette.background)
     }
 }
 

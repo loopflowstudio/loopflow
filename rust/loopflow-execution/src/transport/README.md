@@ -133,7 +133,9 @@ any older holder, and no field has a default:
 
 When starting a held terminal, the server fills missing or empty `TERM` with
 `xterm-256color` and `COLORTERM` with `truecolor`. Programs launched from
-Desktop can detect color, and a terminal caller keeps its own settings.
+Desktop can detect color, and a terminal caller keeps its color settings.
+Every held terminal sets `TERM_PROGRAM=ghostty` and clears
+`TERM_PROGRAM_VERSION` so programs can detect hyperlink support.
 
 Anything else answers `error {message}` and the connection keeps taking
 requests. A `TerminalId` names one PTY and is never reused: a `read` of a

@@ -8,6 +8,9 @@ import QuartzCore
 import Observation
 import Loopflow
 
+typealias TerminalLinkNotice = @MainActor (String) -> Void
+typealias TerminalLinkAction = @MainActor (TerminalHyperlink, @escaping TerminalLinkNotice) async -> Void
+
 #if GHOSTTY_ENABLED
 import GhosttyKit
 
@@ -63,6 +66,7 @@ struct GhosttyTerminalView: View {
     let onSurfaceCreated: () -> Void
     let onSurfaceFailed: (String) -> Void
     let onFocus: () -> Void
+    let onOpenLink: TerminalLinkAction
     @ObservedObject var manager: GhosttyManager
 
     init(
@@ -76,6 +80,7 @@ struct GhosttyTerminalView: View {
         onSurfaceCreated: @escaping () -> Void = {},
         onSurfaceFailed: @escaping (String) -> Void = { _ in },
         onFocus: @escaping () -> Void = {},
+        onOpenLink: @escaping TerminalLinkAction = { _, _ in },
         manager: GhosttyManager = .shared
     ) {
         self.repository = repository
@@ -88,6 +93,7 @@ struct GhosttyTerminalView: View {
         self.onSurfaceCreated = onSurfaceCreated
         self.onSurfaceFailed = onSurfaceFailed
         self.onFocus = onFocus
+        self.onOpenLink = onOpenLink
         self.manager = manager
     }
 
@@ -103,6 +109,7 @@ struct GhosttyTerminalView: View {
                 onSurfaceCreated: onSurfaceCreated,
                 onSurfaceFailed: onSurfaceFailed,
                 onFocus: onFocus,
+                onOpenLink: onOpenLink,
                 size: geo.size,
                 manager: manager
             )
@@ -128,6 +135,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
     let onSurfaceCreated: () -> Void
     let onSurfaceFailed: (String) -> Void
     let onFocus: () -> Void
+    let onOpenLink: TerminalLinkAction
     let size: CGSize
     @ObservedObject var manager: GhosttyManager
 
@@ -157,6 +165,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
             nsView.onSurfaceCreated = onSurfaceCreated
             nsView.onSurfaceFailed = onSurfaceFailed
             nsView.onFocus = onFocus
+            nsView.onOpenLink = onOpenLink
             let searchHeight = nsView.searchBar.isHidden ? 0 : TerminalSearchBar.height
             nsView.sizeDidChange(CGSize(width: size.width, height: max(0, size.height - searchHeight)))
 
@@ -202,6 +211,7 @@ final class GhosttyTerminalMount: NSView {
         addSubview(terminal)
         addSubview(terminal.searchBar)
         addSubview(terminal.connectionBar)
+        addSubview(terminal.linkFeedback)
         needsLayout = true
     }
 
@@ -215,8 +225,16 @@ final class GhosttyTerminalMount: NSView {
         let connectionHeight: CGFloat = terminal.connectionBar.isHidden ? 0 : min(36, terminal.frame.height)
         terminal.connectionBar.frame = NSRect(x: 8, y: terminal.frame.maxY - connectionHeight, width: max(0, bounds.width - 16), height: connectionHeight)
         terminal.layoutConnectionBar()
+        let label = terminal.linkFeedback
+        let size = label.fittingSize
+        let width = min(size.width + 12, max(0, bounds.width - 16))
+        label.frame = NSRect(x: max(0, bounds.width - width - 8), y: 8, width: width, height: size.height)
         terminal.searchBar.frame = NSRect(x: 0, y: terminal.frame.maxY, width: bounds.width, height: searchHeight)
     }
+}
+
+private final class TerminalLinkFeedback: NSTextField {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 /// Retains live terminal views for one repository across navigation and window
@@ -554,6 +572,23 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     var onSurfaceCreated: () -> Void = {}
     var onSurfaceFailed: (String) -> Void = { _ in }
     var onFocus: () -> Void = {}
+    var onOpenLink: TerminalLinkAction = { _, _ in }
+    private var hoveredLink: (target: String, refusal: String?)?
+    private var linkNotice: String?
+    private var linkNoticeDismissal: Task<Void, Never>?
+    private var mouseShapeCursor = NSCursor.arrow
+    var terminalCursor: NSCursor {
+        guard let hoveredLink else { return mouseShapeCursor }
+        return hoveredLink.refusal == nil ? .pointingHand : .operationNotAllowed
+    }
+    private(set) lazy var linkFeedback: NSTextField = {
+        let label = TerminalLinkFeedback(labelWithString: "")
+        label.isHidden = true
+        label.alignment = .center
+        label.lineBreakMode = .byTruncatingMiddle
+        label.drawsBackground = true
+        return label
+    }()
     weak var pool: GhosttySurfacePool?
     /// Typed into the surface when it starts (`lf desktop run` before the tab is drawn).
     var measurementRepository: String?
@@ -598,6 +633,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     private nonisolated(unsafe) var displayLink: CADisplayLink?
     private var trackingArea: NSTrackingArea?
+    private var hoverModifierMonitor: Any?
     private var theme = GhosttyManager.shared.theme
     private nonisolated(unsafe) var themeObserver: NSObjectProtocol?
     private var _markedRange = NSRange(location: NSNotFound, length: 0)
@@ -693,6 +729,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     @objc private func windowKeyChanged(_ notification: Notification) {
         guard let window, notification.object as? NSWindow === window else { return }
         syncSurfaceFocus()
+        // ⌘ is often released in the app a click just activated.
+        if !window.isKeyWindow { clearLinkHover() }
     }
 
     /// Last values sent to the current surface. SwiftUI calls updateNSView on every
@@ -742,6 +780,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         searchBar.applyTheme(theme)
         layer?.backgroundColor = theme.terminal.background.nsColor.cgColor
         connectionBar.layer?.backgroundColor = theme.terminal.background.nsColor.cgColor
+        linkFeedback.backgroundColor = theme.terminal.background.nsColor
+        linkFeedback.textColor = theme.terminal.foreground.nsColor
         dropHighlight?.layer?.borderColor = NSColor(theme.palette.keyboardFocus).cgColor
         dropHighlight?.layer?.backgroundColor = NSColor(theme.palette.keyboardFocus).withAlphaComponent(0.08).cgColor
         renderCommandBlocks()
@@ -783,6 +823,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             updateFeedbackPreferences()
             if window != nil { setupDisplayLink() }
             setupTrackingArea()
+            observeHoverModifiers()
             syncSurfaceFocus()
             restoreInputFocus()
             onSurfaceCreated()
@@ -807,11 +848,14 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         if window == nil {
             displayLink?.invalidate()
             displayLink = nil
+            stopObservingHoverModifiers()
+            showLinkTarget(nil)
         } else if surface != nil, displayLink == nil {
             setupDisplayLink()
             updateContentScale()
             updateSurfaceSize()
         }
+        observeHoverModifiers()
         if focusRequested, acceptsFirstResponder, retainedSearchBar?.isHidden != false, !hasMarkedText() {
             window?.makeFirstResponder(self)
         }
@@ -876,6 +920,10 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         serverConnection = nil
         copyDismissal?.cancel()
         publishCopyConfirmation(nil)
+        linkNoticeDismissal?.cancel()
+        linkNotice = nil
+        showLinkTarget(nil)
+        stopObservingHoverModifiers()
         retainedSearchBar?.end()
         programStatus.close()
         // A released view may still be mounted until SwiftUI reconciles it.
@@ -1119,7 +1167,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private func setupTrackingArea() {
         let area = NSTrackingArea(
             rect: bounds,
-            options: [.activeInKeyWindow, .mouseMoved, .mouseEnteredAndExited, .inVisibleRect],
+            options: [.activeInKeyWindow, .mouseMoved, .mouseEnteredAndExited, .cursorUpdate, .inVisibleRect],
             owner: self,
             userInfo: nil
         )
@@ -1349,13 +1397,48 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     override func flagsChanged(with event: NSEvent) {
-        guard connectionAcceptsInput, !hasMarkedText() else { return }
+        guard !hasMarkedText() else { return }
         guard let surface else {
             super.flagsChanged(with: event)
             return
         }
 
+        // The relay sets Ghostty read-only when input pauses. Ghostty still
+        // uses these events for link hover and suppresses the PTY write.
         if let key = event.ghosttyModifierKey { ghostty_surface_key(surface, key) }
+    }
+
+    private func observeHoverModifiers() {
+        guard hoverModifierMonitor == nil, window != nil, surface != nil else { return }
+        hoverModifierMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.updateUnfocusedLinkHover(with: event)
+            return event
+        }
+    }
+
+    private func stopObservingHoverModifiers() {
+        guard let hoverModifierMonitor else { return }
+        NSEvent.removeMonitor(hoverModifierMonitor)
+        self.hoverModifierMonitor = nil
+    }
+
+    private func updateUnfocusedLinkHover(with event: NSEvent) {
+        guard let window, window.isKeyWindow, event.window === window,
+              window.firstResponder !== self, let surface, let content = window.contentView,
+              event.modifierFlags.contains(.command) || hoveredLink != nil else { return }
+        guard window.attachedSheet == nil else { return clearLinkHover() }
+        let location = window.mouseLocationOutsideOfEventStream
+        let windowPoint = content.superview?.convert(location, from: nil) ?? location
+        guard let hit = content.hitTest(windowPoint), hit === self || hit.isDescendant(of: self) else {
+            return clearLinkHover()
+        }
+        guard !ghostty_surface_mouse_captured(surface) else { return }
+        let point = convert(location, from: nil)
+        let mods = event.modifierFlags.ghosttyMods
+        // Ghostty ignores stationary pointer updates. Leave and re-enter to
+        // apply the modifiers without sending a key to the unfocused PTY.
+        ghostty_surface_mouse_pos(surface, -1, -1, mods)
+        ghostty_surface_mouse_pos(surface, point.x, bounds.height - point.y, mods)
     }
 
     // MARK: - NSTextInputClient
@@ -1447,6 +1530,71 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     // MARK: - Mouse Input
+
+    func openLink(_ link: TerminalHyperlink) async {
+        guard window != nil, surface != nil else { return }
+        showLinkNotice(nil)
+        clearLinkHover()
+        await onOpenLink(link) { [weak self] in self?.showLinkNotice($0) }
+    }
+
+    func showLinkNotice(_ notice: String?) {
+        linkNoticeDismissal?.cancel()
+        linkNotice = notice
+        updateLinkFeedback()
+        if notice != nil {
+            linkNoticeDismissal = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(4))
+                guard !Task.isCancelled else { return }
+                self?.linkNotice = nil
+                self?.updateLinkFeedback()
+            }
+        }
+    }
+
+    /// Drop the preview and Ghostty's hover when the pointer or ⌘ can leave
+    /// without this view seeing it.
+    private func clearLinkHover() {
+        guard hoveredLink != nil else { return }
+        showLinkTarget(nil)
+        if let surface { ghostty_surface_mouse_pos(surface, -1, -1, GHOSTTY_MODS_NONE) }
+    }
+
+    func showLinkTarget(_ target: String?) {
+        hoveredLink = target.map { ($0, TerminalHyperlink(target: $0).refusal) }
+        updateLinkFeedback()
+        updateTerminalCursor()
+    }
+
+    private func updateLinkFeedback() {
+        let message = linkNotice ?? hoveredLink?.refusal ?? hoveredLink?.target ?? ""
+        guard linkFeedback.stringValue != message else { return }
+        linkFeedback.stringValue = message
+        linkFeedback.isHidden = message.isEmpty
+        superview?.needsLayout = true
+    }
+
+    func setMouseShape(_ shape: ghostty_action_mouse_shape_e) {
+        switch shape {
+        case GHOSTTY_MOUSE_SHAPE_POINTER: mouseShapeCursor = .pointingHand
+        case GHOSTTY_MOUSE_SHAPE_TEXT: mouseShapeCursor = .iBeam
+        case GHOSTTY_MOUSE_SHAPE_VERTICAL_TEXT: mouseShapeCursor = .iBeamCursorForVerticalLayout
+        case GHOSTTY_MOUSE_SHAPE_CROSSHAIR: mouseShapeCursor = .crosshair
+        case GHOSTTY_MOUSE_SHAPE_GRAB: mouseShapeCursor = .openHand
+        case GHOSTTY_MOUSE_SHAPE_GRABBING: mouseShapeCursor = .closedHand
+        case GHOSTTY_MOUSE_SHAPE_NOT_ALLOWED, GHOSTTY_MOUSE_SHAPE_NO_DROP: mouseShapeCursor = .operationNotAllowed
+        default: mouseShapeCursor = .arrow
+        }
+        updateTerminalCursor()
+    }
+
+    private func updateTerminalCursor() {
+        if let window, window.isKeyWindow, bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)) {
+            terminalCursor.set()
+        }
+    }
+
+    override func cursorUpdate(with event: NSEvent) { terminalCursor.set() }
 
     // The terminal owns both selections. Every pointer event reaches Ghostty,
     // so a drag selects text inside a block; a plain click that selected no
@@ -1540,6 +1688,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     override func mouseExited(with event: NSEvent) {
+        showLinkTarget(nil)
         if hoveredRow != nil {
             hoveredRow = nil
             if let surface { ghostty_surface_set_command_block_chrome(surface, true, -1) }
@@ -1882,6 +2031,7 @@ struct GhosttyTerminalView: View {
         onSurfaceCreated: @escaping () -> Void = {},
         onSurfaceFailed: @escaping (String) -> Void = { _ in },
         onFocus: @escaping () -> Void = {},
+        onOpenLink: @escaping TerminalLinkAction = { _, _ in },
         manager: GhosttyManager = .shared
     ) {
         self.repository = repository

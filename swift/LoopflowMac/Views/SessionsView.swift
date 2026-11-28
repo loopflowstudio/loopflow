@@ -397,7 +397,7 @@ final class SessionsWorkspace {
     }
 
     /// Where a browser's Files reads: the Machine (nil for this Mac), its name
-    /// and the checkout there; an empty checkout keeps the one already read.
+    /// and the checkout there, when known.
     struct FilesPlace: Equatable {
         let taskId: String
         let machine: String?
@@ -410,6 +410,10 @@ final class SessionsWorkspace {
         guard case .browser(let taskId, _, _, let location) = content else {
             throw RegistryQueryError("The addressed pane is not the browser.")
         }
+        return try filesPlace(taskId: taskId, task: task, location: location)
+    }
+
+    func filesPlace(taskId: String, task: RoadmapTask?, location: WorkspaceIdentity?) throws -> FilesPlace {
         // This Mac's plan names another owner without its checkout; the
         // served watch reads that checkout from the owner.
         let reading = task?.reference.workspace?.identity
@@ -422,10 +426,14 @@ final class SessionsWorkspace {
             if task?.lifecycle == .unstarted { throw TaskNotStarted() }
             throw RegistryQueryError("Where this Task runs is not known yet; open its conversation.")
         }
+        let placeMachine = machine == localMachineId ? nil : machine
+        // With no checkout named here, the one Files read from the owner is it.
+        let named = place.flatMap { $0.machineId == machine && !$0.worktree.isEmpty ? $0.worktree : nil }
+        let read = taskFiles.flatMap { $0.machine == placeMachine ? $0.cwd : nil }
         return FilesPlace(taskId: task?.runtime?.workId ?? taskId,
-                          machine: machine == localMachineId ? nil : machine,
+                          machine: placeMachine,
                           label: owner == machine ? task?.runtime?.owner?.machine.label : nil,
-                          cwd: (place?.machineId == machine ? place?.worktree : nil) ?? "")
+                          cwd: named ?? read ?? "")
     }
 
     /// The Task's Files store. `follow` moves a retained store to this content's
@@ -434,6 +442,10 @@ final class SessionsWorkspace {
     func files(for content: PaneContent, task: RoadmapTask?, query: RegistryQuery,
                follow: Bool = true) throws -> TaskFilesStore {
         let place = try filesPlace(for: content, task: task)
+        return files(at: place, query: query, follow: follow)
+    }
+
+    func files(at place: FilesPlace, query: RegistryQuery, follow: Bool = true) -> TaskFilesStore {
         if let retained = taskFiles {
             if follow { self.follow(place) }
             return retained
@@ -443,7 +455,7 @@ final class SessionsWorkspace {
 
     func follow(_ place: FilesPlace) {
         guard let retained = taskFiles else { return }
-        retained.relocate(machine: place.machine, label: place.label, cwd: place.cwd.isEmpty ? retained.cwd : place.cwd)
+        retained.relocate(machine: place.machine, label: place.label, cwd: place.cwd)
     }
     let surfaces: GhosttySurfacePool
     let pages = BrowserPages()

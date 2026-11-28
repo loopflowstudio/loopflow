@@ -137,12 +137,39 @@ The next Graph step owns publishing and delivery. LOO-1098 and LOO-1100
 remain separate. The November 27 review dropped the five pre-existing QA
 edges. [Exact reply](direction.md#exact-words--ship-review-jack-heart-2026-11-27)
 
+## Pass 7 · Align workflow track markers, paused/blocked chips, and paused breakpoint wakes
+
+Post-build concept review at `59f26fa51d` ([concept-review.html](concept-review.html)) found two model splits introduced during Pass 6’s merge with `lf task pause` and `TaskWorkflowControls`:
+
+### Experience and model
+
+1. **Workflow track items carry their own kind, and blocker text stays off the chip label:**
+   - A top-level track item is one of three kinds (`WorkflowStepKind`: `stage`, `stage_with_breakpoint`, `breakpoint`), with no impossible state and no Swift guessing via `breakpoints.contains(step.name)`:
+     - `stage`: ordinary runnable stage (`explore`, `plan`, `build`, `ship-review`, `deliver`). Renders its name, appears in **Start from**, and is clickable on the track.
+     - `stage_with_breakpoint`: runnable composed stage (or unconverted legacy interactive skill until LOO-1100) containing a breakpoint. Renders `👤 <name>`, appears in **Start from**, and is clickable on the track — even if a breakpoint inside it shares its name.
+     - `breakpoint`: standalone top-level `- break` marker (`after-explore`, `after-ship-review`). Renders only `👤` (no `"after-explore"` text), does **not** appear in **Start from**, and is a non-clickable marker on the track (tooltip `"Breakpoint: <name>"`), never a `Button` launching `--from <breakpoint>`.
+   - `TaskGraphPosition::Breakpoint` carries `blocker: Option<String>` (`#[serde(deserialize_with = "Option::deserialize")]`) instead of `blocked: bool`, and `WorkflowControl.label` stays a short chip label (`Blocked: <chip>`, matching `Paused: <chip>` and `Waiting: <chip>`) instead of smuggling the worker’s blocker sentence.
+   - In Swift `TaskActions`, `breakpointArrival` and `breakpointBlocker` are populated only when `!held` (`row.lifecycle != .paused`). When a Task is paused or pausing at a breakpoint, the chip always displays `actions.control?.label` (`Paused: after-explore` / `Pausing: after-explore`) instead of bare `👤 ⌄`. When unpaused and blocked, the primary button is hidden, the chip shows `👤 ⌄` (standalone) or `Blocked: <stage> ⌄` (composed), and the blocker text renders **once** beside the track.
+
+2. **Pause holds breakpoint handoffs; Unpause delivers an unread parked review once:**
+   - `steers.rs:scopes()` gates `breakpoint:%` steers on `AND NOT EXISTS(SELECT 1 FROM task_pauses p WHERE p.task_id=tp.task_id)` (indexed PK lookup on `task_pauses`), matching `task_state_sql`, `selections.rs`, `waves.rs`, and `snapshot.rs`. A paused Task never wakes an idle primary or starts a quit primary in a held terminal for a breakpoint while shelved.
+   - In `sqlite/task_pause.rs:release_task_pause`, when `settle_step.is_none()` and `task_graphs` is parked at a breakpoint (`run_start IS NULL AND breakpoint IS NOT NULL`), look up the `breakpoint:<task>` steer for that arrival ID. If it has no delivered receipt (`NOT EXISTS(SELECT 1 FROM steer_delivered WHERE steer_id=?1 AND delivered_at IS NOT NULL)`), delete any unstamped `steer_delivered` rows and the old `steers` row and re-save it via `steers::save_in` inside the same transaction (after deleting `task_pauses`). This gives the unread review a fresh `seq`, bumps revisions, and touches the steer marker so the watcher wakes or held-starts the primary once on unpause — while leaving already-delivered reviews quiet.
+
+### Layer changes (start with slice 1)
+
+- **Slice 1 (Rust DTO + Swift workflow controls — proves the UI/wire model immediately):**
+  - `rust/loopflow-execution/src/task_graph.rs`: replace `WorkflowStep.breakpoint: bool` with `WorkflowStep.kind: WorkflowStepKind` (`stage` | `stage_with_breakpoint` | `breakpoint`); replace `TaskGraphPosition::Breakpoint.blocked: bool` with `blocker: Option<String>`; set blocked `WorkflowControl` label to `format!("Blocked: {chip}")`; update `ops/task/snapshot.rs` and `store/task_work.rs` (`blocker.is_some()`).
+  - `tests/fixtures/dto/` & `tests/fixtures/dto/server_schema.json`: update `WorkflowStep` (`kind`) and `TaskGraphPosition::Breakpoint` (`blocker`) across affected fixtures and regenerate the server schema.
+  - `swift/Loopflow/Models/TaskWork.swift`: mirror `WorkflowStepKind` (`TaskGraph.Step.Kind`) and `Position.breakpoint(step:arrival:blocker:)`.
+  - `swift/Loopflow/Design/WorkflowLine.swift`: drive `WorkflowStepLabel` directly from `step.kind` (drop `standalone: Bool` and `WorkflowLine.breakpoints`).
+  - `swift/Loopflow/Design/TaskActions.swift` & `swift/Loopflow/Design/TaskWorkflowControls.swift`: gate `breakpointArrival`/`breakpointBlocker` on `!held`, build `steps` from `track.filter { $0.kind != .breakpoint }`, render standalone breakpoints on the track as non-clickable markers (not `stepButton`), and show `👤 ⌄` in the chip only when `!held` and `step.kind == .breakpoint`.
+  - Tests: update `task_graph::`, `dto_fixtures::`, `server::schema::tests::`, `WorkflowLineTests`, `TaskActionsTests` (add explicit cases for paused-at-breakpoint chip label, non-clickable standalone breakpoint marker, composed stage sharing a breakpoint’s name, and blocked breakpoint inside a composed stage rendering the blocker once), `DesktopHeadlessTests`, and `ServerProtocolTests`.
+- **Slice 2 (Storage pause/unpause breakpoint handoff lifecycle):**
+  - `rust/loopflow-storage/src/sqlite/steers.rs`: exclude paused Tasks (`NOT EXISTS(SELECT 1 FROM task_pauses ...)`) in `scopes()` for `breakpoint:%` steers; verify `query_plans::growing_scans` remains zero scans.
+  - `rust/loopflow-storage/src/sqlite/task_pause.rs`: re-publish an unread parked breakpoint steer inside `release_task_pause` when `settle_step.is_none()`.
+  - Tests: add storage/execution tests covering (a) draining command or unread breakpoint arriving while paused does not appear in `unread` / `read_steer_wakes`, (b) `release_task_pause` re-publishes an unread breakpoint steer once and wakes the primary, and (c) an already-delivered breakpoint steer is not re-delivered after pause + unpause.
+
 ## Remaining
 
-Nothing in this Task. All six ship-review answers are in Pass 6, including the
-"explore * plan, no after-explore" workflow bar (`WorkflowStepLabel` in
-[WorkflowLine.swift](../swift/Loopflow/Design/WorkflowLine.swift)). The
-"57 conflicts" banner in `ship-review.html` predates the sync. On November 27
-the branch was 0 commits behind origin/main and PR #2042 reported `CLEAN`.
-Deferred to delivery: CI skipped every job on the scratch-only head
-`b9f3a3aad1`, so the suites need a run on the published head.
+- Execute Pass 7 (Slices 1 and 2 above), then run focused Rust (`loopflow-storage`, `loopflow-execution`, `loopflow` DTO/schema/graph tests) and Swift (`scripts/test_desktop.sh` across workflow/action/DTO/protocol suites) checks, plus `cargo fmt --all -- --check`.
+- Deferred to delivery: full CI suite run on the published head of PR #2042. LOO-1098 (Antigravity immediate idle wake) and LOO-1100 (retiring legacy `interactive:` readers) remain separate.

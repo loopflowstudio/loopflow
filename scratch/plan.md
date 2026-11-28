@@ -33,8 +33,10 @@ carry the rule.
 - Pass 2 (`41bce8d68`) restored the shared stop and kept skill-specific progress rules. The re-review (`7303cbf672`) found that an unconditional stop conflicts with `optimize-plan` after a reverted trial.
 - Pass 3 (`23467d441`) made the shared stop yield to a skill's rule for the case and updated the docs. Graph output tests, the prompt golden, documented commands, and CLI previews passed.
 
-Review `graph/output.rs` and `docs/orchestration.md` together against
-`optimize-plan.md` and `realign.md`.
+The re-review after Pass 3 (`206eba490b`) found no remaining code, test or
+docs mismatch on HEAD: the shared stop now yields to `optimize-plan`'s
+reverted-trial rule and to `realign`'s small-fix iterate rule. Its one open
+row is the Q2 b choice below. No implementation pass remains.
 
 ## Choice for review
 

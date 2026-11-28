@@ -9,7 +9,7 @@ import Observation
 import Loopflow
 
 typealias TerminalLinkNotice = @MainActor (String) -> Void
-typealias TerminalLinkAction = @MainActor (TerminalLink, @escaping TerminalLinkNotice) async -> Void
+typealias TerminalLinkAction = @MainActor (TerminalHyperlink, @escaping TerminalLinkNotice) async -> Void
 
 #if GHOSTTY_ENABLED
 import GhosttyKit
@@ -573,10 +573,14 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     var onSurfaceFailed: (String) -> Void = { _ in }
     var onFocus: () -> Void = {}
     var onOpenLink: TerminalLinkAction = { _, _ in }
-    private var linkTarget: String?
+    private var hoveredLink: (target: String, refusal: String?)?
     private var linkNotice: String?
     private var linkNoticeDismissal: Task<Void, Never>?
-    private var terminalCursor = NSCursor.arrow
+    private var mouseShapeCursor = NSCursor.arrow
+    var terminalCursor: NSCursor {
+        guard let hoveredLink else { return mouseShapeCursor }
+        return hoveredLink.refusal == nil ? .pointingHand : .operationNotAllowed
+    }
     private(set) lazy var linkFeedback: NSTextField = {
         let label = TerminalLinkFeedback(labelWithString: "")
         label.isHidden = true
@@ -1487,7 +1491,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     // MARK: - Mouse Input
 
-    func openLink(_ link: TerminalLink) async {
+    func openLink(_ link: TerminalHyperlink) async {
         guard window != nil, surface != nil else { return }
         showLinkNotice(nil)
         await onOpenLink(link) { [weak self] in self?.showLinkNotice($0) }
@@ -1508,12 +1512,17 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     func showLinkTarget(_ target: String?) {
-        linkTarget = target
+        if let target {
+            hoveredLink = (target, TerminalHyperlink(target: target).refusal)
+        } else {
+            hoveredLink = nil
+        }
         updateLinkFeedback()
+        updateTerminalCursor()
     }
 
     private func updateLinkFeedback() {
-        let message = linkNotice ?? linkTarget ?? ""
+        let message = linkNotice ?? hoveredLink?.refusal ?? hoveredLink?.target ?? ""
         guard linkFeedback.stringValue != message else { return }
         linkFeedback.stringValue = message
         linkFeedback.isHidden = message.isEmpty
@@ -1522,15 +1531,19 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     func setMouseShape(_ shape: ghostty_action_mouse_shape_e) {
         switch shape {
-        case GHOSTTY_MOUSE_SHAPE_POINTER: terminalCursor = .pointingHand
-        case GHOSTTY_MOUSE_SHAPE_TEXT: terminalCursor = .iBeam
-        case GHOSTTY_MOUSE_SHAPE_VERTICAL_TEXT: terminalCursor = .iBeamCursorForVerticalLayout
-        case GHOSTTY_MOUSE_SHAPE_CROSSHAIR: terminalCursor = .crosshair
-        case GHOSTTY_MOUSE_SHAPE_GRAB: terminalCursor = .openHand
-        case GHOSTTY_MOUSE_SHAPE_GRABBING: terminalCursor = .closedHand
-        case GHOSTTY_MOUSE_SHAPE_NOT_ALLOWED, GHOSTTY_MOUSE_SHAPE_NO_DROP: terminalCursor = .operationNotAllowed
-        default: terminalCursor = .arrow
+        case GHOSTTY_MOUSE_SHAPE_POINTER: mouseShapeCursor = .pointingHand
+        case GHOSTTY_MOUSE_SHAPE_TEXT: mouseShapeCursor = .iBeam
+        case GHOSTTY_MOUSE_SHAPE_VERTICAL_TEXT: mouseShapeCursor = .iBeamCursorForVerticalLayout
+        case GHOSTTY_MOUSE_SHAPE_CROSSHAIR: mouseShapeCursor = .crosshair
+        case GHOSTTY_MOUSE_SHAPE_GRAB: mouseShapeCursor = .openHand
+        case GHOSTTY_MOUSE_SHAPE_GRABBING: mouseShapeCursor = .closedHand
+        case GHOSTTY_MOUSE_SHAPE_NOT_ALLOWED, GHOSTTY_MOUSE_SHAPE_NO_DROP: mouseShapeCursor = .operationNotAllowed
+        default: mouseShapeCursor = .arrow
         }
+        updateTerminalCursor()
+    }
+
+    private func updateTerminalCursor() {
         if let window, window.isKeyWindow, bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)) {
             terminalCursor.set()
         }

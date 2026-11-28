@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
+use crate::engine::{Error, ErrorCode};
 use crate::ops::error::OpsResult;
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::store::SharedStore;
@@ -723,10 +724,25 @@ pub(super) fn file_snapshot(
             )))
         }
     };
-    if !absolute.starts_with(&root) || !absolute.is_file() {
-        return Err(task_error(format!(
+    let not_a_file = || {
+        task_error(format!(
             "Task file {relative:?} does not resolve to a file inside the Task worktree"
-        )));
+        ))
+    };
+    if !absolute.starts_with(&root) {
+        return Err(not_a_file());
+    }
+    let metadata = absolute.metadata().map_err(|_| not_a_file())?;
+    if metadata.is_dir() {
+        return Err(Error::new(
+            ErrorCode::Invalid,
+            format!("Task file {relative:?} is a directory."),
+        )
+        .with(serde_json::json!({ "reason": "directory" }))
+        .into());
+    }
+    if !metadata.is_file() {
+        return Err(not_a_file());
     }
     let mut component_path = root.clone();
     for component in Path::new(&relative).components() {
@@ -751,9 +767,7 @@ pub(super) fn file_snapshot(
             .map_err(|error| task_error(format!("cannot read Task file {relative:?}: {error}")))
     };
     // Sniff only a short prefix for >1 MB files so oversize text never buffers 1 MB in observe::Cache.
-    let (size, bytes) = if std::fs::metadata(&absolute)
-        .is_ok_and(|metadata| metadata.len() > MAX_FILE_BYTES as u64)
-    {
+    let (size, bytes) = if metadata.len() > MAX_FILE_BYTES as u64 {
         let (size, prefix) = read(BINARY_SNIFF_BYTES)?;
         if size > MAX_FILE_BYTES as u64 {
             (size, prefix)
@@ -1154,6 +1168,44 @@ mod tests {
     use loopflow_model::durable::TaskId;
 
     use super::{file_snapshot, TaskFileState, TaskWorkspace, MAX_FILE_BYTES};
+    use crate::engine::{Error, ErrorCode};
+    use crate::ops::error::OpsError;
+
+    #[test]
+    fn file_reads_distinguish_directories_from_missing_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let task_id = TaskId::new();
+        let workspace = TaskWorkspace {
+            issue_identifier: "TEST-1",
+            task_id: &task_id,
+            worktree: dir.path(),
+        };
+        std::fs::create_dir(dir.path().join("folder")).unwrap();
+
+        let is_directory_refusal = |path| {
+            matches!(
+                file_snapshot(workspace, path),
+                Err(OpsError::Refused(Error { code: ErrorCode::Invalid, data: Some(data), .. }))
+                    if data == serde_json::json!({ "reason": "directory" })
+            )
+        };
+        assert!(is_directory_refusal("folder"));
+        assert_eq!(
+            file_snapshot(workspace, "missing").unwrap().state,
+            TaskFileState::Missing
+        );
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("folder", dir.path().join("alias")).unwrap();
+            assert!(is_directory_refusal("alias"));
+            std::os::unix::fs::symlink(dir.path().parent().unwrap(), dir.path().join("outside"))
+                .unwrap();
+            assert!(matches!(
+                file_snapshot(workspace, "outside"),
+                Err(OpsError::Message(_))
+            ));
+        }
+    }
 
     #[test]
     fn oversize_files_classify_from_prefix_without_buffering_text() {

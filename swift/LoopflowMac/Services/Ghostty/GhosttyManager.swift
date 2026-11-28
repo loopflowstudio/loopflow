@@ -286,7 +286,7 @@ final class GhosttyManager: ObservableObject {
             case GHOSTTY_ACTION_OPEN_URL:
                 let request = action.action.open_url
                 let target = copyLinkTarget(request.url, count: Int(request.len))
-                let link = TerminalLink(target: target, allowsBarePath: request.kind != GHOSTTY_ACTION_OPEN_URL_KIND_OSC8)
+                let link = TerminalHyperlink(target: target)
                 Task { @MainActor [weak view] in await view?.openLink(link) }
                 return true
             case GHOSTTY_ACTION_MOUSE_SHAPE:
@@ -295,7 +295,7 @@ final class GhosttyManager: ObservableObject {
             case GHOSTTY_ACTION_MOUSE_OVER_LINK:
                 let request = action.action.mouse_over_link
                 let target = copyLinkTarget(request.url, count: request.len)
-                MainActor.assumeIsolated { view.showLinkTarget(TerminalLink.preview(target)) }
+                MainActor.assumeIsolated { view.showLinkTarget(target) }
                 return true
             case GHOSTTY_ACTION_START_SEARCH:
                 let needle = action.action.start_search.needle.map { String(cString: $0) }
@@ -489,7 +489,8 @@ final class GhosttyManager: ObservableObject {
 
 private func copyLinkTarget(_ bytes: UnsafePointer<CChar>?, count: Int) -> String? {
     guard let bytes, count > 0 else { return nil }
-    return String(validating: UnsafeRawBufferPointer(start: bytes, count: count), as: UTF8.self)
+    // Keep an invalid target distinct from Ghostty clearing the hover.
+    return String(validating: UnsafeRawBufferPointer(start: bytes, count: count), as: UTF8.self) ?? ""
 }
 
 private func withOptionalCString<Result>(_ text: String?, _ body: (UnsafePointer<CChar>?) -> Result) -> Result {

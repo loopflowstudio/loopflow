@@ -10,6 +10,28 @@ import Testing
 
 @Suite("Terminal feedback")
 struct TerminalFeedbackTests {
+    @Test("Link hover shows the target or refusal and changes the cursor")
+    @MainActor
+    func hyperlinkHover() {
+        let view = GhosttyMetalView(terminal: .session("link-preview", machineId: fixtureMachineId))
+        view.setMouseShape(GHOSTTY_MOUSE_SHAPE_POINTER)
+        view.showLinkTarget("https://github.com@evil.example/")
+        #expect(view.linkFeedback.stringValue == "Invalid web link.")
+        #expect(view.terminalCursor == .operationNotAllowed)
+        view.showLinkTarget("https://example.com/%E2%80%AEtest")
+        #expect(view.linkFeedback.stringValue == "Invalid terminal link.")
+        view.showLinkTarget("")
+        #expect(view.linkFeedback.stringValue == "Invalid terminal link.")
+        #expect(view.terminalCursor == .operationNotAllowed)
+        view.setMouseShape(GHOSTTY_MOUSE_SHAPE_TEXT)
+        view.showLinkTarget("/tmp/file#L12")
+        #expect(view.linkFeedback.stringValue == "/tmp/file#L12")
+        #expect(view.terminalCursor == .pointingHand)
+        view.showLinkTarget(nil)
+        #expect(view.linkFeedback.isHidden)
+        #expect(view.terminalCursor == .iBeam)
+    }
+
     @Test("A paused Session previews and opens its OSC 8 link", .requiresDisplay)
     @MainActor
     func sessionHyperlink() async throws {
@@ -60,7 +82,7 @@ struct TerminalFeedbackTests {
         view.flagsChanged(with: try modifiers([]))
         #expect(view.linkFeedback.isHidden)
 
-        var opened: TerminalLink?
+        var opened: TerminalHyperlink?
         view.onOpenLink = { link, _ in opened = link }
         view.mouseDown(with: try mouse(.leftMouseDown, command))
         view.mouseUp(with: try mouse(.leftMouseUp, command))

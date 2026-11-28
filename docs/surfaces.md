@@ -192,6 +192,7 @@ Queries support `wave:`, `task:`, `kind:task|wave`, and
 Hold **⌘** and hover over a link in a Session or Shell pane — a Markdown link
 from an agent, `ls --hyperlink` or `rg` output, or `lf open --task LOO-12 --link`.
 The cursor turns into a hand and the bottom corner shows the target URL or path.
+For a malformed or unsupported target, the corner shows why it was refused.
 This also works when the pane strip is hidden and while the terminal keeps its
 screen during a reconnect or after its relay ends. **⌘-click** opens it:
 
@@ -207,6 +208,9 @@ Repository and Wave Sessions, and local shells left behind after a Task moves,
 open local documents and folders in the default app. Remote files open in
 **Files** when the pane shares the Task's current checkout. The file URL can
 carry the remote hostname.
+
+Clicking a checkout file link in a Dashboard tile enters the Task and opens
+**Files** beside its Session.
 
 Desktop resolves `loopflow://` links as Work addresses. File links need an
 existing absolute path without parent-directory segments and can carry a line

@@ -2,7 +2,7 @@ import Foundation
 import Loopflow
 import UniformTypeIdentifiers
 
-enum TerminalLink: Equatable {
+enum TerminalHyperlink: Equatable {
     struct File: Equatable {
         let path: String
         let host: String?
@@ -34,12 +34,12 @@ enum TerminalLink: Equatable {
     case externalScheme(URL)
     case refused(String)
 
-    init(target: String?, allowsBarePath: Bool = false) {
+    init(target: String?) {
         guard let target, !target.isEmpty, !Self.hasUnsafeCharacters(target) else {
             self = .refused("Invalid terminal link.")
             return
         }
-        if allowsBarePath, target.hasPrefix("/"), !target.hasPrefix("//") {
+        if target.hasPrefix("/"), !target.hasPrefix("//") {
             let parts = target.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
             self = Self.fileLink(path: String(parts[0]), host: nil, fragment: parts.dropFirst().first.map(String.init))
             return
@@ -79,11 +79,9 @@ enum TerminalLink: Equatable {
         }
     }
 
-    /// What ⌘-hover shows: the target a click would open, or why it won't.
-    static func preview(_ target: String?) -> String? {
-        guard let target, !target.isEmpty else { return nil }
-        if case .refused(let reason) = TerminalLink(target: target, allowsBarePath: true) { return reason }
-        return target
+    var refusal: String? {
+        if case .refused(let reason) = self { return reason }
+        return nil
     }
 
     private static func hasUnsafeCharacters(_ text: String) -> Bool {
@@ -146,7 +144,7 @@ enum TerminalLink: Equatable {
     }
 }
 
-extension TerminalLink.File {
+extension TerminalHyperlink.File {
     enum Destination: Equatable {
         case document(URL)
         case checkout(path: String, line: Int?)
@@ -177,15 +175,14 @@ extension TerminalLink.File {
             } else if pane.worktree.isEmpty || pane.worktree == files.cwd,
                       let relative = checkoutPath(in: files.cwd) {
                 guard !relative.isEmpty else { throw OpenError.remoteDirectory }
-                // A directory read is resolved on the owning Machine, including
-                // symlinked directories. Its non-directory response lets Files
-                // perform the regular file read and its own containment check.
+                let snapshot: TaskFileSnapshot
                 do {
-                    _ = try await query.taskFiles(issue: files.taskId, directory: relative, showIgnored: true)
-                } catch let error as ServerError where error.code == .invalid && error.data == .object(["reason": .string("file")]) {
-                    return .checkout(path: relative, line: line)
+                    snapshot = try await query.taskFile(issue: files.taskId, path: relative)
+                } catch let error as ServerError where error.code == .invalid && error.data == .object(["reason": .string("directory")]) {
+                    throw OpenError.remoteDirectory
                 }
-                throw OpenError.remoteDirectory
+                guard snapshot.state != .missing else { throw OpenError.missing }
+                return .checkout(path: snapshot.path, line: line)
             }
         }
         guard local else { throw OpenError.anotherMachine }

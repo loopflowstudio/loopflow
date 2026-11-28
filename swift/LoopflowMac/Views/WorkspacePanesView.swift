@@ -12,6 +12,7 @@ struct WorkspacePanesView: View {
     let model: WorkModel
     let onFocus: (String, String?) -> Void
     var face: PaneState? = nil
+    var onEnter: (() -> Void)? = nil
 
     var body: some View {
         let store = workspace.multiplexer
@@ -42,7 +43,7 @@ struct WorkspacePanesView: View {
         MultiplexerNodeView(node: layout,
             focusedPaneId: isFocused ? workspace.multiplexer.focusedPaneId : "",
             sessions: sessions, workspace: workspace, model: model,
-            onFocus: onFocus, inTile: face != nil)
+            onFocus: onFocus, onEnter: onEnter)
             .padding(PaneGeometry.spacing)
             .background(palette.surfaceMuted)
             .accessibilityIdentifier("sessions-multiplexer")
@@ -159,8 +160,7 @@ struct SessionOpeningView: View {
     }
 }
 
-/// Inputs compared without `onFocus`: a closure never compares equal, so it
-/// would re-run every pane on each parent render. It captures only references.
+/// Compare the pane inputs. The actions capture the owning view's references.
 extension WorkspacePanesView: Equatable {
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         MainActor.assumeIsolated {
@@ -192,7 +192,7 @@ private struct MultiplexerNodeView: View {
     let workspace: SessionsWorkspace
     let model: WorkModel
     let onFocus: (String, String?) -> Void
-    let inTile: Bool
+    let onEnter: (() -> Void)?
 
     private var store: MultiplexerStore { workspace.multiplexer }
 
@@ -204,7 +204,7 @@ private struct MultiplexerNodeView: View {
                 pane: pane,
                 isFocused: pane.id == focusedPaneId,
                 sessions: sessions,
-                workspace: workspace, model: model, onFocus: onFocus, inTile: inTile
+                workspace: workspace, model: model, onFocus: onFocus, onEnter: onEnter
             )
             .id(pane.id)
         case .split(let axis, let first, let second, let ratio):
@@ -239,7 +239,7 @@ private struct MultiplexerNodeView: View {
             node: child,
             focusedPaneId: focusedPaneId,
             sessions: sessions,
-            workspace: workspace, model: model, onFocus: onFocus, inTile: inTile
+            workspace: workspace, model: model, onFocus: onFocus, onEnter: onEnter
         )
     }
 }
@@ -344,7 +344,7 @@ struct SessionPaneView: View {
     let workspace: SessionsWorkspace
     let model: WorkModel
     let onFocus: (String, String?) -> Void
-    var inTile = false
+    var onEnter: (() -> Void)? = nil
 
     private var store: MultiplexerStore { workspace.multiplexer }
     private var hover: HoverFlag { workspace.stripHover(pane.id) }
@@ -1002,7 +1002,7 @@ struct SessionPaneView: View {
         }
     }
 
-    func openTerminalLink(_ link: TerminalLink, at location: WorkspaceIdentity,
+    func openTerminalLink(_ link: TerminalHyperlink, at location: WorkspaceIdentity,
                           notice: @escaping TerminalLinkNotice) async {
         do {
             switch link {
@@ -1038,7 +1038,7 @@ struct SessionPaneView: View {
         return place
     }
 
-    private func openTerminalFile(_ file: TerminalLink.File, at location: WorkspaceIdentity) async throws {
+    private func openTerminalFile(_ file: TerminalHyperlink.File, at location: WorkspaceIdentity) async throws {
         let place = activeFilesPlace
         let destination = try await file.destination(from: location, localMachine: workspace.localMachineId,
                                                      files: place, query: sessions.query)
@@ -1051,14 +1051,14 @@ struct SessionPaneView: View {
             guard let place, place == activeFilesPlace else {
                 throw RegistryQueryError("The Task’s checkout moved before the file could open.")
             }
-            guard let browser = store.showBrowser(.files, location: WorkspaceIdentity(machineId: location.machineId,
-                                                                                       worktree: place.cwd)) else {
+            let filesLocation = WorkspaceIdentity(machineId: location.machineId, worktree: place.cwd)
+            guard let browser = store.showBrowser(.files, location: filesLocation, focus: onEnter == nil) else {
                 throw RegistryQueryError("The Files pane is unavailable.")
             }
             let task = model.task(id: workspace.key.id)?.task
             let files = try workspace.files(for: browser.content, task: task, query: sessions.query)
             files.openPresentation(.init(path: path, lines: line.map { $0...$0 }))
-            if inTile { store.setZoom(browser.id, enabled: true) }
+            onEnter?()
         }
     }
 

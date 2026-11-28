@@ -221,15 +221,8 @@ reducing, say so and stop.
 
 ## Pass
 
-One pass, prose only. Nothing is built yet (`docs/orchestration.md` is updated).
-
-1. Replace `compress.md` with the draft and edit the `ship-review.md` line
-   (reading `docs/orchestration.md` for any edits made since).
-2. Check: `cargo build -p loopflow` then `target/debug/lf help compress`
-   prints the new text (the builtin is `include_str!`'d). No test run.
-
-It teaches whether the draft reads as one operation when shown alone by
-`lf help compress`, without the Graph around it.
+Built in `e283e9925`. The candidate CLI rendered the updated `compress` and
+`ship-review` help. The golden prompt and documented command checks passed.
 
 ## Demo
 

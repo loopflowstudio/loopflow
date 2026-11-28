@@ -7,3 +7,5 @@
 - Where compress puts a cut it won't take: `## Deferred findings` when a plan
   exists, questions in `scratch/questions.md` (concept review's 1a, made for
   review). The alternative keeps compress out of `scratch/plan.md`.
+- Standalone runs may have either scratch file on its own. Each missing file
+  sends its findings or questions to the reply.

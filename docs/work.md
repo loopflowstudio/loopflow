@@ -107,7 +107,8 @@ If cleanup was interrupted, repeat `lf task pause LOO-12` before unpausing.
 The primary conversation stays open. You can talk to it, send steers, or
 attach with `lf resume --task LOO-12`. The Task keeps its branch, dirty files,
 PR, and auto setting. New Graph runs, Auto-Ship, and worker retries wait for
-unpause, including after a Machine restart.
+unpause, including after a Machine restart. If the Graph parks at a breakpoint
+while held, the primary conversation receives the review when you unpause.
 
 An owned Task stays in **Working**, under **Paused** on Mac and iPhone.
 The Working rows in `lf task list --json` carry `working_group`.
@@ -116,7 +117,7 @@ lifts the hold. An interrupted step stays idle and ready for Run. If a step
 failed before pause, its failure stays in the execution history and shows
 in the Task’s condition again on unpause.
 Use `lf task unpause LOO-12 --run` to resume interrupted work or start a Graph that has yet to run.
-At a human step, at a landing step with auto off, or at the end, the command lifts
+At a breakpoint, at a landing step with auto off, or at the end, the command lifts
 the hold and leaves the Task there. Unpause on Mac and iPhone follows the same
 rule. Turn on Auto to continue from the landing stop.
 

@@ -1163,6 +1163,59 @@ mod tests {
         carrier
     }
 
+    #[test]
+    fn a_held_breakpoint_wakes_the_idle_primary_on_unpause() {
+        use loopflow_storage::graph_process::RunOwner;
+        use loopflow_storage::process::Starter;
+
+        let session = "held-review";
+        let fixture = fixture(session);
+        let store = &fixture.store;
+        store.choose_task_primary(&fixture.task, session).unwrap();
+        store
+            .take_up_task_graph(&fixture.task, r#"{"name":"feature","steps":[]}"#)
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/wake')",
+                [fixture.task.as_str()],
+            )
+            .unwrap();
+        let (listener, _) = fixture.idle_claude();
+        listener.set_nonblocking(true).unwrap();
+        let run = store.test_graph("feature", "/wake", &[("implement", None)], None);
+        let mut watcher = Watcher::default();
+        watcher.read_with(store);
+
+        store
+            .begin_task_pause(&fixture.task, &Starter::Person { name: None }, vec![])
+            .unwrap();
+        store.settle_task_pause(&fixture.task, true).unwrap();
+        park_breakpoint(&fixture, "after-explore", "Compare scratch/explore.html");
+        store
+            .finish_run(RunOwner::GraphRun, &run, 20, Some(0), None)
+            .unwrap();
+        watcher.read_with(store);
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock,
+            "the arrival and its Graph progress wait during the hold"
+        );
+
+        store.release_task_pause(&fixture.task, None).unwrap();
+        watcher.read_with(store);
+        let frames = received(&listener);
+        let content = frames[1]["message"]["content"].as_str().unwrap();
+        assert!(
+            content.contains("Compare scratch/explore.html"),
+            "{content}"
+        );
+        assert_eq!(content.matches("Compare scratch/explore.html").count(), 1);
+    }
+
     /// Breakpoint delivery across the five harnesses (Claude, Codex, OpenCode,
     /// Pi idle wake; Antigravity next-turn and held-start, with immediate idle
     /// wake deferred to LOO-1098), plus busy delivery, restart before delivery,

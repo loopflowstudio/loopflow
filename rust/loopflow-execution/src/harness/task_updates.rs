@@ -227,6 +227,9 @@ fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
     };
     let (stored, old) = reading(store, task)?;
     let (graph_row, graphs) = store.task_progress_records(task)?;
+    let held_breakpoint = graph_row
+        .as_ref()
+        .is_some_and(|row| row.pause.is_some() && row.breakpoint.is_some());
     let mut runs = HashMap::new();
     let mut run_in_progress = false;
     let mut changes = Vec::new();
@@ -246,7 +249,10 @@ fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
         };
         // Older readings included running steps with no outcome.
         let previous = old.as_ref().and_then(|old| old.runs.get(&id));
-        if old.is_some() && previous.and_then(|run| run.outcome.as_deref()) != Some(outcome) {
+        if !held_breakpoint
+            && old.is_some()
+            && previous.and_then(|run| run.outcome.as_deref()) != Some(outcome)
+        {
             changes.push(run.report(&id, graph.run.error.as_deref()));
         }
         runs.insert(id, run);
@@ -298,7 +304,11 @@ fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
         }
         let took_up_graph = old.position.is_none()
             && matches!(&observation.position, Some(TaskGraphPosition::At { step }) if step == "start");
-        if (old.position != observation.position && !took_up_graph) || !changes.is_empty() {
+        // A parked review has its own steer. While held, a generic Graph
+        // update would wake the same conversation ahead of the review.
+        if (!held_breakpoint && old.position != observation.position && !took_up_graph)
+            || !changes.is_empty()
+        {
             let mut text = format!(
                 "Task {identifier}: {}.",
                 position_text(observation.position.as_ref())

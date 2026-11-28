@@ -1123,12 +1123,29 @@ fn breakpoint_arrival_scoping_lifecycle_and_query_plans() {
     assert!(woken(&store).is_empty());
     assert!(store.take_steers_to_start("primary").unwrap().is_empty());
 
-    // A later visit wakes the stopped primary once; verify query plans on both
-    // candidate discovery (`read_steer_wakes`) and eligibility (`has_undelivered_steers`
-    // and `take_steers_to_start`).
+    // A command finishing during a pause can park a new review. The hold keeps
+    // it from either the next turn or a wake of the stopped primary.
+    let pause = || {
+        store
+            .begin_task_pause(
+                &task,
+                &crate::process::Starter::Person { name: None },
+                vec![],
+            )
+            .unwrap();
+        store.settle_task_pause(&task, true).unwrap();
+    };
+    pause();
     let second = park("after-explore", "Second visit: updated explore");
+    assert!(!store.has_undelivered_steers("primary").unwrap());
+    assert!(store.take_steers_to_start("primary").unwrap().is_empty());
+    assert!(woken(&store).is_empty());
+
+    // Lifting the hold wakes the primary even though the wake reader already
+    // passed the review while the Task was paused.
     let mut wakes = Vec::new();
     let traced = crate::query_plans::statements(&store, || {
+        store.release_task_pause(&task, None).unwrap();
         wakes = store.read_steer_wakes().unwrap();
         assert!(store.has_undelivered_steers("primary").unwrap());
         assert!(store.has_undelivered_steers("sibling").unwrap());
@@ -1148,5 +1165,14 @@ fn breakpoint_arrival_scoping_lifecycle_and_query_plans() {
     let second_taken = store.take_steers_to_start("primary").unwrap();
     assert_eq!(second_taken.len(), 1);
     assert_eq!(second_taken[0].revision, second.as_str());
-    assert!(woken(&store).is_empty(), "later visit wakes only once");
+    assert_eq!(second_taken[0].text, "Second visit: updated explore");
+    assert!(
+        woken(&store).is_empty(),
+        "the unpaused review wakes only once"
+    );
+
+    pause();
+    store.release_task_pause(&task, None).unwrap();
+    assert!(woken(&store).is_empty(), "the review was already delivered");
+    assert!(store.take_steers_to_start("primary").unwrap().is_empty());
 }

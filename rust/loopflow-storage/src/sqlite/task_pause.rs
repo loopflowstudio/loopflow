@@ -192,7 +192,10 @@ impl SqliteStore {
             Some(step) => {
                 super::task_work::set_step_in(&tx, task, step)?;
             }
-            None => settle_carrier(&tx, task)?,
+            None => {
+                settle_carrier(&tx, task)?;
+                super::steers::republish_parked_breakpoint_in(&tx, task)?;
+            }
         }
         tx.commit()?;
         Ok(())

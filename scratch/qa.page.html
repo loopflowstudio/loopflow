@@ -1,0 +1,105 @@
+<h1>LOO-1125 QA: realign routes code fixes through implement and review</h1>
+<p>Branch <code>lf</code> (debug build of HEAD), private <code>LF_HOME</code> per run, disposable repositories with bare origins under <code>/tmp/qa1125-*</code>. Workers ran on <code>claude:haiku</code> and <code>concept-review</code> on <code>claude:sonnet</code>. The seeded review has three rows: F1 <code>count_words</code> splits on <code>" "</code> only (code), F2 README shows a nonexistent <code>--chars</code> flag (docs), F3 combined output is unlabeled (separate outcome).</p>
+
+<h2>1. The build loop takes a review to a fresh page</h2>
+<p>Graph: <code>- realign</code>, then <code>build</code>'s outer loop (<code>sync</code>, <code>implement</code>, <code>concept-review</code>, <code>realign</code>). Brief: "wc counts words and lines on stdin."</p>
+<pre>
+── graph follow
+  realign
+  cmd: sync
+  implement
+  concept-review
+  realign
+
+[1/5] realign
+The plan was wrong: it said no implementation work remained, but the concept review and my own runs show `count_words` is broken. I fixed the README and recorded the rest as one more pass.
+
+**Findings**
+- **F1 (code, queued):** `count_words` uses `text.split(&quot; &quot;)`, so tabs and newlines don&#x27;t separate words. `&quot;one two\nthree&quot;` counts 2 instead of 3. The outcome promises any whitespace. The existing test only covers single spaces.
+- **F2 (docs, fixed):** The README example used `--chars`, which doesn&#x27;t exist. I changed it to `--words` (`README.md:5`). The plan previously claimed the README showed both flags; it now does.
+- **F3 (deferred):** Combined `--words --lines` prints two unlabeled numbers. This is outside the outcome and needs a format choice (labeled or JSON). It&#x27;s recorded under `## Deferred findings` in `scratch/plan.md`, with the open question in `scratch/questions.md`.
+
+**Plan changes (`scratch/plan.md`)**
+- Added Pass 3 as the remaining work: switch `count_words` to `text.split()` and add tests for tabs/newlines and repeated spaces. Concept-review should then review it.
+- Recorded the review findings by substance and noted that `pytest` isn&#x27;t installed here.
+
+**Verdict: iterate.** One in-scope code fix remains (Pass 3). I did not change `wc.py` or `test_wc.py`; `implement` does that. I checked the current tests by calling their functions directly, and they pass only because they never test whitespace other than spaces.
+Writing the commit message...
+Committing...
+Pushing...
+op: sync</pre>
+<p>Commits on the branch, oldest last:</p>
+<pre>55f2edf lf realign: wc: settle concept review at 100495c; no implementation work left
+ scratch/plan.md      | 23 ++++++++++++++++++-----
+ scratch/questions.md |  2 +-
+a3ac96e lf concept-review: wc: re-record whole-tool concept review at 100495c
+ scratch/concept-review.html      | 95 ++++++++++++++++++++++------------------
+ scratch/concept-review.page.html | 49 ++++++++++-----------
+100495c wc: record pass 4 in plan and questions
+ scratch/plan.md      | 28 +++++++++++-----------------
+ scratch/questions.md |  2 +-
+64d4a73 wc: label combined counts, usage error for bad args, count newlines for lines
+ README.md  |  2 ++
+ test_wc.py | 49 +++++++++++++++++++++++++++++++++++++++++++++++++
+ wc.py      | 22 +++++++++++++++++-----
+3993cd7 lf realign: Plan wc output and line-count fixes from whole-tool concept review
+ scratch/plan.md      | 52 +++++++++++++++++++++++++++++++++++++---------------
+ scratch/questions.md | 13 +++++++++++--
+7be13d8 lf concept-review: wc: record whole-tool concept review at a527f59 with two open CLI findings
+ scratch/concept-review.html      | 2733 +++++++++++++++++++++++++++++++++++++-
+ scratch/concept-review.page.html |   41 +
+a527f59 wc: record pass 3 in plan and questions
+ scratch/plan.md      | 6 ++----
+ scratch/questions.md | 2 ++
+311dc26 wc: count words with split() so tabs, newlines and repeated spaces separate words
+ test_wc.py | 8 ++++++++
+ wc.py      | 2 +-
+0c9e039 lf realign: Fix README --words example and record concept review findings
+ README.md            |  2 +-
+ scratch/plan.md      | 27 ++++++++++++++++++++++++---
+ scratch/questions.md |  3 +++
+701e04e concept review of passes 1 and 2
+ .lf/graphs/follow.yaml      |  9 +++++++++
+ scratch/concept-review.html | 10 ++++++++++</pre>
+<p>Decisions read from each step's <code>StructuredOutput</code>: <code>realign</code> pass 1 <b>iterate</b>, since the fresh whole-tool review raised two CLI findings and it queued them as Pass 4. <code>implement</code> built them, <code>concept-review</code> rewrote the page (a3ac96e), and <code>realign</code> pass 2 returned <b>advance</b>. Every <code>realign</code> commit touched only <code>README.md</code> or <code>scratch/</code>, and the final page has no "No" row.</p>
+
+<h2>2. A deciding realign returns iterate for a queued code fix</h2>
+<p>Graph <code>- loop: [cmd: sync, realign]</code> on the seeded review, run again after the wording fix below. Pass 1 committed only <code>README.md</code> and <code>scratch/plan.md</code> and returned:</p>
+<pre>{"decision":"iterate","summary":"Realign found the plan wrong: it said no implementation pass remained, but `count_words` splits on a single space only. … Fixed the README example from `--chars` (nonexistent) to `--words` …"}</pre>
+<p>Before the fix, the same loop ran three passes and returned <code>iterate</code> each time. Pass 3 then hit an lf error reading the corrected answer:</p>
+<pre>[2/2] realign
+The code matches the plan: `split(&quot; &quot;)` still miscounts, and the README already uses `--words`. I&#x27;ll make two small plan corrections: name the test file, and record that the probe was re-run at the current HEAD.
+Writing the commit message...
+Committing...
+Pushing...
+
+Error: read the final answer of 0a0524d7d2f74a4eb775932d3be7129d from /Users/jack/.claude/projects/-private-tmp-qa1125-decide-repo/364c4f10-c516-42d9-8344-658761a806c4.jsonl
+
+Caused by:
+    it has no turn f9fd08fb-4af6-43df-a561-89317e804b0c
+exit=1</pre>
+
+<h2>3. Standalone and refresh leave code alone</h2>
+<p><code>lf -b realign</code>, <code>lf graph refresh --batch</code> and a one-step <code>- realign</code> Graph started from the seeded review. All three queued F1 and deferred F3 without touching <code>wc.py</code> or <code>test_wc.py</code>. Refresh fixed the README inline.</p>
+<p><b>Fixed here:</b> the first standalone run queued the README fix too, and it wrote "Loop verdict: <code>iterate</code>" into <code>plan.md</code>. Step 1 of scenario 1 also said "Verdict: iterate" while deciding nothing. <code>realign.md</code> now reads "Only a step whose message says it decides a loop returns a verdict", and the non-loop line covers "a step outside the loop" and rules out naming a verdict in the reply or the plan. After a rebuild, both standalone and one-step runs fixed the README and named no verdict ("This step doesn't decide a loop, so I've named no verdict."). The deciding run in scenario 2 still returned <code>iterate</code>. Golden updated.</p>
+<lf-diff path="rust/loopflow-definitions/src/builtins/task/skill/realign.md"></lf-diff>
+
+<h2>What works now</h2>
+<ul>
+<li>Code and test fixes from a review go into the plan, <code>implement</code> makes them, and <code>concept-review</code> rewrites the page before <code>advance</code>.</li>
+<li>User-docs mismatches are fixed inline and recorded in the plan. Separate outcomes go under <code>## Deferred findings</code>.</li>
+<li>Non-deciding runs report what remains with no verdict.</li>
+</ul>
+
+<h2>Not reached</h2>
+<ul>
+<li>A real <code>build</code> Task on GitHub with <code>compress</code>/<code>qa</code>/<code>pr-publish</code>. Only the outer loop was run, against bare origins.</li>
+<li><code>optimize</code>'s refresh path, which stays deferred in the plan.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li>lf: "read the final answer of … it has no turn …" after a correction steer stopped a Graph (exit 1). This is outside this change and is recorded in <code>scratch/questions.md</code>.</li>
+<li>A <code>realign</code> loop with nothing between passes kept returning <code>iterate</code> while churning the plan and never reached <code>blocked</code>. In <code>build</code>, <code>implement</code> sits between passes, so this needs a loop with no implementation step to show up.</li>
+<li>Fixture traps, now in <code>.lf/qa/skills.md</code>. The <code>--batch</code> brief reaches <code>concept-review</code>, and "…and finish it" made it edit the plan and skip the page. Haiku <code>concept-review</code> wrote no page. The inner <code>implement</code> fixes planted mismatches before the review sees them.</li>
+</ol>

@@ -18,3 +18,9 @@
 - `compress` and `qa` can edit code after `concept-review`. Read the freshness
   requirement as covering the fixes queued by `realign`, matching the choice
   to leave the Graph order and review-page format alone.
+- QA (2026-11-27): in a `- loop:` of `cmd: sync` and `realign` with no
+  `implement`, haiku `realign` returned `iterate` three times while refining the
+  plan, never `blocked`. Its third turn first returned invalid output; after the
+  correction steer lf failed with `read the final answer of … it has no turn
+  f9fd08fb-…` (exit 1). That transcript read is outside this Task; worth its own
+  Task if it recurs.

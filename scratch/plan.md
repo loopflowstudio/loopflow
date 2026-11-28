@@ -45,13 +45,16 @@ row for an inline docs fix. `realign` records the fix in the plan. The
 scratch-only alternative, which would send docs fixes through implementation
 and review too, remains in `scratch/questions.md`.
 
-## QA remaining
+## QA
 
-Run the provider fixture in `.lf/qa/skills.md` with one small code mismatch,
-one docs mismatch, and one separate outcome. Pass 1 queues the code fix and
-returns `iterate`. Verify that `implement` fixes it and `concept-review`
-rewrites the page before pass 2 returns `advance`. Check standalone
-`lf -b -a claude:haiku realign` and `refresh` leave code and tests untouched.
+Done 2026-11-27 on the branch `lf` with haiku workers and a sonnet
+`concept-review`; see `scratch/qa.html`. From a seeded review, `realign` fixed
+the README, queued the code fix and deferred the separate outcome. In the
+build loop, `implement` fixed the code, `concept-review` rewrote the page, and
+`realign` returned `iterate` and then `advance`. Standalone and `refresh` left
+code and tests untouched. QA tightened the verdict rule in `realign.md` to
+"Only a step whose message says it decides a loop returns a verdict". Before
+that, two non-deciding runs had named a verdict, one of them in `plan.md`.
 
 ## Deferred findings
 

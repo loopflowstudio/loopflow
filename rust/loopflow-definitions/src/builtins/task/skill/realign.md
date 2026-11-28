@@ -44,15 +44,17 @@ they affect. Write the smallest plan continued work needs if none exists.
 
 ## Deciding a loop
 
+Only a step whose message says it decides a loop returns a verdict:
+
 - Return `blocked` if repeated passes fail to converge on an in-scope fix or
   progress needs a design choice that can't be undone once shipped. Say why.
 - Return `iterate` for any remaining in-scope implementation fix. Name the
   next pass so `implement` makes the fix and `concept-review` reviews it.
 - Return `advance` when no implementation work remains.
 
-Outside a loop (`plan`, `refresh`, or standalone), report what remains without
-a verdict. Record any open irreversible choice in both `scratch/questions.md`
-and the plan.
+Any other run (`plan`, `refresh`, standalone, or a step outside the loop)
+reports what remains and names no verdict, in the reply or the plan. Record
+any open irreversible choice in both `scratch/questions.md` and the plan.
 
 ## Keeping notes readable
 

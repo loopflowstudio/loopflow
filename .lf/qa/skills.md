@@ -45,20 +45,27 @@ with `Error: Graph is blocked: <reason>`. Plan wording steers the decider
 write the plan the way kickoff would. An oversized brief may install and start
 services (Postgres under `/tmp`): stop what the run started by PID.
 
-`build`'s outer loop (`realign` deciding) runs the same way: a fixture
-`.lf/graphs/<name>.yaml` with `- loop:` over an inner `- loop:` (`cmd: sync`,
-`implement`), then `concept-review` and `realign`, plus a two-pass
-`scratch/plan.md` whose first pass is built, takes about ten minutes on haiku.
-`realign`'s opening turn reads `Decision pass 1. Iterating repeats 4 steps,
-back to sync.` Add a `.gitignore` first: step commits sweep up `__pycache__`
-from the agent's test runs, so `concept-review`'s commit looks like it wrote
-code. Give the review one small code mismatch, one stale README and one
-separate outcome. Inspect the first `realign` commit. The README is corrected,
-the plan queues the code fix and lists the separate outcome under
-`## Deferred findings`, and code and tests are untouched. Expect `iterate`,
-then `advance` after `implement` fixes the code and `concept-review` updates the
-page. From the same starting review, standalone `lf -b -a claude:haiku realign`
-and the `realign` step in `refresh` make the same edits without a verdict.
+`build`'s outer loop (`realign` deciding) can't be checked by letting the
+fixture's first `concept-review` find planted mismatches: the inner
+`implement` reads the code and fixes them first (2026-11-27, twice). Seed the
+review instead. Commit a hand-written `scratch/concept-review.html` with one
+code mismatch, one stale README and one separate outcome, a plan saying no
+pass remains, and a `.gitignore` (step commits sweep up `__pycache__`). Run a
+fixture `.lf/graphs/<name>.yaml` of `- realign` followed by the build loop
+(`- loop:` over an inner `- loop:` of `cmd: sync` and `implement`, then
+`concept-review` and `realign`), about ten minutes. The first `realign`
+commit fixes the README, queues the code fix and defers the separate outcome,
+with code and tests untouched. A `- loop:` of `cmd: sync` and `realign`
+shows its `iterate` verdict; without `implement` it keeps iterating, so stop
+it after pass 1. Standalone `lf -b realign` and `lf graph refresh --batch`
+from the same seed show the no-verdict path.
+
+The `--batch` brief reaches every step as `<lf:message>`: "…and finish it"
+made `concept-review` edit the plan and skip its page. Write the brief as the
+outcome ("wc counts words and lines on stdin."). Run `concept-review` on
+sonnet (`lf set --global skill.concept-review.agent claude:sonnet` in the
+private home, no `-a`); on haiku it wrote no page. Read each decision from the
+`StructuredOutput` call in the step's `~/.claude/projects/-private-tmp-…/*.jsonl`.
 
 To read the text a skill launch composes (`extends:` chains, merged
 frontmatter), put a stand-in `claude` first on `PATH` that writes its argv and

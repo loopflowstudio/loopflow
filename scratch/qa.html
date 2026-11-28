@@ -1,0 +1,2903 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1125 QA: realign routes code fixes through implement and review</title>
+<style>
+/* Loopflow repository review page theme (DESIGN.md / Loopflow Light & Dark tokens). */
+:root {
+  --lf-bg: #faf8f5;
+  --lf-surface: #fffdf9;
+  --lf-surface-muted: #f3eee7;
+  --lf-surface-element: #ece6dd;
+  --lf-border: #e6dfd6;
+  --lf-border-strong: #d6ccc0;
+  --lf-text: #2a2624;
+  --lf-text-secondary: #5f5752;
+  --lf-text-tertiary: #65605d;
+  --lf-accent: #722f37;
+  --lf-accent-hover: #5e2630;
+  --lf-accent-text: #faf8f5;
+  --lf-working-ink: #2f629f;
+  --lf-working-fill: #d5dde6;
+  --lf-warning-ink: #7f5a19;
+  --lf-warning-fill: #e4dccd;
+  --lf-failure-ink: #a64038;
+  --lf-failure-fill: #ecd9d5;
+  --lf-success-ink: #386c48;
+  --lf-success-fill: #d7dfd6;
+  --lf-highlight: rgba(114, 47, 55, 0.14);
+  --lf-highlight-active: rgba(114, 47, 55, 0.28);
+  --lf-highlight-line: rgba(114, 47, 55, 0.45);
+  --lf-shadow: 0 8px 26px rgba(42, 38, 36, 0.14);
+  --lf-shadow-sm: 0 3px 12px rgba(42, 38, 36, 0.08);
+  --lf-bubble-bg: #24201e;
+  --lf-bubble-text: #faf8f5;
+  --lf-bubble-border: #3a3430;
+  --lf-font-serif: "Old Standard TT", Georgia, "Times New Roman", serif;
+  --lf-font-sans: "Atkinson Hyperlegible Next", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --lf-font-mono: "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --lf-bg: #181615;
+    --lf-surface: #201d1b;
+    --lf-surface-muted: #282422;
+    --lf-surface-element: #312c29;
+    --lf-border: #38322e;
+    --lf-border-strong: #4a423d;
+    --lf-text: #efeae4;
+    --lf-text-secondary: #b9afa6;
+    --lf-text-tertiary: #8f857d;
+    --lf-accent: #c96b76;
+    --lf-accent-hover: #d8838d;
+    --lf-accent-text: #181615;
+    --lf-working-ink: #7eb2f0;
+    --lf-working-fill: #203147;
+    --lf-warning-ink: #e0b25c;
+    --lf-warning-fill: #3d311c;
+    --lf-failure-ink: #e67c73;
+    --lf-failure-fill: #452422;
+    --lf-success-ink: #7cc490;
+    --lf-success-fill: #213828;
+    --lf-highlight: rgba(201, 107, 118, 0.22);
+    --lf-highlight-active: rgba(201, 107, 118, 0.38);
+    --lf-highlight-line: rgba(201, 107, 118, 0.65);
+    --lf-shadow: 0 10px 30px rgba(0, 0, 0, 0.44);
+    --lf-shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.30);
+    --lf-bubble-bg: #efeae4;
+    --lf-bubble-text: #181615;
+    --lf-bubble-border: #d6ccc0;
+  }
+}
+
+/* Base layout and component styles for compiled Loopflow review pages. */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--lf-bg);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+main.lf-page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 44px 24px max(168px, var(--lf-dock-room, 0px));
+}
+
+h1 {
+  font-family: var(--lf-font-serif);
+  font-size: 32px;
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  font-variant-ligatures: no-common-ligatures;
+  margin: 0 0 12px;
+}
+
+h2 {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 32px 0 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--lf-border);
+}
+
+h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 20px 0 8px;
+}
+
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 22px; }
+li { margin-bottom: 4px; }
+
+code, pre {
+  font-family: var(--lf-font-mono);
+  font-size: 12.5px;
+}
+
+code {
+  background: var(--lf-surface-muted);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+pre {
+  background: var(--lf-surface);
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 16px;
+  font-size: 14px;
+}
+
+th, td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--lf-border);
+  vertical-align: top;
+}
+
+th {
+  color: var(--lf-text-secondary);
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+/* Meta bar & server status banner */
+.lf-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: var(--lf-text-secondary);
+  font-size: 12.5px;
+  margin-bottom: 24px;
+}
+
+.lf-meta code { font-size: 12px; }
+
+.lf-banner {
+  background: var(--lf-warning-fill);
+  color: var(--lf-warning-ink);
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 13.5px;
+}
+
+/* Diff and File blocks */
+.lf-codeblock {
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  background: var(--lf-surface);
+  margin: 14px 0;
+  overflow: hidden;
+}
+
+.lf-codeblock-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--lf-surface-muted);
+  border-bottom: 1px solid var(--lf-border);
+  font-size: 12.5px;
+}
+
+.lf-codeblock-path {
+  font-family: var(--lf-font-mono);
+  color: var(--lf-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lf-codeblock-scroll { overflow-x: auto; }
+
+.lf-code-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+  font-family: var(--lf-font-mono);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.lf-code-table td {
+  border: 0;
+  padding: 0 8px;
+  white-space: pre;
+}
+
+.lf-code-table td.lf-ln {
+  width: 1%;
+  min-width: 38px;
+  text-align: right;
+  color: var(--lf-text-tertiary);
+  user-select: none;
+  border-right: 1px solid var(--lf-border);
+  font-variant-numeric: tabular-nums;
+  position: relative;
+}
+
+.lf-code-table tr.lf-code-row td.lf-ln { cursor: pointer; }
+
+.lf-code-table tr.lf-code-row td.lf-ln-old,
+.lf-code-table tr.lf-code-row td.lf-ln-single {
+  min-width: 52px;
+  padding-left: 24px;
+}
+
+.lf-code-table .lf-gutter-plus {
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border-radius: 4px;
+  border: none;
+  background: var(--lf-accent);
+  color: var(--lf-accent-text);
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.lf-code-table tr.lf-code-row:hover .lf-gutter-plus,
+.lf-code-table .lf-gutter-plus:focus-visible {
+  opacity: 1;
+}
+
+/* A noted row keeps its diff tint; only the gutter carries the note. */
+.lf-code-table tr.lf-code-row.lf-row-has-note td.lf-ln { background: var(--lf-highlight-active); }
+
+.lf-code-table tr.lf-code-row.lf-row-has-note td.lf-ln:first-child {
+  box-shadow: inset 3px 0 0 var(--lf-accent);
+}
+
+.lf-code-table tr.lf-code-row.lf-row-selecting td { background: var(--lf-working-fill); }
+
+.lf-code-table td.lf-sign {
+  width: 18px;
+  text-align: center;
+  user-select: none;
+  padding: 0 2px;
+}
+
+.lf-code-table tr.lf-add { background: var(--lf-success-fill); }
+.lf-code-table tr.lf-add td.lf-sign { color: var(--lf-success-ink); }
+.lf-code-table tr.lf-del { background: var(--lf-failure-fill); }
+.lf-code-table tr.lf-del td.lf-sign { color: var(--lf-failure-ink); }
+.lf-code-table tr.lf-hunk td {
+  background: var(--lf-surface-muted);
+  color: var(--lf-text-secondary);
+  padding: 3px 10px;
+}
+
+.lf-code-table tr.lf-line-note td {
+  white-space: normal;
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  background: var(--lf-surface-element);
+  color: var(--lf-text);
+  padding: 6px 12px;
+  border-top: 1px solid var(--lf-border);
+  border-bottom: 1px solid var(--lf-border);
+}
+
+.lf-codeblock.lf-notes-hidden tr.lf-line-note { display: none; }
+
+/* Builtin components */
+.lf-decision {
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  background: var(--lf-surface);
+  padding: 14px 16px;
+  margin: 14px 0;
+}
+
+.lf-decision-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.lf-decision-title {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.lf-decision-rec {
+  font-size: 12px;
+  color: var(--lf-text-secondary);
+}
+
+.lf-before-after {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.lf-before-after-pane {
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  background: var(--lf-surface);
+  padding: 12px 14px;
+}
+
+.lf-before-after-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--lf-text-secondary);
+  margin-bottom: 8px;
+}
+
+/* Controls: choices, questions, direct actions */
+[data-choice], [data-multiselect] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* Draw `data-label` as a heading only when the control has no selectable prompt child;
+   a decision card shows its title instead. */
+:is([data-choice], [data-multiselect], [data-question])[data-label]:not(:has(> p, > label, > h3, > h4, > legend))::before {
+  content: attr(data-label);
+  display: block;
+  flex-basis: 100%;
+  margin: 10px 0 2px;
+  font-weight: 600;
+}
+
+:is([data-choice], [data-multiselect]) > :is(p, label, h3, h4, legend) {
+  flex-basis: 100%;
+  margin: 10px 0 2px;
+}
+
+.lf-decision [data-choice][data-label]::before { content: none; }
+
+button {
+  appearance: none;
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  line-height: 1.2;
+  padding: 6px 11px;
+  border-radius: 4px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  cursor: pointer;
+}
+
+button:hover { background: var(--lf-surface-muted); }
+
+button.is-selected,
+button[aria-pressed="true"],
+button.lf-btn-accent {
+  background: var(--lf-accent);
+  border-color: var(--lf-accent);
+  color: var(--lf-accent-text);
+}
+
+button.lf-btn-accent:hover {
+  background: var(--lf-accent-hover);
+  border-color: var(--lf-accent-hover);
+}
+
+button.lf-btn-quiet {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-color: var(--lf-border);
+  color: var(--lf-text-secondary);
+}
+
+button.lf-btn-quiet.is-selected,
+button.lf-btn-quiet[aria-pressed="true"] {
+  background: var(--lf-accent);
+  border-color: var(--lf-accent);
+  color: var(--lf-accent-text);
+}
+
+[data-question] { margin: 14px 0; }
+
+[data-question] textarea, [data-question] input[type="text"] {
+  width: 100%;
+  min-height: 60px;
+  padding: 8px 10px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 4px;
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 14px;
+  resize: vertical;
+}
+
+/* Direct action confirmation & receipt */
+.lf-action-confirm,
+.lf-action-receipt,
+.lf-action-error {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  border-radius: 4px;
+}
+
+.lf-action-confirm,
+.lf-action-error {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lf-action-confirm {
+  padding: 6px 10px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 6px;
+  background: var(--lf-surface-muted);
+}
+
+.lf-action-summary {
+  font-family: var(--lf-font-mono);
+  font-size: 12px;
+  color: var(--lf-text-secondary);
+}
+
+.lf-action-receipt {
+  gap: 6px;
+  padding: 5px 10px;
+  background: var(--lf-success-fill);
+  color: var(--lf-success-ink);
+  font-weight: 600;
+}
+
+.lf-action-error {
+  padding: 5px 10px;
+  background: var(--lf-failure-fill);
+  color: var(--lf-failure-ink);
+}
+
+/* Warm-underlined cross-element note highlights */
+.lf-hl {
+  background: var(--lf-highlight);
+  border-bottom: 2px solid var(--lf-highlight-line, var(--lf-accent));
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.lf-hl:hover { background: var(--lf-highlight-active, var(--lf-highlight)); }
+
+.lf-pulse-ring {
+  outline: 2px solid var(--lf-accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* Notion-style floating selection bubble */
+.lf-float-pill {
+  position: fixed;
+  z-index: 960;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px;
+  border-radius: 8px;
+  background: var(--lf-bubble-bg, var(--lf-text));
+  color: var(--lf-bubble-text, var(--lf-bg));
+  border: 1px solid var(--lf-bubble-border, var(--lf-border-strong));
+  box-shadow: var(--lf-shadow, 0 8px 26px rgba(0, 0, 0, 0.2));
+  font-size: 12px;
+}
+
+.lf-float-pill button {
+  background: transparent;
+  border: none;
+  color: var(--lf-bubble-text, var(--lf-bg));
+  padding: 4px 8px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.lf-float-pill button:hover { background: rgba(128, 128, 128, 0.24); }
+
+.lf-float-pill-sep {
+  width: 1px;
+  height: 14px;
+  background: rgba(128, 128, 128, 0.35);
+}
+
+/* Floating comment composer & hover cards */
+.lf-float-composer,
+.lf-hover-card {
+  position: fixed;
+  background: var(--lf-surface);
+  border: 1px solid var(--lf-border-strong);
+  box-shadow: var(--lf-shadow, 0 8px 26px rgba(0, 0, 0, 0.18));
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.lf-float-composer {
+  z-index: 970;
+  width: min(320px, calc(100vw - 16px));
+  padding: 10px;
+  border-radius: 9px;
+}
+
+.lf-hover-card {
+  z-index: 950;
+  width: min(290px, calc(100vw - 16px));
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+
+.lf-anchor-quote {
+  font-size: 11.5px;
+  color: var(--lf-text-secondary);
+  border-left: 2px solid var(--lf-border-strong);
+  padding-left: 7px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lf-card-body {
+  color: var(--lf-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lf-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.lf-float-composer textarea,
+.lf-sidebar-item textarea {
+  width: 100%;
+  min-height: 56px;
+  padding: 6px 8px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 5px;
+  background: var(--lf-bg);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  resize: vertical;
+}
+
+.lf-sidebar-item textarea { background: var(--lf-surface); }
+
+/* Top-right Comments toggle + collapsible slide-over sidebar */
+.lf-comments-toggle {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  z-index: 920;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  font-size: 12.5px;
+  font-weight: 500;
+  box-shadow: var(--lf-shadow-sm, 0 3px 12px rgba(0, 0, 0, 0.08));
+}
+
+.lf-comments-toggle.has-notes { border-color: var(--lf-accent); }
+
+.lf-comments-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--lf-accent);
+  color: var(--lf-accent-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.lf-comments-count[hidden] { display: none; }
+
+.lf-sidebar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(340px, 92vw);
+  z-index: 940;
+  background: var(--lf-surface);
+  border-left: 1px solid var(--lf-border-strong);
+  box-shadow: var(--lf-shadow, 0 8px 26px rgba(0, 0, 0, 0.18));
+  display: flex;
+  flex-direction: column;
+  transform: translateX(104%);
+  transition: transform 0.18s ease;
+}
+
+.lf-sidebar.is-open { transform: translateX(0); }
+
+.lf-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--lf-border);
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.lf-sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lf-sidebar-empty {
+  font-size: 13px;
+  color: var(--lf-text-tertiary);
+  padding: 6px 2px;
+}
+
+.lf-sidebar-item {
+  padding: 9px 11px;
+  border: 1px solid var(--lf-border);
+  border-radius: 7px;
+  background: var(--lf-bg);
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lf-sidebar-item:hover { border-color: var(--lf-accent); }
+
+/* Fixed T3 Code-style attached-chip composer dock (hidden in Loopflow Desktop) */
+.lf-dock {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 1000;
+  width: min(820px, calc(100vw - 24px));
+  padding: 9px 12px;
+  background: var(--lf-surface);
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 11px;
+  box-shadow: var(--lf-shadow, 0 8px 28px rgba(0, 0, 0, 0.16));
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lf-dock-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  max-height: 92px;
+  overflow-y: auto;
+}
+
+.lf-dock[hidden],
+.lf-dock-chips[hidden] { display: none; }
+
+.lf-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-bg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.lf-chip:hover { border-color: var(--lf-accent); }
+
+.lf-chip-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--lf-surface-element);
+  color: var(--lf-text-secondary);
+  flex-shrink: 0;
+}
+
+.lf-chip-tag.tag-note { background: var(--lf-highlight); color: var(--lf-accent); }
+.lf-chip-tag.tag-lines { background: var(--lf-working-fill); color: var(--lf-working-ink); }
+.lf-chip-tag.tag-choice { background: var(--lf-success-fill); color: var(--lf-success-ink); }
+.lf-chip-tag.tag-answer { background: var(--lf-warning-fill); color: var(--lf-warning-ink); }
+.lf-chip-tag.tag-run { background: var(--lf-failure-fill); color: var(--lf-failure-ink); }
+
+.lf-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+}
+
+.lf-chip-x {
+  border: none;
+  background: transparent;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--lf-text-tertiary);
+}
+
+.lf-chip-x:hover {
+  background: transparent;
+  color: var(--lf-failure-ink);
+}
+
+.lf-dock-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.lf-dock-input {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 6px;
+  background: var(--lf-bg);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 13.5px;
+}
+
+.lf-dock-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.lf-dock-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.lf-dock-preview {
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: var(--lf-bg);
+  border: 1px solid var(--lf-border);
+  font-family: var(--lf-font-mono);
+  font-size: 11.5px;
+  color: var(--lf-text-secondary);
+  word-break: break-word;
+  max-height: 84px;
+  overflow-y: auto;
+}
+
+.lf-dock-status {
+  font-size: 12.5px;
+  color: var(--lf-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lf-dock-status.is-error { color: var(--lf-failure-ink); }
+.lf-dock-status.is-ok { color: var(--lf-success-ink); }
+
+</style>
+</head>
+<body>
+<main class="lf-page">
+<h1>LOO-1125 QA: realign routes code fixes through implement and review</h1>
+<p>Branch <code>lf</code> (debug build of HEAD), private <code>LF_HOME</code> per run, disposable repositories with bare origins under <code>/tmp/qa1125-*</code>. Workers ran on <code>claude:haiku</code> and <code>concept-review</code> on <code>claude:sonnet</code>. The seeded review has three rows: F1 <code>count_words</code> splits on <code>" "</code> only (code), F2 README shows a nonexistent <code>--chars</code> flag (docs), F3 combined output is unlabeled (separate outcome).</p>
+
+<h2>1. The build loop takes a review to a fresh page</h2>
+<p>Graph: <code>- realign</code>, then <code>build</code>'s outer loop (<code>sync</code>, <code>implement</code>, <code>concept-review</code>, <code>realign</code>). Brief: "wc counts words and lines on stdin."</p>
+<pre>
+── graph follow
+  realign
+  cmd: sync
+  implement
+  concept-review
+  realign
+
+[1/5] realign
+The plan was wrong: it said no implementation work remained, but the concept review and my own runs show `count_words` is broken. I fixed the README and recorded the rest as one more pass.
+
+**Findings**
+- **F1 (code, queued):** `count_words` uses `text.split(&quot; &quot;)`, so tabs and newlines don&#x27;t separate words. `&quot;one two\nthree&quot;` counts 2 instead of 3. The outcome promises any whitespace. The existing test only covers single spaces.
+- **F2 (docs, fixed):** The README example used `--chars`, which doesn&#x27;t exist. I changed it to `--words` (`README.md:5`). The plan previously claimed the README showed both flags; it now does.
+- **F3 (deferred):** Combined `--words --lines` prints two unlabeled numbers. This is outside the outcome and needs a format choice (labeled or JSON). It&#x27;s recorded under `## Deferred findings` in `scratch/plan.md`, with the open question in `scratch/questions.md`.
+
+**Plan changes (`scratch/plan.md`)**
+- Added Pass 3 as the remaining work: switch `count_words` to `text.split()` and add tests for tabs/newlines and repeated spaces. Concept-review should then review it.
+- Recorded the review findings by substance and noted that `pytest` isn&#x27;t installed here.
+
+**Verdict: iterate.** One in-scope code fix remains (Pass 3). I did not change `wc.py` or `test_wc.py`; `implement` does that. I checked the current tests by calling their functions directly, and they pass only because they never test whitespace other than spaces.
+Writing the commit message...
+Committing...
+Pushing...
+op: sync</pre>
+<p>Commits on the branch, oldest last:</p>
+<pre>55f2edf lf realign: wc: settle concept review at 100495c; no implementation work left
+ scratch/plan.md      | 23 ++++++++++++++++++-----
+ scratch/questions.md |  2 +-
+a3ac96e lf concept-review: wc: re-record whole-tool concept review at 100495c
+ scratch/concept-review.html      | 95 ++++++++++++++++++++++------------------
+ scratch/concept-review.page.html | 49 ++++++++++-----------
+100495c wc: record pass 4 in plan and questions
+ scratch/plan.md      | 28 +++++++++++-----------------
+ scratch/questions.md |  2 +-
+64d4a73 wc: label combined counts, usage error for bad args, count newlines for lines
+ README.md  |  2 ++
+ test_wc.py | 49 +++++++++++++++++++++++++++++++++++++++++++++++++
+ wc.py      | 22 +++++++++++++++++-----
+3993cd7 lf realign: Plan wc output and line-count fixes from whole-tool concept review
+ scratch/plan.md      | 52 +++++++++++++++++++++++++++++++++++++---------------
+ scratch/questions.md | 13 +++++++++++--
+7be13d8 lf concept-review: wc: record whole-tool concept review at a527f59 with two open CLI findings
+ scratch/concept-review.html      | 2733 +++++++++++++++++++++++++++++++++++++-
+ scratch/concept-review.page.html |   41 +
+a527f59 wc: record pass 3 in plan and questions
+ scratch/plan.md      | 6 ++----
+ scratch/questions.md | 2 ++
+311dc26 wc: count words with split() so tabs, newlines and repeated spaces separate words
+ test_wc.py | 8 ++++++++
+ wc.py      | 2 +-
+0c9e039 lf realign: Fix README --words example and record concept review findings
+ README.md            |  2 +-
+ scratch/plan.md      | 27 ++++++++++++++++++++++++---
+ scratch/questions.md |  3 +++
+701e04e concept review of passes 1 and 2
+ .lf/graphs/follow.yaml      |  9 +++++++++
+ scratch/concept-review.html | 10 ++++++++++</pre>
+<p>Decisions read from each step's <code>StructuredOutput</code>: <code>realign</code> pass 1 <b>iterate</b>, since the fresh whole-tool review raised two CLI findings and it queued them as Pass 4. <code>implement</code> built them, <code>concept-review</code> rewrote the page (a3ac96e), and <code>realign</code> pass 2 returned <b>advance</b>. Every <code>realign</code> commit touched only <code>README.md</code> or <code>scratch/</code>, and the final page has no "No" row.</p>
+
+<h2>2. A deciding realign returns iterate for a queued code fix</h2>
+<p>Graph <code>- loop: [cmd: sync, realign]</code> on the seeded review, run again after the wording fix below. Pass 1 committed only <code>README.md</code> and <code>scratch/plan.md</code> and returned:</p>
+<pre>{"decision":"iterate","summary":"Realign found the plan wrong: it said no implementation pass remained, but `count_words` splits on a single space only. … Fixed the README example from `--chars` (nonexistent) to `--words` …"}</pre>
+<p>Before the fix, the same loop ran three passes and returned <code>iterate</code> each time. Pass 3 then hit an lf error reading the corrected answer:</p>
+<pre>[2/2] realign
+The code matches the plan: `split(&quot; &quot;)` still miscounts, and the README already uses `--words`. I&#x27;ll make two small plan corrections: name the test file, and record that the probe was re-run at the current HEAD.
+Writing the commit message...
+Committing...
+Pushing...
+
+Error: read the final answer of 0a0524d7d2f74a4eb775932d3be7129d from /Users/jack/.claude/projects/-private-tmp-qa1125-decide-repo/364c4f10-c516-42d9-8344-658761a806c4.jsonl
+
+Caused by:
+    it has no turn f9fd08fb-4af6-43df-a561-89317e804b0c
+exit=1</pre>
+
+<h2>3. Standalone and refresh leave code alone</h2>
+<p><code>lf -b realign</code>, <code>lf graph refresh --batch</code> and a one-step <code>- realign</code> Graph started from the seeded review. All three queued F1 and deferred F3 without touching <code>wc.py</code> or <code>test_wc.py</code>. Refresh fixed the README inline.</p>
+<p><b>Fixed here:</b> the first standalone run queued the README fix too, and it wrote "Loop verdict: <code>iterate</code>" into <code>plan.md</code>. Step 1 of scenario 1 also said "Verdict: iterate" while deciding nothing. <code>realign.md</code> now reads "Only a step whose message says it decides a loop returns a verdict", and the non-loop line covers "a step outside the loop" and rules out naming a verdict in the reply or the plan. After a rebuild, both standalone and one-step runs fixed the README and named no verdict ("This step doesn't decide a loop, so I've named no verdict."). The deciding run in scenario 2 still returned <code>iterate</code>. Golden updated.</p>
+<div class="lf-codeblock" data-path="rust/loopflow-definitions/src/builtins/task/skill/realign.md"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-definitions/src/builtins/task/skill/realign.md</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-hunk"><td colspan="4">@@ -1,95 +1,71 @@</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1" data-line="1"><td class="lf-ln lf-ln-old">1</td><td class="lf-ln lf-ln-new">1</td><td class="lf-sign"> </td><td>---</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="2" data-line="2"><td class="lf-ln lf-ln-old">2</td><td class="lf-ln lf-ln-new">2</td><td class="lf-sign"> </td><td>requires: intended outcome and work to reconcile</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="3"><td class="lf-ln lf-ln-old">3</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>produces: plan and implementation that agree, with a short account of progress</td></tr>
+<tr class="lf-add lf-code-row" data-line="3"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">3</td><td class="lf-sign">+</td><td>produces: current plan with any remaining implementation work</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="4" data-line="4"><td class="lf-ln lf-ln-old">4</td><td class="lf-ln lf-ln-new">4</td><td class="lf-sign"> </td><td>action_style: procedural</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="5" data-line="5"><td class="lf-ln lf-ln-old">5</td><td class="lf-ln lf-ln-new">5</td><td class="lf-sign"> </td><td>---</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="6"><td class="lf-ln lf-ln-old">6</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>Bring the plan and the code back into agreement with what the work has taught.</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="7"><td class="lf-ln lf-ln-old">7</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td></td></tr>
+<tr class="lf-del lf-code-row" data-old-line="8"><td class="lf-ln lf-ln-old">8</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>After a slice, a review, or upstream changes, answer three questions in order.</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="9"><td class="lf-ln lf-ln-old">9</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>Before anything is built, the review is what was learned.</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="10"><td class="lf-ln lf-ln-old">10</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td></td></tr>
+<tr class="lf-del lf-code-row" data-old-line="11"><td class="lf-ln lf-ln-old">11</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>**What did the work teach?** Look at what the affected behavior does now.</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="12"><td class="lf-ln lf-ln-old">12</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>Say what works, what doesn&#39;t fit, and which assumption in the plan turned out</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="13"><td class="lf-ln lf-ln-old">13</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>wrong: mechanisms that proved unnecessary, behavior still missing or working</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="14"><td class="lf-ln lf-ln-old">14</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>differently than intended. Include what moved around it: upstream changes,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="15"><td class="lf-ln lf-ln-old">15</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>related work, new decisions. Keep what you saw apart from why you think it</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="16"><td class="lf-ln lf-ln-old">16</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>happened. Reuse existing results; run a check only when it settles a real</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="17"><td class="lf-ln lf-ln-old">17</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>question. Realign starting is no reason to rerun tests.</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="18"><td class="lf-ln lf-ln-old">18</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td></td></tr>
+<tr class="lf-del lf-code-row" data-old-line="19"><td class="lf-ln lf-ln-old">19</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>**Is the plan still right?** Recover the intent first: the outcome wanted and</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="20"><td class="lf-ln lf-ln-old">20</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>the constraints people stated, from the conversation, review feedback, plan</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="21"><td class="lf-ln lf-ln-old">21</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>and code. When intent is missing, ask for the specific decision; the</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="22"><td class="lf-ln lf-ln-old">22</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>implementation is not the spec. Then fix the plan at the source. Rewrite what</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="23"><td class="lf-ln lf-ln-old">23</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>the work proved wrong and delete steps that no longer apply. What you learned</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="24"><td class="lf-ln lf-ln-old">24</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>may change the approach, but missing behavior never weakens acceptance. A</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="25"><td class="lf-ln lf-ln-old">25</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>change that needs a design decision is written as the exact open choice.</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="26"><td class="lf-ln lf-ln-old">26</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>Nothing goes into the plan as settled unless someone said so; quote them.</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="27"><td class="lf-ln lf-ln-old">27</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td></td></tr>
+<tr class="lf-del lf-code-row" data-old-line="28"><td class="lf-ln lf-ln-old">28</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>Read the work once as a reviewer, one look at the shape and not a full</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="29"><td class="lf-ln lf-ln-old">29</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>review: is there a concept, type or path it added that the design could do</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="30"><td class="lf-ln lf-ln-old">30</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>without, or a simpler form of what it built? Write what you find into the</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="31"><td class="lf-ln lf-ln-old">31</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>plan as remaining work. Correct small, clear mismatches in code, tests and</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="32"><td class="lf-ln lf-ln-old">32</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>docs yourself; leave a substantial code change as remaining work.</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="33"><td class="lf-ln lf-ln-old">33</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td></td></tr>
+<tr class="lf-del lf-code-row" data-old-line="34"><td class="lf-ln lf-ln-old">34</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>**What is next?** Regroup what remains into end-to-end passes, aiming for</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="35"><td class="lf-ln lf-ln-old">35</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>five or fewer across the Task. Name what the next pass will deliver and</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="36"><td class="lf-ln lf-ln-old">36</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>what it will teach. If nothing remains, say so.</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="37"><td class="lf-ln lf-ln-old">37</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td></td></tr>
+<tr class="lf-del lf-code-row" data-old-line="38"><td class="lf-ln lf-ln-old">38</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>When you finish, the plan separates what exists from what remains, and the</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="39"><td class="lf-ln lf-ln-old">39</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>code backs every claim of finished behavior. Keep blockers, contrary findings</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="40"><td class="lf-ln lf-ln-old">40</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>and deferred checks where they affect the next action.</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="41"><td class="lf-ln lf-ln-old">41</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td></td></tr>
+<tr class="lf-del lf-code-row" data-old-line="42"><td class="lf-ln lf-ln-old">42</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>The plan says what will be built and what remains. Keep what can&#39;t be worked</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="43"><td class="lf-ln lf-ln-old">43</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>out again: what people said, word for word, what a run showed, facts from</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="44"><td class="lf-ln lf-ln-old">44</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>outside the repository, and the few findings that still explain the approach,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="45"><td class="lf-ln lf-ln-old">45</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>with source paths. Cut the rest. With no plan, write the smallest one continued</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="46"><td class="lf-ln lf-ln-old">46</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>work needs.</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="47"><td class="lf-ln lf-ln-old">47</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td></td></tr>
+<tr class="lf-del lf-code-row" data-old-line="48"><td class="lf-ln lf-ln-old">48</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>## After a review</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="49"><td class="lf-ln lf-ln-old">49</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td></td></tr>
+<tr class="lf-del lf-code-row" data-old-line="50"><td class="lf-ln lf-ln-old">50</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>When `scratch/concept-review.html` has findings the plan has not answered, give</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="51"><td class="lf-ln lf-ln-old">51</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>each one a place:</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="52"><td class="lf-ln lf-ln-old">52</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td></td></tr>
+<tr class="lf-del lf-code-row" data-old-line="53"><td class="lf-ln lf-ln-old">53</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>- **Small, clear mismatch:** fix it here, in plan, code, tests or docs.</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="54"><td class="lf-ln lf-ln-old">54</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>- **Conceptual rework in the area this work touches, or missing promised</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="55"><td class="lf-ln lf-ln-old">55</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>  behavior:** write it into the plan as the next pass.</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="56"><td class="lf-ln lf-ln-old">56</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>- **Separate outcome:** list it in the plan under `## Deferred findings` (which</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="57"><td class="lf-ln lf-ln-old">57</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>  `ship-review` reads), with what it would take. Don&#39;t build it.</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="58"><td class="lf-ln lf-ln-old">58</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>- **Reversible design choice (headless):** adopt the recommended direction</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="59"><td class="lf-ln lf-ln-old">59</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>  into the plan marked as made for review, with what was passed over and why</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="60"><td class="lf-ln lf-ln-old">60</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>  (never as settled), so downstream steps build one coherent design and</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="61"><td class="lf-ln lf-ln-old">61</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>  `ship-review` surfaces the choice.</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="62"><td class="lf-ln lf-ln-old">62</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td></td></tr>
+<tr class="lf-del lf-code-row" data-old-line="63"><td class="lf-ln lf-ln-old">63</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>Record in the plan what happened to each finding by substance (not bare</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="64"><td class="lf-ln lf-ln-old">64</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>numbers), so a later `realign` (such as `refresh`) does not act on the same</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="65"><td class="lf-ln lf-ln-old">65</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>page twice. When a fresh `scratch/concept-review.html` arrives (for example,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="66"><td class="lf-ln lf-ln-old">66</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>after `ship-review` iterates back to `build`), replace earlier settled review</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="67"><td class="lf-ln lf-ln-old">67</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>notes while keeping `## Deferred findings` intact.</td></tr>
+<tr class="lf-add lf-code-row" data-line="6"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">6</td><td class="lf-sign">+</td><td>Update the plan with what the work has taught and what still needs to change.</td></tr>
+<tr class="lf-add lf-code-row" data-line="7"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">7</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="8"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">8</td><td class="lf-sign">+</td><td>**What did the work teach?** Compare the intended behavior with what you</td></tr>
+<tr class="lf-add lf-code-row" data-line="9"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">9</td><td class="lf-sign">+</td><td>observed. Include upstream changes, related work and new decisions. Distinguish</td></tr>
+<tr class="lf-add lf-code-row" data-line="10"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">10</td><td class="lf-sign">+</td><td>what happened from why you think it happened. Reuse existing results. Run a</td></tr>
+<tr class="lf-add lf-code-row" data-line="11"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">11</td><td class="lf-sign">+</td><td>check only to settle an open question.</td></tr>
+<tr class="lf-add lf-code-row" data-line="12"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">12</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="13"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">13</td><td class="lf-sign">+</td><td>With a fresh `scratch/concept-review.html`, work from its findings. Before</td></tr>
+<tr class="lf-add lf-code-row" data-line="14"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">14</td><td class="lf-sign">+</td><td>implementation, the review itself is what was learned. Without a fresh review,</td></tr>
+<tr class="lf-add lf-code-row" data-line="15"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">15</td><td class="lf-sign">+</td><td>look once for a simpler shape or a concept, type or path the design can drop.</td></tr>
+<tr class="lf-add lf-code-row" data-line="16"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">16</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="17"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">17</td><td class="lf-sign">+</td><td>**Is the plan still right?** Recover the outcome and constraints from the</td></tr>
+<tr class="lf-add lf-code-row" data-line="18"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">18</td><td class="lf-sign">+</td><td>conversation, review feedback, plan and code. Ask for the specific decision</td></tr>
+<tr class="lf-add lf-code-row" data-line="19"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">19</td><td class="lf-sign">+</td><td>when intent is missing. Correct mistaken assumptions in `scratch/plan.md`</td></tr>
+<tr class="lf-add lf-code-row" data-line="20"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">20</td><td class="lf-sign">+</td><td>and delete steps that no longer apply. Keep promised behavior that is still</td></tr>
+<tr class="lf-add lf-code-row" data-line="21"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">21</td><td class="lf-sign">+</td><td>missing. Quote what people decided and name any choice still open.</td></tr>
+<tr class="lf-add lf-code-row" data-line="22"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">22</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="23"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">23</td><td class="lf-sign">+</td><td>Give each finding a place:</td></tr>
+<tr class="lf-add lf-code-row" data-line="24"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">24</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="25"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">25</td><td class="lf-sign">+</td><td>- Correct the plan and any clear user-docs mismatch under `docs/` or in a</td></tr>
+<tr class="lf-add lf-code-row" data-line="26"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">26</td><td class="lf-sign">+</td><td>  `README.md`. Record the docs fix in the plan.</td></tr>
+<tr class="lf-add lf-code-row" data-line="27"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">27</td><td class="lf-sign">+</td><td>- Queue every other in-scope change for `implement`, including small code or</td></tr>
+<tr class="lf-add lf-code-row" data-line="28"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">28</td><td class="lf-sign">+</td><td>  test fixes, conceptual rework and missing promised behavior.</td></tr>
+<tr class="lf-add lf-code-row" data-line="29"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">29</td><td class="lf-sign">+</td><td>- List separate outcomes under `## Deferred findings` with what each would</td></tr>
+<tr class="lf-add lf-code-row" data-line="30"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">30</td><td class="lf-sign">+</td><td>  take. `ship-review` reads them there. Put new ideas in `scratch/questions.md`.</td></tr>
+<tr class="lf-add lf-code-row" data-line="31"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">31</td><td class="lf-sign">+</td><td>- For a reversible design choice in a headless run, use the recommended</td></tr>
+<tr class="lf-add lf-code-row" data-line="32"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">32</td><td class="lf-sign">+</td><td>  direction. Mark it for review in the plan with the alternative and why you</td></tr>
+<tr class="lf-add lf-code-row" data-line="33"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">33</td><td class="lf-sign">+</td><td>  passed it over, so later steps build one design and `ship-review` surfaces</td></tr>
+<tr class="lf-add lf-code-row" data-line="34"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">34</td><td class="lf-sign">+</td><td>  the choice.</td></tr>
+<tr class="lf-add lf-code-row" data-line="35"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">35</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="36"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">36</td><td class="lf-sign">+</td><td>Record each review finding by substance so later runs can skip findings the</td></tr>
+<tr class="lf-add lf-code-row" data-line="37"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">37</td><td class="lf-sign">+</td><td>plan already answers. When a fresh review arrives, replace settled review</td></tr>
+<tr class="lf-add lf-code-row" data-line="38"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">38</td><td class="lf-sign">+</td><td>notes and keep `## Deferred findings`.</td></tr>
+<tr class="lf-add lf-code-row" data-line="39"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">39</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="40"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">40</td><td class="lf-sign">+</td><td>**What is next?** Group remaining work into end-to-end passes, aiming for five</td></tr>
+<tr class="lf-add lf-code-row" data-line="41"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">41</td><td class="lf-sign">+</td><td>or fewer across the Task. Name what the next pass delivers and what it will</td></tr>
+<tr class="lf-add lf-code-row" data-line="42"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">42</td><td class="lf-sign">+</td><td>teach. Keep blockers, contrary findings and deferred checks beside the work</td></tr>
+<tr class="lf-add lf-code-row" data-line="43"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">43</td><td class="lf-sign">+</td><td>they affect. Write the smallest plan continued work needs if none exists.</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="68" data-line="44"><td class="lf-ln lf-ln-old">68</td><td class="lf-ln lf-ln-new">44</td><td class="lf-sign"> </td><td></td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="69" data-line="45"><td class="lf-ln lf-ln-old">69</td><td class="lf-ln lf-ln-new">45</td><td class="lf-sign"> </td><td>## Deciding a loop</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="70" data-line="46"><td class="lf-ln lf-ln-old">70</td><td class="lf-ln lf-ln-new">46</td><td class="lf-sign"> </td><td></td></tr>
+<tr class="lf-del lf-code-row" data-old-line="71"><td class="lf-ln lf-ln-old">71</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>When this step is deciding a loop: return `iterate` only when the plan now</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="72"><td class="lf-ln lf-ln-old">72</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>holds a pass of rework or missing promised behavior, naming that pass in the</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="73"><td class="lf-ln lf-ln-old">73</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>summary; return `advance` when what was found is fixed here or deferred; return</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="74"><td class="lf-ln lf-ln-old">74</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>`blocked` with the question on a design choice that can&#39;t be undone once</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="75"><td class="lf-ln lf-ln-old">75</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>shipped.</td></tr>
+<tr class="lf-add lf-code-row" data-line="47"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">47</td><td class="lf-sign">+</td><td>Only a step whose message says it decides a loop returns a verdict:</td></tr>
+<tr class="lf-add lf-code-row" data-line="48"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">48</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="49"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">49</td><td class="lf-sign">+</td><td>- Return `blocked` if repeated passes fail to converge on an in-scope fix or</td></tr>
+<tr class="lf-add lf-code-row" data-line="50"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">50</td><td class="lf-sign">+</td><td>  progress needs a design choice that can&#39;t be undone once shipped. Say why.</td></tr>
+<tr class="lf-add lf-code-row" data-line="51"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">51</td><td class="lf-sign">+</td><td>- Return `iterate` for any remaining in-scope implementation fix. Name the</td></tr>
+<tr class="lf-add lf-code-row" data-line="52"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">52</td><td class="lf-sign">+</td><td>  next pass so `implement` makes the fix and `concept-review` reviews it.</td></tr>
+<tr class="lf-add lf-code-row" data-line="53"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">53</td><td class="lf-sign">+</td><td>- Return `advance` when no implementation work remains.</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="76" data-line="54"><td class="lf-ln lf-ln-old">76</td><td class="lf-ln lf-ln-new">54</td><td class="lf-sign"> </td><td></td></tr>
+<tr class="lf-del lf-code-row" data-old-line="77"><td class="lf-ln lf-ln-old">77</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>Outside a loop (`plan`, `refresh`, or standalone), there is no `blocked`</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="78"><td class="lf-ln lf-ln-old">78</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>verdict: record any open irreversible choice in `scratch/questions.md` and</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="79"><td class="lf-ln lf-ln-old">79</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>`scratch/plan.md`, report what changed, and finish.</td></tr>
+<tr class="lf-add lf-code-row" data-line="55"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">55</td><td class="lf-sign">+</td><td>Any other run (`plan`, `refresh`, standalone, or a step outside the loop)</td></tr>
+<tr class="lf-add lf-code-row" data-line="56"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">56</td><td class="lf-sign">+</td><td>reports what remains and names no verdict, in the reply or the plan. Record</td></tr>
+<tr class="lf-add lf-code-row" data-line="57"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">57</td><td class="lf-sign">+</td><td>any open irreversible choice in both `scratch/questions.md` and the plan.</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="80" data-line="58"><td class="lf-ln lf-ln-old">80</td><td class="lf-ln lf-ln-new">58</td><td class="lf-sign"> </td><td></td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="81" data-line="59"><td class="lf-ln lf-ln-old">81</td><td class="lf-ln lf-ln-new">59</td><td class="lf-sign"> </td><td>## Keeping notes readable</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="82" data-line="60"><td class="lf-ln lf-ln-old">82</td><td class="lf-ln lf-ln-new">60</td><td class="lf-sign"> </td><td></td></tr>
+<tr class="lf-del lf-code-row" data-old-line="83"><td class="lf-ln lf-ln-old">83</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>Only a little of `scratch/` is handed to each step; the rest is read on</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="84"><td class="lf-ln lf-ln-old">84</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>demand, so what matters is that the plan is current and the notes aren&#39;t</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="85"><td class="lf-ln lf-ln-old">85</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>misleading. Merge duplicates, drop notes inherited from a stacked parent, and</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="86"><td class="lf-ln lf-ln-old">86</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>delete what a fresh read of the code would recover. Don&#39;t shrink scratch to a</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="87"><td class="lf-ln lf-ln-old">87</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>size. What people said, word for word, stays: it can&#39;t be worked out again.</td></tr>
+<tr class="lf-add lf-code-row" data-line="61"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">61</td><td class="lf-sign">+</td><td>Keep the plan current so later steps can tell what exists and what remains.</td></tr>
+<tr class="lf-add lf-code-row" data-line="62"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">62</td><td class="lf-sign">+</td><td>Check that the code backs each claim of finished behavior. Keep people&#39;s</td></tr>
+<tr class="lf-add lf-code-row" data-line="63"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">63</td><td class="lf-sign">+</td><td>exact words, run results, outside facts and the few findings that still</td></tr>
+<tr class="lf-add lf-code-row" data-line="64"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">64</td><td class="lf-sign">+</td><td>explain the approach, with source paths. Merge duplicates, drop notes</td></tr>
+<tr class="lf-add lf-code-row" data-line="65"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">65</td><td class="lf-sign">+</td><td>inherited from a stacked parent and cut what a fresh read could recover.</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="88" data-line="66"><td class="lf-ln lf-ln-old">88</td><td class="lf-ln lf-ln-new">66</td><td class="lf-sign"> </td><td></td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="89" data-line="67"><td class="lf-ln lf-ln-old">89</td><td class="lf-ln lf-ln-new">67</td><td class="lf-sign"> </td><td>When the Wave&#39;s memory is this step&#39;s to write, curate it as</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="90" data-line="68"><td class="lf-ln lf-ln-old">90</td><td class="lf-ln lf-ln-new">68</td><td class="lf-sign"> </td><td>`lf help wave-session` describes.</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="91" data-line="69"><td class="lf-ln lf-ln-old">91</td><td class="lf-ln lf-ln-new">69</td><td class="lf-sign"> </td><td></td></tr>
+<tr class="lf-del lf-code-row" data-old-line="92"><td class="lf-ln lf-ln-old">92</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>Finish briefly: what changed, what remains, any decision needed. Edit the plan</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="93"><td class="lf-ln lf-ln-old">93</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>rather than adding a report. If everything already agrees, say so. Realign</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="94"><td class="lf-ln lf-ln-old">94</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>changes the plan to match what was learned. It never adds behavior the plan</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="95"><td class="lf-ln lf-ln-old">95</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>didn&#39;t have: that goes in `scratch/questions.md`.</td></tr>
+<tr class="lf-add lf-code-row" data-line="70"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">70</td><td class="lf-sign">+</td><td>Edit the plan directly. Finish briefly with what changed, what remains and</td></tr>
+<tr class="lf-add lf-code-row" data-line="71"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">71</td><td class="lf-sign">+</td><td>any decision needed. If everything already agrees, say so.</td></tr>
+</tbody></table></div></div>
+
+<h2>What works now</h2>
+<ul>
+<li>Code and test fixes from a review go into the plan, <code>implement</code> makes them, and <code>concept-review</code> rewrites the page before <code>advance</code>.</li>
+<li>User-docs mismatches are fixed inline and recorded in the plan. Separate outcomes go under <code>## Deferred findings</code>.</li>
+<li>Non-deciding runs report what remains with no verdict.</li>
+</ul>
+
+<h2>Not reached</h2>
+<ul>
+<li>A real <code>build</code> Task on GitHub with <code>compress</code>/<code>qa</code>/<code>pr-publish</code>. Only the outer loop was run, against bare origins.</li>
+<li><code>optimize</code>'s refresh path, which stays deferred in the plan.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li>lf: "read the final answer of … it has no turn …" after a correction steer stopped a Graph (exit 1). This is outside this change and is recorded in <code>scratch/questions.md</code>.</li>
+<li>A <code>realign</code> loop with nothing between passes kept returning <code>iterate</code> while churning the plan and never reached <code>blocked</code>. In <code>build</code>, <code>implement</code> sits between passes, so this needs a loop with no implementation step to show up.</li>
+<li>Fixture traps, now in <code>.lf/qa/skills.md</code>. The <code>--batch</code> brief reaches <code>concept-review</code>, and "…and finish it" made it edit the plan and skip the page. Haiku <code>concept-review</code> wrote no page. The inner <code>implement</code> fixes planted mismatches before the review sees them.</li>
+</ol>
+</main>
+<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1125"},"directory":"/Users/jack/src/loopflow.loo-1125-route-realign-code","base":"503b3ef9d393a4353aa684f376840b51dc7303e8","head":"5bfde7a3ba","path":"scratch/qa.html","build_id":"8e66a0ef8a243608","protocol":{"revision":11,"min_revision":10}}</script>
+<script>
+(function () {
+  "use strict";
+
+  const stampEl = document.getElementById("lf-page");
+  if (!stampEl) return;
+  let stamp;
+  try {
+    stamp = JSON.parse(stampEl.textContent || "{}");
+  } catch (_) {
+    return;
+  }
+
+  const pagePath = String(stamp.path || "scratch/page.html");
+  const buildId = String(stamp.build_id || "0");
+  const work = stamp.work || { kind: "repository" };
+  const directory = String(stamp.directory || "");
+  const protocol =
+    stamp.protocol && typeof stamp.protocol === "object" ? stamp.protocol : null;
+  const protocolRevision = Number(protocol && protocol.revision);
+  const protocolMinRevision = Number(protocol && protocol.min_revision);
+  const storageKey = "lf-page:" + pagePath + ":" + buildId;
+  const mainEl =
+    document.querySelector("main.lf-page") || document.querySelector("main") || document.body;
+
+  const desktopHandler =
+    window.webkit &&
+    window.webkit.messageHandlers &&
+    window.webkit.messageHandlers.loopflow;
+
+  let hostMode = desktopHandler ? "desktop" : "clipboard";
+  let socket = null;
+  let nextReqId = 1;
+  const pending = new Map();
+  const cancelledAction = Symbol("cancelled action");
+  let serverDisconnected = false;
+  let sendingReply = false;
+
+  // Draft & receipt state.
+  // Notes (prose & diff/file lines), choices, multiselects, questions, offline actions,
+  // and optional browser overall direction enter the reply queue.
+  // Executed direct `data-lf` receipts stay separate and only ride as a suffix on ⌘↩.
+  function emptyState() {
+    return {
+      notes: [],
+      choices: {},
+      multiselects: {},
+      questions: {},
+      offlineActions: [],
+      overall: "",
+      receipts: [],
+    };
+  }
+
+  let state = emptyState();
+
+  function oneLine(text) {
+    return String(text || "")
+      .replace(/[\r\n\t\x00-\x1f]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function buttonValue(btn) {
+    return btn.getAttribute("data-value") || oneLine(btn.textContent);
+  }
+
+  function resultTaskId(result) {
+    return result && ((result.task && result.task.identifier) || result.identifier);
+  }
+
+  function errorMessage(err) {
+    return String(err && err.message ? err.message : err);
+  }
+
+  function el(tag, opts, ...children) {
+    const node = document.createElement(tag);
+    if (typeof opts === "string") {
+      if (opts) node.className = opts;
+    } else if (opts) {
+      for (const [k, v] of Object.entries(opts)) {
+        if (v == null || v === false) continue;
+        if (k === "cls") node.className = v;
+        else if (k === "text") node.textContent = v;
+        else if (k === "on") {
+          for (const [ev, fn] of Object.entries(v)) node.addEventListener(ev, fn);
+        } else if (k === "attrs") {
+          for (const [ak, av] of Object.entries(v)) node.setAttribute(ak, av);
+        } else {
+          node[k] = v;
+        }
+      }
+    }
+    for (const child of children) {
+      if (child != null && child !== false) node.append(child);
+    }
+    return node;
+  }
+
+  function makeButton(label, onClick, className) {
+    return el("button", { type: "button", cls: className || "", text: label, on: { click: onClick } });
+  }
+
+  function setPressed(btn, active) {
+    btn.classList.toggle("is-selected", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+
+  function focusEnd(ta) {
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  }
+
+  function clearSelection() {
+    try {
+      window.getSelection().removeAllRanges();
+    } catch (_) {}
+  }
+
+  function randomId() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return window.crypto.randomUUID();
+    }
+    return "lf-" + Math.random().toString(16).slice(2) + "-" + Date.now().toString(16);
+  }
+
+  function shortPath(path) {
+    const parts = String(path || "").split("/");
+    return parts[parts.length - 1] || path;
+  }
+
+  function truncate(text, max) {
+    const s = oneLine(text);
+    return s.length > max ? s.slice(0, max - 1) + "…" : s;
+  }
+
+  function nearestSection(node) {
+    let cur = node && node.nodeType === 1 ? node : node && node.parentElement;
+    while (cur && cur !== document.body) {
+      let prev = cur.previousElementSibling;
+      while (prev) {
+        if (/^H[1-4]$/.test(prev.tagName)) return oneLine(prev.textContent);
+        prev = prev.previousElementSibling;
+      }
+      cur = cur.parentElement;
+    }
+    const h1 = document.querySelector("h1");
+    return h1 ? oneLine(h1.textContent) : "Top";
+  }
+
+  function formatLineSpan(note) {
+    const start = Number(note.lineStart);
+    const end = Number(note.lineEnd || note.lineStart);
+    const span = start === end ? String(start) : start + "–" + end;
+    return note.side === "old" ? "old:" + span : span;
+  }
+
+  function formatLineAnchor(note) {
+    return oneLine(note.path) + ":" + formatLineSpan(note);
+  }
+
+  function formatNoteAnchorLabel(note) {
+    if (note.kind === "line") return formatLineAnchor(note);
+    return "§ " + oneLine(note.section) + ' · "' + truncate(note.quote, 46) + '"';
+  }
+
+  function pulseElement(target) {
+    if (!target) return;
+    try {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+    } catch (_) {}
+    target.classList.add("lf-pulse-ring");
+    setTimeout(() => target.classList.remove("lf-pulse-ring"), 950);
+  }
+
+  function rowsForLineNote(note) {
+    const matched = [];
+    const attr = note.side === "old" ? "data-old-line" : "data-line";
+    const start = Number(note.lineStart);
+    const end = Number(note.lineEnd || note.lineStart);
+    for (const block of mainEl.querySelectorAll(".lf-codeblock[data-path]")) {
+      if (block.getAttribute("data-path") !== note.path) continue;
+      block.querySelectorAll("tr.lf-code-row[" + attr + "]").forEach((tr) => {
+        const ln = Number(tr.getAttribute(attr));
+        if (ln >= start && ln <= end) matched.push(tr);
+      });
+    }
+    return matched;
+  }
+
+  function noteAnchorElement(note) {
+    if (note.kind === "line") return rowsForLineNote(note)[0] || null;
+    return mainEl.querySelector('.lf-hl[data-lf-note-id="' + CSS.escape(note.id) + '"]');
+  }
+
+  function notesInDocumentOrder() {
+    if (state.notes.length <= 1) return state.notes.slice();
+    return state.notes
+      .map((note, idx) => ({ note, idx, el: noteAnchorElement(note) }))
+      .sort((a, b) => {
+        if (a.el && b.el && a.el !== b.el) {
+          const pos = a.el.compareDocumentPosition(b.el);
+          if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+          if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+        }
+        if (a.el !== b.el) return a.el ? -1 : 1;
+        return a.idx - b.idx;
+      })
+      .map((entry) => entry.note);
+  }
+
+  function deleteNote(id) {
+    state.notes = state.notes.filter((n) => n.id !== id);
+    if (sidebarEditingId === id) sidebarEditingId = null;
+    hideHoverCard();
+    refresh(true);
+  }
+
+  function editNote(id, text) {
+    state.notes = state.notes.map((note) => note.id === id ? { ...note, text } : note);
+    sidebarEditingId = null;
+    refresh(true);
+  }
+
+  function queueEntries() {
+    const entries = [];
+    for (const note of notesInDocumentOrder()) {
+      const text = oneLine(note.text);
+      const jump = () => pulseElement(noteAnchorElement(note));
+      const remove = () => deleteNote(note.id);
+      if (note.kind === "line") {
+        const anchor = formatLineAnchor(note);
+        entries.push({
+          tag: "lines",
+          summary: shortPath(note.path) + ":" + formatLineSpan(note) + " — " + text,
+          title: anchor + " — " + text,
+          ref: "`" + pagePath + "` § " + anchor + " — " + text,
+          jump,
+          remove,
+        });
+      } else {
+        const section = oneLine(note.section);
+        const quote = oneLine(note.quote);
+        entries.push({
+          tag: "note",
+          summary: '"' + truncate(quote, 26) + '" — ' + text,
+          title: section + ' › "' + quote + '" — ' + text,
+          ref: "`" + pagePath + "` § " + section + ' › "' + quote + '" ' + text,
+          jump,
+          remove,
+        });
+      }
+    }
+
+    function pushControl(tag, attr, key, label, val, remove) {
+      const summary = label + ": " + val;
+      entries.push({
+        tag,
+        summary,
+        title: summary,
+        ref: "`" + pagePath + "` § " + summary,
+        jump: () => pulseElement(document.querySelector("[" + attr + '="' + CSS.escape(key) + '"]')),
+        remove: () => {
+          remove();
+          refresh(true);
+        },
+      });
+    }
+
+    for (const [group, entry] of Object.entries(state.choices)) {
+      if (!entry || !entry.value) continue;
+      pushControl(
+        "choice",
+        "data-choice",
+        group,
+        oneLine(entry.label || group),
+        oneLine(entry.value),
+        () => delete state.choices[group]
+      );
+    }
+    for (const [group, entry] of Object.entries(state.multiselects)) {
+      if (!entry || !Array.isArray(entry.values) || entry.values.length === 0) continue;
+      pushControl(
+        "choice",
+        "data-multiselect",
+        group,
+        oneLine(entry.label || group),
+        entry.values.map(oneLine).join(", "),
+        () => delete state.multiselects[group]
+      );
+    }
+    for (const [qid, entry] of Object.entries(state.questions)) {
+      const ans = entry && oneLine(entry.answer);
+      if (!ans) continue;
+      pushControl(
+        "answer",
+        "data-question",
+        qid,
+        oneLine(entry.label || qid),
+        ans,
+        () => delete state.questions[qid]
+      );
+    }
+    for (const act of state.offlineActions) {
+      const summary = oneLine(act.summary);
+      entries.push({
+        tag: "run",
+        summary,
+        title: "Run: " + summary,
+        ref: "`" + pagePath + "` Run: " + summary,
+        jump: () => {
+          const found = actions.find((a) => a.key === act.key);
+          if (found) pulseElement(found.slot);
+        },
+        remove: () => {
+          state.offlineActions = state.offlineActions.filter((a) => a.id !== act.id);
+          refresh(true);
+        },
+      });
+    }
+    return entries;
+  }
+
+  function queueItems(entries) {
+    const items = (entries || queueEntries()).map((e) => e.ref);
+    const overall = oneLine(state.overall);
+    if (!desktopHandler && overall) {
+      items.push("`" + pagePath + "` Overall: " + overall);
+    }
+    return items;
+  }
+
+  function formatReplyMessage(items) {
+    if (!items.length) return "";
+    let message = items.map((ref, idx) => "(" + (idx + 1) + ") " + oneLine(ref)).join(" ");
+    const unreported = state.receipts.filter((r) => !r.reported);
+    if (unreported.length > 0) {
+      const ran = unreported
+        .map((r) => oneLine(r.kind + (r.summary ? " → " + r.summary : "")))
+        .join("; ");
+      message += " [already ran: " + ran + "]";
+    }
+    return oneLine(message);
+  }
+
+  function saveState() {
+    if (desktopHandler) {
+      try {
+        desktopHandler.postMessage({
+          type: "sync",
+          build_id: buildId,
+          state,
+          items: queueItems(),
+        });
+      } catch (_) {}
+      return;
+    }
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(state));
+    } catch (_) {}
+  }
+
+  function loadBrowserState() {
+    if (desktopHandler) return;
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") applyState(parsed);
+    } catch (_) {}
+  }
+
+  // `persist` marks an edit: the last send's sentence no longer describes the queue.
+  function refresh(persist) {
+    if (persist) setStatus("", "");
+    syncControlsFromState();
+    renderHighlights();
+    renderSidebar();
+    if (persist) saveState();
+    renderDock();
+  }
+
+  function applyState(loaded) {
+    if (!loaded || typeof loaded !== "object") {
+      state = emptyState();
+    } else {
+      state = {
+        notes: Array.isArray(loaded.notes) ? loaded.notes : [],
+        choices: loaded.choices && typeof loaded.choices === "object" ? loaded.choices : {},
+        multiselects:
+          loaded.multiselects && typeof loaded.multiselects === "object" ? loaded.multiselects : {},
+        questions: loaded.questions && typeof loaded.questions === "object" ? loaded.questions : {},
+        offlineActions: Array.isArray(loaded.offlineActions) ? loaded.offlineActions : [],
+        overall: typeof loaded.overall === "string" ? loaded.overall : "",
+        receipts: Array.isArray(loaded.receipts) ? loaded.receipts : [],
+      };
+    }
+    refresh(false);
+  }
+
+  // Desktop calls this with `null` after `ReviewComments.insert(into:)` sends the page's items;
+  // Swift has already updated its stored page state, so don't echo a redundant `sync` back.
+  window.__lfDesktopApplyState = function (loaded) {
+    if (loaded) applyState(loaded);
+    else clearDrafts({ markReported: true, persist: false });
+  };
+
+  // --- Loopback WebSocket carrier ---
+
+  function loopbackWsUrl() {
+    if (window.location.protocol !== "http:" || window.location.hostname !== "127.0.0.1") return null;
+    const parts = window.location.pathname.split("/").filter(Boolean);
+    if (parts.length < 3 || parts[1] !== "f" || !/^[A-Za-z0-9_-]{43}$/.test(parts[0])) return null;
+    return "ws://" + window.location.host + "/" + parts[0] + "/machine";
+  }
+
+  function markDisconnected(reason) {
+    hostMode = "clipboard";
+    serverDisconnected = true;
+    showBanner(reason || "Loopflow server disconnected — run lf page open " + pagePath);
+    renderDock();
+  }
+
+  function connectLoopback() {
+    if (desktopHandler) return;
+    const url = loopbackWsUrl();
+    if (!url) return;
+    if (!Number.isInteger(protocolRevision) || !Number.isInteger(protocolMinRevision)) {
+      markDisconnected("Review page is missing server protocol version — rebuild with lf page build");
+      return;
+    }
+    let ws;
+    try {
+      ws = new WebSocket(url);
+    } catch (_) {
+      markDisconnected("");
+      return;
+    }
+    let handshakeError = "";
+    let closingForUnload = false;
+    ws.addEventListener("open", () => {
+      ws.send(
+        JSON.stringify({
+          type: "hello",
+          revision: protocolRevision,
+          min_revision: protocolMinRevision,
+          client: { kind: "page", platform: "browser", name: "review-page", version: "1" },
+        })
+      );
+    });
+    ws.addEventListener("message", (event) => {
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch (_) {
+        return;
+      }
+      if (msg.type === "welcome") {
+        socket = ws;
+        hostMode = "loopback";
+        serverDisconnected = false;
+        hideBanner();
+        renderDock();
+        return;
+      }
+      if (msg.type === "error" && !msg.id) {
+        handshakeError = msg.message || msg.code || "Loopflow server rejected connection";
+        showBanner(handshakeError);
+        return;
+      }
+      if ((msg.type === "response" || msg.type === "error") && msg.id && pending.has(msg.id)) {
+        const entry = pending.get(msg.id);
+        pending.delete(msg.id);
+        if (msg.type === "response") entry.resolve(msg.result);
+        else entry.reject(new Error(msg.message || msg.code || "Server error"));
+      }
+    });
+    ws.addEventListener("close", () => {
+      if (socket === ws) socket = null;
+      for (const [, entry] of pending) entry.reject(new Error("Connection closed"));
+      pending.clear();
+      if (!closingForUnload) markDisconnected(handshakeError);
+    });
+    window.addEventListener("pagehide", () => {
+      closingForUnload = true;
+      try {
+        ws.close();
+      } catch (_) {}
+    });
+  }
+
+  function sendOperation(operation, requestId) {
+    if (desktopHandler) {
+      try {
+        return Promise.resolve(
+          desktopHandler.postMessage({
+            type: "operation",
+            operation,
+            request_id: requestId || null,
+          })
+        ).then((result) => {
+          if (result && result.error) throw new Error(result.error);
+          if (result && result.cancelled) return cancelledAction;
+          return result && result.result !== undefined ? result.result : result;
+        });
+      } catch (err) {
+        return Promise.reject(err);
+      }
+    }
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error("Loopflow server is not connected"));
+    }
+    return new Promise((resolve, reject) => {
+      const id = "req-" + nextReqId++;
+      pending.set(id, { resolve, reject });
+      try {
+        socket.send(JSON.stringify({
+          type: "request",
+          id,
+          operation,
+          select: null,
+          sender: null,
+          request_id: requestId || null,
+        }));
+      } catch (error) {
+        pending.delete(id);
+        reject(error);
+      }
+    });
+  }
+
+  // --- Banner ---
+
+  let bannerEl = null;
+  function showBanner(text) {
+    if (!bannerEl) {
+      bannerEl = el("div", "lf-banner");
+      mainEl.insertBefore(bannerEl, mainEl.firstChild);
+    }
+    bannerEl.textContent = text;
+    bannerEl.hidden = false;
+  }
+
+  function hideBanner() {
+    if (bannerEl) bannerEl.hidden = true;
+  }
+
+  // --- Controls & direct `data-lf` actions ---
+
+  // Each `data-lf` button and the element now standing in its place.
+  const actions = [];
+
+  function showInSlot(action, node) {
+    if (action.slot !== node) action.slot.replaceWith(node);
+    action.slot = node;
+  }
+
+  function wireControls() {
+    document.querySelectorAll("[data-notes-toggle]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const block = btn.closest(".lf-codeblock");
+        if (!block) return;
+        const hidden = block.classList.toggle("lf-notes-hidden");
+        btn.textContent = hidden ? "Show line notes" : "Hide line notes";
+      });
+    });
+
+    document.querySelectorAll("[data-choice]").forEach((groupEl) => {
+      const group = groupEl.getAttribute("data-choice");
+      const label = groupEl.getAttribute("data-label") || group;
+      groupEl.querySelectorAll("button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const value = buttonValue(btn);
+          if (state.choices[group] && state.choices[group].value === value) {
+            delete state.choices[group];
+          } else {
+            state.choices[group] = { label, value };
+          }
+          refresh(true);
+        });
+      });
+    });
+
+    document.querySelectorAll("[data-multiselect]").forEach((groupEl) => {
+      const group = groupEl.getAttribute("data-multiselect");
+      const label = groupEl.getAttribute("data-label") || group;
+      groupEl.querySelectorAll("button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const value = buttonValue(btn);
+          const current = (state.multiselects[group] && state.multiselects[group].values) || [];
+          const next = current.includes(value)
+            ? current.filter((v) => v !== value)
+            : current.concat([value]);
+          if (next.length === 0) delete state.multiselects[group];
+          else state.multiselects[group] = { label, values: next };
+          refresh(true);
+        });
+      });
+    });
+
+    document.querySelectorAll("[data-question]").forEach((box) => {
+      const qid = box.getAttribute("data-question");
+      const label = box.getAttribute("data-label") || qid;
+      let input = box.querySelector("textarea, input");
+      if (!input) {
+        input = el("textarea", { rows: 2 });
+        box.append(input);
+      }
+      input.addEventListener("input", () => {
+        const answer = input.value;
+        if (!oneLine(answer)) delete state.questions[qid];
+        else state.questions[qid] = { label, answer };
+        setStatus("", "");
+        saveState();
+        renderDock();
+      });
+    });
+
+    document.querySelectorAll("[data-lf]").forEach((btn, idx) => {
+      let template;
+      try {
+        template = JSON.parse(btn.getAttribute("data-lf") || "{}");
+      } catch (_) {
+        return;
+      }
+      const action = {
+        key: btn.getAttribute("data-lf-id") || "action-" + idx,
+        btn,
+        template,
+        slot: btn,
+      };
+      actions.push(action);
+      btn.addEventListener("click", (event) => {
+        if (event.isTrusted) openActionConfirm(action);
+      });
+    });
+  }
+
+  // Receipts and offline-queued actions outlive reloads; an action with neither shows its button.
+  function syncActionsFromState() {
+    for (const action of actions) {
+      const receipt = state.receipts.find((r) => r.key === action.key);
+      const offline = state.offlineActions.find((a) => a.key === action.key);
+      if (receipt) {
+        showInSlot(action, el("span", { cls: "lf-action-receipt", text: receipt.text || receipt.summary }));
+      } else if (offline) {
+        showInSlot(action, el("span", { cls: "lf-action-summary", text: "Offline — added to reply" }));
+      } else if (
+        action.slot.classList.contains("lf-action-receipt") ||
+        action.slot.classList.contains("lf-action-summary")
+      ) {
+        showInSlot(action, action.btn);
+      }
+    }
+  }
+
+  function syncControlsFromState() {
+    syncActionsFromState();
+    document.querySelectorAll("[data-choice]").forEach((groupEl) => {
+      const selected =
+        state.choices[groupEl.getAttribute("data-choice")] &&
+        state.choices[groupEl.getAttribute("data-choice")].value;
+      groupEl.querySelectorAll("button").forEach((btn) => setPressed(btn, selected === buttonValue(btn)));
+    });
+    document.querySelectorAll("[data-multiselect]").forEach((groupEl) => {
+      const entry = state.multiselects[groupEl.getAttribute("data-multiselect")];
+      const values = (entry && entry.values) || [];
+      groupEl.querySelectorAll("button").forEach((btn) => setPressed(btn, values.includes(buttonValue(btn))));
+    });
+    document.querySelectorAll("[data-question]").forEach((box) => {
+      let input = box.querySelector("textarea, input");
+      if (!input) {
+        input = el("textarea", { rows: 2 });
+        box.append(input);
+      }
+      const entry = state.questions[box.getAttribute("data-question")];
+      const saved = entry ? entry.answer : "";
+      if (input.value !== saved) input.value = saved;
+    });
+  }
+
+  function summarizeOperation(op) {
+    const parts = [op.kind || "operation"];
+    for (const [k, v] of Object.entries(op)) {
+      if (k === "kind" || k === "directory" || k === "request_id" || v === null || v === false || v === "") {
+        continue;
+      }
+      if (Array.isArray(v) && v.length === 0) continue;
+      parts.push(k + "=" + (typeof v === "string" ? v : JSON.stringify(v)));
+    }
+    return parts.join(" ");
+  }
+
+  function materializeOperation(template, requestId) {
+    const copy = JSON.parse(JSON.stringify(template));
+    if (copy.request_id === "__LF_REQUEST_ID__") copy.request_id = requestId;
+    return copy;
+  }
+
+  function formatReceipt(kind, result) {
+    if (result && typeof result === "object") {
+      const taskId = resultTaskId(result);
+      if (kind === "task.create" && taskId) return "Filed " + taskId;
+      if (result.delivery && result.delivery.sentence) return result.delivery.sentence;
+      if (taskId) return kind + " → " + taskId;
+      if (result.sentence) return result.sentence;
+    }
+    return "Ran " + kind;
+  }
+
+  function openActionConfirm(action) {
+    const template = action.template;
+    if (hostMode === "clipboard") {
+      state.offlineActions.push({ id: randomId(), key: action.key, summary: summarizeOperation(template) });
+      refresh(true);
+      return;
+    }
+
+    const requestId = randomId();
+    if (desktopHandler) execute();
+    else {
+      showInSlot(action, el(
+        "span",
+        "lf-action-confirm",
+        el("span", { cls: "lf-action-summary", text: summarizeOperation(template) }),
+        makeButton("Run", execute, "lf-btn-accent"),
+        makeButton("Cancel", () => showInSlot(action, action.btn))
+      ));
+    }
+
+    function execute(event) {
+      if (event && !event.isTrusted) return;
+      showInSlot(action, el("span", { cls: "lf-action-confirm", text: "Running…" }));
+      const op = materializeOperation(template, requestId);
+      sendOperation(op, requestId).then(
+        (result) => {
+          if (result === cancelledAction) {
+            showInSlot(action, action.btn);
+            return;
+          }
+          const text = formatReceipt(op.kind, result);
+          state.receipts.push({ key: action.key, kind: op.kind, summary: resultTaskId(result) || text, text });
+          refresh(true);
+        },
+        (err) => {
+          showInSlot(
+            action,
+            el("span", "lf-action-error", el("span", { text: errorMessage(err) }), makeButton("Retry", execute))
+          );
+        }
+      );
+    }
+  }
+
+  // --- Cross-element prose highlight anchoring ---
+
+  const EXCLUDED_TEXT_SELECTOR =
+    "button, textarea, input, script, style, .lf-gutter-plus, .lf-ln, .lf-sign, " +
+    ".lf-float-pill, .lf-float-composer, .lf-hover-card, .lf-sidebar, .lf-dock, " +
+    ".lf-comments-toggle, .lf-banner, .lf-action-confirm, .lf-action-receipt, .lf-action-error";
+
+  const BLOCK_TAGS = new Set([
+    "P", "DIV", "LI", "TR", "TD", "TH", "H1", "H2", "H3", "H4", "H5", "H6",
+    "PRE", "BLOCKQUOTE", "SECTION", "ARTICLE", "ASIDE", "HEADER", "FOOTER", "DT", "DD",
+  ]);
+
+  function nearestBlock(node) {
+    let cur = node && node.nodeType === 1 ? node : node && node.parentElement;
+    while (cur && cur !== mainEl) {
+      if (BLOCK_TAGS.has(cur.tagName)) return cur;
+      cur = cur.parentElement;
+    }
+    return mainEl;
+  }
+
+  function isExcludedTextNode(node) {
+    const parent = node.parentElement;
+    return (
+      !parent ||
+      Boolean(parent.closest(EXCLUDED_TEXT_SELECTOR)) ||
+      Boolean(parent.closest("[hidden]")) ||
+      Boolean(parent.closest(".lf-notes-hidden .lf-line-note"))
+    );
+  }
+
+  function buildNormalizedIndex(root) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let flat = "";
+    const positions = [];
+    let lastWasSpace = true;
+    let lastBlock = null;
+    let node;
+    while ((node = walker.nextNode())) {
+      if (!node.nodeValue || isExcludedTextNode(node)) continue;
+      const block = nearestBlock(node);
+      if (lastBlock && block !== lastBlock && !lastWasSpace) {
+        flat += " ";
+        positions.push(null);
+        lastWasSpace = true;
+      }
+      lastBlock = block;
+      const val = node.nodeValue;
+      for (let i = 0; i < val.length; i++) {
+        const ch = val[i];
+        if (/\s/.test(ch)) {
+          if (!lastWasSpace) {
+            flat += " ";
+            positions.push({ node, offset: i });
+            lastWasSpace = true;
+          }
+        } else {
+          flat += ch;
+          positions.push({ node, offset: i });
+          lastWasSpace = false;
+        }
+      }
+    }
+    if (flat.endsWith(" ")) {
+      flat = flat.slice(0, -1);
+      positions.pop();
+    }
+    return { flat, positions };
+  }
+
+  function findOccurrenceForRange(range, needle) {
+    if (!needle) return 0;
+    const index = buildNormalizedIndex(mainEl);
+    let rangeFlatPos = -1;
+    for (let i = 0; i < index.positions.length; i++) {
+      const p = index.positions[i];
+      if (!p) continue;
+      try {
+        if (range.comparePoint(p.node, p.offset) === 0) {
+          rangeFlatPos = i;
+          break;
+        }
+      } catch (_) {}
+    }
+    if (rangeFlatPos < 0) return 0;
+    let count = 0;
+    let from = 0;
+    while (from < rangeFlatPos) {
+      const hit = index.flat.indexOf(needle, from);
+      if (hit < 0 || hit >= rangeFlatPos) break;
+      count++;
+      from = hit + 1;
+    }
+    return count;
+  }
+
+  function findNormalizedRange(needle, occurrence) {
+    if (!needle) return null;
+    const index = buildNormalizedIndex(mainEl);
+    let hit = -1;
+    let from = 0;
+    const targetOcc = Math.max(0, Number(occurrence) || 0);
+    for (let occ = 0; occ <= targetOcc; occ++) {
+      const next = index.flat.indexOf(needle, from);
+      if (next < 0) break;
+      hit = next;
+      from = next + 1;
+    }
+    if (hit < 0) return null;
+    let s = hit;
+    let e = hit + needle.length - 1;
+    while (s <= e && !index.positions[s]) s++;
+    while (e >= s && !index.positions[e]) e--;
+    if (s > e || !index.positions[s] || !index.positions[e]) return null;
+    try {
+      const range = document.createRange();
+      range.setStart(index.positions[s].node, index.positions[s].offset);
+      range.setEnd(index.positions[e].node, index.positions[e].offset + 1);
+      return range;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function wrapRange(range, noteId) {
+    const walker = document.createTreeWalker(mainEl, NodeFilter.SHOW_TEXT);
+    const hits = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      if (!node.nodeValue || isExcludedTextNode(node)) continue;
+      try {
+        if (!range.intersectsNode(node)) continue;
+      } catch (_) {
+        continue;
+      }
+      const start = node === range.startContainer ? range.startOffset : 0;
+      const end = node === range.endContainer ? range.endOffset : node.nodeValue.length;
+      if (end > start && node.nodeValue.slice(start, end).trim()) {
+        hits.push({ node, start, end });
+      }
+    }
+    for (let i = hits.length - 1; i >= 0; i--) {
+      const { node: tn, start, end } = hits[i];
+      const text = tn.nodeValue;
+      const frag = document.createDocumentFragment();
+      if (start > 0) frag.append(text.slice(0, start));
+      frag.append(el("span", { cls: "lf-hl", text: text.slice(start, end), attrs: { "data-lf-note-id": noteId } }));
+      if (end < text.length) frag.append(text.slice(end));
+      if (tn.parentNode) tn.parentNode.replaceChild(frag, tn);
+    }
+  }
+
+  function unwrapAllHighlights() {
+    const spans = Array.from(mainEl.querySelectorAll("span.lf-hl[data-lf-note-id]"));
+    const parents = new Set();
+    for (let i = spans.length - 1; i >= 0; i--) {
+      const span = spans[i];
+      const parent = span.parentNode;
+      if (!parent) continue;
+      parents.add(parent);
+      while (span.firstChild) parent.insertBefore(span.firstChild, span);
+      parent.removeChild(span);
+    }
+    for (const parent of parents) {
+      if (parent.isConnected) parent.normalize();
+    }
+  }
+
+  let lastHighlightSig = "";
+
+  function renderHighlights() {
+    const sig = JSON.stringify(
+      state.notes.map((n) =>
+        n.kind === "line"
+          ? [n.id, "line", n.path, n.side, n.lineStart, n.lineEnd]
+          : [n.id, "prose", n.match || n.quote, n.occurrence || 0]
+      )
+    );
+    if (sig === lastHighlightSig) return;
+    lastHighlightSig = sig;
+
+    unwrapAllHighlights();
+    mainEl.querySelectorAll("tr.lf-code-row.lf-row-has-note").forEach((tr) => {
+      tr.classList.remove("lf-row-has-note");
+      tr.removeAttribute("data-lf-line-note-ids");
+    });
+
+    for (const note of state.notes) {
+      if (note.kind === "line") {
+        for (const tr of rowsForLineNote(note)) {
+          tr.classList.add("lf-row-has-note");
+          const existing = tr.getAttribute("data-lf-line-note-ids");
+          const list = existing ? existing.split(",") : [];
+          if (!list.includes(note.id)) list.push(note.id);
+          tr.setAttribute("data-lf-line-note-ids", list.join(","));
+        }
+      } else {
+        const range = findNormalizedRange(oneLine(note.match || note.quote), note.occurrence || 0);
+        if (range) wrapRange(range, note.id);
+      }
+    }
+  }
+
+  // --- Floating selection pill, composer, and hover cards (1c) ---
+
+  let floatPill = null;
+  let floatComposer = null;
+  let pendingSelection = null; // { range, rect, section, quote, match }
+  let hoverCardEl = null;
+  let hoverHideTimer = null;
+
+  function dismissFloatPill() {
+    if (floatPill) {
+      floatPill.remove();
+      floatPill = null;
+    }
+  }
+
+  function clearPendingSelection() {
+    pendingSelection = null;
+    dismissFloatPill();
+  }
+
+  function dismissFloatComposer() {
+    if (floatComposer) {
+      floatComposer.remove();
+      floatComposer = null;
+    }
+    mainEl.querySelectorAll("tr.lf-code-row.lf-row-selecting").forEach((tr) => {
+      tr.classList.remove("lf-row-selecting");
+    });
+  }
+
+  function dismissFloats() {
+    dismissFloatPill();
+    dismissFloatComposer();
+  }
+
+  function hideHoverCard() {
+    clearTimeout(hoverHideTimer);
+    if (hoverCardEl) {
+      hoverCardEl.remove();
+      hoverCardEl = null;
+    }
+  }
+
+  function clampFixedBox(box, rect, preferAbove) {
+    const w = box.offsetWidth;
+    const h = box.offsetHeight;
+    const dockAllowance = desktopHandler ? 12 : 96;
+    let top;
+    if (preferAbove) {
+      top = rect.top - h - 8;
+      if (top < 8) top = Math.min(window.innerHeight - h - dockAllowance, rect.bottom + 8);
+    } else {
+      top = rect.bottom + 8;
+      if (top + h > window.innerHeight - dockAllowance) {
+        top = Math.max(8, rect.top - h - 8);
+      }
+    }
+    top = Math.max(8, Math.min(window.innerHeight - h - 8, top));
+    const centered = preferAbove ? rect.left + rect.width / 2 - w / 2 : rect.left;
+    const left = Math.max(8, Math.min(window.innerWidth - w - 8, centered));
+    box.style.top = top + "px";
+    box.style.left = left + "px";
+  }
+
+  function buildNoteEditor({ initialText, placeholder, rows, onSave, onCancel, stopProp }) {
+    const ta = el("textarea", { rows: rows || 2, placeholder, value: initialText || "" });
+    const commit = () => {
+      const val = oneLine(ta.value);
+      if (val) onSave(val);
+    };
+    ta.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+        commit();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onCancel();
+      }
+    });
+    const wrap = (fn) => (e) => {
+      if (stopProp) e.stopPropagation();
+      fn();
+    };
+    const actionsEl = el(
+      "div",
+      "lf-card-actions",
+      makeButton("Cancel", wrap(onCancel), "lf-btn-quiet"),
+      makeButton("Save ⌘↩", wrap(commit), "lf-btn-accent")
+    );
+    return { ta, actionsEl };
+  }
+
+  function showFloatPill(rect, buttons) {
+    dismissFloatPill();
+    floatPill = el("div", "lf-float-pill");
+    buttons.forEach((b, idx) => {
+      if (idx > 0) floatPill.append(el("span", "lf-float-pill-sep"));
+      floatPill.append(
+        el("button", {
+          type: "button",
+          text: b.label,
+          on: {
+            mousedown: (e) => e.preventDefault(),
+            click: () => {
+              dismissFloatPill();
+              b.onClick();
+            },
+          },
+        })
+      );
+    });
+    document.body.append(floatPill);
+    clampFixedBox(floatPill, rect, true);
+  }
+
+  function saveProseNote(selInfo, text) {
+    const needle = selInfo.match;
+    state.notes.push({
+      id: randomId(),
+      kind: "prose",
+      section: selInfo.section,
+      quote: selInfo.quote.slice(0, 140),
+      match: needle,
+      occurrence: findOccurrenceForRange(selInfo.range, needle),
+      text: oneLine(text),
+    });
+    pendingSelection = null;
+    clearSelection();
+    refresh(true);
+  }
+
+  function openProseComposer(selInfo) {
+    openFloatingComposer(selInfo.rect, {
+      anchorLabel: formatNoteAnchorLabel({ kind: "prose", section: selInfo.section, quote: selInfo.quote }),
+      onSave: (val) => saveProseNote(selInfo, val),
+    });
+  }
+
+  function openFloatingComposer(rect, opts) {
+    dismissFloats();
+    hideHoverCard();
+
+    if (opts.selectedRows) {
+      for (const tr of opts.selectedRows) tr.classList.add("lf-row-selecting");
+    }
+
+    const { ta, actionsEl } = buildNoteEditor({
+      initialText: opts.initialText,
+      placeholder: opts.placeholder || "Add comment… (⌘↩ to save)",
+      onSave: (val) => {
+        dismissFloatComposer();
+        opts.onSave(val);
+      },
+      onCancel: dismissFloatComposer,
+    });
+
+    floatComposer = el(
+      "div",
+      "lf-float-composer",
+      el("div", { cls: "lf-anchor-quote", text: opts.anchorLabel }),
+      ta,
+      actionsEl
+    );
+    document.body.append(floatComposer);
+    clampFixedBox(floatComposer, rect, false);
+    focusEnd(ta);
+  }
+
+  function showHoverCard(targetEl, note) {
+    if (floatComposer) return;
+    hideHoverCard();
+
+    const editBtn = makeButton("Edit", () => {
+      const r = targetEl.getBoundingClientRect();
+      hideHoverCard();
+      openFloatingComposer(r, {
+        anchorLabel: formatNoteAnchorLabel(note),
+        initialText: note.text,
+        onSave: (val) => editNote(note.id, val),
+      });
+    }, "lf-btn-quiet");
+
+    hoverCardEl = el(
+      "div",
+      {
+        cls: "lf-hover-card",
+        on: {
+          mouseenter: () => clearTimeout(hoverHideTimer),
+          mouseleave: () => {
+            hoverHideTimer = setTimeout(hideHoverCard, 200);
+          },
+        },
+      },
+      el("div", { cls: "lf-anchor-quote", text: formatNoteAnchorLabel(note) }),
+      el("div", { cls: "lf-card-body", text: note.text }),
+      el("div", "lf-card-actions", editBtn, makeButton("Delete", () => deleteNote(note.id), "lf-btn-quiet"))
+    );
+    document.body.append(hoverCardEl);
+    clampFixedBox(hoverCardEl, targetEl.getBoundingClientRect(), false);
+  }
+
+  function wireSelectionNotes() {
+    document.addEventListener("mouseup", (event) => {
+      if (
+        event.target.closest(
+          ".lf-float-pill, .lf-float-composer, .lf-hover-card, .lf-sidebar, .lf-dock, .lf-comments-toggle, button, textarea, input, .lf-action-confirm, td.lf-ln"
+        )
+      ) {
+        return;
+      }
+
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) return clearPendingSelection();
+      const quote = oneLine(sel.toString());
+      if (!quote) return clearPendingSelection();
+
+      const range = sel.getRangeAt(0).cloneRange();
+      const containerEl =
+        range.commonAncestorContainer.nodeType === 1
+          ? range.commonAncestorContainer
+          : range.commonAncestorContainer.parentElement;
+      if (!containerEl || !mainEl.contains(containerEl)) return clearPendingSelection();
+
+      const selInfo = {
+        range,
+        rect: range.getBoundingClientRect(),
+        section: nearestSection(containerEl),
+        quote: quote.slice(0, 140),
+        match: quote.slice(0, 240),
+      };
+      pendingSelection = selInfo;
+
+      showFloatPill(selInfo.rect, [
+        { label: "Comment (c)", onClick: () => openProseComposer(selInfo) },
+        { label: "Flag", onClick: () => saveProseNote(selInfo, "Flagged for follow-up") },
+        {
+          label: "Copy",
+          onClick: () => {
+            copyText(quote).catch(() => {});
+            pendingSelection = null;
+            clearSelection();
+          },
+        },
+      ]);
+    });
+
+    document.addEventListener("mousedown", (event) => {
+      if (
+        floatComposer &&
+        !floatComposer.contains(event.target) &&
+        !event.target.closest(".lf-float-pill, .lf-gutter-plus, td.lf-ln")
+      ) {
+        dismissFloatComposer();
+      }
+    });
+
+    mainEl.addEventListener("mouseover", (event) => {
+      const hl = event.target.closest(".lf-hl[data-lf-note-id]");
+      if (hl) {
+        const note = state.notes.find((n) => n.id === hl.getAttribute("data-lf-note-id"));
+        if (note) showHoverCard(hl, note);
+        return;
+      }
+      const lnCell = event.target.closest("tr.lf-code-row.lf-row-has-note td.lf-ln");
+      if (lnCell) {
+        const tr = lnCell.closest("tr.lf-code-row");
+        const firstId = (tr.getAttribute("data-lf-line-note-ids") || "").split(",")[0];
+        const note = firstId ? state.notes.find((n) => n.id === firstId) : null;
+        if (note) showHoverCard(lnCell, note);
+      }
+    });
+
+    mainEl.addEventListener("mouseout", (event) => {
+      if (event.target.closest(".lf-hl[data-lf-note-id], tr.lf-code-row.lf-row-has-note td.lf-ln")) {
+        hoverHideTimer = setTimeout(hideHoverCard, 220);
+      }
+    });
+
+    mainEl.addEventListener("click", (event) => {
+      const hl = event.target.closest(".lf-hl[data-lf-note-id]");
+      if (!hl) return;
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) return;
+      openSidebar(hl.getAttribute("data-lf-note-id"));
+    });
+  }
+
+  // --- Diff & file gutter `+` and Shift+click line ranges (2a) ---
+
+  let lastGutterAnchor = null; // { block, newLine, oldLine }
+
+  function rowLineInfo(tr) {
+    const n = tr.getAttribute("data-line");
+    const o = tr.getAttribute("data-old-line");
+    const newLine = n !== null && n !== "" ? Number(n) : null;
+    const oldLine = o !== null && o !== "" ? Number(o) : null;
+    return newLine !== null || oldLine !== null ? { newLine, oldLine } : null;
+  }
+
+  function wireCodeBlocks() {
+    mainEl.querySelectorAll(".lf-codeblock[data-path]").forEach((block) => {
+      const path = block.getAttribute("data-path") || "";
+      if (!path) return;
+
+      block.querySelectorAll("tr.lf-code-row").forEach((tr) => {
+        const info = rowLineInfo(tr);
+        if (!info) return;
+        const firstLn = tr.querySelector("td.lf-ln");
+        if (!firstLn || firstLn.querySelector(".lf-gutter-plus")) return;
+        const label = info.newLine !== null ? "line " + info.newLine : "old line " + info.oldLine;
+        firstLn.insertBefore(
+          el("button", {
+            type: "button",
+            cls: "lf-gutter-plus",
+            text: "+",
+            title: "Comment on " + label + " (Shift+click for range)",
+            attrs: { "aria-label": "Comment on " + path + " " + label },
+          }),
+          firstLn.firstChild
+        );
+      });
+
+      block.addEventListener("mousedown", (event) => {
+        if (event.shiftKey && event.target.closest("td.lf-ln")) event.preventDefault();
+      });
+
+      block.addEventListener("click", (event) => {
+        const trigger = event.target.closest(".lf-gutter-plus, td.lf-ln");
+        if (!trigger) return;
+        const tr = trigger.closest("tr.lf-code-row");
+        const info = tr && rowLineInfo(tr);
+        if (!info) return;
+        event.preventDefault();
+        dismissFloatPill();
+        hideHoverCard();
+
+        let rangeSide = info.newLine !== null ? "new" : "old";
+        let lineStart = info.newLine !== null ? info.newLine : info.oldLine;
+        let lineEnd = lineStart;
+
+        if (event.shiftKey && lastGutterAnchor && lastGutterAnchor.block === block) {
+          if (lastGutterAnchor.newLine !== null && info.newLine !== null) {
+            rangeSide = "new";
+            lineStart = Math.min(lastGutterAnchor.newLine, info.newLine);
+            lineEnd = Math.max(lastGutterAnchor.newLine, info.newLine);
+          } else if (lastGutterAnchor.oldLine !== null && info.oldLine !== null) {
+            rangeSide = "old";
+            lineStart = Math.min(lastGutterAnchor.oldLine, info.oldLine);
+            lineEnd = Math.max(lastGutterAnchor.oldLine, info.oldLine);
+          }
+        }
+        lastGutterAnchor = { block, newLine: info.newLine, oldLine: info.oldLine };
+
+        const previewNote = { kind: "line", path, side: rangeSide, lineStart, lineEnd };
+        const selectedRows = rowsForLineNote(previewNote);
+        // Span the whole range so a composer that flips above it never covers it.
+        const firstRect = (selectedRows[0] || tr).getBoundingClientRect();
+        const anchorRow = selectedRows[selectedRows.length - 1] || tr;
+        const rowRect = anchorRow.getBoundingClientRect();
+        const codeCell = anchorRow.lastElementChild;
+        const codeLeft = codeCell ? codeCell.getBoundingClientRect().left : rowRect.left + 110;
+        const composerRect = {
+          top: firstRect.top,
+          bottom: rowRect.bottom,
+          left: codeLeft + 12,
+          right: rowRect.right,
+          width: Math.max(0, rowRect.right - codeLeft - 12),
+        };
+
+        openFloatingComposer(composerRect, {
+          anchorLabel: formatLineAnchor(previewNote),
+          placeholder:
+            lineStart === lineEnd
+              ? "Add comment… (Shift+click another line for range, ⌘↩ to save)"
+              : "Add comment… (⌘↩ to save)",
+          selectedRows: selectedRows.length ? selectedRows : [tr],
+          onSave: (val) => {
+            state.notes.push({
+              id: randomId(),
+              kind: "line",
+              path,
+              side: rangeSide,
+              lineStart,
+              lineEnd,
+              text: val,
+            });
+            refresh(true);
+          },
+        });
+      });
+    });
+  }
+
+  // --- Collapsible slide-over Comments sidebar (1c) ---
+
+  let commentsToggleBtn = null;
+  let commentsCountEl = null;
+  let sidebarEl = null;
+  let sidebarTitleEl = null;
+  let sidebarListEl = null;
+  let sidebarOpen = false;
+  let sidebarEditingId = null;
+
+  function closeSidebar() {
+    sidebarOpen = false;
+    sidebarEditingId = null;
+    renderSidebar();
+  }
+
+  function ensureSidebar() {
+    if (sidebarEl) return;
+
+    commentsCountEl = el("span", { cls: "lf-comments-count", hidden: true });
+    commentsToggleBtn = el(
+      "button",
+      {
+        type: "button",
+        cls: "lf-comments-toggle",
+        on: {
+          click: () => {
+            sidebarOpen = !sidebarOpen;
+            renderSidebar();
+          },
+        },
+      },
+      el("span", { text: "Comments" }),
+      commentsCountEl
+    );
+
+    sidebarTitleEl = el("span");
+    sidebarListEl = el("div", "lf-sidebar-list");
+    sidebarEl = el(
+      "aside",
+      { cls: "lf-sidebar", attrs: { "aria-label": "Comments sidebar" } },
+      el("div", "lf-sidebar-head", sidebarTitleEl, makeButton("Close", closeSidebar, "lf-btn-quiet")),
+      sidebarListEl
+    );
+    document.body.append(commentsToggleBtn, sidebarEl);
+  }
+
+  function openSidebar(focusNoteId) {
+    ensureSidebar();
+    sidebarOpen = true;
+    renderSidebar();
+    if (focusNoteId && sidebarListEl) {
+      const card = sidebarListEl.querySelector('[data-lf-sidebar-note="' + CSS.escape(focusNoteId) + '"]');
+      if (card) pulseElement(card);
+    }
+  }
+
+  function renderSidebar() {
+    ensureSidebar();
+    const ordered = notesInDocumentOrder();
+    const count = ordered.length;
+
+    commentsCountEl.textContent = String(count);
+    commentsCountEl.hidden = count === 0;
+    commentsToggleBtn.classList.toggle("has-notes", count > 0);
+    commentsToggleBtn.setAttribute("aria-expanded", sidebarOpen ? "true" : "false");
+
+    sidebarEl.classList.toggle("is-open", sidebarOpen);
+    sidebarTitleEl.textContent = count > 0 ? "Comments (" + count + ")" : "Comments";
+
+    sidebarListEl.innerHTML = "";
+    if (!count) {
+      sidebarListEl.append(
+        el("div", {
+          cls: "lf-sidebar-empty",
+          text: "No comments yet. Drag across text or click + on a code line to leave one.",
+        })
+      );
+      return;
+    }
+
+    for (const note of ordered) {
+      const item = el(
+        "div",
+        {
+          cls: "lf-sidebar-item",
+          attrs: { "data-lf-sidebar-note": note.id },
+          on: {
+            click: (e) => {
+              if (!e.target.closest("button, textarea")) pulseElement(noteAnchorElement(note));
+            },
+          },
+        },
+        el("div", { cls: "lf-anchor-quote", text: formatNoteAnchorLabel(note) })
+      );
+
+      if (sidebarEditingId === note.id) {
+        const { ta, actionsEl } = buildNoteEditor({
+          initialText: note.text,
+          placeholder: "Edit comment… (⌘↩ to save)",
+          stopProp: true,
+          onSave: (val) => editNote(note.id, val),
+          onCancel: () => {
+            sidebarEditingId = null;
+            renderSidebar();
+          },
+        });
+        item.append(ta, actionsEl);
+        setTimeout(() => focusEnd(ta), 0);
+      } else {
+        item.append(
+          el("div", { cls: "lf-card-body", text: note.text }),
+          el(
+            "div",
+            "lf-card-actions",
+            makeButton(
+              "Edit",
+              (e) => {
+                e.stopPropagation();
+                sidebarEditingId = note.id;
+                renderSidebar();
+              },
+              "lf-btn-quiet"
+            ),
+            makeButton(
+              "Delete",
+              (e) => {
+                e.stopPropagation();
+                deleteNote(note.id);
+              },
+              "lf-btn-quiet"
+            )
+          )
+        );
+      }
+      sidebarListEl.append(item);
+    }
+  }
+
+  // --- Browser T3 Code attached-chip composer dock (3b; hidden in Desktop) ---
+
+  let dockEl = null;
+  let dockChipsEl = null;
+  let dockPreviewEl = null;
+  let dockStatusEl = null;
+  let dockOverallInput = null;
+  let dockPreviewBtn = null;
+  let dockClearBtn = null;
+  let dockSendBtn = null;
+  let dockPreviewOpen = false;
+  let statusText = "";
+  let statusKind = "";
+
+  function setStatus(text, kind) {
+    statusText = text;
+    statusKind = kind || "";
+  }
+
+  function steerTargetLabel() {
+    if (work.kind === "task" && work.issue) return work.issue;
+    if (work.kind === "wave" && work.wave) return "wave " + work.wave;
+    if (work.kind === "session" && work.session) return "session";
+    return "repository";
+  }
+
+  function buildSteerOperation(message) {
+    if (work.kind === "task" && work.issue) {
+      return { kind: "task.steer", directory, issue: work.issue, message };
+    }
+    return {
+      kind: "session.steer",
+      directory,
+      session: work.kind === "session" ? work.session || null : null,
+      wave: work.kind === "wave" ? work.wave || null : null,
+      message,
+    };
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise((resolve, reject) => {
+      const ta = el("textarea", { value: text });
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.append(ta);
+      ta.select();
+      try {
+        if (document.execCommand("copy")) resolve();
+        else reject(new Error("Clipboard is unavailable"));
+      } catch (err) {
+        reject(err);
+      } finally {
+        ta.remove();
+      }
+    });
+  }
+
+  // Drop unsent drafts while keeping rendered receipts; mark receipts reported only after a reply is sent.
+  function clearDrafts(options) {
+    const markReported = Boolean(options && options.markReported);
+    const persist = !options || options.persist !== false;
+    const receipts = markReported
+      ? state.receipts.map((r) => Object.assign({}, r, { reported: true }))
+      : state.receipts.slice();
+    state = emptyState();
+    state.receipts = receipts;
+    sidebarEditingId = null;
+    hideHoverCard();
+    refresh(persist);
+  }
+
+  function submitReply() {
+    if (desktopHandler || sendingReply) return;
+    const items = queueItems();
+    if (!items.length) return;
+    const message = formatReplyMessage(items);
+
+    if (hostMode === "loopback") {
+      // Retain edits made after the send, including receipts from actions
+      // that finish while the steer is in flight.
+      const sent = {
+        notes: new Set(state.notes),
+        choices: { ...state.choices },
+        multiselects: { ...state.multiselects },
+        questions: { ...state.questions },
+        offlineActions: new Set(state.offlineActions),
+        overall: state.overall,
+        receipts: new Set(state.receipts),
+      };
+      sendingReply = true;
+      setStatus("Sending…", "");
+      renderDock();
+      sendOperation(buildSteerOperation(message), randomId()).then(
+        (result) => {
+          sendingReply = false;
+          state.notes = state.notes.filter((note) => !sent.notes.has(note));
+          state.offlineActions = state.offlineActions.filter((action) => !sent.offlineActions.has(action));
+          for (const group of ["choices", "multiselects", "questions"]) {
+            for (const [key, value] of Object.entries(sent[group])) {
+              if (state[group][key] === value) delete state[group][key];
+            }
+          }
+          if (state.overall === sent.overall) state.overall = "";
+          for (const receipt of state.receipts) {
+            if (sent.receipts.has(receipt)) receipt.reported = true;
+          }
+          setStatus(result?.delivery?.sentence || "Steer saved.", "ok");
+          saveState();
+          refresh(false);
+        },
+        (err) => {
+          sendingReply = false;
+          setStatus(errorMessage(err), "error");
+          renderDock();
+        }
+      );
+      return;
+    }
+
+    copyText(message).then(
+      () => {
+        setStatus(serverDisconnected ? "Copied reply (server disconnected)" : "Copied reply", "ok");
+        renderDock();
+      },
+      (err) => {
+        setStatus("Copy failed: " + errorMessage(err), "error");
+        renderDock();
+      }
+    );
+  }
+
+  function ensureDock() {
+    if (desktopHandler || dockEl) return;
+
+    dockChipsEl = el("div", "lf-dock-chips");
+    dockPreviewEl = el("div", { cls: "lf-dock-preview", hidden: true });
+    dockStatusEl = el("div", { cls: "lf-dock-status", hidden: true });
+
+    dockOverallInput = el("input", {
+      type: "text",
+      cls: "lf-dock-input",
+      placeholder: "Overall direction (optional)…",
+      attrs: { "aria-label": "Overall direction" },
+      on: {
+        input: () => {
+          state.overall = dockOverallInput.value;
+          setStatus("", "");
+          saveState();
+          updateDockMeta();
+        },
+      },
+    });
+
+    dockPreviewBtn = makeButton("Preview", () => {
+      dockPreviewOpen = !dockPreviewOpen;
+      updateDockMeta();
+    }, "lf-btn-quiet");
+    dockClearBtn = makeButton("Clear", () => clearDrafts({ markReported: false }), "lf-btn-quiet");
+    dockSendBtn = makeButton("", submitReply, "lf-btn-accent");
+
+    dockEl = el(
+      "div",
+      "lf-dock",
+      dockChipsEl,
+      dockPreviewEl,
+      dockStatusEl,
+      el("div", "lf-dock-row", dockOverallInput, el("div", "lf-dock-actions", dockPreviewBtn, dockClearBtn, dockSendBtn))
+    );
+    document.body.append(dockEl);
+    // Reserve the dock's height below the page so the last control stays reachable.
+    new ResizeObserver(() => {
+      document.documentElement.style.setProperty("--lf-dock-room", dockEl.offsetHeight + 40 + "px");
+    }).observe(dockEl);
+  }
+
+  function updateDockMeta(entries) {
+    if (desktopHandler || !dockEl) return;
+    const items = queueItems(entries);
+    const hasItems = items.length > 0;
+
+    if (dockOverallInput.value !== state.overall) dockOverallInput.value = state.overall;
+
+    dockPreviewBtn.hidden = !hasItems;
+    setPressed(dockPreviewBtn, dockPreviewOpen && hasItems);
+    dockClearBtn.hidden = !hasItems;
+
+    dockSendBtn.disabled = !hasItems || sendingReply;
+    dockSendBtn.textContent =
+      hostMode === "loopback" ? "Steer " + steerTargetLabel() + " ⌘↩" : "Copy reply ⌘↩";
+
+    dockPreviewEl.hidden = !(dockPreviewOpen && hasItems);
+    if (dockPreviewOpen && hasItems) dockPreviewEl.textContent = formatReplyMessage(items);
+
+    dockStatusEl.hidden = !statusText;
+    if (statusText) {
+      dockStatusEl.textContent = statusText;
+      dockStatusEl.className =
+        "lf-dock-status" + (statusKind === "error" ? " is-error" : statusKind === "ok" ? " is-ok" : "");
+    }
+  }
+
+  function renderDock() {
+    if (desktopHandler) return;
+    ensureDock();
+
+    const entries = queueEntries();
+    dockChipsEl.innerHTML = "";
+    dockChipsEl.hidden = entries.length === 0;
+    for (const entry of entries) {
+      dockChipsEl.append(
+        el(
+          "span",
+          { cls: "lf-chip", title: entry.title, on: { click: () => entry.jump() } },
+          el("span", { cls: "lf-chip-tag tag-" + entry.tag, text: entry.tag[0].toUpperCase() + entry.tag.slice(1) }),
+          el("span", { cls: "lf-chip-text", text: entry.summary }),
+          el("button", {
+            type: "button",
+            cls: "lf-chip-x",
+            text: "×",
+            title: "Remove",
+            attrs: { "aria-label": "Remove " + entry.tag },
+            on: {
+              click: (e) => {
+                e.stopPropagation();
+                entry.remove();
+              },
+            },
+          })
+        )
+      );
+    }
+
+    updateDockMeta(entries);
+  }
+
+  // --- Global keyboard shortcuts ---
+
+  document.addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      if (floatComposer && floatComposer.contains(document.activeElement)) return;
+      if (sidebarEl && sidebarEl.contains(document.activeElement) && document.activeElement.tagName === "TEXTAREA") {
+        return;
+      }
+      if (!desktopHandler && queueItems().length > 0) {
+        event.preventDefault();
+        submitReply();
+      }
+      return;
+    }
+
+    if (event.key === "Escape") {
+      if (floatComposer || floatPill || hoverCardEl) {
+        dismissFloats();
+        hideHoverCard();
+      } else if (sidebarOpen) {
+        closeSidebar();
+      }
+      return;
+    }
+
+    if (
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      event.key.toLowerCase() === "c" &&
+      pendingSelection &&
+      !(document.activeElement && document.activeElement.closest("input, textarea"))
+    ) {
+      event.preventDefault();
+      const selInfo = pendingSelection;
+      dismissFloatPill();
+      openProseComposer(selInfo);
+    }
+  });
+
+  wireControls();
+  wireCodeBlocks();
+  wireSelectionNotes();
+  renderSidebar();
+
+  if (desktopHandler) {
+    try {
+      const reply = desktopHandler.postMessage({
+        type: "ready",
+        build_id: buildId,
+      });
+      if (reply && typeof reply.then === "function") {
+        reply.then((loaded) => applyState(loaded), () => {});
+      }
+    } catch (_) {}
+  } else {
+    renderDock();
+    loadBrowserState();
+    connectLoopback();
+  }
+})();
+
+</script>
+</body>
+</html>

@@ -6,15 +6,13 @@ use crate::graph::runner::SkillOutcome;
 use crate::graph::transitions::{GraphDecision, GraphVerdict};
 use crate::graph::ConcreteStep;
 
-/// What every loop decision means, so a skill placed on a loop edge needs no
-/// loop instructions of its own.
 const DECISION_CRITERIA: &str = "
 
-This step also decides a loop. Do the step's work first, then judge from its results.
+This step also decides a loop. Do the step's work first. Follow the skill's rule for the case at hand. Where it gives none, use these defaults.
 
+- blocked when passes repeat without converging, the last pass made no progress, a failure repeats with nothing learned, or you need input you can't supply. The Graph stops here. Give the reason.
 - advance when what this step requires is done. Later obligations belong to later steps.
 - iterate when the last pass made progress and you can name a substantial next pass within scope and the result it should produce. Aim to finish within five passes. Continue past five when the work warrants it.
-- blocked when passes shrink into small increments that no longer converge, the last pass made no progress, a failure repeats with nothing learned, or you need input you can't supply. The Graph stops here. Give the reason.
 
 Leave checks that can't run here to CI or review. Report them as deferred. Carry the next action and the paths it needs in the summary.";
 
@@ -66,7 +64,7 @@ impl GraphOutput {
                     },
                     "reason": {
                         "type": ["string", "null"],
-                        "description": "Nonempty question and evidence for blocked; null for advance/iterate."
+                        "description": "Nonempty reason for blocked; null for advance/iterate."
                     }
                 },
                 "required": ["decision", "summary", "reason"],
@@ -138,7 +136,36 @@ mod tests {
     use super::GraphOutput;
     use crate::graph::runner::SkillOutcome;
     use crate::graph::transitions::GraphDecision;
+    use crate::graph::{compile_graph, load_graph, ConcreteStep};
     use serde_json::json;
+
+    #[test]
+    fn compiled_loops_defer_to_their_skills_rules() {
+        let repo = tempfile::tempdir().unwrap();
+        for (graph, decider) in [("build", "realign"), ("optimize", "optimize-plan")] {
+            let graph = load_graph(graph, repo.path()).unwrap();
+            let steps = compile_graph(&graph, repo.path()).unwrap();
+            let step = steps
+                .iter()
+                .find(|step| {
+                    matches!(step, ConcreteStep::Skill(skill) if skill.skill.name == decider && skill.returns.is_some())
+                })
+                .unwrap_or_else(|| panic!("{} includes {decider} as a loop decider", graph.name));
+
+            let mut message = String::new();
+            assert_eq!(
+                GraphOutput::append_step_instructions(step, &mut message),
+                Some(GraphOutput::Decision)
+            );
+            let (_, defaults) = message
+                .split_once("Follow the skill's rule for the case at hand.")
+                .expect("the skill's decision rules take precedence");
+            assert!(defaults.contains("blocked when passes repeat without converging"));
+            assert!(defaults.contains("the last pass made no progress"));
+            assert!(defaults.contains("a failure repeats with nothing learned"));
+            assert!(defaults.contains("substantial next pass"));
+        }
+    }
 
     #[test]
     fn provider_schemas_use_required_fields_without_root_unions() {

@@ -5,7 +5,7 @@ steps:
         - cmd: sync
         - implement         # decides: another planned pass, or ready for review
     - concept-review        # read-only: writes scratch/concept-review.html
-    - realign               # decides: takes the review into the plan; rework, or move on
+    - realign               # iterate if implementation work remains
 - compress
 - qa
 - pr-publish

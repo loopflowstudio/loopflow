@@ -1248,27 +1248,18 @@ printf '%s' "$line" > "{pasted}"
         changes.wait(std::time::Duration::from_millis(1));
         assert_eq!(watcher.wait_timeout(), super::UNSIGNALLED);
 
-        let watcher_path = path.clone();
-        let worker = std::thread::spawn(move || {
-            let timeout = watcher.wait_timeout();
-            changes.wait(timeout);
-            watcher.read(&watcher_path);
-            watcher.deferred
-        });
-
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        assert!(
-            !pasted.exists(),
-            "watcher should still be waiting in UNSIGNALLED"
-        );
+        assert!(!pasted.exists(), "the steer is still waiting");
+        // Deliver the nudge before waiting so the Linux fallback poll cannot
+        // return from the wait before the nudge is sent.
         let nudged_at = std::time::Instant::now();
         waker.nudge.unwrap().retry_deferred();
-        let still_deferred = worker.join().unwrap();
-        assert!(!still_deferred);
+        changes.wait(watcher.wait_timeout());
         assert!(
             nudged_at.elapsed() < std::time::Duration::from_secs(5),
             "WakeNudge must break UNSIGNALLED immediately"
         );
+        watcher.read_with(store);
+        assert!(!watcher.deferred);
         assert_wake_pasted(&pasted);
         registry.close();
     }

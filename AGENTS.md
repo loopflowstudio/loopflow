@@ -318,6 +318,10 @@ Session history as a `store-gap` observation when the store answers again.
 Codex clients reach their private app-server directly; lf only observes beside
 them.
 
+Make each user-facing harness behavior a requirement of the harness interface.
+Test the visible outcome for every member of `HarnessKind::ALL`. The test
+must fail if a new harness omits the behavior.
+
 A harness's permission and sandbox choices are settled in this order: the
 agent is not handcuffed, then the simplest, then what the other harnesses do.
 Make the choice; don't leave it as a question.
@@ -383,8 +387,7 @@ Make the choice; don't leave it as a question.
   Direct `lf <skill>` and `lf graph <name>` launches are chats or batches, including with
   `--task` or `LF_AS`: context hooks, `LF_BARE_STEER` reads the store, no turn
   reports or required server. The [four launch names](docs/glossary.md#loopflows-words)
-  are work session, worker, chat and batch. The launch matrix covers all four
-  harnesses in each cell.
+  are work session, worker, chat and batch.
 - Claims name their person by the repository's Git `user.email`; fixtures set a repository-local identity (`TestRepo` does).
 - Fixtures that change process environment share `loopflow_test_support::env_lock`.
 - macOS SMAppService fixtures register temporary bundles with LaunchServices and launch bundle-owned update code through it. An external test runner writing a registered app can fail App Management; it does not model an app update. Cleanup unregisters the unique service job and LaunchServices entry.

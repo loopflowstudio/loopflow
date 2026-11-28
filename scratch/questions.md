@@ -22,3 +22,18 @@ Pass 1 choices:
 - Use a confirmation sheet for external URL schemes.
 - Enable previews for detected text links as well as OSC 8 links.
 - Refuse parent-directory segments in terminal file URLs.
+
+Pass 2 choices:
+- The terminal gives every valid Work address to the Work resolver. A name
+  such as `update` can resolve as a registered repository. Terminal clicks
+  never dispatch through the app's control-URL handler.
+- The Dashboard tile shows its own Files pane when a link opens there.
+- Remote links reuse the Task directory read to identify regular files. The
+  owning Machine needs the structured file response from this change.
+- A move observed by Desktop during lookup stops the Files reveal. File
+  reads still follow the Task's active route on the server. QA needs a
+  server-first move to check the gap before Desktop observes it.
+- An exact Session address with `machine` passes the Work grammar. Desktop's
+  existing opener resolves repository root `/` for a remote-only Session and
+  prepares Sessions by ID without a Machine selector. Opening remote-only
+  standalone Sessions needs its own Desktop routing work.

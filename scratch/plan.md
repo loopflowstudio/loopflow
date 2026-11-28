@@ -80,76 +80,12 @@ Pass 1).
   `supports-hyperlinks` honors it with no TTY, so piped output fills with
   escapes.
 
-## Built (Pass 1, a12082957; hover fix in realign)
+## Built
 
-- `TerminalLink` (`swift/LoopflowMac/Services/Ghostty/TerminalLink.swift`)
-  classifies a target as `.web`, `.mail`, `.work`, `.file(path, host, line)`,
-  `.externalScheme` or `.refused(reason)`, refusing control/bidi characters
-  (raw and percent-decoded), web credentials, `..` segments and fragments
-  other than `#L<n>` on files. `localDocument()` resolves symlinks and refuses
-  bundles, aliases, scripts, executables and `#!` files.
-- `GhosttyManager.action_cb` handles `OPEN_URL` (always true, so Ghostty's
-  fallback never runs), `MOUSE_SHAPE` and `MOUSE_OVER_LINK`. Hover shows
-  `TerminalLink.preview`: the target, or the reason a click would refuse it.
-- `GhosttyMetalView.flagsChanged` updates modifier state on a paused Session;
-  `GhosttyTerminalMount` shows the bottom-corner `linkFeedback` overlay.
-- `SessionPaneView.openTerminalLink` (`WorkspacePanesView.swift`) opens web
-  and mail, confirms other schemes in `TerminalExternalLinkSheet`, and opens
-  local files outside the pane's worktree. `.work` and checkout files return
-  placeholder notices.
-- Tests: `TerminalLinkTests`, `TerminalFeedbackTests` (native paused-Session
-  OSC 8 fixture).
+- Pass 1 (`a12082957b`, hover fix `0552209e91`): Ghostty delivers OSC 8 clicks and ⌘-hover feedback. Desktop opens web, mail and safe local documents and confirms external schemes.
+- Pass 2 (`e50723744`): Work links resolve in the repository window, checkout links reveal Files at the line, Dashboard tiles show the Files pane, and link failures appear in the originating terminal.
 
-## Remaining passes
-
-### Pass 2: Work links and checkout files open in Desktop
-
-**Files destination.** Route by the Task's active Files place, not the pane's
-`location.worktree`: `TaskFilesStore` and server `task.file` read only the
-Task's current checkout (`SessionsView.filesPlace(for:task:)`), exist only
-for `key.kind == .task`, and refuse directories
-(`ops/task/snapshot.rs` `file_snapshot`). A terminal matches Files when
-`location.machineId == activeMachine`, `activeCwd` is non-empty, and
-`location.worktree` is empty (unstarted shell, `SessionsView.swift:219`) or
-equals `activeCwd`. When it matches:
-
-- Local pane: require `file.isLocal()`; compare against the checkout with
-  symlinks resolved, so `/tmp` matches `/private/tmp`.
-- Remote pane: compare lexically against `activeCwd`, any `file://` host
-  (Q3), never touching this Mac's disk.
-- A file opens through `TaskFilesStore.openPresentation` at its line. The
-  checkout root and local folders open in Finder through `localDocument()`;
-  a remote folder gets a notice. Neither `.` nor a folder reaches `task.file`.
-
-No match (Repository/Wave Session, moved Task's old shell, path outside the
-checkout): local pane and local host → `localDocument()` in the default app;
-otherwise refuse ("File is on another Machine."). Never read this Mac's disk
-for a remote path or the new Machine for an old shell.
-
-**Work links.** Tighten `TerminalLink`'s `loopflow://` case to `WorkUrl`'s
-grammar (`work/link.rs` `parse`): empty path, `/task/<id>` or `/wave/<name>`;
-query keys `repository`, `session`, `machine` only; `machine` only with
-`session` on a repository target. That refuses `loopflow://foo/bar/baz` and
-the control hosts without a host blocklist. Resolve through
-`sessions.query.workLink(url)` and `model.openRepository`, the path
-`LoopflowApp.handleDeepLink` uses, without its open-work error window.
-
-**One feedback path.** `onOpenLink` can't carry async results. Give
-`GhosttyMetalView` a `showLinkNotice(_:)` that the pane calls for refusals,
-a failed confirmed external open (today `paneFailed` posts "Could not change
-pane: No app could open the link." to the window bar) and Work-link
-resolution errors.
-
-Shows: ⌘-click on `lf open --link` output selects that Task in this window.
-⌘-click on `file://…/scripts/test.py#L42` opens Files at line 42, including in
-a remote Session from `rg`'s hostname-bearing link. A link in the old shell of
-a moved Task never opens the new Machine's file.
-
-Tests: a headless pane-router test with opener closures stubbed over
-(local/remote pane) × (active checkout / old shell / Repository Session /
-outside) × (file / folder / root); `TerminalLinkTests` cases for the `WorkUrl`
-grammar (`loopflow://open/task/LOO-1` opens, `loopflow://foo/bar/baz` and
-unknown query keys refuse).
+## Remaining pass
 
 ### Pass 3: every held terminal names itself ghostty
 
@@ -162,13 +98,13 @@ Codex's link output was not probed; QA records what a Codex Session prints.
 
 ## Acceptance check
 
-Pass 1 passed `TerminalLinkTests`, the headless terminal feedback and modifier
-checks, and the native paused-Session OSC 8 fixture. `swift test --filter
-TerminalLinkTests` passed after the hover fix (2026-11-27). The signed Xcode
-build and a live agent relay demo remain for CI and QA.
+Pass 1 passed the native paused-Session OSC 8 fixture. Pass 2 passed
+`swift test --package-path swift --filter 'TerminalLinkTests|TerminalFeedbackTests'`
+with the two display tests skipped, and both
+`cargo test -p loopflow-execution --lib ops::task::directory::tests::` tests passed.
+The signed Xcode build and live local and remote agent demos remain for CI and QA.
 
-Headless: `cargo test -p loopflow-execution --lib transport::registry_tests::`
-and the `TerminalLinkTests` suite pass.
+Pass 3 runs `cargo test -p loopflow-execution --lib transport::registry_tests::`.
 
 Demo (Dev app): start a Task from Desktop so the server launches its Session.
 Ask the agent for `[the PR](https://github.com/…)`, a checkout file at a line,
@@ -205,8 +141,7 @@ passes on, can carry one. These must hold:
 
 - **One Desktop link router for every surface.** `TaskBriefView` hands
   `loopflow://` to Launch Services; `TaskHTMLView.TaskHTMLLinks` lets
-  non-web schemes fall into WKWebView navigation. Moving both onto Pass 2's
-  Work-link router is ~100 lines of Swift plus tests. File after Pass 2.
+  non-web schemes fall into WKWebView navigation. Both can use the Work resolver and Desktop window opener. File during ship-review.
 - **Files pane for Repository and Wave workspaces.** `TaskFilesStore`,
   `MultiplexerStore` and server `task.file` are Task-only. Needs repository
   file reads on the server and a workspace layout change. Its own Task; until

@@ -1,17 +1,23 @@
-at: a12082957b749803d50b66821a0ec4e311b276a8
+at: e507237447fd41196ba9568a52f97e15a64a99b4
 first:
   - path: docs/surfaces.md
-    why: What terminal link clicks should do
+    why: What each terminal link opens
   - path: swift/LoopflowMac/Services/Ghostty/TerminalLink.swift
-    why: Classifies targets and checks local files before opening
+    why: Validates link targets and chooses the file destination
+  - path: swift/LoopflowMac/Views/WorkspacePanesView.swift
+    why: Opens Work and Files from either terminal pane
+  - path: swift/LoopflowMac/Views/SessionsView.swift
+    why: Resolves the Task's active Files place
+  - path: rust/loopflow-execution/src/ops/task/directory.rs
+    why: Distinguishes remote files and folders on the owning Machine
+  - path: swift/LoopflowMac/LoopflowApp.swift
+    why: Shares Work opening with app deep links
   - path: swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift
     why: Receives Ghostty click, hover, and cursor actions
   - path: swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift
-    why: Shows link feedback in the retained terminal
-  - path: swift/LoopflowMac/Views/WorkspacePanesView.swift
-    why: Routes supported targets and confirms custom schemes
+    why: Shows async link feedback in the originating terminal
+  - path: swift/LoopflowTests/TerminalLinkTests.swift
+    why: Exercises checkout placement, Work links, and refusal notices
   - path: swift/LoopflowTests/TerminalFeedbackTests.swift
     why: Exercises OSC 8 on a paused Session
-  - path: swift/LoopflowTests/TerminalLinkTests.swift
-    why: Covers malformed links and unsafe local files
 hide: []

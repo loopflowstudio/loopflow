@@ -52,7 +52,7 @@ Three headless concept reviews asked these questions; nobody answered them.
 Each recommended direction is adopted and marked for `ship-review` to raise.
 Numbers refer to the second review (after Pass 1); the third review
 (`scratch/concept-review.html`) re-asks Q2–Q4 and adds the tile question
-under Pass 4.
+below.
 
 - **Checkout files (Q2 → 2a).** A file inside the Task's active checkout opens
   in the Files pane at `#L<n>`. Passed over: the default app for every file,
@@ -77,6 +77,9 @@ under Pass 4.
 - **Work links (Q5 → 5a).** A `loopflow://` URL in `WorkUrl`'s grammar opens
   in this window with no confirmation. Passed over: treating it as an unknown
   scheme, which warns on lf's own links and can wake the installed release app.
+- **Dashboard tiles (third review Q1 → 1a).** A checkout file link enters the
+  Task with Files beside its Session. Entering clears any terminal zoom and
+  leaves keyboard focus on the terminal.
 - **FORCE_HYPERLINK** stays rejected: children inherit it, and
   `supports-hyperlinks` honors it with no TTY, so piped output fills with
   escapes.
@@ -86,6 +89,7 @@ under Pass 4.
 - Pass 1 (`a12082957b`, hover fix `0552209e91`): Ghostty delivers OSC 8 clicks and ⌘-hover feedback. Desktop opens web, mail and safe local documents and confirms external schemes.
 - Pass 2 (`e50723744`): Work links resolve in the repository window, checkout links reveal Files at the line, Dashboard tiles show the Files pane, and link failures appear in the originating terminal.
 - Pass 3 (`04c2f98af7`): New held terminals report `TERM_PROGRAM=ghostty` and remove the caller's `TERM_PROGRAM_VERSION`.
+- Pass 4 (`98c105742`): Remote links use `task.file`, hover and click share the `TerminalHyperlink` classifier, and tile clicks enter the Task with Files beside its Session.
 
 ## Acceptance check
 
@@ -99,6 +103,11 @@ Pass 3 passed `cargo test -p loopflow-execution --lib held_children_get_ghostty_
 The PTY child saw `ghostty` and no version with server, Rex, and Apple
 Terminal inputs. QA still needs to check what a live Codex Session prints.
 
+Pass 4 passed `TerminalHyperlinkTests|TerminalFeedbackTests` with two display
+fixtures skipped. The focused Rust snapshot, directory and documented-command
+tests passed. Files performs its normal read on mount after the remote link
+lookup.
+
 Demo (Dev app): start a Task from Desktop so the server launches its Session.
 Ask the agent for `[the PR](https://github.com/…)`, a checkout file at a line,
 and `lf open --task <ID> --link`. ⌘-hover shows the hand and the target.
@@ -108,7 +117,7 @@ and `lf open --task <ID> --link`. ⌘-hover shows the hand and the target.
 
 - Refused target: nothing opens, the overlay says why, and the callback still
   returns true.
-- Missing local file: refused as missing.
+- Missing file on this Mac or a remote Machine: refused as missing.
 - Remote file outside the checkout, or any file from a moved Task's old
   remote shell: refused as on another Machine.
 - Unknown Task in a Work link: the overlay says so; no open-work window.
@@ -146,52 +155,14 @@ passes on, can carry one. These must hold:
   `OPEN_URL`, Ghostty's iOS opener is unimplemented, and a tap carries no ⌘.
   Needs a touch gesture designed, then `TerminalLink` shared. Its own Task.
 
-## Next: Pass 4, review rework
-
-From the third concept review (`scratch/concept-review.html`, at
-`ec8ae076ce`). Delivers one round-trip remote file opens, a hover that agrees
-with the click, and tile clicks that leave the Task's layout alone. Teaches
-whether `task.file` alone is enough to route remote clicks.
-
-- **Remote files read with `task.file`.** `TerminalLink.File.destination`
-  calls `query.taskFile(issue:path:)` instead of probing `query.taskFiles`
-  for `{"reason": "file"}`. `.missing` → `OpenError.missing` (the local
-  message); a folder → `OpenError.remoteDirectory`, from a clear directory
-  refusal added to `file_snapshot` (`ops/task/snapshot.rs`). Seed
-  `TaskFilesStore` with the returned snapshot if that is simple; otherwise
-  the second read stays. Revert this branch's `directory.rs` changes (error
-  data, reordered `.git` guard) and their tests. Keep the
-  `place == activeFilesPlace` check after the await.
-- **One classification for hover, cursor and click.** Drop `allowsBarePath`:
-  OSC 8 and regex bare paths both go through `fileLink`. The pointing hand
-  shows only when the hovered target does not classify as `.refused`.
-  Delete the questions.md note on the split.
-- **Dashboard tile file clicks (third review Q1 → 1a, made for review).**
-  A checkout file ⌘-clicked in a tile enters the Task view and opens Files
-  beside the Session; the tile stays on the Session. Remove
-  `if inTile { store.setZoom(...) }`, which saved Files as the Task's zoomed
-  pane. Passed over: a tile-only face override (1b), which adds tile state
-  for a view that is one click from the real one; keeping the zoom (1c).
-- **Rename the Mac enum `TerminalLink` → `TerminalHyperlink`** (file, tests,
-  docs). `LoopflowiOS/TerminalLink.swift` already names the phone's terminal
-  connection.
-
-Check: `swift test --package-path swift --filter 'TerminalLinkTests|TerminalFeedbackTests'`
-(after rename, the renamed suite) and the focused `ops::task::` Rust tests
-for `file_snapshot`'s directory refusal.
-
 ## Third concept review: where each finding went
 
-- Remote probe via `task.files` → Pass 4.
-- Hover/cursor/click split → Pass 4.
-- Dashboard tile zoom leak → Pass 4 (Q1 → 1a).
-- `TerminalLink` name clash with iOS → Pass 4.
-- Shared Work-link router, Repository/Wave Files, iPhone links → Deferred
-  findings (unchanged). The router finding adds: decide whether
-  `isWorkAddress` (a Swift copy of `WorkUrl::parse`) can shrink once the
-  resolver owns validation.
+Pass 4 addresses all four implementation findings in
+`scratch/concept-review.html`. The shared Work-link router, Repository and
+Wave Files, and iPhone links are listed under Deferred findings.
+
 - Q2 (Files for Task checkouts), Q3 (always `ghostty`), Q4 (remote hostnames)
-  re-ask the adopted 2a / 4a / 3a choices; unchanged, still for `ship-review`.
+  re-ask the adopted 2a / 4a / 3a choices for `ship-review`.
 
 ## Done when
 
@@ -201,6 +172,6 @@ from any terminal prints clickable links.
 
 ## Docs
 
-- `docs/surfaces.md` (`### Links in terminal panes`) describes the end state;
-  recheck it after Pass 4 for the Dashboard tile behavior.
+- `docs/surfaces.md` (`### Links in terminal panes`) describes link behavior,
+  including opening a checkout file from a Dashboard tile.
 - `swift/README.md` points to it.

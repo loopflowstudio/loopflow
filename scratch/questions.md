@@ -12,9 +12,6 @@ Still open:
 - Relative text links: Ghostty can make a regex match for a relative path
   absolute after a local existence check. Confirm the configured matches
   before promising relative links in remote panes.
-- Hover has no link kind, so `TerminalLink.preview` classifies with bare
-  paths allowed; an OSC 8 bare path previews but a click refuses it. Pass 4
-  removes the split by accepting bare paths from OSC 8 too.
 
 Pass 1 choices:
 - Keep web fragments such as GitHub discussion anchors. The `#L<n>` rule
@@ -28,9 +25,6 @@ Pass 2 choices:
 - The terminal gives every valid Work address to the Work resolver. A name
   such as `update` can resolve as a registered repository. Terminal clicks
   never dispatch through the app's control-URL handler.
-- The Dashboard tile shows its own Files pane when a link opens there.
-- Remote links reuse the Task directory read to identify regular files. The
-  owning Machine needs the structured file response from this change.
 - A move observed by Desktop during lookup stops the Files reveal. File
   reads still follow the Task's active route on the server. QA needs a
   server-first move to check the gap before Desktop observes it.
@@ -38,3 +32,10 @@ Pass 2 choices:
   existing opener resolves repository root `/` for a remote-only Session and
   prepares Sessions by ID without a Machine selector. Opening remote-only
   standalone Sessions needs its own Desktop routing work.
+
+Pass 4 choices:
+- Files keeps its normal read when it opens. The lookup snapshot could become
+  stale before the view mounts, and seeding would need to account for retained
+  documents and drafts.
+- Entering a Task from a file link in a zoomed tile clears that zoom so both
+  the Session and Files are visible. It keeps focus on the terminal.

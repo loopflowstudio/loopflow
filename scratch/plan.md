@@ -29,7 +29,8 @@ reviewed and the page still shows "No" rows for code already fixed (runs
 One rule, the same in `build`, `plan`, `refresh` and standalone:
 
 - `realign` writes `scratch/plan.md`, `scratch/questions.md`, Wave memory when
-  that is its step's job, and documentation. It never edits a code or test file.
+  that is its step's job, and user documentation (`docs/`, `README.md`). It
+  never edits code, tests, builtin skills, goldens, `AGENTS.md` or `.lf/qa/`.
 - An in-scope finding that needs a code or test change, however small, is
   written into the plan as the next pass.
 - Deciding a loop: `iterate` when the plan holds any in-scope code or test
@@ -71,23 +72,43 @@ else repeats or snapshots it.
   no `realign.md` override.
 - **The eval already agrees.** `scripts/evals/instruction_levels.json`
   `standalone_realign` allows `inspect_work`, `write_scratch`, `reply`, and not
-  `implement`.
+  `implement`. Its action catalog (`instruction_levels.py`) has no docs-edit
+  action, so inline docs fixes are outside what the eval models.
 - **The refresh description appears nowhere else** (no DTO fixture, doc or
   test quotes "reconcile the plan and code"), so changing it touches one line.
   `compiled.rs` tests check `refresh`'s steps, not its description.
 
 ## Choices made for review
 
-- **"Docs" means documentation files, by path.** A comment inside a source or
-  test file is a code edit and goes through `implement`. Q2 grouped
-  "docs-only or comment-only" in its question, and its chosen answer says
-  "only code/tests force iterate"; read by file, the rule has no judgment call
-  for an agent to stretch ("it's only a comment" is how inline edits came
-  back). Passed over: letting `realign` edit comments in source files.
+- **Inline docs narrow to user documentation: `docs/` and `README.md` files.**
+  Q2 b stands ("only code/tests force iterate"), but concept-review showed
+  "documentation files, by path" doesn't separate Markdown that carries
+  behavior: builtin skills compiled into `lf`, goldens, `AGENTS.md`,
+  `.lf/qa/` playbooks. Those, and comments in source or test files, are
+  code edits and go through `implement`. Passed over: concept-review's
+  recommended "scratch only, docs iterate too" (its Q1 A), because it
+  reverses Jack's Q2 b; it is in `scratch/questions.md` for him.
 - **A docs fix made inline leaves its "No" row on the page.** The plan's
   per-finding record says it was fixed in docs, and `ship-review` reads the
   plan beside the page. Passed over: iterating for docs too (Q2 a), which Q2 b
   declined.
+- **The runner's loop criteria defer to the skill's own.** `DECISION_CRITERIA`
+  (`rust/loopflow-execution/src/graph/output.rs:11-19`) is appended after
+  every deciding step's prompt and says iterate only on "a substantial next
+  pass" and block "when passes shrink into small increments"; it lands last,
+  after `realign`'s rule to iterate on a small code fix. It gains one line:
+  when the skill says how it decides a loop, its rule wins; and `blocked`
+  means passes repeating without converging, not one targeted fix pass.
+  Defaults stay for skills with no loop section. Passed over: hardcoding
+  skill names in `output.rs`, and a separate Task (concept-review's Q2 B),
+  since without this the demo's pass-1 `iterate` contradicts the prompt.
+- **`realign`'s own shape review runs only when no review just ran.**
+  `realign.md:28-31` ("Read the work once as a reviewer…") would, under the
+  new rule, turn a cleanup it spots after an all-"Yes" page into a pass right
+  before `compress`, which exists to simplify. Reconciling a
+  `concept-review`, it triages that page's findings only; standalone,
+  `refresh` and post-slice runs keep the shape look. Passed over: deleting
+  the paragraph.
 - **One eval case is added** (below). Passed over: leaving the loop case
   uncovered by the eval.
 
@@ -112,6 +133,8 @@ One pass.
      result.
    - Closing lines: "It never adds behavior the plan didn't have" gains the
      plain statement that it never edits code or tests.
+   - The "Read the work once as a reviewer" paragraph applies when no
+     `concept-review` page is being reconciled; with one, triage its findings.
    - Keep the skill short; this replaces sentences, it does not add a section.
 2. `tests/goldens/builtin_realign.md` regenerated with
    `uv run python tests/goldens/update_goldens.py` (check no other golden moves).
@@ -119,15 +142,21 @@ One pass.
    description: integrate upstream changes, then bring the plan up to date.
    `build.yaml`'s comment on `realign` already reads correctly; align
    `docs/orchestration.md:154` with it if the wording drifts.
-4. `docs/orchestration.md:172-177`: `realign` takes the findings into
+4. `rust/loopflow-execution/src/graph/output.rs` `DECISION_CRITERIA`: the
+   skill's own loop rule wins; `blocked` is for passes that repeat without
+   converging. `docs/orchestration.md:186-187` follows the same wording.
+   Check `cargo test -p loopflow-execution --lib graph::output` and any
+   golden that embeds the suffix.
+5. `docs/orchestration.md:172-177`: `realign` takes the findings into
    `scratch/plan.md`, fixes docs inline, defers separate outcomes, and iterates
    back to `sync` for any code or test change so `concept-review` reads the
    final code.
-5. `AGENTS.md:285-286` and `:410`: `lf realign` updates the plan (not "plan and
-   code"); line 453 already says "reconcile the plan".
-6. `.lf/qa/skills.md:55-57`: the `realign`-alone scenario expects the small
+6. `AGENTS.md:285-286` and `:410`: `lf realign` updates the plan (not "plan and
+   code"); `:453` "reconcile the plan; test only a repair or a real doubt"
+   drops "a repair".
+7. `.lf/qa/skills.md:55-57`: the `realign`-alone scenario expects the small
    code mismatch queued in the plan with `iterate` and no code diff.
-7. `scripts/evals/instruction_levels.json`: one case, `realign` deciding
+8. `scripts/evals/instruction_levels.json`: one case, `realign` deciding
    `build`'s loop over a review with a small code mismatch; required
    `write_scratch`; allowed `inspect_work`, `write_scratch`, `reply`. Its
    parametrized test in `python/tests/test_instruction_levels.py` picks it up.
@@ -153,6 +182,24 @@ shipped records and are not edited.
 - No pass cap on loops.
 - No change to `concept-review`, `implement`, `ship-review` or any Graph's steps.
 
+## Concept review (commit `6c6f04ea29`), what happened to each finding
+
+- Runner `DECISION_CRITERIA` contradicts iterating on a small fix: adopted
+  into the pass (choice above, item 4).
+- `realign`'s own shape review can reopen the loop after an all-"Yes" page:
+  adopted (choice above, item 1).
+- "Docs by path" is fuzzy: narrowed to `docs/` and `README.md`; the stricter
+  option is in `scratch/questions.md`.
+- `AGENTS.md:453` still implies repairs: added to item 6.
+- `optimize.yaml` has no `implement` after `refresh`: deferred, below.
+
+## Deferred findings
+
+- `optimize.yaml` ends `compress → graph: refresh → measure`; a code mismatch
+  `realign` writes into the plan during `refresh` has no `implement` to build
+  it. Fixing it means an `implement` step (or branch) after `refresh` in
+  `optimize.yaml`; worth it only if optimize runs hit post-sync drift.
+
 ## Acceptance check
 
 Headless, no model:
@@ -173,7 +220,7 @@ small code mismatch, one docs mismatch and one separate outcome (the setup in
 
 ```bash
 lf -b -a claude:haiku realign
-git status --short     # scratch/ and the doc file; no code or test file
+git status --short     # scratch/ and the docs/ file; no code, test or skill file
 ```
 
 `scratch/plan.md` names the code mismatch as the next pass and lists the

@@ -1,9 +1,14 @@
 # LOO-1125 questions
 
-- Kickoff read Q2 b ("Allow realign to edit docs inline (only code/tests force
-  iterate)") by file: documentation files are docs; a comment inside a source
-  or test file is a code edit and goes through `implement`. Is that the line
-  wanted, or may `realign` edit comments in source files?
+- Q2 b ("Allow realign to edit docs inline (only code/tests force iterate)")
+  is read as `docs/` and `README.md` only; skills, goldens, `AGENTS.md`,
+  `.lf/qa/` and comments in source go through `implement`. Concept-review
+  recommended the stricter form instead: `realign` writes only `scratch/`
+  (and Wave memory), docs fixes iterate too, and `concept-review.html` never
+  keeps a stale "No" row. Keep the narrowed Q2 b, or go scratch-only?
+- `DECISION_CRITERIA` in `output.rs` is being changed in this Task so a
+  skill's own loop rule wins over "substantial next pass". Fine here, or a
+  separate Task?
 - `optimize` ends `compress → graph: refresh → measure`, with no `implement`
   after `refresh`. A code mismatch `realign` finds there now stays in
   `scratch/plan.md`. Worth an `implement` step there, or fine as is?

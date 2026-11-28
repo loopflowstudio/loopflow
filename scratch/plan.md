@@ -136,3 +136,13 @@ the saved order. The parser points retired `human:` items to `- break`.
 The next Graph step owns publishing and delivery. LOO-1098 and LOO-1100
 remain separate. The November 27 review dropped the five pre-existing QA
 edges. [Exact reply](direction.md#exact-words--ship-review-jack-heart-2026-11-27)
+
+## Remaining
+
+Nothing in this Task. All six ship-review answers are in Pass 6, including the
+"explore * plan, no after-explore" workflow bar (`WorkflowStepLabel` in
+[WorkflowLine.swift](../swift/Loopflow/Design/WorkflowLine.swift)). The
+"57 conflicts" banner in `ship-review.html` predates the sync. On November 27
+the branch was 0 commits behind origin/main and PR #2042 reported `CLEAN`.
+Deferred to delivery: CI skipped every job on the scratch-only head
+`b9f3a3aad1`, so the suites need a run on the published head.

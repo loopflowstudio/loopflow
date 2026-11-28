@@ -34,8 +34,11 @@ Pass 2 choices:
   standalone Sessions needs its own Desktop routing work.
 
 Pass 4 choices:
-- Files keeps its normal read when it opens. The lookup snapshot could become
-  stale before the view mounts, and seeding would need to account for retained
-  documents and drafts.
 - Entering a Task from a file link in a zoomed tile clears that zoom so both
   the Session and Files are visible. It keeps focus on the terminal.
+
+Pass 5 choices (fourth review):
+- Reversed Pass 4: Files is seeded with the lookup snapshot through
+  `TaskFileDocument.reconcile`, which handles drafts and saves, instead of
+  reading the file a second time.
+- A zoomed Task view behaves like a tile: Files opens beside the Session.

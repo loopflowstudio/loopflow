@@ -48,11 +48,11 @@ started it.
 
 ## Design decisions made for review
 
-Three headless concept reviews asked these questions; nobody answered them.
+Four headless concept reviews asked these questions; nobody answered them.
 Each recommended direction is adopted and marked for `ship-review` to raise.
-Numbers refer to the second review (after Pass 1); the third review
-(`scratch/concept-review.html`) re-asks Q2–Q4 and adds the tile question
-below.
+Numbers refer to the second review (after Pass 1); the fourth review
+(`scratch/concept-review.html`) re-asks them as Q2–Q4 and adds Q1 (zoom)
+and Q5 (scope).
 
 - **Checkout files (Q2 → 2a).** A file inside the Task's active checkout opens
   in the Files pane at `#L<n>`. Passed over: the default app for every file,
@@ -77,9 +77,15 @@ below.
 - **Work links (Q5 → 5a).** A `loopflow://` URL in `WorkUrl`'s grammar opens
   in this window with no confirmation. Passed over: treating it as an unknown
   scheme, which warns on lf's own links and can wake the installed release app.
-- **Dashboard tiles (third review Q1 → 1a).** A checkout file link enters the
-  Task with Files beside its Session. Entering clears any terminal zoom and
-  leaves keyboard focus on the terminal.
+- **Zoomed terminals and Dashboard tiles (third and fourth review Q1 → 1a).**
+  A checkout file link shows Files beside its Session, whether clicked inside
+  a zoomed Task view or from a Dashboard tile: it clears terminal zoom and
+  leaves keyboard focus on the terminal. Passed over: full-screen Files
+  inside a zoomed Task (built in Pass 4, hides the Session), and flipping
+  only the tile to Files.
+- **Ship terminals first (fourth review Q5 → 5a).** Brief, Markdown and
+  review-page links move to the shared router in a follow-up Task (Deferred
+  findings).
 - **FORCE_HYPERLINK** stays rejected: children inherit it, and
   `supports-hyperlinks` honors it with no TTY, so piped output fills with
   escapes.
@@ -155,14 +161,43 @@ passes on, can carry one. These must hold:
   `OPEN_URL`, Ghostty's iOS opener is unimplemented, and a tap carries no ⌘.
   Needs a touch gesture designed, then `TerminalLink` shared. Its own Task.
 
-## Third concept review: where each finding went
+## Remaining: Pass 5 (fourth concept review, `9a7c6e5442`)
 
-Pass 4 addresses all four implementation findings in
-`scratch/concept-review.html`. The shared Work-link router, Repository and
-Wave Files, and iPhone links are listed under Deferred findings.
+`scratch/concept-review.html` reviewed `bba5ff2138`. Pass 4's four findings
+hold. Four seams in built code remain; all are Pass 5:
 
-- Q2 (Files for Task checkouts), Q3 (always `ghostty`), Q4 (remote hostnames)
-  re-ask the adopted 2a / 4a / 3a choices for `ship-review`.
+1. **One remote read per click.** `TerminalHyperlink.File.destination`
+   fetches a `TaskFileSnapshot` through `query.taskFile` and discards it;
+   `TaskFilesView` then reads the file again over SSH. Carry the snapshot on
+   `.checkout` and seed it with `files.document(path).reconcile(snapshot)`
+   before `openPresentation`, so mount does not refetch it. `reconcile`
+   already merges dirty drafts and defers during saves and IME composition,
+   which answers Pass 4's reason for the second read.
+2. **One zoom behavior.** `openTerminalFile`
+   (`WorkspacePanesView.swift:1055`) passes `focus: onEnter == nil`, and
+   `MultiplexerStore.showBrowser` (`MultiplexerStore.swift:244`) unzooms only
+   when `focus` is false. Inside a zoomed Task the click zooms Files and moves
+   focus. Split "show beside, unzoomed" from "focus" in `showBrowser` and use
+   the 1a behavior for both entry points.
+3. **⌘ over an unfocused pane.** The tracking area uses
+   `.activeInKeyWindow`, but `flagsChanged` reaches only the first responder.
+   Pressing ⌘ over a link in an unfocused pane or tile shows nothing until
+   the pointer moves, and releasing ⌘ leaves the pill and hand cursor stuck.
+   Deliver modifier changes to the hovered `GhosttyMetalView` with a local
+   event monitor, as `WorkPalette` does.
+4. **Drop the Swift `WorkUrl::parse` copy.** `isWorkAddress`
+   (`TerminalHyperlink.swift:97`) is not a security check: `.work` clicks go
+   only to `query.workLink`. It mislabels `#frag` and `LOOPFLOW://` as
+   "only Work" refusals and lets invalid IDs pass hover. Classify any
+   `loopflow://` as `.work`; the click shows Rust's own error in the pane
+   notice.
+
+Pass 5 should teach whether one round trip removes the remote loading flash,
+and leave the link code with one Work grammar. Its checks are
+`TerminalHyperlinkTests|TerminalFeedbackTests`, plus a `MultiplexerStore`
+test for clicks into a zoomed layout.
+
+Questions Q2–Q4 re-ask the adopted 2a / 4a / 3a choices for `ship-review`.
 
 ## Done when
 

@@ -1,0 +1,3402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pause Task Graphs at breakpoints instead of interactive steps</title>
+<style>
+/* Default review page theme tokens (light and dark).
+ * Override per repository in `.lf/theme.css` (CSS custom properties only). */
+:root {
+  --lf-bg: #faf8f5;
+  --lf-surface: #fffdf9;
+  --lf-surface-muted: #f3eee7;
+  --lf-surface-element: #ece6dd;
+  --lf-border: #e6dfd6;
+  --lf-border-strong: #d6ccc0;
+  --lf-text: #2a2624;
+  --lf-text-secondary: #5f5752;
+  --lf-text-tertiary: #65605d;
+  --lf-accent: #722f37;
+  --lf-accent-hover: #5e2630;
+  --lf-accent-text: #faf8f5;
+  --lf-working-ink: #2f629f;
+  --lf-working-fill: #d5dde6;
+  --lf-warning-ink: #7f5a19;
+  --lf-warning-fill: #e4dccd;
+  --lf-failure-ink: #a64038;
+  --lf-failure-fill: #ecd9d5;
+  --lf-success-ink: #386c48;
+  --lf-success-fill: #d7dfd6;
+  --lf-highlight: rgba(114, 47, 55, 0.14);
+  --lf-highlight-active: rgba(114, 47, 55, 0.28);
+  --lf-highlight-line: rgba(114, 47, 55, 0.45);
+  --lf-shadow: 0 8px 26px rgba(42, 38, 36, 0.14);
+  --lf-shadow-sm: 0 3px 12px rgba(42, 38, 36, 0.08);
+  --lf-bubble-bg: #24201e;
+  --lf-bubble-text: #faf8f5;
+  --lf-bubble-border: #3a3430;
+  --lf-font-serif: "Old Standard TT", Georgia, "Times New Roman", serif;
+  --lf-font-sans: "Atkinson Hyperlegible Next", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --lf-font-mono: "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --lf-bg: #181615;
+    --lf-surface: #201d1b;
+    --lf-surface-muted: #282422;
+    --lf-surface-element: #312c29;
+    --lf-border: #38322e;
+    --lf-border-strong: #4a423d;
+    --lf-text: #efeae4;
+    --lf-text-secondary: #b9afa6;
+    --lf-text-tertiary: #8f857d;
+    --lf-accent: #c96b76;
+    --lf-accent-hover: #d8838d;
+    --lf-accent-text: #181615;
+    --lf-working-ink: #7eb2f0;
+    --lf-working-fill: #203147;
+    --lf-warning-ink: #e0b25c;
+    --lf-warning-fill: #3d311c;
+    --lf-failure-ink: #e67c73;
+    --lf-failure-fill: #452422;
+    --lf-success-ink: #7cc490;
+    --lf-success-fill: #213828;
+    --lf-highlight: rgba(201, 107, 118, 0.22);
+    --lf-highlight-active: rgba(201, 107, 118, 0.38);
+    --lf-highlight-line: rgba(201, 107, 118, 0.65);
+    --lf-shadow: 0 10px 30px rgba(0, 0, 0, 0.44);
+    --lf-shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.30);
+    --lf-bubble-bg: #efeae4;
+    --lf-bubble-text: #181615;
+    --lf-bubble-border: #d6ccc0;
+  }
+}
+
+/* Base layout and component styles for compiled Loopflow review pages. */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--lf-bg);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+main.lf-page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 44px 24px max(168px, var(--lf-dock-room, 0px));
+}
+
+h1 {
+  font-family: var(--lf-font-serif);
+  font-size: 32px;
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  font-variant-ligatures: no-common-ligatures;
+  margin: 0 0 12px;
+}
+
+h2 {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 32px 0 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--lf-border);
+}
+
+h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 20px 0 8px;
+}
+
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 22px; }
+li { margin-bottom: 4px; }
+
+code, pre {
+  font-family: var(--lf-font-mono);
+  font-size: 12.5px;
+}
+
+code {
+  background: var(--lf-surface-muted);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+pre {
+  background: var(--lf-surface);
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 16px;
+  font-size: 14px;
+}
+
+th, td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--lf-border);
+  vertical-align: top;
+}
+
+th {
+  color: var(--lf-text-secondary);
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+/* Meta bar & server status banner */
+.lf-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: var(--lf-text-secondary);
+  font-size: 12.5px;
+  margin-bottom: 24px;
+}
+
+.lf-meta code { font-size: 12px; }
+
+.lf-banner {
+  background: var(--lf-warning-fill);
+  color: var(--lf-warning-ink);
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 13.5px;
+}
+
+/* Diff and File blocks */
+.lf-codeblock {
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  background: var(--lf-surface);
+  margin: 14px 0;
+  overflow: hidden;
+}
+
+.lf-codeblock-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--lf-surface-muted);
+  border-bottom: 1px solid var(--lf-border);
+  font-size: 12.5px;
+}
+
+.lf-codeblock-path {
+  font-family: var(--lf-font-mono);
+  color: var(--lf-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lf-codeblock-scroll { overflow-x: auto; }
+
+.lf-code-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+  font-family: var(--lf-font-mono);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.lf-code-table td {
+  border: 0;
+  padding: 0 8px;
+  white-space: pre;
+}
+
+.lf-code-table td.lf-ln {
+  width: 1%;
+  min-width: 38px;
+  text-align: right;
+  color: var(--lf-text-tertiary);
+  user-select: none;
+  border-right: 1px solid var(--lf-border);
+  font-variant-numeric: tabular-nums;
+  position: relative;
+}
+
+.lf-code-table tr.lf-code-row td.lf-ln { cursor: pointer; }
+
+.lf-code-table tr.lf-code-row td.lf-ln-old,
+.lf-code-table tr.lf-code-row td.lf-ln-single {
+  min-width: 52px;
+  padding-left: 24px;
+}
+
+.lf-code-table .lf-gutter-plus {
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border-radius: 4px;
+  border: none;
+  background: var(--lf-accent);
+  color: var(--lf-accent-text);
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.lf-code-table tr.lf-code-row:hover .lf-gutter-plus,
+.lf-code-table .lf-gutter-plus:focus-visible {
+  opacity: 1;
+}
+
+/* A noted row keeps its diff tint; only the gutter carries the note. */
+.lf-code-table tr.lf-code-row.lf-row-has-note td.lf-ln { background: var(--lf-highlight-active); }
+
+.lf-code-table tr.lf-code-row.lf-row-has-note td.lf-ln:first-child {
+  box-shadow: inset 3px 0 0 var(--lf-accent);
+}
+
+.lf-code-table tr.lf-code-row.lf-row-selecting td { background: var(--lf-working-fill); }
+
+.lf-code-table td.lf-sign {
+  width: 18px;
+  text-align: center;
+  user-select: none;
+  padding: 0 2px;
+}
+
+.lf-code-table tr.lf-add { background: var(--lf-success-fill); }
+.lf-code-table tr.lf-add td.lf-sign { color: var(--lf-success-ink); }
+.lf-code-table tr.lf-del { background: var(--lf-failure-fill); }
+.lf-code-table tr.lf-del td.lf-sign { color: var(--lf-failure-ink); }
+.lf-code-table tr.lf-hunk td {
+  background: var(--lf-surface-muted);
+  color: var(--lf-text-secondary);
+  padding: 3px 10px;
+}
+
+.lf-code-table tr.lf-line-note td {
+  white-space: normal;
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  background: var(--lf-surface-element);
+  color: var(--lf-text);
+  padding: 6px 12px;
+  border-top: 1px solid var(--lf-border);
+  border-bottom: 1px solid var(--lf-border);
+}
+
+.lf-codeblock.lf-notes-hidden tr.lf-line-note { display: none; }
+
+/* Builtin components */
+.lf-decision {
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  background: var(--lf-surface);
+  padding: 14px 16px;
+  margin: 14px 0;
+}
+
+.lf-decision-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.lf-decision-title {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.lf-decision-rec {
+  font-size: 12px;
+  color: var(--lf-text-secondary);
+}
+
+.lf-before-after {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.lf-before-after-pane {
+  border: 1px solid var(--lf-border);
+  border-radius: 8px;
+  background: var(--lf-surface);
+  padding: 12px 14px;
+}
+
+.lf-before-after-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--lf-text-secondary);
+  margin-bottom: 8px;
+}
+
+/* Controls: choices, questions, direct actions */
+[data-choice], [data-multiselect] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* Draw `data-label` as a heading only when the control has no selectable prompt child;
+   a decision card shows its title instead. */
+:is([data-choice], [data-multiselect], [data-question])[data-label]:not(:has(> p, > label, > h3, > h4, > legend))::before {
+  content: attr(data-label);
+  display: block;
+  flex-basis: 100%;
+  margin: 10px 0 2px;
+  font-weight: 600;
+}
+
+:is([data-choice], [data-multiselect]) > :is(p, label, h3, h4, legend) {
+  flex-basis: 100%;
+  margin: 10px 0 2px;
+}
+
+.lf-decision [data-choice][data-label]::before { content: none; }
+
+button {
+  appearance: none;
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  line-height: 1.2;
+  padding: 6px 11px;
+  border-radius: 4px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  cursor: pointer;
+}
+
+button:hover { background: var(--lf-surface-muted); }
+
+button.is-selected,
+button[aria-pressed="true"],
+button.lf-btn-accent {
+  background: var(--lf-accent);
+  border-color: var(--lf-accent);
+  color: var(--lf-accent-text);
+}
+
+button.lf-btn-accent:hover {
+  background: var(--lf-accent-hover);
+  border-color: var(--lf-accent-hover);
+}
+
+button.lf-btn-quiet {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-color: var(--lf-border);
+  color: var(--lf-text-secondary);
+}
+
+button.lf-btn-quiet.is-selected,
+button.lf-btn-quiet[aria-pressed="true"] {
+  background: var(--lf-accent);
+  border-color: var(--lf-accent);
+  color: var(--lf-accent-text);
+}
+
+[data-question] { margin: 14px 0; }
+
+[data-question] textarea, [data-question] input[type="text"] {
+  width: 100%;
+  min-height: 60px;
+  padding: 8px 10px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 4px;
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 14px;
+  resize: vertical;
+}
+
+/* Direct action confirmation & receipt */
+.lf-action-confirm,
+.lf-action-receipt,
+.lf-action-error {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  border-radius: 4px;
+}
+
+.lf-action-confirm,
+.lf-action-error {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lf-action-confirm {
+  padding: 6px 10px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 6px;
+  background: var(--lf-surface-muted);
+}
+
+.lf-action-summary {
+  font-family: var(--lf-font-mono);
+  font-size: 12px;
+  color: var(--lf-text-secondary);
+}
+
+.lf-action-receipt {
+  gap: 6px;
+  padding: 5px 10px;
+  background: var(--lf-success-fill);
+  color: var(--lf-success-ink);
+  font-weight: 600;
+}
+
+.lf-action-error {
+  padding: 5px 10px;
+  background: var(--lf-failure-fill);
+  color: var(--lf-failure-ink);
+}
+
+/* Warm-underlined cross-element note highlights */
+.lf-hl {
+  background: var(--lf-highlight);
+  border-bottom: 2px solid var(--lf-highlight-line, var(--lf-accent));
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.lf-hl:hover { background: var(--lf-highlight-active, var(--lf-highlight)); }
+
+.lf-pulse-ring {
+  outline: 2px solid var(--lf-accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* Notion-style floating selection bubble */
+.lf-float-pill {
+  position: fixed;
+  z-index: 960;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px;
+  border-radius: 8px;
+  background: var(--lf-bubble-bg, var(--lf-text));
+  color: var(--lf-bubble-text, var(--lf-bg));
+  border: 1px solid var(--lf-bubble-border, var(--lf-border-strong));
+  box-shadow: var(--lf-shadow, 0 8px 26px rgba(0, 0, 0, 0.2));
+  font-size: 12px;
+}
+
+.lf-float-pill button {
+  background: transparent;
+  border: none;
+  color: var(--lf-bubble-text, var(--lf-bg));
+  padding: 4px 8px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.lf-float-pill button:hover { background: rgba(128, 128, 128, 0.24); }
+
+.lf-float-pill-sep {
+  width: 1px;
+  height: 14px;
+  background: rgba(128, 128, 128, 0.35);
+}
+
+/* Floating comment composer & hover cards */
+.lf-float-composer,
+.lf-hover-card {
+  position: fixed;
+  background: var(--lf-surface);
+  border: 1px solid var(--lf-border-strong);
+  box-shadow: var(--lf-shadow, 0 8px 26px rgba(0, 0, 0, 0.18));
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.lf-float-composer {
+  z-index: 970;
+  width: min(320px, calc(100vw - 16px));
+  padding: 10px;
+  border-radius: 9px;
+}
+
+.lf-hover-card {
+  z-index: 950;
+  width: min(290px, calc(100vw - 16px));
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+
+.lf-anchor-quote {
+  font-size: 11.5px;
+  color: var(--lf-text-secondary);
+  border-left: 2px solid var(--lf-border-strong);
+  padding-left: 7px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lf-card-body {
+  color: var(--lf-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lf-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.lf-float-composer textarea,
+.lf-sidebar-item textarea {
+  width: 100%;
+  min-height: 56px;
+  padding: 6px 8px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 5px;
+  background: var(--lf-bg);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 13px;
+  resize: vertical;
+}
+
+.lf-sidebar-item textarea { background: var(--lf-surface); }
+
+/* Top-right Comments toggle + collapsible slide-over sidebar */
+.lf-comments-toggle {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  z-index: 920;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-surface);
+  color: var(--lf-text);
+  font-size: 12.5px;
+  font-weight: 500;
+  box-shadow: var(--lf-shadow-sm, 0 3px 12px rgba(0, 0, 0, 0.08));
+}
+
+.lf-comments-toggle.has-notes { border-color: var(--lf-accent); }
+
+.lf-comments-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--lf-accent);
+  color: var(--lf-accent-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.lf-comments-count[hidden] { display: none; }
+
+.lf-sidebar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(340px, 92vw);
+  z-index: 940;
+  background: var(--lf-surface);
+  border-left: 1px solid var(--lf-border-strong);
+  box-shadow: var(--lf-shadow, 0 8px 26px rgba(0, 0, 0, 0.18));
+  display: flex;
+  flex-direction: column;
+  transform: translateX(104%);
+  transition: transform 0.18s ease;
+}
+
+.lf-sidebar.is-open { transform: translateX(0); }
+
+.lf-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--lf-border);
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.lf-sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lf-sidebar-empty {
+  font-size: 13px;
+  color: var(--lf-text-tertiary);
+  padding: 6px 2px;
+}
+
+.lf-sidebar-item {
+  padding: 9px 11px;
+  border: 1px solid var(--lf-border);
+  border-radius: 7px;
+  background: var(--lf-bg);
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lf-sidebar-item:hover { border-color: var(--lf-accent); }
+
+/* Fixed T3 Code-style attached-chip composer dock (hidden in Loopflow Desktop) */
+.lf-dock {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 1000;
+  width: min(820px, calc(100vw - 24px));
+  padding: 9px 12px;
+  background: var(--lf-surface);
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 11px;
+  box-shadow: var(--lf-shadow, 0 8px 28px rgba(0, 0, 0, 0.16));
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lf-dock-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  max-height: 92px;
+  overflow-y: auto;
+}
+
+.lf-dock[hidden],
+.lf-dock-chips[hidden] { display: none; }
+
+.lf-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--lf-border-strong);
+  background: var(--lf-bg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.lf-chip:hover { border-color: var(--lf-accent); }
+
+.lf-chip-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--lf-surface-element);
+  color: var(--lf-text-secondary);
+  flex-shrink: 0;
+}
+
+.lf-chip-tag.tag-note { background: var(--lf-highlight); color: var(--lf-accent); }
+.lf-chip-tag.tag-lines { background: var(--lf-working-fill); color: var(--lf-working-ink); }
+.lf-chip-tag.tag-choice { background: var(--lf-success-fill); color: var(--lf-success-ink); }
+.lf-chip-tag.tag-answer { background: var(--lf-warning-fill); color: var(--lf-warning-ink); }
+.lf-chip-tag.tag-run { background: var(--lf-failure-fill); color: var(--lf-failure-ink); }
+
+.lf-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+}
+
+.lf-chip-x {
+  border: none;
+  background: transparent;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--lf-text-tertiary);
+}
+
+.lf-chip-x:hover {
+  background: transparent;
+  color: var(--lf-failure-ink);
+}
+
+.lf-dock-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.lf-dock-input {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--lf-border-strong);
+  border-radius: 6px;
+  background: var(--lf-bg);
+  color: var(--lf-text);
+  font-family: var(--lf-font-sans);
+  font-size: 13.5px;
+}
+
+.lf-dock-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.lf-dock-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.lf-dock-preview {
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: var(--lf-bg);
+  border: 1px solid var(--lf-border);
+  font-family: var(--lf-font-mono);
+  font-size: 11.5px;
+  color: var(--lf-text-secondary);
+  word-break: break-word;
+  max-height: 84px;
+  overflow-y: auto;
+}
+
+.lf-dock-status {
+  font-size: 12.5px;
+  color: var(--lf-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lf-dock-status.is-error { color: var(--lf-failure-ink); }
+.lf-dock-status.is-ok { color: var(--lf-success-ink); }
+
+</style>
+</head>
+<body>
+<main class="lf-page">
+<h1>Pause Task Graphs at breakpoints instead of interactive steps</h1>
+
+<p>
+  <strong>LOO-1096</strong> · <a href="https://github.com/loopflowstudio/loopflow/pull/2042">PR #2042</a> ·
+  <code>e3fc33746d</code> · reading order in <code data-path="scratch/tour.yaml">scratch/tour.yaml</code>
+</p>
+
+<blockquote>
+  <p>
+    <strong>Sync required before delivery:</strong> PR #2042 is 12 commits behind <code>origin/main</code> with 57 merge conflicts — including <code>#2036</code> (<code>lf task pause</code>), <code>#2048</code> (review pages / <code>lf page build</code>), <code>#2049</code> (finishing Tasks at merge and deleting <code>verify</code>), <code>#2047</code> (reordering <code>build</code>/<code>plan</code>, adding <code>quick</code>, deleting <code>kickoff-demo.yaml</code>), and <code>#2050</code>–<code>#2057</code>. Delivery needs a sync and conflict-resolution pass first.
+  </p>
+</blockquote>
+
+<h2>1. What was built</h2>
+
+<p>
+  Every reviewable skill (<code>explore</code>, <code>ship-review</code>, <code>design</code>, <code>research</code>, <code>demo</code>) now runs as an ordinary headless Graph worker on its own configured <code>agent</code> and model, followed by a standalone <code>- break</code> marker. Instead of stopping <em>before</em> an <code>interactive:</code> step and asking your Task conversation to switch hats and run the skill on its own model, the worker finishes first, parks at <code>- break</code>, and wakes the Task's primary conversation — or starts it in a held terminal if you quit it — with the summary, <code>scratch/</code> artifact links, recommended continuation, and numbered questions already waiting.
+</p>
+
+<div class="lf-before-after">
+  <div class="lf-before-after-pane">
+    <div class="lf-before-after-label">Before</div>
+    
+    <p><strong>Before:</strong> Graph paused before <code>interactive: explore</code> and <code>interactive: ship-review</code>; the primary conversation ran the skill itself on its own model.</p>
+<pre>steps:
+- interactive: explore
+- graph: plan
+- loop:
+    - loop:
+        - graph: build
+        - interactive: ship-review
+    - graph: deliver</pre>
+  
+  </div>
+  <div class="lf-before-after-pane">
+    <div class="lf-before-after-label">After</div>
+    
+    <p><strong>After:</strong> Skills run headless on their configured <code>skills.&lt;name&gt;.agent</code>, then park at <code>- break</code> and wake the Task conversation.</p>
+<pre>steps:
+- step: explore
+- break
+- graph: plan
+- loop:
+    - loop:
+        - graph: build
+        - step: ship-review
+        - break
+    - graph: deliver</pre>
+  
+  </div>
+</div>
+
+
+<p>
+  <strong>How to try it:</strong>
+  <code>env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo build -p loopflow --bin lf &amp;&amp; ROOT=/tmp/lf-demo-bp &amp;&amp; rm -rf "$ROOT" &amp;&amp; mkdir -p "$ROOT/home" "$ROOT/repo" &amp;&amp; git -C "$ROOT/repo" init -b main &amp;&amp; echo "# Demo" &gt; "$ROOT/repo/README.md" &amp;&amp; git -C "$ROOT/repo" add . &amp;&amp; git -C "$ROOT/repo" commit -m init &amp;&amp; env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') LF_HOME="$ROOT/home" LF_BIN="$PWD/target/debug/lf" "$PWD/target/debug/lf" -C "$ROOT/repo" task create 'Compare two layouts for the Task list' --graph feature --run --setting 'skills.explore.agent=claude:sonnet'</code>
+</p>
+
+<h3>Real output · Quit primary wakes at breakpoint and you override the recommendation</h3>
+<p>From real-Claude QA (<code data-path="scratch/qa.html">scratch/qa.html</code>, <code>claude:haiku</code> worker, default Claude primary). The primary ran <code>/exit</code> while the worker executed; parking at <code>after-note</code> restarted the primary in a held terminal with this turn:</p>
+
+<pre># 1. Worker finishes, parks at `after-note`, wakes the quit primary:
+The naming run (5b7f4cc2) finished and the Task is waiting for your review at the after-note step.
+
+What the worker produced: one file, scratch/note.md, with two candidate names for the command-line tool. Nothing else was edited.
+- recipe: matches the repo name and the README title ("recipe tool"). It's short and easy to type.
+- cookbook: names the collection of recipes rather than the act of running one.
+
+Recommendation: use recipe, and check for name clashes before release.
+Question 1: Which name?
+- a) recipe (recommended)
+- b) cookbook
+Once you choose, the Task moves on to its final step, echo.
+
+# 2. You reply overriding the recommendation:
+&gt; 1b, go with cookbook; it reads better on a shelf of tools
+
+# 3. Primary continues this exact arrival:
+$ lf task run --at-arrival 35738b2d-… \
+    --reason '"1b, go with cookbook; it reads better on a shelf of tools" (selects option b: `cookbook`, over the recommended `recipe`)'
+b0b5de · naming from echo running as Graph run …
+
+# 4. Next worker receives your exact words (cleared once that step settles):
+# Received
+"1b, go with cookbook; it reads better on a shelf of tools" (selects option b: `cookbook`, over the recommended `recipe`)</pre>
+
+<h3>Real output · Waiting for breakpoints, loop overrides, and blocked verdicts</h3>
+<pre># Wait for a review stop even when a PR is already open:
+$ lf task wait c917ac --until breakpoint --timeout 300
+  Graph cmdbreak: At breakpoint check.
+  latest Graph: Graph cmdbreak stopped at breakpoint check; `lf task run c917ac` continues it · started by QA Person
+  action: run  (At breakpoint check.)
+
+# Override a loop breakpoint's verdict without resetting loop pass counts:
+$ lf task run a57fc7 --decision iterate --reason 'try names that start with k'
+a57fc7 · naming-loop from note running as Graph run …
+
+# Blocked verdict at a breakpoint (stops even under auto: on):
+  SelectionState::Breakpoint, Blocked, NextMoveOwner::User
+  actions: no_action (At breakpoint after-ship-review. Blocked: …)
+  Desktop workflow bar omits plain "Continue"; reply in conversation with --at-arrival / --decision</pre>
+
+<h2>2. How it works</h2>
+
+<h3>Compiling <code>- break</code> and translating legacy <code>interactive:</code></h3>
+<p>
+  <code>- break</code> compiles to <code>ConcreteStep::Breakpoint</code> and gets an automatic name (<code>after-&lt;prev&gt;</code>, or <code>break</code> at step 0, deduplicated with <code>#2</code>). Legacy <code>interactive: &lt;skill&gt;</code> compiles into the same worker-then-breakpoint pair so existing Graphs keep working until LOO-1100 removes the reader. Inside a loop, the backward edge moves from the deciding skill to its trailing breakpoint so the worker's verdict is held for review.
+</p>
+
+<div class="lf-codeblock" data-path="rust/loopflow-execution/src/graph/mod.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-execution/src/graph/mod.rs:1308-1343</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-hunk"><td colspan="4">@@ -1217,40 +1281,54 @@ fn compile_steps(</td></tr>
+<tr class="lf-add lf-code-row" data-line="1308"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1308</td><td class="lf-sign">+</td><td>                    id: step.id.clone(),</td></tr>
+<tr class="lf-add lf-code-row" data-line="1309"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1309</td><td class="lf-sign">+</td><td>                    interactive: false,</td></tr>
+<tr class="lf-add lf-code-row" data-line="1310"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1310</td><td class="lf-sign">+</td><td>                    interactive_name: None,</td></tr>
+<tr class="lf-add lf-code-row" data-line="1311"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1311</td><td class="lf-sign">+</td><td>                    returns: None,</td></tr>
+<tr class="lf-add lf-code-row" data-line="1312"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1312</td><td class="lf-sign">+</td><td>                    sources: sources.to_vec(),</td></tr>
+<tr class="lf-add lf-code-row" data-line="1313"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1313</td><td class="lf-sign">+</td><td>                }));</td></tr>
+<tr class="lf-add lf-code-row" data-line="1314"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1314</td><td class="lf-sign">+</td><td>                // LOO-1100: released interactive items spell a worker and its review together.</td></tr>
+<tr class="lf-add lf-code-row" data-line="1315"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1315</td><td class="lf-sign">+</td><td>                if step.interactive {</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Legacy <code>interactive: &lt;skill&gt;</code> compiles as the skill worker followed by an unnamed breakpoint.</td></tr>
+<tr class="lf-add lf-code-row" data-line="1316"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1316</td><td class="lf-sign">+</td><td>                    items.push(ResolvedGraphItem::Breakpoint(Breakpoint {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1317"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1317</td><td class="lf-sign">+</td><td>                        name: String::new(),</td></tr>
+<tr class="lf-add lf-code-row" data-line="1318"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1318</td><td class="lf-sign">+</td><td>                        sources: sources.to_vec(),</td></tr>
+<tr class="lf-add lf-code-row" data-line="1319"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1319</td><td class="lf-sign">+</td><td>                        returns: None,</td></tr>
+<tr class="lf-add lf-code-row" data-line="1320"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1320</td><td class="lf-sign">+</td><td>                    }));</td></tr>
+<tr class="lf-add lf-code-row" data-line="1321"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1321</td><td class="lf-sign">+</td><td>                }</td></tr>
+<tr class="lf-add lf-code-row" data-line="1322"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1322</td><td class="lf-sign">+</td><td>            }</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1249" data-line="1323"><td class="lf-ln lf-ln-old">1249</td><td class="lf-ln lf-ln-new">1323</td><td class="lf-sign"> </td><td>            Target::Xor(branch) =&gt; items.push(compile_branch(branch, catalog, sources)?),</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1250" data-line="1324"><td class="lf-ln lf-ln-old">1250</td><td class="lf-ln lf-ln-new">1324</td><td class="lf-sign"> </td><td>            Target::Loop(block) =&gt; {</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1251" data-line="1325"><td class="lf-ln lf-ln-old">1251</td><td class="lf-ln lf-ln-new">1325</td><td class="lf-sign"> </td><td>                let mut body = compile_steps(block, catalog, sources)?;</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1252" data-line="1326"><td class="lf-ln lf-ln-old">1252</td><td class="lf-ln lf-ln-new">1326</td><td class="lf-sign"> </td><td>                let back = flatten_resolved(&amp;body).len().saturating_sub(1);</td></tr>
+<tr class="lf-add lf-code-row" data-line="1327"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1327</td><td class="lf-sign">+</td><td>                let reviews_skill = matches!(body.as_slice(), [.., ResolvedGraphItem::Skill(skill), ResolvedGraphItem::Breakpoint(_)] if skill.returns.is_none());</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1253" data-line="1328"><td class="lf-ln lf-ln-old">1253</td><td class="lf-ln lf-ln-new">1328</td><td class="lf-sign"> </td><td>                match body.last_mut() {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1329"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1329</td><td class="lf-sign">+</td><td>                    Some(ResolvedGraphItem::Breakpoint(stop)) if reviews_skill =&gt; {</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">When a loop ends in <code>skill</code> + <code>break</code>, the backward edge attaches to the breakpoint so the worker's verdict pauses for review.</td></tr>
+<tr class="lf-add lf-code-row" data-line="1330"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1330</td><td class="lf-sign">+</td><td>                        stop.returns = Some(back);</td></tr>
+<tr class="lf-add lf-code-row" data-line="1331"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1331</td><td class="lf-sign">+</td><td>                    }</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1254" data-line="1332"><td class="lf-ln lf-ln-old">1254</td><td class="lf-ln lf-ln-new">1332</td><td class="lf-sign"> </td><td>                    Some(ResolvedGraphItem::Skill(decider)) if back &gt; 0 =&gt; {</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1255" data-line="1333"><td class="lf-ln lf-ln-old">1255</td><td class="lf-ln lf-ln-new">1333</td><td class="lf-sign"> </td><td>                        decider.returns = Some(back);</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1256" data-line="1334"><td class="lf-ln lf-ln-old">1256</td><td class="lf-ln lf-ln-new">1334</td><td class="lf-sign"> </td><td>                    }</td></tr>
+</tbody></table></div></div>
+
+<h3>Stopping at a breakpoint and waking the primary conversation</h3>
+<p>
+  In the Graph runner, hitting <code>ConcreteStep::Breakpoint</code> checks <code>continue_at_breakpoint</code> (returns <code>true</code> under <code>-b</code> or <code>auto: on</code> unless the verdict is <code>blocked</code>, else <code>false</code>). When it stops, <code>execute</code> builds the handoff from the preceding worker's answer or verdict, resolves any <code>scratch/</code> paths to real files on disk, and records the arrival atomically via <code>arrive_task_graph</code> — which also queues the task update that wakes the primary conversation (or starts it held if stopped).
+</p>
+
+<div class="lf-codeblock" data-path="rust/loopflow-execution/src/graph/runner.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-execution/src/graph/runner.rs:153-166</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-hunk"><td colspan="4">@@ -137,15 +152,28 @@ impl&lt;E: SkillExecutor&gt; GraphRunner&lt;E&gt; {</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="138" data-line="153"><td class="lf-ln lf-ln-old">138</td><td class="lf-ln lf-ln-new">153</td><td class="lf-sign"> </td><td>                total: items.len(),</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="139" data-line="154"><td class="lf-ln lf-ln-old">139</td><td class="lf-ln lf-ln-new">154</td><td class="lf-sign"> </td><td>            }),</td></tr>
+<tr class="lf-add lf-code-row" data-line="155"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">155</td><td class="lf-sign">+</td><td>            direction: leaf.progress.step_direction(),</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="141" data-line="156"><td class="lf-ln lf-ln-old">141</td><td class="lf-ln lf-ln-new">156</td><td class="lf-sign"> </td><td>        };</td></tr>
+<tr class="lf-add lf-code-row" data-line="157"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">157</td><td class="lf-sign">+</td><td>        let (outcome, process) = match item {</td></tr>
+<tr class="lf-add lf-code-row" data-line="158"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">158</td><td class="lf-sign">+</td><td>            ConcreteStep::Breakpoint(stop) =&gt; {</td></tr>
+<tr class="lf-add lf-code-row" data-line="159"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">159</td><td class="lf-sign">+</td><td>                return if self.executor.continue_at_breakpoint(stop, cursor)? {</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Auto/batch runs settle straight through non-blocked breakpoints; interactive runs park and return <code>StoppedAt</code>.</td></tr>
+<tr class="lf-add lf-code-row" data-line="160"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">160</td><td class="lf-sign">+</td><td>                    settle_step(items, cursor)</td></tr>
+<tr class="lf-add lf-code-row" data-line="161"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">161</td><td class="lf-sign">+</td><td>                } else {</td></tr>
+<tr class="lf-add lf-code-row" data-line="162"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">162</td><td class="lf-sign">+</td><td>                    Ok(Some(GraphOutcome::StoppedAt(stop.name.clone())))</td></tr>
+<tr class="lf-add lf-code-row" data-line="163"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">163</td><td class="lf-sign">+</td><td>                };</td></tr>
+<tr class="lf-add lf-code-row" data-line="164"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">164</td><td class="lf-sign">+</td><td>            }</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="143" data-line="165"><td class="lf-ln lf-ln-old">143</td><td class="lf-ln lf-ln-new">165</td><td class="lf-sign"> </td><td>            ConcreteStep::Skill(skill) =&gt; self.executor.run_skill(skill, ctx).await?,</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="144" data-line="166"><td class="lf-ln lf-ln-old">144</td><td class="lf-ln lf-ln-new">166</td><td class="lf-sign"> </td><td>            ConcreteStep::Xor(branch) =&gt; {</td></tr>
+</tbody></table></div></div>
+
+<div class="lf-codeblock" data-path="rust/loopflow/src/lf/commands/graph.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow/src/lf/commands/graph.rs:624-647</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-hunk"><td colspan="4">@@ -637,26 +621,28 @@ fn execute(</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="637" data-line="621"><td class="lf-ln lf-ln-old">637</td><td class="lf-ln lf-ln-new">621</td><td class="lf-sign"> </td><td>        journal::mark_run_owner(RunOwner::GraphRun);</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="638" data-line="622"><td class="lf-ln lf-ln-old">638</td><td class="lf-ln lf-ln-new">622</td><td class="lf-sign"> </td><td>        drop(admission);</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="639" data-line="623"><td class="lf-ln lf-ln-old">639</td><td class="lf-ln lf-ln-new">623</td><td class="lf-sign"> </td><td>        let outcome = drive(&amp;running, start).await?;</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="640"><td class="lf-ln lf-ln-old">640</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>        // A Task run&#39;s Graph writes where it left the Task. Blocked at an</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="641"><td class="lf-ln lf-ln-old">641</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>        // interactive step, the Task waits there: what blocks it is for a</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="642"><td class="lf-ln lf-ln-old">642</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>        // person, and nothing before it runs again.</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="643" data-line="624"><td class="lf-ln lf-ln-old">643</td><td class="lf-ln lf-ln-new">624</td><td class="lf-sign"> </td><td>        if let (Some(carrier), Some(task)) = (task_run, &amp;running.task) {</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="644"><td class="lf-ln lf-ln-old">644</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>            let blocked_at = match (&amp;outcome, running.current()) {</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="645"><td class="lf-ln lf-ln-old">645</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>                (GraphOutcome::Blocked(_), Some(ConcreteStep::Skill(skill))) =&gt; {</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="646"><td class="lf-ln lf-ln-old">646</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>                    skill.interactive_step().map(str::to_owned)</td></tr>
+<tr class="lf-add lf-code-row" data-line="625"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">625</td><td class="lf-sign">+</td><td>            let current = running.current();</td></tr>
+<tr class="lf-add lf-code-row" data-line="626"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">626</td><td class="lf-sign">+</td><td>            let step = match (&amp;outcome, current) {</td></tr>
+<tr class="lf-add lf-code-row" data-line="627"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">627</td><td class="lf-sign">+</td><td>                (GraphOutcome::Completed, _) =&gt; Some(loopflow_execution::task_graph::END),</td></tr>
+<tr class="lf-add lf-code-row" data-line="628"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">628</td><td class="lf-sign">+</td><td>                (GraphOutcome::StoppedAt(step), _) =&gt; Some(step.as_str()),</td></tr>
+<tr class="lf-add lf-code-row" data-line="629"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">629</td><td class="lf-sign">+</td><td>                (GraphOutcome::Blocked(_), Some(ConcreteStep::Breakpoint(stop))) =&gt; {</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">A <code>blocked</code> verdict on a breakpoint still parks at the breakpoint name with the blocker attached.</td></tr>
+<tr class="lf-add lf-code-row" data-line="630"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">630</td><td class="lf-sign">+</td><td>                    Some(stop.name.as_str())</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="647" data-line="631"><td class="lf-ln lf-ln-old">647</td><td class="lf-ln lf-ln-new">631</td><td class="lf-sign"> </td><td>                }</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="648" data-line="632"><td class="lf-ln lf-ln-old">648</td><td class="lf-ln lf-ln-new">632</td><td class="lf-sign"> </td><td>                _ =&gt; None,</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="649" data-line="633"><td class="lf-ln lf-ln-old">649</td><td class="lf-ln lf-ln-new">633</td><td class="lf-sign"> </td><td>            };</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="655" data-line="634"><td class="lf-ln lf-ln-old">655</td><td class="lf-ln lf-ln-new">634</td><td class="lf-sign"> </td><td>            if let Some(step) = step {</td></tr>
+<tr class="lf-add lf-code-row" data-line="635"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">635</td><td class="lf-sign">+</td><td>                let review = matches!(current, Some(ConcreteStep::Breakpoint(_)))</td></tr>
+<tr class="lf-add lf-code-row" data-line="636"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">636</td><td class="lf-sign">+</td><td>                    .then(|| running.breakpoint_handoff(step, carrier))</td></tr>
+<tr class="lf-add lf-code-row" data-line="637"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">637</td><td class="lf-sign">+</td><td>                    .transpose()?;</td></tr>
+<tr class="lf-add lf-code-row" data-line="638"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">638</td><td class="lf-sign">+</td><td>                running.store.sqlite.arrive_task_graph(</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Stores <code>BreakpointArrival</code> on <code>task_graphs</code> and writes the handoff text in one transaction.</td></tr>
+<tr class="lf-add lf-code-row" data-line="639"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">639</td><td class="lf-sign">+</td><td>                    task,</td></tr>
+<tr class="lf-add lf-code-row" data-line="640"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">640</td><td class="lf-sign">+</td><td>                    carrier,</td></tr>
+<tr class="lf-add lf-code-row" data-line="641"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">641</td><td class="lf-sign">+</td><td>                    step,</td></tr>
+<tr class="lf-add lf-code-row" data-line="642"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">642</td><td class="lf-sign">+</td><td>                    review</td></tr>
+<tr class="lf-add lf-code-row" data-line="643"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">643</td><td class="lf-sign">+</td><td>                        .as_ref()</td></tr>
+<tr class="lf-add lf-code-row" data-line="644"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">644</td><td class="lf-sign">+</td><td>                        .map(|(record, text)| (record.as_str(), text.as_str())),</td></tr>
+<tr class="lf-add lf-code-row" data-line="645"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">645</td><td class="lf-sign">+</td><td>                )?;</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="660" data-line="646"><td class="lf-ln lf-ln-old">660</td><td class="lf-ln lf-ln-new">646</td><td class="lf-sign"> </td><td>            }</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="661" data-line="647"><td class="lf-ln lf-ln-old">661</td><td class="lf-ln lf-ln-new">647</td><td class="lf-sign"> </td><td>        }</td></tr>
+</tbody></table></div></div>
+
+<div class="lf-codeblock" data-path="rust/loopflow/src/lf/commands/graph.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow/src/lf/commands/graph.rs:1112-1178</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-hunk"><td colspan="4">@@ -1144,6 +1109,99 @@ impl RunningGraph&lt;&#39;_&gt; {</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1144" data-line="1109"><td class="lf-ln lf-ln-old">1144</td><td class="lf-ln lf-ln-new">1109</td><td class="lf-sign"> </td><td>            .map(|(session, input, _)| (session, input)))</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1145" data-line="1110"><td class="lf-ln lf-ln-old">1145</td><td class="lf-ln lf-ln-new">1110</td><td class="lf-sign"> </td><td>    }</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1146" data-line="1111"><td class="lf-ln lf-ln-old">1146</td><td class="lf-ln lf-ln-new">1111</td><td class="lf-sign"> </td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="1112"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1112</td><td class="lf-sign">+</td><td>    fn breakpoint_handoff(&amp;self, step: &amp;str, carrier: &amp;LfProcessId) -&gt; Result&lt;(String, String)&gt; {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1113"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1113</td><td class="lf-sign">+</td><td>        let cursor = self</td></tr>
+<tr class="lf-add lf-code-row" data-line="1114"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1114</td><td class="lf-sign">+</td><td>            .position</td></tr>
+<tr class="lf-add lf-code-row" data-line="1115"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1115</td><td class="lf-sign">+</td><td>            .lock()</td></tr>
+<tr class="lf-add lf-code-row" data-line="1116"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1116</td><td class="lf-sign">+</td><td>            .expect(&quot;Graph position mutex poisoned&quot;)</td></tr>
+<tr class="lf-add lf-code-row" data-line="1117"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1117</td><td class="lf-sign">+</td><td>            .clone();</td></tr>
+<tr class="lf-add lf-code-row" data-line="1118"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1118</td><td class="lf-sign">+</td><td>        let mut text = self.breakpoint_review(step, &amp;cursor)?;</td></tr>
+<tr class="lf-add lf-code-row" data-line="1119"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1119</td><td class="lf-sign">+</td><td>        let (body, leaf) = cursor.current_body(self.steps);</td></tr>
+<tr class="lf-add lf-code-row" data-line="1120"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1120</td><td class="lf-sign">+</td><td>        text.push_str(&amp;format!(&quot;\nPresent the result, links, proposed next action and questions in this conversation. Discuss questions here. When the person chooses, continue with `lf task run --at-arrival {carrier} --reason &lt;their-reply-and-selected-option&gt;`.&quot;));</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Embeds the exact <code>--at-arrival &lt;carrier&gt;</code> command so stale clicks or replies can't advance a later review.</td></tr>
+<tr class="lf-add lf-code-row" data-line="1121"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1121</td><td class="lf-sign">+</td><td>        if return_target(body, leaf.index).is_some() {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1122"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1122</td><td class="lf-sign">+</td><td>            text.push_str(</td></tr>
+<tr class="lf-add lf-code-row" data-line="1123"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1123</td><td class="lf-sign">+</td><td>                &quot; To change the loop decision, include `--decision advance` or `--decision iterate`.&quot;,</td></tr>
+<tr class="lf-add lf-code-row" data-line="1124"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1124</td><td class="lf-sign">+</td><td>            );</td></tr>
+<tr class="lf-add lf-code-row" data-line="1125"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1125</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add lf-code-row" data-line="1126"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1126</td><td class="lf-sign">+</td><td>        eprintln!(&quot;{text}&quot;);</td></tr>
+<tr class="lf-add lf-code-row" data-line="1127"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1127</td><td class="lf-sign">+</td><td>        let arrival = loopflow_execution::store::task_work::BreakpointArrival {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1128"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1128</td><td class="lf-sign">+</td><td>            id: carrier.clone(),</td></tr>
+<tr class="lf-add lf-code-row" data-line="1129"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1129</td><td class="lf-sign">+</td><td>            cursor,</td></tr>
+<tr class="lf-add lf-code-row" data-line="1130"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1130</td><td class="lf-sign">+</td><td>        };</td></tr>
+<tr class="lf-add lf-code-row" data-line="1131"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1131</td><td class="lf-sign">+</td><td>        Ok((serde_json::to_string(&amp;arrival)?, text))</td></tr>
+<tr class="lf-add lf-code-row" data-line="1132"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1132</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add lf-code-row" data-line="1133"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1133</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="1134"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1134</td><td class="lf-sign">+</td><td>    fn breakpoint_review(&amp;self, name: &amp;str, cursor: &amp;ExecutionCursor) -&gt; Result&lt;String&gt; {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1135"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1135</td><td class="lf-sign">+</td><td>        let mut lines = vec![format!(&quot;Breakpoint {name}&quot;)];</td></tr>
+<tr class="lf-add lf-code-row" data-line="1136"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1136</td><td class="lf-sign">+</td><td>        let body = if let Some(verdict) = &amp;cursor.leaf().progress.verdict {</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Prefers the deciding skill's verdict summary, then falls back to the preceding worker's recorded final answer or command outcome.</td></tr>
+<tr class="lf-add lf-code-row" data-line="1137"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1137</td><td class="lf-sign">+</td><td>            Some(verdict.summary.clone())</td></tr>
+<tr class="lf-add lf-code-row" data-line="1138"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1138</td><td class="lf-sign">+</td><td>        } else if let Some(process) = &amp;cursor.producer {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1139"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1139</td><td class="lf-sign">+</td><td>            let result = match self.captured(Some(process))? {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1140"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1140</td><td class="lf-sign">+</td><td>                Some((_, input)) =&gt; {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1141"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1141</td><td class="lf-sign">+</td><td>                    match loopflow_execution::transcript::answer::input_final_answer_for_people(</td></tr>
+<tr class="lf-add lf-code-row" data-line="1142"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1142</td><td class="lf-sign">+</td><td>                        &amp;self.store.sqlite,</td></tr>
+<tr class="lf-add lf-code-row" data-line="1143"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1143</td><td class="lf-sign">+</td><td>                        &amp;input,</td></tr>
+<tr class="lf-add lf-code-row" data-line="1144"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1144</td><td class="lf-sign">+</td><td>                    ) {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1145"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1145</td><td class="lf-sign">+</td><td>                        Ok(Some(answer)) =&gt; answer,</td></tr>
+<tr class="lf-add lf-code-row" data-line="1146"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1146</td><td class="lf-sign">+</td><td>                        Ok(None) =&gt; format!(&quot;Step {process} finished without a recorded answer.&quot;),</td></tr>
+<tr class="lf-add lf-code-row" data-line="1147"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1147</td><td class="lf-sign">+</td><td>                        Err(error) =&gt; format!(&quot;Answer unavailable for {input}: {error}&quot;),</td></tr>
+<tr class="lf-add lf-code-row" data-line="1148"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1148</td><td class="lf-sign">+</td><td>                    }</td></tr>
+<tr class="lf-add lf-code-row" data-line="1149"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1149</td><td class="lf-sign">+</td><td>                }</td></tr>
+<tr class="lf-add lf-code-row" data-line="1150"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1150</td><td class="lf-sign">+</td><td>                None =&gt; self.recorded_step_result(process)?,</td></tr>
+<tr class="lf-add lf-code-row" data-line="1151"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1151</td><td class="lf-sign">+</td><td>            };</td></tr>
+<tr class="lf-add lf-code-row" data-line="1152"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1152</td><td class="lf-sign">+</td><td>            Some(result)</td></tr>
+<tr class="lf-add lf-code-row" data-line="1153"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1153</td><td class="lf-sign">+</td><td>        } else {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1154"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1154</td><td class="lf-sign">+</td><td>            None</td></tr>
+<tr class="lf-add lf-code-row" data-line="1155"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1155</td><td class="lf-sign">+</td><td>        };</td></tr>
+<tr class="lf-add lf-code-row" data-line="1156"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1156</td><td class="lf-sign">+</td><td>        if let Some(body) = body {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1157"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1157</td><td class="lf-sign">+</td><td>            lines.push(body.clone());</td></tr>
+<tr class="lf-add lf-code-row" data-line="1158"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1158</td><td class="lf-sign">+</td><td>            lines.extend(resolve_artifact_links(self.cwd, &amp;body));</td></tr>
+<tr class="lf-add lf-code-row" data-line="1159"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1159</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add lf-code-row" data-line="1160"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1160</td><td class="lf-sign">+</td><td>        let mut next = cursor.clone();</td></tr>
+<tr class="lf-add lf-code-row" data-line="1161"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1161</td><td class="lf-sign">+</td><td>        lines.push(match next.finish(self.steps) {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1162"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1162</td><td class="lf-sign">+</td><td>            Ok(true) =&gt; &quot;Continuing finishes the Graph.&quot;.into(),</td></tr>
+<tr class="lf-add lf-code-row" data-line="1163"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1163</td><td class="lf-sign">+</td><td>            Ok(false) =&gt; {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1164"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1164</td><td class="lf-sign">+</td><td>                let (body, leaf) = next.current_body(self.steps);</td></tr>
+<tr class="lf-add lf-code-row" data-line="1165"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1165</td><td class="lf-sign">+</td><td>                match &amp;body[leaf.index] {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1166"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1166</td><td class="lf-sign">+</td><td>                    ConcreteStep::Breakpoint(stop) =&gt; {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1167"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1167</td><td class="lf-sign">+</td><td>                        format!(&quot;Continuing reaches breakpoint {}.&quot;, stop.name)</td></tr>
+<tr class="lf-add lf-code-row" data-line="1168"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1168</td><td class="lf-sign">+</td><td>                    }</td></tr>
+<tr class="lf-add lf-code-row" data-line="1169"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1169</td><td class="lf-sign">+</td><td>                    step =&gt; format!(</td></tr>
+<tr class="lf-add lf-code-row" data-line="1170"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1170</td><td class="lf-sign">+</td><td>                        &quot;Continuing runs {}.&quot;,</td></tr>
+<tr class="lf-add lf-code-row" data-line="1171"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1171</td><td class="lf-sign">+</td><td>                        loopflow_execution::task_graph::step_name(step)</td></tr>
+<tr class="lf-add lf-code-row" data-line="1172"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1172</td><td class="lf-sign">+</td><td>                    ),</td></tr>
+<tr class="lf-add lf-code-row" data-line="1173"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1173</td><td class="lf-sign">+</td><td>                }</td></tr>
+<tr class="lf-add lf-code-row" data-line="1174"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1174</td><td class="lf-sign">+</td><td>            }</td></tr>
+<tr class="lf-add lf-code-row" data-line="1175"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1175</td><td class="lf-sign">+</td><td>            Err(error) =&gt; format!(&quot;Blocked: {error}&quot;),</td></tr>
+<tr class="lf-add lf-code-row" data-line="1176"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1176</td><td class="lf-sign">+</td><td>        });</td></tr>
+<tr class="lf-add lf-code-row" data-line="1177"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1177</td><td class="lf-sign">+</td><td>        Ok(lines.join(&quot;\n&quot;))</td></tr>
+<tr class="lf-add lf-code-row" data-line="1178"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1178</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1147" data-line="1205"><td class="lf-ln lf-ln-old">1147</td><td class="lf-ln lf-ln-new">1205</td><td class="lf-sign"> </td><td>    /// The Session a step&#39;s Process opened and the answer its turn returned.</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1148" data-line="1206"><td class="lf-ln lf-ln-old">1148</td><td class="lf-ln lf-ln-new">1206</td><td class="lf-sign"> </td><td>    fn answer(</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1149" data-line="1207"><td class="lf-ln lf-ln-old">1149</td><td class="lf-ln lf-ln-new">1207</td><td class="lf-sign"> </td><td>        &amp;self,</td></tr>
+<tr class="lf-hunk"><td colspan="4">@@ -1160,20 +1218,102 @@ impl RunningGraph&lt;&#39;_&gt; {</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1160" data-line="1218"><td class="lf-ln lf-ln-old">1160</td><td class="lf-ln lf-ln-new">1218</td><td class="lf-sign"> </td><td>    }</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1161" data-line="1219"><td class="lf-ln lf-ln-old">1161</td><td class="lf-ln lf-ln-new">1219</td><td class="lf-sign"> </td><td>}</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1162" data-line="1220"><td class="lf-ln lf-ln-old">1162</td><td class="lf-ln lf-ln-new">1220</td><td class="lf-sign"> </td><td></td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1163"><td class="lf-ln lf-ln-old">1163</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>/// What a headless agent reads at an interactive step. With a loop behind the</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1164"><td class="lf-ln lf-ln-old">1164</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>/// step it answers advance or iterate; blocked repeats with the blocker.</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1165"><td class="lf-ln lf-ln-old">1165</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>fn stand_in_message(step: &amp;str, repeats: bool) -&gt; String {</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1166"><td class="lf-ln lf-ln-old">1166</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    let person = loopflow_execution::config::participant_name()</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1167"><td class="lf-ln lf-ln-old">1167</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>        .ok()</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1168"><td class="lf-ln lf-ln-old">1168</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>        .flatten()</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1169"><td class="lf-ln lf-ln-old">1169</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>        .unwrap_or_else(|| &quot;the person who started this run&quot;.into());</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1170"><td class="lf-ln lf-ln-old">1170</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    let mut message = format!(</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1171"><td class="lf-ln lf-ln-old">1171</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>        &quot;\n\nNo one is available. You are standing in for {person} at {step}. Decide as they would, record why in your final message, and continue.&quot;</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1172"><td class="lf-ln lf-ln-old">1172</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    );</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1173"><td class="lf-ln lf-ln-old">1173</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    if repeats {</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1174"><td class="lf-ln lf-ln-old">1174</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>        message.push_str(&quot; Advance when the work before this step holds; iterate only for a concrete, repairable gap, naming it; there is no one to hand a blocker to.&quot;);</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1175" data-line="1257"><td class="lf-ln lf-ln-old">1175</td><td class="lf-ln lf-ln-new">1257</td><td class="lf-sign"> </td><td>    }</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1176"><td class="lf-ln lf-ln-old">1176</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    message</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1177" data-line="1317"><td class="lf-ln lf-ln-old">1177</td><td class="lf-ln lf-ln-new">1317</td><td class="lf-sign"> </td><td>}</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1178" data-line="1318"><td class="lf-ln lf-ln-old">1178</td><td class="lf-ln lf-ln-new">1318</td><td class="lf-sign"> </td><td></td></tr>
+</tbody></table></div></div>
+
+<h3>Continuing from a breakpoint</h3>
+<p>
+  <code>continue_from_breakpoint</code> validates <code>--at-arrival</code>, applies any <code>--decision advance|iterate</code> override on loop breakpoints, carries <code>--reason</code> as a one-step handoff (or loop iteration direction), clears <code>cursor.producer</code>, and advances the cursor without losing enclosing XOR routes or loop pass counts.
+</p>
+
+<div class="lf-codeblock" data-path="rust/loopflow-execution/src/ops/task.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-execution/src/ops/task.rs:1053-1107</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-hunk"><td colspan="4">@@ -975,78 +982,143 @@ pub fn select_task_run(</td></tr>
+<tr class="lf-add lf-code-row" data-line="1053"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1053</td><td class="lf-sign">+</td><td>fn continue_from_breakpoint(</td></tr>
+<tr class="lf-add lf-code-row" data-line="1054"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1054</td><td class="lf-sign">+</td><td>    graph: &amp;crate::task_graph::CapturedGraph,</td></tr>
+<tr class="lf-add lf-code-row" data-line="1055"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1055</td><td class="lf-sign">+</td><td>    arrival: &amp;crate::store::task_work::BreakpointArrival,</td></tr>
+<tr class="lf-add lf-code-row" data-line="1056"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1056</td><td class="lf-sign">+</td><td>    options: &amp;TaskProcessOptions,</td></tr>
+<tr class="lf-add lf-code-row" data-line="1057"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1057</td><td class="lf-sign">+</td><td>    reason: Option&lt;&amp;str&gt;,</td></tr>
+<tr class="lf-add lf-code-row" data-line="1058"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1058</td><td class="lf-sign">+</td><td>) -&gt; OpsResult&lt;(Option&lt;RunStart&gt;, bool)&gt; {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1059"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1059</td><td class="lf-sign">+</td><td>    use crate::graph::transitions::{GraphDecision, GraphVerdict};</td></tr>
+<tr class="lf-add lf-code-row" data-line="1060"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1060</td><td class="lf-sign">+</td><td>    let mut cursor = arrival.cursor.clone();</td></tr>
+<tr class="lf-add lf-code-row" data-line="1061"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1061</td><td class="lf-sign">+</td><td>    if let Some(decision) = options.decision {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1062"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1062</td><td class="lf-sign">+</td><td>        let (body, leaf) = cursor.current_body(&amp;graph.steps);</td></tr>
+<tr class="lf-add lf-code-row" data-line="1063"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1063</td><td class="lf-sign">+</td><td>        if crate::graph::return_target(body, leaf.index).is_none() {</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Refuses <code>--decision</code> on non-loop breakpoints like <code>after-explore</code>.</td></tr>
+<tr class="lf-add lf-code-row" data-line="1064"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1064</td><td class="lf-sign">+</td><td>            return Err(task_error(&quot;this breakpoint has no loop decision&quot;));</td></tr>
+<tr class="lf-add lf-code-row" data-line="1065"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1065</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add lf-code-row" data-line="1066"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1066</td><td class="lf-sign">+</td><td>        let progress = &amp;mut cursor.leaf_mut().progress;</td></tr>
+<tr class="lf-add lf-code-row" data-line="1067"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1067</td><td class="lf-sign">+</td><td>        match progress.verdict.as_mut() {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1068"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1068</td><td class="lf-sign">+</td><td>            Some(verdict) =&gt; {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1069"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1069</td><td class="lf-sign">+</td><td>                verdict.decision = decision;</td></tr>
+<tr class="lf-add lf-code-row" data-line="1070"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1070</td><td class="lf-sign">+</td><td>                if let Some(reason) = reason {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1071"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1071</td><td class="lf-sign">+</td><td>                    verdict.summary = reason.to_owned();</td></tr>
+<tr class="lf-add lf-code-row" data-line="1072"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1072</td><td class="lf-sign">+</td><td>                }</td></tr>
+<tr class="lf-add lf-code-row" data-line="1073"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1073</td><td class="lf-sign">+</td><td>            }</td></tr>
+<tr class="lf-add lf-code-row" data-line="1074"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1074</td><td class="lf-sign">+</td><td>            None =&gt; {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1075"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1075</td><td class="lf-sign">+</td><td>                let summary = match reason {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1076"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1076</td><td class="lf-sign">+</td><td>                    Some(reason) =&gt; reason.to_owned(),</td></tr>
+<tr class="lf-add lf-code-row" data-line="1077"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1077</td><td class="lf-sign">+</td><td>                    None if decision == GraphDecision::Iterate =&gt; {</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Iterating without a prior verdict requires <code>--reason</code> so the next loop pass knows what to change.</td></tr>
+<tr class="lf-add lf-code-row" data-line="1078"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1078</td><td class="lf-sign">+</td><td>                        return Err(task_error(</td></tr>
+<tr class="lf-add lf-code-row" data-line="1079"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1079</td><td class="lf-sign">+</td><td>                            &quot;iterating at this breakpoint requires `--reason &lt;direction&gt;`&quot;,</td></tr>
+<tr class="lf-add lf-code-row" data-line="1080"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1080</td><td class="lf-sign">+</td><td>                        ));</td></tr>
+<tr class="lf-add lf-code-row" data-line="1081"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1081</td><td class="lf-sign">+</td><td>                    }</td></tr>
+<tr class="lf-add lf-code-row" data-line="1082"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1082</td><td class="lf-sign">+</td><td>                    None =&gt; &quot;continue&quot;.to_owned(),</td></tr>
+<tr class="lf-add lf-code-row" data-line="1083"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1083</td><td class="lf-sign">+</td><td>                };</td></tr>
+<tr class="lf-add lf-code-row" data-line="1084"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1084</td><td class="lf-sign">+</td><td>                progress.verdict = Some(GraphVerdict { decision, summary });</td></tr>
+<tr class="lf-add lf-code-row" data-line="1085"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1085</td><td class="lf-sign">+</td><td>            }</td></tr>
+<tr class="lf-add lf-code-row" data-line="1086"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1086</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add lf-code-row" data-line="1087"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1087</td><td class="lf-sign">+</td><td>    } else if let Some(reason) = reason.filter(|_| !options.auto_on) {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1088"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1088</td><td class="lf-sign">+</td><td>        if let Some(verdict) = cursor.leaf_mut().progress.verdict.as_mut() {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1089"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1089</td><td class="lf-sign">+</td><td>            if verdict.decision == GraphDecision::Iterate {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1090"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1090</td><td class="lf-sign">+</td><td>                verdict.summary = reason.to_owned();</td></tr>
+<tr class="lf-add lf-code-row" data-line="1091"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1091</td><td class="lf-sign">+</td><td>            }</td></tr>
+<tr class="lf-add lf-code-row" data-line="1092"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1092</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add lf-code-row" data-line="1093"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1093</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add lf-code-row" data-line="1094"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1094</td><td class="lf-sign">+</td><td>    let iterated = cursor</td></tr>
+<tr class="lf-add lf-code-row" data-line="1095"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1095</td><td class="lf-sign">+</td><td>        .leaf()</td></tr>
+<tr class="lf-add lf-code-row" data-line="1096"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1096</td><td class="lf-sign">+</td><td>        .progress</td></tr>
+<tr class="lf-add lf-code-row" data-line="1097"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1097</td><td class="lf-sign">+</td><td>        .verdict</td></tr>
+<tr class="lf-add lf-code-row" data-line="1098"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1098</td><td class="lf-sign">+</td><td>        .as_ref()</td></tr>
+<tr class="lf-add lf-code-row" data-line="1099"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1099</td><td class="lf-sign">+</td><td>        .is_some_and(|verdict| verdict.decision == GraphDecision::Iterate);</td></tr>
+<tr class="lf-add lf-code-row" data-line="1100"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1100</td><td class="lf-sign">+</td><td>    cursor.finish(&amp;graph.steps).map_err(task_error)?;</td></tr>
+<tr class="lf-add lf-code-row" data-line="1101"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1101</td><td class="lf-sign">+</td><td>    Ok((</td></tr>
+<tr class="lf-add lf-code-row" data-line="1102"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1102</td><td class="lf-sign">+</td><td>        graph</td></tr>
+<tr class="lf-add lf-code-row" data-line="1103"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1103</td><td class="lf-sign">+</td><td>            .place_of(&amp;cursor)</td></tr>
+<tr class="lf-add lf-code-row" data-line="1104"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1104</td><td class="lf-sign">+</td><td>            .map(|place| RunStart { place, cursor }),</td></tr>
+<tr class="lf-add lf-code-row" data-line="1105"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1105</td><td class="lf-sign">+</td><td>        iterated,</td></tr>
+<tr class="lf-add lf-code-row" data-line="1106"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1106</td><td class="lf-sign">+</td><td>    ))</td></tr>
+<tr class="lf-add lf-code-row" data-line="1107"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1107</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-hunk"><td colspan="4">@@ -1056,18 +1128,18 @@ async fn start_task_run(</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1056" data-line="1128"><td class="lf-ln lf-ln-old">1056</td><td class="lf-ln lf-ln-new">1128</td><td class="lf-sign"> </td><td>async fn try_start_task_run(</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1057" data-line="1129"><td class="lf-ln lf-ln-old">1057</td><td class="lf-ln lf-ln-new">1129</td><td class="lf-sign"> </td><td>    store: &amp;SharedStore,</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1058" data-line="1130"><td class="lf-ln lf-ln-old">1058</td><td class="lf-ln lf-ln-new">1130</td><td class="lf-sign"> </td><td>    task: &amp;mut Task,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1059"><td class="lf-ln lf-ln-old">1059</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    requested: Option&lt;&amp;str&gt;,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1060"><td class="lf-ln lf-ln-old">1060</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    from: Option&lt;&amp;str&gt;,</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1061" data-line="1132"><td class="lf-ln lf-ln-old">1061</td><td class="lf-ln lf-ln-new">1132</td><td class="lf-sign"> </td><td>    mode: TaskRunMode,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1062"><td class="lf-ln lf-ln-old">1062</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    auto_on: bool,</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1063" data-line="1133"><td class="lf-ln lf-ln-old">1063</td><td class="lf-ln lf-ln-new">1133</td><td class="lf-sign"> </td><td>    merges: fn(&amp;[String]) -&gt; bool,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1064"><td class="lf-ln lf-ln-old">1064</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>) -&gt; OpsResult&lt;Option&lt;TaskRunStart&gt;&gt; {</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1065" data-line="1138"><td class="lf-ln lf-ln-old">1065</td><td class="lf-ln lf-ln-new">1138</td><td class="lf-sign"> </td><td>    let standing = crate::store::task_work::task_graph_row(&amp;store.sqlite, &amp;task.id)</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1066" data-line="1139"><td class="lf-ln lf-ln-old">1066</td><td class="lf-ln lf-ln-new">1139</td><td class="lf-sign"> </td><td>        .map_err(task_error)?</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1067" data-line="1140"><td class="lf-ln lf-ln-old">1067</td><td class="lf-ln lf-ln-new">1140</td><td class="lf-sign"> </td><td>        .filter(|row| auto_on &amp;&amp; requested.is_none_or(|name| name == row.graph.name));</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1068" data-line="1141"><td class="lf-ln lf-ln-old">1068</td><td class="lf-ln lf-ln-new">1141</td><td class="lf-sign"> </td><td>    match standing.as_ref().map(|row| (row, &amp;row.run)) {</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1069"><td class="lf-ln lf-ln-old">1069</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>        // A live run reads auto at each interactive step, so it stands in</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1070"><td class="lf-ln lf-ln-old">1070</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>        // from here without being started again. The mark is written before</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1071" data-line="1143"><td class="lf-ln lf-ln-old">1071</td><td class="lf-ln lf-ln-new">1143</td><td class="lf-sign"> </td><td>        // the wait for its Graph, so a slow registration cannot lose it.</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1072" data-line="1144"><td class="lf-ln lf-ln-old">1072</td><td class="lf-ln lf-ln-new">1144</td><td class="lf-sign"> </td><td>        Some((row, Some((cursor, carrier))))</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1073" data-line="1145"><td class="lf-ln lf-ln-old">1073</td><td class="lf-ln lf-ln-new">1145</td><td class="lf-sign"> </td><td>            if crate::store::task_work::carrier_may_run(carrier) =&gt;</td></tr>
+<tr class="lf-hunk"><td colspan="4">@@ -1075,32 +1147,29 @@ async fn try_start_task_run(</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1075" data-line="1147"><td class="lf-ln lf-ln-old">1075</td><td class="lf-ln lf-ln-new">1147</td><td class="lf-sign"> </td><td>            auto::turn_on(store, task)?;</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1076" data-line="1148"><td class="lf-ln lf-ln-old">1076</td><td class="lf-ln lf-ln-new">1148</td><td class="lf-sign"> </td><td>            if let Some(graph_process) = auto::running_graph(store, task, &amp;carrier.id).await? {</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1077" data-line="1149"><td class="lf-ln lf-ln-old">1077</td><td class="lf-ln lf-ln-new">1149</td><td class="lf-sign"> </td><td>                let at = row.graph.step_name_of(cursor);</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1078"><td class="lf-ln lf-ln-old">1078</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>                return Ok(Some(TaskRunStart::Live {</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1079"><td class="lf-ln lf-ln-old">1079</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>                    run: format!(</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1080"><td class="lf-ln lf-ln-old">1080</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>                        &quot;{} at {}&quot;,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1081"><td class="lf-ln lf-ln-old">1081</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>                        row.graph.name,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1082"><td class="lf-ln lf-ln-old">1082</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>                        at.as_deref().unwrap_or(&amp;row.step)</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1083"><td class="lf-ln lf-ln-old">1083</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>                    ),</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1084"><td class="lf-ln lf-ln-old">1084</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>                    graph_process,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1085"><td class="lf-ln lf-ln-old">1085</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>                }));</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1086" data-line="1161"><td class="lf-ln lf-ln-old">1086</td><td class="lf-ln lf-ln-new">1161</td><td class="lf-sign"> </td><td>            }</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1087" data-line="1162"><td class="lf-ln lf-ln-old">1087</td><td class="lf-ln lf-ln-new">1162</td><td class="lf-sign"> </td><td>        }</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1088" data-line="1163"><td class="lf-ln lf-ln-old">1088</td><td class="lf-ln lf-ln-new">1163</td><td class="lf-sign"> </td><td>        Some((row, None)) if row.step == crate::task_graph::END &amp;&amp; from.is_none() =&gt; {</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1089"><td class="lf-ln lf-ln-old">1089</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>            return Ok(Some(TaskRunStart::Ended));</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1090" data-line="1165"><td class="lf-ln lf-ln-old">1090</td><td class="lf-ln lf-ln-new">1165</td><td class="lf-sign"> </td><td>        }</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1091" data-line="1166"><td class="lf-ln lf-ln-old">1091</td><td class="lf-ln lf-ln-new">1166</td><td class="lf-sign"> </td><td>        _ =&gt; {}</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1092" data-line="1167"><td class="lf-ln lf-ln-old">1092</td><td class="lf-ln lf-ln-new">1167</td><td class="lf-sign"> </td><td>    }</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1093"><td class="lf-ln lf-ln-old">1093</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    let selection = select_task_run(</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1094"><td class="lf-ln lf-ln-old">1094</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>        store,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1095"><td class="lf-ln lf-ln-old">1095</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>        task,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1096"><td class="lf-ln lf-ln-old">1096</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>        task.worktree()?,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1097"><td class="lf-ln lf-ln-old">1097</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>        requested,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1098"><td class="lf-ln lf-ln-old">1098</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>        from,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1099"><td class="lf-ln lf-ln-old">1099</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>        auto_on,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1100"><td class="lf-ln lf-ln-old">1100</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>        merges,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="1101"><td class="lf-ln lf-ln-old">1101</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    )?;</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1102" data-line="1169"><td class="lf-ln lf-ln-old">1102</td><td class="lf-ln lf-ln-new">1169</td><td class="lf-sign"> </td><td>    let reaches_end = selection.reaches_end(mode);</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1103" data-line="1170"><td class="lf-ln lf-ln-old">1103</td><td class="lf-ln lf-ln-new">1170</td><td class="lf-sign"> </td><td>    let TaskRunSelection {</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1104" data-line="1173"><td class="lf-ln lf-ln-old">1104</td><td class="lf-ln lf-ln-new">1173</td><td class="lf-sign"> </td><td>        graph,</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1105" data-line="1174"><td class="lf-ln lf-ln-old">1105</td><td class="lf-ln lf-ln-new">1174</td><td class="lf-sign"> </td><td>        take_up,</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1106" data-line="1175"><td class="lf-ln lf-ln-old">1106</td><td class="lf-ln lf-ln-new">1175</td><td class="lf-sign"> </td><td>        start,</td></tr>
+</tbody></table></div></div>
+
+<h2>3. Key data structures and APIs</h2>
+
+<p>One additive SQLite column on <code>task_graphs</code> carries the parked visit, mirrored across Rust DTOs, CLI flags, and Swift models:</p>
+
+<div class="lf-codeblock" data-path="rust/loopflow-storage/src/migrations/task_graph_breakpoint.sql"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-storage/src/migrations/task_graph_breakpoint.sql</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1 @@</td></tr>
+<tr class="lf-add lf-code-row" data-line="1"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1</td><td class="lf-sign">+</td><td>ALTER TABLE task_graphs ADD COLUMN breakpoint TEXT CHECK (breakpoint IS NULL OR (json_valid(breakpoint) AND lf_process_id IS NULL));</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4">Additive column storing serialized <code>BreakpointArrival</code> JSON while parked; <code>NULL</code> once continued.</td></tr>
+</tbody></table></div></div>
+
+<div class="lf-codeblock" data-path="rust/loopflow-execution/src/store/task_work.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-execution/src/store/task_work.rs:256-272</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-hunk"><td colspan="4">@@ -204,17 +219,63 @@ mod tests {</td></tr>
+<tr class="lf-add lf-code-row" data-line="256"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">256</td><td class="lf-sign">+</td><td>/// One visit to a breakpoint. A carrier can park only once. Its globally</td></tr>
+<tr class="lf-add lf-code-row" data-line="257"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">257</td><td class="lf-sign">+</td><td>/// unique ID also identifies the arrival after a Graph replacement or move.</td></tr>
+<tr class="lf-add lf-code-row" data-line="258"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">258</td><td class="lf-sign">+</td><td>#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]</td></tr>
+<tr class="lf-add lf-code-row" data-line="259"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">259</td><td class="lf-sign">+</td><td>pub struct BreakpointArrival {</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4"><code>id</code> is the Graph carrier's <code>LfProcessId</code> (unique per arrival); <code>cursor</code> preserves exact XOR path, loop counts, and pending verdict.</td></tr>
+<tr class="lf-add lf-code-row" data-line="260"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">260</td><td class="lf-sign">+</td><td>    pub id: LfProcessId,</td></tr>
+<tr class="lf-add lf-code-row" data-line="261"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">261</td><td class="lf-sign">+</td><td>    pub cursor: ExecutionCursor,</td></tr>
+<tr class="lf-add lf-code-row" data-line="262"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">262</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add lf-code-row" data-line="263"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">263</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="264"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">264</td><td class="lf-sign">+</td><td>impl BreakpointArrival {</td></tr>
+<tr class="lf-add lf-code-row" data-line="265"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">265</td><td class="lf-sign">+</td><td>    /// The blocker&#39;s summary when the worker&#39;s pending verdict at this breakpoint is `blocked`.</td></tr>
+<tr class="lf-add lf-code-row" data-line="266"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">266</td><td class="lf-sign">+</td><td>    pub fn blocked_reason(&amp;self) -&gt; Option&lt;&amp;str&gt; {</td></tr>
+<tr class="lf-add lf-code-row" data-line="267"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">267</td><td class="lf-sign">+</td><td>        let verdict = self.cursor.leaf().progress.verdict.as_ref()?;</td></tr>
+<tr class="lf-add lf-code-row" data-line="268"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">268</td><td class="lf-sign">+</td><td>        (verdict.decision == crate::graph::transitions::GraphDecision::Blocked)</td></tr>
+<tr class="lf-add lf-code-row" data-line="269"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">269</td><td class="lf-sign">+</td><td>            .then_some(verdict.summary.as_str())</td></tr>
+<tr class="lf-add lf-code-row" data-line="270"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">270</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add lf-code-row" data-line="271"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">271</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add lf-code-row" data-line="272"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">272</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-hunk"><td colspan="4">@@ -263,6 +335,11 @@ pub(crate) fn place_moved_task_graph(</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="263" data-line="335"><td class="lf-ln lf-ln-old">263</td><td class="lf-ln lf-ln-new">335</td><td class="lf-sign"> </td><td>    store.place_moved_task_graph(</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="264" data-line="336"><td class="lf-ln lf-ln-old">264</td><td class="lf-ln lf-ln-new">336</td><td class="lf-sign"> </td><td>        task,</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="265" data-line="337"><td class="lf-ln lf-ln-old">265</td><td class="lf-ln lf-ln-new">337</td><td class="lf-sign"> </td><td>        &amp;super::sqlite::task_work::SavedTaskGraphRecord {</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="266" data-line="343"><td class="lf-ln lf-ln-old">266</td><td class="lf-ln lf-ln-new">343</td><td class="lf-sign"> </td><td>            graph: serde_json::to_string(&amp;record.graph)?,</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="267" data-line="344"><td class="lf-ln lf-ln-old">267</td><td class="lf-ln lf-ln-new">344</td><td class="lf-sign"> </td><td>            step: record.step.clone(),</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="268" data-line="345"><td class="lf-ln lf-ln-old">268</td><td class="lf-ln lf-ln-new">345</td><td class="lf-sign"> </td><td>            run_start: record</td></tr>
+</tbody></table></div></div>
+
+<div class="lf-codeblock" data-path="rust/loopflow-execution/src/task_graph.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-execution/src/task_graph.rs:409-440</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-code-row" data-line="409"><td class="lf-ln lf-ln-single">409</td><td>/// One top-level step of a Task&#39;s Graph.</td></tr>
+<tr class="lf-code-row" data-line="410"><td class="lf-ln lf-ln-single">410</td><td>#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]</td></tr>
+<tr class="lf-code-row" data-line="411"><td class="lf-ln lf-ln-single">411</td><td>pub struct WorkflowStep {</td></tr>
+<tr class="lf-code-row" data-line="412"><td class="lf-ln lf-ln-single">412</td><td>    pub name: String,</td></tr>
+<tr class="lf-code-row" data-line="413"><td class="lf-ln lf-ln-single">413</td><td>    /// This step is a breakpoint or contains one, composed Graphs and XOR paths included.</td></tr>
+<tr class="lf-code-row" data-line="414"><td class="lf-ln lf-ln-single">414</td><td>    pub breakpoint: bool,</td></tr>
+<tr class="lf-code-row" data-line="415"><td class="lf-ln lf-ln-single">415</td><td>}</td></tr>
+<tr class="lf-code-row" data-line="416"><td class="lf-ln lf-ln-single">416</td><td></td></tr>
+<tr class="lf-code-row" data-line="417"><td class="lf-ln lf-ln-single">417</td><td>#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]</td></tr>
+<tr class="lf-code-row" data-line="418"><td class="lf-ln lf-ln-single">418</td><td>#[serde(tag = &quot;kind&quot;, rename_all = &quot;snake_case&quot;)]</td></tr>
+<tr class="lf-code-row" data-line="419"><td class="lf-ln lf-ln-single">419</td><td>pub enum TaskGraphPosition {</td></tr>
+<tr class="lf-code-row" data-line="420"><td class="lf-ln lf-ln-single">420</td><td>    /// The Task stands at `start`, at `end`, at a landing wait (`auto: off`),</td></tr>
+<tr class="lf-code-row" data-line="421"><td class="lf-ln lf-ln-single">421</td><td>    /// or at an unconverted released wait (LOO-1100).</td></tr>
+<tr class="lf-code-row" data-line="422"><td class="lf-ln lf-ln-single">422</td><td>    At { step: String },</td></tr>
+<tr class="lf-code-row" data-line="423"><td class="lf-ln lf-ln-single">423</td><td>    /// The Task is parked at breakpoint `step` for visit `arrival`.</td></tr>
+<tr class="lf-code-row" data-line="424"><td class="lf-ln lf-ln-single">424</td><td>    Breakpoint {</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="2"><code>TaskGraphPosition::Breakpoint</code> replaces overloaded <code>At</code> waits and surfaces <code>arrival</code> + <code>blocked</code> directly on the wire.</td></tr>
+<tr class="lf-code-row" data-line="425"><td class="lf-ln lf-ln-single">425</td><td>        step: String,</td></tr>
+<tr class="lf-code-row" data-line="426"><td class="lf-ln lf-ln-single">426</td><td>        arrival: loopflow_model::id::LfProcessId,</td></tr>
+<tr class="lf-code-row" data-line="427"><td class="lf-ln lf-ln-single">427</td><td>        blocked: bool,</td></tr>
+<tr class="lf-code-row" data-line="428"><td class="lf-ln lf-ln-single">428</td><td>    },</td></tr>
+<tr class="lf-code-row" data-line="429"><td class="lf-ln lf-ln-single">429</td><td>    /// `lf task run` (`lf_process_id`) carries the Task on from `step`, and</td></tr>
+<tr class="lf-code-row" data-line="430"><td class="lf-ln lf-ln-single">430</td><td>    /// runs `at`. `running` is read from that Process: a run that ended</td></tr>
+<tr class="lf-code-row" data-line="431"><td class="lf-ln lf-ln-single">431</td><td>    /// without arriving stopped, and the next `lf task run` starts it again</td></tr>
+<tr class="lf-code-row" data-line="432"><td class="lf-ln lf-ln-single">432</td><td>    /// at `at`; the steps before it stay done.</td></tr>
+<tr class="lf-code-row" data-line="433"><td class="lf-ln lf-ln-single">433</td><td>    Run {</td></tr>
+<tr class="lf-code-row" data-line="434"><td class="lf-ln lf-ln-single">434</td><td>        step: String,</td></tr>
+<tr class="lf-code-row" data-line="435"><td class="lf-ln lf-ln-single">435</td><td>        at: String,</td></tr>
+<tr class="lf-code-row" data-line="436"><td class="lf-ln lf-ln-single">436</td><td>        lf_process_id: String,</td></tr>
+<tr class="lf-code-row" data-line="437"><td class="lf-ln lf-ln-single">437</td><td>        running: bool,</td></tr>
+<tr class="lf-code-row" data-line="438"><td class="lf-ln lf-ln-single">438</td><td>    },</td></tr>
+<tr class="lf-code-row" data-line="439"><td class="lf-ln lf-ln-single">439</td><td>}</td></tr>
+<tr class="lf-code-row" data-line="440"><td class="lf-ln lf-ln-single">440</td><td></td></tr>
+</tbody></table></div></div>
+
+<div class="lf-codeblock" data-path="rust/loopflow-execution/src/engine/task.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-execution/src/engine/task.rs:316-354</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-hunk"><td colspan="4">@@ -323,27 +313,44 @@ fn missing(issue: &amp;str) -&gt; Error {</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="323" data-line="313"><td class="lf-ln lf-ln-old">323</td><td class="lf-ln lf-ln-new">313</td><td class="lf-sign"> </td><td>        .with(serde_json::json!({ &quot;task&quot;: issue }))</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="324" data-line="314"><td class="lf-ln lf-ln-old">324</td><td class="lf-ln lf-ln-new">314</td><td class="lf-sign"> </td><td>}</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="325" data-line="315"><td class="lf-ln lf-ln-old">325</td><td class="lf-ln lf-ln-new">315</td><td class="lf-sign"> </td><td></td></tr>
+<tr class="lf-del lf-code-row" data-old-line="326"><td class="lf-ln lf-ln-old">326</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>pub fn spell_run(</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="327"><td class="lf-ln lf-ln-old">327</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    issue: &amp;str,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="328"><td class="lf-ln lf-ln-old">328</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    from: Option&lt;&amp;str&gt;,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="329"><td class="lf-ln lf-ln-old">329</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    graph: Option&lt;&amp;str&gt;,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="330"><td class="lf-ln lf-ln-old">330</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    agent: Option&lt;&amp;str&gt;,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="331"><td class="lf-ln lf-ln-old">331</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    approve: bool,</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="332"><td class="lf-ln lf-ln-old">332</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>) -&gt; Vec&lt;String&gt; {</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="333"><td class="lf-ln lf-ln-old">333</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    let mut args = Vec::new();</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="334"><td class="lf-ln lf-ln-old">334</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    if approve {</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="335"><td class="lf-ln lf-ln-old">335</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>        args.push(&quot;--batch&quot;.to_owned());</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="336"><td class="lf-ln lf-ln-old">336</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    }</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="337"><td class="lf-ln lf-ln-old">337</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    if let Some(agent) = agent {</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="338"><td class="lf-ln lf-ln-old">338</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>        args.extend([&quot;--agent&quot;.to_owned(), agent.to_owned()]);</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="339"><td class="lf-ln lf-ln-old">339</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    }</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="340"><td class="lf-ln lf-ln-old">340</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    args.extend([&quot;task&quot;, &quot;run&quot;, issue].map(str::to_owned));</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="341"><td class="lf-ln lf-ln-old">341</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    args.extend(graph.map(str::to_owned));</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="342"><td class="lf-ln lf-ln-old">342</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    if let Some(from) = from {</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="343"><td class="lf-ln lf-ln-old">343</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>        args.extend([&quot;--from&quot;.to_owned(), from.to_owned()]);</td></tr>
+<tr class="lf-add lf-code-row" data-line="316"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">316</td><td class="lf-sign">+</td><td>#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]</td></tr>
+<tr class="lf-add lf-code-row" data-line="317"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">317</td><td class="lf-sign">+</td><td>pub struct TaskRunRequest {</td></tr>
+<tr class="lf-add lf-code-row" data-line="318"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">318</td><td class="lf-sign">+</td><td>    pub graph: Option&lt;String&gt;,</td></tr>
+<tr class="lf-add lf-code-row" data-line="319"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">319</td><td class="lf-sign">+</td><td>    pub from: Option&lt;String&gt;,</td></tr>
+<tr class="lf-add lf-code-row" data-line="320"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">320</td><td class="lf-sign">+</td><td>    pub agent: Option&lt;String&gt;,</td></tr>
+<tr class="lf-add lf-code-row" data-line="321"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">321</td><td class="lf-sign">+</td><td>    pub approve: bool,</td></tr>
+<tr class="lf-add lf-code-row" data-line="322"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">322</td><td class="lf-sign">+</td><td>    pub at_arrival: Option&lt;LfProcessId&gt;,</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="4"><code>task.run</code> accepts <code>at_arrival</code>, <code>decision</code>, and <code>reason</code> over the server protocol and CLI alike.</td></tr>
+<tr class="lf-add lf-code-row" data-line="323"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">323</td><td class="lf-sign">+</td><td>    pub decision: Option&lt;crate::graph::transitions::GraphDecision&gt;,</td></tr>
+<tr class="lf-add lf-code-row" data-line="324"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">324</td><td class="lf-sign">+</td><td>    pub reason: Option&lt;String&gt;,</td></tr>
+<tr class="lf-add lf-code-row" data-line="325"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">325</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add lf-code-row" data-line="326"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">326</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="327"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">327</td><td class="lf-sign">+</td><td>impl TaskRunRequest {</td></tr>
+<tr class="lf-add lf-code-row" data-line="328"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">328</td><td class="lf-sign">+</td><td>    pub fn argv(&amp;self, issue: &amp;str) -&gt; Vec&lt;String&gt; {</td></tr>
+<tr class="lf-add lf-code-row" data-line="329"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">329</td><td class="lf-sign">+</td><td>        let mut args = Vec::new();</td></tr>
+<tr class="lf-add lf-code-row" data-line="330"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">330</td><td class="lf-sign">+</td><td>        if self.approve {</td></tr>
+<tr class="lf-add lf-code-row" data-line="331"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">331</td><td class="lf-sign">+</td><td>            args.push(&quot;--batch&quot;.into());</td></tr>
+<tr class="lf-add lf-code-row" data-line="332"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">332</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add lf-code-row" data-line="333"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">333</td><td class="lf-sign">+</td><td>        if let Some(agent) = &amp;self.agent {</td></tr>
+<tr class="lf-add lf-code-row" data-line="334"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">334</td><td class="lf-sign">+</td><td>            args.extend([&quot;--agent&quot;.into(), agent.clone()]);</td></tr>
+<tr class="lf-add lf-code-row" data-line="335"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">335</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add lf-code-row" data-line="336"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">336</td><td class="lf-sign">+</td><td>        args.extend([&quot;task&quot;, &quot;run&quot;, issue].map(str::to_owned));</td></tr>
+<tr class="lf-add lf-code-row" data-line="337"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">337</td><td class="lf-sign">+</td><td>        args.extend(self.graph.iter().cloned());</td></tr>
+<tr class="lf-add lf-code-row" data-line="338"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">338</td><td class="lf-sign">+</td><td>        for (flag, value) in [</td></tr>
+<tr class="lf-add lf-code-row" data-line="339"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">339</td><td class="lf-sign">+</td><td>            (&quot;--from&quot;, self.from.as_deref()),</td></tr>
+<tr class="lf-add lf-code-row" data-line="340"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">340</td><td class="lf-sign">+</td><td>            (</td></tr>
+<tr class="lf-add lf-code-row" data-line="341"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">341</td><td class="lf-sign">+</td><td>                &quot;--at-arrival&quot;,</td></tr>
+<tr class="lf-add lf-code-row" data-line="342"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">342</td><td class="lf-sign">+</td><td>                self.at_arrival.as_ref().map(LfProcessId::as_str),</td></tr>
+<tr class="lf-add lf-code-row" data-line="343"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">343</td><td class="lf-sign">+</td><td>            ),</td></tr>
+<tr class="lf-add lf-code-row" data-line="344"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">344</td><td class="lf-sign">+</td><td>            (&quot;--decision&quot;, self.decision.map(|d| d.as_str())),</td></tr>
+<tr class="lf-add lf-code-row" data-line="345"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">345</td><td class="lf-sign">+</td><td>            (&quot;--reason&quot;, self.reason.as_deref()),</td></tr>
+<tr class="lf-add lf-code-row" data-line="346"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">346</td><td class="lf-sign">+</td><td>        ] {</td></tr>
+<tr class="lf-add lf-code-row" data-line="347"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">347</td><td class="lf-sign">+</td><td>            if let Some(value) = value {</td></tr>
+<tr class="lf-add lf-code-row" data-line="348"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">348</td><td class="lf-sign">+</td><td>                args.extend([flag.into(), value.into()]);</td></tr>
+<tr class="lf-add lf-code-row" data-line="349"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">349</td><td class="lf-sign">+</td><td>            }</td></tr>
+<tr class="lf-add lf-code-row" data-line="350"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">350</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add lf-code-row" data-line="351"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">351</td><td class="lf-sign">+</td><td>        args.push(&quot;--json&quot;.into());</td></tr>
+<tr class="lf-add lf-code-row" data-line="352"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">352</td><td class="lf-sign">+</td><td>        args</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="344" data-line="353"><td class="lf-ln lf-ln-old">344</td><td class="lf-ln lf-ln-new">353</td><td class="lf-sign"> </td><td>    }</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="345"><td class="lf-ln lf-ln-old">345</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    args.push(&quot;--json&quot;.to_owned());</td></tr>
+<tr class="lf-del lf-code-row" data-old-line="346"><td class="lf-ln lf-ln-old">346</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    args</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="347" data-line="354"><td class="lf-ln lf-ln-old">347</td><td class="lf-ln lf-ln-new">354</td><td class="lf-sign"> </td><td>}</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="348" data-line="355"><td class="lf-ln lf-ln-old">348</td><td class="lf-ln lf-ln-new">355</td><td class="lf-sign"> </td><td></td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="349" data-line="356"><td class="lf-ln lf-ln-old">349</td><td class="lf-ln lf-ln-new">356</td><td class="lf-sign"> </td><td>pub fn spell_auto_on(issue: &amp;str) -&gt; Vec&lt;String&gt; {</td></tr>
+</tbody></table></div></div>
+
+<div class="lf-codeblock" data-path="rust/loopflow-storage/src/sqlite/selections.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-storage/src/sqlite/selections.rs:288-320</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-code-row" data-line="288"><td class="lf-ln lf-ln-single">288</td><td>pub fn task_selection_states(</td></tr>
+<tr class="lf-code-row" data-line="289"><td class="lf-ln lf-ln-single">289</td><td>    state: Option&lt;TaskState&gt;,</td></tr>
+<tr class="lf-code-row" data-line="290"><td class="lf-ln lf-ln-single">290</td><td>    section: TaskSection,</td></tr>
+<tr class="lf-code-row" data-line="291"><td class="lf-ln lf-ln-single">291</td><td>    claimed_or_published: bool,</td></tr>
+<tr class="lf-code-row" data-line="292"><td class="lf-ln lf-ln-single">292</td><td>    auto: bool,</td></tr>
+<tr class="lf-code-row" data-line="293"><td class="lf-ln lf-ln-single">293</td><td>    at_breakpoint: bool,</td></tr>
+<tr class="lf-code-row" data-line="294"><td class="lf-ln lf-ln-single">294</td><td>    activity: Option&lt;&amp;TaskActivity&gt;,</td></tr>
+<tr class="lf-code-row" data-line="295"><td class="lf-ln lf-ln-single">295</td><td>) -&gt; BTreeSet&lt;SelectionState&gt; {</td></tr>
+<tr class="lf-code-row" data-line="296"><td class="lf-ln lf-ln-single">296</td><td>    let mut states = activity.map_or_else(BTreeSet::new, |activity| activity.states.clone());</td></tr>
+<tr class="lf-code-row" data-line="297"><td class="lf-ln lf-ln-single">297</td><td>    let open = matches!(section, TaskSection::Backlog | TaskSection::Working);</td></tr>
+<tr class="lf-code-row" data-line="298"><td class="lf-ln lf-ln-single">298</td><td>    if claimed_or_published &amp;&amp; open {</td></tr>
+<tr class="lf-code-row" data-line="299"><td class="lf-ln lf-ln-single">299</td><td>        states.insert(SelectionState::Open);</td></tr>
+<tr class="lf-code-row" data-line="300"><td class="lf-ln lf-ln-single">300</td><td>    }</td></tr>
+<tr class="lf-code-row" data-line="301"><td class="lf-ln lf-ln-single">301</td><td>    if auto &amp;&amp; open {</td></tr>
+<tr class="lf-code-row" data-line="302"><td class="lf-ln lf-ln-single">302</td><td>        states.insert(SelectionState::Auto);</td></tr>
+<tr class="lf-code-row" data-line="303"><td class="lf-ln lf-ln-single">303</td><td>    }</td></tr>
+<tr class="lf-code-row" data-line="304"><td class="lf-ln lf-ln-single">304</td><td>    if at_breakpoint &amp;&amp; open &amp;&amp; state == Some(TaskState::Active) {</td></tr>
+<tr class="lf-line-note" data-notes><td colspan="2"><code>SelectionState::Breakpoint</code> is set only on open <code>Active</code> Tasks so breakpoints float first in <strong>Now</strong> and stay distinct from LOO-1078's shelved <code>Paused</code>.</td></tr>
+<tr class="lf-code-row" data-line="305"><td class="lf-ln lf-ln-single">305</td><td>        states.insert(SelectionState::Breakpoint);</td></tr>
+<tr class="lf-code-row" data-line="306"><td class="lf-ln lf-ln-single">306</td><td>    }</td></tr>
+<tr class="lf-code-row" data-line="307"><td class="lf-ln lf-ln-single">307</td><td>    states.extend(state.map(|state| match state {</td></tr>
+<tr class="lf-code-row" data-line="308"><td class="lf-ln lf-ln-single">308</td><td>        TaskState::Unstarted =&gt; SelectionState::Unstarted,</td></tr>
+<tr class="lf-code-row" data-line="309"><td class="lf-ln lf-ln-single">309</td><td>        TaskState::Idle =&gt; SelectionState::Idle,</td></tr>
+<tr class="lf-code-row" data-line="310"><td class="lf-ln lf-ln-single">310</td><td>        TaskState::Active =&gt; SelectionState::Active,</td></tr>
+<tr class="lf-code-row" data-line="311"><td class="lf-ln lf-ln-single">311</td><td>        TaskState::Moving =&gt; SelectionState::Moving,</td></tr>
+<tr class="lf-code-row" data-line="312"><td class="lf-ln lf-ln-single">312</td><td>        TaskState::Done | TaskState::Abandoned =&gt; SelectionState::Done,</td></tr>
+<tr class="lf-code-row" data-line="313"><td class="lf-ln lf-ln-single">313</td><td>    }));</td></tr>
+<tr class="lf-code-row" data-line="314"><td class="lf-ln lf-ln-single">314</td><td>    states.insert(match section {</td></tr>
+<tr class="lf-code-row" data-line="315"><td class="lf-ln lf-ln-single">315</td><td>        TaskSection::Backlog =&gt; SelectionState::Backlog,</td></tr>
+<tr class="lf-code-row" data-line="316"><td class="lf-ln lf-ln-single">316</td><td>        TaskSection::Working =&gt; SelectionState::Working,</td></tr>
+<tr class="lf-code-row" data-line="317"><td class="lf-ln lf-ln-single">317</td><td>        TaskSection::Done | TaskSection::Abandoned =&gt; SelectionState::Done,</td></tr>
+<tr class="lf-code-row" data-line="318"><td class="lf-ln lf-ln-single">318</td><td>    });</td></tr>
+<tr class="lf-code-row" data-line="319"><td class="lf-ln lf-ln-single">319</td><td>    states</td></tr>
+<tr class="lf-code-row" data-line="320"><td class="lf-ln lf-ln-single">320</td><td>}</td></tr>
+</tbody></table></div></div>
+
+<h2>4. Trade-offs and invariants going forward</h2>
+
+<ul>
+  <li><strong>Plain Continue accepts the worker's recommended loop verdict.</strong> If <code>ship-review</code> or <code>research</code> recommends <code>iterate</code>, plain <code>lf task run</code> (or Desktop's <em>Continue</em>) iterates; if it recommends <code>advance</code>, it advances. Overriding uses <code>--decision advance|iterate</code> on that arrival (<code>--at-arrival</code>) rather than <code>--from</code>, which resets loop counts.</li>
+  <li><strong>Blocked breakpoints hide Desktop's plain <em>Continue</em> button.</strong> Even under <code>auto: on</code>, a <code>blocked</code> verdict parks with <code>blocked: true</code>, sets <code>actions.recommended = no_action</code>, and tells you to answer in the conversation with <code>--at-arrival</code> / <code>--decision</code> rather than offering a button that errors.</li>
+  <li><strong>Sidebar drag order stays intact when "Sort by status" is off.</strong> Tasks at a breakpoint float first in <strong>Now</strong> and when <strong>Sort by status</strong> is on, but manual sidebar drag order is untouched when sorting by status is off.</li>
+  <li><strong>Workflow bar shows breakpoints as separate items; "Start from…" lists runnable stages.</strong> Breakpoints render beside their step (<code>explore · 👤 after-explore · plan · …</code>) matching <code>lf graph show</code>; <em>Start from…</em> lists real stages so picking <code>ship-review</code> runs a fresh review instead of jumping to an empty producerless stop.</li>
+  <li><strong>Initial-step review Graphs (<code>feature</code>, <code>redesign</code>, <code>research</code>, or leading <code>- break</code>).</strong> On <code>task create --graph feature --run</code>, <code data-path="rust/loopflow-execution/src/ops/human_session/setup.rs">setup.rs</code> spawns <code>lf task run</code> (running <code>explore</code> headless first) and immediately starts Turn 1 of the primary conversation. Turn 1 reports <code>explore</code> moving and goes idle; <code>after-explore</code> wakes it once <code>explore</code> finishes (immediately on Claude/Codex/OpenCode/Pi; on next turn in <code>agy</code> until LOO-1098). A literal leading <code>- break</code> compiles as <code>break</code> and parks immediately on step 0, though its handoff still uses the generic "Present the result, links…" phrasing.</li>
+  <li><strong>Two skill modes only.</strong> Builtin skills have direct interactive use (<code>lf &lt;skill&gt;</code>) and headless Graph worker mode (propose a default plan of action that continues if nobody intervenes). No third "headless-before-breakpoint" mode exists.</li>
+  <li><strong>Sync onto <code>origin/main</code> adopts #2036, #2047, #2048, and #2049.</strong> Resolving the 57 conflicts means: dropping edits to deleted <code>verify.md</code> / <code>kickoff-demo.yaml</code>; keeping <code>SelectionState::Breakpoint</code> distinct from <code>#2036</code>'s <code>Paused</code>; preserving <code>#2048</code>'s review-page skill rules (<code>lf page build</code> / <code>lf page open</code>) on <code>ship-review</code>/<code>explore</code>/<code>qa</code>/<code>demo</code>; and re-verifying DTO fixtures and Rust/Swift suites on the merged head.</li>
+  <li><strong>Untested live surfaces:</strong> real Desktop GUI click-through (covered by headless Swift tests), Codex as worker/primary (weekly quota exhausted during QA), and a live blocked worker verdict (unit-tested only). No auth, credential, telemetry, or deployment paths changed.</li>
+</ul>
+
+<h2>5. Findings</h2>
+
+<div class="lf-decision" data-decision-id="f1">
+  <div class="lf-decision-head">
+    <span class="lf-decision-title">Sync 12 commits / 57 merge conflicts from origin/main</span>
+    <span class="lf-decision-rec">Recommended: Fix here</span>
+  </div>
+  <div class="lf-decision-body">
+  <p>PR #2042 is <code>DIRTY</code> against <code>origin/main</code> (<code>#2034</code>, <code>#2036</code> Pause, <code>#2047</code> graph reorder, <code>#2048</code> review pages, <code>#2049</code> verify removal, <code>#2050</code>–<code>#2057</code>). Must be synced, conflict-resolved, and verified before delivery.</p>
+</div>
+  <div data-choice="f1" data-label="Sync 12 commits / 57 merge conflicts from origin/main">
+    <button type="button" data-value="Fix here">Fix here</button>
+    <button type="button" data-value="File Task">File Task</button>
+    <button type="button" data-value="Drop">Drop</button>
+  </div>
+</div>
+
+
+<div class="lf-decision" data-decision-id="f2">
+  <div class="lf-decision-head">
+    <span class="lf-decision-title">RoadmapView row Continue omits --at-arrival</span>
+    <span class="lf-decision-rec">Recommended: Fix here</span>
+  </div>
+  <div class="lf-decision-body">
+  <p><code>TaskWorkflowBar</code> and iOS pass <code>--at-arrival &lt;id&gt;</code>, while clicking <em>Continue</em> on a row in <code data-path="swift/LoopflowMac/Views/RoadmapView.swift">RoadmapView.swift</code> calls <code>startTask(nil)</code> because <code>RoadmapTask</code> doesn't carry <code>breakpoint_arrival</code> yet. Small DTO addition for uniform arrival safety.</p>
+</div>
+  <div data-choice="f2" data-label="RoadmapView row Continue omits --at-arrival">
+    <button type="button" data-value="Fix here">Fix here</button>
+    <button type="button" data-value="File Task">File Task</button>
+    <button type="button" data-value="Drop">Drop</button>
+  </div>
+</div>
+
+
+<div class="lf-decision" data-decision-id="f3">
+  <div class="lf-decision-head">
+    <span class="lf-decision-title">Retired human: parse error copy in graph/mod.rs</span>
+    <span class="lf-decision-rec">Recommended: Fix here</span>
+  </div>
+  <div class="lf-decision-body">
+  <p>Parse errors for the retired <code>human:</code> key in <code data-path="rust/loopflow-execution/src/graph/mod.rs">graph/mod.rs</code> still mention <code>interactive: &lt;skill&gt;</code>, and the unknown-mapping error omits <code>break</code>. Three-line copy fix during sync (or leave with LOO-1100).</p>
+</div>
+  <div data-choice="f3" data-label="Retired human: parse error copy in graph/mod.rs">
+    <button type="button" data-value="Fix here">Fix here</button>
+    <button type="button" data-value="File Task">File Task</button>
+    <button type="button" data-value="Drop">Drop</button>
+  </div>
+</div>
+
+
+<div class="lf-decision" data-decision-id="f4">
+  <div class="lf-decision-head">
+    <span class="lf-decision-title">Producerless / leading - break handoff wording</span>
+    <span class="lf-decision-rec">Recommended: Drop</span>
+  </div>
+  <div class="lf-decision-body">
+  <p>Jumping via <code>--from &lt;breakpoint&gt;</code> or putting <code>- break</code> at step 0 has no producer process, so the handoff omits <code>scratch/</code> links but still prints "Present the result, links, proposed next action and questions in this conversation."</p>
+</div>
+  <div data-choice="f4" data-label="Producerless / leading - break handoff wording">
+    <button type="button" data-value="Fix here">Fix here</button>
+    <button type="button" data-value="File Task">File Task</button>
+    <button type="button" data-value="Drop">Drop</button>
+  </div>
+</div>
+
+
+<div class="lf-decision" data-decision-id="f5">
+  <div class="lf-decision-head">
+    <span class="lf-decision-title">Already tracked: Antigravity idle wake (LOO-1098) &amp; legacy interactive: removal (LOO-1100)</span>
+    <span class="lf-decision-rec">Recommended: Drop</span>
+  </div>
+  <div class="lf-decision-body">
+  <p>Both are already tracked: <strong>LOO-1098</strong> (currently at <code>ship-review</code>) handles immediate <code>agy</code> idle wake; <strong>LOO-1100</strong> retires temporary <code>interactive:</code> YAML/capture compatibility readers after this release ships.</p>
+</div>
+  <div data-choice="f5" data-label="Already tracked: Antigravity idle wake (LOO-1098) &amp; legacy interactive: removal (LOO-1100)">
+    <button type="button" data-value="Fix here">Fix here</button>
+    <button type="button" data-value="File Task">File Task</button>
+    <button type="button" data-value="Drop">Drop</button>
+  </div>
+</div>
+
+
+<div class="lf-decision" data-decision-id="f6">
+  <div class="lf-decision-head">
+    <span class="lf-decision-title">Five pre-existing QA edges outside LOO-1096</span>
+    <span class="lf-decision-rec">Recommended: Drop</span>
+  </div>
+  <div class="lf-decision-body">
+  <p>(1) Claude <code>Esc</code> mid-tool fires no Stop hook; (2) limit retry keeps the captured agent until interrupt/fresh run; (3) builtin <code>build.yaml</code> names <code>qa</code> bare (shadowed by a repo <code>qa</code> Graph); (4) status prints running step UUID; (5) <code>TaskRow.next</code> prints <code>lf task run</code> when <code>actions.recommended</code> is <code>NoAction</code> on blocked Tasks.</p>
+</div>
+  <div data-choice="f6" data-label="Five pre-existing QA edges outside LOO-1096">
+    <button type="button" data-value="Fix here">Fix here</button>
+    <button type="button" data-value="File Task">File Task</button>
+    <button type="button" data-value="Drop">Drop</button>
+  </div>
+</div>
+
+
+<h2>6. Decisions for this review</h2>
+
+<div data-choice="q1" data-label="1. Sync &amp; small fixes">
+  <p><strong>1. Sync onto <code>origin/main</code> (required — 57 conflicts) and small fixes before delivery?</strong></p>
+  <button data-value="1a">1a · Sync onto main (adopting #2036 Pause, #2047 graphs, #2048 review pages, #2049 verify removal), plus fix RoadmapView --at-arrival and graph/mod.rs copy</button>
+  <button data-value="1b">1b · Sync onto main only (skip RoadmapView breakpoint_arrival; leave graph/mod.rs copy for LOO-1100)</button>
+</div>
+
+<div data-choice="q2" data-label="2. Plain Continue on iterate recommendation">
+  <p><strong>2. When a reviewer recommends another loop pass (<code>iterate</code>), what should plain Continue (<code>lf task run</code>) do?</strong></p>
+  <button data-value="2a">2a · Built: follow the worker's recommendation (iterate or advance); use --decision only to override</button>
+  <button data-value="2b">2b · Always advance on plain Continue unless you explicitly ask to iterate</button>
+</div>
+
+<div data-choice="q3" data-label="3. Sidebar order when Sort by status is off">
+  <p><strong>3. When "Sort by status" is off in Desktop's sidebar, where should a Task at a breakpoint sit?</strong></p>
+  <button data-value="3a">3a · Built: keep manual drag order intact; float breakpoints first in Now and when Sort by status is on</button>
+  <button data-value="3b">3b · Float breakpoints to the top of the sidebar even when Sort by status is off</button>
+</div>
+
+<div data-choice="q4" data-label="4. Workflow bar breakpoint display">
+  <p><strong>4. How should Desktop's workflow bar show breakpoints?</strong></p>
+  <button data-value="4a">4a · Built: separate marked item beside its step (explore · 👤 after-explore · plan), matching lf graph show</button>
+  <button data-value="4b">4b · Put the person badge on the preceding step (explore 👤 · plan) to keep the bar narrower</button>
+</div>
+
+<div data-choice="q5" data-label="5. Blocked breakpoint button in Desktop">
+  <p><strong>5. On a blocked breakpoint in Desktop, what should the main button do?</strong></p>
+  <button data-value="5a">5a · Built: hide plain Continue and show the blocker reason so you reply in the conversation</button>
+  <button data-value="5b">5b · Keep Continue visible and focus the conversation input when clicked</button>
+</div>
+
+<div data-choice="q6" data-label="6. Pre-existing QA edges">
+  <p><strong>6. What should happen to the five pre-existing QA edges (f6)?</strong></p>
+  <button data-value="6a">6a · Drop here (no new Task)</button>
+  <button data-value="6b">6b · File one grouped follow-up Task (say which items to include in a note below)</button>
+</div>
+
+<div data-question="notes" data-label="Additional notes or edits">
+  <p>Anything else to adjust before syncing and delivering (for example, initial-step <code>task create --run</code> behavior or leading <code>- break</code> copy)?</p>
+  <textarea></textarea>
+</div>
+</main>
+<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1096"},"directory":"/Users/jack/src/loopflow.ba45eb-interactive-step-should","base":"23ce1a69f901ee3a93be23892e6e652603d85ea5","head":"e3fc33746d","path":"scratch/ship-review.html","build_id":"e7afdf82eb3de95f","protocol":{"revision":11,"min_revision":10}}</script>
+<script>
+(function () {
+  "use strict";
+
+  const stampEl = document.getElementById("lf-page");
+  if (!stampEl) return;
+  let stamp;
+  try {
+    stamp = JSON.parse(stampEl.textContent || "{}");
+  } catch (_) {
+    return;
+  }
+
+  const pagePath = String(stamp.path || "scratch/page.html");
+  const buildId = String(stamp.build_id || "0");
+  const work = stamp.work || { kind: "repository" };
+  const directory = String(stamp.directory || "");
+  const protocol =
+    stamp.protocol && typeof stamp.protocol === "object" ? stamp.protocol : null;
+  const protocolRevision = Number(protocol && protocol.revision);
+  const protocolMinRevision = Number(protocol && protocol.min_revision);
+  const storageKey = "lf-page:" + pagePath + ":" + buildId;
+  const mainEl =
+    document.querySelector("main.lf-page") || document.querySelector("main") || document.body;
+
+  const desktopHandler =
+    window.webkit &&
+    window.webkit.messageHandlers &&
+    window.webkit.messageHandlers.loopflow;
+
+  let hostMode = desktopHandler ? "desktop" : "clipboard";
+  let socket = null;
+  let nextReqId = 1;
+  const pending = new Map();
+  const cancelledAction = Symbol("cancelled action");
+  let serverDisconnected = false;
+  let sendingReply = false;
+
+  // Draft & receipt state.
+  // Notes (prose & diff/file lines), choices, multiselects, questions, offline actions,
+  // and optional browser overall direction enter the reply queue.
+  // Executed direct `data-lf` receipts stay separate and only ride as a suffix on ⌘↩.
+  function emptyState() {
+    return {
+      notes: [],
+      choices: {},
+      multiselects: {},
+      questions: {},
+      offlineActions: [],
+      overall: "",
+      receipts: [],
+    };
+  }
+
+  let state = emptyState();
+
+  function oneLine(text) {
+    return String(text || "")
+      .replace(/[\r\n\t\x00-\x1f]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function buttonValue(btn) {
+    return btn.getAttribute("data-value") || oneLine(btn.textContent);
+  }
+
+  function resultTaskId(result) {
+    return result && ((result.task && result.task.identifier) || result.identifier);
+  }
+
+  function errorMessage(err) {
+    return String(err && err.message ? err.message : err);
+  }
+
+  function el(tag, opts, ...children) {
+    const node = document.createElement(tag);
+    if (typeof opts === "string") {
+      if (opts) node.className = opts;
+    } else if (opts) {
+      for (const [k, v] of Object.entries(opts)) {
+        if (v == null || v === false) continue;
+        if (k === "cls") node.className = v;
+        else if (k === "text") node.textContent = v;
+        else if (k === "on") {
+          for (const [ev, fn] of Object.entries(v)) node.addEventListener(ev, fn);
+        } else if (k === "attrs") {
+          for (const [ak, av] of Object.entries(v)) node.setAttribute(ak, av);
+        } else {
+          node[k] = v;
+        }
+      }
+    }
+    for (const child of children) {
+      if (child != null && child !== false) node.append(child);
+    }
+    return node;
+  }
+
+  function makeButton(label, onClick, className) {
+    return el("button", { type: "button", cls: className || "", text: label, on: { click: onClick } });
+  }
+
+  function setPressed(btn, active) {
+    btn.classList.toggle("is-selected", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+
+  function focusEnd(ta) {
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  }
+
+  function clearSelection() {
+    try {
+      window.getSelection().removeAllRanges();
+    } catch (_) {}
+  }
+
+  function randomId() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return window.crypto.randomUUID();
+    }
+    return "lf-" + Math.random().toString(16).slice(2) + "-" + Date.now().toString(16);
+  }
+
+  function shortPath(path) {
+    const parts = String(path || "").split("/");
+    return parts[parts.length - 1] || path;
+  }
+
+  function truncate(text, max) {
+    const s = oneLine(text);
+    return s.length > max ? s.slice(0, max - 1) + "…" : s;
+  }
+
+  function nearestSection(node) {
+    let cur = node && node.nodeType === 1 ? node : node && node.parentElement;
+    while (cur && cur !== document.body) {
+      let prev = cur.previousElementSibling;
+      while (prev) {
+        if (/^H[1-4]$/.test(prev.tagName)) return oneLine(prev.textContent);
+        prev = prev.previousElementSibling;
+      }
+      cur = cur.parentElement;
+    }
+    const h1 = document.querySelector("h1");
+    return h1 ? oneLine(h1.textContent) : "Top";
+  }
+
+  function formatLineSpan(note) {
+    const start = Number(note.lineStart);
+    const end = Number(note.lineEnd || note.lineStart);
+    const span = start === end ? String(start) : start + "–" + end;
+    return note.side === "old" ? "old:" + span : span;
+  }
+
+  function formatLineAnchor(note) {
+    return oneLine(note.path) + ":" + formatLineSpan(note);
+  }
+
+  function formatNoteAnchorLabel(note) {
+    if (note.kind === "line") return formatLineAnchor(note);
+    return "§ " + oneLine(note.section) + ' · "' + truncate(note.quote, 46) + '"';
+  }
+
+  function pulseElement(target) {
+    if (!target) return;
+    try {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+    } catch (_) {}
+    target.classList.add("lf-pulse-ring");
+    setTimeout(() => target.classList.remove("lf-pulse-ring"), 950);
+  }
+
+  function rowsForLineNote(note) {
+    const matched = [];
+    const attr = note.side === "old" ? "data-old-line" : "data-line";
+    const start = Number(note.lineStart);
+    const end = Number(note.lineEnd || note.lineStart);
+    for (const block of mainEl.querySelectorAll(".lf-codeblock[data-path]")) {
+      if (block.getAttribute("data-path") !== note.path) continue;
+      block.querySelectorAll("tr.lf-code-row[" + attr + "]").forEach((tr) => {
+        const ln = Number(tr.getAttribute(attr));
+        if (ln >= start && ln <= end) matched.push(tr);
+      });
+    }
+    return matched;
+  }
+
+  function noteAnchorElement(note) {
+    if (note.kind === "line") return rowsForLineNote(note)[0] || null;
+    return mainEl.querySelector('.lf-hl[data-lf-note-id="' + CSS.escape(note.id) + '"]');
+  }
+
+  function notesInDocumentOrder() {
+    if (state.notes.length <= 1) return state.notes.slice();
+    return state.notes
+      .map((note, idx) => ({ note, idx, el: noteAnchorElement(note) }))
+      .sort((a, b) => {
+        if (a.el && b.el && a.el !== b.el) {
+          const pos = a.el.compareDocumentPosition(b.el);
+          if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+          if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+        }
+        if (a.el !== b.el) return a.el ? -1 : 1;
+        return a.idx - b.idx;
+      })
+      .map((entry) => entry.note);
+  }
+
+  function deleteNote(id) {
+    state.notes = state.notes.filter((n) => n.id !== id);
+    if (sidebarEditingId === id) sidebarEditingId = null;
+    hideHoverCard();
+    refresh(true);
+  }
+
+  function editNote(id, text) {
+    state.notes = state.notes.map((note) => note.id === id ? { ...note, text } : note);
+    sidebarEditingId = null;
+    refresh(true);
+  }
+
+  function queueEntries() {
+    const entries = [];
+    for (const note of notesInDocumentOrder()) {
+      const text = oneLine(note.text);
+      const jump = () => pulseElement(noteAnchorElement(note));
+      const remove = () => deleteNote(note.id);
+      if (note.kind === "line") {
+        const anchor = formatLineAnchor(note);
+        entries.push({
+          tag: "lines",
+          summary: shortPath(note.path) + ":" + formatLineSpan(note) + " — " + text,
+          title: anchor + " — " + text,
+          ref: "`" + pagePath + "` § " + anchor + " — " + text,
+          jump,
+          remove,
+        });
+      } else {
+        const section = oneLine(note.section);
+        const quote = oneLine(note.quote);
+        entries.push({
+          tag: "note",
+          summary: '"' + truncate(quote, 26) + '" — ' + text,
+          title: section + ' › "' + quote + '" — ' + text,
+          ref: "`" + pagePath + "` § " + section + ' › "' + quote + '" ' + text,
+          jump,
+          remove,
+        });
+      }
+    }
+
+    function pushControl(tag, attr, key, label, val, remove) {
+      const summary = label + ": " + val;
+      entries.push({
+        tag,
+        summary,
+        title: summary,
+        ref: "`" + pagePath + "` § " + summary,
+        jump: () => pulseElement(document.querySelector("[" + attr + '="' + CSS.escape(key) + '"]')),
+        remove: () => {
+          remove();
+          refresh(true);
+        },
+      });
+    }
+
+    for (const [group, entry] of Object.entries(state.choices)) {
+      if (!entry || !entry.value) continue;
+      pushControl(
+        "choice",
+        "data-choice",
+        group,
+        oneLine(entry.label || group),
+        oneLine(entry.value),
+        () => delete state.choices[group]
+      );
+    }
+    for (const [group, entry] of Object.entries(state.multiselects)) {
+      if (!entry || !Array.isArray(entry.values) || entry.values.length === 0) continue;
+      pushControl(
+        "choice",
+        "data-multiselect",
+        group,
+        oneLine(entry.label || group),
+        entry.values.map(oneLine).join(", "),
+        () => delete state.multiselects[group]
+      );
+    }
+    for (const [qid, entry] of Object.entries(state.questions)) {
+      const ans = entry && oneLine(entry.answer);
+      if (!ans) continue;
+      pushControl(
+        "answer",
+        "data-question",
+        qid,
+        oneLine(entry.label || qid),
+        ans,
+        () => delete state.questions[qid]
+      );
+    }
+    for (const act of state.offlineActions) {
+      const summary = oneLine(act.summary);
+      entries.push({
+        tag: "run",
+        summary,
+        title: "Run: " + summary,
+        ref: "`" + pagePath + "` Run: " + summary,
+        jump: () => {
+          const found = actions.find((a) => a.key === act.key);
+          if (found) pulseElement(found.slot);
+        },
+        remove: () => {
+          state.offlineActions = state.offlineActions.filter((a) => a.id !== act.id);
+          refresh(true);
+        },
+      });
+    }
+    return entries;
+  }
+
+  function queueItems(entries) {
+    const items = (entries || queueEntries()).map((e) => e.ref);
+    const overall = oneLine(state.overall);
+    if (!desktopHandler && overall) {
+      items.push("`" + pagePath + "` Overall: " + overall);
+    }
+    return items;
+  }
+
+  function formatReplyMessage(items) {
+    if (!items.length) return "";
+    let message = items.map((ref, idx) => "(" + (idx + 1) + ") " + oneLine(ref)).join(" ");
+    const unreported = state.receipts.filter((r) => !r.reported);
+    if (unreported.length > 0) {
+      const ran = unreported
+        .map((r) => oneLine(r.kind + (r.summary ? " → " + r.summary : "")))
+        .join("; ");
+      message += " [already ran: " + ran + "]";
+    }
+    return oneLine(message);
+  }
+
+  function saveState() {
+    if (desktopHandler) {
+      try {
+        desktopHandler.postMessage({
+          type: "sync",
+          build_id: buildId,
+          state,
+          items: queueItems(),
+        });
+      } catch (_) {}
+      return;
+    }
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(state));
+    } catch (_) {}
+  }
+
+  function loadBrowserState() {
+    if (desktopHandler) return;
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") applyState(parsed);
+    } catch (_) {}
+  }
+
+  // `persist` marks an edit: the last send's sentence no longer describes the queue.
+  function refresh(persist) {
+    if (persist) setStatus("", "");
+    syncControlsFromState();
+    renderHighlights();
+    renderSidebar();
+    if (persist) saveState();
+    renderDock();
+  }
+
+  function applyState(loaded) {
+    if (!loaded || typeof loaded !== "object") {
+      state = emptyState();
+    } else {
+      state = {
+        notes: Array.isArray(loaded.notes) ? loaded.notes : [],
+        choices: loaded.choices && typeof loaded.choices === "object" ? loaded.choices : {},
+        multiselects:
+          loaded.multiselects && typeof loaded.multiselects === "object" ? loaded.multiselects : {},
+        questions: loaded.questions && typeof loaded.questions === "object" ? loaded.questions : {},
+        offlineActions: Array.isArray(loaded.offlineActions) ? loaded.offlineActions : [],
+        overall: typeof loaded.overall === "string" ? loaded.overall : "",
+        receipts: Array.isArray(loaded.receipts) ? loaded.receipts : [],
+      };
+    }
+    refresh(false);
+  }
+
+  // Desktop calls this with `null` after `ReviewComments.insert(into:)` sends the page's items;
+  // Swift has already updated its stored page state, so don't echo a redundant `sync` back.
+  window.__lfDesktopApplyState = function (loaded) {
+    if (loaded) applyState(loaded);
+    else clearDrafts({ markReported: true, persist: false });
+  };
+
+  // --- Loopback WebSocket carrier ---
+
+  function loopbackWsUrl() {
+    if (window.location.protocol !== "http:" || window.location.hostname !== "127.0.0.1") return null;
+    const parts = window.location.pathname.split("/").filter(Boolean);
+    if (parts.length < 3 || parts[1] !== "f" || !/^[A-Za-z0-9_-]{43}$/.test(parts[0])) return null;
+    return "ws://" + window.location.host + "/" + parts[0] + "/machine";
+  }
+
+  function markDisconnected(reason) {
+    hostMode = "clipboard";
+    serverDisconnected = true;
+    showBanner(reason || "Loopflow server disconnected — run lf page open " + pagePath);
+    renderDock();
+  }
+
+  function connectLoopback() {
+    if (desktopHandler) return;
+    const url = loopbackWsUrl();
+    if (!url) return;
+    if (!Number.isInteger(protocolRevision) || !Number.isInteger(protocolMinRevision)) {
+      markDisconnected("Review page is missing server protocol version — rebuild with lf page build");
+      return;
+    }
+    let ws;
+    try {
+      ws = new WebSocket(url);
+    } catch (_) {
+      markDisconnected("");
+      return;
+    }
+    let handshakeError = "";
+    let closingForUnload = false;
+    ws.addEventListener("open", () => {
+      ws.send(
+        JSON.stringify({
+          type: "hello",
+          revision: protocolRevision,
+          min_revision: protocolMinRevision,
+          client: { kind: "page", platform: "browser", name: "review-page", version: "1" },
+        })
+      );
+    });
+    ws.addEventListener("message", (event) => {
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch (_) {
+        return;
+      }
+      if (msg.type === "welcome") {
+        socket = ws;
+        hostMode = "loopback";
+        serverDisconnected = false;
+        hideBanner();
+        renderDock();
+        return;
+      }
+      if (msg.type === "error" && !msg.id) {
+        handshakeError = msg.message || msg.code || "Loopflow server rejected connection";
+        showBanner(handshakeError);
+        return;
+      }
+      if ((msg.type === "response" || msg.type === "error") && msg.id && pending.has(msg.id)) {
+        const entry = pending.get(msg.id);
+        pending.delete(msg.id);
+        if (msg.type === "response") entry.resolve(msg.result);
+        else entry.reject(new Error(msg.message || msg.code || "Server error"));
+      }
+    });
+    ws.addEventListener("close", () => {
+      if (socket === ws) socket = null;
+      for (const [, entry] of pending) entry.reject(new Error("Connection closed"));
+      pending.clear();
+      if (!closingForUnload) markDisconnected(handshakeError);
+    });
+    window.addEventListener("pagehide", () => {
+      closingForUnload = true;
+      try {
+        ws.close();
+      } catch (_) {}
+    });
+  }
+
+  function sendOperation(operation, requestId) {
+    if (desktopHandler) {
+      try {
+        return Promise.resolve(
+          desktopHandler.postMessage({
+            type: "operation",
+            operation,
+            request_id: requestId || null,
+          })
+        ).then((result) => {
+          if (result && result.error) throw new Error(result.error);
+          if (result && result.cancelled) return cancelledAction;
+          return result && result.result !== undefined ? result.result : result;
+        });
+      } catch (err) {
+        return Promise.reject(err);
+      }
+    }
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error("Loopflow server is not connected"));
+    }
+    return new Promise((resolve, reject) => {
+      const id = "req-" + nextReqId++;
+      pending.set(id, { resolve, reject });
+      try {
+        socket.send(JSON.stringify({
+          type: "request",
+          id,
+          operation,
+          select: null,
+          sender: null,
+          request_id: requestId || null,
+        }));
+      } catch (error) {
+        pending.delete(id);
+        reject(error);
+      }
+    });
+  }
+
+  // --- Banner ---
+
+  let bannerEl = null;
+  function showBanner(text) {
+    if (!bannerEl) {
+      bannerEl = el("div", "lf-banner");
+      mainEl.insertBefore(bannerEl, mainEl.firstChild);
+    }
+    bannerEl.textContent = text;
+    bannerEl.hidden = false;
+  }
+
+  function hideBanner() {
+    if (bannerEl) bannerEl.hidden = true;
+  }
+
+  // --- Controls & direct `data-lf` actions ---
+
+  // Each `data-lf` button and the element now standing in its place.
+  const actions = [];
+
+  function showInSlot(action, node) {
+    if (action.slot !== node) action.slot.replaceWith(node);
+    action.slot = node;
+  }
+
+  function wireControls() {
+    document.querySelectorAll("[data-notes-toggle]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const block = btn.closest(".lf-codeblock");
+        if (!block) return;
+        const hidden = block.classList.toggle("lf-notes-hidden");
+        btn.textContent = hidden ? "Show line notes" : "Hide line notes";
+      });
+    });
+
+    document.querySelectorAll("[data-choice]").forEach((groupEl) => {
+      const group = groupEl.getAttribute("data-choice");
+      const label = groupEl.getAttribute("data-label") || group;
+      groupEl.querySelectorAll("button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const value = buttonValue(btn);
+          if (state.choices[group] && state.choices[group].value === value) {
+            delete state.choices[group];
+          } else {
+            state.choices[group] = { label, value };
+          }
+          refresh(true);
+        });
+      });
+    });
+
+    document.querySelectorAll("[data-multiselect]").forEach((groupEl) => {
+      const group = groupEl.getAttribute("data-multiselect");
+      const label = groupEl.getAttribute("data-label") || group;
+      groupEl.querySelectorAll("button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const value = buttonValue(btn);
+          const current = (state.multiselects[group] && state.multiselects[group].values) || [];
+          const next = current.includes(value)
+            ? current.filter((v) => v !== value)
+            : current.concat([value]);
+          if (next.length === 0) delete state.multiselects[group];
+          else state.multiselects[group] = { label, values: next };
+          refresh(true);
+        });
+      });
+    });
+
+    document.querySelectorAll("[data-question]").forEach((box) => {
+      const qid = box.getAttribute("data-question");
+      const label = box.getAttribute("data-label") || qid;
+      let input = box.querySelector("textarea, input");
+      if (!input) {
+        input = el("textarea", { rows: 2 });
+        box.append(input);
+      }
+      input.addEventListener("input", () => {
+        const answer = input.value;
+        if (!oneLine(answer)) delete state.questions[qid];
+        else state.questions[qid] = { label, answer };
+        setStatus("", "");
+        saveState();
+        renderDock();
+      });
+    });
+
+    document.querySelectorAll("[data-lf]").forEach((btn, idx) => {
+      let template;
+      try {
+        template = JSON.parse(btn.getAttribute("data-lf") || "{}");
+      } catch (_) {
+        return;
+      }
+      const action = {
+        key: btn.getAttribute("data-lf-id") || "action-" + idx,
+        btn,
+        template,
+        slot: btn,
+      };
+      actions.push(action);
+      btn.addEventListener("click", (event) => {
+        if (event.isTrusted) openActionConfirm(action);
+      });
+    });
+  }
+
+  // Receipts and offline-queued actions outlive reloads; an action with neither shows its button.
+  function syncActionsFromState() {
+    for (const action of actions) {
+      const receipt = state.receipts.find((r) => r.key === action.key);
+      const offline = state.offlineActions.find((a) => a.key === action.key);
+      if (receipt) {
+        showInSlot(action, el("span", { cls: "lf-action-receipt", text: receipt.text || receipt.summary }));
+      } else if (offline) {
+        showInSlot(action, el("span", { cls: "lf-action-summary", text: "Offline — added to reply" }));
+      } else if (
+        action.slot.classList.contains("lf-action-receipt") ||
+        action.slot.classList.contains("lf-action-summary")
+      ) {
+        showInSlot(action, action.btn);
+      }
+    }
+  }
+
+  function syncControlsFromState() {
+    syncActionsFromState();
+    document.querySelectorAll("[data-choice]").forEach((groupEl) => {
+      const selected =
+        state.choices[groupEl.getAttribute("data-choice")] &&
+        state.choices[groupEl.getAttribute("data-choice")].value;
+      groupEl.querySelectorAll("button").forEach((btn) => setPressed(btn, selected === buttonValue(btn)));
+    });
+    document.querySelectorAll("[data-multiselect]").forEach((groupEl) => {
+      const entry = state.multiselects[groupEl.getAttribute("data-multiselect")];
+      const values = (entry && entry.values) || [];
+      groupEl.querySelectorAll("button").forEach((btn) => setPressed(btn, values.includes(buttonValue(btn))));
+    });
+    document.querySelectorAll("[data-question]").forEach((box) => {
+      let input = box.querySelector("textarea, input");
+      if (!input) {
+        input = el("textarea", { rows: 2 });
+        box.append(input);
+      }
+      const entry = state.questions[box.getAttribute("data-question")];
+      const saved = entry ? entry.answer : "";
+      if (input.value !== saved) input.value = saved;
+    });
+  }
+
+  function summarizeOperation(op) {
+    const parts = [op.kind || "operation"];
+    for (const [k, v] of Object.entries(op)) {
+      if (k === "kind" || k === "directory" || k === "request_id" || v === null || v === false || v === "") {
+        continue;
+      }
+      if (Array.isArray(v) && v.length === 0) continue;
+      parts.push(k + "=" + (typeof v === "string" ? v : JSON.stringify(v)));
+    }
+    return parts.join(" ");
+  }
+
+  function materializeOperation(template, requestId) {
+    const copy = JSON.parse(JSON.stringify(template));
+    if (copy.request_id === "__LF_REQUEST_ID__") copy.request_id = requestId;
+    return copy;
+  }
+
+  function formatReceipt(kind, result) {
+    if (result && typeof result === "object") {
+      const taskId = resultTaskId(result);
+      if (kind === "task.create" && taskId) return "Filed " + taskId;
+      if (result.delivery && result.delivery.sentence) return result.delivery.sentence;
+      if (taskId) return kind + " → " + taskId;
+      if (result.sentence) return result.sentence;
+    }
+    return "Ran " + kind;
+  }
+
+  function openActionConfirm(action) {
+    const template = action.template;
+    if (hostMode === "clipboard") {
+      state.offlineActions.push({ id: randomId(), key: action.key, summary: summarizeOperation(template) });
+      refresh(true);
+      return;
+    }
+
+    const requestId = randomId();
+    if (desktopHandler) execute();
+    else {
+      showInSlot(action, el(
+        "span",
+        "lf-action-confirm",
+        el("span", { cls: "lf-action-summary", text: summarizeOperation(template) }),
+        makeButton("Run", execute, "lf-btn-accent"),
+        makeButton("Cancel", () => showInSlot(action, action.btn))
+      ));
+    }
+
+    function execute(event) {
+      if (event && !event.isTrusted) return;
+      showInSlot(action, el("span", { cls: "lf-action-confirm", text: "Running…" }));
+      const op = materializeOperation(template, requestId);
+      sendOperation(op, requestId).then(
+        (result) => {
+          if (result === cancelledAction) {
+            showInSlot(action, action.btn);
+            return;
+          }
+          const text = formatReceipt(op.kind, result);
+          state.receipts.push({ key: action.key, kind: op.kind, summary: resultTaskId(result) || text, text });
+          refresh(true);
+        },
+        (err) => {
+          showInSlot(
+            action,
+            el("span", "lf-action-error", el("span", { text: errorMessage(err) }), makeButton("Retry", execute))
+          );
+        }
+      );
+    }
+  }
+
+  // --- Cross-element prose highlight anchoring ---
+
+  const EXCLUDED_TEXT_SELECTOR =
+    "button, textarea, input, script, style, .lf-gutter-plus, .lf-ln, .lf-sign, " +
+    ".lf-float-pill, .lf-float-composer, .lf-hover-card, .lf-sidebar, .lf-dock, " +
+    ".lf-comments-toggle, .lf-banner, .lf-action-confirm, .lf-action-receipt, .lf-action-error";
+
+  const BLOCK_TAGS = new Set([
+    "P", "DIV", "LI", "TR", "TD", "TH", "H1", "H2", "H3", "H4", "H5", "H6",
+    "PRE", "BLOCKQUOTE", "SECTION", "ARTICLE", "ASIDE", "HEADER", "FOOTER", "DT", "DD",
+  ]);
+
+  function nearestBlock(node) {
+    let cur = node && node.nodeType === 1 ? node : node && node.parentElement;
+    while (cur && cur !== mainEl) {
+      if (BLOCK_TAGS.has(cur.tagName)) return cur;
+      cur = cur.parentElement;
+    }
+    return mainEl;
+  }
+
+  function isExcludedTextNode(node) {
+    const parent = node.parentElement;
+    return (
+      !parent ||
+      Boolean(parent.closest(EXCLUDED_TEXT_SELECTOR)) ||
+      Boolean(parent.closest("[hidden]")) ||
+      Boolean(parent.closest(".lf-notes-hidden .lf-line-note"))
+    );
+  }
+
+  function buildNormalizedIndex(root) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let flat = "";
+    const positions = [];
+    let lastWasSpace = true;
+    let lastBlock = null;
+    let node;
+    while ((node = walker.nextNode())) {
+      if (!node.nodeValue || isExcludedTextNode(node)) continue;
+      const block = nearestBlock(node);
+      if (lastBlock && block !== lastBlock && !lastWasSpace) {
+        flat += " ";
+        positions.push(null);
+        lastWasSpace = true;
+      }
+      lastBlock = block;
+      const val = node.nodeValue;
+      for (let i = 0; i < val.length; i++) {
+        const ch = val[i];
+        if (/\s/.test(ch)) {
+          if (!lastWasSpace) {
+            flat += " ";
+            positions.push({ node, offset: i });
+            lastWasSpace = true;
+          }
+        } else {
+          flat += ch;
+          positions.push({ node, offset: i });
+          lastWasSpace = false;
+        }
+      }
+    }
+    if (flat.endsWith(" ")) {
+      flat = flat.slice(0, -1);
+      positions.pop();
+    }
+    return { flat, positions };
+  }
+
+  function findOccurrenceForRange(range, needle) {
+    if (!needle) return 0;
+    const index = buildNormalizedIndex(mainEl);
+    let rangeFlatPos = -1;
+    for (let i = 0; i < index.positions.length; i++) {
+      const p = index.positions[i];
+      if (!p) continue;
+      try {
+        if (range.comparePoint(p.node, p.offset) === 0) {
+          rangeFlatPos = i;
+          break;
+        }
+      } catch (_) {}
+    }
+    if (rangeFlatPos < 0) return 0;
+    let count = 0;
+    let from = 0;
+    while (from < rangeFlatPos) {
+      const hit = index.flat.indexOf(needle, from);
+      if (hit < 0 || hit >= rangeFlatPos) break;
+      count++;
+      from = hit + 1;
+    }
+    return count;
+  }
+
+  function findNormalizedRange(needle, occurrence) {
+    if (!needle) return null;
+    const index = buildNormalizedIndex(mainEl);
+    let hit = -1;
+    let from = 0;
+    const targetOcc = Math.max(0, Number(occurrence) || 0);
+    for (let occ = 0; occ <= targetOcc; occ++) {
+      const next = index.flat.indexOf(needle, from);
+      if (next < 0) break;
+      hit = next;
+      from = next + 1;
+    }
+    if (hit < 0) return null;
+    let s = hit;
+    let e = hit + needle.length - 1;
+    while (s <= e && !index.positions[s]) s++;
+    while (e >= s && !index.positions[e]) e--;
+    if (s > e || !index.positions[s] || !index.positions[e]) return null;
+    try {
+      const range = document.createRange();
+      range.setStart(index.positions[s].node, index.positions[s].offset);
+      range.setEnd(index.positions[e].node, index.positions[e].offset + 1);
+      return range;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function wrapRange(range, noteId) {
+    const walker = document.createTreeWalker(mainEl, NodeFilter.SHOW_TEXT);
+    const hits = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      if (!node.nodeValue || isExcludedTextNode(node)) continue;
+      try {
+        if (!range.intersectsNode(node)) continue;
+      } catch (_) {
+        continue;
+      }
+      const start = node === range.startContainer ? range.startOffset : 0;
+      const end = node === range.endContainer ? range.endOffset : node.nodeValue.length;
+      if (end > start && node.nodeValue.slice(start, end).trim()) {
+        hits.push({ node, start, end });
+      }
+    }
+    for (let i = hits.length - 1; i >= 0; i--) {
+      const { node: tn, start, end } = hits[i];
+      const text = tn.nodeValue;
+      const frag = document.createDocumentFragment();
+      if (start > 0) frag.append(text.slice(0, start));
+      frag.append(el("span", { cls: "lf-hl", text: text.slice(start, end), attrs: { "data-lf-note-id": noteId } }));
+      if (end < text.length) frag.append(text.slice(end));
+      if (tn.parentNode) tn.parentNode.replaceChild(frag, tn);
+    }
+  }
+
+  function unwrapAllHighlights() {
+    const spans = Array.from(mainEl.querySelectorAll("span.lf-hl[data-lf-note-id]"));
+    const parents = new Set();
+    for (let i = spans.length - 1; i >= 0; i--) {
+      const span = spans[i];
+      const parent = span.parentNode;
+      if (!parent) continue;
+      parents.add(parent);
+      while (span.firstChild) parent.insertBefore(span.firstChild, span);
+      parent.removeChild(span);
+    }
+    for (const parent of parents) {
+      if (parent.isConnected) parent.normalize();
+    }
+  }
+
+  let lastHighlightSig = "";
+
+  function renderHighlights() {
+    const sig = JSON.stringify(
+      state.notes.map((n) =>
+        n.kind === "line"
+          ? [n.id, "line", n.path, n.side, n.lineStart, n.lineEnd]
+          : [n.id, "prose", n.match || n.quote, n.occurrence || 0]
+      )
+    );
+    if (sig === lastHighlightSig) return;
+    lastHighlightSig = sig;
+
+    unwrapAllHighlights();
+    mainEl.querySelectorAll("tr.lf-code-row.lf-row-has-note").forEach((tr) => {
+      tr.classList.remove("lf-row-has-note");
+      tr.removeAttribute("data-lf-line-note-ids");
+    });
+
+    for (const note of state.notes) {
+      if (note.kind === "line") {
+        for (const tr of rowsForLineNote(note)) {
+          tr.classList.add("lf-row-has-note");
+          const existing = tr.getAttribute("data-lf-line-note-ids");
+          const list = existing ? existing.split(",") : [];
+          if (!list.includes(note.id)) list.push(note.id);
+          tr.setAttribute("data-lf-line-note-ids", list.join(","));
+        }
+      } else {
+        const range = findNormalizedRange(oneLine(note.match || note.quote), note.occurrence || 0);
+        if (range) wrapRange(range, note.id);
+      }
+    }
+  }
+
+  // --- Floating selection pill, composer, and hover cards (1c) ---
+
+  let floatPill = null;
+  let floatComposer = null;
+  let pendingSelection = null; // { range, rect, section, quote, match }
+  let hoverCardEl = null;
+  let hoverHideTimer = null;
+
+  function dismissFloatPill() {
+    if (floatPill) {
+      floatPill.remove();
+      floatPill = null;
+    }
+  }
+
+  function clearPendingSelection() {
+    pendingSelection = null;
+    dismissFloatPill();
+  }
+
+  function dismissFloatComposer() {
+    if (floatComposer) {
+      floatComposer.remove();
+      floatComposer = null;
+    }
+    mainEl.querySelectorAll("tr.lf-code-row.lf-row-selecting").forEach((tr) => {
+      tr.classList.remove("lf-row-selecting");
+    });
+  }
+
+  function dismissFloats() {
+    dismissFloatPill();
+    dismissFloatComposer();
+  }
+
+  function hideHoverCard() {
+    clearTimeout(hoverHideTimer);
+    if (hoverCardEl) {
+      hoverCardEl.remove();
+      hoverCardEl = null;
+    }
+  }
+
+  function clampFixedBox(box, rect, preferAbove) {
+    const w = box.offsetWidth;
+    const h = box.offsetHeight;
+    const dockAllowance = desktopHandler ? 12 : 96;
+    let top;
+    if (preferAbove) {
+      top = rect.top - h - 8;
+      if (top < 8) top = Math.min(window.innerHeight - h - dockAllowance, rect.bottom + 8);
+    } else {
+      top = rect.bottom + 8;
+      if (top + h > window.innerHeight - dockAllowance) {
+        top = Math.max(8, rect.top - h - 8);
+      }
+    }
+    top = Math.max(8, Math.min(window.innerHeight - h - 8, top));
+    const centered = preferAbove ? rect.left + rect.width / 2 - w / 2 : rect.left;
+    const left = Math.max(8, Math.min(window.innerWidth - w - 8, centered));
+    box.style.top = top + "px";
+    box.style.left = left + "px";
+  }
+
+  function buildNoteEditor({ initialText, placeholder, rows, onSave, onCancel, stopProp }) {
+    const ta = el("textarea", { rows: rows || 2, placeholder, value: initialText || "" });
+    const commit = () => {
+      const val = oneLine(ta.value);
+      if (val) onSave(val);
+    };
+    ta.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+        commit();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onCancel();
+      }
+    });
+    const wrap = (fn) => (e) => {
+      if (stopProp) e.stopPropagation();
+      fn();
+    };
+    const actionsEl = el(
+      "div",
+      "lf-card-actions",
+      makeButton("Cancel", wrap(onCancel), "lf-btn-quiet"),
+      makeButton("Save ⌘↩", wrap(commit), "lf-btn-accent")
+    );
+    return { ta, actionsEl };
+  }
+
+  function showFloatPill(rect, buttons) {
+    dismissFloatPill();
+    floatPill = el("div", "lf-float-pill");
+    buttons.forEach((b, idx) => {
+      if (idx > 0) floatPill.append(el("span", "lf-float-pill-sep"));
+      floatPill.append(
+        el("button", {
+          type: "button",
+          text: b.label,
+          on: {
+            mousedown: (e) => e.preventDefault(),
+            click: () => {
+              dismissFloatPill();
+              b.onClick();
+            },
+          },
+        })
+      );
+    });
+    document.body.append(floatPill);
+    clampFixedBox(floatPill, rect, true);
+  }
+
+  function saveProseNote(selInfo, text) {
+    const needle = selInfo.match;
+    state.notes.push({
+      id: randomId(),
+      kind: "prose",
+      section: selInfo.section,
+      quote: selInfo.quote.slice(0, 140),
+      match: needle,
+      occurrence: findOccurrenceForRange(selInfo.range, needle),
+      text: oneLine(text),
+    });
+    pendingSelection = null;
+    clearSelection();
+    refresh(true);
+  }
+
+  function openProseComposer(selInfo) {
+    openFloatingComposer(selInfo.rect, {
+      anchorLabel: formatNoteAnchorLabel({ kind: "prose", section: selInfo.section, quote: selInfo.quote }),
+      onSave: (val) => saveProseNote(selInfo, val),
+    });
+  }
+
+  function openFloatingComposer(rect, opts) {
+    dismissFloats();
+    hideHoverCard();
+
+    if (opts.selectedRows) {
+      for (const tr of opts.selectedRows) tr.classList.add("lf-row-selecting");
+    }
+
+    const { ta, actionsEl } = buildNoteEditor({
+      initialText: opts.initialText,
+      placeholder: opts.placeholder || "Add comment… (⌘↩ to save)",
+      onSave: (val) => {
+        dismissFloatComposer();
+        opts.onSave(val);
+      },
+      onCancel: dismissFloatComposer,
+    });
+
+    floatComposer = el(
+      "div",
+      "lf-float-composer",
+      el("div", { cls: "lf-anchor-quote", text: opts.anchorLabel }),
+      ta,
+      actionsEl
+    );
+    document.body.append(floatComposer);
+    clampFixedBox(floatComposer, rect, false);
+    focusEnd(ta);
+  }
+
+  function showHoverCard(targetEl, note) {
+    if (floatComposer) return;
+    hideHoverCard();
+
+    const editBtn = makeButton("Edit", () => {
+      const r = targetEl.getBoundingClientRect();
+      hideHoverCard();
+      openFloatingComposer(r, {
+        anchorLabel: formatNoteAnchorLabel(note),
+        initialText: note.text,
+        onSave: (val) => editNote(note.id, val),
+      });
+    }, "lf-btn-quiet");
+
+    hoverCardEl = el(
+      "div",
+      {
+        cls: "lf-hover-card",
+        on: {
+          mouseenter: () => clearTimeout(hoverHideTimer),
+          mouseleave: () => {
+            hoverHideTimer = setTimeout(hideHoverCard, 200);
+          },
+        },
+      },
+      el("div", { cls: "lf-anchor-quote", text: formatNoteAnchorLabel(note) }),
+      el("div", { cls: "lf-card-body", text: note.text }),
+      el("div", "lf-card-actions", editBtn, makeButton("Delete", () => deleteNote(note.id), "lf-btn-quiet"))
+    );
+    document.body.append(hoverCardEl);
+    clampFixedBox(hoverCardEl, targetEl.getBoundingClientRect(), false);
+  }
+
+  function wireSelectionNotes() {
+    document.addEventListener("mouseup", (event) => {
+      if (
+        event.target.closest(
+          ".lf-float-pill, .lf-float-composer, .lf-hover-card, .lf-sidebar, .lf-dock, .lf-comments-toggle, button, textarea, input, .lf-action-confirm, td.lf-ln"
+        )
+      ) {
+        return;
+      }
+
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) return clearPendingSelection();
+      const quote = oneLine(sel.toString());
+      if (!quote) return clearPendingSelection();
+
+      const range = sel.getRangeAt(0).cloneRange();
+      const containerEl =
+        range.commonAncestorContainer.nodeType === 1
+          ? range.commonAncestorContainer
+          : range.commonAncestorContainer.parentElement;
+      if (!containerEl || !mainEl.contains(containerEl)) return clearPendingSelection();
+
+      const selInfo = {
+        range,
+        rect: range.getBoundingClientRect(),
+        section: nearestSection(containerEl),
+        quote: quote.slice(0, 140),
+        match: quote.slice(0, 240),
+      };
+      pendingSelection = selInfo;
+
+      showFloatPill(selInfo.rect, [
+        { label: "Comment (c)", onClick: () => openProseComposer(selInfo) },
+        { label: "Flag", onClick: () => saveProseNote(selInfo, "Flagged for follow-up") },
+        {
+          label: "Copy",
+          onClick: () => {
+            copyText(quote).catch(() => {});
+            pendingSelection = null;
+            clearSelection();
+          },
+        },
+      ]);
+    });
+
+    document.addEventListener("mousedown", (event) => {
+      if (
+        floatComposer &&
+        !floatComposer.contains(event.target) &&
+        !event.target.closest(".lf-float-pill, .lf-gutter-plus, td.lf-ln")
+      ) {
+        dismissFloatComposer();
+      }
+    });
+
+    mainEl.addEventListener("mouseover", (event) => {
+      const hl = event.target.closest(".lf-hl[data-lf-note-id]");
+      if (hl) {
+        const note = state.notes.find((n) => n.id === hl.getAttribute("data-lf-note-id"));
+        if (note) showHoverCard(hl, note);
+        return;
+      }
+      const lnCell = event.target.closest("tr.lf-code-row.lf-row-has-note td.lf-ln");
+      if (lnCell) {
+        const tr = lnCell.closest("tr.lf-code-row");
+        const firstId = (tr.getAttribute("data-lf-line-note-ids") || "").split(",")[0];
+        const note = firstId ? state.notes.find((n) => n.id === firstId) : null;
+        if (note) showHoverCard(lnCell, note);
+      }
+    });
+
+    mainEl.addEventListener("mouseout", (event) => {
+      if (event.target.closest(".lf-hl[data-lf-note-id], tr.lf-code-row.lf-row-has-note td.lf-ln")) {
+        hoverHideTimer = setTimeout(hideHoverCard, 220);
+      }
+    });
+
+    mainEl.addEventListener("click", (event) => {
+      const hl = event.target.closest(".lf-hl[data-lf-note-id]");
+      if (!hl) return;
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) return;
+      openSidebar(hl.getAttribute("data-lf-note-id"));
+    });
+  }
+
+  // --- Diff & file gutter `+` and Shift+click line ranges (2a) ---
+
+  let lastGutterAnchor = null; // { block, newLine, oldLine }
+
+  function rowLineInfo(tr) {
+    const n = tr.getAttribute("data-line");
+    const o = tr.getAttribute("data-old-line");
+    const newLine = n !== null && n !== "" ? Number(n) : null;
+    const oldLine = o !== null && o !== "" ? Number(o) : null;
+    return newLine !== null || oldLine !== null ? { newLine, oldLine } : null;
+  }
+
+  function wireCodeBlocks() {
+    mainEl.querySelectorAll(".lf-codeblock[data-path]").forEach((block) => {
+      const path = block.getAttribute("data-path") || "";
+      if (!path) return;
+
+      block.querySelectorAll("tr.lf-code-row").forEach((tr) => {
+        const info = rowLineInfo(tr);
+        if (!info) return;
+        const firstLn = tr.querySelector("td.lf-ln");
+        if (!firstLn || firstLn.querySelector(".lf-gutter-plus")) return;
+        const label = info.newLine !== null ? "line " + info.newLine : "old line " + info.oldLine;
+        firstLn.insertBefore(
+          el("button", {
+            type: "button",
+            cls: "lf-gutter-plus",
+            text: "+",
+            title: "Comment on " + label + " (Shift+click for range)",
+            attrs: { "aria-label": "Comment on " + path + " " + label },
+          }),
+          firstLn.firstChild
+        );
+      });
+
+      block.addEventListener("mousedown", (event) => {
+        if (event.shiftKey && event.target.closest("td.lf-ln")) event.preventDefault();
+      });
+
+      block.addEventListener("click", (event) => {
+        const trigger = event.target.closest(".lf-gutter-plus, td.lf-ln");
+        if (!trigger) return;
+        const tr = trigger.closest("tr.lf-code-row");
+        const info = tr && rowLineInfo(tr);
+        if (!info) return;
+        event.preventDefault();
+        dismissFloatPill();
+        hideHoverCard();
+
+        let rangeSide = info.newLine !== null ? "new" : "old";
+        let lineStart = info.newLine !== null ? info.newLine : info.oldLine;
+        let lineEnd = lineStart;
+
+        if (event.shiftKey && lastGutterAnchor && lastGutterAnchor.block === block) {
+          if (lastGutterAnchor.newLine !== null && info.newLine !== null) {
+            rangeSide = "new";
+            lineStart = Math.min(lastGutterAnchor.newLine, info.newLine);
+            lineEnd = Math.max(lastGutterAnchor.newLine, info.newLine);
+          } else if (lastGutterAnchor.oldLine !== null && info.oldLine !== null) {
+            rangeSide = "old";
+            lineStart = Math.min(lastGutterAnchor.oldLine, info.oldLine);
+            lineEnd = Math.max(lastGutterAnchor.oldLine, info.oldLine);
+          }
+        }
+        lastGutterAnchor = { block, newLine: info.newLine, oldLine: info.oldLine };
+
+        const previewNote = { kind: "line", path, side: rangeSide, lineStart, lineEnd };
+        const selectedRows = rowsForLineNote(previewNote);
+        // Span the whole range so a composer that flips above it never covers it.
+        const firstRect = (selectedRows[0] || tr).getBoundingClientRect();
+        const anchorRow = selectedRows[selectedRows.length - 1] || tr;
+        const rowRect = anchorRow.getBoundingClientRect();
+        const codeCell = anchorRow.lastElementChild;
+        const codeLeft = codeCell ? codeCell.getBoundingClientRect().left : rowRect.left + 110;
+        const composerRect = {
+          top: firstRect.top,
+          bottom: rowRect.bottom,
+          left: codeLeft + 12,
+          right: rowRect.right,
+          width: Math.max(0, rowRect.right - codeLeft - 12),
+        };
+
+        openFloatingComposer(composerRect, {
+          anchorLabel: formatLineAnchor(previewNote),
+          placeholder:
+            lineStart === lineEnd
+              ? "Add comment… (Shift+click another line for range, ⌘↩ to save)"
+              : "Add comment… (⌘↩ to save)",
+          selectedRows: selectedRows.length ? selectedRows : [tr],
+          onSave: (val) => {
+            state.notes.push({
+              id: randomId(),
+              kind: "line",
+              path,
+              side: rangeSide,
+              lineStart,
+              lineEnd,
+              text: val,
+            });
+            refresh(true);
+          },
+        });
+      });
+    });
+  }
+
+  // --- Collapsible slide-over Comments sidebar (1c) ---
+
+  let commentsToggleBtn = null;
+  let commentsCountEl = null;
+  let sidebarEl = null;
+  let sidebarTitleEl = null;
+  let sidebarListEl = null;
+  let sidebarOpen = false;
+  let sidebarEditingId = null;
+
+  function closeSidebar() {
+    sidebarOpen = false;
+    sidebarEditingId = null;
+    renderSidebar();
+  }
+
+  function ensureSidebar() {
+    if (sidebarEl) return;
+
+    commentsCountEl = el("span", { cls: "lf-comments-count", hidden: true });
+    commentsToggleBtn = el(
+      "button",
+      {
+        type: "button",
+        cls: "lf-comments-toggle",
+        on: {
+          click: () => {
+            sidebarOpen = !sidebarOpen;
+            renderSidebar();
+          },
+        },
+      },
+      el("span", { text: "Comments" }),
+      commentsCountEl
+    );
+
+    sidebarTitleEl = el("span");
+    sidebarListEl = el("div", "lf-sidebar-list");
+    sidebarEl = el(
+      "aside",
+      { cls: "lf-sidebar", attrs: { "aria-label": "Comments sidebar" } },
+      el("div", "lf-sidebar-head", sidebarTitleEl, makeButton("Close", closeSidebar, "lf-btn-quiet")),
+      sidebarListEl
+    );
+    document.body.append(commentsToggleBtn, sidebarEl);
+  }
+
+  function openSidebar(focusNoteId) {
+    ensureSidebar();
+    sidebarOpen = true;
+    renderSidebar();
+    if (focusNoteId && sidebarListEl) {
+      const card = sidebarListEl.querySelector('[data-lf-sidebar-note="' + CSS.escape(focusNoteId) + '"]');
+      if (card) pulseElement(card);
+    }
+  }
+
+  function renderSidebar() {
+    ensureSidebar();
+    const ordered = notesInDocumentOrder();
+    const count = ordered.length;
+
+    commentsCountEl.textContent = String(count);
+    commentsCountEl.hidden = count === 0;
+    commentsToggleBtn.classList.toggle("has-notes", count > 0);
+    commentsToggleBtn.setAttribute("aria-expanded", sidebarOpen ? "true" : "false");
+
+    sidebarEl.classList.toggle("is-open", sidebarOpen);
+    sidebarTitleEl.textContent = count > 0 ? "Comments (" + count + ")" : "Comments";
+
+    sidebarListEl.innerHTML = "";
+    if (!count) {
+      sidebarListEl.append(
+        el("div", {
+          cls: "lf-sidebar-empty",
+          text: "No comments yet. Drag across text or click + on a code line to leave one.",
+        })
+      );
+      return;
+    }
+
+    for (const note of ordered) {
+      const item = el(
+        "div",
+        {
+          cls: "lf-sidebar-item",
+          attrs: { "data-lf-sidebar-note": note.id },
+          on: {
+            click: (e) => {
+              if (!e.target.closest("button, textarea")) pulseElement(noteAnchorElement(note));
+            },
+          },
+        },
+        el("div", { cls: "lf-anchor-quote", text: formatNoteAnchorLabel(note) })
+      );
+
+      if (sidebarEditingId === note.id) {
+        const { ta, actionsEl } = buildNoteEditor({
+          initialText: note.text,
+          placeholder: "Edit comment… (⌘↩ to save)",
+          stopProp: true,
+          onSave: (val) => editNote(note.id, val),
+          onCancel: () => {
+            sidebarEditingId = null;
+            renderSidebar();
+          },
+        });
+        item.append(ta, actionsEl);
+        setTimeout(() => focusEnd(ta), 0);
+      } else {
+        item.append(
+          el("div", { cls: "lf-card-body", text: note.text }),
+          el(
+            "div",
+            "lf-card-actions",
+            makeButton(
+              "Edit",
+              (e) => {
+                e.stopPropagation();
+                sidebarEditingId = note.id;
+                renderSidebar();
+              },
+              "lf-btn-quiet"
+            ),
+            makeButton(
+              "Delete",
+              (e) => {
+                e.stopPropagation();
+                deleteNote(note.id);
+              },
+              "lf-btn-quiet"
+            )
+          )
+        );
+      }
+      sidebarListEl.append(item);
+    }
+  }
+
+  // --- Browser T3 Code attached-chip composer dock (3b; hidden in Desktop) ---
+
+  let dockEl = null;
+  let dockChipsEl = null;
+  let dockPreviewEl = null;
+  let dockStatusEl = null;
+  let dockOverallInput = null;
+  let dockPreviewBtn = null;
+  let dockClearBtn = null;
+  let dockSendBtn = null;
+  let dockPreviewOpen = false;
+  let statusText = "";
+  let statusKind = "";
+
+  function setStatus(text, kind) {
+    statusText = text;
+    statusKind = kind || "";
+  }
+
+  function steerTargetLabel() {
+    if (work.kind === "task" && work.issue) return work.issue;
+    if (work.kind === "wave" && work.wave) return "wave " + work.wave;
+    if (work.kind === "session" && work.session) return "session";
+    return "repository";
+  }
+
+  function buildSteerOperation(message) {
+    if (work.kind === "task" && work.issue) {
+      return { kind: "task.steer", directory, issue: work.issue, message };
+    }
+    return {
+      kind: "session.steer",
+      directory,
+      session: work.kind === "session" ? work.session || null : null,
+      wave: work.kind === "wave" ? work.wave || null : null,
+      message,
+    };
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise((resolve, reject) => {
+      const ta = el("textarea", { value: text });
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.append(ta);
+      ta.select();
+      try {
+        if (document.execCommand("copy")) resolve();
+        else reject(new Error("Clipboard is unavailable"));
+      } catch (err) {
+        reject(err);
+      } finally {
+        ta.remove();
+      }
+    });
+  }
+
+  // Drop unsent drafts while keeping rendered receipts; mark receipts reported only after a reply is sent.
+  function clearDrafts(options) {
+    const markReported = Boolean(options && options.markReported);
+    const persist = !options || options.persist !== false;
+    const receipts = markReported
+      ? state.receipts.map((r) => Object.assign({}, r, { reported: true }))
+      : state.receipts.slice();
+    state = emptyState();
+    state.receipts = receipts;
+    sidebarEditingId = null;
+    hideHoverCard();
+    refresh(persist);
+  }
+
+  function submitReply() {
+    if (desktopHandler || sendingReply) return;
+    const items = queueItems();
+    if (!items.length) return;
+    const message = formatReplyMessage(items);
+
+    if (hostMode === "loopback") {
+      // Retain edits made after the send, including receipts from actions
+      // that finish while the steer is in flight.
+      const sent = {
+        notes: new Set(state.notes),
+        choices: { ...state.choices },
+        multiselects: { ...state.multiselects },
+        questions: { ...state.questions },
+        offlineActions: new Set(state.offlineActions),
+        overall: state.overall,
+        receipts: new Set(state.receipts),
+      };
+      sendingReply = true;
+      setStatus("Sending…", "");
+      renderDock();
+      sendOperation(buildSteerOperation(message), randomId()).then(
+        (result) => {
+          sendingReply = false;
+          state.notes = state.notes.filter((note) => !sent.notes.has(note));
+          state.offlineActions = state.offlineActions.filter((action) => !sent.offlineActions.has(action));
+          for (const group of ["choices", "multiselects", "questions"]) {
+            for (const [key, value] of Object.entries(sent[group])) {
+              if (state[group][key] === value) delete state[group][key];
+            }
+          }
+          if (state.overall === sent.overall) state.overall = "";
+          for (const receipt of state.receipts) {
+            if (sent.receipts.has(receipt)) receipt.reported = true;
+          }
+          setStatus(result?.delivery?.sentence || "Steer saved.", "ok");
+          saveState();
+          refresh(false);
+        },
+        (err) => {
+          sendingReply = false;
+          setStatus(errorMessage(err), "error");
+          renderDock();
+        }
+      );
+      return;
+    }
+
+    copyText(message).then(
+      () => {
+        setStatus(serverDisconnected ? "Copied reply (server disconnected)" : "Copied reply", "ok");
+        renderDock();
+      },
+      (err) => {
+        setStatus("Copy failed: " + errorMessage(err), "error");
+        renderDock();
+      }
+    );
+  }
+
+  function ensureDock() {
+    if (desktopHandler || dockEl) return;
+
+    dockChipsEl = el("div", "lf-dock-chips");
+    dockPreviewEl = el("div", { cls: "lf-dock-preview", hidden: true });
+    dockStatusEl = el("div", { cls: "lf-dock-status", hidden: true });
+
+    dockOverallInput = el("input", {
+      type: "text",
+      cls: "lf-dock-input",
+      placeholder: "Overall direction (optional)…",
+      attrs: { "aria-label": "Overall direction" },
+      on: {
+        input: () => {
+          state.overall = dockOverallInput.value;
+          setStatus("", "");
+          saveState();
+          updateDockMeta();
+        },
+      },
+    });
+
+    dockPreviewBtn = makeButton("Preview", () => {
+      dockPreviewOpen = !dockPreviewOpen;
+      updateDockMeta();
+    }, "lf-btn-quiet");
+    dockClearBtn = makeButton("Clear", () => clearDrafts({ markReported: false }), "lf-btn-quiet");
+    dockSendBtn = makeButton("", submitReply, "lf-btn-accent");
+
+    dockEl = el(
+      "div",
+      "lf-dock",
+      dockChipsEl,
+      dockPreviewEl,
+      dockStatusEl,
+      el("div", "lf-dock-row", dockOverallInput, el("div", "lf-dock-actions", dockPreviewBtn, dockClearBtn, dockSendBtn))
+    );
+    document.body.append(dockEl);
+    // Reserve the dock's height below the page so the last control stays reachable.
+    new ResizeObserver(() => {
+      document.documentElement.style.setProperty("--lf-dock-room", dockEl.offsetHeight + 40 + "px");
+    }).observe(dockEl);
+  }
+
+  function updateDockMeta(entries) {
+    if (desktopHandler || !dockEl) return;
+    const items = queueItems(entries);
+    const hasItems = items.length > 0;
+
+    if (dockOverallInput.value !== state.overall) dockOverallInput.value = state.overall;
+
+    dockPreviewBtn.hidden = !hasItems;
+    setPressed(dockPreviewBtn, dockPreviewOpen && hasItems);
+    dockClearBtn.hidden = !hasItems;
+
+    dockSendBtn.disabled = !hasItems || sendingReply;
+    dockSendBtn.textContent =
+      hostMode === "loopback" ? "Steer " + steerTargetLabel() + " ⌘↩" : "Copy reply ⌘↩";
+
+    dockPreviewEl.hidden = !(dockPreviewOpen && hasItems);
+    if (dockPreviewOpen && hasItems) dockPreviewEl.textContent = formatReplyMessage(items);
+
+    dockStatusEl.hidden = !statusText;
+    if (statusText) {
+      dockStatusEl.textContent = statusText;
+      dockStatusEl.className =
+        "lf-dock-status" + (statusKind === "error" ? " is-error" : statusKind === "ok" ? " is-ok" : "");
+    }
+  }
+
+  function renderDock() {
+    if (desktopHandler) return;
+    ensureDock();
+
+    const entries = queueEntries();
+    dockChipsEl.innerHTML = "";
+    dockChipsEl.hidden = entries.length === 0;
+    for (const entry of entries) {
+      dockChipsEl.append(
+        el(
+          "span",
+          { cls: "lf-chip", title: entry.title, on: { click: () => entry.jump() } },
+          el("span", { cls: "lf-chip-tag tag-" + entry.tag, text: entry.tag[0].toUpperCase() + entry.tag.slice(1) }),
+          el("span", { cls: "lf-chip-text", text: entry.summary }),
+          el("button", {
+            type: "button",
+            cls: "lf-chip-x",
+            text: "×",
+            title: "Remove",
+            attrs: { "aria-label": "Remove " + entry.tag },
+            on: {
+              click: (e) => {
+                e.stopPropagation();
+                entry.remove();
+              },
+            },
+          })
+        )
+      );
+    }
+
+    updateDockMeta(entries);
+  }
+
+  // --- Global keyboard shortcuts ---
+
+  document.addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      if (floatComposer && floatComposer.contains(document.activeElement)) return;
+      if (sidebarEl && sidebarEl.contains(document.activeElement) && document.activeElement.tagName === "TEXTAREA") {
+        return;
+      }
+      if (!desktopHandler && queueItems().length > 0) {
+        event.preventDefault();
+        submitReply();
+      }
+      return;
+    }
+
+    if (event.key === "Escape") {
+      if (floatComposer || floatPill || hoverCardEl) {
+        dismissFloats();
+        hideHoverCard();
+      } else if (sidebarOpen) {
+        closeSidebar();
+      }
+      return;
+    }
+
+    if (
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      event.key.toLowerCase() === "c" &&
+      pendingSelection &&
+      !(document.activeElement && document.activeElement.closest("input, textarea"))
+    ) {
+      event.preventDefault();
+      const selInfo = pendingSelection;
+      dismissFloatPill();
+      openProseComposer(selInfo);
+    }
+  });
+
+  wireControls();
+  wireCodeBlocks();
+  wireSelectionNotes();
+  renderSidebar();
+
+  if (desktopHandler) {
+    try {
+      const reply = desktopHandler.postMessage({
+        type: "ready",
+        build_id: buildId,
+      });
+      if (reply && typeof reply.then === "function") {
+        reply.then((loaded) => applyState(loaded), () => {});
+      }
+    } catch (_) {}
+  } else {
+    renderDock();
+    loadBrowserState();
+    connectLoopback();
+  }
+})();
+
+</script>
+</body>
+</html>

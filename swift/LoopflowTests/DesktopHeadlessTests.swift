@@ -570,7 +570,9 @@ struct DesktopHeadlessTests {
         _ = try bar.find(viewWithAccessibilityIdentifier: "task-workflow-step-0")
         #expect(throws: (any Error).self) { try bar.find(viewWithAccessibilityIdentifier: "task-workflow-step-2") }
         let steps = try bar.find(viewWithAccessibilityIdentifier: "task-workflow-move")
-        for action in ["build", "demo", "Interrupt step", "Abandon…"] { _ = try steps.find(button: action) }
+        for action in ["plan", "build", "Interrupt step", "Abandon…"] { _ = try steps.find(button: action) }
+        // demo is a breakpoint in this fixture, so Start from leaves it out.
+        #expect(throws: (any Error).self) { try steps.find(button: "demo") }
         #expect(throws: (any Error).self) { try steps.find(button: "Copy Task ID") }
         _ = try bar.find(viewWithAccessibilityIdentifier: "task-complete")
     }

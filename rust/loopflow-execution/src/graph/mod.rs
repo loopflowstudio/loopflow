@@ -657,7 +657,17 @@ fn name_breakpoints(items: &mut [ResolvedGraphItem]) -> Result<(), LoadError> {
 }
 
 pub(crate) fn breakpoint_name(previous: Option<&str>, used: &mut HashSet<String>) -> String {
-    let base = previous.map_or_else(|| "break".into(), |name| format!("after-{name}"));
+    // A command label ("land --wait-and-fix") becomes one shell word.
+    let base = previous.map_or_else(
+        || "break".into(),
+        |name| {
+            let words: Vec<&str> = name
+                .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
+                .filter(|word| !word.is_empty())
+                .collect();
+            format!("after-{}", words.join("-"))
+        },
+    );
     let mut candidate = base.clone();
     let mut suffix = 2;
     while !used.insert(candidate.clone()) {
@@ -1736,6 +1746,12 @@ mod tests {
         assert_eq!(
             crate::task_graph::WorkflowOutline::of(&steps).breakpoints,
             ["after-explore#2", "after-explore"]
+        );
+        // `--from` takes the name as one shell word.
+        let steps = compile("- cmd: land --wait-and-fix\n- break\n").unwrap();
+        assert_eq!(
+            crate::task_graph::WorkflowOutline::of(&steps).breakpoints,
+            ["after-land-wait-and-fix"]
         );
         for body in [
             "- break: explore\n- explore\n",

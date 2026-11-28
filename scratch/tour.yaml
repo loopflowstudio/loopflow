@@ -1,9 +1,9 @@
-at: 669edf2c1d1396587bf12b41e1c1ed2b955ffc71
+at: dca368a68effcd847f0501bd077b0ee71d319753
 first:
   - path: docs/orchestration.md
     why: Walk through Graph breakpoints, loop overrides, and replies.
   - path: rust/loopflow-definitions/src/builtins/task/graph/feature.yaml
-    why: Explore, review, build, and verify with standalone breaks.
+    why: Explore and review before delivery with standalone breaks.
   - path: rust/loopflow-definitions/src/builtins/task/skill/task_session.md
     why: Present finished work, wait on breakpoints, continue one arrival.
   - path: rust/loopflow-execution/src/graph/mod.rs
@@ -26,14 +26,20 @@ first:
     why: Park arrivals and claim captures atomically in one transaction.
   - path: rust/loopflow-storage/src/sqlite/steers.rs
     why: Scope breakpoint handoffs to the active primary visit.
+  - path: rust/loopflow-storage/src/sqlite/task_comments.rs
+    why: Save breakpoint replies once and exclude them from task-update news.
   - path: rust/loopflow-storage/src/sqlite/selections.rs
     why: Derive Breakpoint selection state gated on Active.
   - path: rust/loopflow/src/lf/commands/graph.rs
     why: Build review readback, artifact links, and arrival handoff.
   - path: rust/loopflow/src/lf/commands/waves.rs
-    why: Project breakpoint condition, next move, and selection state.
+    why: Carry the displayed breakpoint arrival to Roadmap Continue.
   - path: swift/Loopflow/Models/TaskWork.swift
     why: Decode breakpoint positions, waiting step, and runnable start steps.
+  - path: rust/loopflow-execution/src/ops/task/pause.rs
+    why: Unpausing a review keeps the saved arrival.
+  - path: swift/Loopflow/Design/TaskWorkflowControls.swift
+    why: Mark breakpoints with a person icon and show blockers.
   - path: swift/Loopflow/Models/NowProjection.swift
     why: Surface breakpoints first in Now and status-sorted work.
   - path: rust/loopflow/tests/work/graph_tests.rs

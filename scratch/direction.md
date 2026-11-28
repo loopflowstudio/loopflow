@@ -45,6 +45,14 @@ Explore & pivot to Breakpoints (`scratch/explore.html`):
 4. **Interaction with LOO-1078 (`lf task pause`):**
    - Keep **At Breakpoint** distinct from LOO-1078's **`Paused`** (shelved, lower-priority sidebar group): a Task at a breakpoint is the opposite—highest priority in **`Active`** (and surfaced in **Now**), the first ones you should be talking to—and `lf task run` / `lf task auto on` moves straight past it. `lf task pause` composes cleanly on top to shelve a Task into `Paused`.
 
+## Exact words — Ship review (Jack Heart, 2026-11-27)
+
+From `scratch/ship-review.html` (`⌘↩` reply):
+> for 5i think i want explore * {head} & * plan, no "after-explore" though (1) `scratch/ship-review.html` § 1. Sync & small fixes: 1a (2) `scratch/ship-review.html` § 2. Plain Continue on iterate recommendation: 2a (3) `scratch/ship-review.html` § 3. Sidebar order when Sort by status is off: 3a (4) `scratch/ship-review.html` § 4. Workflow bar breakpoint display: 4b (5) `scratch/ship-review.html` § 5. Blocked breakpoint button in Desktop: 5a (6) `scratch/ship-review.html` § 6. Pre-existing QA edges: 6a
+
+Earlier question (2026-11-26):
+> is this going to work with interactive steps tat are the initial steps?
+
 ## Reference history
 
 - Previous `interactive:`-handoff branch commits (Passes 1–5) are preserved at commit `13c443c955` (`origin/jack-heart/ba45eb-interactive-step-should`), including:

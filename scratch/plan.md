@@ -98,10 +98,41 @@ Closed all four concept splits identified at `4b295b5e3a` ([concept-review.html]
 
 Real Claude for primaries and `claude:haiku` workers on a private Machine. A primary that quit with `/exit` was started again at the breakpoint and presented the worker's artifact and question. A reply choosing the option that wasn't recommended reached the next worker word for word. `--until breakpoint` returned at the park; `--until submitted` did not. Iterating at a revisited loop breakpoint required `--reason`. Three fixes: a breakpoint reply was sent back to the primary as a "new comment" update with raw markers (`task_undirected_comments` now skips it); continuing a breakpoint printed "from start" (it now names the step); and pass 1 of a loop was told to compare with a preceding pass, which the worker made up (the sentence now starts at pass 2). Details are in [qa.html](qa.html).
 
-## Remaining · gate and demo
+## Pass 6 · Ship-review changes
 
-Nothing remains to implement; Pass 5 closed every split in [concept-review.html](concept-review.html).
+Synced with main at `6deb3b0450` in `94901da89e`. Follow-up fixes are in
+`dca368a68e`. Feature and code use the
+review loop before delivery. The post-merge verify stop and the outer loop
+are gone. Explore and ship-review compile a review page for the Task
+conversation. Main's pause holds a breakpoint at the same visit, with
+Unpause returning to review.
 
-**Gate and demo.** Gate owns all-target Clippy, the full Swift package check, `scripts/test_desktop.sh --filter DTOFixtureTests/breakpointOffersContinuationForThePresentedArrival`, iOS build/simulator checks, and full Work/Now projection checks. Before shipping, run the feature walkthrough in a disposable repository with different agents for explore and the primary. Quit during explore, reopen from Now or with `lf resume --task <ID>`, open the artifact and choose the other layout. Record what appeared on reopen and what planning received, separately from the stand-in results. The multi-day Desktop usage goals in the earlier Task snapshot require real sessions.
+Roadmap Continue carries `breakpoint_arrival` through to `--at-arrival`.
+Blocked reviews show the worker's reason in the workflow bar. The person
+icon stands on its own for a standalone breakpoint. A composition keeps
+its stage name. Plain Continue uses the recorded recommendation. Status
+sorting puts breakpoints first within Active, and manual sorting keeps
+the saved order. The parser points retired `human:` items to `- break`.
 
-**Outside this PR:** Claude Esc during a tool call missing a Stop hook; provider limit retry keeping captured agent; builtin `build.yaml` bare `qa`; running-step UUID in `task_execution.rs`; LOO-1098 (Antigravity immediate idle wake); LOO-1100 (removing released `interactive:` compatibility readers).
+### Checks
+
+- `cargo build -p loopflow --bin lf` passed. The CLI showed the builtin
+  feature, code, quick and research Graphs. A disposable command-only Graph
+  presented its review in foreground and crossed it in batch. The retired
+  `human:` item reported the new `- break` guidance.
+- The 161 focused Desktop checks passed, including the Roadmap and workflow bar
+  Continue commands, the blocked review, pause and Now ordering, both DTO
+  decoders, and the regenerated server schema.
+- 84 focused Rust checks passed across three runs. The end-to-end fixtures
+  exercised the feature reply into planning, a draining command parking at
+  a breakpoint during pause, and unpause preserving the recorded arrival.
+  Schema, DTO, prompt and documented-command checks passed.
+- The Task Graph and Roadmap reads use the Task primary-key index on 10,000 rows.
+  In-memory medians were 1.7 µs for one Task and 986 µs for 250 Roadmap rows.
+- `uv run --project website --extra test pytest -q website/tests/test_readme_index_sync.py` passed.
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  and Swift parsing passed.
+
+The next Graph step owns publishing and delivery. LOO-1098 and LOO-1100
+remain separate. The November 27 review dropped the five pre-existing QA
+edges. [Exact reply](direction.md#exact-words--ship-review-jack-heart-2026-11-27)

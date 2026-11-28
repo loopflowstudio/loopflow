@@ -1,0 +1,170 @@
+<h1>Concept review: a more ambitious <code>compress</code> (LOO-1127)</h1>
+
+<p><strong>Area taken:</strong> Post-implementation simplification and handoff across the builtin Task Graphs (<code>build</code>, <code>optimize</code>), the simplification skill family (<code>compress</code>, <code>realign</code>, <code>concept-review</code>, <code>deep-clean</code>, <code>reduce</code>), automatic step commits (<code>commit_step</code>), user docs (<code>docs/orchestration.md</code>), and shared <code>scratch/</code> records (<code>scratch/plan.md</code>, <code>scratch/questions.md</code>, <code>scratch/tour.yaml</code>). <strong>Why:</strong> Raising <code>compress</code> from a per-slice tidy-up to a whole-branch simplification pass changes how it verifies each cut, how it hands untaken cuts and open questions to <code>ship-review</code>, and how it behaves in <code>optimize</code> and standalone <code>lf compress</code> runs.</p>
+
+<p><strong>Status at <code>HEAD</code> (<code>0cd7bf0326</code> vs <code>fd8dce986d</code>):</strong> Built and committed across <code>8d7e690df1</code> (<code>docs/orchestration.md</code>), <code>e283e9925f</code> (<code>compress.md</code>, <code>ship-review.md</code>, <code>docs/orchestration.md</code>), and <code>0cd7bf0326</code> (<code>scratch/tour.yaml</code>, <code>scratch/plan.md</code>, <code>scratch/questions.md</code>). The plan-stage review findings (removing <code>build.yaml</code>'s schedule from <code>compress.md</code>, checking before committing, dropping the unconsumed closing report, dropping "written by <code>realign</code>" from <code>ship-review.md:14</code>) are already built. This post-build review checks the built change as a whole and finds two real bugs in the committed skill text plus one small alignment miss; the reversible design choices made for review remain open in the questions below.</p>
+
+<h2>Do domain and skill concepts line up?</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Domain concept (what people expect and do)</th>
+      <th>Built skill, doc &amp; Graph concept</th>
+      <th>Lines up?</th>
+      <th>What is wrong</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Whole-branch simplification as one reusable operation.</strong> Read the branch against its base as one change, merge cross-pass seams, audit new additions, and take multi-file reshapes in <code>build</code>, <code>optimize</code>, loop-backs, or standalone <code>lf compress</code>.</td>
+      <td><code>compress.md:1-13, 33-37</code> makes the plan optional (<code>requires</code>) and frames scope around the branch against its base without asserting where it runs in a Graph.</td>
+      <td><strong>Yes</strong></td>
+      <td>Cleanly matches <code>prompt.md</code> ("one useful operation, not a stage of one Graph").</td>
+    </tr>
+    <tr>
+      <td><strong>Open questions reach <code>ship-review</code> in headless Task runs, without littering standalone branches.</strong> When <code>compress</code> hits a question only a person can answer (for example, whether a legacy flag is still used), a Task run records it for <code>ship-review</code>; a standalone run with no plan says it in the reply.</td>
+      <td><code>compress.md:51-53</code> writes to <code>scratch/questions.md</code> only <em>"if it exists"</em>, otherwise puts questions in the reply. <code>docs/orchestration.md:197-199</code> implies only standalone runs fall back to the reply.</td>
+      <td><strong>No</strong></td>
+      <td>Nothing in Loopflow pre-creates <code>scratch/questions.md</code> (unlike <code>scratch/plan.md</code>, which <code>kickoff</code> writes). On a clean Task with no earlier questions, <code>scratch/plan.md</code> exists and <code>scratch/questions.md</code> does not — so headless <code>compress</code> writes its question to its unprinted log reply (<code>headless.md:9</code>), and <code>ship-review</code> never sees it. Every other skill creates <code>scratch/questions.md</code> on demand.</td>
+    </tr>
+    <tr>
+      <td><strong>Verify each code cut before committing it.</strong> Before committing a multi-file reshape, deletion, or parameter removal, build the changed target or run its focused test; skip builds only for prose-only edits and unchanged reruns.</td>
+      <td><code>compress.md:39-43</code> says: <em>"Check only the narrowest changed target or focused test <strong>when behavior changed</strong>. No edits, no rerun."</em></td>
+      <td><strong>No</strong></td>
+      <td>Direct contradiction with <code>compress</code>'s own contract (<code>compress.md:6, 48</code>: behavior stays as it is). Under a literal read, a behavior-preserving refactor never "changes behavior", giving an agent licence to commit broken multi-file cuts without compiling or testing them. Compare <code>AGENTS.md:457</code> and <code>implement.md:79</code> ("build the changed code and run its focused test. Skip builds for prose-only edits").</td>
+    </tr>
+    <tr>
+      <td><strong>Shared ownership of <code>## Deferred findings</code> at <code>ship-review</code>.</strong> Both <code>realign</code> (design outcomes) and <code>compress</code> (behavior/data/metric-changing cuts) can record deferred items that <code>ship-review</code> turns into Fix here / File Task / Drop cards.</td>
+      <td><code>ship-review.md:14</code> dropped <em>"written by <code>realign</code>"</em>, but line 15 immediately below still reads: <em>"<code>scratch/concept-review.html</code>: the review page behind those findings."</em></td>
+      <td><strong>No</strong></td>
+      <td>Lines 14 and 15 still imply every entry under <code>## Deferred findings</code> has a backing section on <code>scratch/concept-review.html</code>, which is false for cuts deferred by <code>compress</code>.</td>
+    </tr>
+    <tr>
+      <td><strong>Per-cut reversible commits with automatic step push.</strong> Each substantial cut lands as its own commit saying what it removed and why, so one bad cut can be reverted alone.</td>
+      <td><code>compress.md:41-43</code> commits each cut; <code>RunningGraph::commit_step</code> (<code>graph.rs:1293</code>) and <code>ops::commit_step</code> (<code>commit.rs:206-249</code>) push self-made commits and commit leftover <code>scratch/</code> edits automatically.</td>
+      <td><strong>Yes</strong></td>
+      <td>Works end to end in both Graph steps and standalone <code>lf compress</code> (<code>lf.rs:456</code>).</td>
+    </tr>
+    <tr>
+      <td><strong>Audit every branch addition without turning into <code>deep-clean</code>.</strong> Question every new type, function, field, parameter, flag, config key, and test once in-run, without a persistent <code>scratch/</code> worklist or repo-wide sweep.</td>
+      <td><code>compress.md:23-27</code> adapts <code>deep-clean</code>'s deletion flags to the branch's additions; <code>deep-clean.md</code> keeps its multi-pass area worklist and Graph.</td>
+      <td><strong>Yes</strong></td>
+      <td>Clear boundary between branch-scoped simplification and multi-pass area deletion.</td>
+    </tr>
+    <tr>
+      <td><strong>Keep reading order current after cuts.</strong> If a tour exists, rewrite it after cuts move files or entry points.</td>
+      <td><code>compress.md:45-46</code> rewrites <code>scratch/tour.yaml</code> when it exists; <code>commit_step</code> commits it inside <code>scratch/</code> so <code>at:</code> stays current (<code>tour.md:37-38</code>); <code>ship-review.md:21-22</code> refreshes it if <code>qa</code> edits code afterward.</td>
+      <td><strong>Yes</strong></td>
+      <td>No wasted tour creation when none exists; stays accurate when one does.</td>
+    </tr>
+    <tr>
+      <td><strong>Preserve the measured metric in <code>optimize</code>.</strong> Simplifying an optimization branch must not silently lose the speedup.</td>
+      <td><code>compress.md:48-49</code> protects the measured number; <code>optimize.yaml:9-11</code> runs <code>compress</code> → <code>refresh</code> → <code>measure (final)</code>, where <code>measure.md:41-43</code> reverts the whole tree to the last kept commit on regression.</td>
+      <td><strong>No</strong></td>
+      <td>Failure-path mismatch in <code>optimize.yaml</code>, not <code>compress.md</code>: one regressed cut discards every <code>compress</code> cut and <code>refresh</code> together. Already tracked as a separate outcome in <code>scratch/plan.md:259-267</code>.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Biggest mismatch: two subtle guards in <code>compress.md</code> that break on normal runs</h2>
+
+<p>The overall shape of the built change is right — whole-branch scope, in-run audit of branch additions, check-then-commit per cut, and deferral of behavior/data/metric changes all line up with <code>build.yaml</code>, <code>commit_step</code>, and <code>ship-review</code>. Two concrete clauses added or carried into <code>compress.md</code> undermine it on the most common paths:</p>
+
+<ol>
+  <li><strong>Gating <code>scratch/questions.md</code> on <em>"if it exists"</em> drops open questions in normal headless <code>build</code> runs.</strong> In <code>code</code>, <code>feature</code>, and <code>pursue</code>, <code>kickoff</code> creates <code>scratch/plan.md</code>, while <code>scratch/questions.md</code> is only created on demand when an earlier step happens to ask a question. On any clean Task where <code>compress</code> is the first step with a question for a person, <code>scratch/questions.md</code> does not exist yet — so <code>compress.md:51-53</code> sends the question to the headless reply (logged, not displayed) instead of creating <code>scratch/questions.md</code> for <code>ship-review</code>. The signal that <code>scratch/</code> is active on the branch is <code>scratch/plan.md</code>, not whether a prior step already had a question.</li>
+  <li><strong>Gating per-cut checks on <em>"when behavior changed"</em> lets refactor cuts commit unchecked.</strong> <code>compress</code>'s whole job is behavior-preserving simplification: lines 6 and 48 explicitly forbid changing behavior people rely on. Telling a behavior-preserving step to run checks only <em>"when behavior changed"</em> is a direct loophole (<code>prompt.md:66</code>) that lets a multi-file reshape or parameter deletion skip compilation and focused tests. The real line — already written in <code>AGENTS.md:457</code> and <code>implement.md:79</code> — is <em>when a cut changes code</em> versus prose-only edits and unchanged reruns.</li>
+</ol>
+
+<lf-component name="before-after">
+  <div slot="before">
+    <p><strong>Built at <code>HEAD</code> (<code>e283e9925f</code>)</strong></p>
+    <ul>
+      <li><code>compress.md:39-40</code>: <em>"Check only the narrowest changed target or focused test <strong>when behavior changed</strong>. No edits, no rerun."</em></li>
+      <li><code>compress.md:49-53</code>: <em>"Record each cut and what it would take under <code>## Deferred findings</code> if <code>scratch/plan.md</code> exists. Put questions only a person can answer in <code>scratch/questions.md</code> <strong>if it exists</strong>. When either file is missing, put its findings or questions in your reply."</em></li>
+      <li><code>docs/orchestration.md:198-199</code>: <em>"Standalone runs (<code>lf compress</code>) report findings or questions in the reply when the corresponding file is absent."</em></li>
+      <li><code>ship-review.md:14-15</code>: drops <em>"written by <code>realign</code>"</em> on line 14, while line 15 still calls <code>scratch/concept-review.html</code> <em>"the review page behind those findings."</em></li>
+    </ul>
+  </div>
+  <div slot="after">
+    <p><strong>Recommended fix (this work)</strong></p>
+    <ul>
+      <li><code>compress.md:39-40</code>: <em>"Check the narrowest changed target or focused test <strong>when a cut changes code</strong>; skip builds for prose-only edits and don't rerun without an edit."</em></li>
+      <li><code>compress.md:49-53</code>: <em>"When <code>scratch/plan.md</code> exists, record each deferred cut and what it would take under <code>## Deferred findings</code>, and put questions only a person can answer in <code>scratch/questions.md</code>. Without <code>scratch/plan.md</code>, report deferred cuts in your reply, and put questions in <code>scratch/questions.md</code> if it exists or in your reply otherwise."</em></li>
+      <li><code>docs/orchestration.md:196-199</code>: state the same rule — when a plan exists, deferred cuts go under <code>## Deferred findings</code> and open questions go in <code>scratch/questions.md</code> (created if needed); standalone runs without a plan report them in the reply.</li>
+      <li><code>ship-review.md:15</code>: <em>"<code>scratch/concept-review.html</code>: the concept review page."</em></li>
+    </ul>
+  </div>
+</lf-component>
+
+<h3>Real excerpts behind the mismatch</h3>
+
+<lf-diff path="rust/loopflow-definitions/src/builtins/task/skill/compress.md" lines="38-56">
+  <lf-note line="40">Contradicts lines 6 and 48: <code>compress</code> preserves behavior, so "when behavior changed" gives a refactor cut licence to skip its build/focused test before committing.</lf-note>
+  <lf-note line="52"><code>scratch/questions.md</code> is never pre-created in a Task. If no earlier step wrote a question, headless <code>compress</code> writes its question to the unprinted log reply and <code>ship-review</code> never sees it.</lf-note>
+</lf-diff>
+
+<lf-diff path="docs/orchestration.md" lines="191-200">
+  <lf-note line="198">Describes the missing-file fallback as a standalone-run behavior, whereas <code>compress.md:51-53</code> applies it inside headless <code>build</code> runs too whenever <code>scratch/questions.md</code> hasn't been created yet.</lf-note>
+</lf-diff>
+
+<lf-diff path="rust/loopflow-definitions/src/builtins/task/skill/ship-review.md" lines="11-17">
+  <lf-note line="15">Line 14 opened <code>## Deferred findings</code> to <code>compress</code>, but line 15 still reads as if every deferred finding came from <code>scratch/concept-review.html</code>.</lf-note>
+</lf-diff>
+
+<lf-file path="rust/loopflow-definitions/src/builtins/modes/headless.md" lines="1-10">
+  <lf-note line="5">Headless mode creates <code>scratch/questions.md</code> on demand without checking whether it already exists.</lf-note>
+  <lf-note line="9">Anything written only to the reply in headless <code>build</code> is logged and never shown to a reviewer.</lf-note>
+</lf-file>
+
+<lf-file path="AGENTS.md" lines="455-464">
+  <lf-note line="457">Existing rule draws the right boundary for <code>implement</code> and <code>compress</code>: changed code vs prose-only edits.</lf-note>
+</lf-file>
+
+<h2>Walking normal, failure, and recovery paths</h2>
+
+<ul>
+  <li><strong>Normal path (clean <code>code</code> / <code>feature</code> Task with no earlier questions):</strong> <code>kickoff</code> creates <code>scratch/plan.md</code>; <code>implement</code>, <code>concept-review</code>, and <code>realign</code> run cleanly without creating <code>scratch/questions.md</code>. Headless <code>compress</code> spots an unused-looking config option and wants to ask whether anyone relies on it. At <code>HEAD</code>, <code>scratch/questions.md</code> does not exist, so <code>compress</code> prints the question to its headless log and <code>ship-review</code> misses it. With the fix, <code>scratch/plan.md</code> exists, so <code>compress</code> creates <code>scratch/questions.md</code>, <code>commit_step</code> commits and pushes it, and <code>ship-review</code> surfaces the question.</li>
+  <li><strong>Failure path 1 (a multi-file reshape breaks a caller or test):</strong> At <code>HEAD</code>, a literal agent reading <em>"when behavior changed"</em> can skip checking a pure refactor and commit broken code before <code>qa</code> catches it. With <em>"when a cut changes code"</em>, the focused check fails before the cut is committed, so the agent fixes or drops it cleanly; if a subtle regression escapes the focused check, <code>qa</code> catches it or a reviewer reverts that one commit alone.</li>
+  <li><strong>Failure path 2 (standalone <code>lf compress</code> on a branch with no <code>scratch/plan.md</code>):</strong> The person runs <code>lf compress</code> directly on an ordinary branch without a Task plan. Because <code>scratch/plan.md</code> is absent, <code>compress</code> does not manufacture <code>scratch/plan.md</code> or <code>scratch/questions.md</code>; it prints any deferred cuts and questions directly in the interactive reply (while still appending to <code>scratch/questions.md</code> if the branch already uses one).</li>
+  <li><strong>Failure path 3 (<code>ship-review</code> loops back to <code>build</code>):</strong> The person requests another pass. <code>realign.md:67</code> preserves <code>## Deferred findings</code> when replacing settled review notes, <code>compress.md</code> makes no claim that nothing follows it, and the next <code>compress</code> pass stops cleanly on already-simplified code.</li>
+  <li><strong>Failure path 4 (<code>optimize</code> metric regression after <code>compress</code>):</strong> <code>compress.md:48-49</code> guards against hot-path regressions up front. If one still slips through, <code>optimize.yaml</code> runs <code>measure (final)</code> after <code>refresh</code> and reverts to the last kept commit, losing all <code>compress</code> cuts and <code>refresh</code> together. Keeping that as a separate outcome in <code>scratch/plan.md:259-267</code> is still the right boundary.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<lf-component name="decision" id="f1" title="This work: Create scratch/questions.md when scratch/plan.md exists" recommendation="Fix here">
+  <p>In <code>compress.md:49-53</code>, gate <code>scratch/</code> recording on whether <code>scratch/plan.md</code> exists rather than gating <code>scratch/questions.md</code> on whether it already exists: when <code>scratch/plan.md</code> exists, write deferred cuts under <code>## Deferred findings</code> and open questions to <code>scratch/questions.md</code> (creating it if absent); without <code>scratch/plan.md</code>, put deferred cuts in the reply and questions in <code>scratch/questions.md</code> if it exists or in the reply otherwise. Align <code>docs/orchestration.md:195-199</code> to say the same.</p>
+  <p><strong>Passed over:</strong> Keeping independent <em>"if it exists"</em> checks on both files. That silently drops open questions into headless logs on every clean Task where no earlier step wrote <code>scratch/questions.md</code>.</p>
+</lf-component>
+
+<lf-component name="decision" id="f2" title="This work: Check each cut when code changes, not 'when behavior changed'" recommendation="Fix here">
+  <p>In <code>compress.md:39-40</code>, replace <em>"Check only the narrowest changed target or focused test when behavior changed. No edits, no rerun."</em> with <em>"Check the narrowest changed target or focused test when a cut changes code; skip builds for prose-only edits and don't rerun without an edit."</em></p>
+  <p><strong>Passed over:</strong> Keeping the inherited <em>"when behavior changed"</em> phrasing from the old skill. It directly contradicts <code>compress</code>'s behavior-preserving contract and creates an easy loophole on multi-file refactors.</p>
+</lf-component>
+
+<lf-component name="decision" id="f3" title="This work: Align ship-review.md:15 with shared ## Deferred findings ownership" recommendation="Fix here">
+  <p>Update <code>ship-review.md:15</code> from <em>"<code>scratch/concept-review.html</code>: the review page behind those findings."</em> to <em>"<code>scratch/concept-review.html</code>: the concept review page."</em> so lines 14–15 agree that <code>## Deferred findings</code> can come from either <code>realign</code> or <code>compress</code>.</p>
+  <p><strong>Passed over:</strong> Leaving line 15 as is. Small drift, cheap to fix alongside line 14.</p>
+</lf-component>
+
+<lf-component name="decision" id="f4" title="Separate outcome: Granular rollback if compress regresses an optimize metric" recommendation="Drop">
+  <p>In <code>optimize.yaml</code>, <code>measure (final)</code> runs after <code>compress</code> and <code>refresh</code> and reverts the whole tree to the last kept commit on regression, dropping every <code>compress</code> cut and the upstream sync together.</p>
+  <p><strong>What it would take:</strong> One small Task on <code>optimize.yaml</code> and <code>measure.md</code> (measuring right after <code>compress</code> before <code>refresh</code>, or checking hot-path cuts when <code>scratch/measure.html</code> exists). Already recorded in <code>scratch/plan.md:259-267</code>; only worth filing if it bites in practice.</p>
+</lf-component>
+
+<h2>Questions</h2>
+
+<p>Both choices below are reversible prose decisions already built as recommended for review; answer only if you want to reverse either one.</p>
+
+<div data-choice="q1" data-label="1. How untaken simplification cuts appear at ship-review">
+  <p><strong>1.</strong> When <code>compress</code> spots a simplification that would change visible behavior, stored data, or a measured number (for example, deleting a legacy flag), how should it show up when you review the PR at <code>ship-review</code>?</p>
+  <button type="button" data-value="1a">1a. As a Fix here / File Task / Drop finding card alongside review deferrals, with open questions in scratch/questions.md (Built, Recommended)</button>
+  <button type="button" data-value="1b">1b. Keep compress out of the plan: list untaken cuts and open questions together in scratch/questions.md only</button>
+</div>
+
+<div data-choice="q2" data-label="2. What happens when compress spots a deeper design flaw">
+  <p><strong>2.</strong> If <code>compress</code> uncovers a deeper structural problem it cannot simplify without changing behavior, should it leave it as a deferred finding for you to decide at <code>ship-review</code>, or send the Task back through the implementation loop automatically?</p>
+  <button type="button" data-value="2a">2a. Keep compress outside the loop and defer it to ship-review — concept-review and realign already loop right before compress (Built, Recommended)</button>
+  <button type="button" data-value="2b">2b. Let compress send the Task back into the build loop when it finds a design-level problem</button>
+</div>

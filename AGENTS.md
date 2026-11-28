@@ -411,8 +411,7 @@ def open_warp(path: Path) -> None:
     """Open Warp terminal at path."""
 ```
 
-Start features with a design doc under `scratch/`; after implementation,
-`lf realign` updates the plan with what implementation taught.
+Start features with a design doc under `scratch/`.
 
 User docs use the shortest command that resolves (`lf land`, `lf wt create`);
 keep canonical paths in command references. `documented_commands` checks

@@ -151,7 +151,7 @@ outer loop, then runs `compress` and `qa` once after the design settles.
         - cmd: sync
         - implement        # decides: another planned pass (iterate) or ready for review (advance)
     - concept-review       # read-only: writes scratch/concept-review.html
-    - realign              # decides: take review into plan; code fixes (iterate) or move on (advance)
+    - realign              # iterate if implementation work remains
 - compress                 # simplify what the branch touched
 - qa                       # exercise the real change end to end
 - pr-publish
@@ -169,16 +169,16 @@ collapses the finished pass in `scratch/plan.md` to one line with its commit and
 names the next pass; if a counterexample breaks the plan, it notes what broke
 and advances so review can replan.
 
-Once planned passes are built, `concept-review` reviews the whole change
-read-only (`scratch/concept-review.html`). In `build`, `refresh`, and standalone
-runs, `realign` updates `scratch/plan.md`, fixes clear mismatches in user docs
-(`docs/`, `README.md`), and lists separate outcomes under `## Deferred findings`.
-Any in-scope code or test fix, however small, becomes the next implementation
-pass in the plan. In `build`, that returns `iterate` and sends the loop back
-through `sync`, `implement`, and `concept-review` so the review page covers the
-fix before `compress`. When no implementation work remains, `realign` advances
-to `compress`. Aim for one diff a person can review in a sitting. Around 2,000
-lines of non-test change is a soft ceiling.
+`concept-review` writes its findings in `scratch/concept-review.html`.
+`realign` fixes clear user-docs mismatches in `docs/` or a `README.md` and
+updates `scratch/plan.md`. Separate outcomes go under `## Deferred findings`.
+Every in-scope code or test fix goes into the next implementation pass.
+In `build`, even one small fix sends the loop back through `sync`, `implement`,
+and `concept-review` so the review page covers the correction before
+`compress`. Outside a loop, `realign` reports what remains.
+
+Aim for one diff a person can review in a sitting. Around 2,000 lines of
+non-test change is a soft ceiling.
 
 The deciding step sees which pass it is on and how many steps the loop
 repeats, including the decision itself.
@@ -187,13 +187,10 @@ repeats, including the decision itself.
 Decision pass 3. Iterating repeats 2 steps, back to sync.
 ```
 
-Unless the Skill gives a different rule for the case, the decider returns
-`blocked` when passes repeat without converging, the last pass made no progress,
-a failure repeats with nothing learned, or progress needs missing input.
-The decider also follows any `advance` and `iterate` rules the Skill defines.
-By default, it looks for a substantial next pass and can keep iterating past
-five when the work warrants it.
-`lf task status` shows the reason the decider gave.
+The Skill's rule for the case takes precedence. By default, the decider
+iterates for a substantial next pass, even past five, and stops as `blocked`
+if passes fail to converge, the last pass made no progress, a failure repeats
+with nothing learned, or input is missing. `lf task status` shows the reason.
 If the step succeeds and the Graph then fails, status shows the Graph error.
 
 ### Docs-first (`write-docs`) and QA playbooks (`.lf/qa/`)

@@ -52,13 +52,13 @@ services (Postgres under `/tmp`): stop what the run started by PID.
 `realign`'s opening turn reads `Decision pass 1. Iterating repeats 4 steps,
 back to sync.` Add a `.gitignore` first: step commits sweep up `__pycache__`
 from the agent's test runs, so `concept-review`'s commit looks like it wrote
-code. Give the review one small code mismatch, one user-docs mismatch and
-one separate outcome. Pass 1 returns `iterate` and queues the code fix in
-`scratch/plan.md`. Only the plan and docs change in that `realign` step. Pass 2
-returns `advance` once `implement` fixes the code and `concept-review` confirms
-it. For the same review, standalone `lf -b -a claude:haiku realign` queues the
-code fix and reports what remains without a loop verdict. In both runs, the
-separate outcome goes under `## Deferred findings`.
+code. Give the review one small code mismatch, one stale README and one
+separate outcome. Inspect the first `realign` commit. The README is corrected,
+the plan queues the code fix and lists the separate outcome under
+`## Deferred findings`, and code and tests are untouched. Expect `iterate`,
+then `advance` after `implement` fixes the code and `concept-review` updates the
+page. From the same starting review, standalone `lf -b -a claude:haiku realign`
+and the `realign` step in `refresh` make the same edits without a verdict.
 
 To read the text a skill launch composes (`extends:` chains, merged
 frontmatter), put a stand-in `claude` first on `PATH` that writes its argv and

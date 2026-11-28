@@ -6,15 +6,11 @@ use crate::graph::runner::SkillOutcome;
 use crate::graph::transitions::{GraphDecision, GraphVerdict};
 use crate::graph::ConcreteStep;
 
-/// Default loop decision criteria, with a skill's own rules taking precedence.
 const DECISION_CRITERIA: &str = "
 
-This step also decides a loop. Do the step's work first, then judge from its results.
+This step also decides a loop. Do the step's work first. Follow the skill's rule for the case at hand. Where it gives none, use these defaults.
 
-- Unless the skill says to handle that case differently, return blocked when passes repeat without converging, the last pass made no progress, a failure repeats with nothing learned, or you need input you can't supply. If you return blocked, the Graph stops here. Give the reason.
-
-If the skill gives its own rules for advance and iterate, follow those. Otherwise use these defaults.
-
+- blocked when passes repeat without converging, the last pass made no progress, a failure repeats with nothing learned, or you need input you can't supply. The Graph stops here. Give the reason.
 - advance when what this step requires is done. Later obligations belong to later steps.
 - iterate when the last pass made progress and you can name a substantial next pass within scope and the result it should produce. Aim to finish within five passes. Continue past five when the work warrants it.
 
@@ -61,7 +57,7 @@ impl GraphOutput {
                     },
                     "reason": {
                         "type": ["string", "null"],
-                        "description": "Nonempty question and evidence for blocked; null for advance/iterate."
+                        "description": "Nonempty reason for blocked; null for advance/iterate."
                     }
                 },
                 "required": ["decision", "summary", "reason"],
@@ -154,14 +150,13 @@ mod tests {
                 GraphOutput::append_step_instructions(step, &mut message),
                 Some(GraphOutput::Decision)
             );
-            let (stop, progress) = message
-                .split_once("If the skill gives its own rules for advance and iterate, follow those. Otherwise use these defaults.")
-                .expect("the runner defers to the skill's progress rules");
-            assert!(stop.contains("Unless the skill says to handle that case differently, return blocked when passes repeat without converging"));
-            assert!(stop.contains("the last pass made no progress"));
-            assert!(stop.contains("a failure repeats with nothing learned"));
-            assert!(progress.contains("- advance when"));
-            assert!(progress.contains("substantial next pass"));
+            let (_, defaults) = message
+                .split_once("Follow the skill's rule for the case at hand.")
+                .expect("the skill's decision rules take precedence");
+            assert!(defaults.contains("blocked when passes repeat without converging"));
+            assert!(defaults.contains("the last pass made no progress"));
+            assert!(defaults.contains("a failure repeats with nothing learned"));
+            assert!(defaults.contains("substantial next pass"));
         }
     }
 

@@ -12,3 +12,15 @@ Still open:
 - Claude's `file://` link shape (line fragment or not) wasn't confirmed from
   its binary. The classifier keeps `#L<n>` and refuses other fragments.
 - Codex's hyperlink detection was not probed.
+
+Pass 1 choices:
+- Keep web fragments such as GitHub discussion anchors. The `#L<n>` rule
+  applies to file links.
+- Refuse web URLs with credentials. A preview like
+  `https://example.com@other.example/` can mislead about the destination.
+- Use a confirmation sheet for external URL schemes, following Desktop's
+  confirmation pattern.
+- Enable previews for detected text links as well as OSC 8 links, so both
+  use the terminal's target overlay.
+- Refuse parent-directory segments in terminal file URLs. Compare checkout
+  paths lexically so a remote filename never triggers a lookup on this Mac.

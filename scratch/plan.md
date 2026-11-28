@@ -3,7 +3,7 @@
 Brief, word for word: "links in agent sessions that work in terminals like rex
 dont work in loopflow desktop".
 
-Nothing is built yet. Base 6deb3b0450.
+Base 6deb3b0450.
 
 ## What is wrong
 
@@ -112,7 +112,7 @@ Three layers, each with one job:
      `NSWorkspace.shared.open`.
    - `.file` outside the checkout in a remote Session: refused, "File is on
      another Machine". Never look up the same path on this Mac.
-   - `.externalScheme`: an alert names the target and asks before opening.
+   - `.externalScheme`: a confirmation sheet names the target and asks before opening.
    - `.refused`: notice only.
 
 **Feedback slot.** The hover target and refusal notices share one
@@ -127,35 +127,29 @@ carry these.
 local state while nothing is written to the PTY. Without that, ⌘-hover does
 nothing on a reconnecting or ended screen.
 
+Pass 1 (a12082957) adds Desktop link previews, cursor feedback and validated opening. Headless tests and the native paused-Session fixture passed.
+
 ## Remaining passes
 
-### Pass 1: Desktop opens web links, with hand cursor and preview
-
-`TerminalLink` with the full classification, the three `action_cb` cases,
-`onOpenLink` routing for `.web`, `.mail`, `.externalScheme`, `.refused` and
-local outside-checkout `.file`, the overlay, and the `flagsChanged` fix.
-
-Shows: in the Dev app, ⌘ over an agent's Markdown link turns the cursor to a
-hand and shows the target; a click opens the browser. Teaches whether the
-action arrives for a relayed Session. If it doesn't, the fault is in the relay
-and the later passes change.
-
-Tests: `TerminalLinkTests` (headless) over the classification, including
-`file:///tmp/x.command`, a symlink to an app, `https:relative`, a bidi
-override, `#L12`, `file://<hostName>/…`, `loopflow://update`,
-`loopflow://open?repo=/tmp`. One `.requiresDisplay` case in
-`TerminalFeedbackTests` feeds `ESC ] 8 ;; https://example.com ESC \ text`, then
-⌘-clicks the cell and asserts `onOpenLink` received the URL.
-
 ### Pass 2: Work links and checkout files open in Desktop
+
+**Realign checkout routing first.** A shell tab keeps its Machine and checkout
+after a Task moves. `SessionsWorkspace.showBrowser(.files, from:)` records the
+pane's location, but `filesPlace(for:task:)` and the server's `task.file` read
+the Task's current checkout. Sending the old pane's relative path through
+that store can open the same-named file on the new Machine. The remote
+workspace fixture `RemoteTaskWorkspaceTests` keeps the old shell alive across
+exactly this move. Repository and Wave Sessions also have no Task Files pane.
+The plan needs a file presentation tied to the terminal's checkout, or a
+narrower outcome for those panes.
 
 Route `.work` through `WorkLinkRouter`. Route checkout `.file` to the Files
 pane at its line, choosing by the pane's Machine and checkout path. Refuse
 remote paths outside the checkout.
 
 Shows: ⌘-click on `lf open --link` output inside a Session selects that Task in
-this window. ⌘-click on `scripts/test.py#L42` opens the Files pane at line 42,
-including in a remote Session.
+this window. ⌘-click on an absolute `file://…/scripts/test.py#L42` target opens
+the Files pane at line 42, including in a remote Session.
 
 Tests: routing decisions over (local/remote) × (inside/outside the checkout)
 in a headless pane-router test with the opener closures stubbed.
@@ -170,6 +164,11 @@ is unset, `rex` and `Apple_Terminal`, with a stale `TERM_PROGRAM_VERSION`.
 Codex: its link output was not probed. QA records what a Codex Session prints.
 
 ## Acceptance check
+
+Pass 1 passed `TerminalLinkTests`, the headless terminal feedback and modifier
+checks, and the native paused-Session OSC 8 fixture. The Desktop fallback
+sources type-checked with GhosttyKit disabled. The signed Xcode build and a
+live agent relay demo remain for CI and QA.
 
 Headless: `cargo test -p loopflow-execution --lib transport::registry_tests::`
 and the `TerminalLinkTests` suite pass.
@@ -234,8 +233,7 @@ from any terminal prints clickable links.
   local pane, a non-local `file://` host must be refused; on a remote pane,
   should a `file://` URL with a non-empty host open in **Files** when its path
   falls inside the remote pane's checkout?
-- **Relative file targets:** Pass 2's example mentions `scripts/test.py#L42`,
-  while `TerminalLink` refuses relative targets. Confirm whether checkout file
-  links are always absolute `file://` OSC 8 targets (with relative display text)
-  or whether scheme-less relative paths should resolve against the pane's
-  checkout.
+- **Relative file targets:** OSC 8 file targets are required to be absolute.
+  Ghostty can turn a regex match for a relative path into an absolute path
+  after a local existence check. Confirm the configured matches before
+  promising relative text links in remote panes.

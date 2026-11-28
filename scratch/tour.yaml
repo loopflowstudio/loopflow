@@ -1,0 +1,17 @@
+at: a12082957b749803d50b66821a0ec4e311b276a8
+first:
+  - path: docs/surfaces.md
+    why: What terminal link clicks should do
+  - path: swift/LoopflowMac/Services/Ghostty/TerminalLink.swift
+    why: Classifies targets and checks local files before opening
+  - path: swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift
+    why: Receives Ghostty click, hover, and cursor actions
+  - path: swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift
+    why: Shows link feedback in the retained terminal
+  - path: swift/LoopflowMac/Views/WorkspacePanesView.swift
+    why: Routes supported targets and confirms custom schemes
+  - path: swift/LoopflowTests/TerminalFeedbackTests.swift
+    why: Exercises OSC 8 on a paused Session
+  - path: swift/LoopflowTests/TerminalLinkTests.swift
+    why: Covers malformed links and unsafe local files
+hide: []

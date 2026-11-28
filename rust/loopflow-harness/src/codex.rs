@@ -39,6 +39,21 @@ impl Harness for Codex {
             && command.split_whitespace().any(|arg| arg == "app-server")
             && command.split_whitespace().any(|arg| arg == "--listen")
     }
+    fn caller_session_env(&self) -> &'static [&'static str] {
+        &[
+            "CODEX_CI",
+            "CODEX_SANDBOX",
+            "CODEX_SANDBOX_NETWORK_DISABLED",
+            "CODEX_SESSION_ID",
+            "CODEX_THREAD_ID",
+            "CODEX_TOOL_CALL_ID",
+            "CODEX_VERSION",
+            "CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
+        ]
+    }
+    fn sign_in_advice(&self) -> &'static str {
+        "run `codex login`"
+    }
     fn title_args(&self, _name: &str) -> Vec<String> {
         vec!["-c".into(), "tui.terminal_title=[]".into()]
     }

@@ -9,8 +9,9 @@
 //! has been quiet for [`IN_FLIGHT`].
 
 use std::path::{Path, PathBuf};
-#[cfg(target_os = "macos")]
 use std::sync::Arc;
+#[cfg(not(target_os = "macos"))]
+use std::sync::{Condvar, Mutex};
 use std::time::Duration;
 #[cfg(target_os = "macos")]
 use std::time::Instant;
@@ -27,15 +28,31 @@ const IN_FLIGHT: Duration = Duration::from_secs(1);
 pub struct StoreWaker {
     #[cfg(target_os = "macos")]
     queue: Option<Arc<std::os::fd::OwnedFd>>,
+    #[cfg(not(target_os = "macos"))]
+    signal: Arc<Signal>,
 }
 
 impl StoreWaker {
+    /// Interrupt the associated wait without writing to SQLite.
     pub fn wake(&self) {
         #[cfg(target_os = "macos")]
         if let Some(queue) = &self.queue {
             macos::trigger(queue);
         }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let mut woken = self.signal.woken.lock().unwrap_or_else(|e| e.into_inner());
+            *woken = true;
+            self.signal.changed.notify_one();
+        }
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[derive(Debug, Default)]
+struct Signal {
+    woken: Mutex<bool>,
+    changed: Condvar,
 }
 
 #[derive(Debug)]
@@ -51,6 +68,8 @@ pub struct StoreChanges {
     /// When either watched log was last seen written or replaced.
     #[cfg(target_os = "macos")]
     written: Option<Instant>,
+    #[cfg(not(target_os = "macos"))]
+    signal: Arc<Signal>,
 }
 
 impl StoreChanges {
@@ -68,6 +87,8 @@ impl StoreChanges {
             watch: None,
             #[cfg(target_os = "macos")]
             written: None,
+            #[cfg(not(target_os = "macos"))]
+            signal: Arc::new(Signal::default()),
         }
     }
 
@@ -75,16 +96,18 @@ impl StoreChanges {
         StoreWaker {
             #[cfg(target_os = "macos")]
             queue: self.queue.clone(),
+            #[cfg(not(target_os = "macos"))]
+            signal: Arc::clone(&self.signal),
         }
     }
 
-    /// Return once the store may have changed, or after `timeout`.
+    /// Return on a store change, a wake signal, or after `timeout`.
     pub fn wait(&mut self, timeout: Duration) {
         self.wait_with_history(timeout, false);
     }
 
     /// Return once the store (or `history.db` when `watch_history` is true)
-    /// may have changed, or after `timeout`.
+    /// may have changed, a wake signal arrived, or `timeout` elapsed.
     #[cfg(target_os = "macos")]
     pub fn wait_with_history(&mut self, timeout: Duration, watch_history: bool) {
         let history_target = watch_history.then_some(self.history_wal.as_path());
@@ -120,7 +143,14 @@ impl StoreChanges {
                 }
             },
             // No store yet. Its directory may not exist either.
-            None => std::thread::sleep(timeout.min(Duration::from_millis(100))),
+            None => {
+                let timeout = timeout.min(Duration::from_millis(100));
+                if let Some(queue) = &self.queue {
+                    macos::wait_event(queue, timeout);
+                } else {
+                    std::thread::sleep(timeout);
+                }
+            }
         }
     }
 
@@ -128,7 +158,16 @@ impl StoreChanges {
     /// short clock.
     #[cfg(not(target_os = "macos"))]
     pub fn wait_with_history(&mut self, timeout: Duration, _watch_history: bool) {
-        std::thread::sleep(timeout.min(Duration::from_millis(50)));
+        let mut woken = self.signal.woken.lock().unwrap_or_else(|e| e.into_inner());
+        if !*woken {
+            let (guard, _) = self
+                .signal
+                .changed
+                .wait_timeout(woken, timeout.min(Duration::from_millis(50)))
+                .unwrap_or_else(|e| e.into_inner());
+            woken = guard;
+        }
+        *woken = false;
     }
 }
 
@@ -273,39 +312,44 @@ mod macos {
         }
 
         pub(super) fn wait(&mut self, timeout: Duration) -> Waited {
-            let timeout = libc::timespec {
-                tv_sec: timeout.as_secs() as libc::time_t,
-                tv_nsec: timeout.subsec_nanos() as libc::c_long,
-            };
-            // SAFETY: the queue is open and `event` is a valid out-parameter
-            // for the single event requested.
-            unsafe {
-                let mut event: libc::kevent = std::mem::zeroed();
-                let count = libc::kevent(
-                    self.queue.as_raw_fd(),
-                    std::ptr::null(),
-                    0,
-                    &mut event,
-                    1,
-                    &timeout,
-                );
-                match count {
-                    0 => Waited::Quiet,
-                    1 if event.filter == libc::EVFILT_USER => Waited::Quiet,
-                    1 if event.fflags & (libc::NOTE_DELETE | libc::NOTE_RENAME) == 0 => {
-                        Waited::Written
-                    }
-                    1 if self
+            match wait_event(&self.queue, timeout) {
+                None => Waited::Quiet,
+                Some(event) if event.filter == libc::EVFILT_USER => Waited::Quiet,
+                Some(event) if event.fflags & (libc::NOTE_DELETE | libc::NOTE_RENAME) == 0 => {
+                    Waited::Written
+                }
+                Some(event)
+                    if self
                         .history
                         .as_ref()
-                        .is_some_and(|h| event.ident == h.as_raw_fd() as usize) =>
-                    {
-                        self.history = None;
-                        Waited::Written
-                    }
-                    _ => Waited::Gone,
+                        .is_some_and(|file| event.ident == file.as_raw_fd() as usize) =>
+                {
+                    self.history = None;
+                    Waited::Written
                 }
+                Some(_) => Waited::Gone,
             }
+        }
+    }
+
+    pub(super) fn wait_event(queue: &OwnedFd, timeout: Duration) -> Option<libc::kevent> {
+        let timeout = libc::timespec {
+            tv_sec: timeout.as_secs() as libc::time_t,
+            tv_nsec: timeout.subsec_nanos() as libc::c_long,
+        };
+        // SAFETY: the queue is open and `event` is a valid out-parameter
+        // for the single event requested.
+        unsafe {
+            let mut event: libc::kevent = std::mem::zeroed();
+            let count = libc::kevent(
+                queue.as_raw_fd(),
+                std::ptr::null(),
+                0,
+                &mut event,
+                1,
+                &timeout,
+            );
+            (count == 1).then_some(event)
         }
     }
 
@@ -407,5 +451,41 @@ mod tests {
         changes.wait(Duration::from_secs(20));
         assert!(started.elapsed() < Duration::from_secs(10));
         drop(writer.join().unwrap());
+    }
+
+    /// A wake is retained until the next wait consumes it, with or without a WAL.
+    #[test]
+    fn waker_ends_the_wait_without_a_wal_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let mut changes = StoreChanges::watch(&path);
+        check_pending_wake(&mut changes);
+
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE t(x);")
+            .unwrap();
+        changes.wait(Duration::ZERO);
+        check_pending_wake(&mut changes);
+    }
+
+    #[cfg(target_os = "macos")]
+    fn check_pending_wake(changes: &mut StoreChanges) {
+        let waker = changes.waker();
+        let queue = waker.queue.as_ref().unwrap();
+        waker.wake();
+        let event = super::macos::wait_event(queue, Duration::ZERO).unwrap();
+        assert_eq!(event.filter, libc::EVFILT_USER);
+
+        waker.wake();
+        changes.wait(Duration::ZERO);
+        assert!(super::macos::wait_event(queue, Duration::ZERO).is_none());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn check_pending_wake(changes: &mut StoreChanges) {
+        changes.waker().wake();
+        assert!(*changes.signal.woken.lock().unwrap());
+        changes.wait(Duration::ZERO);
+        assert!(!*changes.signal.woken.lock().unwrap());
     }
 }

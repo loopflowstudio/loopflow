@@ -303,6 +303,11 @@ on every headless step, nothing is sandboxed and nothing asks.
 one you switch to gets the context block and your steers from its first
 prompt, and `lf resume` reopens the one you quit in.
 
+Reopen an Antigravity Task conversation with `lf resume --task LOO-12`.
+If steers or Task updates are waiting, the first turn reads them before you
+type. An already open, idle conversation wakes once its prompt is empty,
+leaving drafts, menus, and dialogs untouched.
+
 Usage counts the conversation lf started, not its subagents. A plain `agy`
 conversation is not listed in `lf session list`. Native response schemas, turn
 limits and `--effort` are unavailable.

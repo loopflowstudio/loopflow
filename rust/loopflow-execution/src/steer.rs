@@ -152,6 +152,71 @@ pub fn render_complete(steers: &[Steer]) -> String {
     text
 }
 
+/// Short interactive prompt sent to a provider whose steers arrive through its
+/// turn hook (`PreInvocation`), rather than a server-side inbox or RPC.
+pub const WAKE_PROMPT: &str = "Read the waiting steers and Task updates for this Session.";
+
+/// A managed conversation whose last boundary was a turn end, and how the
+/// Machine server reaches it there.
+#[derive(Debug, Clone)]
+pub struct IdleConversation {
+    pub adapter: SteerAdapter,
+    /// The Session's selected native conversation, once reported.
+    pub thread: Option<String>,
+    /// The Session's working directory, where rendered steers are saved.
+    pub cwd: std::path::PathBuf,
+    pub reach: IdleReach,
+}
+
+/// Screen-readiness predicate deciding whether a held terminal is at an empty,
+/// idle top-level prompt safe to receive a bracketed-paste wake.
+pub type PromptReady = fn(&loopflow_terminal::ghostty_vt::Terminal) -> bool;
+
+#[derive(Debug, Clone)]
+pub enum IdleReach {
+    /// The Session's private app-server.
+    Codex(std::path::PathBuf),
+    /// What the provider's own code listens on.
+    Inbox(Inbox),
+    /// The held terminal hosting the provider's interactive TUI, paired with
+    /// the harness's screen-readiness guard.
+    Terminal {
+        terminal: loopflow_model::id::TerminalId,
+        prompt_ready: PromptReady,
+    },
+}
+
+fn idle_reach(candidate: &IdleCandidate) -> Option<IdleReach> {
+    let kind = loopflow_harness::HarnessKind::parse(candidate.provider.as_deref()?)?;
+    let reach = crate::harness::launcher(kind).idle_reach(&candidate.endpoints)?;
+    if candidate.thread.is_none() && !matches!(reach, IdleReach::Terminal { .. }) {
+        return None;
+    }
+    Some(reach)
+}
+
+/// A recorded start leaves waiting input for the server when this launch
+/// has published the endpoint its harness uses.
+pub fn is_idle_reachable(
+    store: &loopflow_storage::sqlite::SqliteStore,
+    adapter: &SteerAdapter,
+) -> crate::store::StoreResult<bool> {
+    Ok(store
+        .idle_conversation_candidates(Some(&adapter.session))?
+        .iter()
+        .any(|candidate| {
+            candidate.adapter.agent_process_id == adapter.agent_process_id
+                && idle_reach(candidate).is_some()
+        }))
+}
+
+fn is_live(identity: Option<(u32, i64)>) -> bool {
+    identity.is_some_and(|(pid, start)| {
+        crate::process::os_process::process_identity_evidence(pid, start)
+            == crate::store::ProcessIdentityEvidence::Live
+    })
+}
+
 /// Only confirmed live, managed conversations can be woken.
 pub fn idle_conversations(
     store: &loopflow_storage::sqlite::SqliteStore,
@@ -161,13 +226,15 @@ pub fn idle_conversations(
         .idle_conversation_candidates(session)?
         .into_iter()
         .filter_map(|candidate| {
-            candidate
-                .identity
-                .is_some_and(|(pid, start)| {
-                    crate::process::os_process::process_identity_evidence(pid, start)
-                        == crate::store::ProcessIdentityEvidence::Live
-                })
-                .then_some(candidate.conversation)
+            // Check the harness endpoint before querying the OS process table
+            // so sessions without one cost no syscalls.
+            let reach = idle_reach(&candidate)?;
+            is_live(candidate.identity).then_some(IdleConversation {
+                adapter: candidate.adapter,
+                thread: candidate.thread,
+                cwd: candidate.cwd,
+                reach,
+            })
         })
         .collect())
 }
@@ -182,13 +249,7 @@ pub fn sessions_to_start(
     Ok(store
         .read_steer_wakes()?
         .into_iter()
-        .filter(|wake| {
-            let running = wake.identity.is_some_and(|(pid, start)| {
-                crate::process::os_process::process_identity_evidence(pid, start)
-                    == crate::store::ProcessIdentityEvidence::Live
-            });
-            !running && named.insert(wake.session.clone())
-        })
+        .filter(|wake| !is_live(wake.identity) && named.insert(wake.session.clone()))
         .collect())
 }
 

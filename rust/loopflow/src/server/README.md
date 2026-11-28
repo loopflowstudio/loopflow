@@ -74,6 +74,8 @@ first reading after start is the restart and reboot case. Each reading:
    the Task is open, claimed and checked out here, no agent or pending holder
    serves it, and it never had an agent or its last agent did not end by the
    person (exit 0 or 130).
+   It starts in the Session's saved directory. If that directory is gone, it
+   resumes in the repository's main checkout when available.
    An unfinished agent whose recorded process is gone died too. The store
    counts the start (`agent_sessions.starts_since_turn`, `last_started_at`)
    before it goes through `session.continue`'s path with request
@@ -872,9 +874,9 @@ takes messages while idle, and names which kind it is. From Claude it is
 `{"claude": key}`, the key file the conversation publishes for peers of its
 cross-session inbox, `sessions/<pid>.<sha256 of socket>.key` in its
 configuration directory, found from the `CLAUDE_CODE_MESSAGING_SOCKET` Claude
-gives its children. From an OpenCode or Pi work session it is
-`{"socket": path}`, the Unix socket its plugin or extension listens on. It is
-null from Codex and from workers.
+gives its children. From an OpenCode or Pi work session it is `{"socket": path}`, the Unix socket
+its plugin or extension listens on. It is null from Codex, Antigravity, and
+workers.
 
 Before answering, the server records what the boundary says: the native turn
 (started at a prompt, yielded at a turn end, with the open background tools and
@@ -938,12 +940,12 @@ and batches, prompt hooks are gated like tool hooks.
 
 The server keeps no list of conversations (`wake.rs`); it reads them from the
 store. A work session is idle when its last recorded native turn yielded
-(`session_activity`) and its AgentProcess is live, and reachable through its
-Codex app-server (`agent_sessions.agent_endpoint`) or what its boundaries
-saved: a Claude inbox key in `agent_sessions.agent_inbox`, where
+(`session_activity`) and its AgentProcess is live. Its launcher selects the
+recorded endpoint for its provider. Codex uses its app-server in
+`agent_sessions.agent_endpoint`, Claude the inbox key in `agent_sessions.agent_inbox`, where
 `sessions/<pid>.json` beside the key names the socket and must still name the
-conversation, or the socket an OpenCode plugin or Pi extension listens on in
-`agent_sessions.agent_socket`. One
+conversation. OpenCode and Pi use the socket their plugin or extension
+publishes in `agent_sessions.agent_socket`. One
 server thread waits on the store's change signal (`store::changes`) and reads
 the `task_updates` revision and the newest steer at start and whenever either
 moves; every idle conversation with news gets its unread steers, Task updates
@@ -967,6 +969,16 @@ that lapses for the next boundary:
   another conversation, or whose provider refuses, closes without answering.
   A turn already running takes the message as a steer. OpenCode's TUI shows
   the answer but not the message that caused it.
+- Antigravity: its held terminal (`agent_sessions.held_terminal_id`). When the
+  held terminal's retained `libghostty-vt` screen shows `agy`'s empty idle
+  prompt (`───` / `>` / `───` with `? for shortcuts`, bracketed paste enabled,
+  main screen, no `esc to cancel` or navigation menu) and no recent user
+  keystrokes or open paste, the server injects the trigger prompt via bracketed
+  paste (`ESC[200~ … ESC[201~\r`) and marks the conversation woken without
+  claiming steers; `PreInvocation` claims and stamps them once `agy` starts the
+  turn. The relay reads waiting viewer input and provider output before
+  checking readiness. A draft, menu, dialog, or holder still being adopted
+  defers the wake for a retry.
 
 A reopened work session takes steers saved while it was closed as a turn
 before anyone types. Without a steer or an opening prompt, it waits for input.
@@ -976,13 +988,17 @@ or socket, lets the server deliver waiting steers. Claude reports its start.
 Codex runs its start hook inside a turn, so lf reports the start once the
 app-server holds the conversation. If Codex has an opening prompt, lf reports
 the prompt before starting its turn. OpenCode names its socket when the plugin
-loads, and Pi names its socket at `session_start`. The next boundary claims
-any steers the server could not deliver.
+loads, and Pi names its socket at `session_start`. Antigravity opens with `-i`
+when news is waiting and records its opening idle state when opened without
+`-i`, so steers arriving while it sits idle wake its held terminal as soon as
+its prompt is ready. The next boundary claims any steers the server could not
+deliver.
 
 A server that restarts reads the same conversations again. An unreachable
-Claude inbox or extension socket leaves its news unclaimed. After a failed
-send the steers arrive again. One watcher serves every Session, with a 60 s
-fallback for a missed checkpoint or a Machine's sleep.
+Claude inbox, extension socket, or busy held terminal leaves its news
+unclaimed. After a failed send the steers arrive again. One watcher serves
+every Session, with a 60 s fallback for a missed checkpoint, a Machine's sleep,
+or a steer that arrived during launch. Deferred terminal wakes retry within 2 s.
 
 ### Starting a stopped conversation
 

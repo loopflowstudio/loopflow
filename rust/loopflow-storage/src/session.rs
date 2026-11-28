@@ -358,11 +358,11 @@ pub struct SessionSummary {
     /// None for a conversation Loopflow never attached to.
     pub agent_process_id: Option<loopflow_model::id::AgentProcessId>,
     pub task_terminal: bool,
-    /// It is an open Task's conversation in the Task's checkout on this
-    /// Machine: one the server's recovery pass reads. A Task checked out
-    /// elsewhere, a completed conversation, or one moved to another Machine,
-    /// is not.
-    pub in_task_checkout: bool,
+    /// It is the primary conversation of an open Task checked out on this
+    /// Machine: one the server's recovery pass reads (and restarts in the
+    /// Session's own directory). A Task with no checkout here, a completed
+    /// conversation, or one moved to another Machine is not.
+    pub task_checked_out_here: bool,
     /// Its held terminal is open and its agent's pid is not recorded yet: a
     /// start under way, which has no liveness to read.
     pub launching: bool,

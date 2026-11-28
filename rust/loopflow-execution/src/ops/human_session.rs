@@ -165,7 +165,7 @@ pub(super) async fn checkout_conversation(
     let root = crate::git::worktree_root(cwd)?;
     Ok(store
         .sqlite
-        .checkout_conversation(&root)?
+        .checkout_conversation(&root, None)?
         .map(|session| session.id.into()))
 }
 
@@ -668,7 +668,7 @@ fn session_ending(
         };
     }
     let facts = crate::ops::recovery::DownConversation {
-        here: conversation && session.in_task_checkout,
+        here: conversation && session.task_checked_out_here,
         exit_code: end.and_then(|end| end.exit_code),
         starts_since_turn: attempts,
         last_started_at: session.last_started_at,
@@ -1992,10 +1992,6 @@ pub async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<SessionRe
         .session(&session.id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
-    crate::journal::request::diagnostic(format_args!(
-        "Binding {} to {} ({}). Permanent.",
-        session.id, task.identifier, task.title
-    ));
     surface(store, &session).await
 }
 

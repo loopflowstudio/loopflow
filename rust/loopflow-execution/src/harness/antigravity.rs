@@ -21,6 +21,7 @@ use crate::agent::{AgentConfig, AgentFailure};
 use crate::context_block::ContextMoment;
 use crate::harness::fact_writer::FactWriter;
 use crate::harness::{Driver as StreamDriver, HarnessError, HookCallback, LaunchKind, Recording};
+use crate::steer::{IdleEndpoints, IdleReach};
 use loopflow_harness::antigravity_decode::Turn;
 use loopflow_harness::Harness;
 use loopflow_model::chat::types::ConversationEvent;
@@ -339,6 +340,16 @@ impl StreamDriver for Driver {
 }
 
 impl super::Launcher for loopflow_harness::Antigravity {
+    fn idle_reach(&self, endpoints: &IdleEndpoints) -> Option<IdleReach> {
+        endpoints
+            .held_terminal
+            .clone()
+            .map(|terminal| IdleReach::Terminal {
+                terminal,
+                prompt_ready,
+            })
+    }
+
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
             thread: super::ThreadNaming {
@@ -346,6 +357,7 @@ impl super::Launcher for loopflow_harness::Antigravity {
                 managed: super::ThreadName::Reported,
             },
             initial_prompt_on_resume: false,
+            reopen_steers: super::ReopenSteers::PromptHook,
             native_skills: None,
             installed_skills: super::InstalledSkills {
                 // agy 1.5.14 ignores `~/` paths in this file; sync writes the
@@ -479,6 +491,22 @@ impl super::Launcher for loopflow_harness::Antigravity {
         if let Some(input) = input.filter(|input| !input.is_empty()) {
             crate::agent::validate_terminal_turn(&input)?;
             args.extend(["-i".into(), input]);
+        } else if launch.kind.is_managed() {
+            // `agy` runs no start hook until a turn begins, so a work session
+            // opened without `-i` records itself idle here; the held terminal's
+            // VT guard waits until `agy` draws its empty prompt before waking.
+            let recording = launch.recording;
+            let recorded = recording
+                .store
+                .reserve_steer_adapter(&recording.session, &recording.attachment)
+                .and_then(|adapter| recording.store.record_first_boundary(&adapter));
+            if let Err(error) = recorded {
+                tracing::warn!(
+                    session = %recording.session,
+                    %error,
+                    "Antigravity opening idle state unrecorded; wakes wait for the first turn"
+                );
+            }
         }
         if let Some(context) = &launch.config.conversation_context {
             let delivery = context.configure_hooks(&mut client.process)?;
@@ -503,6 +531,72 @@ fn main_git_dir(cwd: &Path) -> Option<PathBuf> {
     let main = crate::agent::workspace_add_dirs(cwd).pop()?;
     let git = main.join(".git").canonicalize().ok()?;
     (git.as_os_str() > cwd.canonicalize().ok()?.as_os_str()).then_some(git)
+}
+
+/// Whether `terminal` shows Antigravity's empty top-level prompt box and no
+/// running turn, dialog, picker, or typed draft.
+///
+/// Checked against the retained `libghostty-vt` screen right before pasting a
+/// wake prompt, so drafts and modals survive server restarts and adoptions
+/// without relying on keystroke history alone.
+pub(crate) fn prompt_ready(terminal: &loopflow_terminal::ghostty_vt::Terminal) -> bool {
+    use loopflow_model::program_status::State;
+    if terminal.alternate_screen() || !terminal.bracketed_paste() || !terminal.at_ground() {
+        return false;
+    }
+    if terminal
+        .program_status()
+        .records
+        .iter()
+        .any(|report| matches!(report.state, State::Working | State::Blocked))
+    {
+        return false;
+    }
+    let Ok(screen) = terminal.text() else {
+        return false;
+    };
+    let lines: Vec<&str> = screen.lines().collect();
+    let is_rule = |line: &&str| {
+        let trimmed = line.trim();
+        trimmed.chars().count() >= 10 && trimmed.chars().all(|ch| ch == '─')
+    };
+    let Some(bottom) = lines.iter().rposition(is_rule) else {
+        return false;
+    };
+    let Some(top) = lines[..bottom].iter().rposition(is_rule) else {
+        return false;
+    };
+    // Empty single-line prompt box: `───` / `>` / `───`.
+    if bottom != top + 2 || !prompt_empty(lines[top + 1], top + 1, terminal.cursor()) {
+        return false;
+    }
+    let footer = &lines[bottom + 1..];
+    let blocked = [
+        "esc to cancel",
+        "↑/↓ Navigate",
+        "esc Go Back",
+        "enter Confirm",
+        "enter Select",
+    ];
+    footer.iter().any(|line| line.contains("? for shortcuts"))
+        && !footer
+            .iter()
+            .any(|line| blocked.iter().any(|marker| line.contains(marker)))
+}
+
+/// An empty input line is a bare `>`, or `> ` followed by the dim mode hint
+/// `agy` 1.5.17 draws there ("Auto mode: … (shift+tab to cycle)") with the
+/// cursor parked before it. Typed text moves the cursor and replaces the hint.
+fn prompt_empty(line: &str, row: usize, (cursor_x, cursor_y): (u16, u16)) -> bool {
+    let Some(input) = line.trim_end().strip_prefix('>') else {
+        return false;
+    };
+    let input = input.trim();
+    let cursor_in_prompt = usize::from(cursor_y) == row;
+    if input.is_empty() {
+        return !cursor_in_prompt || cursor_x <= 2;
+    }
+    cursor_in_prompt && cursor_x == 2 && input.ends_with("(shift+tab to cycle)")
 }
 
 /// Settings for one session that let the TUI start in a worktree lf created
@@ -971,6 +1065,95 @@ mod tests {
         );
         // Any other handler would have to answer, and `{}` denies a tool.
         assert_eq!(managed["loopflow"].as_object().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn prompt_ready_accepts_only_empty_idle_prompt() {
+        use loopflow_terminal::ghostty_vt::Terminal;
+
+        let render = |bytes: &[u8]| {
+            let mut terminal = Terminal::new(80, 24).unwrap();
+            terminal.write(bytes);
+            terminal
+        };
+        let rule = "─".repeat(80);
+        let idle = format!(
+            "\x1b[?2004h\x1b[2J\x1b[H  Antigravity CLI 1.5.17\r\n\r\n{rule}\r\n\x1b[94m>\x1b[m\r\n{rule}\r\n? for shortcuts                                 auto · Gemini 4 Neon · high\r\n"
+        );
+        assert!(super::prompt_ready(&render(idle.as_bytes())));
+
+        // The mode hint agy draws in an empty prompt, cursor parked before it.
+        let hinted = format!(
+            "\x1b[?2004h\x1b[2J\x1b[H{rule}\r\n\x1b[94m>\x1b[m \x1b[90mAuto mode: edits & safe commands auto-approved (shift+tab to cycle)\x1b[m\r\n{rule}\r\n? for shortcuts   auto · Gemini 4 Neon · high\x1b[2;3H"
+        );
+        assert!(super::prompt_ready(&render(hinted.as_bytes())));
+
+        // The same words typed as a draft leave the cursor after them.
+        let typed_hint = hinted.replace("\x1b[2;3H", "\x1b[2;70H");
+        assert!(!super::prompt_ready(&render(typed_hint.as_bytes())));
+
+        // Without bracketed paste mode enabled, never inject.
+        let no_paste = idle.replacen("\x1b[?2004h", "", 1);
+        assert!(!super::prompt_ready(&render(no_paste.as_bytes())));
+
+        // Alternate screen (sign-in, trust dialog, full-screen UI).
+        let alt = format!("\x1b[?1049h{idle}");
+        assert!(!super::prompt_ready(&render(alt.as_bytes())));
+
+        // Typed draft (even with no prior keystroke history after adoption).
+        let draft = format!(
+            "\x1b[?2004h\x1b[2J\x1b[H{rule}\r\n> finish this thought\r\n{rule}\r\nauto · Gemini 4 Neon · high\r\n"
+        );
+        assert!(!super::prompt_ready(&render(draft.as_bytes())));
+
+        // Draft even if footer still showed `? for shortcuts`.
+        let draft_with_footer = format!(
+            "\x1b[?2004h\x1b[2J\x1b[H{rule}\r\n> x\r\n{rule}\r\n? for shortcuts   auto · Gemini 4 Neon · high\r\n"
+        );
+        assert!(!super::prompt_ready(&render(draft_with_footer.as_bytes())));
+
+        // The screen trims trailing spaces, but a whitespace draft moves
+        // the cursor beyond the empty prompt.
+        let spaces = format!(
+            "\x1b[?2004h\x1b[2J\x1b[H{rule}\r\n>    \r\n{rule}\r\n? for shortcuts\x1b[2;6H"
+        );
+        assert!(!super::prompt_ready(&render(spaces.as_bytes())));
+
+        // Multiline pasted draft.
+        let multiline = format!(
+            "\x1b[?2004h\x1b[2J\x1b[H{rule}\r\n> line1\r\n  line2\r\n{rule}\r\n? for shortcuts   auto · Gemini 4 Neon · high\r\n"
+        );
+        assert!(!super::prompt_ready(&render(multiline.as_bytes())));
+
+        // Trust dialog (no prompt box, navigate/confirm footer).
+        let trust = "\x1b[?2004h\x1b[2J\x1b[HDo you trust the contents of this project?\r\n> Yes, I trust this folder\r\n  No, exit\r\n  ↑/↓ Navigate · enter Confirm\r\n";
+        assert!(!super::prompt_ready(&render(trust.as_bytes())));
+
+        // Slash menu.
+        let slash = format!(
+            "\x1b[?2004h\x1b[2J\x1b[H{rule}\r\n> /\r\n{rule}\r\n> /add-dir    Add a directory\r\n  ↑/↓ Navigate · enter Select · tab Complete\r\n? for shortcuts\r\n"
+        );
+        assert!(!super::prompt_ready(&render(slash.as_bytes())));
+
+        // Model picker.
+        let model = "\x1b[?2004h\x1b[2J\x1b[HSelect Model\r\n> Gemini 4 Neon\r\n  Keyboard: ↑/↓ Navigate · enter Select · esc Go Back\r\nesc to cancel\r\n";
+        assert!(!super::prompt_ready(&render(model.as_bytes())));
+
+        // Running turn (`Generating...`, `esc to cancel` in footer).
+        let running = format!(
+            "\x1b[?2004h\x1b[2J\x1b[H⣷  Generating...\r\n{rule}\r\n>\r\n{rule}\r\nesc to cancel   auto · Gemini 4 Neon · high\r\n"
+        );
+        assert!(!super::prompt_ready(&render(running.as_bytes())));
+
+        // Running turn even if `? for shortcuts` wasn't erased yet.
+        let running_mixed = format!(
+            "\x1b[?2004h\x1b[2J\x1b[H{rule}\r\n>\r\n{rule}\r\n? for shortcuts   esc to cancel\r\n"
+        );
+        assert!(!super::prompt_ready(&render(running_mixed.as_bytes())));
+
+        // OSC 7501 working status blocks injection.
+        let working_status = format!("{idle}\x1b]7501;state=working\x07");
+        assert!(!super::prompt_ready(&render(working_status.as_bytes())));
     }
 
     /// Needs `agy` on PATH, signed in:

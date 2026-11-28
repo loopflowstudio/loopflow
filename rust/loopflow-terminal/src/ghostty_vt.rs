@@ -326,7 +326,7 @@ impl Terminal {
         (cols, rows)
     }
 
-    #[cfg(any(test, feature = "test-support"))]
+    /// The cursor's column and row on the active screen.
     pub fn cursor(&self) -> (u16, u16) {
         let x = self
             .data::<u16>(ffi::DATA_CURSOR_X, "cursor_x")
@@ -350,10 +350,16 @@ impl Terminal {
 
     /// Whether the program asked for focus in and out reports (DEC mode 1004).
     pub fn focus_reporting(&self) -> bool {
-        let mut query = ffi::ModeConfig {
-            mode: ffi::MODE_FOCUS_EVENT,
-            value: false,
-        };
+        self.mode(ffi::MODE_FOCUS_EVENT)
+    }
+
+    /// Whether the program enabled bracketed paste mode (DEC mode 2004).
+    pub fn bracketed_paste(&self) -> bool {
+        self.mode(ffi::MODE_BRACKETED_PASTE)
+    }
+
+    fn mode(&self, mode: u16) -> bool {
+        let mut query = ffi::ModeConfig { mode, value: false };
         // SAFETY: query is the mode configuration the mode data key documents.
         let result = unsafe {
             ffi::ghostty_terminal_get(
@@ -392,7 +398,6 @@ impl Terminal {
     }
 
     /// The active screen's visible rows as plain text, one line per row.
-    #[cfg(any(test, feature = "test-support"))]
     pub fn text(&self) -> Result<String, Error> {
         let bytes = self.format(ffi::FORMAT_PLAIN, Range::Active, false)?;
         Ok(String::from_utf8_lossy(&bytes).into_owned())
@@ -706,9 +711,7 @@ mod ffi {
     pub const DATA_COLS: i32 = 1;
     pub const DATA_TITLE: i32 = 12;
     pub const DATA_ROWS: i32 = 2;
-    #[cfg(any(test, feature = "test-support"))]
     pub const DATA_CURSOR_X: i32 = 3;
-    #[cfg(any(test, feature = "test-support"))]
     pub const DATA_CURSOR_Y: i32 = 4;
     pub const DATA_ACTIVE_SCREEN: i32 = 6;
     pub const DATA_SCROLLBACK_ROWS: i32 = 15;
@@ -716,6 +719,8 @@ mod ffi {
     pub const DATA_MODE: i32 = 37;
     /// DEC private mode 1004: a mode value with the ANSI bit clear.
     pub const MODE_FOCUS_EVENT: u16 = 1004;
+    /// DEC private mode 2004: bracketed paste mode.
+    pub const MODE_BRACKETED_PASTE: u16 = 2004;
 
     /// `GhosttyTerminalModeConfig`, a frozen layout.
     #[repr(C)]
@@ -729,7 +734,6 @@ mod ffi {
     pub const DECODER_OPT_MAX_CONTINUATION_BYTES: i32 = 0;
     pub const DECODER_OPT_RETAIN_CONTINUATION: i32 = 1;
 
-    #[cfg(any(test, feature = "test-support"))]
     pub const FORMAT_PLAIN: i32 = 0;
     pub const FORMAT_VT: i32 = 1;
 
@@ -968,13 +972,16 @@ mod tests {
     }
 
     #[test]
-    fn focus_reporting_follows_the_programs_mode() {
+    fn focus_reporting_and_bracketed_paste_follow_the_programs_modes() {
         let mut terminal = Terminal::new(80, 24).unwrap();
         assert!(!terminal.focus_reporting());
-        terminal.write(b"\x1b[?1004h");
+        assert!(!terminal.bracketed_paste());
+        terminal.write(b"\x1b[?1004h\x1b[?2004h");
         assert!(terminal.focus_reporting());
-        terminal.write(b"\x1b[?1004l");
+        assert!(terminal.bracketed_paste());
+        terminal.write(b"\x1b[?1004l\x1b[?2004l");
         assert!(!terminal.focus_reporting());
+        assert!(!terminal.bracketed_paste());
     }
 
     #[test]

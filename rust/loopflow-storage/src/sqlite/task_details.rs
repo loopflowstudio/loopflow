@@ -142,11 +142,6 @@ impl SqliteStore {
                 if run_start.is_none() {
                     if let Some(arrival) = breakpoint {
                         breakpoints.insert(id.clone(), (step.clone(), arrival));
-                        if states.get(&id) == Some(&TaskState::Active) {
-                            if let Some(group) = working_groups.get_mut(&id) {
-                                *group = WorkingGroup::Active;
-                            }
-                        }
                     }
                     steps.insert(id, step);
                 }

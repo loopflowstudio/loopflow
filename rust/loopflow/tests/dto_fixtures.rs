@@ -287,16 +287,16 @@ fn task_detail_says_each_fact_once() {
     );
     assert_eq!(
         detail.task.graph.as_ref().unwrap().step.as_deref(),
-        Some("demo")
+        Some("after-demo")
     );
     let graph = detail.graph.as_ref().unwrap();
-    assert_eq!(graph.current_step, Some(2));
-    assert_eq!(graph.control.label, "demo · next: end");
+    assert_eq!(graph.current_step, Some(4));
+    assert_eq!(graph.control.label, "Continue");
     assert_eq!(
         graph.control.action,
-        loopflow_execution::task_graph::WorkflowAction::Run
+        loopflow_execution::task_graph::WorkflowAction::Continue
     );
-    assert_eq!(graph.sentence, "Waiting for you at demo.");
+    assert_eq!(graph.sentence, "At breakpoint after-demo.");
     let conversation = detail
         .sessions
         .iter()

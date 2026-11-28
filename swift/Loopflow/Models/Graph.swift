@@ -261,7 +261,7 @@ public struct WorkflowOutline: Decodable, Sendable, Hashable {
     public let steps: [TaskGraph.Step]
     /// Every breakpoint in order, composed Graphs and XOR paths included.
     public let breakpoints: [String]
-    /// "You take part at after-explore, after-ship-review and after-verify." or "Runs on its own."
+    /// "You take part at after-explore and after-ship-review." or "Runs on its own."
     public let sentence: String
 }
 

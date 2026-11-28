@@ -2463,12 +2463,12 @@ assert unpause.returncode != 0 and 'still finishing' in unpause.stderr, unpause"
 }
 
 #[test]
-fn draining_command_before_interactive_step_arrives_under_pause_hold() {
+fn draining_command_before_breakpoint_arrives_under_pause_hold() {
     let task = GraphTask::new();
     task.repo.push_new_branch("main");
     task.repo.create_file(
         ".lf/graphs/landing-demo.yaml",
-        "- cmd: pr land --local\n- interactive: demo\n",
+        "- cmd: pr land --local\n- break: review\n",
     );
     task.repo.create_file("feature.txt", "land before demo");
     task.repo.stage_all();
@@ -2497,30 +2497,30 @@ assert paused.returncode == 0, paused.stderr"#,
     assert_eq!(graphs[0].1.len(), 1);
     assert_eq!(task.state(), "paused");
     let paused = task.graph();
-    assert_eq!(paused["position"], at("demo"));
+    assert!(at_breakpoint(&paused["position"], "review"));
     assert_eq!(
         paused["control"],
-        serde_json::json!({"action": "unpause", "label": "Paused: demo"})
+        serde_json::json!({"action": "unpause", "label": "Paused: review"})
     );
     assert_eq!(
         paused["sentence"],
-        "Paused at demo. `lf task unpause` lifts the hold."
+        "Paused at review. `lf task unpause` lifts the hold."
     );
 
-    // Plain unpause lands directly in Active waiting at demo without rerunning pr land.
+    // Unpause returns to the same review after pr land.
     task.ok(&["task", "unpause", "INF-123"]);
     assert_eq!(task.state(), "active");
     let unpaused = task.graph();
-    assert_eq!(unpaused["position"], at("demo"));
+    assert_eq!(unpaused["position"], paused["position"]);
     assert_eq!(
         unpaused["control"],
-        serde_json::json!({"action": "run", "label": "demo · next: end"})
+        serde_json::json!({"action": "continue", "label": "Continue"})
     );
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
 
-    // Pausing again and running smart unpause also stays parked at demo.
+    // Pausing again and running smart unpause also keeps the review.
     task.ok(&["task", "pause", "INF-123"]);
-    assert_unpause_stays_at(&task, "demo");
+    assert_unpause_stays_at(&task, "review");
     assert_eq!(task.state(), "active");
 }
 
@@ -2577,7 +2577,7 @@ assert paused.returncode == 0, paused.stderr"#,
 }
 
 #[test]
-fn auto_off_while_paused_at_interactive_or_landing_cursor_settles_on_unpause() {
+fn auto_off_while_paused_at_a_landing_cursor_settles_on_unpause() {
     use loopflow_execution::task_graph::CapturedGraph;
     use loopflow_model::id::{LfProcessId, TraceId};
     use loopflow_storage::graph_process::ExecutionStart;
@@ -2585,10 +2585,8 @@ fn auto_off_while_paused_at_interactive_or_landing_cursor_settles_on_unpause() {
     use loopflow_storage::sqlite::{Auto, AutoState};
 
     let task = GraphTask::new();
-    task.repo.create_file(
-        ".lf/graphs/stops.yaml",
-        "- interactive: ship-review\n- cmd: pr land\n",
-    );
+    task.repo
+        .create_file(".lf/graphs/stops.yaml", "- cmd: pr land\n");
     let captured = CapturedGraph::load("stops", task.repo.path())
         .unwrap()
         .unwrap();
@@ -2638,35 +2636,6 @@ fn auto_off_while_paused_at_interactive_or_landing_cursor_settles_on_unpause() {
         sqlite.settle_task_pause(id, false).unwrap();
     };
 
-    // 1. Paused with auto: on on interactive ship-review -> turn auto off -> unpause --run settles to At.
-    seed_paused_cursor("ship-review");
-    let before_off = task.graph();
-    assert_eq!(
-        before_off["control"],
-        serde_json::json!({"action": "resume", "label": "Paused: ship-review"})
-    );
-    assert_eq!(
-        before_off["sentence"],
-        "Paused at ship-review. `lf task unpause --run` resumes it."
-    );
-    task.ok(&["--task", "INF-123", "task", "auto", "off"]);
-    let after_off = task.graph();
-    assert_eq!(
-        after_off["control"],
-        serde_json::json!({"action": "unpause", "label": "Paused: ship-review"})
-    );
-    assert_eq!(
-        after_off["sentence"],
-        "Paused at ship-review. `lf task unpause` lifts the hold."
-    );
-    assert_unpause_stays_at(&task, "ship-review");
-    assert_eq!(task.state(), "active");
-    assert_eq!(
-        task.graph()["control"],
-        serde_json::json!({"action": "run", "label": "ship-review · next: pr land"})
-    );
-
-    // 2. Paused with auto: on on pr land -> turn auto off -> unpause --run settles to At without spawning a Graph.
     seed_paused_cursor("pr land");
     let before_off = task.graph();
     assert_eq!(
@@ -3023,6 +2992,12 @@ if (home / 'hold-turn').exists():
 }
 
 fn assert_unpause_stays_at(task: &GraphTask, step: &str) {
+    let before = task.graph();
+    let expected = if at_breakpoint(&before["position"], step) {
+        before["position"].clone()
+    } else {
+        at(step)
+    };
     let graphs = support::recorded_graphs(task.home.path()).len();
     let unpaused = task.run(&["task", "unpause", "INF-123", "--run", "--json"]);
     assert!(unpaused.status.success(), "{unpaused:?}");
@@ -3031,7 +3006,7 @@ fn assert_unpause_stays_at(task: &GraphTask, step: &str) {
         serde_json::Value::Null
     );
     assert_ne!(task.state(), "paused");
-    assert_eq!(task.graph()["position"], at(step));
+    assert_eq!(task.graph()["position"], expected);
     assert_eq!(support::recorded_graphs(task.home.path()).len(), graphs);
 }
 

@@ -13,9 +13,8 @@ struct DTOFixtureTests {
         #expect(graph.breakpoints == ["after-research"])
         #expect(graph.waitingStep == "after-research")
         #expect(graph.steps.map(\.breakpoint) == [false, true])
-        let action = graph.runAction(issue: "INF-123")
-        #expect(action?.label == "Continue")
-        #expect(action?.arrival == "11111111-1111-4111-8111-111111111111")
+        #expect(graph.control.action == .continue)
+        #expect(graph.control.label == "Continue")
     }
 
     @Test func screenReadsDecodeTheirCompletePayloads() throws {

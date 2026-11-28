@@ -398,23 +398,19 @@ Under the jump bar, the workflow track shows the Task’s steps. The step it sta
 grows into a chip that says what is happening there.
 
 ```text
-[⏸]  plan  build · implement ▾  👤ship-review  deliver            Auto ◉  ✓
+[⏸]  plan  build · implement ▾  ship-review  👤  deliver            Auto ◉  ✓
 ```
 
-Click ⏸ to pause the worker and keep talking in the Task conversation; the chip reads
-**Paused: build · implement**. Click ▶ to resume the interrupted step. At a human stop, ▶ lifts
-the hold and the Task waits there for you. Once you finish the review, the chip reads
-**ship-review · next: deliver** and ▶ runs deliver. A failed or interrupted run offers
-its saved step again.
+Click ⏸ to pause the worker and keep talking in the Task conversation. The chip
+reads **Paused: build · implement**. Click ▶ to resume an interrupted step.
+If you pause while reviewing a breakpoint, ▶ lifts the hold and returns to
+the same review. The person icon marks the breakpoint. Continue takes the
+worker's recommendation or you can reply in the Task conversation.
 
-Click any other step to start from it. Click the chip to pick a starting point,
-interrupt a running step, or pause at review; the same menu has Claim or Unassign and
-**Abandon…**. On a narrow pane only ▶, the chip and its menu stay. The Auto switch runs
-through the remaining human steps when armed. You can switch it off while paused.
-The checkmark completes the Task and lights up when its PR merges or its Graph reaches
-the end. If a post-merge step stops after merge, **Run: `<step>`** is still available beside the
-checkmark. Right-click the Task in the sidebar for conversations, Wave moves, links and
-copy actions.
+Click a work stage to start from it. The chip menu can pick a starting point,
+interrupt a running step or pause at review. The Auto switch takes the
+recommended path through each breakpoint. The checkmark completes the Task
+and lights up when its PR merges or its Graph reaches the end.
 
 ```text
 ⌘T          new shell tab in the Task’s Shell tool

@@ -423,8 +423,9 @@ struct DesktopHeadlessTests {
                     workflow["control"] = ["action": "run", "label": "Run: implement"]
                 } else if position["step"] as? String == "end" {
                     workflow["control"] = ["action": "done", "label": "Done"]
-                } else {
-                    workflow["control"] = ["action": "run", "label": "Run: end"]
+                } else if position["kind"] as? String == "breakpoint" {
+                    workflow["current_step"] = 3
+                    workflow["control"] = ["action": "continue", "label": "Continue"]
                 }
             }
             wire["graph"] = workflow
@@ -451,12 +452,12 @@ struct DesktopHeadlessTests {
         let stopped = try view(position: ["kind": "run", "step": "review-design", "at": "implement", "lf_process_id": process, "running": false])
         _ = try stopped.inspect().find(text: "Run: implement")
 
-        // At `demo` the one action continues after it; going into `end` is auto's too.
-        let waiting = try view(position: ["kind": "at", "step": "demo"])
+        // A continued review is scoped to the visit the bar displayed.
+        let waiting = try view(position: ["kind": "breakpoint", "step": "demo", "arrival": process, "blocked": false])
         let next = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-primary").button()
-        _ = try waiting.inspect().find(text: "Run: end")
+        #expect(throws: (any Error).self) { try waiting.inspect().find(text: "demo") }
         try next.tap()
-        #expect(try await tapped(1) == ["task", "run", task.task.identifier, "--json"])
+        #expect(try await tapped(1) == ["task", "run", task.task.identifier, "--at-arrival", process, "--json"])
         // The chip says the run is starting until the Machine answers.
         for _ in 0..<200 where model.pendingChanges.controlRequest(for: task.task.identifier) != nil { try await Task.sleep(for: .milliseconds(5)) }
         // Auto-Ship sits in the Workflow bar, not in the detail page's Workflow header.

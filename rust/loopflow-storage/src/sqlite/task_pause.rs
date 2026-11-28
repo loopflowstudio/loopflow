@@ -262,7 +262,7 @@ mod tests {
         use crate::execution::TaskState;
         use crate::graph_process::ExecutionStart;
         use crate::process::Starter;
-        use crate::sqlite::task_work::END;
+        use crate::sqlite::task_work::{TaskGraphClaim, END};
         use loopflow_model::id::{LfProcessId, TraceId};
 
         let (_home, store, fixture, _) = crate::test_fixture::task();
@@ -278,9 +278,8 @@ mod tests {
                 due_date: None,
             })
             .unwrap();
-        store
-            .take_up_task_graph(&id, r#"{"name":"landing","steps":[]}"#)
-            .unwrap();
+        let graph = r#"{"name":"landing","steps":[]}"#;
+        store.take_up_task_graph(&id, graph).unwrap();
         let carrier = LfProcessId::new();
         {
             let conn = store.conn.lock().unwrap();
@@ -293,9 +292,13 @@ mod tests {
         assert!(store
             .start_task_graph_run(
                 &id,
-                "start",
-                None,
-                r#"{"index":0}"#,
+                TaskGraphClaim {
+                    graph,
+                    step: "start",
+                    stopped: None,
+                    arrival: None,
+                },
+                (r#"{"index":0}"#, None),
                 (&carrier, &ExecutionStart::reserved(1)),
             )
             .unwrap());
@@ -303,7 +306,7 @@ mod tests {
             .begin_task_pause(&id, &Starter::Person { name: None }, vec![])
             .unwrap();
 
-        assert!(store.arrive_task_graph(&id, &carrier, END).unwrap());
+        assert!(store.arrive_task_graph(&id, &carrier, END, None).unwrap());
         assert_eq!(store.task_state(&id).unwrap(), TaskState::Paused);
         assert!(store.task_pause(&id).unwrap().is_some());
         assert!(store.task_completion_pending(&id).unwrap().is_none());
@@ -316,9 +319,13 @@ mod tests {
         assert!(store
             .start_task_graph_run(
                 &id,
-                END,
-                None,
-                r#"{"index":0}"#,
+                TaskGraphClaim {
+                    graph,
+                    step: END,
+                    stopped: None,
+                    arrival: None,
+                },
+                (r#"{"index":0}"#, None),
                 (&carrier, &ExecutionStart::reserved(1)),
             )
             .unwrap());

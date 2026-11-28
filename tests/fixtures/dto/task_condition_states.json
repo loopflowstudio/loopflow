@@ -1480,6 +1480,7 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": null,
@@ -1490,6 +1491,8 @@
       "active",
       "working",
       "breakpoint"
-    ]
+    ],
+    "working_group": null,
+    "breakpoint_arrival": null
   }
 }

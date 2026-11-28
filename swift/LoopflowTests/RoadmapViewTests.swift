@@ -37,6 +37,22 @@ struct RoadmapViewTests {
         #expect(RoadmapTaskAction.run.label(parked) == "Continue")
     }
 
+    @Test @MainActor func continueFromRoadmapSendsTheDisplayedArrival() async throws {
+        let arrival = "11111111-1111-4111-8111-111111111111"
+        let task = try roadmapTask(condition: "waiting", reason: "At breakpoint after-explore.",
+                                   lifecycle: "active", recommended: "run", selectionStates: ["breakpoint"],
+                                   breakpointArrival: arrival)
+        let expected = ["task", "run", task.task.identifier, "--at-arrival", arrival, "--json"]
+        let machine = HeldMachine()
+        let query = RegistryQuery(change: { write, requestID in
+            #expect(write.argv == expected)
+            return try await machine.send(write, requestID)
+        }) { _, _ in throw RegistryQueryError("No read needed") }
+        let model = WorkModel(query: query)
+        model.perform(.run, task: task)
+        await machine.answer(nil)
+    }
+
     @Test("The recommended action explains itself")
     func recommendedActionCarriesItsReason() throws {
         let snapshot = try loadRoadmapFixture()

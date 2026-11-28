@@ -257,8 +257,7 @@ impl CapturedGraph {
             merges: &mut dyn FnMut(&[String]) -> bool,
         ) -> bool {
             steps.iter().rev().fold(after, |later, step| match step {
-                ConcreteStep::Breakpoint(_) => true,
-                ConcreteStep::Skill(skill) if skill.interactive_step().is_some() => true,
+                step if stop_name(step).is_some() => true,
                 ConcreteStep::Xor(branch) => branch
                     .paths
                     .values()
@@ -377,39 +376,6 @@ impl CapturedGraph {
             for (offset, step) in body[from..].iter().enumerate() {
                 let index = from + offset;
                 match step {
-                    ConcreteStep::Breakpoint(_) => {
-                        if !through {
-                            return Reach::Stopped;
-                        }
-                        if let Some(target) = return_target(body, index) {
-                            if target < from
-                                && scan(&body[..from], target, through, merges) == Reach::Landing
-                            {
-                                return Reach::Landing;
-                            }
-                        }
-                    }
-                    ConcreteStep::Skill(skill) => {
-                        // Matches a released capture: an interactive step stops before landing runs.
-                        if !through && skill.interactive {
-                            return Reach::Stopped;
-                        }
-                        if landing_name(step, merges).is_some() {
-                            return Reach::Landing;
-                        }
-                        if let Some(target) = return_target(body, index) {
-                            if target < from
-                                && scan(&body[..from], target, through, merges) == Reach::Landing
-                            {
-                                return Reach::Landing;
-                            }
-                        }
-                    }
-                    ConcreteStep::Command(_) => {
-                        if landing_name(step, merges).is_some() {
-                            return Reach::Landing;
-                        }
-                    }
                     ConcreteStep::Xor(branch) => {
                         let mut all_stopped = !branch.paths.is_empty();
                         for alternative in branch.paths.values() {
@@ -421,6 +387,21 @@ impl CapturedGraph {
                         }
                         if all_stopped {
                             return Reach::Stopped;
+                        }
+                    }
+                    step => {
+                        if !through && stop_name(step).is_some() {
+                            return Reach::Stopped;
+                        }
+                        if landing_name(step, merges).is_some() {
+                            return Reach::Landing;
+                        }
+                        if let Some(target) = return_target(body, index) {
+                            if target < from
+                                && scan(&body[..from], target, through, merges) == Reach::Landing
+                            {
+                                return Reach::Landing;
+                            }
                         }
                     }
                 }
@@ -652,7 +633,7 @@ pub struct WorkflowOutline {
     pub steps: Vec<WorkflowStep>,
     /// Every breakpoint in order, including composed Graphs and XOR paths.
     pub breakpoints: Vec<String>,
-    /// "You take part at after-explore, after-ship-review and after-verify." or "Runs on its own."
+    /// "You take part at after-explore and after-ship-review." or "Runs on its own."
     pub sentence: String,
 }
 
@@ -762,7 +743,13 @@ impl TaskGraph {
         };
         let top_name = |place: &Place| steps[top(place) as usize].name.as_str();
         let resumes = pause.is_some()
-            && graph.resumes_on_unpause(&step, run.as_ref().map(|run| run.cursor), breakpoint.is_some(), auto, merges);
+            && graph.resumes_on_unpause(
+                &step,
+                run.as_ref().map(|run| run.cursor),
+                breakpoint.is_some(),
+                auto,
+                merges,
+            );
         let pausing = pause == Some(PauseStage::Stopping)
             || (pause.is_some() && run.as_ref().is_some_and(|run| run.running));
         let unpause = if resumes {
@@ -1158,10 +1145,6 @@ pub(crate) mod tests {
         };
         let start = read("start", None, None);
         assert_eq!(start.control.label, "Run: plan");
-        assert_eq!(
-            read("ship-review", None, None).control.label,
-            "ship-review · next: deliver"
-        );
         let steps: Vec<_> = start
             .steps
             .iter()
@@ -1223,6 +1206,7 @@ pub(crate) mod tests {
             test_merges,
         );
         assert_eq!(parked.current_step, Some(3));
+        assert_eq!(parked.control.action, super::WorkflowAction::Continue);
         assert_eq!(parked.sentence, "At breakpoint after-ship-review.");
         assert_eq!(parked.waiting_step(), Some("after-ship-review"));
         let mut blocked_arrival = arrival;
@@ -1382,17 +1366,20 @@ pub(crate) mod tests {
             assert_eq!(reading.sentence, sentence);
         }
 
-        // Arriving at an interactive step under a hold stays At { step } with Unpause wording.
+        // A parked review keeps the unpause action regardless of a prior worker cursor.
         write(
             repo.path(),
             ".lf/graphs/demo.yaml",
-            "- cmd: help graph\n- interactive: demo\n",
+            "- cmd: help graph\n- break: after-demo\n",
         );
         let demo = CapturedGraph::load("demo", repo.path()).unwrap().unwrap();
         let parked = TaskGraph::read(
             &demo,
             "after-demo".into(),
-            None,
+            Some(&crate::store::task_work::BreakpointArrival {
+                id: loopflow_model::id::LfProcessId::new(),
+                cursor: demo.find("after-demo").unwrap().cursor(),
+            }),
             None,
             None,
             Some(PauseStage::Held),
@@ -1498,16 +1485,16 @@ pub(crate) mod tests {
         assert!(!post_merge.reaches_landing(&post_stop, false, test_merges));
         assert!(!post_merge.reaches_landing(&post_stop, true, test_merges));
 
-        // Interactive landing skill stops before landing unless running through.
+        // A leading breakpoint also gates a merging skill.
         write(
             repo.path(),
-            ".lf/graphs/interactive-land.yaml",
-            "- interactive: pr-land\n",
+            ".lf/graphs/review-before-land.yaml",
+            "- break: review\n- pr-land\n",
         );
-        let interactive_land = load("interactive-land");
-        let start = interactive_land.find("start").unwrap();
-        assert!(!interactive_land.reaches_landing(&start, false, test_merges));
-        assert!(interactive_land.reaches_landing(&start, true, test_merges));
+        let review_before_land = load("review-before-land");
+        let start = review_before_land.find("start").unwrap();
+        assert!(!review_before_land.reaches_landing(&start, false, test_merges));
+        assert!(review_before_land.reaches_landing(&start, true, test_merges));
 
         // XOR: any branch reaching land returns true; a trailing land is only blocked when every branch stops.
         write(

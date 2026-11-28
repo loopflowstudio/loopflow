@@ -6,7 +6,7 @@ import Testing
 /// these facts changed.
 func roadmapTask(condition: String, reason: String, lifecycle: String = "idle",
                  recommended: String? = nil, nextMove: String? = nil, graphHasRun: Bool = true,
-                 selectionStates: [String]? = nil, updatedAt: String? = nil, id: String? = nil) throws -> RoadmapTask {
+                 selectionStates: [String]? = nil, breakpointArrival: String? = nil, updatedAt: String? = nil, id: String? = nil) throws -> RoadmapTask {
     let wire = try #require(JSONSerialization.jsonObject(with: loadFixtureData("roadmap_snapshot.json")) as? [String: Any])
     var row = try #require(((wire["tasks"] as? [String: Any])?["items"] as? [[String: Any]])?.first)
     func set(_ key: String, _ field: String, _ value: String) throws {
@@ -21,6 +21,7 @@ func roadmapTask(condition: String, reason: String, lifecycle: String = "idle",
     if let updatedAt { try set("runtime", "updated_at", updatedAt) }
     if let id { try set("task", "id", id) }
     row["lifecycle"] = lifecycle
+    if let breakpointArrival { row["breakpoint_arrival"] = breakpointArrival }
     if let selectionStates { row["selection_states"] = selectionStates }
     if !graphHasRun { row["latest_graph_process"] = NSNull() }
     return try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))

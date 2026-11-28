@@ -147,12 +147,13 @@ lf task list --subscribe --json                # stream a JSON line on every cha
 ```
 
 At a breakpoint the Task is **Active**. It appears in **Now** and at the
-top of active work in Desktop. Open it to read the finished step's result
+top of active work when the sidebar sorts by status. Open it to read the finished step's result
 and respond. You can leave the conversation and come back to the same choice.
 
 `lf task status` and Desktop's workflow bar show the same sentence about
 the current step and the next stop. For scripts, `--json` includes the steps,
-the current step index and `graph.sentence`. Before a Task starts, Desktop
+the current step index, `graph.control` for the button, and `graph.sentence`.
+Before a Task starts, Desktop
 gets its workflow from [the Graph catalog](orchestration.md#describe-a-graph).
 
 Every read queries this machine's local store, so it answers instantly and

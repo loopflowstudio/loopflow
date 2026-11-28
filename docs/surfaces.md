@@ -358,7 +358,7 @@ request stays on screen with "Not started.", the error, **Try again** and
 Open a filed Task and it says what Start will do, in the sheet's words:
 
 ```text
-feature   explore   ☺   plan   build   ship-review   ☺   deliver   Start
+[▶]   [Run: explore ▾]   ☺   plan   build   ship-review   ☺   deliver    Auto ◯   ✓
 
 Not started
 

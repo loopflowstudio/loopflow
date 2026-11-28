@@ -2556,7 +2556,13 @@ async fn snapshot_task_detail(
         ),
         reference,
         lifecycle,
-        working_group: facts.working_groups.get(&task.id).copied(),
+        working_group: facts.working_groups.get(&task.id).map(|group| {
+            if breakpoint.is_some() {
+                loopflow_storage::execution::WorkingGroup::Active
+            } else {
+                *group
+            }
+        }),
         selection_states: task_selection_states(
             observed,
             section,
@@ -5025,6 +5031,7 @@ mod tests {
         assert!(row
             .selection_states
             .contains(&loopflow_execution::work::selection::SelectionState::Breakpoint));
+        assert_eq!(row.breakpoint_arrival.as_ref(), Some(&carrier));
         assert_eq!(row.next_move.owner, NextMoveOwner::User);
         assert_eq!(
             row.next_move.reason,

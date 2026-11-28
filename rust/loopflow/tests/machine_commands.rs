@@ -6018,6 +6018,7 @@ fn served_pause_holds_the_remote_cursor_and_status_names_unpause() {
                 graph: serde_json::to_string(&graph).unwrap(),
                 step: "start".into(),
                 run_start: Some(serde_json::to_string(&cursor).unwrap()),
+                breakpoint: None,
             },
             Some(&plan.remote.test_lf_process()),
         )
@@ -6874,10 +6875,10 @@ fn a_served_status_for_a_task_mini_runs_is_minis_answer() {
     assert_success(&output);
     let text = String::from_utf8(output.stdout).unwrap();
     for line in [
-        "Waiting for you at demo.",
+        "At breakpoint after-demo.",
         "manual  Checkout conversation  closed",
         "parent: LOO-1",
-        "child: LOO-3  Route incoming mail  active at demo",
+        "child: LOO-3  Route incoming mail  active at after-demo",
     ] {
         assert!(text.contains(line), "{text}");
     }

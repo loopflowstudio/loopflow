@@ -1315,7 +1315,7 @@ fn a_moved_capture_changes_sidebar_coordinates_only_when_the_run_is_claimed() {
     place_moved_task_graph(&store, &task, &imported, None).unwrap();
     assert!(start_task_graph_run(&store, &task, &old, &cursor, None, (&by, &here)).unwrap());
     let sidebar = || {
-        selections::view_plan(&store, &repo, None)
+        selections::view_plan(&store, &repo, None, |_| false)
             .unwrap()
             .contents
             .into_iter()

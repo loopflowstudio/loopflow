@@ -132,7 +132,11 @@ impl Fixture {
         let home = tempfile::tempdir().unwrap();
         support::seed_store(&home.path().join("machine"));
         let fixture = Self {
-            _server: MachineServer::start(env!("CARGO_BIN_EXE_lf"), &home.path().join("machine")),
+            _server: MachineServer::start_with_path(
+                env!("CARGO_BIN_EXE_lf"),
+                &home.path().join("machine"),
+                &fixture_path(home.path()),
+            ),
             repo: TestRepo::new(),
             home,
         };
@@ -141,13 +145,13 @@ impl Fixture {
             ".lf/config.yaml",
             &format!("agent: {provider}\ndiff: false\ndiff_files: false\npaste: false\n"),
         );
-        for harness in ["claude", "codex", "opencode"] {
+        for harness in ["claude", "codex", "opencode", "agy"] {
             let script = fixture.home.path().join("bin").join(harness);
-            let source = if harness == "opencode" {
-                include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
-                    .replace("__WAIT__", "False")
-            } else {
-                r#"#!/usr/bin/python3
+            let source = match harness {
+                "opencode" => include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
+                    .replace("__WAIT__", "False"),
+                "agy" => include_str!("../../loopflow-execution/tests/support/agy_cli.py").into(),
+                _ => r#"#!/usr/bin/python3
 import json, os, sys, runpy
 from pathlib import Path
 args = sys.argv[1:]
@@ -207,10 +211,7 @@ elif os.path.basename(sys.argv[0]) == 'codex':
         command
             .env_clear()
             .env("HOME", self.home.path())
-            .env(
-                "PATH",
-                format!("{}:/usr/bin:/bin", self.home.path().join("bin").display()),
-            )
+            .env("PATH", fixture_path(self.home.path()))
             .env("LF_HOME", self.home.path().join("machine"))
             .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
             .env("CLAUDE_CONFIG_DIR", self.home.path().join(".claude"))
@@ -278,6 +279,10 @@ elif os.path.basename(sys.argv[0]) == 'codex':
     fn settings(&self, provider: &str, yolo: bool, chrome: bool) {
         self.repo.create_file(".lf/config.yaml", &format!("agent: {provider}\nyolo: {yolo}\nchrome: {chrome}\ndiff: false\ndiff_files: false\npaste: false\n"));
     }
+}
+
+fn fixture_path(home: &Path) -> String {
+    format!("{}:/usr/bin:/bin", home.join("bin").display())
 }
 
 /// Each OpenCode launch's private stderr log, found where it is retained.
@@ -1079,6 +1084,104 @@ fn task_conversation_preparation_is_passive_and_connect_uses_shared_launch_setti
     pair(&resumed, "--resume", &native);
     pair(&resumed, "--model", "haiku");
     assert!(args(&resumed).contains(&"--no-chrome"));
+}
+
+#[test]
+fn a_reopened_antigravity_task_hears_repository_direction_once() {
+    use loopflow_execution::harness::{launcher, ReopenSteers};
+    for harness in loopflow_harness::HarnessKind::ALL {
+        match launcher(harness).capabilities().reopen_steers {
+            ReopenSteers::PromptHook => check_prompt_hook_reopen(harness),
+            // server::wake exercises the first reported boundary on every server route.
+            ReopenSteers::ServerBoundary => continue,
+        }
+    }
+}
+
+fn check_prompt_hook_reopen(harness: loopflow_harness::HarnessKind) {
+    let fixture = Fixture::new(harness.as_str());
+    let home = fixture.home.path();
+    let machine = home.join("machine");
+    let _env = support::EnvGuard::with_lf_home(&[], &machine);
+    let task = support::register_task_without_pr(
+        &machine,
+        fixture.repo.path(),
+        "main",
+        &fixture.repo.head_sha(),
+    );
+    let resume = ["resume", "--task", task.task.id.as_str()];
+    let heard = || -> Vec<Value> {
+        serde_json::from_slice(&fs::read(home.join("tui-heard.json")).unwrap()).unwrap()
+    };
+    fixture.run(&resume);
+    let first = heard();
+    assert_eq!(first.len(), 1);
+    let session = fixture.session();
+
+    success(
+        &fixture
+            .command()
+            .args(["--repo", ".", "steer", "REOPEN_DIRECTION"])
+            .output()
+            .unwrap(),
+    );
+    let resumed = fixture.run(&resume);
+    pair(
+        &resumed,
+        "--conversation",
+        first[0]["conversation"].as_str().unwrap(),
+    );
+    let turns = heard();
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0]["conversation"], first[0]["conversation"]);
+    assert!(
+        turns[0]["context"]
+            .as_str()
+            .unwrap()
+            .contains("REOPEN_DIRECTION"),
+        "{turns:?}"
+    );
+
+    let page = fixture
+        .command()
+        .args(["session", "steers", &session, "--json"])
+        .output()
+        .unwrap();
+    success(&page);
+    let page: Value = serde_json::from_slice(&page.stdout).unwrap();
+    assert_eq!(page["pending"], 0);
+    assert!(page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|row| row["steer"]["text"] == "REOPEN_DIRECTION" && row["delivered_at"].is_number()));
+
+    // A PR comment produces a Task update when read, with no direct steer
+    // to start a turn for it.
+    let store = loopflow_execution::store::open_sqlite(&machine.join("loopflow.db")).unwrap();
+    store
+        .append_task_comment(
+            &task.task.id,
+            &loopflow_model::comment::TaskComment {
+                id: "resumed-pr".into(),
+                body: "PR: https://example.test/pr/21".into(),
+                author: loopflow_model::comment::TaskCommentAuthor::Person {
+                    name: Some("Reviewer".into()),
+                },
+                created_at: Some("2026-11-25T03:00:00Z".into()),
+            },
+        )
+        .unwrap();
+    fixture.run(&resume);
+    let updates = heard();
+    assert_eq!(updates.len(), 1);
+    let context = updates[0]["context"].as_str().unwrap();
+    assert!(context.contains("example.test/pr/21"), "{context}");
+    assert!(!context.contains("REOPEN_DIRECTION"), "{context}");
+
+    let quiet = fixture.run(&resume);
+    assert!(!args(&quiet).contains(&"-i"));
+    assert!(heard().is_empty());
 }
 
 #[test]

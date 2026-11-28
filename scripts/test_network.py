@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import platform
 import shutil
@@ -16,6 +17,21 @@ NETWORK_RULES = """(deny network*)
 (allow network-inbound (local ip "localhost:*") (local unix-socket))
 (allow network-bind)
 """
+
+
+def _installed_harnesses(arguments: list[str]) -> list[Path]:
+    # Hide host provider installations from the application library test binary
+    # so missing-CLI fixtures cannot fall through to them via lf's PATH repair.
+    if Path(arguments[0]).name.rpartition("-")[0] != "loopflow":
+        return []
+    # lf restores these system tool directories even with a fixture PATH.
+    paths = (
+        Path(prefix, directory, name)
+        for prefix in ("/opt/homebrew", "/usr/local")
+        for directory in ("bin", "sbin")
+        for name in ("claude", "codex", "opencode", "pi", "agy")
+    )
+    return [path for path in paths if os.access(path, os.X_OK) and path.is_file()]
 
 
 def _probe() -> None:
@@ -58,6 +74,7 @@ def main() -> int:
         os.execvp(arguments[0], arguments)
     if not arguments:
         raise SystemExit("usage: test_network.py COMMAND [ARGS...]")
+    installed = _installed_harnesses(arguments)
     child = [sys.executable, str(Path(__file__).resolve()), "--isolated", *arguments]
     if platform.system() == "Darwin":
         if desktop:
@@ -69,8 +86,28 @@ def main() -> int:
                 "(version 1)(allow default)"
                 '(allow process-exec (literal "/bin/ps") (with no-sandbox))'
             )
+        for path in installed:
+            profile += f"(deny file-read* (literal {json.dumps(str(path))}))"
         command = ["sandbox-exec", "-p", profile + NETWORK_RULES, *child]
     elif platform.system() == "Linux" and shutil.which("unshare") and shutil.which("ip"):
+        namespace = ["unshare", "--net"]
+        if installed:
+            # Mask only in the new, private mount namespace. /dev/null is
+            # not a regular executable, so lf sees a genuinely absent CLI.
+            namespace.extend(
+                [
+                    "--mount",
+                    "--propagation",
+                    "private",
+                    "/bin/sh",
+                    "-ec",
+                    'while [ "$1" != -- ]; do /bin/mount --bind /dev/null "$1"; shift; done\n'
+                    'shift; exec "$@"',
+                    "hide-installed-harnesses",
+                    *map(str, installed),
+                    "--",
+                ]
+            )
         command = [
             "sudo",
             "-n",
@@ -78,8 +115,7 @@ def main() -> int:
             "env",
             f"PATH={os.environ['PATH']}",
             f"HOME={os.environ['HOME']}",
-            "unshare",
-            "--net",
+            *namespace,
             *child,
         ]
     else:

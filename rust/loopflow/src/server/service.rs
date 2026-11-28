@@ -129,6 +129,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> Carrier for Messages<S> {
 pub(super) struct LocalAuthority {
     pub(super) remote: mpsc::Sender<Control>,
     pub(super) loopback: Result<Arc<super::loopback::Handle>, String>,
+    waker: super::wake::Waker,
 }
 
 /// Connections to this server and from it to other Machines.
@@ -275,10 +276,6 @@ pub(super) async fn run() -> Result<()> {
             (None, Err(format!("{error:#}")))
         }
     };
-    let local_authority = LocalAuthority {
-        remote: remote_control,
-        loopback: loopback_handle,
-    };
     super::maintenance::start();
     tokio::spawn(loopflow_execution::ops::tracker_events::watch_owned_work(
         None,
@@ -292,7 +289,11 @@ pub(super) async fn run() -> Result<()> {
             None
         }
     };
-    super::recovery::start(terminals.clone());
+    let local_authority = LocalAuthority {
+        remote: remote_control,
+        loopback: loopback_handle,
+        waker: super::recovery::start(terminals.clone()),
+    };
     let remote = super::remote::manage(
         super::mobile::configured(),
         remote_requests,
@@ -2098,7 +2099,8 @@ async fn request(
     let trace_id = loopflow_model::id::TraceId::default();
     let answer = match operation {
         Operation::Server(ServerOperation::SessionBoundary(boundary)) => {
-            Answer::read(session_boundary(boundary, reservation.clone()).await)
+            let waker = local_authority.map(|local| local.waker).unwrap_or_default();
+            Answer::read(session_boundary(boundary, reservation.clone(), waker).await)
         }
         operation => {
             operate(
@@ -2428,6 +2430,7 @@ async fn plan_here(
 async fn session_boundary(
     boundary: super::wire::SessionBoundary,
     reservation: Arc<Reservation>,
+    waker: super::wake::Waker,
 ) -> Result<serde_json::Value, Error> {
     let (answer, after) = tokio::task::spawn_blocking(move || {
         let _held = reservation;
@@ -2443,7 +2446,7 @@ async fn session_boundary(
     .map_err(unavailable)?;
     if let Some(after) = after {
         tokio::task::spawn_blocking(move || {
-            loopflow_execution::journal::request::isolate(|| super::boundary::after(after))
+            loopflow_execution::journal::request::isolate(|| super::boundary::after(after, waker))
         });
     }
     serde_json::to_value(answer).map_err(unavailable)
@@ -2856,6 +2859,7 @@ mod tests {
             super::LocalAuthority {
                 remote: remote_control,
                 loopback: Ok(loopback_handle),
+                waker: crate::server::wake::Waker::default(),
             },
             Arc::new(Tickets::default()),
             Arc::new(Subscriptions::default()),

@@ -19,6 +19,12 @@ impl Harness for Pi {
             && command.split_whitespace().any(|arg| arg == "--mode")
             && command.split_whitespace().any(|arg| arg == "rpc")
     }
+    fn caller_session_env(&self) -> &'static [&'static str] {
+        &[]
+    }
+    fn sign_in_advice(&self) -> &'static str {
+        "run `pi` and enter `/login`"
+    }
     fn api_key_env(&self) -> &'static [&'static str] {
         &[
             "ANTHROPIC_API_KEY",

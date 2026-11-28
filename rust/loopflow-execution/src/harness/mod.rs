@@ -33,6 +33,7 @@ use loopflow_model::id::AgentSessionId;
 use tokio::sync::mpsc;
 
 use crate::agent::AgentConfig;
+use crate::steer::{IdleEndpoints, IdleReach};
 use crate::transcript::{Gap, Located, RetentionState};
 
 pub(crate) fn configure_vendor_std_env(command: &mut std::process::Command) -> Result<()> {
@@ -149,6 +150,18 @@ mod environment_tests {
             checkout.path().to_str().unwrap()
         );
         assert_eq!(command.as_std().get_current_dir(), Some(checkout.path()));
+    }
+
+    #[tokio::test]
+    async fn a_nested_provider_cannot_address_the_parent_antigravity_conversation() {
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command
+            .env("ANTIGRAVITY_LS_ADDRESS", "parent")
+            .env("ANTIGRAVITY_CSRF_TOKEN", "fixture")
+            .env("ANTIGRAVITY_CONVERSATION_ID", "parent")
+            .args(["-c", r#"test -z "${ANTIGRAVITY_LS_ADDRESS+x}${ANTIGRAVITY_CSRF_TOKEN+x}${ANTIGRAVITY_CONVERSATION_ID+x}""#]);
+        configure_agent_env(&mut command, &crate::agent::AgentConfig::default());
+        assert!(command.status().await.unwrap().success());
     }
 
     #[test]
@@ -352,10 +365,21 @@ pub struct InstalledSkills {
     pub global_registry: Option<&'static str>,
 }
 
+/// What starts a turn when a work session reopens on an existing thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReopenSteers {
+    /// The server delivers waiting steers at the first reachable boundary.
+    ServerBoundary,
+    /// An opening prompt runs the provider hook that reads waiting input.
+    PromptHook,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Capabilities {
     pub thread: ThreadNaming,
+    /// Replay the saved request if the resumed thread is empty.
     pub initial_prompt_on_resume: bool,
+    pub reopen_steers: ReopenSteers,
     pub native_skills: Option<crate::skills::catalog::SkillDialect>,
     pub installed_skills: InstalledSkills,
     pub turn_limit: bool,
@@ -443,6 +467,8 @@ pub struct HookCallback {
 /// store and the process table.
 pub trait Launcher: Harness {
     fn capabilities(&self) -> Capabilities;
+    /// The published endpoint that accepts a turn for this idle harness.
+    fn idle_reach(&self, endpoints: &IdleEndpoints) -> Option<IdleReach>;
     /// What an error this harness's decoder reported says went wrong, for the
     /// failures the provider leaves to lf: a spent quota, a revoked login or
     /// an unserved model moves the run to the next agent in its order, and a

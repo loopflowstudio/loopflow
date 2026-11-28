@@ -64,10 +64,10 @@ managed by the local server vs. bare:
 A Session can change kind between launches: for example, binding a chat to a
 Task reopens it as a work session next time.
 
-Running `lf` from inside an existing Claude Code or Codex conversation always
-starts an independent Session (never a nested child), inheriting your
-`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and API keys without leaking the parent
-conversation's session markers.
+Running `lf` from inside an existing Claude Code, Codex, OpenCode, or
+Antigravity conversation always starts an independent Session (never a nested
+child), inheriting your `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and API keys without
+leaking the parent conversation's session markers.
 
 ## Survive updates without interrupting work
 
@@ -208,10 +208,12 @@ lf session steers <session>                          # pending vs. delivered
 
 - **Running Sessions** receive steers at their next provider boundary (after a
   tool call or turn).
-- **Idle work sessions** on Claude, Codex, OpenCode and Pi wake for steers,
-  Task comments, and Graph runs that settle. The Task conversation stays idle
-  as the Graph advances through its steps. Antigravity hears updates at its
-  next boundary.
+- **Idle work sessions** on Claude, Codex, OpenCode, Pi, and Antigravity wake
+  for steers, Task comments, and Graph runs that settle. Antigravity wakes only
+  when its held terminal is at an empty idle prompt, leaving drafts, slash
+  menus, and dialogs untouched.
+- **Reopened work sessions** (`lf resume --task <ID>`) run steers saved while
+  they were closed as soon as the provider is ready for input, before you type.
 - **A Task's conversation** also hears about the
   [follow-ups filed from it](work.md#file-follow-ups-from-a-task) when one
   stops at an interactive step, fails, merges or closes, not at each step. A

@@ -49,14 +49,17 @@ drops it too, so sessions a person opens by hand inherit none of it.
 
 A conversation sets markers in its own shells: lf's process context above and
 its provider's own. Every provider lf starts (Claude, Codex, OpenCode, Pi, Antigravity, in
-chats, batches, work sessions and workers) drops the caller's, by name, from
-one list (`CALLER_SESSION_ENV`), before applying the new conversation's.
+chats, batches, work sessions and workers) drops the caller's, by name, through
+`caller_session_env()` (shared lf markers plus each harness's
+`Harness::caller_session_env()`), before applying the new conversation's.
 
 | Set by | Removed |
 |---|---|
-| lf | the process-context variables above |
-| Claude Code | `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_SESSION_ATTENDED`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_EXECPATH`, `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDE_CODE_CHILD_NOTES_DIR`, `CLAUDE_PID`, `CLAUDE_EFFORT`, `AI_AGENT` |
+| lf | the process-context variables above, `AI_AGENT` |
+| Claude Code | `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_SESSION_ATTENDED`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_EXECPATH`, `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDE_CODE_CHILD_NOTES_DIR`, `CLAUDE_PID`, `CLAUDE_EFFORT` |
 | Codex | `CODEX_CI`, `CODEX_SANDBOX`, `CODEX_SANDBOX_NETWORK_DISABLED`, `CODEX_SESSION_ID`, `CODEX_THREAD_ID`, `CODEX_TOOL_CALL_ID`, `CODEX_VERSION`, `CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS` |
+| OpenCode | `OPENCODE`, `OPENCODE_SESSION_ID`, `OPENCODE_TERMINAL`, `OPENCODE_CONFIG_CONTENT` |
+| Antigravity | `ANTIGRAVITY_AGENT`, `ANTIGRAVITY_AGENTAPI_EXE`, `ANTIGRAVITY_APP_DATA_DIR`, `ANTIGRAVITY_CONVERSATION_ID`, `ANTIGRAVITY_CSRF_TOKEN`, `ANTIGRAVITY_LS_ADDRESS`, `ANTIGRAVITY_LS_VERSION`, `ANTIGRAVITY_PROJECT_ID`, `ANTIGRAVITY_SOURCE_METADATA`, `ANTIGRAVITY_TRAJECTORY_ID` |
 
 An inherited `CLAUDE_CODE_CHILD_SESSION` turns off an interactive Claude's
 transcript (`-p` runs keep theirs), so the Session couldn't be resumed; an

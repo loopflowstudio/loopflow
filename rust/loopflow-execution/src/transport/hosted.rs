@@ -86,7 +86,12 @@ pub(super) struct Hosted {
     /// from the ring: its queries were answered when it was printed, or
     /// went unanswered while no server ran. Nothing answers them now.
     replayed_through: u64,
+    /// When a viewer last typed a key or the server queued a wake prompt.
+    last_prompt_input: Option<Instant>,
 }
+
+/// Give the provider time to process a keystroke or a wake before pasting.
+const PROMPT_INPUT_QUIET: Duration = Duration::from_secs(2);
 
 /// The threads the Machine server's held terminals share: viewing records
 /// and Session-name reads.
@@ -154,6 +159,7 @@ impl Hosted {
             title,
             reported_status: None,
             replayed_through: 0,
+            last_prompt_input: None,
             id,
         })
     }
@@ -203,6 +209,37 @@ impl Hosted {
         self.output.program_status()
     }
 
+    /// Inject `prompt` via bracketed paste + Enter when this terminal has no
+    /// active paste or recent user typing and `prompt_ready` accepts its live
+    /// VT screen.
+    pub fn wake_idle_prompt(
+        &mut self,
+        child: &mut Source,
+        prompt: &str,
+        prompt_ready: crate::steer::PromptReady,
+    ) -> super::registry::WakeTerminal {
+        use super::registry::WakeTerminal;
+        if self.exit.is_some()
+            || self.settling.is_some()
+            || child.position() < self.replayed_through
+            || self.pending_input.in_paste()
+            || !self.pending_input.is_empty()
+            || self
+                .last_prompt_input
+                .is_some_and(|at| at.elapsed() < PROMPT_INPUT_QUIET)
+            || !self.output.terminal().is_some_and(prompt_ready)
+        {
+            return WakeTerminal::NotReady;
+        }
+        let payload = format!("\x1b[200~{prompt}\x1b[201~\r");
+        if !self.pending_input.push(payload.as_bytes()) {
+            return WakeTerminal::NotReady;
+        }
+        self.last_prompt_input = Some(Instant::now());
+        child.forward(&mut self.pending_input);
+        WakeTerminal::Injected
+    }
+
     /// Record the provider's confirmed directory once the worker verified its
     /// agent process in the store.
     pub fn confirm_directory(&mut self, cwd: &std::path::Path) {
@@ -250,6 +287,7 @@ impl Hosted {
                 kept,
                 execution_directory_reported,
                 close_notice,
+                last_prompt_input,
                 ..
             } = self;
             for index in 0..viewers.len() {
@@ -282,6 +320,9 @@ impl Hosted {
                                 );
                                 if input::keys(&typed).next().is_some() {
                                     output.acknowledge_results();
+                                }
+                                if input::has_user_keystroke(&typed) {
+                                    *last_prompt_input = Some(Instant::now());
                                 }
                                 *writer = Some(viewer.id.clone());
                                 sizing.touch(viewer);

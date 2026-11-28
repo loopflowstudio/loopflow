@@ -192,11 +192,11 @@ Once the loop settles, `compress` reads the whole branch against its base as
 one change—simplifying the change and the area around it, merging seams
 between passes, and dropping dead or superseded additions. It checks and
 commits each cut on its own with what it removed and why, so any single cut
-can be reverted cleanly. Cuts that would change visible behavior, data people
-rely on, or a measured target stay untouched and go under
-`## Deferred findings` in `scratch/plan.md` (with open questions in
-`scratch/questions.md`) for `ship-review`; run standalone (`lf compress`)
-without those files, it reports them in its reply.
+can be reverted cleanly. `compress` defers cuts that would change visible
+behavior, data people rely on, or a measured target. It records them under
+`## Deferred findings` in `scratch/plan.md` for `ship-review` and puts open
+questions in `scratch/questions.md`. Standalone runs (`lf compress`) report
+findings or questions in the reply when the corresponding file is absent.
 
 ### Docs-first (`write-docs`) and QA playbooks (`.lf/qa/`)
 

@@ -242,7 +242,7 @@ public final class MultiplexerStore {
     /// the recorded one; an unknown one never discards it.
     @discardableResult
     public func showBrowser(_ tab: BrowserTab, location: WorkspaceIdentity? = nil,
-                            focus: Bool = true, unzoom: Bool = false) -> PaneState? {
+                            focus: Bool = true) -> PaneState? {
         guard let pane = browserPane,
               case .browser(let taskId, var tabs, _, let place) = pane.content else { return nil }
         if !tabs.contains(where: { $0.id == tab.id }) { tabs.append(tab) }
@@ -251,8 +251,12 @@ public final class MultiplexerStore {
         if content != pane.content {
             layout = layout.replacingBrowser(of: pane.id, with: content, retainingOccurrence: content.location == pane.content.location)
         }
-        if unzoom, let zoomedPaneId, zoomedPaneId != pane.id { setZoom(zoomedPaneId, enabled: false) }
-        if focus { setFocusedPane(pane.id) } else { setCollapsed(paneId: pane.id, collapsed: false) }
+        if focus {
+            setFocusedPane(pane.id)
+        } else {
+            setCollapsed(paneId: pane.id, collapsed: false)
+            if let zoomedPaneId, zoomedPaneId != pane.id { setZoom(zoomedPaneId, enabled: false) }
+        }
         return layout.pane(for: pane.id)
     }
 

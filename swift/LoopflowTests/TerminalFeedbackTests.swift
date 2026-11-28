@@ -107,7 +107,7 @@ struct TerminalFeedbackTests {
             try #require(ContinuousClock.now < clickDeadline, "Ghostty did not deliver the OSC 8 click.")
             try await Task.sleep(for: .milliseconds(10))
         }
-        #expect(opened == .web(try #require(URL(string: "https://example.com"))))
+        #expect(opened == .defaultApp(try #require(URL(string: "https://example.com"))))
     }
 
     @Test("Host Copy, Paste and Find do not consume modified TUI shortcuts")

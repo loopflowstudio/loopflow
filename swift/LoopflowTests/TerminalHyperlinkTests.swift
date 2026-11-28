@@ -7,18 +7,14 @@ import Testing
 
 @Suite("Terminal links")
 struct TerminalHyperlinkTests {
-    @Test(arguments: ["https://example.com/pr#discussion", "http://localhost:8080/"])
-    func webLinksOpenInTheBrowser(_ target: String) throws {
-        #expect(TerminalHyperlink(target: target) == .web(try #require(URL(string: target))))
+    @Test(arguments: ["https://example.com/pr#discussion", "http://localhost:8080/", "mailto:team@example.com?subject=Review"])
+    func webAndMailLinksOpenInTheDefaultApp(_ target: String) throws {
+        #expect(TerminalHyperlink(target: target) == .defaultApp(try #require(URL(string: target))))
     }
 
-    @Test func mailWorkAndExternalLinksHaveDistinctRoutes() throws {
-        let mail = try #require(URL(string: "mailto:team@example.com?subject=Review"))
-        let work = try #require(URL(string: "loopflow://loopflow/task/LOO-1126"))
-        let external = try #require(URL(string: "slack://channel?id=C123"))
-        #expect(TerminalHyperlink(target: mail.absoluteString) == .mail(mail))
-        #expect(TerminalHyperlink(target: work.absoluteString) == .work(work))
-        #expect(TerminalHyperlink(target: external.absoluteString) == .externalScheme(external))
+    @Test func externalSchemesRequireConfirmation() throws {
+        let url = try #require(URL(string: "slack://channel?id=C123"))
+        #expect(TerminalHyperlink(target: url.absoluteString) == .externalScheme(url))
     }
 
     @Test(arguments: [
@@ -55,13 +51,18 @@ struct TerminalHyperlinkTests {
         #expect(file.line == 12)
         #expect(file.isLocal(hostName: "workstation.local"))
         #expect(!file.isLocal(hostName: "another.local"))
-        #expect(file.checkoutPath(in: "/tmp/check out") == "scripts/test.py")
-        #expect(file.checkoutPath(in: "/tmp/check") == nil)
         #expect(TerminalHyperlink(target: "/tmp/file#L12") ==
                 .file(.init(path: "/tmp/file", host: nil, line: 12)))
     }
 
-    @Test func localDocumentsOpenAfterResolvingSymlinks() throws {
+    @MainActor private func localLink(to url: URL) async throws -> TerminalHyperlink.File.Destination {
+        let file = TerminalHyperlink.File(path: url.path, host: nil, line: nil)
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("Unexpected server read.") }
+        return try await file.destination(from: .init(machineId: "local", worktree: ""), localMachine: "local",
+                                          files: nil, query: query)
+    }
+
+    @Test @MainActor func localDocumentsOpenAfterResolvingSymlinks() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -69,13 +70,11 @@ struct TerminalHyperlinkTests {
         try Data("Notes".utf8).write(to: document)
         let shortcut = root.appendingPathComponent("shortcut.txt")
         try FileManager.default.createSymbolicLink(at: shortcut, withDestinationURL: document)
-        #expect(try TerminalHyperlink.File(path: shortcut.path, host: nil, line: nil).localDocument() ==
-                document.resolvingSymlinksInPath())
-        let folder = TerminalHyperlink.File(path: root.path, host: nil, line: nil)
-        #expect(try folder.localDocument().path == root.resolvingSymlinksInPath().path)
+        #expect(try await localLink(to: shortcut) == .document(document.resolvingSymlinksInPath()))
+        #expect(try await localLink(to: root) == .document(root.resolvingSymlinksInPath()))
     }
 
-    @Test func localFileLinksRefuseLaunchers() throws {
+    @Test @MainActor func localFileLinksRefuseLaunchers() async throws {
         let manager = FileManager.default
         let root = manager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try manager.createDirectory(at: root, withIntermediateDirectories: false)
@@ -91,11 +90,13 @@ struct TerminalHyperlinkTests {
         try Data("test".utf8).write(to: executable)
         try manager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
         for name in ["app-alias", "test.command", "launcher.jar", "script", "executable.txt"] {
-            let file = TerminalHyperlink.File(path: root.appendingPathComponent(name).path, host: nil, line: nil)
-            #expect(throws: TerminalHyperlink.File.OpenError.unsafe) { try file.localDocument() }
+            await #expect(throws: TerminalHyperlink.File.OpenError.unsafe) {
+                try await localLink(to: root.appendingPathComponent(name))
+            }
         }
-        let missing = TerminalHyperlink.File(path: root.appendingPathComponent("missing.txt").path, host: nil, line: nil)
-        #expect(throws: TerminalHyperlink.File.OpenError.missing) { try missing.localDocument() }
+        await #expect(throws: TerminalHyperlink.File.OpenError.missing) {
+            try await localLink(to: root.appendingPathComponent("missing.txt"))
+        }
     }
 
     @Test @MainActor func localPaneRoutesFromItsTasksCurrentCheckout() async throws {
@@ -121,14 +122,14 @@ struct TerminalHyperlinkTests {
                 .destination(from: pane, localMachine: "local", files: files, query: query)
         }
 
-        #expect(try await open(shortcut.appendingPathComponent("test.py")) == .checkout(path: "test.py", line: 42))
+        #expect(try await open(shortcut.appendingPathComponent("test.py")) == .checkout(path: "test.py"))
         #expect(try await open(folder) == .document(folder.resolvingSymlinksInPath()))
         #expect(try await open(checkout) == .document(checkout.resolvingSymlinksInPath()))
         #expect(try await open(outside) == .document(outside.resolvingSymlinksInPath()))
         #expect(try await open(notes, files: nil) == .document(notes.resolvingSymlinksInPath()))
         #expect(try await open(notes, files: moved) == .document(notes.resolvingSymlinksInPath()))
         #expect(try await open(notes, from: .init(machineId: "local", worktree: root.path)) == .document(notes.resolvingSymlinksInPath()))
-        #expect(try await open(notes, from: .init(machineId: "local", worktree: "")) == .checkout(path: "notes.txt", line: 42))
+        #expect(try await open(notes, from: .init(machineId: "local", worktree: "")) == .checkout(path: "notes.txt"))
         await #expect(throws: TerminalHyperlink.File.OpenError.unsafe) { try await open(script, files: moved) }
         await #expect(throws: TerminalHyperlink.File.OpenError.missing) { try await open(checkout.appendingPathComponent("missing")) }
         await #expect(throws: TerminalHyperlink.File.OpenError.anotherMachine) { try await open(notes, host: "another.invalid") }
@@ -160,12 +161,11 @@ struct TerminalHyperlinkTests {
                 .destination(from: pane, localMachine: "local", files: files, query: query)
         }
 
-        guard case .checkout(let path, let line, let snapshot) = try await open("/peer/checkout/script.py") else {
+        guard case .checkout(let path, let snapshot) = try await open("/peer/checkout/script.py") else {
             Issue.record("Expected a checkout file")
             return
         }
         #expect(path == "script.py")
-        #expect(line == 42)
         #expect(snapshot?.content == "text")
         await #expect(throws: TerminalHyperlink.File.OpenError.remoteDirectory) { try await open("/peer/checkout/folder") }
         await #expect(throws: TerminalHyperlink.File.OpenError.remoteDirectory) { try await open("/peer/checkout") }
@@ -188,10 +188,13 @@ struct TerminalHyperlinkTests {
         let unnamed = WorkspaceIdentity(machineId: "peer", worktree: "")
         #expect(try workspace.filesPlace(taskId: "task", task: nil, location: unnamed).cwd == "")
 
-        _ = workspace.files(at: .init(taskId: "task", machine: "peer", label: nil, cwd: "/peer/checkout"), query: query)
+        let files = workspace.files(at: .init(taskId: "task", machine: "peer", label: nil, cwd: "/peer/checkout"), query: query)
         #expect(try workspace.filesPlace(taskId: "task", task: nil, location: unnamed).cwd == "/peer/checkout")
         let elsewhere = WorkspaceIdentity(machineId: "other", worktree: "")
-        #expect(try workspace.filesPlace(taskId: "task", task: nil, location: elsewhere).cwd == "")
+        let moved = try workspace.filesPlace(taskId: "task", task: nil, location: elsewhere)
+        workspace.follow(moved)
+        #expect(files.machine == elsewhere.machineId)
+        #expect(files.cwd.isEmpty)
     }
 
     @Test(arguments: [false, true], [false, true]) @MainActor
@@ -258,6 +261,12 @@ struct TerminalHyperlinkTests {
         #expect(reads.withLock { $0 } == 1)
         await files.loadFile()
         #expect(reads.withLock { $0 } == 2)
+
+        // The same link in an already-open file leaves no read to skip on remount.
+        await pane.openTerminalLink(link, at: location) { Issue.record("Could not reopen the file link: \($0)") }
+        files.endPresentation()
+        await files.loadSelection()
+        #expect(reads.withLock { $0 } == 4)
     }
 
     @Test @MainActor func aTaskMoveDuringTheRemoteLookupLeavesFilesClosed() async throws {

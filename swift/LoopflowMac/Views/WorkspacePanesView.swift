@@ -351,7 +351,7 @@ struct SessionPaneView: View {
     @State private var bellRinging = false
     @State private var terminalTitle: String?
     @State private var copyConfirmation: String?
-    @State private var externalLink: (url: URL, notice: TerminalLinkNotice)?
+    @State private var externalLink: ExternalLinkConfirmation?
 
     private var item: SessionItem? {
         guard case .session(let id?, _) = pane.content else { return nil }
@@ -408,18 +408,8 @@ struct SessionPaneView: View {
         .accessibilityIdentifier(item.map { "session-pane-\($0.id)" } ?? "session-pane-empty")
         .modifier(CreationPresentation(recovery: .shared, resource: .session(item?.id ?? ""), visible: item != nil))
         .background {
-            Color.clear.sheet(isPresented: Binding(
-                get: { externalLink != nil },
-                set: { if !$0 { externalLink = nil } }
-            )) {
-                if let externalLink {
-                    TerminalExternalLinkSheet(url: externalLink.url, cancel: { self.externalLink = nil }, open: {
-                        self.externalLink = nil
-                        if !NSWorkspace.shared.open(externalLink.url) {
-                            externalLink.notice("No app could open the link.")
-                        }
-                    })
-                }
+            Color.clear.sheet(item: $externalLink) { link in
+                TerminalExternalLinkSheet(link: link)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttyTerminalBell)) { notification in
@@ -1006,10 +996,10 @@ struct SessionPaneView: View {
                           notice: @escaping TerminalLinkNotice) async {
         do {
             switch link {
-            case .web(let url), .mail(let url):
+            case .defaultApp(let url):
                 if !NSWorkspace.shared.open(url) { notice("No app could open the link.") }
             case .externalScheme(let url):
-                externalLink = (url, notice)
+                externalLink = ExternalLinkConfirmation(url: url, notice: notice)
             case .work(let url):
                 guard let open = model.openResolvedWorkLink else {
                     throw RegistryQueryError("This window cannot open Work links.")
@@ -1045,7 +1035,7 @@ struct SessionPaneView: View {
         switch destination {
         case .document(let url):
             guard NSWorkspace.shared.open(url) else { throw RegistryQueryError("No app could open the file.") }
-        case .checkout(let path, let line, let snapshot):
+        case .checkout(let path, let snapshot):
             // A remote read can finish after the Task moves. Only reveal the
             // file in the checkout the click addressed.
             guard let place, place == activeFilesPlace else {
@@ -1060,10 +1050,10 @@ struct SessionPaneView: View {
                 }
             }
             let filesLocation = WorkspaceIdentity(machineId: location.machineId, worktree: place.cwd)
-            guard store.showBrowser(.files, location: filesLocation, focus: false, unzoom: true) != nil else {
+            guard store.showBrowser(.files, location: filesLocation, focus: false) != nil else {
                 throw RegistryQueryError("The Files pane is unavailable.")
             }
-            files.openPresentation(.init(path: path, lines: line.map { $0...$0 }), reusingSnapshot: snapshot != nil)
+            files.openPresentation(.init(path: path, lines: file.line.map { $0...$0 }), reusingSnapshot: snapshot != nil)
             onEnter?()
         }
     }
@@ -1130,10 +1120,15 @@ struct SessionPaneView: View {
     }
 }
 
-private struct TerminalExternalLinkSheet: View {
+private struct ExternalLinkConfirmation: Identifiable {
     let url: URL
-    let cancel: () -> Void
-    let open: () -> Void
+    let notice: TerminalLinkNotice
+    var id: URL { url }
+}
+
+private struct TerminalExternalLinkSheet: View {
+    let link: ExternalLinkConfirmation
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -1141,7 +1136,7 @@ private struct TerminalExternalLinkSheet: View {
             Text("Open link in another app?")
                 .font(Typography.lede)
             ScrollView {
-                Text(url.absoluteString)
+                Text(link.url.absoluteString)
                     .font(Typography.text)
                     .foregroundStyle(palette.textSecondary)
                     .textSelection(.enabled)
@@ -1150,11 +1145,14 @@ private struct TerminalExternalLinkSheet: View {
             .frame(maxHeight: 120)
             HStack {
                 Spacer()
-                Button("Cancel", action: cancel)
+                Button("Cancel") { dismiss() }
                     .buttonStyle(LoopflowButtonStyle())
                     .keyboardShortcut(.cancelAction)
-                Button("Open", action: open)
-                    .buttonStyle(LoopflowButtonStyle(.accent))
+                Button("Open") {
+                    dismiss()
+                    if !NSWorkspace.shared.open(link.url) { link.notice("No app could open the link.") }
+                }
+                .buttonStyle(LoopflowButtonStyle(.accent))
             }
         }
         .padding(Spacing.xl)

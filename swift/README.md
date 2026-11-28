@@ -669,13 +669,8 @@ Terminals start from Desktop's own terminal settings. A launcher's `NO_COLOR`,
 `TERM`, pager and agent variables do not reach them, so provider CLIs keep their
 colors however Desktop was opened.
 
-Hold **⌘** over a hyperlink in a Session or Shell pane for a hand cursor and
-bottom-corner target preview, even when the pane strip is hidden or input is
-paused. **⌘-click** opens web and mail links in their default app, Work links
-in the repository's window, and files in the Task's active checkout in
-**Files** at `#L<n>`. Failed clicks show a notice. Held terminals set
-`TERM_PROGRAM=ghostty` so Sessions started anywhere emit clickable links.
-[Links in terminal panes](../docs/surfaces.md#links-in-terminal-panes).
+**⌘-click** a terminal link to open it. Hold **⌘** over it to preview the
+target. [Links in terminal panes](../docs/surfaces.md#links-in-terminal-panes).
 
 If macOS cannot provide Ghostty's display link, terminals use timer rendering.
 The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.

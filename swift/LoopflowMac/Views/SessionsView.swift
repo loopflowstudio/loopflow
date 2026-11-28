@@ -202,7 +202,7 @@ final class SessionsWorkspace {
               case .browser(_, let tabs, _, _)? = multiplexer.browserPane?.content, tabs.isEmpty else { return }
         didPrepareTaskPanes = true
         guard let browser = multiplexer.showBrowser(.files, location: session.content.location,
-            focus: false, unzoom: true) else { return }
+            focus: false) else { return }
         // A location error is presented by the browser's normal error view.
         _ = try? files(for: browser.content, task: nil, query: query)
     }
@@ -247,7 +247,7 @@ final class SessionsWorkspace {
         let source = owner ?? multiplexer.sessionPane
         let place = source?.content.location ?? location
         if tab == .files { selectFilesPage() }
-        return multiplexer.showBrowser(tab, location: place, focus: focus, unzoom: !focus)
+        return multiplexer.showBrowser(tab, location: place, focus: focus)
     }
 
     /// ⌘W closes the named tab, else the selected one; a session pane, or one
@@ -397,7 +397,7 @@ final class SessionsWorkspace {
     }
 
     /// Where a browser's Files reads: the Machine (nil for this Mac), its name
-    /// and the checkout there; an empty checkout keeps the one already read.
+    /// and the checkout there, when known.
     struct FilesPlace: Equatable {
         let taskId: String
         let machine: String?
@@ -429,7 +429,7 @@ final class SessionsWorkspace {
         let placeMachine = machine == localMachineId ? nil : machine
         // With no checkout named here, the one Files read from the owner is it.
         let named = place.flatMap { $0.machineId == machine && !$0.worktree.isEmpty ? $0.worktree : nil }
-        let read = taskFiles.flatMap { $0.machine == placeMachine && !$0.cwd.isEmpty ? $0.cwd : nil }
+        let read = taskFiles.flatMap { $0.machine == placeMachine ? $0.cwd : nil }
         return FilesPlace(taskId: task?.runtime?.workId ?? taskId,
                           machine: placeMachine,
                           label: owner == machine ? task?.runtime?.owner?.machine.label : nil,
@@ -455,7 +455,7 @@ final class SessionsWorkspace {
 
     func follow(_ place: FilesPlace) {
         guard let retained = taskFiles else { return }
-        retained.relocate(machine: place.machine, label: place.label, cwd: place.cwd.isEmpty ? retained.cwd : place.cwd)
+        retained.relocate(machine: place.machine, label: place.label, cwd: place.cwd)
     }
     let surfaces: GhosttySurfacePool
     let pages = BrowserPages()

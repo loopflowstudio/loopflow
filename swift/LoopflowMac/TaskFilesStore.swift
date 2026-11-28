@@ -113,8 +113,11 @@ final class TaskFilesStore {
         filePicker = nil
         let visit = request.lines.map { FileVisit(line: $0.lowerBound, showsSource: true, highlight: .lines($0)) }
         reveal(request.path, at: visit, mode: request.mode, from: jumps.position(in: self))
-        browser.selectionHasSnapshot = reusingSnapshot
-        if reusingSnapshot { error = nil }
+        presentedFile = reusingSnapshot ? (request.path, machine, cwd) : nil
+        if reusingSnapshot {
+            fileGeneration += 1
+            error = nil
+        }
     }
 
     private(set) var scratchPaths: [String] = []
@@ -291,7 +294,6 @@ final class TaskFilesStore {
     func relocate(machine: String?, label: String? = nil, cwd: String) {
         if machine == self.machine, let label { machineLabel = label }
         guard machine != self.machine || cwd != self.cwd else { return }
-        browser.selectionHasSnapshot = false
         machineLabel = label
         let observing = observation != nil || servedObservation != nil
         observation = nil
@@ -369,7 +371,6 @@ final class TaskFilesStore {
         let wasNotStarted = watchNotStarted
         watchNotStarted = revision.notStarted
         if revision.machineID != machine {
-            browser.selectionHasSnapshot = false
             arriving = Set(documents.keys)
             machine = revision.machineID
             seenScratchStamps = nil
@@ -377,7 +378,6 @@ final class TaskFilesStore {
         machineLabel = revision.machineLabel
         let checkoutChanged = revision.checkout != nil && revision.checkout != cwd
         if checkoutChanged, let checkout = revision.checkout {
-            browser.selectionHasSnapshot = false
             cwd = checkout
             seenScratchStamps = nil
         }
@@ -689,18 +689,26 @@ final class TaskFilesStore {
         }
     }
 
+    // A terminal link may have read the file before revealing Files. Only
+    // the first automatic read of that presentation can reuse its result.
+    @ObservationIgnored private var presentedFile: (path: String, machine: String?, cwd: String)?
+
+    func endPresentation() { presentedFile = nil }
+
     func loadSelection() async {
         guard !Task.isCancelled else { return }
-        if browser.selectionHasSnapshot {
-            browser.selectionHasSnapshot = false
+        let presented = presentedFile
+        presentedFile = nil
+        guard mode != .diff else { return }
+        if let presented, mode == .read, presented.path == selection, presented.machine == machine, presented.cwd == cwd {
             watchOpenFiles()
-            return
+        } else {
+            await loadFile()
         }
-        await loadFile()
     }
 
     func loadFile() async {
-        browser.selectionHasSnapshot = false
+        presentedFile = nil
         fileGeneration += 1
         let generation = fileGeneration
         guard let path = selection else { return }

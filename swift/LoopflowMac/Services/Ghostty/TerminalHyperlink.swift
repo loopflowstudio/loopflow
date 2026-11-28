@@ -13,22 +13,9 @@ enum TerminalHyperlink: Equatable {
             return host.caseInsensitiveCompare("localhost") == .orderedSame
                 || host.caseInsensitiveCompare(hostName) == .orderedSame
         }
-
-        func checkoutPath(in checkout: String) -> String? {
-            Self.relativePath(path, in: checkout)
-        }
-
-        private static func relativePath(_ path: String, in checkout: String) -> String? {
-            guard checkout.hasPrefix("/") else { return nil }
-            let root = checkout.split(separator: "/").filter { $0 != "." }
-            let target = path.split(separator: "/").filter { $0 != "." }
-            guard target.starts(with: root) else { return nil }
-            return target.dropFirst(root.count).joined(separator: "/")
-        }
     }
 
-    case web(URL)
-    case mail(URL)
+    case defaultApp(URL)
     case work(URL)
     case file(File)
     case externalScheme(URL)
@@ -58,9 +45,9 @@ enum TerminalHyperlink: Equatable {
                 self = .refused("Invalid web link.")
                 return
             }
-            self = .web(url)
+            self = .defaultApp(url)
         case "mailto":
-            self = parts.host == nil && !parts.path.isEmpty ? .mail(url) : .refused("Invalid mail link.")
+            self = parts.host == nil && !parts.path.isEmpty ? .defaultApp(url) : .refused("Invalid mail link.")
         case "file":
             guard target.dropFirst("file:".count).hasPrefix("//"), parts.user == nil,
                   parts.password == nil, parts.port == nil, parts.query == nil else {
@@ -112,46 +99,36 @@ enum TerminalHyperlink: Equatable {
 extension TerminalHyperlink.File {
     enum Destination: Equatable {
         case document(URL)
-        case checkout(path: String, line: Int?, snapshot: TaskFileSnapshot? = nil)
+        case checkout(path: String, snapshot: TaskFileSnapshot? = nil)
     }
 
     @MainActor
     func destination(from pane: WorkspaceIdentity, localMachine: String?, files: SessionsWorkspace.FilesPlace?,
                      query: RegistryQuery) async throws -> Destination {
-        let local = pane.machineId == localMachine
-        if local, !isLocal() { throw OpenError.anotherMachine }
-
-        if let files, !files.cwd.isEmpty, let machine = files.machine ?? localMachine, pane.machineId == machine {
-            if local {
-                let checkout = URL(fileURLWithPath: files.cwd).resolvingSymlinksInPath().path
-                let target = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
-                let paneCwd = pane.worktree.isEmpty ? checkout
-                    : URL(fileURLWithPath: pane.worktree).resolvingSymlinksInPath().path
-                if paneCwd == checkout,
-                   let relative = Self.relativePath(target, in: checkout), !relative.isEmpty {
-                    guard let kind = try? URL(fileURLWithPath: target).resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey]) else {
-                        throw OpenError.missing
-                    }
-                    if kind.isRegularFile == true {
-                        return .checkout(path: relative, line: line)
-                    }
-                    guard kind.isDirectory == true else { throw OpenError.unsafe }
-                }
-            } else if pane.worktree.isEmpty || pane.worktree == files.cwd,
-                      let relative = checkoutPath(in: files.cwd) {
-                guard !relative.isEmpty else { throw OpenError.remoteDirectory }
-                let snapshot: TaskFileSnapshot
-                do {
-                    snapshot = try await query.taskFile(issue: files.taskId, path: relative)
-                } catch let error as ServerError where error.code == .invalid && error.data == .object(["reason": .string("directory")]) {
-                    throw OpenError.remoteDirectory
-                }
-                guard snapshot.state != .missing else { throw OpenError.missing }
-                return .checkout(path: snapshot.path, line: line, snapshot: snapshot)
-            }
+        if pane.machineId == localMachine {
+            guard isLocal() else { throw OpenError.anotherMachine }
+            return try localDestination(from: pane.worktree, checkout: files?.machine == nil ? files?.cwd : nil)
         }
-        guard local else { throw OpenError.anotherMachine }
-        return .document(try localDocument())
+
+        // Remote paths belong to the Task's Machine. Never resolve them on this Mac.
+        guard let files, files.machine == pane.machineId, pane.worktree.isEmpty || pane.worktree == files.cwd,
+              let relative = Self.relativePath(path, in: files.cwd) else { throw OpenError.anotherMachine }
+        guard !relative.isEmpty else { throw OpenError.remoteDirectory }
+        do {
+            let snapshot = try await query.taskFile(issue: files.taskId, path: relative)
+            guard snapshot.state != .missing else { throw OpenError.missing }
+            return .checkout(path: snapshot.path, snapshot: snapshot)
+        } catch let error as ServerError where error.code == .invalid && error.data == .object(["reason": .string("directory")]) {
+            throw OpenError.remoteDirectory
+        }
+    }
+
+    private static func relativePath(_ path: String, in checkout: String) -> String? {
+        guard checkout.hasPrefix("/") else { return nil }
+        let root = checkout.split(separator: "/").filter { $0 != "." }
+        let target = path.split(separator: "/").filter { $0 != "." }
+        guard target.starts(with: root) else { return nil }
+        return target.dropFirst(root.count).joined(separator: "/")
     }
 
     enum OpenError: LocalizedError {
@@ -170,16 +147,25 @@ extension TerminalHyperlink.File {
         }
     }
 
-    /// Launch Services receives the resolved target after its type was checked.
-    func localDocument() throws -> URL {
-        let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+    private func localDestination(from worktree: String, checkout: String?) throws -> Destination {
+        func resolved(_ path: String) -> URL { URL(fileURLWithPath: path).resolvingSymlinksInPath() }
+        let url = resolved(path)
         guard let info = try? url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey,
                                                           .isPackageKey, .isAliasFileKey, .contentTypeKey]) else {
             throw OpenError.missing
         }
+        if info.isRegularFile == true, let checkout, !checkout.isEmpty {
+            let root = resolved(checkout).path
+            if worktree.isEmpty || resolved(worktree).path == root,
+               let relative = Self.relativePath(url.path, in: root), !relative.isEmpty {
+                return .checkout(path: relative)
+            }
+        }
+
+        // Launch Services receives only the resolved document or folder we inspected.
         guard info.isPackage != true, info.isAliasFile != true,
               !Self.launcherExtensions.contains(url.pathExtension.lowercased()) else { throw OpenError.unsafe }
-        if info.isDirectory == true { return url }
+        if info.isDirectory == true { return .document(url) }
         guard info.isRegularFile == true,
               !FileManager.default.isExecutableFile(atPath: url.path),
               info.contentType?.conforms(to: .executable) != true,
@@ -189,7 +175,7 @@ extension TerminalHyperlink.File {
         guard let handle = try? FileHandle(forReadingFrom: url) else { throw OpenError.missing }
         defer { try? handle.close() }
         guard try handle.read(upToCount: 2) != Data("#!".utf8) else { throw OpenError.unsafe }
-        return url
+        return .document(url)
     }
 
     private static let launcherExtensions: Set<String> = [

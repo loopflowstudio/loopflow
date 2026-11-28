@@ -48,3 +48,6 @@ Pass 5 choices (fourth review):
   input stays with the first responder. Ghostty ignores stationary pointer
   updates, so the monitor sends a leave and re-entry on press and release.
   [Pinned Ghostty cursor handling](https://github.com/ghostty-org/ghostty/blob/a60e9e2/src/apprt/embedded.zig#L997).
+
+Compression keeps the existing split-pane behavior for terminal clicks.
+A checkout learned from Files belongs to the Machine that supplied it.

@@ -189,43 +189,34 @@ Queries support `wave:`, `task:`, `kind:task|wave`, and
 
 ### Links in terminal panes
 
-Hold **⌘** and hover over a link in a Session or Shell pane — a Markdown link
-from an agent, `ls --hyperlink` or `rg` output, or `lf open --task LOO-12 --link`.
-The cursor turns into a hand and the bottom corner shows the target URL or path.
-The corner also shows target errors. Work addresses are checked on click.
-This also works when the pane strip is hidden and while the terminal keeps its
-screen during a reconnect or after its relay ends. **⌘-click** opens it:
+Hold **⌘** over a link in a Session or Shell pane. The cursor turns into a
+hand and the bottom corner shows the target. **⌘-click** to open it. Errors
+appear in that corner. Links still work with the pane strip hidden or while
+a disconnected terminal shows its last screen.
 
 | Link | Opens in |
 |---|---|
 | `https://…`, `http://…`, `mailto:…` | Default browser or mail app |
-| `loopflow://<repo>`, `…/task/<ID>`, `…/wave/<name>` | The repository's Desktop window, with no alert |
-| File inside the Task's active checkout (e.g. `file:///…/scripts/test.py#L42`) | **Files** at that line in Read mode, on this Mac or a remote Machine |
-| Local folder, or a local document with no matching Files pane | Default app on this Mac |
-| Other URL schemes (e.g. `slack://…`) | A confirmation sheet names the target before opening it |
+| A `loopflow://` Work address from `lf open --task LOO-12 --link` | The repository's Desktop window, after Desktop resolves the address |
+| A file in the Task's active checkout, such as `file:///…/scripts/test.py#L42` | **Files** in Read mode at the linked line |
+| Local folder or local document outside the pane’s active Task checkout | Default app on this Mac |
+| Another URL scheme, such as `slack://…` | A confirmation sheet shows the target before opening it |
 
-Repository and Wave Sessions, and local shells left behind after a Task moves,
-open local documents and folders in the default app. Remote files open in
-**Files** when the pane shares the Task's current checkout. The file URL can
-carry the remote hostname.
+A checkout file opens beside the terminal and leaves keyboard focus there.
+Desktop enters the Task from a Dashboard tile and restores the split from a
+zoomed terminal.
 
-Clicking a checkout file link in a Dashboard tile enters the Task and opens
-**Files** beside its Session. A click in a zoomed terminal restores the split
-layout so the file opens beside the terminal. Keyboard focus stays in the
-terminal.
+File paths must be absolute, exist, and contain no parent-directory segments.
+A file link can include a line as `#L<n>`. Remote file URLs can name the
+remote host and must point to a file inside the Task's active checkout.
+Repository and Wave Sessions, and local shells left behind when a Task
+moves, open local documents and folders in the default app. Desktop refuses
+to launch apps, scripts, and executables. It also refuses malformed links
+and targets containing control characters or bidirectional text controls.
 
-Desktop resolves `loopflow://` links as Work addresses. File links need an
-existing absolute path without parent-directory segments and can carry a line
-fragment in the form `#L<n>`. Outside Files, Desktop refuses to launch app
-bundles, scripts and executables. Desktop also refuses remote folders, files
-outside the active remote checkout, malformed links, and links with control
-or bidirectional text characters. Failed clicks say why in the bottom-corner
-notice.
-
-Every held terminal identifies itself as `TERM_PROGRAM=ghostty` (dropping any
-inherited `TERM_PROGRAM_VERSION`), so agents and CLIs emit clickable hyperlinks
-whether a Session started from Desktop, a Graph worker, or another terminal.
-Sessions already running keep their launch environment until their next start.
+New held terminals set `TERM_PROGRAM=ghostty` and clear
+`TERM_PROGRAM_VERSION` so programs can detect hyperlink support from
+Desktop, Graph workers, or another terminal.
 
 ### Changes show at once
 

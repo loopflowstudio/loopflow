@@ -1561,11 +1561,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     func showLinkTarget(_ target: String?) {
-        if let target {
-            hoveredLink = (target, TerminalHyperlink(target: target).refusal)
-        } else {
-            hoveredLink = nil
-        }
+        hoveredLink = target.map { ($0, TerminalHyperlink(target: $0).refusal) }
         updateLinkFeedback()
         updateTerminalCursor()
     }

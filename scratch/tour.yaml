@@ -1,35 +1,31 @@
-at: 75d691696a09f1c4295aaaeff536bafb1ade289c
+at: f1abc07252c06c5736f9d8e38b0632aea67a0649
 first:
   - path: docs/surfaces.md
-    why: What each terminal link opens
+    why: What opens when someone clicks a terminal link
   - path: swift/LoopflowMac/Services/Ghostty/TerminalHyperlink.swift
-    why: Classifies links and carries the remote file snapshot
-  - path: swift/LoopflowMac/Views/WorkspacePanesView.swift
-    why: Opens Work and reveals Files at the linked line
-  - path: swift/LoopflowMac/TaskFilesStore.swift
-    why: Reconciles the snapshot before Files appears
-  - path: swift/LoopflowMac/MultiplexerStore.swift
-    why: Restores the split without moving keyboard focus
-  - path: swift/LoopflowMac/Views/DashboardView.swift
-    why: Enters the Task when a tile link reveals Files
+    why: Validates targets and resolves local and remote files
   - path: swift/LoopflowMac/Views/SessionsView.swift
-    why: Resolves the Task's active Files place
-  - path: rust/loopflow-execution/src/ops/task/snapshot.rs
-    why: Distinguishes remote folders from missing files
+    why: Locates the active checkout on its owning Machine
+  - path: swift/LoopflowMac/Views/WorkspacePanesView.swift
+    why: Opens Work, checkout files, and external apps
+  - path: swift/LoopflowMac/TaskFilesStore.swift
+    why: Reuses the remote read for one Files presentation
   - path: swift/LoopflowMac/LoopflowApp.swift
-    why: Shares Work opening with app deep links
+    why: Opens resolved Work in its repository window
   - path: swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift
-    why: Receives Ghostty click, hover, and cursor actions
+    why: Receives Ghostty link and cursor callbacks
   - path: swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift
-    why: Updates previews and cursor in unfocused terminals
+    why: Shows targets and errors beside terminal output
+  - path: rust/loopflow-execution/src/ops/task/snapshot.rs
+    why: Distinguishes remote directories from missing files
   - path: rust/loopflow-execution/src/transport/registry.rs
-    why: Advertises hyperlinks when held terminals start
+    why: Advertises hyperlink support to held terminal programs
   - path: swift/LoopflowTests/TerminalHyperlinkTests.swift
-    why: Checks one remote read, navigation, and resolver errors
+    why: Exercises checkout routing, pane focus, and snapshot reuse
   - path: swift/LoopflowTests/TerminalFeedbackTests.swift
-    why: Exercises hover and OSC 8 clicks
-  - path: swift/LoopflowTests/MultiplexerStoreTests.swift
-    why: Checks Files visibility and focus after unzooming
+    why: Exercises cursor feedback and native hyperlink clicks
   - path: rust/loopflow-execution/src/transport/registry_tests.rs
-    why: Checks the terminal identity visible to a PTY child
-hide: []
+    why: Checks the terminal identity a child receives
+hide:
+  - path: scratch/concept-review.html
+    why: Compiled copy of the review page source

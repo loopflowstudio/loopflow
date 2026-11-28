@@ -75,12 +75,8 @@ struct TaskFilesView: View {
                 await store.workingTree.refresh()
             }
         }
-        .task(id: "\(store.selection ?? "")|\(store.mode)") {
-            if store.mode != .diff { await store.loadSelection() }
-        }
-        // A snapshot handed over while this file was already showing is never
-        // consumed here; the next mount must read the file again.
-        .onDisappear { store.browser.selectionHasSnapshot = false }
+        .task(id: "\(store.selection ?? "")|\(store.mode)") { await store.loadSelection() }
+        .onDisappear { store.endPresentation() }
         .onChange(of: store.selection) { store.find?.reset() }
         .onChange(of: store.mode) { store.find?.reset() }
         .onChange(of: store.selectedDocument?.editVersion) { store.jumps.dismiss() }

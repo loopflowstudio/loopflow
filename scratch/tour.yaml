@@ -1,11 +1,15 @@
-at: 98c1057421347619743a11ab8d61f512215f6d50
+at: 75d691696a09f1c4295aaaeff536bafb1ade289c
 first:
   - path: docs/surfaces.md
     why: What each terminal link opens
   - path: swift/LoopflowMac/Services/Ghostty/TerminalHyperlink.swift
-    why: Validates targets and resolves file destinations
+    why: Classifies links and carries the remote file snapshot
   - path: swift/LoopflowMac/Views/WorkspacePanesView.swift
     why: Opens Work and reveals Files at the linked line
+  - path: swift/LoopflowMac/TaskFilesStore.swift
+    why: Reconciles the snapshot before Files appears
+  - path: swift/LoopflowMac/MultiplexerStore.swift
+    why: Restores the split without moving keyboard focus
   - path: swift/LoopflowMac/Views/DashboardView.swift
     why: Enters the Task when a tile link reveals Files
   - path: swift/LoopflowMac/Views/SessionsView.swift
@@ -17,13 +21,15 @@ first:
   - path: swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift
     why: Receives Ghostty click, hover, and cursor actions
   - path: swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift
-    why: Shows link previews, refusals, and the matching cursor
+    why: Updates previews and cursor in unfocused terminals
   - path: rust/loopflow-execution/src/transport/registry.rs
     why: Advertises hyperlinks when held terminals start
   - path: swift/LoopflowTests/TerminalHyperlinkTests.swift
-    why: Exercises link routing and Dashboard navigation
+    why: Checks one remote read, navigation, and resolver errors
   - path: swift/LoopflowTests/TerminalFeedbackTests.swift
     why: Exercises hover and OSC 8 clicks
+  - path: swift/LoopflowTests/MultiplexerStoreTests.swift
+    why: Checks Files visibility and focus after unzooming
   - path: rust/loopflow-execution/src/transport/registry_tests.rs
     why: Checks the terminal identity visible to a PTY child
 hide: []

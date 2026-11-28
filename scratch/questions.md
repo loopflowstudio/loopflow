@@ -42,3 +42,9 @@ Pass 5 choices (fourth review):
   `TaskFileDocument.reconcile`, which handles drafts and saves, instead of
   reading the file a second time.
 - A zoomed Task view behaves like a tile: Files opens beside the Session.
+- The remote snapshot satisfies the first automatic Files read for that
+  presentation. Refresh and file watches keep using their existing reads.
+- The unfocused hover monitor refreshes Ghostty's pointer state so keyboard
+  input stays with the first responder. Ghostty ignores stationary pointer
+  updates, so the monitor sends a leave and re-entry on press and release.
+  [Pinned Ghostty cursor handling](https://github.com/ghostty-org/ghostty/blob/a60e9e2/src/apprt/embedded.zig#L997).

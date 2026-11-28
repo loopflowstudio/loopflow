@@ -96,6 +96,7 @@ and Q5 (scope).
 - Pass 2 (`e50723744`): Work links resolve in the repository window, checkout links reveal Files at the line, Dashboard tiles show the Files pane, and link failures appear in the originating terminal.
 - Pass 3 (`04c2f98af7`): New held terminals report `TERM_PROGRAM=ghostty` and remove the caller's `TERM_PROGRAM_VERSION`.
 - Pass 4 (`98c105742`): Remote links use `task.file`, hover and click share the `TerminalHyperlink` classifier, and tile clicks enter the Task with Files beside its Session.
+- Pass 5 (`75d691696`): Remote clicks supply the Files snapshot, zoomed terminals restore the split with focus intact, unfocused terminals get ⌘-hover, and the Work resolver owns address validation.
 
 ## Acceptance check
 
@@ -111,8 +112,14 @@ Terminal inputs. QA still needs to check what a live Codex Session prints.
 
 Pass 4 passed `TerminalHyperlinkTests|TerminalFeedbackTests` with two display
 fixtures skipped. The focused Rust snapshot, directory and documented-command
-tests passed. Files performs its normal read on mount after the remote link
-lookup.
+tests passed.
+
+Pass 5 passed `TerminalHyperlinkTests|TerminalFeedbackTests|MultiplexerStoreTests`
+headless, with two display fixtures skipped. The link fixture opened Files
+with one mocked remote read and verified that manual Refresh still reads.
+All four `documented_commands` tests passed.
+The native hover fixture, signed Xcode build, live local and remote demos,
+and Codex output check remain for CI and QA.
 
 Demo (Dev app): start a Task from Desktop so the server launches its Session.
 Ask the agent for `[the PR](https://github.com/…)`, a checkout file at a line,
@@ -150,9 +157,7 @@ passes on, can carry one. These must hold:
 - **One Desktop link router for every surface.** `TaskBriefView` hands
   `loopflow://` to Launch Services; `TaskHTMLView.TaskHTMLLinks` lets
   non-web schemes fall into WKWebView navigation. Both can use the Work
-  resolver and Desktop window opener, and the terminal's Swift
-  `isWorkAddress` copy of `WorkUrl::parse` may shrink to a scheme check.
-  File during ship-review.
+  resolver and Desktop window opener. File during ship-review.
 - **Files pane for Repository and Wave workspaces.** `TaskFilesStore`,
   `MultiplexerStore` and server `task.file` are Task-only. Needs repository
   file reads on the server and a workspace layout change. Its own Task; until
@@ -160,44 +165,6 @@ passes on, can carry one. These must hold:
 - **iPhone Sessions.** `swift/LoopflowiOS/GhosttySurface.swift` ignores
   `OPEN_URL`, Ghostty's iOS opener is unimplemented, and a tap carries no ⌘.
   Needs a touch gesture designed, then `TerminalLink` shared. Its own Task.
-
-## Remaining: Pass 5 (fourth concept review, `9a7c6e5442`)
-
-`scratch/concept-review.html` reviewed `bba5ff2138`. Pass 4's four findings
-hold. Four seams in built code remain; all are Pass 5:
-
-1. **One remote read per click.** `TerminalHyperlink.File.destination`
-   fetches a `TaskFileSnapshot` through `query.taskFile` and discards it;
-   `TaskFilesView` then reads the file again over SSH. Carry the snapshot on
-   `.checkout` and seed it with `files.document(path).reconcile(snapshot)`
-   before `openPresentation`, so mount does not refetch it. `reconcile`
-   already merges dirty drafts and defers during saves and IME composition,
-   which answers Pass 4's reason for the second read.
-2. **One zoom behavior.** `openTerminalFile`
-   (`WorkspacePanesView.swift:1055`) passes `focus: onEnter == nil`, and
-   `MultiplexerStore.showBrowser` (`MultiplexerStore.swift:244`) unzooms only
-   when `focus` is false. Inside a zoomed Task the click zooms Files and moves
-   focus. Split "show beside, unzoomed" from "focus" in `showBrowser` and use
-   the 1a behavior for both entry points.
-3. **⌘ over an unfocused pane.** The tracking area uses
-   `.activeInKeyWindow`, but `flagsChanged` reaches only the first responder.
-   Pressing ⌘ over a link in an unfocused pane or tile shows nothing until
-   the pointer moves, and releasing ⌘ leaves the pill and hand cursor stuck.
-   Deliver modifier changes to the hovered `GhosttyMetalView` with a local
-   event monitor, as `WorkPalette` does.
-4. **Drop the Swift `WorkUrl::parse` copy.** `isWorkAddress`
-   (`TerminalHyperlink.swift:97`) is not a security check: `.work` clicks go
-   only to `query.workLink`. It mislabels `#frag` and `LOOPFLOW://` as
-   "only Work" refusals and lets invalid IDs pass hover. Classify any
-   `loopflow://` as `.work`; the click shows Rust's own error in the pane
-   notice.
-
-Pass 5 should teach whether one round trip removes the remote loading flash,
-and leave the link code with one Work grammar. Its checks are
-`TerminalHyperlinkTests|TerminalFeedbackTests`, plus a `MultiplexerStore`
-test for clicks into a zoomed layout.
-
-Questions Q2–Q4 re-ask the adopted 2a / 4a / 3a choices for `ship-review`.
 
 ## Done when
 

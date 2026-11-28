@@ -1,95 +1,71 @@
 ---
 requires: intended outcome and work to reconcile
-produces: plan and implementation that agree, with a short account of progress
+produces: current plan with any remaining implementation work
 action_style: procedural
 ---
-Bring the plan and the code back into agreement with what the work has taught.
+Update the plan with what the work has taught and what still needs to change.
 
-After a slice, a review, or upstream changes, answer three questions in order.
-Before anything is built, the review is what was learned.
+**What did the work teach?** Compare the intended behavior with what you
+observed. Include upstream changes, related work and new decisions. Distinguish
+what happened from why you think it happened. Reuse existing results. Run a
+check only to settle an open question.
 
-**What did the work teach?** Look at what the affected behavior does now.
-Say what works, what doesn't fit, and which assumption in the plan turned out
-wrong: mechanisms that proved unnecessary, behavior still missing or working
-differently than intended. Include what moved around it: upstream changes,
-related work, new decisions. Keep what you saw apart from why you think it
-happened. Reuse existing results; run a check only when it settles a real
-question. Realign starting is no reason to rerun tests.
+With a fresh `scratch/concept-review.html`, work from its findings. Before
+implementation, the review itself is what was learned. Without a fresh review,
+look once for a simpler shape or a concept, type or path the design can drop.
 
-**Is the plan still right?** Recover the intent first: the outcome wanted and
-the constraints people stated, from the conversation, review feedback, plan
-and code. When intent is missing, ask for the specific decision; the
-implementation is not the spec. Then fix the plan at the source. Rewrite what
-the work proved wrong and delete steps that no longer apply. What you learned
-may change the approach, but missing behavior never weakens acceptance. A
-change that needs a design decision is written as the exact open choice.
-Nothing goes into the plan as settled unless someone said so; quote them.
+**Is the plan still right?** Recover the outcome and constraints from the
+conversation, review feedback, plan and code. Ask for the specific decision
+when intent is missing. Correct mistaken assumptions in `scratch/plan.md`
+and delete steps that no longer apply. Keep promised behavior that is still
+missing. Quote what people decided and name any choice still open.
 
-Read the work once as a reviewer, one look at the shape and not a full
-review: is there a concept, type or path it added that the design could do
-without, or a simpler form of what it built? Write what you find into the
-plan as remaining work. Correct small, clear mismatches in code, tests and
-docs yourself; leave a substantial code change as remaining work.
+Give each finding a place:
 
-**What is next?** Regroup what remains into end-to-end passes, aiming for
-five or fewer across the Task. Name what the next pass will deliver and
-what it will teach. If nothing remains, say so.
+- Correct the plan and any clear user-docs mismatch under `docs/` or in a
+  `README.md`. Record the docs fix in the plan.
+- Queue every other in-scope change for `implement`, including small code or
+  test fixes, conceptual rework and missing promised behavior.
+- List separate outcomes under `## Deferred findings` with what each would
+  take. `ship-review` reads them there. Put new ideas in `scratch/questions.md`.
+- For a reversible design choice in a headless run, use the recommended
+  direction. Mark it for review in the plan with the alternative and why you
+  passed it over, so later steps build one design and `ship-review` surfaces
+  the choice.
 
-When you finish, the plan separates what exists from what remains, and the
-code backs every claim of finished behavior. Keep blockers, contrary findings
-and deferred checks where they affect the next action.
+Record each review finding by substance so later runs can skip findings the
+plan already answers. When a fresh review arrives, replace settled review
+notes and keep `## Deferred findings`.
 
-The plan says what will be built and what remains. Keep what can't be worked
-out again: what people said, word for word, what a run showed, facts from
-outside the repository, and the few findings that still explain the approach,
-with source paths. Cut the rest. With no plan, write the smallest one continued
-work needs.
-
-## After a review
-
-When `scratch/concept-review.html` has findings the plan has not answered, give
-each one a place:
-
-- **Small, clear mismatch:** fix it here, in plan, code, tests or docs.
-- **Conceptual rework in the area this work touches, or missing promised
-  behavior:** write it into the plan as the next pass.
-- **Separate outcome:** list it in the plan under `## Deferred findings` (which
-  `ship-review` reads), with what it would take. Don't build it.
-- **Reversible design choice (headless):** adopt the recommended direction
-  into the plan marked as made for review, with what was passed over and why
-  (never as settled), so downstream steps build one coherent design and
-  `ship-review` surfaces the choice.
-
-Record in the plan what happened to each finding by substance (not bare
-numbers), so a later `realign` (such as `refresh`) does not act on the same
-page twice. When a fresh `scratch/concept-review.html` arrives (for example,
-after `ship-review` iterates back to `build`), replace earlier settled review
-notes while keeping `## Deferred findings` intact.
+**What is next?** Group remaining work into end-to-end passes, aiming for five
+or fewer across the Task. Name what the next pass delivers and what it will
+teach. Keep blockers, contrary findings and deferred checks beside the work
+they affect. Write the smallest plan continued work needs if none exists.
 
 ## Deciding a loop
 
-When this step is deciding a loop: return `iterate` only when the plan now
-holds a pass of rework or missing promised behavior, naming that pass in the
-summary; return `advance` when what was found is fixed here or deferred; return
-`blocked` with the question on a design choice that can't be undone once
-shipped.
+Only a step whose message says it decides a loop returns a verdict:
 
-Outside a loop (`plan`, `refresh`, or standalone), there is no `blocked`
-verdict: record any open irreversible choice in `scratch/questions.md` and
-`scratch/plan.md`, report what changed, and finish.
+- Return `blocked` if repeated passes fail to converge on an in-scope fix or
+  progress needs a design choice that can't be undone once shipped. Say why.
+- Return `iterate` for any remaining in-scope implementation fix. Name the
+  next pass so `implement` makes the fix and `concept-review` reviews it.
+- Return `advance` when no implementation work remains.
+
+Any other run (`plan`, `refresh`, standalone, or a step outside the loop)
+reports what remains and names no verdict, in the reply or the plan. Record
+any open irreversible choice in both `scratch/questions.md` and the plan.
 
 ## Keeping notes readable
 
-Only a little of `scratch/` is handed to each step; the rest is read on
-demand, so what matters is that the plan is current and the notes aren't
-misleading. Merge duplicates, drop notes inherited from a stacked parent, and
-delete what a fresh read of the code would recover. Don't shrink scratch to a
-size. What people said, word for word, stays: it can't be worked out again.
+Keep the plan current so later steps can tell what exists and what remains.
+Check that the code backs each claim of finished behavior. Keep people's
+exact words, run results, outside facts and the few findings that still
+explain the approach, with source paths. Merge duplicates, drop notes
+inherited from a stacked parent and cut what a fresh read could recover.
 
 When the Wave's memory is this step's to write, curate it as
 `lf help wave-session` describes.
 
-Finish briefly: what changed, what remains, any decision needed. Edit the plan
-rather than adding a report. If everything already agrees, say so. Realign
-changes the plan to match what was learned. It never adds behavior the plan
-didn't have: that goes in `scratch/questions.md`.
+Edit the plan directly. Finish briefly with what changed, what remains and
+any decision needed. If everything already agrees, say so.

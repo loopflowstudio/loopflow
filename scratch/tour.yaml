@@ -1,4 +1,4 @@
-at: e507237447fd41196ba9568a52f97e15a64a99b4
+at: 04c2f98af7969e5cb1da51cb7c29410c1101453c
 first:
   - path: docs/surfaces.md
     why: What each terminal link opens
@@ -16,8 +16,12 @@ first:
     why: Receives Ghostty click, hover, and cursor actions
   - path: swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift
     why: Shows async link feedback in the originating terminal
+  - path: rust/loopflow-execution/src/transport/registry.rs
+    why: Advertises hyperlink support when the held terminal starts
   - path: swift/LoopflowTests/TerminalLinkTests.swift
     why: Exercises checkout placement, Work links, and refusal notices
   - path: swift/LoopflowTests/TerminalFeedbackTests.swift
     why: Exercises OSC 8 on a paused Session
+  - path: rust/loopflow-execution/src/transport/registry_tests.rs
+    why: Checks the terminal identity visible to a PTY child
 hide: []

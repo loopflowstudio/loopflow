@@ -84,17 +84,7 @@ Pass 1).
 
 - Pass 1 (`a12082957b`, hover fix `0552209e91`): Ghostty delivers OSC 8 clicks and ⌘-hover feedback. Desktop opens web, mail and safe local documents and confirms external schemes.
 - Pass 2 (`e50723744`): Work links resolve in the repository window, checkout links reveal Files at the line, Dashboard tiles show the Files pane, and link failures appear in the originating terminal.
-
-## Remaining pass
-
-### Pass 3: every held terminal names itself ghostty
-
-`transport/registry.rs` (beside the `TERM`/`COLORTERM` defaults near line
-548): set `TERM_PROGRAM=ghostty` and drop `TERM_PROGRAM_VERSION`. Extend the
-env case in `transport/registry_tests.rs` with a caller value unset, `rex`
-and `Apple_Terminal`, each with a stale `TERM_PROGRAM_VERSION`.
-
-Codex's link output was not probed; QA records what a Codex Session prints.
+- Pass 3 (`04c2f98af7`): New held terminals report `TERM_PROGRAM=ghostty` and remove the caller's `TERM_PROGRAM_VERSION`.
 
 ## Acceptance check
 
@@ -104,7 +94,9 @@ with the two display tests skipped, and both
 `cargo test -p loopflow-execution --lib ops::task::directory::tests::` tests passed.
 The signed Xcode build and live local and remote agent demos remain for CI and QA.
 
-Pass 3 runs `cargo test -p loopflow-execution --lib transport::registry_tests::`.
+Pass 3 passed `cargo test -p loopflow-execution --lib held_children_get_ghostty_identity_and_default_terminal_colors`.
+The PTY child saw `ghostty` and no version with server, Rex, and Apple
+Terminal inputs. QA still needs to check what a live Codex Session prints.
 
 Demo (Dev app): start a Task from Desktop so the server launches its Session.
 Ask the agent for `[the PR](https://github.com/…)`, a checkout file at a line,

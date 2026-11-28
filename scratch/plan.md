@@ -30,33 +30,11 @@ carry the rule.
   inline edits to user docs, and limited post-review realign to the review
   findings. The prompt golden, Graph tests, documented commands, eval scorer,
   and CLI previews passed.
-- Pass 2 (`41bce8d68`) restored the shared stop for all loop deciders, left the
-  skill in charge of `advance` and `iterate`, and aligned the realign prompt,
-  build comment, docs, and golden. The Graph output tests, prompt golden,
-  documented commands, and branch CLI previews passed.
+- Pass 2 (`41bce8d68`) restored the shared stop and kept skill-specific progress rules. The re-review (`7303cbf672`) found that an unconditional stop conflicts with `optimize-plan` after a reverted trial.
+- Pass 3 (`23467d441`) made the shared stop yield to a skill's rule for the case and updated the docs. Graph output tests, the prompt golden, documented commands, and CLI previews passed.
 
-The review at `3180e006f7` confirmed the earlier findings about the small-fix
-iteration rule, the extra shape review, and the agent guide were resolved.
-Its finding that the shared stop had become a fallback is fixed by Pass 2.
-
-The review at `7303cbf672` found Pass 2 overcorrected: `output.rs:14` says the
-`blocked` stop "applies to every decider" and lets skills override only
-`advance` and `iterate`, and `docs/orchestration.md:190-195` repeats it. That
-contradicts `optimize-plan.md:20-28`, where a reverted trial makes no progress,
-running out of ideas returns `advance`, and `blocked` is only for a failed
-harness or workload. The appended criteria would stop an optimize run as
-`blocked` instead of reaching `compress` and `measure`.
-
-- Pass 3 (next): keep the shared `blocked` bullet ahead of the defaults, but
-  replace "This applies to every decider." with a qualifier that a skill's own
-  rule for that case wins (review wording: "unless the skill says to handle
-  that case differently"). Update `build_realign_uses_its_own_loop_rule` in
-  `output.rs`, add a compiled-Graph assertion for an `optimize-plan` decider
-  if the existing test helper makes it one line, and match
-  `docs/orchestration.md:190-195`. `realign`, `implement` and `loop-or-next`
-  state no stop rule of their own, so they keep the stop. Re-run
-  `concept-review` on the result. Passed over: deleting the shared stop, which
-  leaves `implement` and custom skills without one.
+Review `graph/output.rs` and `docs/orchestration.md` together against
+`optimize-plan.md` and `realign.md`.
 
 ## Choice for review
 

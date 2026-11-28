@@ -1,11 +1,11 @@
-at: 41bce8d68ac7ce3d330247f4dfbcea786bab079e
+at: 23467d441b9a4df834760a04f6e17580ebc06fed
 first:
   - path: docs/orchestration.md
     why: How a code finding sends build around again.
   - path: rust/loopflow-definitions/src/builtins/task/skill/realign.md
     why: Which findings realign fixes, queues, or defers.
   - path: rust/loopflow-execution/src/graph/output.rs
-    why: Shared stop criteria and the skill's progress rules.
+    why: Shared loop defaults yield to skill rules.
   - path: .lf/qa/skills.md
     why: How to verify the two-pass run.
 hide:

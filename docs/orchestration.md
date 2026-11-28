@@ -188,16 +188,15 @@ passes shrink into small increments that no longer converge. `lf task status`
 shows the reason the decider gave. If the step succeeds and the Graph then
 fails, status shows the Graph error.
 
-Once the loop settles, `compress` reads the whole branch against its base as
-one change—simplifying the change and the area around it, merging seams
-between passes, and dropping dead or superseded additions. It checks and
-commits each cut on its own with what it removed and why, so any single cut
-can be reverted cleanly. `compress` defers cuts that would change visible
-behavior, data people rely on, or a measured target. It records them under
-`## Deferred findings` in `scratch/plan.md` for `ship-review` and puts open
-questions in `scratch/questions.md`. On a branch with no plan (`lf compress`
-standalone), deferred cuts go in the reply, and questions too unless
-`scratch/questions.md` exists.
+`compress` reads the branch against its base as one change. If two passes
+introduced the same parser, it can merge them and move both sets of callers
+together. It checks each cut and commits it separately with the reason.
+
+Cuts that would change visible behavior, people's data or the branch's
+measured result go under `## Deferred findings` in `scratch/plan.md` for `ship-review`.
+Open questions go in `scratch/questions.md`. Without a plan, `lf compress`
+reports deferred cuts in its reply and includes questions there unless the
+questions file already exists.
 
 ### Docs-first (`write-docs`) and QA playbooks (`.lf/qa/`)
 

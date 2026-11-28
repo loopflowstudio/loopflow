@@ -221,7 +221,7 @@ reducing, say so and stop.
 
 ## Pass
 
-Built in `e283e9925`. The candidate CLI rendered the updated `compress` and
+Built in `e283e9925`; review fixes in the realign commit after `b9de11dcc7`. The candidate CLI rendered the updated `compress` and
 `ship-review` help. The golden prompt and documented command checks passed.
 
 ## Demo
@@ -240,21 +240,23 @@ parameters gone), and `ship-review` lists anything it deferred.
 - `ship-review.md` names no single writer of `## Deferred findings`.
 - `docs/orchestration.md` describes the same step.
 
-## Review findings (concept review, plan stage)
+## Review findings (concept review, built change, `b9de11dcc7`)
 
-- *Skill asserted `build`'s schedule* ("This runs once… Nothing will be
-  built on top of it later"): fixed in the draft; opening now says what the
-  operation is, `requires:` makes the plan optional.
-- *Second writer on `## Deferred findings`, mixed with open questions, no
-  plan in standalone runs*: adopted the review's recommendation (its
-  question 1a), made for review: cuts to the plan when one exists, questions
-  to `scratch/questions.md`, otherwise the reply; `ship-review.md:14` edit
-  added to the pass.
-- *Commit before check*: fixed; one check-then-commit step.
-- *Closing report nobody reads*: dropped from the draft.
-- *Stay outside the loop* (its question 2a): already the plan.
-- *`optimize` rolls back every compress cut on a final-measure regression*:
-  deferred below.
+Plan-stage findings (schedule assertion, commit-before-check, closing
+report, single writer of deferred findings) were built in `e283e9925`. The
+post-build review found three mismatches, fixed in the realign commit after
+`b9de11dcc7`:
+
+- *Questions lost on a clean Task*: `compress.md` wrote to
+  `scratch/questions.md` only "if it exists". Now, when `scratch/plan.md`
+  exists, it creates `scratch/questions.md`; only a plan-less run falls back
+  to the reply. `docs/orchestration.md` says the same.
+- *Checks gated on "when behavior changed"* in a behavior-preserving step:
+  now "when a cut changes code", skipping only prose-only edits and reruns
+  without an edit (matches `AGENTS.md`'s implement/compress line).
+- *`ship-review.md:15` tied every deferred finding to the concept-review
+  page*: now "the review page behind the concept review's findings".
+- `optimize`'s whole revert on regression: still deferred below.
 
 ## Deferred findings
 

@@ -36,9 +36,10 @@ there. Don't stop after one small win, and don't wander into unrelated cleanup.
    speculative flexibility; keep abstractions that help a reader. Clarity
    beats line count.
 
-6. **Check, then commit, each cut.** Check only the narrowest changed target
-   or focused test when behavior changed. No edits, no rerun. Skip release
-   builds, workspace-wide linters and full suites — CI runs them. Commit the
+6. **Check, then commit, each cut.** When a cut changes code, build the
+   narrowest changed target or run its focused test; skip the check for
+   prose-only edits, and don't rerun without an edit. Skip release builds,
+   workspace-wide linters and full suites — CI runs them. Commit the
    cut on its own with what it removed and why, so one can be undone
    without the others.
 
@@ -46,11 +47,12 @@ there. Don't stop after one small win, and don't wander into unrelated cleanup.
    `lf help tour` describes: your cuts moved what a reader should open first.
 
 What people see, the data they have and a number the branch was built to
-move stay as they are. Defer cuts that would change any of those. Record
-each cut and what it would take under `## Deferred findings` if
-`scratch/plan.md` exists. Put questions only a person can answer in
-`scratch/questions.md` if it exists. When either file is missing, put its
-findings or questions in your reply.
+move stay as they are. Defer cuts that would change any of those. When
+`scratch/plan.md` exists, record each deferred cut and what it would take
+under `## Deferred findings`, and put questions only a person can answer in
+`scratch/questions.md`, creating it if needed. Without a plan, put deferred
+cuts in your reply, and questions in `scratch/questions.md` if it exists or
+in your reply otherwise.
 
 Keep the reason for a non-obvious cut beside the code. If nothing needs
 reducing, say so and stop.

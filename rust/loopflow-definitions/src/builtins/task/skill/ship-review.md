@@ -12,7 +12,8 @@ whether the change is right. This is not a code review and not a go/no-go.
 
 - `scratch/plan.md`: what was to be built, what remains, choices agents made,
   and `## Deferred findings`.
-- `scratch/concept-review.html`: the review page behind those findings.
+- `scratch/concept-review.html`: the review page behind the concept
+  review's findings.
 - What `qa` used and saw, and what it says is still wrong.
 - `git log` against the base: each step's commit says what that step changed.
 - `scratch/questions.md`: what was left open.

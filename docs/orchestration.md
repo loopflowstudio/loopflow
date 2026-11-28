@@ -195,8 +195,9 @@ commits each cut on its own with what it removed and why, so any single cut
 can be reverted cleanly. `compress` defers cuts that would change visible
 behavior, data people rely on, or a measured target. It records them under
 `## Deferred findings` in `scratch/plan.md` for `ship-review` and puts open
-questions in `scratch/questions.md`. Standalone runs (`lf compress`) report
-findings or questions in the reply when the corresponding file is absent.
+questions in `scratch/questions.md`. On a branch with no plan (`lf compress`
+standalone), deferred cuts go in the reply, and questions too unless
+`scratch/questions.md` exists.
 
 ### Docs-first (`write-docs`) and QA playbooks (`.lf/qa/`)
 

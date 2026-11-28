@@ -6,12 +6,12 @@ use crate::graph::runner::SkillOutcome;
 use crate::graph::transitions::{GraphDecision, GraphVerdict};
 use crate::graph::ConcreteStep;
 
-/// Shared stop criteria and default advance and iterate criteria for loop decisions.
+/// Default loop decision criteria, with a skill's own rules taking precedence.
 const DECISION_CRITERIA: &str = "
 
 This step also decides a loop. Do the step's work first, then judge from its results.
 
-- blocked when passes repeat without converging, the last pass made no progress, a failure repeats with nothing learned, or you need input you can't supply. This applies to every decider. The Graph stops here. Give the reason.
+- Unless the skill says to handle that case differently, return blocked when passes repeat without converging, the last pass made no progress, a failure repeats with nothing learned, or you need input you can't supply. If you return blocked, the Graph stops here. Give the reason.
 
 If the skill gives its own rules for advance and iterate, follow those. Otherwise use these defaults.
 
@@ -137,30 +137,32 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn build_realign_uses_its_own_loop_rule() {
+    fn compiled_loops_defer_to_their_skills_rules() {
         let repo = tempfile::tempdir().unwrap();
-        let graph = load_graph("build", repo.path()).unwrap();
-        let steps = compile_graph(&graph, repo.path()).unwrap();
-        let step = steps
-            .iter()
-            .find(
-                |step| matches!(step, ConcreteStep::Skill(skill) if skill.skill.name == "realign"),
-            )
-            .expect("build includes realign");
+        for (graph, decider) in [("build", "realign"), ("optimize", "optimize-plan")] {
+            let graph = load_graph(graph, repo.path()).unwrap();
+            let steps = compile_graph(&graph, repo.path()).unwrap();
+            let step = steps
+                .iter()
+                .find(|step| {
+                    matches!(step, ConcreteStep::Skill(skill) if skill.skill.name == decider && skill.returns.is_some())
+                })
+                .unwrap_or_else(|| panic!("{} includes {decider} as a loop decider", graph.name));
 
-        let mut message = String::new();
-        assert_eq!(
-            GraphOutput::append_step_instructions(step, &mut message),
-            Some(GraphOutput::Decision)
-        );
-        let (shared, defaults) = message
-            .split_once("If the skill gives its own rules for advance and iterate, follow those. Otherwise use these defaults.")
-            .expect("the runner defers to realign's rule to iterate on small fixes");
-        assert!(shared.contains("- blocked when passes repeat without converging"));
-        assert!(shared.contains("the last pass made no progress"));
-        assert!(shared.contains("a failure repeats with nothing learned"));
-        assert!(defaults.contains("- advance when"));
-        assert!(defaults.contains("substantial next pass"));
+            let mut message = String::new();
+            assert_eq!(
+                GraphOutput::append_step_instructions(step, &mut message),
+                Some(GraphOutput::Decision)
+            );
+            let (stop, progress) = message
+                .split_once("If the skill gives its own rules for advance and iterate, follow those. Otherwise use these defaults.")
+                .expect("the runner defers to the skill's progress rules");
+            assert!(stop.contains("Unless the skill says to handle that case differently, return blocked when passes repeat without converging"));
+            assert!(stop.contains("the last pass made no progress"));
+            assert!(stop.contains("a failure repeats with nothing learned"));
+            assert!(progress.contains("- advance when"));
+            assert!(progress.contains("substantial next pass"));
+        }
     }
 
     #[test]

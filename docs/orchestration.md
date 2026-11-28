@@ -187,11 +187,12 @@ repeats, including the decision itself.
 Decision pass 3. Iterating repeats 2 steps, back to sync.
 ```
 
-When a Skill defines its own rules for `advance` and `iterate`, the decider
-follows them. By default, a decider looks for a substantial next pass and can
-keep iterating past five when the work warrants it. Every decider returns
+Unless the Skill gives a different rule for the case, the decider returns
 `blocked` when passes repeat without converging, the last pass made no progress,
 a failure repeats with nothing learned, or progress needs missing input.
+The decider also follows any `advance` and `iterate` rules the Skill defines.
+By default, it looks for a substantial next pass and can keep iterating past
+five when the work warrants it.
 `lf task status` shows the reason the decider gave.
 If the step succeeds and the Graph then fails, status shows the Graph error.
 

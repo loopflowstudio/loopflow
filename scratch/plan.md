@@ -140,17 +140,13 @@ One pass.
    `uv run python tests/goldens/update_goldens.py` (check no other golden moves).
 3. `rust/loopflow-definitions/src/builtins/task/graph/refresh.yaml`
    description: integrate upstream changes, then bring the plan up to date.
-   `build.yaml`'s comment on `realign` already reads correctly; align
-   `docs/orchestration.md:154` with it if the wording drifts.
+   `build.yaml`'s comment on `realign` already reads correctly.
 4. `rust/loopflow-execution/src/graph/output.rs` `DECISION_CRITERIA`: the
    skill's own loop rule wins; `blocked` is for passes that repeat without
-   converging. `docs/orchestration.md:186-187` follows the same wording.
-   Check `cargo test -p loopflow-execution --lib graph::output` and any
-   golden that embeds the suffix.
-5. `docs/orchestration.md:172-177`: `realign` takes the findings into
-   `scratch/plan.md`, fixes docs inline, defers separate outcomes, and iterates
-   back to `sync` for any code or test change so `concept-review` reads the
-   final code.
+   converging. Check `cargo test -p loopflow-execution --lib graph::output`
+   and any golden that embeds the suffix.
+5. `docs/orchestration.md`: updated in `write-docs` (lines 154 and 172–197);
+   keep in sync if wording changes during implementation.
 6. `AGENTS.md:285-286` and `:410`: `lf realign` updates the plan (not "plan and
    code"); `:453` "reconcile the plan; test only a repair or a real doubt"
    drops "a repair".

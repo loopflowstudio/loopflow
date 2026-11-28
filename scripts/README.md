@@ -285,6 +285,10 @@ children or open service connections. Unsupported isolation fails explicitly. In
 proofs disconnect their external Docker network after compiling, then run the
 same denial/loopback probes before executing tests. Display diagnostics remain opt-in.
 
+The Graph fixture for a missing CLI hides system-installed providers from its
+processes. macOS denies reads of those paths. On Linux a private mount namespace
+masks each executable. The fixture's own tools stay on its PATH.
+
 ## Installation harness
 
 `uv run python scripts/test_task_installation.py --repository-upgrade`

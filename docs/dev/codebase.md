@@ -122,11 +122,15 @@ declares.
 ```sh
 cargo test -p loopflow-harness <name>_decode                         # after steps 1-2
 cargo test -p loopflow-execution --lib harness::launch_matrix        # after step 4
+cargo test -p loopflow-execution --lib harness::conformance_tests::  # after step 4
+cargo test -p loopflow --lib server::wake::tests::                   # after step 4
 ```
 
 1. In [`loopflow-harness`](../../rust/loopflow-harness/README.md), add the unit
-   struct, its `HarnessKind` variant and its line in `HarnessKind::harness()`.
-2. Implement `Harness` on it. Map native output to the common stream in
+   struct and its `HarnessKind` variant. Include it in `HarnessKind::ALL` and
+   `HarnessKind::harness()`.
+2. Implement `Harness` on it, including its caller-session markers, driver
+   recognition and sign-in advice. Map native output to the common stream in
    `<name>_decode.rs` and implement `transcript_reader` in
    `transcript/<name>.rs`. `transcript_home` has no default: name the client's
    own home variable and directory. Supply the provider's saved-history layout
@@ -134,13 +138,15 @@ cargo test -p loopflow-execution --lib harness::launch_matrix        # after ste
    omissions and finality. Captured output for normal, tool, error and retry
    turns goes in `src/testdata/` and `src/transcript/testdata/`.
 3. In execution, add `harness/<name>.rs` implementing `Launcher` on the same
-   struct: its `Capabilities`, `open` for the native interactive client and
-   `driver` for the headless stream, and `recognizes` when a running process
-   is its client by more than the command name. Add its line in
-   `harness::launcher`: the match is exhaustive, so execution does not compile
-   until the new variant has one. Its native client owns authentication.
-4. Add conformance fixtures; the `harness::launch_matrix` test picks the new
-   variant up from `HarnessKind::ALL`.
+   struct: its `Capabilities`, `open` for the native
+   interactive client and `driver` for the headless stream, and `recognizes`
+   when a running process is its client by more than the command name. Add its
+   line in `harness::launcher`. Implement `idle_reach` for the endpoint that
+   starts a turn, and declare how a reopened work session receives its steers.
+4. Exercise the provider through the shared launch, worker and wake fixtures.
+   `harness::launch_matrix`, `harness::conformance_tests`, `server::wake::tests`,
+   and `task_graph_launch_tests` iterate `HarnessKind::ALL`. The Antigravity
+   reopen fixture exercises the native launch through `lf resume --task`.
 5. Map the new edge in the checked architecture reference.
 
 Do not add a collector daemon, mandatory telemetry store, or synthetic final

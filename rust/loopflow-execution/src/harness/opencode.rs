@@ -20,6 +20,7 @@ use crate::agent::AgentConfig;
 use crate::harness::fact_writer::FactWriter;
 use crate::harness::Recording;
 use crate::harness::{Driver as StreamDriver, HarnessError};
+use crate::steer::{IdleEndpoints, IdleReach, Inbox};
 use loopflow_harness::fact::{ProviderFact, ProviderTurn};
 use loopflow_harness::opencode_decode::Turn;
 use loopflow_harness::Harness;
@@ -366,6 +367,13 @@ impl super::Launcher for loopflow_harness::OpenCode {
             crate::agent::routing_failure(code, message)
         }
     }
+    fn idle_reach(&self, endpoints: &IdleEndpoints) -> Option<IdleReach> {
+        endpoints
+            .socket
+            .clone()
+            .map(|path| IdleReach::Inbox(Inbox::Socket(path)))
+    }
+
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
             thread: super::ThreadNaming {
@@ -373,6 +381,7 @@ impl super::Launcher for loopflow_harness::OpenCode {
                 managed: super::ThreadName::Assigned,
             },
             initial_prompt_on_resume: false,
+            reopen_steers: super::ReopenSteers::ServerBoundary,
             native_skills: None,
             installed_skills: super::InstalledSkills {
                 global: ".agents/skills",

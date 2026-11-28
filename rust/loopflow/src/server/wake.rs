@@ -1,12 +1,13 @@
 //! Steers and Task updates for idle managed conversations, pushed by the
-//! Machine server. The store says which conversations are idle and how to
-//! reach them (`loopflow_execution::steer::idle_conversations`); when a steer is saved or
-//! the store's `task_updates` revision moves, one watcher reads them and wakes
+//! Machine server. The store records which conversations are idle. Each
+//! launcher selects its endpoint in `loopflow_execution::steer::idle_conversations`.
+//! When a steer is saved or the `task_updates` revision moves, one watcher wakes
 //! each one it has news for. A server restart forgets nothing. No process or
 //! clock per Session: Claude takes the message in its cross-session inbox,
 //! Codex as a turn its app-server starts, OpenCode and Pi as a turn their
-//! plugin or extension starts. A conversation the server cannot reach hears
-//! it at its next boundary.
+//! plugin or extension starts, and Antigravity via a VT-guarded bracketed paste
+//! into its held terminal whose `PreInvocation` hook reads the waiting steers.
+//! A conversation the server cannot reach hears it at its next boundary.
 //!
 //! A steer naming a stopped interactive Session starts it, once per steer,
 //! in a held terminal as `session.continue` does; the resumed conversation
@@ -15,28 +16,89 @@
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::json;
 
-use loopflow_execution::steer::{IdleConversation, IdleReach, Inbox};
-use loopflow_execution::transport::registry::Registry;
+use loopflow_execution::steer::{IdleConversation, IdleReach, Inbox, WAKE_PROMPT};
+use loopflow_execution::transport::registry::{Registry, WakeTerminal};
 use loopflow_model::id::LfSessionId;
 use loopflow_storage::sqlite::SqliteStore;
 
 /// How long the watcher waits for a store change before reading the revision
 /// anyway: the change signal can miss a checkpoint or a Machine's sleep.
-pub(super) const UNSIGNALLED: Duration = Duration::from_secs(60);
+const UNSIGNALLED: Duration = Duration::from_secs(60);
+/// How soon the watcher retries an idle held terminal that was busy (e.g. typed
+/// draft, open menu, or recent typing) when news arrived.
+const DEFERRED_RETRY: Duration = Duration::from_secs(2);
+/// Delay between post-Stop redraw retries before handing off to the watcher.
+const REDRAW_RETRY: Duration = Duration::from_millis(300);
 const SEND_DEADLINE: Duration = Duration::from_secs(2);
 /// A provider's turn start loads nothing new; it answers once the turn exists.
 const TURN_START_DEADLINE: Duration = Duration::from_secs(15);
 
-/// Wake `session` now if it is idle and has news: a turn just ended, so an
-/// update that arrived during it waits no longer. Blocking.
-pub(super) fn after_turn(store: &SqliteStore, session: &str) {
-    wake_idle(store, Some(session));
+/// Nudge handle shared by boundary follow-ups and the recovery/wake watcher.
+/// Calling
+/// [`retry_deferred`](Self::retry_deferred) flags a deferred turn-end wake and
+/// breaks the watcher's `StoreChanges::wait` out of `UNSIGNALLED` immediately.
+#[derive(Debug, Clone)]
+struct WakeNudge {
+    state: Arc<(AtomicBool, loopflow_storage::changes::StoreWaker)>,
+}
+
+impl WakeNudge {
+    fn new(waker: loopflow_storage::changes::StoreWaker) -> Self {
+        Self {
+            state: Arc::new((AtomicBool::new(false), waker)),
+        }
+    }
+
+    fn retry_deferred(&self) {
+        self.state.0.store(true, Ordering::Release);
+        self.state.1.wake();
+    }
+
+    fn take_pending(&self) -> bool {
+        self.state.0.swap(false, Ordering::AcqRel)
+    }
+}
+
+/// Server-owned handle for waking idle sessions from boundary follow-ups and
+/// nudging the background watcher when a held-terminal wake is deferred.
+#[derive(Debug, Clone, Default)]
+pub(super) struct Waker {
+    terminals: Option<Arc<Registry>>,
+    nudge: Option<WakeNudge>,
+}
+
+impl Waker {
+    /// Wake `session` if it is idle and has news. For a held-terminal wake
+    /// right after `Stop`, the TUI may still be redrawing its idle prompt; give
+    /// it two brief retries before handing off to the background watcher.
+    pub(super) async fn after_boundary(&self, store: &SqliteStore, session: &str) -> Result<()> {
+        for attempt in 0..3 {
+            if attempt > 0 {
+                tokio::time::sleep(REDRAW_RETRY).await;
+            }
+            let store = store.clone();
+            let session = session.to_owned();
+            let terminals = self.terminals.clone();
+            let deferred = loopflow_execution::journal::request::spawn_blocking(move || {
+                wake_idle(&store, Some(&session), terminals.as_deref())
+            })
+            .await?;
+            if !deferred {
+                return Ok(());
+            }
+        }
+        if let Some(nudge) = &self.nudge {
+            nudge.retry_deferred();
+        }
+        Ok(())
+    }
 }
 
 /// The revisions this watcher last woke conversations for, and the held
@@ -45,18 +107,41 @@ pub(super) fn after_turn(store: &SqliteStore, session: &str) {
 #[derive(Default)]
 pub(super) struct Watcher {
     seen: Option<(i64, i64)>,
+    last_wake_pass: Option<SystemTime>,
     terminals: Option<Arc<Registry>>,
+    nudge: Option<WakeNudge>,
+    deferred: bool,
 }
 
 impl Watcher {
-    pub(super) fn new(terminals: Option<Arc<Registry>>) -> Self {
-        Self {
-            seen: None,
+    pub(super) fn new(
+        terminals: Option<Arc<Registry>>,
+        signal: loopflow_storage::changes::StoreWaker,
+    ) -> (Self, Waker) {
+        let nudge = Some(WakeNudge::new(signal));
+        let waker = Waker {
+            terminals: terminals.clone(),
+            nudge: nudge.clone(),
+        };
+        let watcher = Self {
             terminals,
+            nudge,
+            ..Self::default()
+        };
+        (watcher, waker)
+    }
+
+    pub(super) fn wait_timeout(&self) -> Duration {
+        if self.deferred {
+            DEFERRED_RETRY
+        } else {
+            UNSIGNALLED
         }
     }
 
-    /// Wake idle conversations if the revisions moved since the last reading.
+    /// Wake idle conversations if the revisions moved since the last reading,
+    /// or retry held terminals that were busy on an earlier pass. The periodic
+    /// pass also picks up steers read before a terminal became reachable.
     /// The first reading wakes too: what arrived while no server ran reaches
     /// each idle conversation now. One that already heard it gets nothing;
     /// claimed updates and confirmed steers say so.
@@ -65,25 +150,36 @@ impl Watcher {
             .task_update_revision()
             .and_then(|updates| Ok((updates, store.steer_revision()?)))
         {
-            Ok(revision) if self.seen != Some(revision) => {
-                self.seen = Some(revision);
-                if let Some(terminals) = &self.terminals {
-                    let mut agents = loopflow_execution::agent::MachineAgents::default();
-                    start_stopped(
-                        store,
-                        |session| {
-                            loopflow_execution::ops::recovery::launch_failure(
-                                store,
-                                session,
-                                &mut agents,
-                            )
-                        },
-                        |session, request| hold(terminals, session, request),
-                    );
+            Ok(revision) => {
+                let moved = self.seen != Some(revision);
+                let nudged = self.nudge.as_ref().is_some_and(WakeNudge::take_pending);
+                let now = SystemTime::now();
+                let due = self.last_wake_pass.is_none_or(|last| {
+                    !now.duration_since(last)
+                        .is_ok_and(|elapsed| elapsed < UNSIGNALLED)
+                });
+                if moved {
+                    self.seen = Some(revision);
+                    if let Some(terminals) = &self.terminals {
+                        let mut agents = loopflow_execution::agent::MachineAgents::default();
+                        start_stopped(
+                            store,
+                            |session| {
+                                loopflow_execution::ops::recovery::launch_failure(
+                                    store,
+                                    session,
+                                    &mut agents,
+                                )
+                            },
+                            |session, request| hold(terminals, session, request),
+                        );
+                    }
                 }
-                wake_idle(store, None);
+                if moved || self.deferred || nudged || due {
+                    self.last_wake_pass = Some(now);
+                    self.deferred = wake_idle(store, None, self.terminals.as_deref());
+                }
             }
-            Ok(_) => {}
             Err(error) => {
                 tracing::warn!(%error, "steer and Task update revisions unread");
             }
@@ -148,48 +244,84 @@ fn hold(terminals: &Registry, session: &LfSessionId, request: String) -> Result<
     Ok(())
 }
 
-fn wake_idle(store: &SqliteStore, session: Option<&str>) {
+fn wake_idle(store: &SqliteStore, session: Option<&str>, terminals: Option<&Registry>) -> bool {
     match loopflow_execution::steer::idle_conversations(store, session) {
         Ok(idle) => {
+            let mut deferred = false;
             for conversation in idle {
-                wake(store, &conversation);
+                deferred |= wake(store, &conversation, terminals);
             }
+            deferred
         }
-        Err(error) => tracing::warn!(session, %error, "idle conversations unread"),
+        Err(error) => {
+            tracing::warn!(session, %error, "idle conversations unread");
+            false
+        }
     }
 }
 
 /// Deliver `conversation`'s pending steers, Task updates among them; with
-/// none, the conversation is not touched. The steers are stamped once sent,
-/// so a failed send leaves a claim that lapses for the next boundary. Once
-/// sent, the conversation is recorded as in a turn, so the next revision
-/// starts no second one.
-fn wake(store: &SqliteStore, conversation: &IdleConversation) {
+/// none, the conversation is not touched. Provider-API endpoints claim and
+/// stamp steers once sent, so a failed send leaves a claim that lapses for the
+/// next boundary. Held-terminal wakes (`IdleReach::Terminal`) leave steers
+/// unclaimed and paste the trigger prompt once the VT screen shows an empty
+/// idle prompt; the provider's `PreInvocation` hook claims and stamps them
+/// once the turn starts. Returns `true` when a held terminal with news was not
+/// yet ready to paste into.
+fn wake(
+    store: &SqliteStore,
+    conversation: &IdleConversation,
+    terminals: Option<&Registry>,
+) -> bool {
     let IdleConversation {
         adapter,
         thread,
         reach,
         ..
     } = conversation;
-    let delivered = (|| -> Result<()> {
+    let outcome = (|| -> Result<bool> {
         let session = &adapter.session;
         loopflow_execution::harness::task_updates::write(store, session)?;
         if !store.has_undelivered_steers(session)? {
-            return Ok(());
+            return Ok(false);
         }
         // Connect before claiming, so an unreachable conversation keeps its
         // news for its next boundary.
-        let reach = match reach {
-            IdleReach::Inbox(Inbox::Claude(key)) => match open_inbox(key, thread)? {
-                Some((socket, token)) => Reach::Claude(socket, token),
-                None => return Ok(()),
-            },
-            IdleReach::Codex(endpoint) => Reach::Codex(endpoint),
-            IdleReach::Inbox(Inbox::Socket(socket)) => Reach::Socket(open_socket(socket)?),
+        let (thread, reach) = match (reach, thread.as_deref()) {
+            (
+                IdleReach::Terminal {
+                    terminal,
+                    prompt_ready,
+                },
+                _,
+            ) => {
+                let Some(terminals) = terminals else {
+                    return Ok(false);
+                };
+                return match terminals.wake_idle_prompt(terminal, WAKE_PROMPT, *prompt_ready)? {
+                    WakeTerminal::Injected => {
+                        store.record_woken(adapter)?;
+                        Ok(false)
+                    }
+                    WakeTerminal::NotReady => Ok(true),
+                    WakeTerminal::Absent => Ok(false),
+                };
+            }
+            (_, None) => return Ok(false),
+            (IdleReach::Inbox(Inbox::Claude(key)), Some(thread)) => {
+                match open_inbox(key, thread)? {
+                    Some((socket, token)) => (thread, Reach::Claude(socket, token)),
+                    None => return Ok(false),
+                }
+            }
+            (IdleReach::Codex(endpoint), Some(thread)) => (thread, Reach::Codex(endpoint)),
+            (IdleReach::Inbox(Inbox::Socket(socket)), Some(thread)) => {
+                (thread, Reach::Socket(open_socket(socket)?))
+            }
         };
         let steers = loopflow_execution::steer::claim_complete(store, adapter, thread)?;
         let Some(steers) = steers else {
-            return Ok(());
+            return Ok(false);
         };
         match reach {
             Reach::Claude(mut socket, token) => {
@@ -200,10 +332,14 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
         }
         store.record_woken(adapter)?;
         loopflow_execution::steer::delivered(store, session, &steers);
-        Ok(())
+        Ok(false)
     })();
-    if let Err(error) = delivered {
-        tracing::warn!(session = adapter.session, error = %format!("{error:#}"), "idle conversation not woken; its steers wait for its next boundary");
+    match outcome {
+        Ok(deferred) => deferred,
+        Err(error) => {
+            tracing::warn!(session = adapter.session, error = %format!("{error:#}"), "idle conversation not woken; its steers wait for its next boundary");
+            false
+        }
     }
 }
 
@@ -309,10 +445,16 @@ fn send_inbox(socket: &mut UnixStream, token: &str, thread: &str, text: &str) ->
 
 #[cfg(test)]
 mod tests {
+    use loopflow_execution::harness::{launcher, ReopenSteers};
     use loopflow_execution::process::attachment;
+    use loopflow_harness::HarnessKind;
 
-    use super::{after_turn, start_stopped, wake_idle, Watcher};
+    use super::{start_stopped, wake_idle, Registry, Watcher};
     use crate::server::wire::{BoundaryMoment, SessionBoundary};
+
+    fn after_turn(store: &SqliteStore, session: &str, terminals: Option<&Registry>) -> bool {
+        wake_idle(store, Some(session), terminals)
+    }
     use loopflow_execution::context_block::ContextDelivery;
     use loopflow_execution::steer::{Inbox, NativeBoundary, SteerAdapter};
     use loopflow_storage::sqlite::SqliteStore;
@@ -333,7 +475,7 @@ mod tests {
     fn fixture(session: &str) -> Fixture {
         let home = tempfile::tempdir_in("/tmp").unwrap();
         let store =
-            loopflow_execution::store::opening::open_ephemeral(&home.path().join("store.db"))
+            loopflow_execution::store::opening::open_ephemeral(&home.path().join("loopflow.db"))
                 .unwrap();
         store.test_session(
             session,
@@ -379,7 +521,7 @@ mod tests {
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
-                "UPDATE agent_sessions SET interactive=1 WHERE id=?1",
+                "UPDATE agent_sessions SET interactive=1,provider='claude' WHERE id=?1",
                 [session],
             )
             .unwrap();
@@ -429,7 +571,7 @@ mod tests {
 
     impl Fixture {
         fn store_path(&self) -> PathBuf {
-            self.home.path().join("store.db")
+            self.home.path().join("loopflow.db")
         }
 
         /// A Claude conversation whose turn ended, listening on its inbox.
@@ -456,21 +598,37 @@ mod tests {
             key
         }
 
-        /// The conversation's turn ends; its hook names its inbox.
-        fn stop(&self, store: &SqliteStore, inbox: &Path) {
+        fn boundary(
+            &self,
+            store: &SqliteStore,
+            moment: BoundaryMoment,
+            callback: serde_json::Value,
+            inbox: Option<Inbox>,
+        ) -> Option<super::super::boundary::After> {
             super::super::boundary::answer(
                 store,
                 &SessionBoundary {
-                    moment: BoundaryMoment::Stop,
+                    moment,
                     delivery: self.delivery.clone(),
                     adapter: Some(self.adapter.clone()),
-                    callback: serde_json::json!({"hook_event_name":"Stop","session_id":"native"}),
+                    callback,
                     gap: None,
                     printed: Vec::new(),
-                    inbox: Some(Inbox::Claude(inbox.to_owned())),
+                    inbox,
                 },
             )
-            .unwrap();
+            .unwrap()
+            .1
+        }
+
+        /// The conversation's turn ends; its hook names its inbox.
+        fn stop(&self, store: &SqliteStore, inbox: &Path) {
+            self.boundary(
+                store,
+                BoundaryMoment::Stop,
+                serde_json::json!({"hook_event_name":"Stop","session_id":"native"}),
+                Some(Inbox::Claude(inbox.to_owned())),
+            );
         }
 
         /// An OpenCode or Pi work session's turn ends, as its plugin or
@@ -553,18 +711,19 @@ mod tests {
     fn extension(
         socket: &Path,
         answer: &'static str,
+        count: usize,
     ) -> std::sync::mpsc::Receiver<serde_json::Value> {
         let listener = UnixListener::bind(socket).unwrap();
         let (taken, messages) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            for stream in listener.incoming() {
+            for stream in listener.incoming().take(count) {
                 let mut stream = stream.unwrap();
                 let mut wire = String::new();
                 stream.read_to_string(&mut wire).unwrap();
-                let _ = std::io::Write::write_all(&mut stream, answer.as_bytes());
                 if taken.send(serde_json::from_str(&wire).unwrap()).is_err() {
                     return;
                 }
+                let _ = std::io::Write::write_all(&mut stream, answer.as_bytes());
             }
         });
         messages
@@ -621,10 +780,10 @@ mod tests {
             let session = format!("wake-{provider}");
             let fixture = fixture(&session);
             let socket = fixture.home.path().join("s");
-            let messages = extension(&socket, "started\n");
+            let messages = extension(&socket, "started\n", 2);
             fixture.settle(provider, &socket);
             fixture.comment(&fixture.store, "c-1", "use the staging bucket");
-            after_turn(&fixture.store, &session);
+            after_turn(&fixture.store, &session, None);
             let message = messages.try_recv().expect(provider);
             assert_eq!(message["thread"], thread);
             let text = message["text"].as_str().unwrap();
@@ -639,72 +798,506 @@ mod tests {
             );
             // Woken, it is in a turn: nothing more goes out until that ends.
             fixture.comment(&fixture.store, "c-2", "and the eu region");
-            wake_idle(&fixture.store, None);
+            wake_idle(&fixture.store, None, None);
             assert!(messages.try_recv().is_err(), "{provider} woken mid-turn");
             fixture.settle(provider, &socket);
-            after_turn(&fixture.store, &session);
+            after_turn(&fixture.store, &session, None);
             let text = messages.try_recv().expect(provider)["text"].to_string();
             assert!(text.contains("and the eu region"));
             assert!(!text.contains("staging bucket"), "{text}");
         }
     }
 
-    /// Codex runs no hook before its first turn: the launch reports a
-    /// reopened conversation's start, and the wake runs the waiting steer as
-    /// a turn on its app-server before anyone types.
-    #[test]
-    fn a_reopened_codex_work_session_starts_a_turn_on_its_waiting_steer() {
-        let session = "wake-codex";
-        let fixture = fixture(session);
-        let endpoint = fixture.home.path().join("codex.sock");
-        let report = |moment, event: &str| {
-            super::super::boundary::answer(
-                &fixture.store,
-                &SessionBoundary {
-                    moment,
-                    delivery: fixture.delivery.clone(),
-                    adapter: Some(fixture.adapter.clone()),
-                    callback: serde_json::json!({"hook_event_name":event,"session_id":"native","source":"resume"}),
-                    gap: None,
-                    printed: Vec::new(),
-                    inbox: None,
-                },
-            )
+    const HOLDER_BUILD: &str = "feedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface";
+
+    /// A real holder + Registry in `home` running a shell script that simulates
+    /// an open Antigravity TUI in a held terminal.
+    fn held_agy_terminal(
+        store: &SqliteStore,
+        session: &str,
+        script: &str,
+        wait_for: &str,
+    ) -> (
+        std::sync::Arc<super::Registry>,
+        loopflow_model::id::TerminalId,
+    ) {
+        use loopflow_execution::terminal_holder::{serve, Place};
+        use loopflow_execution::transport::registry::{connect, Registry, Start};
+        use loopflow_execution::transport::wire::{frame, Incoming, Request, Tag};
+        use std::io::Write;
+        use std::time::{Duration, Instant};
+
+        let place = Place::of(HOLDER_BUILD).unwrap();
+        let (ready, listening) = std::sync::mpsc::channel();
+        let served = place.clone();
+        std::thread::spawn(move || {
+            let _ = serve(&served, HOLDER_BUILD, move || {
+                let _ = ready.send(());
+            });
+        });
+        listening.recv_timeout(Duration::from_secs(10)).unwrap();
+        let registry = Registry::open(HOLDER_BUILD).unwrap();
+        let terminal = registry
+            .start(Start {
+                session: Some(loopflow_model::id::LfSessionId::from(session)),
+                request: format!("wake-{session}"),
+                argv: vec!["/bin/sh".into(), "-c".into(), script.into()],
+                cwd: "/".into(),
+                env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+                rows: 24,
+                cols: 80,
+                placement: None,
+            })
+            .unwrap();
+        store
+            .conn
+            .lock()
             .unwrap()
-            .1
-        };
-        // The Codex before it was quit mid-turn.
-        report(BoundaryMoment::Tool, "UserPromptSubmit");
-        {
-            let conn = fixture.store.conn.lock().unwrap();
-            conn.execute("UPDATE session_activity SET agent_process_id='earlier'", [])
-                .unwrap();
-            conn.execute(
-                "UPDATE agent_sessions SET provider='codex',agent_endpoint=?2 WHERE id=?1",
-                rusqlite::params![session, endpoint.to_string_lossy()],
+            .execute(
+                "UPDATE agent_sessions SET held_terminal_id=?2 WHERE id=?1",
+                rusqlite::params![session, terminal.as_str()],
             )
             .unwrap();
-        }
-        fixture
-            .store
-            .save_session_steer(session, "Fixture author", "use the other table")
-            .unwrap();
-        let provider = codex_app_server(&endpoint);
-        let Some(super::super::boundary::After::Reachable(woken)) =
-            report(BoundaryMoment::Start, "SessionStart")
-        else {
-            panic!("a reopened Codex start leaves no wake");
+        // Wait until Hosted's ghostty_vt::Terminal has parsed the screen text.
+        let mut socket = connect(&terminal).unwrap();
+        let attach = Incoming {
+            id: 1,
+            request: Request::Attach {
+                focused: None,
+                rows: 24,
+                cols: 80,
+                name: None,
+                from: None,
+            },
         };
-        after_turn(&fixture.store, &woken);
-        let start = provider.join().unwrap();
-        assert_eq!(start["method"], "turn/start");
-        assert_eq!(start["params"]["threadId"], "native");
-        let output = start["params"]["toolOutput"]["output"].to_string();
-        assert!(output.contains("use the other table"), "{output}");
-        assert_eq!(
-            fixture.store.session_steers(session, 0, 8).unwrap().pending,
-            0
+        socket
+            .write_all(&frame(Tag::Request, &serde_json::to_vec(&attach).unwrap()))
+            .unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        let mut seen = Vec::new();
+        let needle = wait_for.as_bytes();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !seen.windows(needle.len()).any(|w| w == needle) {
+            assert!(
+                Instant::now() < deadline,
+                "held terminal never showed {wait_for:?}: {:?}",
+                String::from_utf8_lossy(&seen)
+            );
+            let mut buf = [0u8; 4096];
+            if let Ok(n) = socket.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                seen.extend_from_slice(&buf[..n]);
+            }
+        }
+        drop(socket);
+        (registry, terminal)
+    }
+
+    fn wait_until(what: &str, mut ready: impl FnMut() -> bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !ready() {
+            assert!(std::time::Instant::now() < deadline, "timed out: {what}");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    fn agy_idle_screen() -> String {
+        let rule = "─".repeat(80);
+        format!(
+            r"\033[?2004h\033[2J\033[H{rule}\r\n\033[94m>\033[m\r\n{rule}\r\n? for shortcuts   auto · Gemini 4 Neon · high\r\n"
+        )
+    }
+
+    fn agy_idle_script(pasted: &Path) -> String {
+        let idle = agy_idle_screen();
+        format!(
+            "stty -echo\nprintf '{idle}'\nIFS= read -r line\nprintf '%s' \"$line\" > \"{}\"\n",
+            pasted.display()
+        )
+    }
+
+    fn assert_wake_pasted(pasted: &Path) {
+        let expected = format!("\x1b[200~{}\x1b[201~", super::WAKE_PROMPT);
+        wait_until("wake prompt pasted", || {
+            std::fs::metadata(pasted).is_ok_and(|file| file.len() >= expected.len() as u64)
+        });
+        assert_eq!(std::fs::read_to_string(pasted).unwrap(), expected);
+    }
+
+    #[test]
+    fn every_harness_wakes_its_idle_work_session() {
+        for harness in HarnessKind::ALL {
+            check_waiting_steer(harness, WakeAt::TurnEnd);
+        }
+    }
+
+    #[test]
+    fn reopened_work_sessions_take_waiting_steers() {
+        for harness in HarnessKind::ALL {
+            match launcher(harness).capabilities().reopen_steers {
+                ReopenSteers::ServerBoundary => check_waiting_steer(harness, WakeAt::Reopen),
+                // session_launch_contract runs every PromptHook fixture through lf resume.
+                ReopenSteers::PromptHook => continue,
+            }
+        }
+    }
+
+    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+    enum WakeAt {
+        TurnEnd,
+        Reopen,
+    }
+
+    fn pin_lf_home(
+        home: &Path,
+    ) -> (
+        crate::test_ambient::EnvGuard,
+        std::sync::MutexGuard<'static, ()>,
+    ) {
+        let lock = loopflow_execution::journal::test_env_lock();
+        let guard = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
+        std::env::set_var("LF_HOME", home);
+        // Tuple fields drop in order: restore LF_HOME before releasing the lock.
+        (guard, lock)
+    }
+
+    fn check_waiting_steer(harness: HarnessKind, wake_at: WakeAt) {
+        let session = "waiting";
+        let fixture = fixture(session);
+        // Pi's session_start and Antigravity's held terminal use LF_HOME.
+        let _home = ((harness == HarnessKind::Pi && wake_at == WakeAt::Reopen)
+            || harness == HarnessKind::Antigravity)
+            .then(|| pin_lf_home(fixture.home.path()));
+        let store = &fixture.store;
+        let socket = fixture.home.path().join("s");
+        let thread = if harness == HarnessKind::Pi {
+            "/pi/session.jsonl"
+        } else {
+            "native"
+        };
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET provider=?2,provider_thread=?3 WHERE id=?1",
+                [session, harness.as_str(), thread],
+            )
+            .unwrap();
+
+        // Each listener returns the actual turn addressed to this conversation.
+        type ReadTurn = Box<dyn FnOnce() -> String>;
+        let mut terminals = None;
+        let (inbox, message): (Option<Inbox>, ReadTurn) = match harness {
+            HarnessKind::Claude => {
+                let listener = UnixListener::bind(&socket).unwrap();
+                (
+                    Some(Inbox::Claude(fixture.claude(&socket))),
+                    Box::new(move || {
+                        let frames = received(&listener);
+                        assert_eq!(frames[1]["session_id"], thread);
+                        frames[1]["message"]["content"].as_str().unwrap().to_owned()
+                    }),
+                )
+            }
+            HarnessKind::Codex => {
+                store
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .execute(
+                        "UPDATE agent_sessions SET agent_endpoint=?2 WHERE id=?1",
+                        rusqlite::params![session, socket.to_str().unwrap()],
+                    )
+                    .unwrap();
+                let server = codex_app_server(&socket);
+                (
+                    None,
+                    Box::new(move || {
+                        let start = server.join().unwrap();
+                        assert_eq!(start["method"], "turn/start");
+                        assert_eq!(start["params"]["threadId"], thread);
+                        start["params"]["toolOutput"]["output"].to_string()
+                    }),
+                )
+            }
+            HarnessKind::OpenCode | HarnessKind::Pi => {
+                let messages = extension(&socket, "started\n", 1);
+                (
+                    Some(Inbox::Socket(socket)),
+                    Box::new(move || {
+                        let message = messages.recv().unwrap();
+                        assert_eq!(message["thread"], thread);
+                        message["text"].as_str().unwrap().to_owned()
+                    }),
+                )
+            }
+            HarnessKind::Antigravity => {
+                let pasted = fixture.home.path().join("pasted");
+                let script = agy_idle_script(&pasted);
+                let (registry, _) = held_agy_terminal(store, session, &script, "? for shortcuts");
+                terminals = Some(registry);
+                let store_clone = store.clone();
+                let repo = fixture.home.path().join("repo");
+                let adapter = fixture.adapter.clone();
+                (
+                    None,
+                    Box::new(move || {
+                        assert_wake_pasted(&pasted);
+                        // Steers stay unstamped until agy's PreInvocation runs.
+                        assert_eq!(
+                            store_clone.session_steers(session, 0, 8).unwrap().pending,
+                            1
+                        );
+                        let claimed = loopflow_execution::steer::claim(
+                            &store_clone,
+                            &repo,
+                            &adapter,
+                            thread,
+                            NativeBoundary::Turn,
+                        )
+                        .unwrap()
+                        .expect("PreInvocation claims waiting steer");
+                        loopflow_execution::steer::delivered(&store_clone, session, &claimed);
+                        claimed.text
+                    }),
+                )
+            }
+        };
+
+        let report = |moment, callback, inbox| fixture.boundary(store, moment, callback, inbox);
+        let event = |name| serde_json::json!({"hook_event_name":name, "session_id":thread});
+        let steer = || {
+            store
+                .save_session_steer(session, "Fixture author", "use the other table")
+                .unwrap()
+        };
+        if wake_at == WakeAt::Reopen {
+            // The previous process quit mid-turn. Its successor's first
+            // boundary makes the saved conversation reachable before input.
+            report(BoundaryMoment::Tool, event("UserPromptSubmit"), None);
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute("UPDATE session_activity SET agent_process_id='earlier'", [])
+                .unwrap();
+            steer();
+            let (moment, callback) = match harness {
+                HarnessKind::Codex | HarnessKind::Claude => (
+                    BoundaryMoment::Start,
+                    serde_json::json!({"hook_event_name":"SessionStart","session_id":thread,"source":"resume"}),
+                ),
+                HarnessKind::OpenCode => (BoundaryMoment::Tool, event("OpenCodeMessagesTransform")),
+                HarnessKind::Pi => (
+                    BoundaryMoment::Event,
+                    serde_json::json!({"type":"session_start","sessionFile":thread}),
+                ),
+                HarnessKind::Antigravity => {
+                    unreachable!("Antigravity reopens through its launch prompt")
+                }
+            };
+            let after = report(moment, callback, inbox);
+            assert!(
+                matches!(after, Some(super::super::boundary::After::Reachable(id)) if id == session),
+                "{harness:?} {wake_at:?}"
+            );
+        } else {
+            report(BoundaryMoment::Stop, event("Stop"), inbox);
+            steer();
+        }
+        assert!(
+            !after_turn(store, session, terminals.as_deref()),
+            "{harness:?} {wake_at:?} should wake immediately"
         );
+        let text = message();
+        assert!(
+            text.contains("use the other table"),
+            "{harness:?} {wake_at:?}: {text}"
+        );
+        let page = store.session_steers(session, 0, 8).unwrap();
+        assert_eq!(page.items.len(), 1, "{harness:?} {wake_at:?}");
+        assert!(
+            page.items[0].delivered_at.is_some(),
+            "{harness:?} {wake_at:?}"
+        );
+        assert_eq!(page.pending, 0, "{harness:?} {wake_at:?}");
+        if let Some(registry) = terminals {
+            registry.close();
+        }
+    }
+
+    #[test]
+    fn an_open_idle_antigravity_with_a_draft_defers_wake_until_the_prompt_is_empty() {
+        let session = "wake-agy-draft";
+        let fixture = fixture(session);
+        let _home = pin_lf_home(fixture.home.path());
+        let store = &fixture.store;
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET provider='agy',provider_thread='native' WHERE id=?1",
+                [session],
+            )
+            .unwrap();
+        let clear = fixture.home.path().join("clear");
+        let cleared = fixture.home.path().join("cleared");
+        let pasted = fixture.home.path().join("pasted");
+        let rule = "─".repeat(80);
+        let idle = agy_idle_screen();
+        let script = format!(
+            r#"stty -echo
+printf '\033[?2004h\033[2J\033[H{rule}\r\n> keep this draft\r\n{rule}\r\nauto · Gemini 4 Neon · high\r\n'
+while [ ! -f "{clear}" ]; do sleep 0.05; done
+printf '{idle}'
+: > "{cleared}"
+IFS= read -r line
+printf '%s' "$line" > "{pasted}"
+"#,
+            clear = clear.display(),
+            cleared = cleared.display(),
+            pasted = pasted.display(),
+        );
+        let (registry, _) = held_agy_terminal(store, session, &script, "keep this draft");
+        fixture.boundary(
+            store,
+            BoundaryMoment::Stop,
+            serde_json::json!({"hook_event_name":"Stop","session_id":"native"}),
+            None,
+        );
+        store
+            .save_session_steer(session, "Fixture author", "wait until draft clears")
+            .unwrap();
+        let path = fixture.store_path();
+        let mut watcher = Watcher {
+            terminals: Some(registry.clone()),
+            ..Watcher::default()
+        };
+        watcher.read(&path);
+        assert!(watcher.deferred, "draft must defer held-terminal wake");
+        assert!(!pasted.exists(), "draft must not be clobbered");
+        assert_eq!(store.session_steers(session, 0, 8).unwrap().pending, 1);
+
+        // Once the person clears the draft, the next watcher tick wakes it
+        // without needing another steer or revision move.
+        std::fs::write(&clear, "").unwrap();
+        wait_until("draft cleared", || cleared.exists());
+        // Poll until Hosted has read the cleared screen from the holder.
+        wait_until("deferred wake fired", || {
+            watcher.read(&path);
+            !watcher.deferred
+        });
+        assert_wake_pasted(&pasted);
+        registry.close();
+    }
+
+    #[test]
+    fn a_steer_read_during_antigravity_launch_wakes_once_it_is_reachable() {
+        let session = "wake-agy-opening";
+        let fixture = fixture(session);
+        let _home = pin_lf_home(fixture.home.path());
+        let store = &fixture.store;
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET provider='agy',provider_thread=NULL WHERE id=?1",
+                [session],
+            )
+            .unwrap();
+        let pasted = fixture.home.path().join("pasted");
+        let (registry, _) =
+            held_agy_terminal(store, session, &agy_idle_script(&pasted), "? for shortcuts");
+        store
+            .save_session_steer(session, "Fixture author", "arrived while opening")
+            .unwrap();
+        let mut watcher = Watcher {
+            terminals: Some(registry.clone()),
+            ..Watcher::default()
+        };
+        watcher.read_with(store);
+        assert!(!watcher.deferred);
+
+        // The launch records a reachable idle session without saving another
+        // steer or Task update, and the provider has no opening hook.
+        assert!(store.record_first_boundary(&fixture.adapter).unwrap());
+        watcher.last_wake_pass = Some(std::time::UNIX_EPOCH);
+        watcher.read_with(store);
+        assert_wake_pasted(&pasted);
+        registry.close();
+    }
+
+    #[test]
+    fn wake_nudge_wakes_waiting_watcher_without_a_revision_move() {
+        let session = "wake-nudge";
+        let fixture = fixture(session);
+        let _home = pin_lf_home(fixture.home.path());
+        let store = &fixture.store;
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET provider='agy',provider_thread='native' WHERE id=?1",
+                [session],
+            )
+            .unwrap();
+        let pasted = fixture.home.path().join("pasted");
+        let script = agy_idle_script(&pasted);
+        let (registry, _) = held_agy_terminal(store, session, &script, "? for shortcuts");
+
+        // Steer lands mid-turn: the watcher observes the revision while the
+        // session is working, so `watcher.deferred` stays false.
+        fixture.boundary(
+            store,
+            BoundaryMoment::Tool,
+            serde_json::json!({"hook_event_name":"UserPromptSubmit","session_id":"native"}),
+            None,
+        );
+        store
+            .save_session_steer(session, "Fixture author", "nudge after turn end")
+            .unwrap();
+        let path = fixture.store_path();
+        let mut changes = loopflow_storage::changes::StoreChanges::watch(&path);
+        let (mut watcher, waker) = Watcher::new(Some(registry.clone()), changes.waker());
+        watcher.read_with(store);
+        assert!(!watcher.deferred);
+
+        // Turn ends: `session_activity` flips to yielded without moving either
+        // `task_update_revision` or `steer_revision`.
+        fixture.boundary(
+            store,
+            BoundaryMoment::Stop,
+            serde_json::json!({"hook_event_name":"Stop","session_id":"native"}),
+            None,
+        );
+
+        // Arm `StoreChanges` after the Stop write so no WAL event is pending,
+        // and confirm the watcher would otherwise wait `UNSIGNALLED` (60 s).
+        changes.wait(std::time::Duration::from_millis(1));
+        assert_eq!(watcher.wait_timeout(), super::UNSIGNALLED);
+
+        assert!(!pasted.exists(), "the steer is still waiting");
+        // Deliver the nudge before waiting so the Linux fallback poll cannot
+        // return from the wait before the nudge is sent.
+        let nudged_at = std::time::Instant::now();
+        waker.nudge.unwrap().retry_deferred();
+        changes.wait(watcher.wait_timeout());
+        assert!(
+            nudged_at.elapsed() < std::time::Duration::from_secs(5),
+            "WakeNudge must break UNSIGNALLED immediately"
+        );
+        watcher.read_with(store);
+        assert!(!watcher.deferred);
+        assert_wake_pasted(&pasted);
+        registry.close();
     }
 
     #[test]
@@ -715,10 +1308,10 @@ mod tests {
             let session = format!("wake-refused-{refused}");
             let fixture = fixture(&session);
             let socket = fixture.home.path().join("s");
-            let _messages = refused.then(|| extension(&socket, ""));
+            let _messages = refused.then(|| extension(&socket, "", 1));
             fixture.settle("opencode", &socket);
             fixture.comment(&fixture.store, "c-1", "use the staging bucket");
-            after_turn(&fixture.store, &session);
+            after_turn(&fixture.store, &session, None);
             assert_eq!(
                 loopflow_execution::steer::idle_conversations(&fixture.store, Some(&session))
                     .unwrap()
@@ -742,7 +1335,7 @@ mod tests {
         let (listener, inbox) = fixture.idle_claude();
         fixture.comment(&fixture.store, "c-1", "use the staging bucket");
         fixture.comment(&fixture.store, "c-2", "PR: https://example.test/pr/1");
-        after_turn(&fixture.store, "wake-claude");
+        after_turn(&fixture.store, "wake-claude", None);
         let frames = received(&listener);
         assert_eq!(
             frames[0],
@@ -768,9 +1361,9 @@ mod tests {
         );
         // Woken, it is in a turn: nothing more goes out until its Stop.
         fixture.comment(&fixture.store, "c-3", "and the eu region");
-        wake_idle(&fixture.store, None);
+        wake_idle(&fixture.store, None, None);
         fixture.stop(&fixture.store, &inbox);
-        after_turn(&fixture.store, "wake-claude");
+        after_turn(&fixture.store, "wake-claude", None);
         let wire = received(&listener)[1]["message"]["content"].to_string();
         assert!(wire.contains("and the eu region"));
         assert!(
@@ -816,7 +1409,7 @@ mod tests {
             .unwrap();
         fixture.comment(store, "c-1", "Review the staged changes");
         loopflow_execution::harness::task_updates::write(store, session).unwrap();
-        after_turn(store, session);
+        after_turn(store, session, None);
         let frames = received(&listener);
         let content = frames[1]["message"]["content"].as_str().unwrap();
         assert!(content.contains("Review the staged changes"), "{content}");
@@ -839,7 +1432,7 @@ mod tests {
         let restarted = loopflow_execution::store::open_sqlite(&path).unwrap();
         fixture.stop(&restarted, &inbox);
         fixture.comment(&restarted, "c-2", "PR: https://example.test/pr/2");
-        wake_idle(&restarted, None);
+        wake_idle(&restarted, None, None);
         let content = received(&listener)[1]["message"]["content"].to_string();
         assert!(content.contains("pr/2") && !content.contains("pr/1"));
     }
@@ -911,7 +1504,7 @@ mod tests {
         assert!(content.contains("lint failed"));
 
         fixture.stop(store, &inbox);
-        after_turn(store, "wake-graph");
+        after_turn(store, "wake-graph", None);
         assert_eq!(
             listener.accept().unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock
@@ -939,8 +1532,8 @@ mod tests {
         fixture.claude(&socket);
         listener.set_nonblocking(true).unwrap();
         fixture.comment(&fixture.store, "c-1", "PR: https://example.test/pr/1");
-        after_turn(&fixture.store, "wake-bare");
-        wake_idle(&fixture.store, None);
+        after_turn(&fixture.store, "wake-bare", None);
+        wake_idle(&fixture.store, None, None);
         assert_eq!(
             listener.accept().unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock,
@@ -966,7 +1559,7 @@ mod tests {
         fixture.stop(&fixture.store, &inbox);
         fixture.comment(&fixture.store, "c-1", "use the staging bucket");
         fixture.comment(&fixture.store, "c-2", "PR: https://example.test/pr/1");
-        after_turn(&fixture.store, "wake-gone");
+        after_turn(&fixture.store, "wake-gone", None);
         assert_eq!(
             loopflow_execution::steer::idle_conversations(&fixture.store, Some("wake-gone"))
                 .unwrap()

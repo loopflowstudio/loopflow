@@ -40,6 +40,10 @@ impl Paste {
         rest
     }
 
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+
     pub fn detaches(&self, bytes: &[u8]) -> bool {
         let mut paste = *self;
         for &byte in bytes {
@@ -75,6 +79,12 @@ pub(super) fn keys(mut bytes: &[u8]) -> impl Iterator<Item = u8> + '_ {
     })
 }
 
+fn csi_params_len(body: &[u8]) -> usize {
+    body.iter()
+        .take_while(|byte| byte.is_ascii_digit() || **byte == b';')
+        .count()
+}
+
 /// The length of the terminal report `bytes` starts with: an OSC or DCS
 /// string, a cursor position, status, device attributes, mode or window
 /// report, or a focus event.
@@ -90,12 +100,7 @@ fn report_length(bytes: &[u8]) -> Option<usize> {
         [0x1b, b'[', body @ ..] => {
             let private = matches!(body.first(), Some(b'?' | b'>' | b'='));
             let mut at = usize::from(private);
-            while body
-                .get(at)
-                .is_some_and(|byte| byte.is_ascii_digit() || *byte == b';')
-            {
-                at += 1;
-            }
+            at += csi_params_len(&body[at..]);
             let dollar = body.get(at) == Some(&b'$');
             at += usize::from(dollar);
             let report = match *body.get(at)? {
@@ -108,6 +113,40 @@ fn report_length(bytes: &[u8]) -> Option<usize> {
                 _ => false,
             };
             report.then_some(at + 3)
+        }
+        _ => None,
+    }
+}
+
+/// Whether `bytes` contains any real user keystroke (ignoring terminal query
+/// replies, focus reports, and mouse events).
+pub(super) fn has_user_keystroke(mut bytes: &[u8]) -> bool {
+    while !bytes.is_empty() {
+        if let Some(length) = report_length(bytes).or_else(|| mouse_event_length(bytes)) {
+            bytes = &bytes[length..];
+            continue;
+        }
+        return true;
+    }
+    false
+}
+
+/// The length of a terminal mouse report `bytes` starts with: SGR (`1006`),
+/// X10 (`1000`), or URXVT (`1015`).
+fn mouse_event_length(bytes: &[u8]) -> Option<usize> {
+    match bytes {
+        // X10 / normal mouse tracking: ESC [ M <cb> <cx> <cy>
+        [0x1b, b'[', b'M', _, _, _, ..] => Some(6),
+        // SGR mouse tracking: ESC [ < digits ; digits ; digits (M | m)
+        [0x1b, b'[', b'<', body @ ..] => {
+            let at = csi_params_len(body);
+            (at > 0 && matches!(body.get(at), Some(b'M' | b'm'))).then_some(at + 4)
+        }
+        // URXVT mouse tracking: ESC [ digits ; digits ; digits M
+        [0x1b, b'[', body @ ..] => {
+            let at = csi_params_len(body);
+            let semicolons = body[..at].iter().filter(|&&byte| byte == b';').count();
+            (semicolons == 2 && body.get(at) == Some(&b'M')).then_some(at + 3)
         }
         _ => None,
     }
@@ -128,6 +167,10 @@ impl PendingInput {
         self.bytes.extend(bytes);
         self.paste.observe(bytes);
         true
+    }
+
+    pub fn in_paste(&self) -> bool {
+        self.paste.is_open()
     }
 
     pub fn finish_paste(&mut self) {
@@ -156,7 +199,36 @@ impl PendingInput {
 mod tests {
     use std::io::{self, Write};
 
-    use super::{keys, Paste, PendingInput};
+    use super::{has_user_keystroke, keys, Paste, PendingInput};
+
+    #[test]
+    fn mouse_focus_and_query_reports_are_not_user_keystrokes() {
+        for ignored in [
+            b"\x1b[I".as_slice(),
+            b"\x1b[O",
+            b"\x1b[12;40R",
+            b"\x1b[?62;22c",
+            b"\x1b]11;rgb:1e1e/1e1e/2e2e\x07",
+            b"\x1b[<64;10;20M",
+            b"\x1b[<0;10;20m",
+            b"\x1b[M !#",
+            b"\x1b[32;10;20M",
+            b"\x1b[I\x1b[<65;1;2M\x1b[O",
+        ] {
+            assert!(!has_user_keystroke(ignored), "{ignored:?}");
+        }
+        for typed in [
+            b"a".as_slice(),
+            b"\r",
+            b"\x7f",
+            b"\x1b",
+            b"\x1b[A",
+            b"\x1b[<64;10;20Mhello",
+            b"\x1b[200~pasted\x1b[201~",
+        ] {
+            assert!(has_user_keystroke(typed), "{typed:?}");
+        }
+    }
 
     #[test]
     fn a_second_views_terminal_answers_never_reach_the_agent_but_its_keys_do() {

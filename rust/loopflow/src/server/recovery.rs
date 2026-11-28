@@ -32,11 +32,14 @@ const ENDING: Duration = Duration::from_secs(1);
 
 /// Start the Machine's single store-watching thread for recovery and steer/Task
 /// update wakes. It runs as long as the server.
-pub(super) fn start(terminals: Option<Arc<Registry>>) {
+pub(super) fn start(terminals: Option<Arc<Registry>>) -> super::wake::Waker {
+    let path = loopflow_execution::store::default_db_path();
+    let changes = loopflow_storage::changes::StoreChanges::watch(&path);
+    let (wake, waker) = super::wake::Watcher::new(terminals.clone(), changes.waker());
     let spawned = std::thread::Builder::new()
         .name("recovery-wake".into())
         .spawn(move || {
-            loopflow_execution::journal::request::isolate(|| watch(terminals));
+            loopflow_execution::journal::request::isolate(|| watch(path, changes, terminals, wake));
         });
     if let Err(error) = spawned {
         tracing::warn!(
@@ -44,13 +47,16 @@ pub(super) fn start(terminals: Option<Arc<Registry>>) {
             "Task conversations that die stay down until resumed and Task updates wait for the next turn"
         );
     }
+    waker
 }
 
-fn watch(terminals: Option<Arc<Registry>>) {
-    let path = loopflow_execution::store::default_db_path();
-    let mut changes = loopflow_storage::changes::StoreChanges::watch(&path);
+fn watch(
+    path: std::path::PathBuf,
+    mut changes: loopflow_storage::changes::StoreChanges,
+    terminals: Option<Arc<Registry>>,
+    mut wake: super::wake::Watcher,
+) {
     let mut recovery = Watcher::default();
-    let mut wake = super::wake::Watcher::new(terminals.clone());
     loop {
         if path.exists() {
             match loopflow_execution::store::open_sqlite(&path) {
@@ -65,13 +71,10 @@ fn watch(terminals: Option<Arc<Registry>>) {
                 }
             }
         }
-        let wait = if terminals.is_some() {
-            recovery
-                .wait(SystemTime::now())
-                .min(super::wake::UNSIGNALLED)
-        } else {
-            super::wake::UNSIGNALLED
-        };
+        let mut wait = wake.wait_timeout();
+        if terminals.is_some() {
+            wait = wait.min(recovery.wait(SystemTime::now()));
+        }
         changes.wait(wait);
     }
 }
@@ -317,8 +320,8 @@ mod tests {
     /// A Task claimed here with a checkout and its conversation, whose agent
     /// is running as this test process.
     struct Fixture {
-        _home: tempfile::TempDir,
-        _repo: TestRepo,
+        home: tempfile::TempDir,
+        repo: TestRepo,
         store: SqliteStore,
         task: TaskId,
         session: LfSessionId,
@@ -328,7 +331,7 @@ mod tests {
     fn fixture() -> Fixture {
         let home = tempfile::tempdir_in("/tmp").unwrap();
         let store =
-            loopflow_execution::store::opening::open_ephemeral(&home.path().join("store.db"))
+            loopflow_execution::store::opening::open_ephemeral(&home.path().join("loopflow.db"))
                 .unwrap();
         let repo = TestRepo::new();
         let checkout = repo.path().to_string_lossy().into_owned();
@@ -384,8 +387,8 @@ mod tests {
             .unwrap();
         }
         let fixture = Fixture {
-            _home: home,
-            _repo: repo,
+            home,
+            repo,
             store,
             task,
             session,
@@ -679,5 +682,81 @@ mod tests {
         assert_eq!(fixture.attempts(), (1, Some(NOW)), "a failure is a start");
         assert_eq!(fixture.pass(NOW + 60, false).len(), 1);
         assert_eq!(fixture.failure(), None);
+    }
+
+    #[test]
+    fn a_dead_task_conversation_in_another_directory_restarts_in_its_own_directory() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let fixture = fixture();
+        let _home = loopflow_execution::config::environment::EnvVarGuard::set(
+            "LF_HOME",
+            fixture.home.path().to_str().unwrap(),
+        );
+        let binary = std::env::current_exe().unwrap();
+        let _binary = loopflow_execution::config::environment::EnvVarGuard::set(
+            "LF_BIN",
+            binary.to_str().unwrap(),
+        );
+        let session_dir = fixture
+            .repo
+            .create_named_worktree("research")
+            .canonicalize()
+            .unwrap();
+        assert_ne!(session_dir, fixture.repo.path().canonicalize().unwrap());
+        fixture.execute(
+            "UPDATE agent_sessions SET cwd=?2 WHERE id=?1",
+            params![fixture.session.as_str(), session_dir.to_str().unwrap()],
+        );
+        fixture.exited(137);
+
+        let started_cwds = RefCell::new(Vec::new());
+        recover_conversations(
+            &fixture.store,
+            NOW,
+            |_| false,
+            |_| Ok(None),
+            |conversation, request| {
+                assert_eq!(conversation.session, fixture.session);
+                assert_eq!(
+                    request,
+                    format!("recover:{}:{}:1", fixture.session, fixture.agent)
+                );
+                let start = crate::server::service::continuing(
+                    conversation.session.clone(),
+                    request,
+                    0,
+                    0,
+                    None,
+                )
+                .map_err(|error| anyhow::anyhow!("{}", error.message))?;
+                started_cwds.borrow_mut().push(start.cwd);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(started_cwds.into_inner(), [session_dir]);
+
+        // The holder must start lf before resume can relocate a missing worktree.
+        let retired = fixture.repo.path().join("retired");
+        fixture.execute(
+            "UPDATE agent_sessions SET cwd=?2 WHERE id=?1",
+            params![fixture.session.as_str(), retired.to_str().unwrap()],
+        );
+        let start = crate::server::service::continuing(
+            fixture.session.clone(),
+            "recover-retired".into(),
+            0,
+            0,
+            None,
+        )
+        .unwrap();
+        assert_eq!(start.cwd, fixture.repo.path().canonicalize().unwrap());
+
+        // Without a local checkout row for the Task, recovery leaves it down.
+        fixture.execute(
+            "DELETE FROM task_checkouts WHERE task_id=?1",
+            [fixture.task.as_str()],
+        );
+        assert!(fixture.pass(NOW + 60, false).is_empty());
     }
 }

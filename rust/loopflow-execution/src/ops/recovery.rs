@@ -105,7 +105,7 @@ pub fn launch_failure(
 /// outlook from its summary; both ask [`server_start`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DownConversation {
-    /// It is an open Task's conversation in the Task's checkout here.
+    /// It is the primary conversation of an open Task checked out here.
     pub here: bool,
     /// Its last agent's exit; `None` when nobody saw one.
     pub exit_code: Option<i32>,
@@ -129,7 +129,7 @@ pub enum Left {
     Quit,
     /// It was started [`CONVERSATION_STARTS`] times without finishing a turn.
     OutOfStarts,
-    /// It is not an open Task's conversation in that Task's checkout here.
+    /// It is not the primary conversation of an open Task checked out here.
     Elsewhere,
     /// Another Machine claims its Task.
     NotClaimedHere,

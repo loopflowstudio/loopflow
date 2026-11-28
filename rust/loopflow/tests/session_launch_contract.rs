@@ -132,7 +132,11 @@ impl Fixture {
         let home = tempfile::tempdir().unwrap();
         support::seed_store(&home.path().join("machine"));
         let fixture = Self {
-            _server: MachineServer::start(env!("CARGO_BIN_EXE_lf"), &home.path().join("machine")),
+            _server: MachineServer::start_with_path(
+                env!("CARGO_BIN_EXE_lf"),
+                &home.path().join("machine"),
+                &fixture_path(home.path()),
+            ),
             repo: TestRepo::new(),
             home,
         };
@@ -141,13 +145,13 @@ impl Fixture {
             ".lf/config.yaml",
             &format!("agent: {provider}\ndiff: false\ndiff_files: false\npaste: false\n"),
         );
-        for harness in ["claude", "codex", "opencode"] {
+        for harness in ["claude", "codex", "opencode", "agy"] {
             let script = fixture.home.path().join("bin").join(harness);
-            let source = if harness == "opencode" {
-                include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
-                    .replace("__WAIT__", "False")
-            } else {
-                r#"#!/usr/bin/python3
+            let source = match harness {
+                "opencode" => include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
+                    .replace("__WAIT__", "False"),
+                "agy" => include_str!("../../loopflow-execution/tests/support/agy_cli.py").into(),
+                _ => r#"#!/usr/bin/python3
 import json, os, sys, runpy
 from pathlib import Path
 args = sys.argv[1:]
@@ -207,10 +211,7 @@ elif os.path.basename(sys.argv[0]) == 'codex':
         command
             .env_clear()
             .env("HOME", self.home.path())
-            .env(
-                "PATH",
-                format!("{}:/usr/bin:/bin", self.home.path().join("bin").display()),
-            )
+            .env("PATH", fixture_path(self.home.path()))
             .env("LF_HOME", self.home.path().join("machine"))
             .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
             .env("CLAUDE_CONFIG_DIR", self.home.path().join(".claude"))
@@ -278,6 +279,10 @@ elif os.path.basename(sys.argv[0]) == 'codex':
     fn settings(&self, provider: &str, yolo: bool, chrome: bool) {
         self.repo.create_file(".lf/config.yaml", &format!("agent: {provider}\nyolo: {yolo}\nchrome: {chrome}\ndiff: false\ndiff_files: false\npaste: false\n"));
     }
+}
+
+fn fixture_path(home: &Path) -> String {
+    format!("{}:/usr/bin:/bin", home.join("bin").display())
 }
 
 /// Each OpenCode launch's private stderr log, found where it is retained.
@@ -1082,6 +1087,104 @@ fn task_conversation_preparation_is_passive_and_connect_uses_shared_launch_setti
 }
 
 #[test]
+fn a_reopened_antigravity_task_hears_repository_direction_once() {
+    use loopflow_execution::harness::{launcher, ReopenSteers};
+    for harness in loopflow_harness::HarnessKind::ALL {
+        match launcher(harness).capabilities().reopen_steers {
+            ReopenSteers::PromptHook => check_prompt_hook_reopen(harness),
+            // server::wake exercises the first reported boundary on every server route.
+            ReopenSteers::ServerBoundary => continue,
+        }
+    }
+}
+
+fn check_prompt_hook_reopen(harness: loopflow_harness::HarnessKind) {
+    let fixture = Fixture::new(harness.as_str());
+    let home = fixture.home.path();
+    let machine = home.join("machine");
+    let _env = support::EnvGuard::with_lf_home(&[], &machine);
+    let task = support::register_task_without_pr(
+        &machine,
+        fixture.repo.path(),
+        "main",
+        &fixture.repo.head_sha(),
+    );
+    let resume = ["resume", "--task", task.task.id.as_str()];
+    let heard = || -> Vec<Value> {
+        serde_json::from_slice(&fs::read(home.join("tui-heard.json")).unwrap()).unwrap()
+    };
+    fixture.run(&resume);
+    let first = heard();
+    assert_eq!(first.len(), 1);
+    let session = fixture.session();
+
+    success(
+        &fixture
+            .command()
+            .args(["--repo", ".", "steer", "REOPEN_DIRECTION"])
+            .output()
+            .unwrap(),
+    );
+    let resumed = fixture.run(&resume);
+    pair(
+        &resumed,
+        "--conversation",
+        first[0]["conversation"].as_str().unwrap(),
+    );
+    let turns = heard();
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0]["conversation"], first[0]["conversation"]);
+    assert!(
+        turns[0]["context"]
+            .as_str()
+            .unwrap()
+            .contains("REOPEN_DIRECTION"),
+        "{turns:?}"
+    );
+
+    let page = fixture
+        .command()
+        .args(["session", "steers", &session, "--json"])
+        .output()
+        .unwrap();
+    success(&page);
+    let page: Value = serde_json::from_slice(&page.stdout).unwrap();
+    assert_eq!(page["pending"], 0);
+    assert!(page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|row| row["steer"]["text"] == "REOPEN_DIRECTION" && row["delivered_at"].is_number()));
+
+    // A PR comment produces a Task update when read, with no direct steer
+    // to start a turn for it.
+    let store = loopflow_execution::store::open_sqlite(&machine.join("loopflow.db")).unwrap();
+    store
+        .append_task_comment(
+            &task.task.id,
+            &loopflow_model::comment::TaskComment {
+                id: "resumed-pr".into(),
+                body: "PR: https://example.test/pr/21".into(),
+                author: loopflow_model::comment::TaskCommentAuthor::Person {
+                    name: Some("Reviewer".into()),
+                },
+                created_at: Some("2026-11-25T03:00:00Z".into()),
+            },
+        )
+        .unwrap();
+    fixture.run(&resume);
+    let updates = heard();
+    assert_eq!(updates.len(), 1);
+    let context = updates[0]["context"].as_str().unwrap();
+    assert!(context.contains("example.test/pr/21"), "{context}");
+    assert!(!context.contains("REOPEN_DIRECTION"), "{context}");
+
+    let quiet = fixture.run(&resume);
+    assert!(!args(&quiet).contains(&"-i"));
+    assert!(heard().is_empty());
+}
+
+#[test]
 fn another_agent_resumes_a_failed_codex_bootstrap_on_its_own_input() {
     let fixture = Fixture::new("codex");
     let machine = fixture.home.path().join("machine");
@@ -1312,6 +1415,95 @@ fn live_taskless_provider_switch_preserves_identity_and_accepts_terminal_input()
             .id,
         after.id
     );
+}
+
+#[test]
+fn resume_switches_a_bound_agy_conversation_to_claude_in_its_original_worktree() {
+    let fixture = Fixture::new("agy");
+    let agy = fixture.home.path().join("bin/agy");
+    fs::write(
+        &agy,
+        format!(
+            "{}\nsys.stdin.readline()\n",
+            include_str!("../../loopflow-execution/tests/support/agy_cli.py")
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(agy, fs::Permissions::from_mode(0o755)).unwrap();
+    let origin = fixture
+        .repo
+        .create_named_worktree("research")
+        .canonicalize()
+        .unwrap();
+    let delivery = fixture.repo.create_named_worktree("delivery");
+    let created = fixture
+        .command()
+        .args([
+            "task",
+            "create",
+            "--title",
+            "Delivery",
+            "--worktree",
+            delivery.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    success(&created);
+    let created: Value = serde_json::from_slice(&created.stdout).unwrap();
+    let task = created["task"]["id"].as_str().unwrap();
+    let mut first = fixture
+        .command()
+        .current_dir(&origin)
+        .args(["-i", "-a", "agy", ":", "Keep the draft here"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !fixture.home.path().join("tui-heard.json").exists() {
+        assert!(
+            first.try_wait().unwrap().is_none(),
+            "agy exited before its first turn"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "agy did not finish its first turn"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let id = fixture.session();
+    let bound = fixture
+        .command()
+        .args(["session", "bind", &id, "--task", task])
+        .output()
+        .unwrap();
+    success(&bound);
+
+    let switched = fixture
+        .command()
+        .current_dir(&origin)
+        .args(["resume", "-a", "claude:fable"])
+        .output()
+        .unwrap();
+    drop(first.stdin.take());
+    first.wait().unwrap();
+    success(&switched);
+    let received = fixture.received();
+    assert_eq!(received["cwd"], origin.to_str().unwrap());
+    let prompt = received["input"].as_str().unwrap();
+    assert!(prompt.contains("Keep the draft here"), "{prompt}");
+    assert!(prompt.contains("## assistant\n\nanswer to:"), "{prompt}");
+    let card = fixture
+        .command()
+        .args(["session", "card", &id, "--json"])
+        .output()
+        .unwrap();
+    success(&card);
+    let card: Value = serde_json::from_slice(&card.stdout).unwrap();
+    assert_eq!(card["session"]["provider"], "claude");
+    assert_eq!(card["session"]["task_ids"], serde_json::json!([task]));
 }
 
 #[test]

@@ -68,8 +68,12 @@ def _hook(event, conversation, **more):
                 timeout=60,
                 check=True,
             ).stdout
-            for step in json.loads(output).get("injectSteps", []):
-                texts.append(step["systemMessage"]["systemMessage"])
+            messages = [step["systemMessage"] for step in json.loads(output).get("injectSteps", [])]
+            # agy 1.5.16 and 1.5.17 discard this hook's entire reply, including
+            # ordinary context steps beside the one requesting inline markdown.
+            if any(isinstance(m.get("metadata", {}).get("user_markdown"), str) for m in messages):
+                continue
+            texts.extend(m["systemMessage"] for m in messages)
     return "\n".join(texts)
 
 
@@ -131,17 +135,18 @@ def _terminal():
     continues the same process under a second conversation."""
     prompt = _option("-i") or ""
     _receive(prompt)
-    prompts = [prompt]
+    resumed = _option("--conversation")
+    turns = [(resumed or str(uuid.uuid4()), prompt, bool(resumed))] if prompt else []
     if (HOME / "tui-new").exists():
-        prompts.append((HOME / "tui-new").read_text())
-    conversation = _option("--conversation") or str(uuid.uuid4())
+        turns.append((str(uuid.uuid4()), (HOME / "tui-new").read_text(), False))
     heard = []
-    for prompt in prompts:
+    for conversation, prompt, resumed_thread in turns:
         heard.append(
             {
                 "conversation": conversation,
                 "context": _hook(
-                    "PreInvocation", conversation, invocationNum=0, initialNumSteps=1
+                    "PreInvocation", conversation, lastUserInput=prompt,
+                    invocationNum=0, initialNumSteps=3 if resumed_thread else 1,
                 ),
             }
         )
@@ -152,7 +157,6 @@ def _terminal():
         ]
         _keep(conversation, rows)
         _hook("Stop", conversation, executionNum=0, terminationReason="NO_TOOL_CALL")
-        conversation = str(uuid.uuid4())
     (HOME / "tui-heard.json").write_text(json.dumps(heard))
 
 
@@ -201,6 +205,11 @@ def main():
     if (HOME / "hold-turn").exists():
         (HOME / "holding").write_text(conversation)
     _wait(lambda: not (HOME / "hold-turn").exists(), "turn")
+    if (HOME / "ask-question").exists():
+        tool = {"name": "ask_question", "parameters": {"Question": "Use the fixture?"}}
+        step += 1
+        for state in ("ACTIVE", "DONE"):
+            update(step, state, "tool", tool_name="ask_question", tool_info=tool)
     if (HOME / "tool_turn.py").exists():
         (HOME / "hook-context").write_text(context)
         tool = {"name": "run_command", "parameters": {"CommandLine": "echo hi"}}

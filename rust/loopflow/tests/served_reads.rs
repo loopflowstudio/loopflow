@@ -473,7 +473,7 @@ fn working_task_drop_keeps_its_side_after_another_window_reorders() {
 }
 
 #[test]
-fn served_binding_moves_the_conversation_to_the_task_checkout() {
+fn served_binding_keeps_the_conversation_in_its_directory() {
     use loopflow::lf::commands::write::Write;
 
     let home = tempfile::tempdir().unwrap();
@@ -520,7 +520,7 @@ fn served_binding_moves_the_conversation_to_the_task_checkout() {
         preview: false,
     });
     assert_eq!(bound["id"], session["id"]);
-    assert_eq!(bound["cwd"], destination.to_str().unwrap());
+    assert_eq!(bound["cwd"], session["cwd"]);
     assert_eq!(bound["primary_scope"], "task");
     assert_eq!(processes(&home.path().join("loopflow.db")), before);
 }

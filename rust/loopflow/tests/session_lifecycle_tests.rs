@@ -2656,7 +2656,7 @@ fn promotion_explicit_sources_with_run_keep_the_selected_work() {
 }
 
 #[test]
-fn promotion_sets_directory_immediately_and_resumes_same_native_conversation() {
+fn binding_keeps_the_conversation_in_its_worktree() {
     let fixture = Fixture::new(true);
     let origin = fixture
         .repo
@@ -2698,7 +2698,20 @@ fn promotion_sets_directory_immediately_and_resumes_same_native_conversation() {
             .unwrap();
         let captures = fixture.captures();
         let attachment = fixture.input_attachment(&id);
-        let bound = fixture.json(&["session", "bind", &id, "--task", task_id, "--json"]);
+        let output = fixture.run(&["session", "bind", &id, "--task", task_id, "--json"]);
+        assert!(output.status.success(), "{output:?}");
+        let diagnostic = format!(
+            "Conversation stays in {}; {}'s checkout is {}.",
+            origin.display(),
+            task["identifier"].as_str().unwrap(),
+            destination.display()
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(&diagnostic),
+            "{output:?}"
+        );
+        let bound: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(bound["cwd"], origin.to_str().unwrap());
         assert_eq!(bound["id"], id);
         assert_eq!(fixture.input_attachment(&id), attachment);
         let after = fixture
@@ -2706,9 +2719,8 @@ fn promotion_sets_directory_immediately_and_resumes_same_native_conversation() {
             .into_iter()
             .find(|s| s["id"] == id)
             .unwrap();
-        assert_eq!(after["cwd"], destination.to_str().unwrap());
+        assert_eq!(after["cwd"], origin.to_str().unwrap());
         assert_eq!(after["agent_process_id"], before["agent_process_id"]);
-        // Binding selects the directory without rewriting the running child's launch.
         let launch_cwd: String = fixture
             .db()
             .query_row(
@@ -2721,6 +2733,15 @@ fn promotion_sets_directory_immediately_and_resumes_same_native_conversation() {
         let opened = fixture.json(&["resume", "--task", task_id, "--prepare", "--json"]);
         assert_eq!(opened["id"], id);
         assert_eq!(opened["cwd"], after["cwd"]);
+        let prepared = fixture
+            .command(&["resume", "--prepare", "--json"])
+            .current_dir(&origin)
+            .output()
+            .unwrap();
+        assert!(prepared.status.success(), "{prepared:?}");
+        let local: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+        assert_eq!(local["id"], id);
+        assert_eq!(local["cwd"], after["cwd"]);
         let status = fixture.json(&["task", "status", task_id, "--json"]);
         assert_eq!(status["sessions"][0]["cwd"], after["cwd"]);
         assert_eq!(fixture.captures(), captures);
@@ -2739,7 +2760,7 @@ fn promotion_sets_directory_immediately_and_resumes_same_native_conversation() {
         &std::fs::read_to_string(fixture.home.path().join("received.json")).unwrap(),
     )
     .unwrap();
-    assert_eq!(received["cwd"], destination.to_str().unwrap());
+    assert_eq!(received["cwd"], origin.to_str().unwrap());
     let native_after: Value = serde_json::from_str(
         &std::fs::read_to_string(fixture.home.path().join("native-sessions.json")).unwrap(),
     )
@@ -2756,13 +2777,13 @@ fn promotion_sets_directory_immediately_and_resumes_same_native_conversation() {
         .as_object()
         .unwrap()
         .values()
-        .all(|cwd| cwd == destination.to_str().unwrap()));
+        .all(|cwd| cwd == origin.to_str().unwrap()));
     let after = fixture
         .sessions()
         .into_iter()
         .find(|s| s["id"] == id)
         .unwrap();
-    assert_eq!(after["cwd"], destination.to_str().unwrap());
+    assert_eq!(after["cwd"], origin.to_str().unwrap());
     assert_eq!(
         std::fs::read_to_string(origin.join("draft.txt")).unwrap(),
         "keep unfinished work"

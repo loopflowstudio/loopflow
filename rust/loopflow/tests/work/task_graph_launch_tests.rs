@@ -1,6 +1,7 @@
 use crate::test_linear_input::SeedLinear;
 use crate::test_support as support;
 use loopflow_execution::test_support::task_graph::{hold_build_jobs, holding_claude, worker_job};
+use loopflow_harness::HarnessKind;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -2089,31 +2090,34 @@ fn pi_stand_in() -> String {
     )
 }
 
+/// Agent selection, executable and final answer for one worker.
+fn worker(harness: HarnessKind) -> (&'static str, String, &'static str) {
+    match harness {
+        HarnessKind::Claude => ("claude", holding_claude(), "Held."),
+        HarnessKind::Codex => (
+            "codex",
+            support::codex_app_server_script("Worker finished.", ""),
+            "Worker finished.",
+        ),
+        HarnessKind::OpenCode => (
+            "opencode:opencode/fixture",
+            opencode_stand_in(),
+            "Fixture completed.",
+        ),
+        HarnessKind::Pi => ("pi:fixture/model", pi_stand_in(), "answer 1:"),
+        HarnessKind::Antigravity => ("agy", antigravity_stand_in(), "answer to:"),
+    }
+}
+
 /// One `implement` step on each stand-in: it settles and the Graph moves on,
 /// with its answer, native thread and usage recorded. While its one tool
 /// runs, `lf steer` saves a steer; the hooks lf gave the harness return the
 /// step's context before the tool and the steer after it.
 #[test]
 fn a_task_step_runs_as_a_worker_on_every_harness() {
-    let opencode = opencode_stand_in();
-    let pi = pi_stand_in();
-    for (provider, agent, script, answer) in [
-        (
-            "opencode",
-            "opencode:opencode/fixture",
-            opencode,
-            "Fixture completed.",
-        ),
-        ("pi", "pi:fixture/model", pi, "answer 1:"),
-        ("agy", "agy", antigravity_stand_in(), "answer to:"),
-        ("claude", "claude", holding_claude(), "Held."),
-        (
-            "codex",
-            "codex",
-            support::codex_app_server_script("Worker finished.", ""),
-            "Worker finished.",
-        ),
-    ] {
+    for harness in HarnessKind::ALL {
+        let provider = harness.as_str();
+        let (agent, script, answer) = worker(harness);
         let task = GraphTask::with_tools(&[(provider, &script)]);
         define_worker_graph(&task);
         let home = task.home.path();
@@ -2158,19 +2162,14 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
         );
         assert!(
             String::from_utf8_lossy(&history.stdout).contains(answer),
-            "{provider}: {history:?}"
+            "{provider}: missing worker answer"
         );
 
-        // The start hook named this worker's Session and Task, and the hook
-        // after the tool brought the steer saved while the tool ran.
         let context = fs::read_to_string(home.join("hook-context")).unwrap();
         assert!(
-            context.contains(&format!("This Session: {session}\n")),
-            "{provider}: {context}"
-        );
-        assert!(
-            context.contains("This Session's Task: INF-123"),
-            "{provider}: {context}"
+            context.contains(&format!("This Session: {session}\n"))
+                && context.contains("This Session's Task: INF-123"),
+            "{provider}: {context}",
         );
         let steer = fs::read_to_string(home.join("hook-steer")).unwrap();
         assert!(steer.contains("WORKER_DIRECTION"), "{provider}: {steer}");
@@ -2184,12 +2183,13 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
             .unwrap()
             .iter()
             .find(|run| run["session_id"] == session.as_str())
-            .map(|run| &run["usage"])
-            .unwrap();
+            .map(|run| &run["usage"]);
         // Pi's stand-in counts its one model call its own way.
         let (input, output) = if provider == "pi" { (10, 3) } else { (20, 5) };
-        assert_eq!(usage["input_tokens"], input, "{provider}: {usage}");
-        assert_eq!(usage["output_tokens"], output, "{provider}: {usage}");
+        assert!(
+            usage.is_some_and(|u| u["input_tokens"] == input && u["output_tokens"] == output),
+            "{provider}: {usage:?}",
+        );
     }
 }
 
@@ -2199,19 +2199,35 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
 /// answer is a steer, which the next run's conversation hears.
 #[test]
 fn a_question_with_nobody_there_ends_the_step() {
-    for (provider, agent, script) in [
-        ("opencode", "opencode:opencode/fixture", opencode_stand_in()),
-        ("pi", "pi:fixture/model", pi_stand_in()),
-    ] {
+    for harness in HarnessKind::ALL {
+        let provider = harness.as_str();
+        let (agent, script, _) = worker(harness);
         let task = GraphTask::with_tools(&[(provider, &script)]);
         define_worker_graph(&task);
         let home = task.home.path();
         fs::write(home.join("ask-question"), "").unwrap();
+        fs::write(home.join("release"), "").unwrap();
 
         let asked = task.task_run(&["task", "run", "INF-123", "worker", "-a", agent]);
-        assert!(!asked.success(), "{provider}: {}", asked.text);
         let reason = "asked a question with nobody there to answer it: Use the fixture?";
-        assert!(asked.text.contains(reason), "{provider}: {}", asked.text);
+        match harness {
+            // TODO(Task 48edb9): these decoders still let the question pass.
+            HarnessKind::Claude | HarnessKind::Codex | HarnessKind::Antigravity => {
+                assert!(asked.success(), "{provider}: {}", asked.text);
+                assert!(
+                    at_breakpoint(&task.graph()["position"], "review"),
+                    "{provider}"
+                );
+                continue;
+            }
+            HarnessKind::OpenCode | HarnessKind::Pi => {
+                assert!(
+                    !asked.success() && asked.text.contains(reason),
+                    "{provider}: {}",
+                    asked.text
+                );
+            }
+        }
         assert!(
             asked
                 .text
@@ -3033,35 +3049,11 @@ fn smart_unpause_starts_an_uncaptured_graph_and_preserves_review_and_end() {
 /// interrupted, nothing starts the run again, and the next `lf task run` takes
 /// the step up and moves the Graph on.
 #[test]
-fn a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_claude_and_codex() {
-    interrupt_a_worker("claude", "claude", &holding_claude(), "Held.");
-    interrupt_a_worker(
-        "codex",
-        "codex",
-        &support::codex_app_server_script("Worker finished.", ""),
-        "Worker finished.",
-    );
-}
-
-#[test]
-fn a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_opencode_and_pi() {
-    interrupt_a_worker(
-        "opencode",
-        "opencode:opencode/fixture",
-        &opencode_stand_in(),
-        "Fixture completed.",
-    );
-    interrupt_a_worker("pi", "pi:fixture/model", &pi_stand_in(), "answer 1:");
-}
-
-#[test]
-fn a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_antigravity() {
-    interrupt_a_worker("agy", "agy", &antigravity_stand_in(), "answer to:");
-}
-
-fn interrupt_a_worker(provider: &str, agent: &str, script: &str, answer: &str) {
-    {
-        let task = GraphTask::with_tools(&[(provider, script)]);
+fn a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again() {
+    for harness in HarnessKind::ALL {
+        let provider = harness.as_str();
+        let (agent, script, answer) = worker(harness);
+        let task = GraphTask::with_tools(&[(provider, &script)]);
         define_worker_graph(&task);
         let home = task.home.path();
         fs::write(home.join("hold-turn"), "").unwrap();
@@ -3130,68 +3122,112 @@ fn interrupt_a_worker(provider: &str, agent: &str, script: &str, answer: &str) {
 /// run is not started again; with another agent in the order the step runs there.
 #[test]
 fn a_step_that_cannot_launch_is_not_started_again() {
-    let codex = support::codex_app_server_script("Worker finished.", "");
-    let task = GraphTask::with_tools(&[("codex", &codex)]);
-    define_worker_graph(&task);
-
-    let pinned = task.task_run(&[
-        "task",
-        "run",
-        "INF-123",
-        "worker",
-        "-a",
-        "opencode:opencode/fixture",
-    ]);
-    assert!(!pinned.success(), "{}", pinned.text);
-    let hint = "'opencode' is not installed. Install OpenCode 2 or later";
-    assert!(pinned.text.contains(hint), "{}", pinned.text);
-    assert!(
-        pinned.text.contains("stopped before any agent started"),
-        "{}",
-        pinned.text
-    );
-    assert!(
-        !pinned.text.contains("starting it again"),
-        "{}",
-        pinned.text
-    );
-    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
-    let status = task.text_status();
-    assert!(status.contains("'opencode' is not installed"), "{status}");
-
-    task.ok(&[
-        "set",
-        "--global",
-        "agents",
-        "opencode:opencode/fixture,codex",
-    ]);
-    let moved = task.task_run(&["task", "run", "INF-123"]);
-    assert!(moved.success(), "{}", moved.text);
-    assert!(at_breakpoint(&task.graph()["position"], "review"));
-    assert_eq!(support::recorded_graphs(task.home.path()).len(), 2);
-    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
-    let ran_on_codex: bool = db
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1 AND provider='codex'
-                 AND skill='implement' AND interactive=0 AND completed_at IS NOT NULL)",
-            [task.registered.task.id.as_str()],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert!(ran_on_codex, "{}", moved.text);
-    let recorded: String = db
-        .query_row("SELECT reason FROM agent_limit_recoveries", [], |row| {
-            row.get(0)
+    // Filtering PATH alone cannot model an uninstalled CLI: lf restores the
+    // Machine's tool directories at startup. Use the same filesystem view as
+    // gate when a developer runs this single test on a Machine with providers.
+    let restored = [
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/usr/local/bin",
+        "/usr/local/sbin",
+    ];
+    if restored.iter().any(|dir| {
+        HarnessKind::ALL.iter().any(|kind| {
+            loopflow_execution::os_process::which_on_path(&Path::new(dir).join(kind.as_str()))
+                .is_some()
         })
-        .unwrap();
-    assert!(
-        recorded.starts_with("'opencode' is not installed")
-            && recorded.ends_with(&format!(
-                "{}codex",
-                loopflow_execution::ops::task_execution::MOVED_TO
-            )),
-        "{recorded}"
-    );
+    }) {
+        assert!(
+            std::env::var_os("LOOPFLOW_NETWORK_ISOLATED").is_none(),
+            "test sandbox still sees a Machine provider"
+        );
+        let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/test_network.py");
+        let status = Command::new("uv")
+            .args(["run", "--no-sync", "python"])
+            .arg(script)
+            .arg(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                std::thread::current().name().unwrap(),
+                "--nocapture",
+            ])
+            .env("LOOPFLOW_TEST_LF", loopflow_test_support::lf_binary())
+            .status()
+            .unwrap();
+        assert!(status.success(), "isolated missing-CLI fixture: {status}");
+        return;
+    }
+    for harness in HarnessKind::ALL {
+        let provider = harness.as_str();
+        let (agent, _, _) = worker(harness);
+        let fallback = if harness == HarnessKind::Codex {
+            HarnessKind::Claude
+        } else {
+            HarnessKind::Codex
+        };
+        let (next, script, _) = worker(fallback);
+        let task = GraphTask::with_tools(&[(fallback.as_str(), &script)]);
+        define_worker_graph(&task);
+        fs::write(task.home.path().join("release"), "").unwrap();
+        let pinned = task.task_run(&["task", "run", "INF-123", "worker", "-a", agent]);
+        let missing = format!("'{provider}' is not installed");
+        let hint = loopflow_execution::harness::launcher(harness)
+            .capabilities()
+            .install_hint;
+        assert!(
+            !pinned.success() && pinned.text.contains(&missing) && pinned.text.contains(hint),
+            "{provider}: {}",
+            pinned.text
+        );
+        assert!(
+            pinned.text.contains("stopped before any agent started"),
+            "{}",
+            pinned.text
+        );
+        assert!(
+            !pinned.text.contains("starting it again"),
+            "{}",
+            pinned.text
+        );
+        assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
+        assert!(task.text_status().contains(&missing), "{provider}");
+
+        task.ok(&["set", "--global", "agents", &format!("{agent},{next}")]);
+        let moved = task.task_run(&["task", "run", "INF-123"]);
+        let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+        let ran_on_fallback: bool = db
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1 AND provider=?2
+             AND skill='implement' AND interactive=0 AND completed_at IS NOT NULL)",
+                [task.registered.task.id.as_str(), fallback.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(moved.success(), "{provider}: {}", moved.text);
+        assert!(
+            ran_on_fallback,
+            "{provider}: no completed {fallback:?} worker"
+        );
+        assert!(
+            at_breakpoint(&task.graph()["position"], "review"),
+            "{provider}: {}",
+            moved.text
+        );
+        assert_eq!(support::recorded_graphs(task.home.path()).len(), 2);
+        let recorded: String = db
+            .query_row("SELECT reason FROM agent_limit_recoveries", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert!(
+            recorded.starts_with(&missing)
+                && recorded.ends_with(&format!(
+                    "{}{next}",
+                    loopflow_execution::ops::task_execution::MOVED_TO
+                )),
+            "{recorded}"
+        );
+    }
 }
 
 #[test]

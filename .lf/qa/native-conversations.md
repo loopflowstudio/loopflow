@@ -6,9 +6,19 @@ Real turns need real logins: keep the account's `HOME` (Claude's Keychain login
 and `~/.codex`) and isolate only `LF_HOME`, with the branch `lf` first on `PATH`.
 Interactive `-i` launches need no lf account. `lf checkout <task>` itself starts
 the Task's primary Claude conversation, which runs one `task-session` turn and
-goes idle: that alone is a managed idle conversation. Start Codex with
-`lf --task <task> -i -a codex : "Reply only with QA_OK"` in a PTY; its first turn
-needs no typing. A conversation is a wake candidate once
+goes idle: that alone is a managed idle conversation. For Codex, `lf task run
+<task> -a codex` makes the primary conversation Codex. `lf --task <task> -i -a
+codex : …` is a chat: it reports no turns, gets no `session_activity` row and is
+never a wake candidate.
+
+Set `TERM=xterm-256color` for a PTY driver started from an agent shell, which
+has `TERM=dumb`. Codex's folder-trust dialog ignored every key from the driver
+(`\r`, `ESC[13u`, `1`) even then. Trust the repository root by appending
+`[projects."<root>"] trust_level = "trusted"` to `~/.codex/config.toml`, the
+entry the dialog writes. Back the file up first and restore it afterwards.
+Claude's trust dialog defaults to "No, exit": send `ESC [ B`, then Enter. A
+repository steer (`lf --repo . steer`) wakes every idle conversation in the
+repository and waits on every closed one. A conversation is a wake candidate once
 `session_activity.yielded` is 1 and `processes.inbox` (Claude) or
 `processes.endpoint` (Codex) is set. Then `lf comment <task> 'Reply only with X'`
 and read the reply: Claude's in

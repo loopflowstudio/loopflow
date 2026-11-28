@@ -4,18 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>LOO-1096 · Concept review at 59f26fa51d</title>
+<title>LOO-1096 · Concept review at c4309d595e</title>
 <style>
 :root{color-scheme:light dark;--bg:#f6f5f0;--paper:#fffefa;--ink:#1b2420;--muted:#4f5c56;--line:#c2c9bf;--accent:#1c604a;--wash:#e5efe7;--warn:#8e3f22;--warnwash:#f6e8df;--codebg:#eeede6;font-family:"Instrument Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 @media(prefers-color-scheme:dark){:root{--bg:#151b19;--paper:#1d2521;--ink:#edf2e9;--muted:#b5c3b9;--line:#48574d;--accent:#99dbb5;--wash:#243c30;--warn:#ffb694;--warnwash:#3a2a23;--codebg:#111715}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-size:16px;line-height:1.52}main{max-width:1040px;padding:clamp(20px,5vw,54px);margin:auto}
 header{border-top:5px solid var(--accent);padding-top:14px}header small,.label,.speaker,.badge{color:var(--accent);font-size:.76rem;font-weight:720;letter-spacing:.06em;text-transform:uppercase}
 h1,h2,h3,p{margin:0}h1,h2{font-family:"Iowan Old Style",Georgia,serif;font-weight:500;line-height:1.12;text-wrap:balance}h1{font-size:clamp(2.2rem,5vw,3.7rem);margin:.28em 0}h2{font-size:clamp(1.5rem,3.2vw,2.1rem);margin-bottom:.62em}h3{font-size:1.05rem;line-height:1.3;margin:.3em 0 .5em}header p{max-width:78ch}section{margin-top:2.7rem}a{color:var(--accent);text-underline-offset:.19em}
-code{font:.88em ui-monospace,"SFMono-Regular",Consolas,monospace;overflow-wrap:anywhere}pre{margin:.65rem 0 0;padding:.75rem .9rem;background:var(--codebg);border:1px solid var(--line);border-radius:4px;font:.83rem/1.45 ui-monospace,"SFMono-Regular",Consolas,monospace;overflow-x:auto;white-space:pre-wrap}
+code{font:.88em ui-monospace,"SFMono-Regular",Consolas,monospace;overflow-wrap:anywhere}
 p+p{margin-top:.75em}.pair{display:grid;gap:1rem;grid-template-columns:repeat(2,minmax(0,1fr))}
 article,figure{margin:0;background:var(--paper);border:1px solid var(--line);padding:1.15rem;border-radius:5px}
 .before{border-top:3px solid var(--warn)}.before .label{color:var(--warn)}.after{border-top:3px solid var(--accent)}
-.badge{display:inline-block;padding:.12rem .45rem;border-radius:3px;background:var(--wash);margin-right:.4rem}.badge.prop{background:var(--warnwash);color:var(--warn)}
+.badge{display:inline-block;padding:.12rem .45rem;border-radius:3px;background:var(--wash);margin-right:.4rem}.badge.open{background:var(--warnwash);color:var(--warn)}
 .bar{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;margin-top:.65rem;padding:.55rem .7rem;background:var(--codebg);border:1px solid var(--line);border-radius:5px;font:.84rem ui-monospace,"SFMono-Regular",Consolas,monospace}
 .pill{display:inline-flex;align-items:center;gap:.25rem;padding:.18rem .5rem;border-radius:5px;border:1px solid var(--line);background:var(--paper)}
 .pill.chip{font-weight:650;border-color:var(--accent);background:var(--wash)}
@@ -23,49 +23,21 @@ article,figure{margin:0;background:var(--paper);border:1px solid var(--line);pad
 .pill.btn{border-style:dashed;color:var(--muted)}
 .pill.marker{border-color:transparent;background:transparent;color:var(--muted)}
 .blocker{font-size:.8rem;color:var(--warn)}
-figure{margin-top:1rem;padding:0}figcaption,.turn{padding:.8rem 1.15rem}figcaption{color:var(--muted);border-bottom:1px solid var(--line);font-size:.9rem}.turn{display:grid;grid-template-columns:156px 1fr;gap:.8rem}.turn+.turn{border-top:1px solid var(--line)}.reply{background:var(--wash)}.warnrow{background:var(--warnwash)}.speaker{letter-spacing:normal;text-transform:none}
+figure{margin-top:1rem;padding:0}figcaption,.turn{padding:.8rem 1.15rem}figcaption{color:var(--muted);border-bottom:1px solid var(--line);font-size:.9rem}.turn{display:grid;grid-template-columns:156px 1fr;gap:.8rem}.turn+.turn{border-top:1px solid var(--line)}.reply{background:var(--wash)}
+.speaker{letter-spacing:normal;text-transform:none}
 .note{color:var(--muted);font-size:.9rem;margin-top:.7rem}
-table{border-collapse:collapse;width:100%}th,td{text-align:left;vertical-align:top;padding:.75rem .5rem;border-bottom:1px solid var(--line)}th{font-size:.84rem;color:var(--muted)}td:first-child{width:24%;font-weight:600}.yes,.no{font-weight:750;white-space:nowrap}.yes{color:var(--accent)}.no{color:var(--warn)}
+table{border-collapse:collapse;width:100%}th,td{text-align:left;vertical-align:top;padding:.75rem .5rem;border-bottom:1px solid var(--line)}th{font-size:.84rem;color:var(--muted)}td:first-child{width:24%;font-weight:600}.yes{font-weight:750;white-space:nowrap;color:var(--accent)}
 ol,ul{padding-left:1.35rem}li{padding:.22rem 0 .55rem .2rem}li p{margin:.28rem 0}
 @media(max-width:720px){.pair{grid-template-columns:1fr}.turn{grid-template-columns:1fr;gap:.2rem}td,th{padding:.58rem .25rem}td:first-child{width:28%}main{padding:20px 14px 40px}table{font-size:.9rem}}
 </style>
 </head>
 <body><main>
 <header>
-<small>LOO-1096 · Post-build concept review at 59f26fa51d</small>
-<h1>A marker is not a stage, and paused means quiet</h1>
-<p><strong>Area reviewed:</strong> Task Graph breakpoints end to end — Graph authoring and compilation, runner execution, handoff delivery and wake, pause/unpause interaction, reply continuation, waits, CLI status, and Desktop/iOS workflow controls and projections — reviewed fresh at <code>59f26fa51d</code> against base <code>6deb3b0450</code>.</p>
-<p class="note"><span class="badge">Built &amp; committed</span> Passes 1–6, merge with <code>main</code> (<code>lf task pause</code>, shared workflow bar, review pages), ship-review answers, compression, and QA (<code>59f26fa51d</code>). <span class="badge prop">Proposed · Pass 7</span> Two model splits introduced in Pass 6 are written into <a href="plan.md">scratch/plan.md</a> for the next pass before delivery.</p>
+<small>LOO-1096 · Post-build concept review at c4309d595e</small>
+<h1>Graph breakpoints line up from YAML to Desktop</h1>
+<p><strong>Area reviewed:</strong> Task Graph breakpoints end to end — Graph authoring and compilation, legacy <code>interactive:</code> capture translation, runner execution, handoff delivery and wake across all five harnesses, pause/unpause interaction, reply continuation, waits, CLI status, and Desktop/iOS workflow controls and projections — reviewed fresh at <code>c4309d595e</code> against base <code>fd8dce986d</code>.</p>
+<p class="note"><span class="badge">Built &amp; committed</span> Passes 1–7, the merge with <code>main</code> (<code>fd8dce986d</code>, including <code>#2036</code> Pause, <code>#2045</code> Antigravity idle wake, <code>#2048</code> review pages), Pass 7’s workflow-track and pause-wake fixes (<code>4971b4dd5c</code>, <code>cc73f2d81a</code>), compression (<code>c273d84a53</code>), and unified read-side translation of released interactive captures (<code>c4309d595e</code>). <span class="badge open">Open for review</span> No concept mismatches remain; one reversible pause/unpause default is built as <b>1a</b> below.</p>
 </header>
-
-<section aria-labelledby="biggest"><h2 id="biggest">Biggest mismatch: overloaded track markers and chip labels</h2>
-<p>Pass 6 merged the shared workflow bar (<code>TaskWorkflowControls</code>) and <code>lf task pause</code>, and adopted your ship-review display (<code>explore · 👤 · plan</code>, no <code>after-explore</code>). The underlying wire shape stayed two booleans (<code>WorkflowStep.breakpoint</code> and <code>TaskGraphPosition::Breakpoint.blocked</code>) plus a single <code>WorkflowControl.label</code>, so one field is doing two jobs in four places:</p>
-
-<div class="pair">
-<article class="before">
-<div class="label">Existing at HEAD · 59f26fa51d</div>
-<h3>One boolean, one label, four contradictions</h3>
-<p><strong>1. Paused at a breakpoint loses “Paused”:</strong> <code>TaskActions</code> keeps <code>breakpointArrival</code> non-nil when paused, so the chip hides Rust’s <code>Paused: after-explore</code> behind a bare person icon.</p>
-<div class="bar"><span class="pill warn">▶</span><span class="pill">explore</span><span class="pill warn">👤 ⌄</span><span class="pill">plan</span><span class="pill">build</span></div>
-<p style="margin-top:.85rem"><strong>2. Clicking 👤 on the track jumps to an empty stop:</strong> the <em>Start from</em> menu excludes breakpoints, but the track still wraps every non-current <code>👤</code> in a button (<code>Start from after-explore</code>) that launches a producerless run.</p>
-<div class="bar"><span class="pill">▶</span><span class="pill">explore</span><span class="pill btn">👤 ↗ --from after-explore</span><span class="pill chip">plan ⌄</span></div>
-<p style="margin-top:.85rem"><strong>3. Name collision hides a real stage:</strong> Swift guesses standalone breakpoints via <code>breakpoints.contains(step.name)</code>; a composed stage named <code>review</code> containing <code>- break: review</code> loses its name and disappears from <em>Start from</em>.</p>
-<p style="margin-top:.85rem"><strong>4. Composed blocked breakpoint prints twice:</strong> Rust puts the worker’s blocker sentence into <code>WorkflowControl.label</code>, so a blocked review inside a composed stage renders the same blocker inside the chip and again beside the track.</p>
-</article>
-
-<article class="after">
-<div class="label">Proposed · Pass 7</div>
-<h3>Three step kinds, separate blocker field, honest hold</h3>
-<p><strong>1. Paused always says Paused:</strong> <code>TaskActions</code> populates <code>breakpointArrival</code> and <code>breakpointBlocker</code> only while unpaused. Pausing at <code>after-explore</code> shows Rust’s exact hold label.</p>
-<div class="bar"><span class="pill warn">▶</span><span class="pill">explore</span><span class="pill warn">Paused: after-explore ⌄</span><span class="pill">plan</span><span class="pill">build</span></div>
-<p style="margin-top:.85rem"><strong>2. Track buttons match Start from:</strong> <code>WorkflowStep.kind</code> is <code>stage</code>, <code>stage_with_breakpoint</code>, or <code>breakpoint</code>. Standalone <code>👤</code> markers are never jump buttons and never guess from names.</p>
-<div class="bar"><span class="pill">▶</span><span class="pill">explore</span><span class="pill marker">👤</span><span class="pill chip">plan ⌄</span><span class="pill">build</span></div>
-<p style="margin-top:.85rem"><strong>3. Composed stage keeps its name and Start from entry:</strong> <code>stage_with_breakpoint</code> always draws <code>👤 review</code> and stays clickable, even when its inner break is also named <code>review</code>.</p>
-<p style="margin-top:.85rem"><strong>4. Blocker text prints once:</strong> <code>TaskGraphPosition::Breakpoint</code> carries <code>blocker: Option&lt;String&gt;</code>; <code>WorkflowControl.label</code> stays a chip label (<code>Blocked: pursue</code>), and the blocker sentence prints once beside the track.</p>
-<div class="bar"><span class="pill chip">Blocked: pursue ⌄</span><span class="blocker">Two incompatible schema migrations</span></div>
-</article>
-</div>
-</section>
 
 <section aria-labelledby="pairings"><h2 id="pairings">Do the product’s concepts and the code’s concepts line up at HEAD?</h2>
 <table>
@@ -74,75 +46,94 @@ ol,ul{padding-left:1.35rem}li{padding:.22rem 0 .55rem .2rem}li p{margin:.28rem 0
 <tr>
 <td>A worker runs on its own model, then <code>- break</code> pauses</td>
 <td class="yes">Yes</td>
-<td><strong>Built &amp; committed.</strong> <code>ConcreteStep::Breakpoint</code> replaces per-skill interactive flags; skills have two modes only (direct interactive vs. headless worker proposing a default); <code>feature</code>, <code>code</code>, <code>redesign</code>, and <code>research</code> use <code>- break</code>; authored break names reserve first and generated names join command labels into one shell word; legacy <code>interactive:</code> YAML and captures translate cleanly until LOO-1100.</td>
+<td><strong>Built &amp; committed.</strong> <code>ConcreteStep::Breakpoint</code> replaces per-skill interactive flags. Skills have two modes only (direct interactive <code>lf &lt;skill&gt;</code> vs. headless worker proposing a default). Builtin <code>feature</code>, <code>code</code>, <code>redesign</code>, and <code>research</code> use <code>- break</code>. Authored break names reserve first, generated names join command labels into one shell word, and ambiguous names fail compilation. Released <code>interactive:</code> YAML compiles to worker + breakpoint everywhere (including chat recipes), and released stored captures translate once on read (<code>CapturedGraph::read_saved</code> / <code>decode_row</code>) until LOO-1100.</td>
 </tr>
 <tr>
 <td>One visit to a breakpoint awaiting a reply</td>
 <td class="yes">Yes</td>
-<td><strong>Built &amp; committed.</strong> <code>task_graphs.breakpoint</code> stores <code>BreakpointArrival { id, cursor }</code> (mutually exclusive with <code>lf_process_id</code> via SQLite <code>CHECK</code>). <code>arrive_task_graph</code> parks and queues the handoff in one transaction; <code>start_task_graph_run</code> and <code>end_task_graph</code> atomically claim one visit; Desktop bar, Roadmap/Now, and iOS all send <code>--at-arrival</code>.</td>
+<td><strong>Built &amp; committed.</strong> <code>task_graphs.breakpoint</code> stores <code>BreakpointArrival { id, cursor }</code> (mutually exclusive with <code>lf_process_id</code> via SQLite <code>CHECK</code>). <code>arrive_task_graph</code> parks and queues <code>breakpoint:&lt;task&gt;</code> in one transaction; <code>start_task_graph_run</code> and <code>end_task_graph</code> atomically claim one arrival; Desktop workflow bar, Roadmap/Now Continue, and iOS Continue all send <code>--at-arrival</code>.</td>
 </tr>
 <tr>
 <td>Present finished work in the Task conversation</td>
 <td class="yes">Yes</td>
-<td><strong>Built &amp; committed.</strong> <code>RunningGraph::breakpoint_review</code> reads verdicts, final answers, or recorded command results and logs, resolves <code>scratch/</code> links with symlink-safe fallback, and names the next step. <code>server/wake.rs</code> wakes idle primaries and held-starts quit or crashed ones.</td>
+<td><strong>Built &amp; committed.</strong> <code>RunningGraph::breakpoint_review</code> reads verdicts, final answers, or recorded command results and log paths, resolves <code>scratch/</code> links with symlink-safe fallback, and names the next step. <code>server/wake.rs</code> wakes idle primaries across Claude, Codex, OpenCode, Pi, and Antigravity (via <code>#2045</code> on <code>main</code>) and held-starts quit or crashed primaries.</td>
 </tr>
 <tr>
 <td>What this Task needs right now (status, action, Now, sidebar, blocked runs)</td>
 <td class="yes">Yes</td>
-<td><strong>Built &amp; committed.</strong> <code>BreakpointActionEvidence::owns_execution</code> is shared across <code>snapshot.rs</code>, <code>task_actions.rs</code>, and <code>waves.rs</code>. <code>SelectionState::Breakpoint</code> is gated on <code>TaskState::Active</code>, floats breakpoints first in Now and when <em>Sort by status</em> is on, and keeps manual sidebar drag order intact when off.</td>
+<td><strong>Built &amp; committed.</strong> <code>BreakpointActionEvidence::owns_execution</code> is shared across <code>snapshot.rs</code>, <code>task_actions.rs</code>, and <code>waves.rs</code>; <code>Finished::of</code> keeps a parked breakpoint from reading as merged. <code>SelectionState::Breakpoint</code> is gated on <code>TaskState::Active</code>, floats breakpoints first in Now and when <em>Sort by status</em> is on, and preserves saved sidebar drag order when off.</td>
 </tr>
 <tr>
 <td>Carry a review reply to the next step or loop pass</td>
 <td class="yes">Yes</td>
-<td><strong>Built &amp; committed.</strong> <code>continue_from_breakpoint</code> sets the reply once: loop iterations carry it through the pass in <code>GraphProgress.direction</code>, and non-loop / loop-exit replies go to the first step after the review via <code>GraphProgress.handoff</code>. Replies write one <code>CommentKind::Breakpoint</code> comment without double-steering or echoing back as task news.</td>
+<td><strong>Built &amp; committed.</strong> <code>continue_from_breakpoint</code> places loop replies in <code>GraphProgress.direction</code> and single-step / loop-exit replies in <code>GraphProgress.handoff</code> (cleared once that immediate next step settles). Replies record one <code>CommentKind::Breakpoint</code> comment without double-steering or echoing back as task news.</td>
+</tr>
+<tr>
+<td>Workflow track: runnable stages vs. breakpoint markers, paused and blocked chips</td>
+<td class="yes">Yes</td>
+<td><strong>Built &amp; committed in Pass 7 (<code>4971b4dd5c</code>).</strong> <code>WorkflowStep.kind</code> is <code>stage</code>, <code>stage_with_breakpoint</code>, or <code>breakpoint</code>: standalone <code>👤</code> markers are non-clickable and omitted from <em>Start from</em>; composed stages keep <code>👤 &lt;name&gt;</code> and stay runnable even on a name collision. <code>TaskGraphPosition::Breakpoint</code> carries <code>blocker: Option&lt;String&gt;</code> so <code>WorkflowControl.label</code> stays a short chip label (<code>Blocked: &lt;chip&gt;</code>) and the blocker prints once beside the track. <code>TaskActions</code> gates <code>breakpointArrival</code> and <code>breakpointBlocker</code> on <code>!held</code> so paused Tasks always read <code>Paused: &lt;step&gt; ⌄</code>.</td>
+</tr>
+<tr>
+<td>Pausing a Task silences breakpoint prompts until you unpause it</td>
+<td class="yes">Yes</td>
+<td><strong>Built &amp; committed in Pass 7 (<code>cc73f2d81a</code>).</strong> <code>steers.rs:scopes()</code> excludes paused Tasks from <code>breakpoint:%</code> steers via an indexed <code>task_pauses</code> lookup, and <code>task_updates.rs</code> holds back generic Graph updates while <code>held_breakpoint</code> is set (keeping comments, PR changes, and parent notices flowing). On unpause, <code>release_task_pause</code> calls <code>republish_parked_breakpoint_in</code> inside the same transaction so an unread review wakes the primary once while an already-read review stays quiet.</td>
 </tr>
 <tr>
 <td>Wait for a review even with an open PR</td>
 <td class="yes">Yes</td>
 <td><strong>Built &amp; committed.</strong> <code>lf task wait --until breakpoint</code> (<code>TaskWaitUntil::Breakpoint</code>) returns on parked breakpoint, <code>end</code>, or terminal; <code>--until submitted</code> stays dedicated to PR submission.</td>
 </tr>
-<tr>
-<td>Workflow track: runnable stages vs. breakpoint markers, paused and blocked chips</td>
-<td class="no">No</td>
-<td><strong>Proposed in Pass 7.</strong> One boolean (<code>WorkflowStep.breakpoint</code>) hides the difference between a standalone marker and a composed stage with a breakpoint, making <code>👤</code> clickable on the track (contradicting <em>Start from</em>) and breaking on name collisions. <code>TaskActions</code> leaves <code>breakpointArrival</code> set while paused, hiding <code>Paused: after-explore</code> behind <code>👤 ⌄</code>. <code>WorkflowControl.label</code> carries raw blocker text, printing it twice for composed stages. Fix: <code>WorkflowStepKind</code>, <code>Breakpoint.blocker: Option&lt;String&gt;</code>, and <code>!held</code> gating in <code>TaskActions</code>.</td>
-</tr>
-<tr>
-<td>Pausing a Task silences breakpoint prompts until you unpause it</td>
-<td class="no">No</td>
-<td><strong>Proposed in Pass 7.</strong> <code>task_state_sql</code>, <code>selections.rs</code>, <code>waves.rs</code>, and <code>snapshot.rs</code> all let <code>Paused</code> supersede <code>Breakpoint</code>, but <code>steers.rs:scopes()</code> checks only <code>task_open_sql</code> and never checks <code>task_pauses</code>. If a draining command finishes into a breakpoint during pause (or a Task is paused before its primary reads the handoff), the watcher still wakes or held-starts the primary for a shelved Task and prompts a reply that <code>lf task run</code> refuses. Fix: exclude paused Tasks in <code>scopes()</code> and re-publish any unread parked breakpoint steer inside <code>release_task_pause</code> on unpause.</td>
-</tr>
 </tbody>
 </table>
-<p class="note">Inspected at <code>59f26fa51d</code> against <code>6deb3b0450</code> · <a href="../rust/loopflow-execution/src/task_graph.rs">task_graph.rs</a> · <a href="../rust/loopflow-execution/src/ops/task.rs">ops/task.rs</a> · <a href="../rust/loopflow-execution/src/ops/task/pause.rs">pause.rs</a> · <a href="../rust/loopflow-execution/src/ops/task_actions.rs">task_actions.rs</a> · <a href="../rust/loopflow-storage/src/sqlite/steers.rs">steers.rs</a> · <a href="../rust/loopflow-storage/src/sqlite/task_pause.rs">task_pause.rs</a> · <a href="../swift/Loopflow/Models/TaskWork.swift">TaskWork.swift</a> · <a href="../swift/Loopflow/Design/WorkflowLine.swift">WorkflowLine.swift</a> · <a href="../swift/Loopflow/Design/TaskActions.swift">TaskActions.swift</a> · <a href="../swift/Loopflow/Design/TaskWorkflowControls.swift">TaskWorkflowControls.swift</a></p>
+<p class="note">Inspected at <code>c4309d595e</code> against <code>fd8dce986d</code> · <a href="../rust/loopflow-execution/src/task_graph.rs">task_graph.rs</a> · <a href="../rust/loopflow-execution/src/task_graph/legacy.rs">legacy.rs</a> · <a href="../rust/loopflow-execution/src/store/task_work.rs">store/task_work.rs</a> · <a href="../rust/loopflow-execution/src/ops/task.rs">ops/task.rs</a> · <a href="../rust/loopflow-execution/src/ops/task/pause.rs">pause.rs</a> · <a href="../rust/loopflow-execution/src/ops/task_actions.rs">task_actions.rs</a> · <a href="../rust/loopflow-execution/src/harness/task_updates.rs">task_updates.rs</a> · <a href="../rust/loopflow-storage/src/sqlite/steers.rs">steers.rs</a> · <a href="../rust/loopflow-storage/src/sqlite/task_pause.rs">task_pause.rs</a> · <a href="../swift/Loopflow/Design/TaskActions.swift">TaskActions.swift</a> · <a href="../swift/Loopflow/Design/TaskWorkflowControls.swift">TaskWorkflowControls.swift</a> · <a href="../swift/Loopflow/Design/WorkflowLine.swift">WorkflowLine.swift</a></p>
 </section>
 
-<section aria-labelledby="walkthrough"><h2 id="walkthrough">Walked through normal, failure, and recovery</h2>
+<section aria-labelledby="resolved"><h2 id="resolved">What Pass 7 resolved since the previous review</h2>
+<div class="pair">
+<article class="before">
+<div class="label">Before Pass 7 · 59f26fa51d</div>
+<h3>Overloaded track booleans and loud holds</h3>
+<p>Paused breakpoints lost their <code>Paused:</code> chip behind bare <code>👤 ⌄</code>; standalone <code>👤</code> track items launched producerless runs; composed blocked reviews printed the blocker twice; paused Tasks still woke their primary for breakpoints; and released interactive captures still read as old interactive waits until run start.</p>
+<div class="bar"><span class="pill warn">▶</span><span class="pill">explore</span><span class="pill warn">👤 ⌄</span><span class="pill">plan</span><span class="pill btn">👤 ↗</span></div>
+</article>
+
+<article class="after">
+<div class="label">Built &amp; committed · c4309d595e</div>
+<h3>Explicit kinds, quiet holds, one capture shape</h3>
+<p>Paused Tasks show <code>Paused: &lt;step&gt; ⌄</code> and emit zero breakpoint wakes until unpaused. Standalone <code>👤</code> markers are non-clickable; composed stages stay clickable; blocked reviews print their reason once beside the track; and released captures translate once on read so status, pause, and run all see worker + breakpoint.</p>
+<div class="bar"><span class="pill warn">▶</span><span class="pill">explore</span><span class="pill warn">Paused: after-explore ⌄</span><span class="pill">plan</span><span class="pill marker">👤</span></div>
+<div class="bar"><span class="pill chip">Blocked: nested-review ⌄</span><span class="blocker">Choose a layout</span></div>
+</article>
+</div>
+</section>
+
+<section aria-labelledby="walkthrough"><h2 id="walkthrough">Normal, failure, and recovery paths verified at HEAD</h2>
 <figure>
-<figcaption>Failure &amp; recovery check · Pausing a Task while a command drains into a breakpoint, then unpausing later</figcaption>
-<div class="turn"><span class="speaker">1. Pause mid-command</span><div>Task runs <code>cmd: check</code> followed by <code>- break: review</code>. You run <code>lf task pause</code> to shelve it. Because operations drain cleanly, <code>check</code> finishes and parks at <code>review</code>, saving the arrival and review text.</div></div>
-<div class="turn warnrow"><span class="speaker">2. Today at HEAD</span><div><code>steers.rs</code> ignores <code>task_pauses</code>, so the watcher wakes your idle primary (or launches a held terminal for a quit primary) for a paused Task and tells you to reply — which fails with <em>“Task is paused.”</em> Meanwhile Desktop’s workflow bar shows <code>👤 ⌄</code> instead of <code>Paused: review ⌄</code>.</div></div>
-<div class="turn reply"><span class="speaker">3. Proposed · Pass 7</span><div>While paused, <code>scopes()</code> hides <code>breakpoint:&lt;task&gt;</code>: zero wakes, zero held-terminal starts, and Desktop’s chip reads <code>Paused: review ⌄</code>. When you later run <code>lf task unpause</code> (or click Unpause), <code>release_task_pause</code> clears the hold and — because that arrival has no delivered receipt — re-publishes its steer once in the same transaction so your primary immediately wakes and presents the review. If you had already read the review before pausing, unpause stays quiet.</div></div>
+<figcaption>Failure &amp; recovery · Pausing mid-command into a breakpoint, then unpausing later (built &amp; tested in <code>cc73f2d81a</code>)</figcaption>
+<div class="turn"><span class="speaker">1. Pause mid-command</span><div><code>cmd: check</code> drains and parks at <code>- break: review</code> while the Task is paused. <code>arrive_task_graph</code> saves the arrival and queues the review steer.</div></div>
+<div class="turn"><span class="speaker">2. Stay quiet while held</span><div><code>steers.rs:scopes()</code> hides <code>breakpoint:&lt;task&gt;</code> and <code>task_updates.rs</code> suppresses the generic Graph update while held. Zero wakes, zero held-terminal starts, and Desktop shows <code>Paused: review ⌄</code>.</div></div>
+<div class="turn reply"><span class="speaker">3. Unpause once</span><div><code>lf task unpause</code> clears <code>task_pauses</code> and <code>republish_parked_breakpoint_in</code> re-queues the unread review once in the same transaction, waking the primary to present it. If the review was already read before pausing, unpause stays quiet.</div></div>
 </figure>
 
 <figure>
-<figcaption>Normal &amp; override path (verified live in <a href="qa.html">scratch/qa.html</a>) · Dead primary restarts, iterate + exit reply carries cleanly</figcaption>
-<div class="turn"><span class="speaker">1. Primary dies</span><div>On <code>loopecho</code> (<code>loop: [note, break]</code> → <code>echo</code>), the primary exits with code 1 at Claude’s folder dialog. The watcher restarts it; on attach it presents <code>scratch/note.md</code>, recommendation <code>1a</code>, and numbered options.</div></div>
-<div class="turn reply"><span class="speaker">2. Iterate, then advance</span><div>Replying <em>“Neither. Go around again and try names that start with k.”</em> runs <code>--at-arrival … --decision iterate --reason …</code>. Pass 2 proposes <code>kitchen</code> / <code>kettle</code>. Replying <em>“1b, kettle. Shorter wins; ship it.”</em> exits the loop into <code>echo</code> with those exact words via <code>GraphProgress.handoff</code>, leaving the earlier iterate direction behind.</div></div>
+<figcaption>Compatibility &amp; recovery · Released interactive capture opened on the new build (built &amp; tested in <code>c4309d595e</code>)</figcaption>
+<div class="turn"><span class="speaker">1. Read</span><div>A Task the released <code>lf</code> parked at interactive step <code>note</code> translates once in <code>decode_row</code> / <code>CapturedGraph::read_saved</code> to <code>note → after-note → echo</code> standing at <code>note</code>, so status, pause, and tile views all agree with what <code>lf task run</code> will execute.</div></div>
+<div class="turn reply"><span class="speaker">2. Claim</span><div><code>lf task run</code> starts the <code>note</code> worker, atomically writes the converted capture on claim, parks at <code>after-note</code>, and wakes the primary with <code>note</code>’s output.</div></div>
 </figure>
 </section>
 
 <section aria-labelledby="outside"><h2 id="outside">Settled choices &amp; work outside LOO-1096</h2>
 <ul>
-<li><strong>Settled in your Nov 27 ship review (built in Pass 6):</strong> synced with <code>main</code> (<code>#2036</code> Pause, <code>#2047</code> graph reorder, <code>#2048</code> review pages, <code>#2049</code> verify removal); Roadmap Continue sends <code>--at-arrival</code>; retired <code>human:</code> points to <code>- break</code>; plain Continue accepts worker’s loop verdict; sidebar keeps drag order when <em>Sort by status</em> is off; standalone breakpoints render as <code>👤</code> without <code>after-*</code> text; blocked breakpoints hide plain Continue and show the worker’s reason.</li>
-<li><strong>Outside LOO-1096:</strong> Antigravity immediate idle wake (<strong>LOO-1098</strong>); retiring temporary <code>interactive:</code> YAML/capture compatibility readers after release (<strong>LOO-1100</strong>); pre-existing QA edges (steps after a loop printing <code>pass N</code>, Claude folder dialog trap on first attach, doubled <code>invalid graph:</code> error prefix, stale-arrival wording when standing at a same-named loop stop).</li>
+<li><strong>Settled &amp; built:</strong> standalone <code>- break</code> items; two skill modes; <code>feature</code>/<code>code</code>/<code>redesign</code>/<code>research</code> updated; Roadmap &amp; workflow-bar Continue carry <code>--at-arrival</code>; plain Continue accepts worker verdict; manual sidebar order preserved when <em>Sort by status</em> is off; standalone breakpoints render as <code>👤</code> without <code>after-*</code> text; blocked breakpoints hide plain Continue and display the reason once; Antigravity immediate idle wake is now on <code>main</code> (<code>#2045</code> / LOO-1098).</li>
+<li><strong>Outside LOO-1096:</strong> retiring temporary <code>interactive:</code> YAML and capture compatibility readers after release (<strong>LOO-1100</strong>); pre-existing QA edges dropped in the Nov 27 ship review (steps after a loop printing <code>pass N</code>, Claude folder dialog on first attach, doubled <code>invalid graph:</code> prefix, stale-arrival wording at a same-named loop stop).</li>
 </ul>
 </section>
 
-<section aria-labelledby="questions"><h2 id="questions">Decisions for review</h2>
-<p>Pass 7 implements the clear model fixes above without changing any choice you already made. One reversible detail is built as <b>1a</b> for review:</p>
+<section aria-labelledby="questions"><h2 id="questions">Open reversible choice for review</h2>
+<p>Nothing blocks delivery. One reversible behavior added in Pass 7 is built as <b>1a</b> for review:</p>
 <ol>
 <li><strong>When you pause a Task before seeing a breakpoint review and later unpause it, should unpausing wake the Task conversation right away to present that review?</strong>
-<p><b>1a · Chosen for Pass 7.</b> Yes — while paused the Task stays completely quiet; lifting the hold wakes or opens the conversation once if you have not seen that review yet (and stays quiet if you already saw it before pausing).</p>
+<p><b>1a · Built &amp; committed.</b> Yes — while paused the Task stays quiet; lifting the hold wakes or opens the conversation once if you have not seen that review yet (and stays quiet if you already saw it before pausing).</p>
 <p><b>1b.</b> Keep it silent on unpause too; wait until you open or message the conversation yourself.</p>
 </li>
 </ol>

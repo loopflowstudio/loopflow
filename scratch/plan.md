@@ -114,9 +114,202 @@ else repeats or snapshots it.
 
 ## What changes
 
-Implemented in `7d0554d112`. The prompt golden, focused Graph tests, documented
-commands, eval scorer and branch CLI previews passed. The two-pass provider
-run remains for QA in `.lf/qa/skills.md`.
+Implemented in `7d0554d112` (Pass 1). The prompt golden, focused Graph tests,
+documented commands, eval scorer and branch CLI previews passed then. Pass 2
+below revises items 1 and 4. The two-pass provider run remains for QA in
+`.lf/qa/skills.md`.
+
+1. `rust/loopflow-definitions/src/builtins/task/skill/realign.md`
+   - Frontmatter `produces:` no longer promises an implementation that agrees:
+     a plan that matches the code and names the code changes still owed.
+   - Opening line and "Is the plan still right?": the sentence "Correct small,
+     clear mismatches in code, tests and docs yourself; leave a substantial
+     code change as remaining work." becomes: fix docs here; any code or test
+     change is remaining work, whatever its size.
+   - `## After a review`: "Small, clear mismatch: fix it here, in plan, code,
+     tests or docs." splits into a plan-or-docs mismatch (fixed here) and a
+     code-or-test mismatch (joins the next pass with rework and missing
+     promised behavior).
+   - `## Deciding a loop`: the three verdicts as in "The rule", including that
+     a finding the plan already answered does not reopen the loop, and that
+     the pass is named so `implement` builds it and `concept-review` reads the
+     result.
+   - Closing lines: "It never adds behavior the plan didn't have" gains the
+     plain statement that it never edits code or tests.
+   - The "Read the work once as a reviewer" paragraph applies when no
+     `concept-review` page is being reconciled; with one, triage its findings.
+   - Keep the skill short; this replaces sentences, it does not add a section.
+2. `tests/goldens/builtin_realign.md` regenerated with
+   `uv run python tests/goldens/update_goldens.py` (check no other golden moves).
+3. `rust/loopflow-definitions/src/builtins/task/graph/refresh.yaml`
+   description: integrate upstream changes, then bring the plan up to date.
+   `build.yaml`'s comment on `realign` already reads correctly.
+4. `rust/loopflow-execution/src/graph/output.rs` `DECISION_CRITERIA`: the
+   skill's own loop rule wins; `blocked` is for passes that repeat without
+   converging. Check `cargo test -p loopflow-execution --lib graph::output`
+   and any golden that embeds the suffix.
+5. `docs/orchestration.md`: updated in `write-docs` (lines 154 and 172–197);
+   keep in sync if wording changes during implementation.
+6. `AGENTS.md:285-286` and `:410`: `lf realign` updates the plan (not "plan and
+   code"); `:453` "reconcile the plan; test only a repair or a real doubt"
+   drops "a repair".
+7. `.lf/qa/skills.md:55-57`: the `realign`-alone scenario expects the small
+   code mismatch queued in the plan with `iterate` and no code diff.
+8. `scripts/evals/instruction_levels.json`: one case, `realign` deciding
+   `build`'s loop over a review with a small code mismatch; required
+   `write_scratch`; allowed `inspect_work`, `write_scratch`, `reply`. Its
+   parametrized test in `python/tests/test_instruction_levels.py` picks it up.
+
+## What goes
+
+- The inline-code-fix permission in `realign.md` (three sentences: body,
+  `## After a review`, `## Deciding a loop`) and its echoes in
+  `docs/orchestration.md`, `refresh.yaml`, `AGENTS.md` and `.lf/qa/skills.md`.
+- `scratch/design.md`, superseded by this file.
+
+Stays: `realign`'s triage of findings (defer, adopt a reversible choice marked
+for review, block on an irreversible one), `## Deferred findings` for
+`ship-review`, the "outside a loop there is no `blocked`" paragraph, Wave
+memory curation, and docs fixes inline. Release notes under `release/` are
+shipped records and are not edited.
+
+## Exclusions
+
+- No loop-runner guard against a decider that edited tracked files, and no
+  reviewed-commit stamp on compiled pages (explore's Vision C). Enforcement is
+  the prompt.
+- No pass cap on loops.
+- No change to `concept-review`, `implement`, `ship-review` or any Graph's steps.
+
+## Pass 2 (next): keep the non-convergence stop; tidy the builtin text
+
+Built in Pass 1 (`7d0554d112`); concept review `3180e006f7` reviewed it on
+HEAD `82b93dde97`. Pass 2 delivers:
+
+1. `rust/loopflow-execution/src/graph/output.rs` `DECISION_CRITERIA`: split
+   step-specific progress from loop safety. A skill's own rules decide
+   `advance` and `iterate` (the "substantial next pass" default applies only
+   without them); `blocked` when passes repeat without converging, the last
+   pass made no progress, or a failure repeats with nothing learned applies to
+   every decider. Update the doc comment and `build_realign_uses_its_own_loop_rule`
+   so it fails if the stop sits behind the fallback.
+2. `realign.md` `## Deciding a loop`: the `blocked` bullet also covers a
+   finding that passes keep failing to resolve. In the same file, drop the
+   enumerated list "skills, goldens, agent guides, QA playbooks and source
+   comments" (the `docs/`/`README.md` allowlist already says it; everything
+   else goes through implementation) and drop "so `ship-review` can account
+   for the review row", which `ship-review.md` doesn't implement; keep
+   "record any docs fix in the plan".
+3. `build.yaml:8` comment: `# decides: code fixes (iterate) or move on (advance)`,
+   matching `docs/orchestration.md:154`.
+4. `docs/orchestration.md:188-191`: the non-convergence stop applies to every
+   decider, not only by default.
+5. Regenerate `tests/goldens/builtin_realign.md` (and any golden embedding the
+   suffix); run `cargo test -p loopflow-execution --lib graph::output`.
+
+Pass 2 teaches whether the runner suffix can carry one universal stop without
+contradicting `realign`'s iterate-on-small-fix rule; the two-pass provider run
+in `.lf/qa/skills.md` remains for QA.
+
+## Concept review (commit `3180e006f7`), what happened to each finding
+
+- Fallback-only `DECISION_CRITERIA` dropped the non-convergence `blocked` stop
+  for skills with their own loop section (`realign`, `implement`,
+  `optimize-plan`): Pass 2 items 1, 2, 4. Passed over: a pass cap in the
+  runner (excluded above).
+- `build.yaml:8` comment still says "rework, or move on": Pass 2 item 3.
+- Inline docs exception (Q2 b) hardcodes Loopflow's layout and promises an
+  unbacked `ship-review` handoff: made for review, keep Q2 b as Jack chose it,
+  with the cleanups in Pass 2 item 2. Passed over: concept-review's
+  recommended scratch-only `realign` (its Q1 A), since it overturns Jack's
+  Q2 b reply; still open in `scratch/questions.md`.
+- `optimize.yaml` has no `implement` after `refresh`: already deferred, below.
+- Earlier review (`6c6f04ea29`): runner contradiction, shape-review spin and
+  `AGENTS.md:453` wording were fixed in Pass 1; the review confirms them.
+
+## Deferred findings`);
+  `blocked` on a design choice that can't be undone once shipped, as today.
+
+Source of truth is the builtin skill text,
+`rust/loopflow-definitions/src/builtins/task/skill/realign.md`. Everything
+else repeats or snapshots it.
+
+## Findings behind the plan
+
+- **The loop already does the right thing on `iterate`.** `build.yaml`'s outer
+  loop reruns `sync → implement → concept-review → realign`. `implement.md`
+  ("When deciding a loop") iterates "while the plan lists a pass not yet
+  built", so `realign` has to write the fixes as a named pass, not a loose
+  list. `concept-review.md` reviews "the area with the whole change in it
+  against its base, not only the last pass" and rewrites
+  `scratch/concept-review.page.html`, so a second run produces a fresh page
+  with no skill change. No Graph or runner change is needed.
+- **Nothing caps loop passes** (no pass limit in
+  `rust/loopflow-execution/src/graph`). A fresh review can always find
+  something, so `iterate` on any code finding could spin. What stops it is
+  already in the text and stays: only findings "the plan has not answered" get
+  a place, the plan records what happened to each finding "by substance", and
+  a separate outcome is deferred, not built. The rewritten `## Deciding a loop`
+  says an already-answered finding does not reopen the loop. The second-pass
+  `advance` is part of the demo for this reason.
+- **`refresh` has one builtin caller with no `implement` after it:**
+  `optimize.yaml` ends `compress → graph: refresh → measure`. There, a code
+  mismatch `realign` sees after `sync` stays in `scratch/plan.md` as remaining
+  work and nothing builds it. Q3 a chose this; `cmd: sync` owns merge
+  conflicts, so what is left for `realign` after a sync is mostly plan drift.
+- **Siblings.** `plan.yaml` runs `realign` before any code exists; the rule
+  costs it nothing. `implement.md`, `ship-review.md` and `concept-review.md`
+  mention `realign` only as the writer of the plan and `## Deferred findings`;
+  no wording there says it fixes code. The repository's own `.lf/skills/` has
+  no `realign.md` override.
+- **The eval already agrees.** `scripts/evals/instruction_levels.json`
+  `standalone_realign` allows `inspect_work`, `write_scratch`, `reply`, and not
+  `implement`. Its action catalog (`instruction_levels.py`) has no docs-edit
+  action, so inline docs fixes are outside what the eval models.
+- **The refresh description appears nowhere else** (no DTO fixture, doc or
+  test quotes "reconcile the plan and code"), so changing it touches one line.
+  `compiled.rs` tests check `refresh`'s steps, not its description.
+
+## Choices made for review
+
+- **Inline docs narrow to user documentation: `docs/` and `README.md` files.**
+  Q2 b stands ("only code/tests force iterate"), but concept-review showed
+  "documentation files, by path" doesn't separate Markdown that carries
+  behavior: builtin skills compiled into `lf`, goldens, `AGENTS.md`,
+  `.lf/qa/` playbooks. Those, and comments in source or test files, are
+  code edits and go through `implement`. Passed over: concept-review's
+  recommended "scratch only, docs iterate too" (its Q1 A), because it
+  reverses Jack's Q2 b; it is in `scratch/questions.md` for him.
+- **A docs fix made inline leaves its "No" row on the page.** The plan's
+  per-finding record says it was fixed in docs, and `ship-review` reads the
+  plan beside the page. Passed over: iterating for docs too (Q2 a), which Q2 b
+  declined.
+- **The runner's loop criteria defer to the skill's own.** `DECISION_CRITERIA`
+  (`rust/loopflow-execution/src/graph/output.rs:11-19`) is appended after
+  every deciding step's prompt and says iterate only on "a substantial next
+  pass" and block "when passes shrink into small increments"; it lands last,
+  after `realign`'s rule to iterate on a small code fix. It gains one line:
+  when the skill says how it decides a loop, its rule wins; and `blocked`
+  means passes repeating without converging, not one targeted fix pass.
+  Defaults stay for skills with no loop section. Passed over: hardcoding
+  skill names in `output.rs`, and a separate Task (concept-review's Q2 B),
+  since without this the demo's pass-1 `iterate` contradicts the prompt.
+- **`realign`'s own shape review runs only when no review just ran.**
+  `realign.md:28-31` ("Read the work once as a reviewer…") would, under the
+  new rule, turn a cleanup it spots after an all-"Yes" page into a pass right
+  before `compress`, which exists to simplify. Reconciling a
+  `concept-review`, it triages that page's findings only; standalone,
+  `refresh` and post-slice runs keep the shape look. Passed over: deleting
+  the paragraph.
+- **One eval case is added** (below). Passed over: leaving the loop case
+  uncovered by the eval.
+
+## What changes
+
+Implemented in `7d0554d112` (Pass 1). The prompt golden, focused Graph tests,
+documented commands, eval scorer and branch CLI previews passed then. Pass 2
+below revises items 1 and 4. The two-pass provider run remains for QA in
+`.lf/qa/skills.md`.
 
 1. `rust/loopflow-definitions/src/builtins/task/skill/realign.md`
    - Frontmatter `produces:` no longer promises an implementation that agrees:

@@ -76,7 +76,7 @@ struct TaskFilesView: View {
             }
         }
         .task(id: "\(store.selection ?? "")|\(store.mode)") {
-            if store.mode != .diff { await store.loadFile() }
+            if store.mode != .diff { await store.loadSelection() }
         }
         .onChange(of: store.selection) { store.find?.reset() }
         .onChange(of: store.mode) { store.find?.reset() }

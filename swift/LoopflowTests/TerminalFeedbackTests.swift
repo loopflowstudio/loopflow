@@ -35,6 +35,11 @@ struct TerminalFeedbackTests {
     @Test("A paused Session previews and opens its OSC 8 link", .requiresDisplay)
     @MainActor
     func sessionHyperlink() async throws {
+        final class PointerWindow: NSWindow {
+            var pointer = NSPoint.zero
+            override var isKeyWindow: Bool { true }
+            override var mouseLocationOutsideOfEventStream: NSPoint { pointer }
+        }
         _ = NSApplication.shared
         let manager = GhosttyManager.shared
         manager.initialize()
@@ -42,8 +47,8 @@ struct TerminalFeedbackTests {
         view.workingDirectory = NSTemporaryDirectory()
         view.command = #"/bin/sh -c 'printf "\033]8;;https://example.com\007link-proof\033]8;;\007\n"; exec /bin/cat'"#
         let mount = GhosttyTerminalMount(terminal: view)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 480),
-                              styleMask: [.titled], backing: .buffered, defer: false)
+        let window = PointerWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 480),
+                                   styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = mount
         defer { view.destroySurface(); window.contentView = nil }
         mount.layoutSubtreeIfNeeded()
@@ -81,6 +86,17 @@ struct TerminalFeedbackTests {
         #expect(NSCursor.current == .pointingHand)
         view.flagsChanged(with: try modifiers([]))
         #expect(view.linkFeedback.isHidden)
+
+        window.pointer = point
+        try #require(window.makeFirstResponder(nil))
+        try #require(window.firstResponder !== view)
+        NSApp.sendEvent(try modifiers(command))
+        #expect(view.linkFeedback.stringValue == "https://example.com")
+        #expect(view.terminalCursor == .pointingHand)
+        NSApp.sendEvent(try modifiers([]))
+        #expect(view.linkFeedback.isHidden)
+        #expect(view.terminalCursor != .pointingHand)
+        #expect(window.firstResponder !== view)
 
         var opened: TerminalHyperlink?
         view.onOpenLink = { link, _ in opened = link }

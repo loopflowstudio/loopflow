@@ -633,6 +633,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     private nonisolated(unsafe) var displayLink: CADisplayLink?
     private var trackingArea: NSTrackingArea?
+    private var hoverModifierMonitor: Any?
     private var theme = GhosttyManager.shared.theme
     private nonisolated(unsafe) var themeObserver: NSObjectProtocol?
     private var _markedRange = NSRange(location: NSNotFound, length: 0)
@@ -820,6 +821,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             updateFeedbackPreferences()
             if window != nil { setupDisplayLink() }
             setupTrackingArea()
+            observeHoverModifiers()
             syncSurfaceFocus()
             restoreInputFocus()
             onSurfaceCreated()
@@ -844,12 +846,14 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         if window == nil {
             displayLink?.invalidate()
             displayLink = nil
+            stopObservingHoverModifiers()
             showLinkTarget(nil)
         } else if surface != nil, displayLink == nil {
             setupDisplayLink()
             updateContentScale()
             updateSurfaceSize()
         }
+        observeHoverModifiers()
         if focusRequested, acceptsFirstResponder, retainedSearchBar?.isHidden != false, !hasMarkedText() {
             window?.makeFirstResponder(self)
         }
@@ -917,6 +921,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         linkNoticeDismissal?.cancel()
         linkNotice = nil
         showLinkTarget(nil)
+        stopObservingHoverModifiers()
         retainedSearchBar?.end()
         programStatus.close()
         // A released view may still be mounted until SwiftUI reconciles it.
@@ -1399,6 +1404,37 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         // The relay sets Ghostty read-only when input pauses. Ghostty still
         // uses these events for link hover and suppresses the PTY write.
         if let key = event.ghosttyModifierKey { ghostty_surface_key(surface, key) }
+    }
+
+    private func observeHoverModifiers() {
+        guard hoverModifierMonitor == nil, window != nil, surface != nil else { return }
+        hoverModifierMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.updateUnfocusedLinkHover(with: event)
+            return event
+        }
+    }
+
+    private func stopObservingHoverModifiers() {
+        guard let hoverModifierMonitor else { return }
+        NSEvent.removeMonitor(hoverModifierMonitor)
+        self.hoverModifierMonitor = nil
+    }
+
+    private func updateUnfocusedLinkHover(with event: NSEvent) {
+        guard let window, window.isKeyWindow, event.window === window,
+              window.firstResponder !== self, window.attachedSheet == nil,
+              let surface, let content = window.contentView,
+              event.modifierFlags.contains(.command) || hoveredLink != nil else { return }
+        let location = window.mouseLocationOutsideOfEventStream
+        let windowPoint = content.superview?.convert(location, from: nil) ?? location
+        guard let hit = content.hitTest(windowPoint), hit === self || hit.isDescendant(of: self),
+              !ghostty_surface_mouse_captured(surface) else { return }
+        let point = convert(location, from: nil)
+        let mods = event.modifierFlags.ghosttyMods
+        // Ghostty ignores stationary pointer updates. Leave and re-enter to
+        // apply the modifiers without sending a key to the unfocused PTY.
+        ghostty_surface_mouse_pos(surface, -1, -1, mods)
+        ghostty_surface_mouse_pos(surface, point.x, bounds.height - point.y, mods)
     }
 
     // MARK: - NSTextInputClient

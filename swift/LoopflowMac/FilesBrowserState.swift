@@ -44,11 +44,14 @@ final class FilesBrowserState {
     var visit: FileVisit?
     var documents: [String: TaskFileDocument] = [:]
     var tabs: [WorkFileTab] = []
+    /// The current presentation already read the file before opening it.
+    var selectionHasSnapshot = false
     private var modes: [String: TaskFilesStore.Mode] = [:]
     private var automatic: [String] = []
 
     var selection: String? {
         didSet {
+            selectionHasSnapshot = false
             if oldValue != selection {
                 notice = nil
                 visit = nil
@@ -72,7 +75,10 @@ final class FilesBrowserState {
         set {
             guard let selection else { return }
             if mode == .edit && newValue != .edit { notice = nil }
-            if newValue != mode { jumps.dismiss() }
+            if newValue != mode {
+                selectionHasSnapshot = false
+                jumps.dismiss()
+            }
             modes[selection] = newValue == .read ? nil : newValue
         }
     }

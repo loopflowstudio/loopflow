@@ -1045,19 +1045,25 @@ struct SessionPaneView: View {
         switch destination {
         case .document(let url):
             guard NSWorkspace.shared.open(url) else { throw RegistryQueryError("No app could open the file.") }
-        case .checkout(let path, let line):
+        case .checkout(let path, let line, let snapshot):
             // A remote read can finish after the Task moves. Only reveal the
             // file in the checkout the click addressed.
             guard let place, place == activeFilesPlace else {
                 throw RegistryQueryError("The Task’s checkout moved before the file could open.")
             }
+            let files = workspace.files(at: place, query: sessions.query)
+            if let snapshot {
+                await files.reconcileDocument(files.document(path), with: snapshot)
+                try Task.checkCancellation()
+                guard place == activeFilesPlace, files.machine == place.machine, files.cwd == place.cwd else {
+                    throw RegistryQueryError("The Task’s checkout moved before the file could open.")
+                }
+            }
             let filesLocation = WorkspaceIdentity(machineId: location.machineId, worktree: place.cwd)
-            guard let browser = store.showBrowser(.files, location: filesLocation, focus: onEnter == nil) else {
+            guard store.showBrowser(.files, location: filesLocation, focus: false, unzoom: true) != nil else {
                 throw RegistryQueryError("The Files pane is unavailable.")
             }
-            let task = model.task(id: workspace.key.id)?.task
-            let files = try workspace.files(for: browser.content, task: task, query: sessions.query)
-            files.openPresentation(.init(path: path, lines: line.map { $0...$0 }))
+            files.openPresentation(.init(path: path, lines: line.map { $0...$0 }), reusingSnapshot: snapshot != nil)
             onEnter?()
         }
     }

@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import Loopflow
+import Synchronization
 import Testing
 @testable import LoopflowMac
 
@@ -25,14 +26,9 @@ struct TerminalHyperlinkTests {
         "https://example.com/\u{202e}test", "https://example.com/%E2%80%AEtest",
         "https://example.com/%00", "https://example.com/%zz", "https://user@example.com",
         "file:relative", "file:///tmp/%2e%2e/note", "file:///tmp/note#other", "file:///tmp/note#L0", "file:///tmp/note#L+1",
-        "file:///tmp/note#L\(Int.max)", "loopflow://", "loopflow:///",
-        "loopflow://open?repo=/tmp", "loopflow://open?view=tasks", "LOOPFLOW://SESSIONS",
-        "loopflow://foo/bar/baz", "loopflow://repo/task/", "loopflow://repo/wave/a%2Fb",
-        "loopflow://repo:/task/A", "loopflow://repo?session=a&session=b",
-        "loopflow://repo?machine=home_11111111111111111111111111111111",
-        "loopflow://repo/task/A?session=s&machine=home_11111111111111111111111111111111",
+        "file:///tmp/note#L\(Int.max)", "loopflow://repo/task/%00",
     ])
-    func invalidAndControlTargetsAreRefused(_ target: String) {
+    func invalidTargetsAreRefused(_ target: String) {
         guard case .refused = TerminalHyperlink(target: target) else {
             Issue.record("Opened an invalid terminal target")
             return
@@ -42,7 +38,8 @@ struct TerminalHyperlinkTests {
     @Test(arguments: [
         "loopflow://open/task/LOO-1", "loopflow://my%20repo/wave/my%20wave",
         "loopflow://repo?session=a%2Bb%26c&machine=home_11111111111111111111111111111111",
-        "loopflow://update",
+        "loopflow://update", "loopflow://open?repo=/tmp", "LOOPFLOW://SESSIONS",
+        "loopflow://repo/task/LOO-1#fragment",
     ])
     func workAddressesGoOnlyToTheWorkResolver(_ target: String) throws {
         #expect(TerminalHyperlink(target: target) == .work(try #require(URL(string: target))))
@@ -163,7 +160,13 @@ struct TerminalHyperlinkTests {
                 .destination(from: pane, localMachine: "local", files: files, query: query)
         }
 
-        #expect(try await open("/peer/checkout/script.py") == .checkout(path: "script.py", line: 42))
+        guard case .checkout(let path, let line, let snapshot) = try await open("/peer/checkout/script.py") else {
+            Issue.record("Expected a checkout file")
+            return
+        }
+        #expect(path == "script.py")
+        #expect(line == 42)
+        #expect(snapshot?.content == "text")
         await #expect(throws: TerminalHyperlink.File.OpenError.remoteDirectory) { try await open("/peer/checkout/folder") }
         await #expect(throws: TerminalHyperlink.File.OpenError.remoteDirectory) { try await open("/peer/checkout") }
         await #expect(throws: TerminalHyperlink.File.OpenError.missing) { try await open("/peer/checkout/missing") }
@@ -178,8 +181,8 @@ struct TerminalHyperlinkTests {
         await #expect(throws: RegistryQueryError.self) { try await open("/peer/checkout/offline") }
     }
 
-    @Test(arguments: [false, true]) @MainActor
-    func terminalFileEntersTheTaskWithFilesBesideTheSession(sessionZoomed: Bool) async throws {
+    @Test(arguments: [false, true], [false, true]) @MainActor
+    func terminalFileOpensBesideTheSession(fromTile: Bool, sessionZoomed: Bool) async throws {
         let checkout = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: checkout) }
@@ -195,16 +198,16 @@ struct TerminalHyperlinkTests {
         if sessionZoomed { workspace.multiplexer.setZoom(session.id, enabled: true) }
         let model = WorkModel(query: query)
         model.selectWorkingTasksDashboard()
+        let enter: (() -> Void)? = fromTile ? { model.enterTile(workspace.key, origin: nil) } : nil
         let pane = SessionPaneView(pane: session, isFocused: true, sessions: sessions,
-                                   workspace: workspace, model: model, onFocus: { _, _ in },
-                                   onEnter: { model.enterTile(workspace.key, origin: nil) })
+                                   workspace: workspace, model: model, onFocus: { _, _ in }, onEnter: enter)
         await pane.openTerminalLink(.file(.init(path: file.path, host: nil, line: 42)), at: location) {
             Issue.record("Could not open the file link: \($0)")
         }
 
         let browser = try #require(workspace.multiplexer.browserPane)
         let work = try #require(workspace.key.reference)
-        #expect(model.navigation.destination == .entered(from: .workingTasks, work: work))
+        if fromTile { #expect(model.navigation.destination == .entered(from: .workingTasks, work: work)) }
         #expect(workspace.multiplexer.isVisible(session))
         #expect(workspace.multiplexer.isVisible(browser))
         #expect(workspace.multiplexer.focusedPaneId == session.id)
@@ -214,6 +217,34 @@ struct TerminalHyperlinkTests {
         #expect(files.mode == .read)
         #expect(files.visit?.line == 42)
         #expect(files.visit?.showsSource == true)
+    }
+
+    @Test @MainActor func remoteFileLinkOpensWithOneReadAndCanStillRefresh() async throws {
+        let location = WorkspaceIdentity(machineId: "peer", worktree: "/peer/checkout")
+        let workspace = SessionsWorkspace(key: .init(repository: "repo", kind: .task, id: "task"),
+                                          title: "Task", location: location, localMachineId: "local")
+        let reads = Mutex(0)
+        let query = RegistryQuery(serve: { operation in
+            guard operation == .taskFile(issue: "task", path: "notes.md", at: nil) else {
+                throw RegistryQueryError("Unexpected read.")
+            }
+            reads.withLock { $0 += 1 }
+            return Self.fileReply("notes.md")
+        }) { _, _ in throw RegistryQueryError("Unexpected CLI read.") }
+        let pane = SessionPaneView(pane: try #require(workspace.multiplexer.sessionPane), isFocused: true,
+                                   sessions: workspace.sessionStore(repoPath: "/repo", query: query),
+                                   workspace: workspace, model: WorkModel(query: query), onFocus: { _, _ in })
+
+        let link = TerminalHyperlink(target: "file://peer.example/peer/checkout/notes.md#L42")
+        await pane.openTerminalLink(link, at: location) { Issue.record("Could not open the file link: \($0)") }
+        let browser = try #require(workspace.multiplexer.browserPane)
+        let files = try workspace.files(for: browser.content, task: nil, query: query)
+        #expect(files.selectedDocument?.text == "text")
+        #expect(files.visit?.line == 42)
+        await files.loadSelection()
+        #expect(reads.withLock { $0 } == 1)
+        await files.loadFile()
+        #expect(reads.withLock { $0 } == 2)
     }
 
     @Test @MainActor func aTaskMoveDuringTheRemoteLookupLeavesFilesClosed() async throws {
@@ -252,6 +283,12 @@ struct TerminalHyperlinkTests {
         let reply = String(decoding: try JSONEncoder().encode([work]), as: UTF8.self)
         let query = RegistryQuery(serve: { read in
             if read == .workResolve(directory: "/", url: work.url) { return ReadOutput(reply) }
+            if read == .workResolve(directory: "/", url: "loopflow://open?view=tasks") {
+                throw RegistryQueryError("Unknown Work link query `view`")
+            }
+            if read == .workResolve(directory: "/", url: "loopflow://loopflow/task/LOO-1#fragment") {
+                throw RegistryQueryError("Work links do not accept a fragment")
+            }
             throw RegistryQueryError("No Task matches that Work link.")
         }) { _, _ in throw RegistryQueryError("Unexpected CLI read.") }
         let location = WorkspaceIdentity(machineId: "local", worktree: "/repo")
@@ -267,8 +304,12 @@ struct TerminalHyperlinkTests {
         var notices: [String] = []
         await pane.openTerminalLink(TerminalHyperlink(target: work.url), at: location) { notices.append($0) }
         await pane.openTerminalLink(TerminalHyperlink(target: "loopflow://loopflow/task/missing"), at: location) { notices.append($0) }
+        await pane.openTerminalLink(TerminalHyperlink(target: "loopflow://open?view=tasks"), at: location) { notices.append($0) }
+        await pane.openTerminalLink(TerminalHyperlink(target: "loopflow://loopflow/task/LOO-1#fragment"), at: location) { notices.append($0) }
         #expect(opened == [work])
-        #expect(notices == ["No Task matches that Work link."])
+        #expect(notices == [
+            "No Task matches that Work link.", "Unknown Work link query `view`", "Work links do not accept a fragment",
+        ])
     }
 }
 #endif

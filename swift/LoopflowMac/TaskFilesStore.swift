@@ -109,10 +109,12 @@ final class TaskFilesStore {
 
     var holdsPresentation: Bool { page == .changes || (page == .files && mode != .read) }
 
-    func openPresentation(_ request: FilesBrowserState.Presentation) {
+    func openPresentation(_ request: FilesBrowserState.Presentation, reusingSnapshot: Bool = false) {
         filePicker = nil
         let visit = request.lines.map { FileVisit(line: $0.lowerBound, showsSource: true, highlight: .lines($0)) }
         reveal(request.path, at: visit, mode: request.mode, from: jumps.position(in: self))
+        browser.selectionHasSnapshot = reusingSnapshot
+        if reusingSnapshot { error = nil }
     }
 
     private(set) var scratchPaths: [String] = []
@@ -289,6 +291,7 @@ final class TaskFilesStore {
     func relocate(machine: String?, label: String? = nil, cwd: String) {
         if machine == self.machine, let label { machineLabel = label }
         guard machine != self.machine || cwd != self.cwd else { return }
+        browser.selectionHasSnapshot = false
         machineLabel = label
         let observing = observation != nil || servedObservation != nil
         observation = nil
@@ -366,6 +369,7 @@ final class TaskFilesStore {
         let wasNotStarted = watchNotStarted
         watchNotStarted = revision.notStarted
         if revision.machineID != machine {
+            browser.selectionHasSnapshot = false
             arriving = Set(documents.keys)
             machine = revision.machineID
             seenScratchStamps = nil
@@ -373,6 +377,7 @@ final class TaskFilesStore {
         machineLabel = revision.machineLabel
         let checkoutChanged = revision.checkout != nil && revision.checkout != cwd
         if checkoutChanged, let checkout = revision.checkout {
+            browser.selectionHasSnapshot = false
             cwd = checkout
             seenScratchStamps = nil
         }
@@ -447,11 +452,7 @@ final class TaskFilesStore {
                     invalidate([path])
                     continue
                 }
-                if arriving.remove(path) != nil {
-                    await document.arrive(next)
-                } else {
-                    await document.reconcile(next)
-                }
+                await reconcileDocument(document, with: next)
             } catch is CancellationError {
                 return
             } catch { self.error = error.localizedDescription }
@@ -622,6 +623,14 @@ final class TaskFilesStore {
 
     var selectedDocument: TaskFileDocument? { selection.flatMap { documents[$0] } }
 
+    func reconcileDocument(_ document: TaskFileDocument, with snapshot: TaskFileSnapshot) async {
+        if arriving.remove(document.path) != nil {
+            await document.arrive(snapshot)
+        } else {
+            await document.reconcile(snapshot)
+        }
+    }
+
     func document(_ path: String) -> TaskFileDocument {
         if let document = documents[path] { return document }
         let document = TaskFileDocument(path: path)
@@ -680,7 +689,18 @@ final class TaskFilesStore {
         }
     }
 
+    func loadSelection() async {
+        guard !Task.isCancelled else { return }
+        if browser.selectionHasSnapshot {
+            browser.selectionHasSnapshot = false
+            watchOpenFiles()
+            return
+        }
+        await loadFile()
+    }
+
     func loadFile() async {
+        browser.selectionHasSnapshot = false
         fileGeneration += 1
         let generation = fileGeneration
         guard let path = selection else { return }

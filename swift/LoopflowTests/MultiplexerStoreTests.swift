@@ -75,6 +75,20 @@ struct MultiplexerStoreTests {
         #expect(BrowserTab.page(URL(string: "file:///etc/hosts")!) == nil)
     }
 
+    @Test("Files can open beside a zoomed Session without taking focus")
+    func browserRevealsBesideZoomedSession() throws {
+        let store = MultiplexerStore(taskId: "task_1")
+        let session = try #require(store.sessionPane)
+        store.setZoom(session.id, enabled: true)
+
+        let files = try #require(store.showBrowser(.files, location: here, focus: false, unzoom: true))
+
+        #expect(store.isVisible(session))
+        #expect(store.isVisible(files))
+        #expect(store.zoomedPaneId == nil)
+        #expect(store.focusedPaneId == session.id)
+    }
+
     @Test("Close hides a pane and Undo shows it again; the last visible pane stays")
     func closeHides() throws {
         let store = MultiplexerStore(taskId: "task_1")

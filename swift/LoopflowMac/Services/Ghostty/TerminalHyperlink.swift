@@ -69,10 +69,6 @@ enum TerminalHyperlink: Equatable {
             }
             self = Self.fileLink(path: parts.path, host: parts.host, fragment: parts.fragment)
         case "loopflow":
-            guard Self.isWorkAddress(target) else {
-                self = .refused("Terminal links can only open Work in Loopflow.")
-                return
-            }
             self = .work(url)
         default:
             self = .externalScheme(url)
@@ -90,37 +86,6 @@ enum TerminalHyperlink: Equatable {
                 || $0.properties.isBidiControl
                 || $0.value == 0x2028 || $0.value == 0x2029
         }
-    }
-
-    /// Check the address shape for hover feedback. The Work resolver validates
-    /// identities and looks them up without dispatching app-control URLs.
-    private static func isWorkAddress(_ target: String) -> Bool {
-        func component(_ raw: String) -> Bool {
-            guard let value = raw.removingPercentEncoding else { return false }
-            return !value.isEmpty && !value.contains("/") && !value.contains("\\")
-        }
-        let prefix = "loopflow://"
-        guard target.hasPrefix(prefix), !target.contains("#") else { return false }
-        let address = target.dropFirst(prefix.count).split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
-        guard let root = address.first else { return false }
-        let location = root.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
-        guard let host = location.first, !host.contains("@"), !host.contains(":"), component(String(host)) else { return false }
-        let path = location.dropFirst().first ?? ""
-        let repository = path.isEmpty
-        if !repository {
-            let segments = path.split(separator: "/", omittingEmptySubsequences: false)
-            guard segments.count == 2, ["task", "wave"].contains(segments[0]), component(String(segments[1])) else {
-                return false
-            }
-        }
-        var keys: Set<String> = []
-        for pair in address.dropFirst().first?.split(separator: "&") ?? [] {
-            let item = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
-            let key = String(item[0])
-            guard item.count == 2, ["repository", "session", "machine"].contains(key),
-                  keys.insert(key).inserted, component(String(item[1])) else { return false }
-        }
-        return !keys.contains("machine") || (repository && keys.contains("session"))
     }
 
     private static func fileLink(path: String, host: String?, fragment: String?) -> Self {
@@ -147,7 +112,7 @@ enum TerminalHyperlink: Equatable {
 extension TerminalHyperlink.File {
     enum Destination: Equatable {
         case document(URL)
-        case checkout(path: String, line: Int?)
+        case checkout(path: String, line: Int?, snapshot: TaskFileSnapshot? = nil)
     }
 
     @MainActor
@@ -182,7 +147,7 @@ extension TerminalHyperlink.File {
                     throw OpenError.remoteDirectory
                 }
                 guard snapshot.state != .missing else { throw OpenError.missing }
-                return .checkout(path: snapshot.path, line: line)
+                return .checkout(path: snapshot.path, line: line, snapshot: snapshot)
             }
         }
         guard local else { throw OpenError.anotherMachine }

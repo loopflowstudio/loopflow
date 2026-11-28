@@ -202,7 +202,7 @@ final class SessionsWorkspace {
               case .browser(_, let tabs, _, _)? = multiplexer.browserPane?.content, tabs.isEmpty else { return }
         didPrepareTaskPanes = true
         guard let browser = multiplexer.showBrowser(.files, location: session.content.location,
-            focus: false) else { return }
+            focus: false, unzoom: true) else { return }
         // A location error is presented by the browser's normal error view.
         _ = try? files(for: browser.content, task: nil, query: query)
     }
@@ -247,7 +247,7 @@ final class SessionsWorkspace {
         let source = owner ?? multiplexer.sessionPane
         let place = source?.content.location ?? location
         if tab == .files { selectFilesPage() }
-        return multiplexer.showBrowser(tab, location: place, focus: focus)
+        return multiplexer.showBrowser(tab, location: place, focus: focus, unzoom: !focus)
     }
 
     /// ⌘W closes the named tab, else the selected one; a session pane, or one
@@ -438,6 +438,10 @@ final class SessionsWorkspace {
     func files(for content: PaneContent, task: RoadmapTask?, query: RegistryQuery,
                follow: Bool = true) throws -> TaskFilesStore {
         let place = try filesPlace(for: content, task: task)
+        return files(at: place, query: query, follow: follow)
+    }
+
+    func files(at place: FilesPlace, query: RegistryQuery, follow: Bool = true) -> TaskFilesStore {
         if let retained = taskFiles {
             if follow { self.follow(place) }
             return retained

@@ -736,6 +736,22 @@ mod tests {
         .unwrap();
         assert_eq!(started_cwds.into_inner(), [session_dir]);
 
+        // The holder must start lf before resume can relocate a missing worktree.
+        let retired = fixture.repo.path().join("retired");
+        fixture.execute(
+            "UPDATE agent_sessions SET cwd=?2 WHERE id=?1",
+            params![fixture.session.as_str(), retired.to_str().unwrap()],
+        );
+        let start = crate::server::service::continuing(
+            fixture.session.clone(),
+            "recover-retired".into(),
+            0,
+            0,
+            None,
+        )
+        .unwrap();
+        assert_eq!(start.cwd, fixture.repo.path().canonicalize().unwrap());
+
         // Without a local checkout row for the Task, recovery leaves it down.
         fixture.execute(
             "DELETE FROM task_checkouts WHERE task_id=?1",

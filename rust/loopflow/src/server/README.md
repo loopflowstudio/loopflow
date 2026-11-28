@@ -74,6 +74,8 @@ first reading after start is the restart and reboot case. Each reading:
    the Task is open, claimed and checked out here, no agent or pending holder
    serves it, and it never had an agent or its last agent did not end by the
    person (exit 0 or 130).
+   It starts in the Session's saved directory. If that directory is gone, it
+   resumes in the repository's main checkout when available.
    An unfinished agent whose recorded process is gone died too. The store
    counts the start (`agent_sessions.starts_since_turn`, `last_started_at`)
    before it goes through `session.continue`'s path with request

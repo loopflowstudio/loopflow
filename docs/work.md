@@ -195,8 +195,8 @@ The conversation keeps its directory, uncommitted files, provider history, and
 live terminal attachment:
 
 ```text
-$ lf session bind session_94d9963b --task LOO-12
-Session session_94d9963b belongs to LOO-12.
+$ lf session bind session_0123456789abcdef0123456789abcdef --task LOO-12
+Session session_0123456789abcdef0123456789abcdef belongs to LOO-12.
 Conversation stays in /src/repo.research; LOO-12's checkout is /src/repo.loo-12.
 ```
 

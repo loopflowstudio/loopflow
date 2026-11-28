@@ -2,7 +2,7 @@
 //! Session; a Task points to one of its existing conversations.
 
 use crate::store::session_projection;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
 
@@ -12,6 +12,7 @@ use super::{
 use crate::session::{conversation, LfSession, PrimaryScope, WorkSource};
 use crate::store::SharedStore;
 use loopflow_model::durable::WorkStatus;
+use loopflow_storage::sqlite::SqliteStore;
 
 /// Find or admit the primary conversation of a Wave, or of the repository
 /// itself, and prepare its workspace; `true` when it was admitted now. The
@@ -302,26 +303,11 @@ async fn leave_gone_directory(store: &SharedStore, session: LfSession) -> Result
     if session.cwd.is_dir() {
         return Ok(session);
     }
-    let recorded = match &session.task_id {
-        Some(task) => match store.get_task(task).await? {
-            Some(task) => store.sqlite.repository_path(&task.repository_id)?,
-            None => None,
-        },
-        None => None,
-    };
-    let recorded = match (recorded.or_else(|| session.repo.clone()), &session.wave_id) {
-        (Some(repo), _) => Some(repo),
-        (None, Some(wave)) => store
-            .get_wave(wave)
-            .await?
-            .map(|wave| wave.repo().to_string()),
-        (None, None) => None,
-    };
-    // With no repository on record the launch reports the missing directory.
-    let Some(root) = recorded
-        .map(std::path::PathBuf::from)
-        .filter(|repo| repo.is_dir())
-        .and_then(|repo| crate::git::worktrees::main_repo_root(&repo).ok())
+    let sqlite = store.sqlite.clone();
+    let record = session.clone();
+    let Some(root) =
+        crate::journal::request::spawn_blocking(move || replacement_directory(&sqlite, &record))
+            .await??
     else {
         return Ok(session);
     };
@@ -330,6 +316,27 @@ async fn leave_gone_directory(store: &SharedStore, session: LfSession) -> Result
         .session(&session.id)
         .await?
         .ok_or_else(|| session_not_found(&session.id))
+}
+
+/// The main checkout to use when a conversation's saved directory is gone.
+pub fn replacement_directory(store: &SqliteStore, session: &LfSession) -> Result<Option<PathBuf>> {
+    let recorded = match &session.task_id {
+        Some(task) => match store.task(task)? {
+            Some(task) => store.repository_path(&task.repository_id)?,
+            None => None,
+        },
+        None => None,
+    };
+    let recorded = match (recorded.or_else(|| session.repo.clone()), &session.wave_id) {
+        (Some(repo), _) => Some(repo),
+        (None, Some(wave)) => store.get_wave(wave)?.map(|wave| wave.repo().to_string()),
+        (None, None) => None,
+    };
+    // With no repository on record the launch reports the missing directory.
+    Ok(recorded
+        .map(PathBuf::from)
+        .filter(|repo| repo.is_dir())
+        .and_then(|repo| crate::git::worktrees::main_repo_root(&repo).ok()))
 }
 
 async fn admit_scope_workspace(store: &SharedStore, session: LfSession) -> Result<LfSession> {

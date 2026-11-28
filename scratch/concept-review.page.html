@@ -2,18 +2,18 @@
 
 <p class="lf-meta">
   <span>Task <code>LOO-1126</code></span>
-  <span>Stage: post-implementation review (Passes 1–3 built)</span>
-  <span>Base: <code>fd8dce986d</code> · HEAD: <code>ec8ae076ce</code></span>
+  <span>Stage: post-implementation review (Passes 1–4 built)</span>
+  <span>Base: <code>fd8dce986d</code> · HEAD: <code>bba5ff2138</code></span>
 </p>
 
-<p><strong>Area reviewed:</strong> clickable links across Loopflow Sessions and Desktop — from held-terminal identity (<code>transport/registry.rs</code>), through Ghostty's hover, cursor, and click callbacks (<code>GhosttyManager</code>, <code>GhosttyTerminalView</code>), link parsing and destination resolution (<code>TerminalLink</code>, <code>ops/task/directory.rs</code>, <code>ops/task/snapshot.rs</code>), into Desktop's pane, Files, Dashboard tile, and Work routers (<code>WorkspacePanesView</code>, <code>SessionsView</code>, <code>TaskFilesStore</code>, <code>LoopflowApp</code>, <code>TaskBriefView</code>, <code>TaskHTMLView</code>, and <code>LoopflowiOS</code>). Reviewing the whole area on <code>ec8ae076ce</code> against base <code>fd8dce986d</code> shows that the core experience works, while one inverted server probe and three smaller conceptual seams remain.</p>
+<p><strong>Area reviewed:</strong> clickable links across Loopflow Sessions and Desktop — from held-terminal identity (<code>transport/registry.rs</code>), through Ghostty hover, cursor, and click callbacks (<code>GhosttyManager</code>, <code>GhosttyTerminalView</code>), hyperlink parsing and file/Work routing (<code>TerminalHyperlink</code>, <code>ops/task/snapshot.rs</code>, <code>work/link.rs</code>), into Desktop's pane, Files, Dashboard tile, and Work surfaces (<code>WorkspacePanesView</code>, <code>MultiplexerStore</code>, <code>TaskFilesStore</code>, <code>DashboardView</code>, <code>LoopflowApp</code>, <code>TaskBriefView</code>, <code>MarkdownBlocks</code>, <code>TaskHTMLView</code>, and <code>LoopflowiOS</code>). Reviewing the whole area on <code>bba5ff2138</code> against base <code>fd8dce986d</code> confirms Pass 4 closed all four earlier implementation mismatches; one cross-surface link-ownership split and three concrete seams in the built code remain.</p>
 
 <h2>What is built vs. what waits</h2>
 
 <ul>
-  <li><strong>Built and committed across Passes 1–3 (<code>a12082957b</code>, <code>0552209e91</code>, <code>e507237447</code>, <code>04c2f98af7</code>, <code>ec8ae076ce</code>):</strong> Ghostty intercepts <code>OPEN_URL</code> (always returning <code>true</code>), <code>MOUSE_SHAPE</code>, and <code>MOUSE_OVER_LINK</code> with <code>link-previews = true</code>; paused Sessions support ⌘-hover via <code>flagsChanged</code>; all link previews and click errors share one bottom-corner <code>linkFeedback</code> pill; web and mail links open in default apps; custom schemes confirm in <code>TerminalExternalLinkSheet</code>; <code>loopflow://</code> Work addresses resolve via <code>query.workLink</code> and open in-app without dispatching app-control routes; Task checkout files open in <strong>Files</strong> at <code>#L&lt;n&gt;</code> using the Task's active <code>filesPlace</code> with safe default-app fallbacks for non-Task panes and old local shells; held terminals set <code>TERM_PROGRAM=ghostty</code> and drop <code>TERM_PROGRAM_VERSION</code>.</li>
-  <li><strong>Product choices implemented headless, awaiting confirmation:</strong> all five recommendations from the prior headless review were built (Files pane for Task checkouts + safe fallback, remote <code>file://</code> hostnames, unconditional <code>TERM_PROGRAM=ghostty</code>, direct in-app Work links), plus Dashboard tile file clicks flipping the tile via <code>zoomedPaneId</code>.</li>
-  <li><strong>Still misaligned in the built code:</strong> remote file clicks probe the <em>directory-listing</em> endpoint (<code>task.files</code>) hoping for a special error instead of reading the file with <code>task.file</code>; hover cursor and bare-path acceptance disagree with click validation; Dashboard tile clicks overwrite the Task's saved zoom state; and macOS's <code>TerminalLink</code> collides with iOS's <code>TerminalLink</code> connection class.</li>
+  <li><strong>Built and committed across Passes 1–4 (<code>a12082957b</code>, <code>0552209e91</code>, <code>e507237447</code>, <code>04c2f98af7</code>, <code>98c1057421</code>, <code>bba5ff2138</code>):</strong> Ghostty intercepts <code>OPEN_URL</code> (always returning <code>true</code>), <code>MOUSE_SHAPE</code>, and <code>MOUSE_OVER_LINK</code> with <code>link-previews = true</code>; paused Sessions support ⌘-hover via <code>flagsChanged</code>; hover preview, cursor shape (<code>.pointingHand</code> vs. <code>.operationNotAllowed</code>), and click routing share one <code>TerminalHyperlink</code> classifier (renamed to clear <code>LoopflowiOS.TerminalLink</code>); web and mail links open in default apps; custom schemes confirm in <code>TerminalExternalLinkSheet</code>; <code>loopflow://</code> Work links resolve via <code>query.workLink</code> and open in-app without touching app-control routes; Task checkout files open in <strong>Files</strong> at <code>#L&lt;n&gt;</code> locally and remotely via <code>task.file</code> (with <code>snapshot.rs</code> distinguishing directories from missing files and <code>directory.rs</code> reverted); non-Task panes and pre-move local shells fall back to safe local documents/folders; Dashboard tile clicks enter the Task with Files beside its Session; held terminals set <code>TERM_PROGRAM=ghostty</code> and drop <code>TERM_PROGRAM_VERSION</code>.</li>
+  <li><strong>Product choices implemented headless, still awaiting human confirmation:</strong> Files pane for active Task checkouts + safe default-app fallback elsewhere (Q2), unconditional <code>TERM_PROGRAM=ghostty</code> on held terminals (Q3), accepting any remote <code>file://</code> hostname inside the remote Task's checkout (Q4), and Dashboard tile + zoomed-terminal behavior (Q1).</li>
+  <li><strong>Remaining mismatches on <code>bba5ff2138</code>:</strong> Desktop still has four different link routers and two parsers for <code>loopflow://</code> Work addresses; remote file clicks fetch and discard the full file body before Files fetches it a second time over SSH; clicking a checkout file inside a zoomed terminal behaves opposite to clicking it from a zoomed Task's Dashboard tile; and ⌘-hover over an unfocused terminal pane misses <code>flagsChanged</code>.</li>
 </ul>
 
 <h2>Do the concepts line up?</h2>
@@ -29,95 +29,92 @@
   </thead>
   <tbody>
     <tr>
-      <td><strong>⌘-click a file inside a remote Task's checkout</strong> (regular file, folder, missing file, or escaped symlink).</td>
-      <td><code>TerminalLink.File.destination</code> calls <code>query.taskFiles</code> (directory listing!) with <code>showIgnored: true</code> and treats <code>ServerError(.invalid, {"reason": "file"})</code> from <code>ops/task/directory.rs</code> as "this is a file", then <code>openPresentation</code> calls <code>task.file</code> in a second round-trip.</td>
+      <td><strong>Click a <code>loopflow://</code> Work link or <code>file://</code> link anywhere in Desktop</strong> (terminal, Task Brief, rendered Markdown, review page, or OS deep link).</td>
+      <td><code>TerminalHyperlink.isWorkAddress</code> duplicates 28 lines of Rust's <code>WorkUrl::parse</code> in Swift for terminals; terminal clicks route through <code>query.workLink</code> → <code>openResolvedWorkLink</code>. Meanwhile <code>TaskBriefView</code> and <code>MarkdownBlocks</code> hand <code>loopflow://</code> and <code>file://</code> to macOS Launch Services (<code>.systemAction</code>), and <code>TaskHTMLView.TaskHTMLLinks</code> returns <code>.allow</code> for non-web schemes so <code>WKWebView</code> tries to navigate them.</td>
       <td><strong>No</strong></td>
-      <td>An inverted API. Clicking a regular file pays two remote round-trips and breaks against older remote servers; clicking a folder enumerates, sorts, and ships up to 500 <code>TaskFileEntry</code> rows just to discard them; missing files and escaped symlinks leak raw OS / "Directory" errors instead of matching local panes' <code>"File is missing or unreadable."</code>; and <code>directory.rs</code> had to reorder its <code>.git</code> guard to accommodate file probes.</td>
+      <td>One link concept under two parsers and four incompatible routers. In this branch, <code>isWorkAddress</code> is not what blocks app-control routes (<code>loopflow://update</code> already passes it), yet it mislabels syntax mistakes like <code>#frag</code> or <code>LOOPFLOW://</code> as control-route refusals while letting invalid <code>RepositoryId</code>/<code>MachineId</code> values pass hover. Across Desktop, clicking a Related Task in Brief or a Markdown link can wake the wrong installed app, hit <code>handleDeepLink</code> app-control routes, or bypass local executable checks.</td>
     </tr>
     <tr>
-      <td><strong>⌘-hover to see whether a link is clickable and where it goes</strong> before clicking.</td>
-      <td><code>MOUSE_OVER_LINK</code> runs <code>TerminalLink.preview(target)</code> with <code>allowsBarePath: true</code>, while <code>OPEN_URL</code> passes <code>allowsBarePath: kind != OSC8</code>. <code>MOUSE_SHAPE</code> sets <code>.pointingHand</code> unconditionally, even when <code>preview</code> returns a refusal reason.</td>
+      <td><strong>⌘-click a file inside a remote Task's checkout.</strong></td>
+      <td><code>TerminalHyperlink.File.destination</code> calls <code>query.taskFile(issue:path:)</code>, checks <code>snapshot.state != .missing</code>, and discards the returned <code>TaskFileSnapshot</code> (up to 1 MB of text/data). <code>openPresentation</code> then mounts <code>TaskFilesView</code>, which calls <code>TaskFilesStore.loadFile()</code> and runs the same <code>task.file</code> RPC again.</td>
       <td><strong>No</strong></td>
-      <td>One gesture split across three rules. Hovering a refused link (e.g. <code>https://github.com@evil.example/</code>) shows a refusal message in the corner while the cursor still shows a pointing hand. Hovering an OSC 8 bare path (<code>\x1b]8;;/tmp/file</code>) previews it as valid, then clicking refuses it.</td>
+      <td>One click pays two full remote file transfers over SSH, even though <code>TaskFileDocument.reconcile(_:)</code> already merges fetched snapshots safely with retained documents, IME composition, and dirty drafts.</td>
     </tr>
     <tr>
-      <td><strong>⌘-click a checkout file inside a Dashboard tile.</strong></td>
-      <td><code>openTerminalFile</code> runs <code>if inTile { store.setZoom(browser.id, enabled: true) }</code>, mutating the Task workspace's persisted <code>MultiplexerStore.zoomedPaneId</code>.</td>
+      <td><strong>⌘-click a checkout file when the terminal is zoomed</strong> (inside the Task view vs. from a Dashboard tile).</td>
+      <td><code>openTerminalFile</code> calls <code>store.showBrowser(.files, location: filesLocation, focus: onEnter == nil)</code>. In <code>MultiplexerStore.showBrowser</code>, <code>focus: false</code> uncollapses Files and clears <code>zoomedPaneId</code>, while <code>focus: true</code> calls <code>setFocusedPane</code>, which keeps zoom on and switches <code>zoomedPaneId</code> to Files.</td>
       <td><strong>No</strong></td>
-      <td>One piece of state ("which pane fills the Task view") reused for "show this link in a Dashboard tile." Opening a file from a tile persists Files as zoomed, so entering the Task later drops the Session + Files split until you manually exit zoom.</td>
+      <td>One gesture produces opposite layouts, and <code>focus: Bool</code> hides two unrelated behaviors. From a zoomed Task's Dashboard tile, clicking a file unzooms into Session + Files side-by-side with focus on the terminal; inside that same zoomed Task view, clicking the same file hides the Session behind full-screen zoomed Files and moves focus away.</td>
     </tr>
     <tr>
-      <td><strong>Click a <code>loopflow://</code> Work link anywhere in Desktop</strong> (terminal, Task Brief, review page, or OS deep link).</td>
-      <td><code>TerminalLink.isWorkAddress</code> duplicates 28 lines of Rust's <code>WorkUrl::parse</code> in Swift for hover checks. Terminal clicks go through <code>query.workLink</code> → <code>openResolvedWorkLink</code>; <code>TaskBriefView</code> hands <code>loopflow://</code> to Launch Services (<code>.systemAction</code>); <code>TaskHTMLView.TaskHTMLLinks</code> lets WKWebView navigate non-web schemes.</td>
+      <td><strong>Hold or release ⌘ over a link in an unfocused terminal pane</strong> (e.g. Session while Files is focused, or another Dashboard tile).</td>
+      <td><code>GhosttyMetalView.setupTrackingArea</code> uses <code>.activeInKeyWindow</code> so <code>mouseMoved</code> works while unfocused, but <code>flagsChanged</code> is an <code>NSResponder</code> override delivered only to the first responder.</td>
       <td><strong>No</strong></td>
-      <td>One grammar under two parsers (Swift skips <code>RepositoryId</code>/<code>MachineId</code> checks and gives a misleading control-route error for syntax mistakes like <code>#frag</code>), and three different Desktop click behaviors for the same URL.</td>
+      <td>Resting the pointer over a link in an unfocused pane and pressing ⌘ shows nothing until you wiggle the mouse; releasing ⌘ after hovering leaves the link preview pill and pointing-hand cursor stuck on screen until the pointer moves.</td>
     </tr>
     <tr>
-      <td><strong>Share terminal link parsing between Mac and iPhone.</strong></td>
-      <td><code>swift/LoopflowMac/Services/Ghostty/TerminalLink.swift</code> defines <code>enum TerminalLink</code> (a clickable hyperlink). <code>swift/LoopflowiOS/TerminalLink.swift</code> already defines <code>final class TerminalLink</code> (the phone's live Session/shell connection).</td>
-      <td><strong>No</strong></td>
-      <td>One name for two unrelated concepts in the same Swift workspace, blocking extraction of hyperlink parsing into the shared <code>Loopflow</code> library.</td>
-    </tr>
-    <tr>
-      <td><strong>⌘-click a local file in a Task pane, Repo/Wave Session, or old pre-move shell.</strong></td>
-      <td><code>activeFilesPlace</code> checks <code>key.kind == .task</code>, active owner Machine, and <code>filesPlace</code>; matching local files open in <strong>Files</strong> at <code>#L&lt;n&gt;</code>, while folders and non-matching local panes fall back to <code>localDocument()</code> (blocking apps, scripts, aliases, and executables).</td>
+      <td><strong>⌘-hover over valid vs. refused links in a focused or paused Session.</strong></td>
+      <td><code>MOUSE_OVER_LINK</code> and <code>OPEN_URL</code> both classify through <code>TerminalHyperlink(target:)</code>; <code>GhosttyMetalView.terminalCursor</code> shows <code>.pointingHand</code> when valid and <code>.operationNotAllowed</code> when refused; <code>linkFeedback</code> shows the target or refusal reason even while read-only.</td>
       <td><strong>Yes</strong></td>
-      <td>Built in Pass 2; symlink roots (<code>/tmp</code> vs <code>/private/tmp</code>), unstarted shell <code>worktree == ""</code>, and pre-move shells all route cleanly.</td>
+      <td>Resolved in Pass 4; hover cursor, preview pill, and click classification now agree on every target.</td>
+    </tr>
+    <tr>
+      <td><strong>⌘-click a local file in a Task pane, Repo/Wave Session, or pre-move local shell.</strong></td>
+      <td><code>activeFilesPlace</code> matches active Task owner and checkout; regular files in that checkout open in <strong>Files</strong> at <code>#L&lt;n&gt;</code> (rendered for <code>.md</code>/<code>.html</code> without <code>#L</code>, source with <code>#L</code>), while folders, outside files, non-Task panes, and old local shells fall back to <code>localDocument()</code> (blocking packages, aliases, scripts, shebangs, and executables).</td>
+      <td><strong>Yes</strong></td>
+      <td>Symlinked checkouts (<code>/tmp</code> vs. <code>/private/tmp</code>), package bundles inside checkouts, escaped symlinks, and unstarted shells all route cleanly.</td>
     </tr>
     <tr>
       <td><strong>All terminal link failures report in the pane you clicked.</strong></td>
-      <td><code>GhosttyMetalView.openLink</code> passes a <code>showLinkNotice</code> closure through <code>onOpenLink</code>, covering sync refusals, failed <code>TerminalExternalLinkSheet</code> opens, and async remote/Work errors in one bottom-corner overlay.</td>
+      <td><code>GhosttyMetalView.openLink</code> passes a pane-scoped <code>showLinkNotice</code> callback through <code>onOpenLink</code> covering sync refusals, failed <code>TerminalExternalLinkSheet</code> opens, and async remote/Work errors.</td>
       <td><strong>Yes</strong></td>
-      <td>No longer misroutes link errors through <code>paneFailed</code> or the <code>open-work</code> error window.</td>
+      <td>Errors stay in the originating pane's bottom-corner notice instead of opening the <code>open-work</code> window or marking the pane failed.</td>
     </tr>
     <tr>
-      <td><strong>Sessions emit clickable links regardless of how they started.</strong></td>
+      <td><strong>Held terminals advertise clickable hyperlinks however they started.</strong></td>
       <td><code>transport/registry.rs</code> strips caller <code>TERM_PROGRAM</code> / <code>TERM_PROGRAM_VERSION</code> and sets <code>TERM_PROGRAM=ghostty</code> on every held terminal (Sessions and Desktop shells).</td>
       <td><strong>Yes</strong></td>
-      <td>Matches the real <code>libghostty-vt</code> emulator behind every held terminal; <code>terminal_host.rs</code> reads <code>REX_SESSION</code>/<code>REX_BLOCK</code>.</td>
+      <td>Matches the real <code>libghostty-vt</code> emulator behind every held terminal; Rex host detection uses <code>REX_SESSION</code>/<code>REX_BLOCK</code>.</td>
     </tr>
     <tr>
-      <td><strong>OSC 8 clicks, paused-Session hover, VT relay, and <code>.ghostsnp</code>.</strong></td>
-      <td><code>GhosttyManager</code> always returns <code>true</code> on <code>OPEN_URL</code>; <code>GhosttyMetalView.flagsChanged</code> keeps ⌘-hover working while read-only; <code>loopflow-terminal</code> preserves OSC 8 spans.</td>
-      <td><strong>Yes</strong></td>
-      <td>Exercised end-to-end by <code>TerminalFeedbackTests.sessionHyperlink</code>.</td>
+      <td><strong>Tap links in iPhone Sessions.</strong></td>
+      <td><code>swift/LoopflowiOS/GhosttySurface.swift</code> ignores <code>GHOSTTY_ACTION_OPEN_URL</code> and has no touch link gesture.</td>
+      <td><strong>No (separate)</strong></td>
+      <td>Out of scope for macOS Desktop, but renaming to <code>TerminalHyperlink</code> cleared the collision with <code>LoopflowiOS.TerminalLink</code> so sharing the parser in <code>Loopflow</code> is unblocked.</td>
     </tr>
   </tbody>
 </table>
 
-<h2>Biggest mismatch: probing remote files through the directory-listing API</h2>
+<h2>Biggest mismatch: no single link owner in Desktop (two parsers, four routers)</h2>
 
-<p>To check whether a clicked remote path is a file or a folder before opening <strong>Files</strong>, Pass 2 calls <code>task.files</code> (the directory-listing operation) and relies on a new structured error inside <code>directory_snapshot</code>:</p>
+<p>Terminal links now have a clean, safe classifier and in-app Work opener — but only for terminal panes. Meanwhile <code>TerminalHyperlink.isWorkAddress</code> re-implements 28 lines of Rust's <code>WorkUrl::parse</code> in Swift, and every non-terminal surface in Desktop still routes <code>loopflow://</code> and <code>file://</code> links through different paths:</p>
 
-<lf-diff path="swift/LoopflowMac/Services/Ghostty/TerminalLink.swift" lines="177-190"></lf-diff>
+<lf-diff path="swift/LoopflowMac/Services/Ghostty/TerminalHyperlink.swift" lines="71-125"></lf-diff>
 
-<lf-diff path="rust/loopflow-execution/src/ops/task/directory.rs" lines="82-101"></lf-diff>
+<lf-file path="rust/loopflow-execution/src/work/link.rs" lines="44-98"></lf-file>
 
-<p>Meanwhile, <code>task.file</code> (<code>file_snapshot</code>) already exists on the exact same server, already canonicalizes and checks containment inside the Task worktree, already returns <code>TaskFileState::Missing</code> cleanly when the path does not exist, already handles read-only <code>.git/*</code> files, and is the very read <code>TaskFilesStore.loadFile()</code> immediately runs next:</p>
+<p>Outside terminals, <code>TaskBriefView</code> (which renders Related Task <code>loopflow://</code> links and Task descriptions) and every <code>MarkdownBlocks</code> reader fall back to SwiftUI's <code>.systemAction</code> (macOS Launch Services), while <code>TaskHTMLView</code> lets <code>WKWebView</code> navigate non-web schemes:</p>
 
-<lf-file path="rust/loopflow-execution/src/ops/task/snapshot.rs" lines="707-735"></lf-file>
+<lf-file path="swift/LoopflowMac/Views/TaskBriefView.swift" lines="120-126"></lf-file>
+
+<lf-file path="swift/LoopflowMac/Views/TaskHTMLView.swift" lines="302-311"></lf-file>
 
 <lf-component name="before-after">
   <div slot="before">
-    <p><strong>Built today (probe via <code>task.files</code> directory listing)</strong></p>
+    <p><strong>Today across Desktop (four routes, two Work parsers)</strong></p>
     <ol>
-      <li>Remote file click calls <code>task.files(directory: relative, showIgnored: true)</code>.</li>
-      <li>Server canonicalizes, stats, and fails with <code>Invalid { "reason": "file" }</code> — caught by Swift as success.</li>
-      <li><code>files.openPresentation</code> opens the tab and makes a <em>second</em> server call (<code>task.file</code>) to fetch the file.</li>
-      <li>Clicking a remote folder runs <code>read_dir</code>, sorts up to 500 entries, serializes them, sends them over SSH, and Swift discards the response to throw <code>remoteDirectory</code>.</li>
-      <li>Clicking a missing remote file throws raw <code>"io error: No such file or directory (os error 2)"</code>; an escaped symlink throws <code>"Directory must remain inside the Task worktree"</code>; an un-upgraded remote Machine fails every file click.</li>
-      <li><code>directory.rs</code> carries custom error-data plumbing and a reordered <code>.git</code> guard solely for terminal links.</li>
+      <li><strong>Terminal panes:</strong> Swift's <code>isWorkAddress</code> parses <code>loopflow://</code> (rejecting syntax errors like <code>#frag</code> with a misleading "only Work" notice, while accepting invalid IDs like <code>?repository=bad</code> and control names like <code>loopflow://update</code>), then clicks go to <code>query.workLink</code> → <code>openResolvedWorkLink</code>.</li>
+      <li><strong>Task Brief &amp; Markdown readers</strong> (<code>TaskBriefView</code>, <code>TaskFilesView</code>, <code>WorkSurfaceView</code>, <code>TaskChangesView</code>, <code>TaskCommentsView</code>): <code>loopflow://</code> and <code>file://</code> go to <code>.systemAction</code> (Launch Services), which can wake the Release app from Dev, pop the <code>open-work</code> error window, dispatch app-control URLs like <code>loopflow://update</code>, and launch local files without executable checks.</li>
+      <li><strong>Review pages</strong> (<code>TaskHTMLView</code>): only <code>http</code>/<code>https</code>/<code>mailto</code> leave the page; <code>loopflow://</code> and <code>file://</code> return <code>.allow</code> and navigate inside the offline <code>WKWebView</code>.</li>
+      <li><strong>OS deep links</strong> (<code>LoopflowApp.handleDeepLink</code>): the only surface that legitimately handles app-control routes (<code>open</code>, <code>portfolio</code>, <code>sessions</code>, <code>update</code>) before falling back to <code>workLink</code>.</li>
     </ol>
   </div>
   <div slot="after">
-    <p><strong>Recommended (read via <code>task.file</code> directly)</strong></p>
+    <p><strong>Recommended (one Desktop link router; Rust owns Work grammar)</strong></p>
     <ol>
-      <li>Revert the <code>directory.rs</code> changes completely — <code>task.files</code> stays a pure directory listing.</li>
-      <li>Remote file click calls <code>query.taskFile(issue: files.taskId, path: relative)</code>.</li>
-      <li>If <code>snapshot.state == .missing</code> → throw <code>OpenError.missing</code> (<code>"File is missing or unreadable."</code>, matching local panes).</li>
-      <li>If <code>snapshot</code> is a file (<code>.text</code>, <code>.binary</code>, <code>.truncated</code>, <code>.unsupportedEncoding</code>) → return <code>.checkout(path: relative, line: line, snapshot: snapshot)</code> and seed <code>TaskFilesStore</code> so <strong>Files</strong> renders in one round-trip with no second read.</li>
-      <li>In <code>snapshot.rs</code>, when <code>absolute.is_dir()</code>, return a clear directory refusal (and map <code>is_dir</code> → <code>OpenError.remoteDirectory</code>). Older remote servers still open every regular and missing file without breaking.</li>
-      <li>Keep the existing <code>place == activeFilesPlace</code> guard after <code>await</code> so a concurrent Task move still leaves Files closed.</li>
+      <li><strong>One Desktop router</strong> handles in-app clicks from terminals, Task Brief, rendered Markdown, and review pages: web/mail → default app, <code>loopflow://</code> → <code>query.workLink</code> → <code>openResolvedWorkLink</code> (never <code>handleDeepLink</code>), <code>file://</code> → active Task <strong>Files</strong> or safe <code>localDocument()</code>, unknown schemes → confirmation sheet.</li>
+      <li><strong>One <code>WorkUrl</code> parser (Rust):</strong> because in-app clicks never enter <code>handleDeepLink</code>, Swift does not need a 28-line copy of <code>WorkUrl::parse</code> to stay safe. Either keep a minimal shape check in Swift for hover (rejecting only obvious app-control queries like <code>?repo=</code>/<code>?view=</code>, or letting <code>query.workLink</code> return Rust's exact syntax error on click) or expose one shared validator.</li>
+      <li><strong>OS deep links</strong> stay the sole entry point for Desktop control routes (<code>loopflow://update</code>, <code>loopflow://open?repo=…&amp;view=…</code>).</li>
     </ol>
   </div>
 </lf-component>
@@ -125,89 +122,91 @@
 <h2>Counterexamples tested</h2>
 
 <ul>
-  <li><strong>Remote folder click (<code>file://mini.local/home/jack/wt/node_modules</code>):</strong> <code>file_snapshot</code> checks <code>absolute.is_dir()</code> in O(1) and refuses immediately — zero <code>read_dir</code>, zero 500-entry JSON payload over SSH.</li>
-  <li><strong>Remote missing file (<code>file://mini.local/home/jack/wt/deleted.rs</code>):</strong> <code>file_snapshot</code> returns <code>TaskFileSnapshot(state: .missing)</code>; Swift throws <code>OpenError.missing</code> so local and remote panes show the exact same <code>"File is missing or unreadable."</code> message and never open an empty tab.</li>
-  <li><strong>Large remote binary or multi-megabyte log file:</strong> <code>file_snapshot</code> already bounds text reads at 1 MB (sniffing a short prefix first) and binary reads at <code>MAX_BINARY_DATA_BYTES</code> — the exact same work <code>TaskFilesStore.loadFile</code> performs anyway when opening the file.</li>
-  <li><strong>Remote symlink pointing outside the checkout:</strong> <code>file_snapshot</code> checks <code>!absolute.starts_with(&amp;root)</code> before reading any bytes and refuses with a file-scoped message instead of saying <code>"Directory must remain inside the Task worktree"</code>.</li>
-  <li><strong>Remote <code>.git/config</code> vs <code>.git</code>:</strong> <code>file_snapshot</code> already marks <code>.git/config</code> read-only (<code>"Git metadata is read-only."</code>) and rejects <code>.git</code> as a directory — no special ordering needed in <code>directory.rs</code>.</li>
-  <li><strong>Mixed-version remote Machine (older <code>lf</code> on <code>mini</code>):</strong> <code>task.file</code> already returns <code>Ok(TaskFileSnapshot)</code> for regular files and <code>Missing</code> for missing files on older builds, whereas <code>task.files</code> with <code>{"reason": "file"}</code> fails every remote file click until <code>mini</code> is upgraded.</li>
-  <li><strong>Task moves during the remote read:</strong> <code>guard let place, place == activeFilesPlace</code> still runs after <code>await</code> before touching the browser pane or <code>TaskFilesStore</code>, so a move cancels the reveal cleanly.</li>
+  <li><strong><code>loopflow://update</code> or <code>loopflow://sessions</code> printed by an agent:</strong> Passes <code>isWorkAddress</code> today, goes to <code>query.workLink</code> (not <code>handleDeepLink</code>), and only opens if a registered repository is literally named <code>update</code> or <code>sessions</code>; otherwise reports not found in the pane notice. Never runs Sparkle or opens the sessions sheet.</li>
+  <li><strong><code>loopflow://loopflow/task/LOO-1#section</code> printed by an agent:</strong> With <code>isWorkAddress</code>, hover and click say <code>"Terminal links can only open Work in Loopflow."</code> instead of Rust's actual reason (<code>"Work links do not accept a fragment"</code>).</li>
+  <li><strong>Related Task link in <code>TaskBriefView</code> while running Loopflow Dev:</strong> <code>.systemAction</code> hands <code>loopflow://loopflow/task/LOO-99</code> to macOS Launch Services, which can focus the installed Release build instead of the Dev window.</li>
+  <li><strong>Remote file with unsaved edits in <strong>Files</strong>:</strong> If <code>openTerminalFile</code> seeds the fetched <code>TaskFileSnapshot</code> through <code>TaskFileDocument.reconcile(_:)</code>, dirty drafts run 3-way merge (<code>TaskTextEdit.merge</code>) and in-flight saves defer cleanly — the exact path <code>TaskFilesStore.loadFile()</code> already uses.</li>
+  <li><strong>Task moves during remote <code>task.file</code> lookup:</strong> <code>guard let place, place == activeFilesPlace</code> runs after <code>await</code> before touching Files or <code>onEnter</code>, so a concurrent move aborts cleanly with a pane notice.</li>
+  <li><strong>Package bundle inside a local checkout (e.g. <code>Fixture.app</code>):</strong> <code>kind.isRegularFile</code> is false and <code>kind.isDirectory</code> is true, so it falls through to <code>localDocument()</code>, which checks <code>info.isPackage != true</code> and refuses it as unsafe.</li>
+  <li><strong>Pointer rests on a link in an unfocused Session (Files focused) and user presses or releases ⌘:</strong> <code>mouseMoved</code> never fires without pointer movement, and AppKit sends <code>flagsChanged</code> only to Files, so the preview/cursor fails to appear on press or stays stuck after release.</li>
 </ul>
 
-<h2>Second mismatch: hover preview, cursor shape, and <code>allowsBarePath</code></h2>
+<h2>Three smaller seams inside this branch's built code</h2>
 
-<lf-diff path="swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift" lines="286-299"></lf-diff>
+<h3>1. Remote checkout click reads the file body twice over SSH</h3>
 
-<lf-diff path="swift/LoopflowMac/Services/Ghostty/TerminalLink.swift" lines="37-87"></lf-diff>
+<lf-diff path="swift/LoopflowMac/Services/Ghostty/TerminalHyperlink.swift" lines="175-190"></lf-diff>
 
-<p>Two contradictions live in those 30 lines:</p>
-<ol>
-  <li><strong>Pointing hand on refused links:</strong> <code>MOUSE_OVER_LINK</code> shows <code>"Invalid web link."</code> or <code>"Terminal links can only open Work in Loopflow."</code>, while <code>MOUSE_SHAPE</code> still puts up <code>.pointingHand</code>. Having <code>TerminalLink.preview</code> distinguish valid vs. refused (or letting <code>GhosttyMetalView</code> suppress <code>.pointingHand</code> while hovering a refused link) makes cursor and pill agree.</li>
-  <li><strong>OSC 8 bare paths preview as valid, then fail on click:</strong> <code>preview(_:)</code> calls <code>TerminalLink(target: target, allowsBarePath: true)</code> because Ghostty's <code>MOUSE_OVER_LINK</code> carries no link kind, whereas <code>OPEN_URL</code> passes <code>allowsBarePath: request.kind != GHOSTTY_ACTION_OPEN_URL_KIND_OSC8</code>. Both <code>/tmp/foo</code> and <code>file:///tmp/foo</code> produce the exact same <code>TerminalLink.File(path: "/tmp/foo", host: nil, line: nil)</code> and pass through the exact same containment and launcher checks; refusing bare paths only on OSC 8 adds no security boundary and creates the hover/click split noted in <code>scratch/questions.md</code>. Removing <code>allowsBarePath</code> lets hover and click share one classifier unconditionally.</li>
-</ol>
+<lf-file path="swift/LoopflowMac/TaskFileDocument.swift" lines="73-100"></lf-file>
 
-<h2>Third mismatch: Dashboard tile zoom side-effect and <code>TerminalLink</code> name collision</h2>
+<p><code>TerminalHyperlink.File.destination</code> fetches the complete <code>TaskFileSnapshot</code> (up to 1 MB) via <code>query.taskFile</code> and throws it away; <code>openPresentation</code> then mounts <code>TaskFilesView</code>, which runs <code>store.loadFile()</code> and transfers the exact same file a second time. Returning the snapshot on <code>.checkout</code> (or reconciling it via <code>files.document(path).reconcile(snapshot)</code> right before <code>openPresentation</code>) displays the remote file immediately in one round-trip while keeping <code>TaskFileDocument</code>'s draft-merge and save safety intact.</p>
 
-<lf-diff path="swift/LoopflowMac/Views/WorkspacePanesView.swift" lines="1041-1063"></lf-diff>
+<h3>2. Zoomed terminal file clicks disagree between Task view and Dashboard tile</h3>
 
-<lf-file path="swift/LoopflowMac/Views/DashboardView.swift" lines="286-298"></lf-file>
+<lf-diff path="swift/LoopflowMac/Views/WorkspacePanesView.swift" lines="1048-1063"></lf-diff>
 
-<p>In a Dashboard tile (<code>inTile == true</code>), clicking a checkout file calls <code>store.setZoom(browser.id, enabled: true)</code>. Because <code>DashboardView</code> renders <code>entry.multiplexer.zoomedPaneId</code> as the tile's face, that flips the tile to <strong>Files</strong> — but it also saves Files as zoomed on the Task's workspace layout, so entering the Task later hides the Session behind zoomed Files. See Q1 below.</p>
+<lf-file path="swift/LoopflowMac/MultiplexerStore.swift" lines="243-261"></lf-file>
 
-<p>Separately, the Mac hyperlink enum shares a name with iOS's live terminal connection class:</p>
+<p><code>openTerminalFile</code> passes <code>focus: onEnter == nil</code> to <code>MultiplexerStore.showBrowser</code>. Because <code>showBrowser</code> clears <code>zoomedPaneId</code> when <code>focus == false</code> and switches <code>zoomedPaneId</code> to Files when <code>focus == true</code>, clicking a checkout file from a zoomed Task's Dashboard tile unzooms into Session + Files side-by-side (focus on Session), whereas clicking the exact same link inside that zoomed Task view hides the Session behind zoomed Files (focus on Files). Making the layout intent explicit (unzooming to show Files beside the Session in both places, or separating <code>unzoom</code> from <code>focus</code> on <code>showBrowser</code>) removes the hidden overload.</p>
 
-<lf-file path="swift/LoopflowiOS/TerminalLink.swift" lines="21-38"></lf-file>
+<h3>3. ⌘-hover on an unfocused terminal pane misses modifier changes</h3>
 
-<p>Renaming the Mac hyperlink enum to <code>TerminalHyperlink</code> (before or when sharing it across macOS and iOS) removes "one name for two ideas" in the same Swift package.</p>
+<lf-diff path="swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift" lines="1160-1169"></lf-diff>
+
+<lf-diff path="swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift" lines="1392-1402"></lf-diff>
+
+<p>Tracking areas use <code>.activeInKeyWindow</code>, so moving the mouse while holding ⌘ previews links even when another pane (like Files or a neighboring Dashboard tile) is first responder. Because <code>flagsChanged</code> only reaches the first responder, pressing or releasing ⌘ without moving the pointer fails to update the unfocused terminal — leaving the preview pill and hand cursor stuck after ⌘ is released until the mouse moves. Forwarding window <code>flagsChanged</code> to the hovered terminal view (or clearing hover when ⌘ is no longer held) keeps cursor and pill accurate across split panes and tiles.</p>
 
 <h2>Findings</h2>
 
-<lf-component name="decision" id="f1" title="Replace the remote task.files error-probe with task.file and revert directory.rs" recommendation="Fix here">
-  <p><strong>This work.</strong> Delete the bespoke <code>{"reason": "file"}</code> refusal and <code>.git</code> reordering in <code>rust/loopflow-execution/src/ops/task/directory.rs</code>. Have remote checkout routing in <code>TerminalLink.File.destination</code> call <code>query.taskFile(issue:path:)</code> (optionally seeding <code>TaskFilesStore</code> with the returned snapshot), mapping <code>.missing</code> to <code>OpenError.missing</code> and adding a clean directory refusal in <code>snapshot.rs</code>. Cuts remote opens from 2 round-trips to 1, stops reading 500 directory entries on folder clicks, fixes raw OS / "Directory" error text, and keeps regular remote files working on older servers. <em>Passed over:</em> keeping <code>task.files</code> as a probe, which leaves all four defects in place.</p>
+<lf-component name="decision" id="f1" title="Pass the fetched remote TaskFileSnapshot into TaskFilesStore instead of reading twice" recommendation="Fix here">
+  <p><strong>This work.</strong> Carry the already-fetched <code>TaskFileSnapshot</code> from <code>TerminalHyperlink.File.destination</code> into <code>openTerminalFile</code> and reconcile it via <code>await files.document(path).reconcile(snapshot)</code> before <code>openPresentation</code> (letting <code>loadFile()</code> skip a redundant immediate fetch or revalidate quietly). Cuts remote clicks from two full file transfers over SSH to one, removes the loading flash on remote file links, and reuses <code>TaskFileDocument</code>'s existing 3-way draft merge and concurrent-save guard. <em>Passed over:</em> discarding the lookup snapshot and re-reading on mount, which pays double SSH bandwidth and latency on every remote file link.</p>
 </lf-component>
 
-<lf-component name="decision" id="f2" title="Make hover cursor, hover preview, and click validation use one TerminalLink result" recommendation="Fix here">
-  <p><strong>This work.</strong> Drop the <code>allowsBarePath</code> split between <code>MOUSE_OVER_LINK</code> and <code>OPEN_URL</code> (both already funnel through <code>fileLink</code> and <code>destination</code>/<code>localDocument</code>), and have <code>GhosttyMetalView</code> avoid showing <code>.pointingHand</code> when the hovered target classifies as <code>.refused</code>. Removes the hover/click contradiction recorded in <code>scratch/questions.md</code>.</p>
+<lf-component name="decision" id="f2" title="Make zoomed-terminal file clicks behave consistently and separate unzoom from focus in showBrowser" recommendation="Fix here">
+  <p><strong>This work (depends on Q1).</strong> Stop overloading <code>MultiplexerStore.showBrowser(..., focus: Bool)</code> so <code>focus: false</code> secretly means "also unzoom". When a person ⌘-clicks a checkout file in a zoomed terminal — whether inside the Task view or from a Dashboard tile — unzooming so <strong>Files</strong> opens beside the Session makes one gesture do one predictable thing everywhere. <em>Passed over:</em> keeping <code>focus: onEnter == nil</code>, which splits zoomed Task clicks (full-screen Files hiding Session) from zoomed tile clicks (Session + Files side-by-side).</p>
 </lf-component>
 
-<lf-component name="decision" id="f3" title="Decide Dashboard tile behavior for checkout file links without leaking saved zoom" recommendation="Fix here">
-  <p><strong>This work (depends on Q1).</strong> Right now <code>if inTile { store.setZoom(browser.id, enabled: true) }</code> mutates the Task workspace's persisted zoom state so entering the Task opens Files full-screen. Either enter the full Task view on tile file clicks (showing Session + Files side by side) or track a tile-only face override instead of writing <code>zoomedPaneId</code>.</p>
+<lf-component name="decision" id="f3" title="Forward flagsChanged to hovered unfocused terminal panes so ⌘-hover never sticks" recommendation="Fix here">
+  <p><strong>This work.</strong> Observe <code>flagsChanged</code> in the key window (like <code>WorkPalette</code> already does with a local event monitor) while the pointer is inside a <code>GhosttyMetalView</code> that is not first responder, so pressing ⌘ previews links immediately over unfocused panes/tiles and releasing ⌘ always clears the pill and cursor. <em>Passed over:</em> relying only on <code>NSResponder.flagsChanged</code>, which leaves unfocused panes stale until the mouse moves.</p>
 </lf-component>
 
-<lf-component name="decision" id="f4" title="Rename macOS TerminalLink to TerminalHyperlink to avoid colliding with LoopflowiOS.TerminalLink" recommendation="Fix here">
-  <p><strong>This work (small cleanup).</strong> <code>LoopflowiOS/TerminalLink.swift</code> already owns the name <code>TerminalLink</code> for the phone's live terminal connection. Renaming the new hyperlink enum now keeps one name per concept across the Swift package and prepares for sharing it with iOS.</p>
+<lf-component name="decision" id="f4" title="Drop or simplify Swift's WorkUrl::parse duplicate (isWorkAddress) in TerminalHyperlink" recommendation="Fix here">
+  <p><strong>This work (small cleanup).</strong> <code>openTerminalLink</code> already sends every <code>.work</code> link exclusively to <code>query.workLink</code> (never <code>handleDeepLink</code>), so <code>isWorkAddress</code> is not a security boundary — it only pre-screens hover feedback while diverging from Rust's <code>WorkUrl::parse</code> on error text and ID validation. Either keep a minimal hover check (scheme + non-empty host + reject known control-query keys, letting Rust report syntax errors cleanly) or document it as a temporary hover heuristic until the shared router lands.</p>
 </lf-component>
 
-<lf-component name="decision" id="f5" title="Share one Work-link router across Terminal, TaskBriefView, and TaskHTMLView" recommendation="File Task">
-  <p><strong>Separate outcome.</strong> <code>TaskBriefView</code> still sends Related Task <code>loopflow://</code> links through Launch Services (<code>.systemAction</code>, which can wake the wrong installed Loopflow app and pop the <code>open-work</code> error window), and <code>TaskHTMLView.TaskHTMLLinks</code> lets non-web schemes fall into WKWebView navigation. Unifying all Desktop surfaces onto <code>openResolvedWorkLink</code> (and deciding whether <code>TerminalLink.isWorkAddress</code> can shrink once the resolver owns validation) is a clean follow-up Task (~100 lines of Swift + tests).</p>
+<lf-component name="decision" id="f5" title="Share one Desktop link router across Terminal, TaskBriefView, MarkdownBlocks, and TaskHTMLView" recommendation="File Task">
+  <p><strong>Separate outcome.</strong> Route <code>loopflow://</code> and <code>file://</code> links from <code>TaskBriefView</code> (Related Tasks and descriptions), <code>MarkdownBlocks</code> (Files Markdown reader, PR descriptions, comments), and <code>TaskHTMLView</code> (review pages) through the same in-app Work resolver and safe file router that terminals now use, leaving <code>LoopflowApp.handleDeepLink</code> strictly for OS deep links. Needs ~120 lines of Swift + unit tests across Brief, Markdown, and HTML views.</p>
 </lf-component>
 
 <lf-component name="decision" id="f6" title="Files pane for Repository and Wave workspaces" recommendation="File Task">
-  <p><strong>Separate outcome.</strong> <code>TaskFilesStore</code>, <code>MultiplexerStore</code>, and server <code>task.file</code> are Task-only. Adding Files to Repository and Wave workspaces needs repository file endpoints and layout work; until then, safe local default-app fallback handles those panes.</p>
+  <p><strong>Separate outcome.</strong> <code>TaskFilesStore</code>, <code>MultiplexerStore</code>, and server <code>task.file</code> are Task-only. Adding Files to Repository and Wave workspaces needs repository file endpoints on the server and workspace layout changes; until then, safe local default-app fallback handles those panes.</p>
 </lf-component>
 
 <lf-component name="decision" id="f7" title="Clickable links in iPhone Sessions" recommendation="File Task">
-  <p><strong>Separate outcome.</strong> <code>swift/LoopflowiOS/GhosttySurface.swift</code> ignores <code>OPEN_URL</code> and touch has no ⌘-click gesture; needs a touch gesture design plus sharing the renamed hyperlink classifier in <code>Loopflow</code>.</p>
+  <p><strong>Separate outcome.</strong> <code>swift/LoopflowiOS/GhosttySurface.swift</code> ignores <code>OPEN_URL</code> and touch has no ⌘-click gesture; needs a touch interaction design plus moving <code>TerminalHyperlink</code> into the shared <code>Loopflow</code> package.</p>
 </lf-component>
 
 <h2>Questions</h2>
 
-<div data-choice="q1" data-label="1. Clicking a file link inside a Dashboard tile">
-  <p><strong>1. When you are on the Working Tasks Dashboard and ⌘-click a checkout file inside a Task tile, what should happen?</strong></p>
-  <p>Today the tile replaces its Session terminal with <strong>Files</strong> by setting zoom on that Task's layout — which also means clicking into the Task later opens Files zoomed full-screen instead of the Session + Files split. Entering the Task shows Session and Files side by side immediately without changing the tile; keeping the file inside the tile lets you stay on the Dashboard.</p>
-  <button type="button" data-value="1a">1a — Enter the Task view and open the file in Files beside the Session, leaving the tile on the Session (Recommended)</button>
-  <button type="button" data-value="1b">1b — Flip only that Dashboard tile to Files without changing the Task's saved zoom state</button>
-  <button type="button" data-value="1c">1c — Keep current behavior (flip the tile via the Task's layout zoom)</button>
+<p>None of these choices lock in an irreversible data format; all can be adjusted later in Desktop or server code.</p>
+
+<div data-choice="q1" data-label="1. Clicking a file link when the Session is zoomed (Task view and Dashboard tiles)">
+  <p><strong>1. When your Session is zoomed full-screen (or you click from a Dashboard tile) and you ⌘-click a checkout file link, how should Desktop show the file?</strong></p>
+  <p>Built today: clicking from a Dashboard tile enters the Task and unzooms so Session and <strong>Files</strong> appear side-by-side (keeping keyboard focus in the Session), while clicking the same link inside a zoomed Task view replaces the zoomed Session with full-screen <strong>Files</strong> (moving focus to Files).</p>
+  <button type="button" data-value="1a">1a — Always show Session and Files side-by-side (clear terminal zoom in both Task view and Dashboard tiles) (Recommended)</button>
+  <button type="button" data-value="1b">1b — Keep current split: unzoom when entering from a Dashboard tile, replace zoom with full-screen Files inside a zoomed Task view</button>
+  <button type="button" data-value="1c">1c — In a Dashboard tile, flip only that tile to Files without entering the Task or changing saved zoom</button>
 </div>
 
 <div data-choice="q2" data-label="2. Checkout files: Files pane + safe fallback vs. default app (built as 2a)">
   <p><strong>2. Built today: ⌘-clicking a file inside a Task's active checkout opens it in Desktop's Files pane at <code>#L&lt;n&gt;</code> (locally or remotely), while Repository/Wave Sessions and old pre-move local shells open safe local documents and folders in the macOS default app (still blocking scripts and executables). Keep this?</strong></p>
-  <p>Opening Task files in <strong>Files</strong> preserves line numbers, safely reads scripts like <code>scripts/test.py</code>, and works on remote Machines. Opening all local files in the default app matches Rex, but drops line numbers, must refuse scripts, and cannot open remote files.</p>
+  <p>Opening Task files in <strong>Files</strong> keeps line numbers, safely reads scripts like <code>scripts/test.py</code>, and works on remote Machines. Opening all local files in the default app matches Rex, but drops line numbers, must refuse scripts, and cannot open remote files.</p>
   <button type="button" data-value="2a">2a — Keep built behavior: Files pane for active Task checkouts, safe default-app fallback elsewhere (Recommended)</button>
   <button type="button" data-value="2b">2b — Open all local files in the macOS default app, matching Rex</button>
 </div>
 
-<div data-choice="q3" data-label="3. Held terminal identity: always ghostty vs. keep rex (built as 3a)">
+<div data-choice="q3" data-label="3. Held terminal identity: always ghostty vs. keep caller TERM_PROGRAM (built as 3a)">
   <p><strong>3. Built today: every held terminal reports <code>TERM_PROGRAM=ghostty</code> (and clears <code>TERM_PROGRAM_VERSION</code>), even when started from Rex, Apple Terminal, or <code>tmux</code>. Keep always setting <code>ghostty</code>?</strong></p>
   <p>Always advertising <code>ghostty</code> makes clickable links work consistently no matter where the Session started, and Loopflow's Rex host detection uses <code>REX_SESSION</code>/<code>REX_BLOCK</code> rather than <code>TERM_PROGRAM</code>. Preserving caller <code>TERM_PROGRAM</code> keeps <code>rex</code> when launched from Rex, but leaves Sessions started from Apple Terminal or <code>tmux</code> without clickable links.</p>
   <button type="button" data-value="3a">3a — Keep built behavior: always set TERM_PROGRAM=ghostty on held terminals (Recommended)</button>
@@ -219,4 +218,10 @@
   <p><strong>Files</strong> reads only from the Task's owning Machine over Loopflow's server and never connects to the hostname in the URL. Local panes still require this Mac's hostname.</p>
   <button type="button" data-value="4a">4a — Keep built behavior: open matching remote checkout paths in Files regardless of file:// hostname (Recommended)</button>
   <button type="button" data-value="4b">4b — Require empty or localhost hostnames remotely (ls --hyperlink and rg links won't open remotely)</button>
+</div>
+
+<div data-choice="q5" data-label="5. Scope for non-terminal Desktop links (Brief, Markdown, Review pages)">
+  <p><strong>5. Task Briefs, rendered Markdown files, and HTML review pages still handle <code>loopflow://</code> and <code>file://</code> links differently from terminals (sending Brief/Markdown links to macOS Launch Services and letting review pages navigate non-web schemes). Ship terminal links first and unify the rest in a follow-up Task?</strong></p>
+  <button type="button" data-value="5a">5a — Ship LOO-1126 for terminals and file a dedicated follow-up Task to unify Brief, Markdown, and review-page links (Recommended)</button>
+  <button type="button" data-value="5b">5b — Pull the shared Desktop link router into LOO-1126 before shipping</button>
 </div>

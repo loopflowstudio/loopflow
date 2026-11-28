@@ -851,18 +851,18 @@ button.lf-btn-quiet[aria-pressed="true"] {
 
 <p class="lf-meta">
   <span>Task <code>LOO-1126</code></span>
-  <span>Stage: post-implementation review (Passes 1–3 built)</span>
-  <span>Base: <code>fd8dce986d</code> · HEAD: <code>ec8ae076ce</code></span>
+  <span>Stage: post-implementation review (Passes 1–4 built)</span>
+  <span>Base: <code>fd8dce986d</code> · HEAD: <code>bba5ff2138</code></span>
 </p>
 
-<p><strong>Area reviewed:</strong> clickable links across Loopflow Sessions and Desktop — from held-terminal identity (<code>transport/registry.rs</code>), through Ghostty's hover, cursor, and click callbacks (<code>GhosttyManager</code>, <code>GhosttyTerminalView</code>), link parsing and destination resolution (<code>TerminalLink</code>, <code>ops/task/directory.rs</code>, <code>ops/task/snapshot.rs</code>), into Desktop's pane, Files, Dashboard tile, and Work routers (<code>WorkspacePanesView</code>, <code>SessionsView</code>, <code>TaskFilesStore</code>, <code>LoopflowApp</code>, <code>TaskBriefView</code>, <code>TaskHTMLView</code>, and <code>LoopflowiOS</code>). Reviewing the whole area on <code>ec8ae076ce</code> against base <code>fd8dce986d</code> shows that the core experience works, while one inverted server probe and three smaller conceptual seams remain.</p>
+<p><strong>Area reviewed:</strong> clickable links across Loopflow Sessions and Desktop — from held-terminal identity (<code>transport/registry.rs</code>), through Ghostty hover, cursor, and click callbacks (<code>GhosttyManager</code>, <code>GhosttyTerminalView</code>), hyperlink parsing and file/Work routing (<code>TerminalHyperlink</code>, <code>ops/task/snapshot.rs</code>, <code>work/link.rs</code>), into Desktop's pane, Files, Dashboard tile, and Work surfaces (<code>WorkspacePanesView</code>, <code>MultiplexerStore</code>, <code>TaskFilesStore</code>, <code>DashboardView</code>, <code>LoopflowApp</code>, <code>TaskBriefView</code>, <code>MarkdownBlocks</code>, <code>TaskHTMLView</code>, and <code>LoopflowiOS</code>). Reviewing the whole area on <code>bba5ff2138</code> against base <code>fd8dce986d</code> confirms Pass 4 closed all four earlier implementation mismatches; one cross-surface link-ownership split and three concrete seams in the built code remain.</p>
 
 <h2>What is built vs. what waits</h2>
 
 <ul>
-  <li><strong>Built and committed across Passes 1–3 (<code>a12082957b</code>, <code>0552209e91</code>, <code>e507237447</code>, <code>04c2f98af7</code>, <code>ec8ae076ce</code>):</strong> Ghostty intercepts <code>OPEN_URL</code> (always returning <code>true</code>), <code>MOUSE_SHAPE</code>, and <code>MOUSE_OVER_LINK</code> with <code>link-previews = true</code>; paused Sessions support ⌘-hover via <code>flagsChanged</code>; all link previews and click errors share one bottom-corner <code>linkFeedback</code> pill; web and mail links open in default apps; custom schemes confirm in <code>TerminalExternalLinkSheet</code>; <code>loopflow://</code> Work addresses resolve via <code>query.workLink</code> and open in-app without dispatching app-control routes; Task checkout files open in <strong>Files</strong> at <code>#L&lt;n&gt;</code> using the Task's active <code>filesPlace</code> with safe default-app fallbacks for non-Task panes and old local shells; held terminals set <code>TERM_PROGRAM=ghostty</code> and drop <code>TERM_PROGRAM_VERSION</code>.</li>
-  <li><strong>Product choices implemented headless, awaiting confirmation:</strong> all five recommendations from the prior headless review were built (Files pane for Task checkouts + safe fallback, remote <code>file://</code> hostnames, unconditional <code>TERM_PROGRAM=ghostty</code>, direct in-app Work links), plus Dashboard tile file clicks flipping the tile via <code>zoomedPaneId</code>.</li>
-  <li><strong>Still misaligned in the built code:</strong> remote file clicks probe the <em>directory-listing</em> endpoint (<code>task.files</code>) hoping for a special error instead of reading the file with <code>task.file</code>; hover cursor and bare-path acceptance disagree with click validation; Dashboard tile clicks overwrite the Task's saved zoom state; and macOS's <code>TerminalLink</code> collides with iOS's <code>TerminalLink</code> connection class.</li>
+  <li><strong>Built and committed across Passes 1–4 (<code>a12082957b</code>, <code>0552209e91</code>, <code>e507237447</code>, <code>04c2f98af7</code>, <code>98c1057421</code>, <code>bba5ff2138</code>):</strong> Ghostty intercepts <code>OPEN_URL</code> (always returning <code>true</code>), <code>MOUSE_SHAPE</code>, and <code>MOUSE_OVER_LINK</code> with <code>link-previews = true</code>; paused Sessions support ⌘-hover via <code>flagsChanged</code>; hover preview, cursor shape (<code>.pointingHand</code> vs. <code>.operationNotAllowed</code>), and click routing share one <code>TerminalHyperlink</code> classifier (renamed to clear <code>LoopflowiOS.TerminalLink</code>); web and mail links open in default apps; custom schemes confirm in <code>TerminalExternalLinkSheet</code>; <code>loopflow://</code> Work links resolve via <code>query.workLink</code> and open in-app without touching app-control routes; Task checkout files open in <strong>Files</strong> at <code>#L&lt;n&gt;</code> locally and remotely via <code>task.file</code> (with <code>snapshot.rs</code> distinguishing directories from missing files and <code>directory.rs</code> reverted); non-Task panes and pre-move local shells fall back to safe local documents/folders; Dashboard tile clicks enter the Task with Files beside its Session; held terminals set <code>TERM_PROGRAM=ghostty</code> and drop <code>TERM_PROGRAM_VERSION</code>.</li>
+  <li><strong>Product choices implemented headless, still awaiting human confirmation:</strong> Files pane for active Task checkouts + safe default-app fallback elsewhere (Q2), unconditional <code>TERM_PROGRAM=ghostty</code> on held terminals (Q3), accepting any remote <code>file://</code> hostname inside the remote Task's checkout (Q4), and Dashboard tile + zoomed-terminal behavior (Q1).</li>
+  <li><strong>Remaining mismatches on <code>bba5ff2138</code>:</strong> Desktop still has four different link routers and two parsers for <code>loopflow://</code> Work addresses; remote file clicks fetch and discard the full file body before Files fetches it a second time over SSH; clicking a checkout file inside a zoomed terminal behaves opposite to clicking it from a zoomed Task's Dashboard tile; and ⌘-hover over an unfocused terminal pane misses <code>flagsChanged</code>.</li>
 </ul>
 
 <h2>Do the concepts line up?</h2>
@@ -878,249 +878,68 @@ button.lf-btn-quiet[aria-pressed="true"] {
   </thead>
   <tbody>
     <tr>
-      <td><strong>⌘-click a file inside a remote Task's checkout</strong> (regular file, folder, missing file, or escaped symlink).</td>
-      <td><code>TerminalLink.File.destination</code> calls <code>query.taskFiles</code> (directory listing!) with <code>showIgnored: true</code> and treats <code>ServerError(.invalid, {"reason": "file"})</code> from <code>ops/task/directory.rs</code> as "this is a file", then <code>openPresentation</code> calls <code>task.file</code> in a second round-trip.</td>
+      <td><strong>Click a <code>loopflow://</code> Work link or <code>file://</code> link anywhere in Desktop</strong> (terminal, Task Brief, rendered Markdown, review page, or OS deep link).</td>
+      <td><code>TerminalHyperlink.isWorkAddress</code> duplicates 28 lines of Rust's <code>WorkUrl::parse</code> in Swift for terminals; terminal clicks route through <code>query.workLink</code> → <code>openResolvedWorkLink</code>. Meanwhile <code>TaskBriefView</code> and <code>MarkdownBlocks</code> hand <code>loopflow://</code> and <code>file://</code> to macOS Launch Services (<code>.systemAction</code>), and <code>TaskHTMLView.TaskHTMLLinks</code> returns <code>.allow</code> for non-web schemes so <code>WKWebView</code> tries to navigate them.</td>
       <td><strong>No</strong></td>
-      <td>An inverted API. Clicking a regular file pays two remote round-trips and breaks against older remote servers; clicking a folder enumerates, sorts, and ships up to 500 <code>TaskFileEntry</code> rows just to discard them; missing files and escaped symlinks leak raw OS / "Directory" errors instead of matching local panes' <code>"File is missing or unreadable."</code>; and <code>directory.rs</code> had to reorder its <code>.git</code> guard to accommodate file probes.</td>
+      <td>One link concept under two parsers and four incompatible routers. In this branch, <code>isWorkAddress</code> is not what blocks app-control routes (<code>loopflow://update</code> already passes it), yet it mislabels syntax mistakes like <code>#frag</code> or <code>LOOPFLOW://</code> as control-route refusals while letting invalid <code>RepositoryId</code>/<code>MachineId</code> values pass hover. Across Desktop, clicking a Related Task in Brief or a Markdown link can wake the wrong installed app, hit <code>handleDeepLink</code> app-control routes, or bypass local executable checks.</td>
     </tr>
     <tr>
-      <td><strong>⌘-hover to see whether a link is clickable and where it goes</strong> before clicking.</td>
-      <td><code>MOUSE_OVER_LINK</code> runs <code>TerminalLink.preview(target)</code> with <code>allowsBarePath: true</code>, while <code>OPEN_URL</code> passes <code>allowsBarePath: kind != OSC8</code>. <code>MOUSE_SHAPE</code> sets <code>.pointingHand</code> unconditionally, even when <code>preview</code> returns a refusal reason.</td>
+      <td><strong>⌘-click a file inside a remote Task's checkout.</strong></td>
+      <td><code>TerminalHyperlink.File.destination</code> calls <code>query.taskFile(issue:path:)</code>, checks <code>snapshot.state != .missing</code>, and discards the returned <code>TaskFileSnapshot</code> (up to 1 MB of text/data). <code>openPresentation</code> then mounts <code>TaskFilesView</code>, which calls <code>TaskFilesStore.loadFile()</code> and runs the same <code>task.file</code> RPC again.</td>
       <td><strong>No</strong></td>
-      <td>One gesture split across three rules. Hovering a refused link (e.g. <code>https://github.com@evil.example/</code>) shows a refusal message in the corner while the cursor still shows a pointing hand. Hovering an OSC 8 bare path (<code>\x1b]8;;/tmp/file</code>) previews it as valid, then clicking refuses it.</td>
+      <td>One click pays two full remote file transfers over SSH, even though <code>TaskFileDocument.reconcile(_:)</code> already merges fetched snapshots safely with retained documents, IME composition, and dirty drafts.</td>
     </tr>
     <tr>
-      <td><strong>⌘-click a checkout file inside a Dashboard tile.</strong></td>
-      <td><code>openTerminalFile</code> runs <code>if inTile { store.setZoom(browser.id, enabled: true) }</code>, mutating the Task workspace's persisted <code>MultiplexerStore.zoomedPaneId</code>.</td>
+      <td><strong>⌘-click a checkout file when the terminal is zoomed</strong> (inside the Task view vs. from a Dashboard tile).</td>
+      <td><code>openTerminalFile</code> calls <code>store.showBrowser(.files, location: filesLocation, focus: onEnter == nil)</code>. In <code>MultiplexerStore.showBrowser</code>, <code>focus: false</code> uncollapses Files and clears <code>zoomedPaneId</code>, while <code>focus: true</code> calls <code>setFocusedPane</code>, which keeps zoom on and switches <code>zoomedPaneId</code> to Files.</td>
       <td><strong>No</strong></td>
-      <td>One piece of state ("which pane fills the Task view") reused for "show this link in a Dashboard tile." Opening a file from a tile persists Files as zoomed, so entering the Task later drops the Session + Files split until you manually exit zoom.</td>
+      <td>One gesture produces opposite layouts, and <code>focus: Bool</code> hides two unrelated behaviors. From a zoomed Task's Dashboard tile, clicking a file unzooms into Session + Files side-by-side with focus on the terminal; inside that same zoomed Task view, clicking the same file hides the Session behind full-screen zoomed Files and moves focus away.</td>
     </tr>
     <tr>
-      <td><strong>Click a <code>loopflow://</code> Work link anywhere in Desktop</strong> (terminal, Task Brief, review page, or OS deep link).</td>
-      <td><code>TerminalLink.isWorkAddress</code> duplicates 28 lines of Rust's <code>WorkUrl::parse</code> in Swift for hover checks. Terminal clicks go through <code>query.workLink</code> → <code>openResolvedWorkLink</code>; <code>TaskBriefView</code> hands <code>loopflow://</code> to Launch Services (<code>.systemAction</code>); <code>TaskHTMLView.TaskHTMLLinks</code> lets WKWebView navigate non-web schemes.</td>
+      <td><strong>Hold or release ⌘ over a link in an unfocused terminal pane</strong> (e.g. Session while Files is focused, or another Dashboard tile).</td>
+      <td><code>GhosttyMetalView.setupTrackingArea</code> uses <code>.activeInKeyWindow</code> so <code>mouseMoved</code> works while unfocused, but <code>flagsChanged</code> is an <code>NSResponder</code> override delivered only to the first responder.</td>
       <td><strong>No</strong></td>
-      <td>One grammar under two parsers (Swift skips <code>RepositoryId</code>/<code>MachineId</code> checks and gives a misleading control-route error for syntax mistakes like <code>#frag</code>), and three different Desktop click behaviors for the same URL.</td>
+      <td>Resting the pointer over a link in an unfocused pane and pressing ⌘ shows nothing until you wiggle the mouse; releasing ⌘ after hovering leaves the link preview pill and pointing-hand cursor stuck on screen until the pointer moves.</td>
     </tr>
     <tr>
-      <td><strong>Share terminal link parsing between Mac and iPhone.</strong></td>
-      <td><code>swift/LoopflowMac/Services/Ghostty/TerminalLink.swift</code> defines <code>enum TerminalLink</code> (a clickable hyperlink). <code>swift/LoopflowiOS/TerminalLink.swift</code> already defines <code>final class TerminalLink</code> (the phone's live Session/shell connection).</td>
-      <td><strong>No</strong></td>
-      <td>One name for two unrelated concepts in the same Swift workspace, blocking extraction of hyperlink parsing into the shared <code>Loopflow</code> library.</td>
-    </tr>
-    <tr>
-      <td><strong>⌘-click a local file in a Task pane, Repo/Wave Session, or old pre-move shell.</strong></td>
-      <td><code>activeFilesPlace</code> checks <code>key.kind == .task</code>, active owner Machine, and <code>filesPlace</code>; matching local files open in <strong>Files</strong> at <code>#L&lt;n&gt;</code>, while folders and non-matching local panes fall back to <code>localDocument()</code> (blocking apps, scripts, aliases, and executables).</td>
+      <td><strong>⌘-hover over valid vs. refused links in a focused or paused Session.</strong></td>
+      <td><code>MOUSE_OVER_LINK</code> and <code>OPEN_URL</code> both classify through <code>TerminalHyperlink(target:)</code>; <code>GhosttyMetalView.terminalCursor</code> shows <code>.pointingHand</code> when valid and <code>.operationNotAllowed</code> when refused; <code>linkFeedback</code> shows the target or refusal reason even while read-only.</td>
       <td><strong>Yes</strong></td>
-      <td>Built in Pass 2; symlink roots (<code>/tmp</code> vs <code>/private/tmp</code>), unstarted shell <code>worktree == ""</code>, and pre-move shells all route cleanly.</td>
+      <td>Resolved in Pass 4; hover cursor, preview pill, and click classification now agree on every target.</td>
+    </tr>
+    <tr>
+      <td><strong>⌘-click a local file in a Task pane, Repo/Wave Session, or pre-move local shell.</strong></td>
+      <td><code>activeFilesPlace</code> matches active Task owner and checkout; regular files in that checkout open in <strong>Files</strong> at <code>#L&lt;n&gt;</code> (rendered for <code>.md</code>/<code>.html</code> without <code>#L</code>, source with <code>#L</code>), while folders, outside files, non-Task panes, and old local shells fall back to <code>localDocument()</code> (blocking packages, aliases, scripts, shebangs, and executables).</td>
+      <td><strong>Yes</strong></td>
+      <td>Symlinked checkouts (<code>/tmp</code> vs. <code>/private/tmp</code>), package bundles inside checkouts, escaped symlinks, and unstarted shells all route cleanly.</td>
     </tr>
     <tr>
       <td><strong>All terminal link failures report in the pane you clicked.</strong></td>
-      <td><code>GhosttyMetalView.openLink</code> passes a <code>showLinkNotice</code> closure through <code>onOpenLink</code>, covering sync refusals, failed <code>TerminalExternalLinkSheet</code> opens, and async remote/Work errors in one bottom-corner overlay.</td>
+      <td><code>GhosttyMetalView.openLink</code> passes a pane-scoped <code>showLinkNotice</code> callback through <code>onOpenLink</code> covering sync refusals, failed <code>TerminalExternalLinkSheet</code> opens, and async remote/Work errors.</td>
       <td><strong>Yes</strong></td>
-      <td>No longer misroutes link errors through <code>paneFailed</code> or the <code>open-work</code> error window.</td>
+      <td>Errors stay in the originating pane's bottom-corner notice instead of opening the <code>open-work</code> window or marking the pane failed.</td>
     </tr>
     <tr>
-      <td><strong>Sessions emit clickable links regardless of how they started.</strong></td>
+      <td><strong>Held terminals advertise clickable hyperlinks however they started.</strong></td>
       <td><code>transport/registry.rs</code> strips caller <code>TERM_PROGRAM</code> / <code>TERM_PROGRAM_VERSION</code> and sets <code>TERM_PROGRAM=ghostty</code> on every held terminal (Sessions and Desktop shells).</td>
       <td><strong>Yes</strong></td>
-      <td>Matches the real <code>libghostty-vt</code> emulator behind every held terminal; <code>terminal_host.rs</code> reads <code>REX_SESSION</code>/<code>REX_BLOCK</code>.</td>
+      <td>Matches the real <code>libghostty-vt</code> emulator behind every held terminal; Rex host detection uses <code>REX_SESSION</code>/<code>REX_BLOCK</code>.</td>
     </tr>
     <tr>
-      <td><strong>OSC 8 clicks, paused-Session hover, VT relay, and <code>.ghostsnp</code>.</strong></td>
-      <td><code>GhosttyManager</code> always returns <code>true</code> on <code>OPEN_URL</code>; <code>GhosttyMetalView.flagsChanged</code> keeps ⌘-hover working while read-only; <code>loopflow-terminal</code> preserves OSC 8 spans.</td>
-      <td><strong>Yes</strong></td>
-      <td>Exercised end-to-end by <code>TerminalFeedbackTests.sessionHyperlink</code>.</td>
+      <td><strong>Tap links in iPhone Sessions.</strong></td>
+      <td><code>swift/LoopflowiOS/GhosttySurface.swift</code> ignores <code>GHOSTTY_ACTION_OPEN_URL</code> and has no touch link gesture.</td>
+      <td><strong>No (separate)</strong></td>
+      <td>Out of scope for macOS Desktop, but renaming to <code>TerminalHyperlink</code> cleared the collision with <code>LoopflowiOS.TerminalLink</code> so sharing the parser in <code>Loopflow</code> is unblocked.</td>
     </tr>
   </tbody>
 </table>
 
-<h2>Biggest mismatch: probing remote files through the directory-listing API</h2>
+<h2>Biggest mismatch: no single link owner in Desktop (two parsers, four routers)</h2>
 
-<p>To check whether a clicked remote path is a file or a folder before opening <strong>Files</strong>, Pass 2 calls <code>task.files</code> (the directory-listing operation) and relies on a new structured error inside <code>directory_snapshot</code>:</p>
+<p>Terminal links now have a clean, safe classifier and in-app Work opener — but only for terminal panes. Meanwhile <code>TerminalHyperlink.isWorkAddress</code> re-implements 28 lines of Rust's <code>WorkUrl::parse</code> in Swift, and every non-terminal surface in Desktop still routes <code>loopflow://</code> and <code>file://</code> links through different paths:</p>
 
-<div class="lf-codeblock" data-path="swift/LoopflowMac/Services/Ghostty/TerminalLink.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/Services/Ghostty/TerminalLink.swift:177-190</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
-<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,237 @@</td></tr>
-<tr class="lf-add lf-code-row" data-line="177"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">177</td><td class="lf-sign">+</td><td>            } else if pane.worktree.isEmpty || pane.worktree == files.cwd,</td></tr>
-<tr class="lf-add lf-code-row" data-line="178"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">178</td><td class="lf-sign">+</td><td>                      let relative = checkoutPath(in: files.cwd) {</td></tr>
-<tr class="lf-add lf-code-row" data-line="179"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">179</td><td class="lf-sign">+</td><td>                guard !relative.isEmpty else { throw OpenError.remoteDirectory }</td></tr>
-<tr class="lf-add lf-code-row" data-line="180"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">180</td><td class="lf-sign">+</td><td>                // A directory read is resolved on the owning Machine, including</td></tr>
-<tr class="lf-add lf-code-row" data-line="181"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">181</td><td class="lf-sign">+</td><td>                // symlinked directories. Its non-directory response lets Files</td></tr>
-<tr class="lf-add lf-code-row" data-line="182"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">182</td><td class="lf-sign">+</td><td>                // perform the regular file read and its own containment check.</td></tr>
-<tr class="lf-add lf-code-row" data-line="183"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">183</td><td class="lf-sign">+</td><td>                do {</td></tr>
-<tr class="lf-add lf-code-row" data-line="184"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">184</td><td class="lf-sign">+</td><td>                    _ = try await query.taskFiles(issue: files.taskId, directory: relative, showIgnored: true)</td></tr>
-<tr class="lf-add lf-code-row" data-line="185"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">185</td><td class="lf-sign">+</td><td>                } catch let error as ServerError where error.code == .invalid &amp;&amp; error.data == .object([&quot;reason&quot;: .string(&quot;file&quot;)]) {</td></tr>
-<tr class="lf-add lf-code-row" data-line="186"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">186</td><td class="lf-sign">+</td><td>                    return .checkout(path: relative, line: line)</td></tr>
-<tr class="lf-add lf-code-row" data-line="187"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">187</td><td class="lf-sign">+</td><td>                }</td></tr>
-<tr class="lf-add lf-code-row" data-line="188"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">188</td><td class="lf-sign">+</td><td>                throw OpenError.remoteDirectory</td></tr>
-<tr class="lf-add lf-code-row" data-line="189"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">189</td><td class="lf-sign">+</td><td>            }</td></tr>
-<tr class="lf-add lf-code-row" data-line="190"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">190</td><td class="lf-sign">+</td><td>        }</td></tr>
-</tbody></table></div></div>
-
-<div class="lf-codeblock" data-path="rust/loopflow-execution/src/ops/task/directory.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-execution/src/ops/task/directory.rs:82-101</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
-<tr class="lf-hunk"><td colspan="4">@@ -84,9 +79,26 @@ fn directory_snapshot(</td></tr>
-<tr class="lf-ctx lf-code-row" data-old-line="84" data-line="79"><td class="lf-ln lf-ln-old">84</td><td class="lf-ln lf-ln-new">79</td><td class="lf-sign"> </td><td>    }</td></tr>
-<tr class="lf-ctx lf-code-row" data-old-line="85" data-line="80"><td class="lf-ln lf-ln-old">85</td><td class="lf-ln lf-ln-new">80</td><td class="lf-sign"> </td><td>    let root = worktree.canonicalize()?;</td></tr>
-<tr class="lf-ctx lf-code-row" data-old-line="86" data-line="81"><td class="lf-ln lf-ln-old">86</td><td class="lf-ln lf-ln-new">81</td><td class="lf-sign"> </td><td>    let absolute = root.join(&amp;directory).canonicalize()?;</td></tr>
-<tr class="lf-del lf-code-row" data-old-line="87"><td class="lf-ln lf-ln-old">87</td><td class="lf-ln lf-ln-new"></td><td class="lf-sign">-</td><td>    if !absolute.starts_with(&amp;root) || !absolute.is_dir() {</td></tr>
-<tr class="lf-add lf-code-row" data-line="82"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">82</td><td class="lf-sign">+</td><td>    if !absolute.starts_with(&amp;root) {</td></tr>
-<tr class="lf-ctx lf-code-row" data-old-line="88" data-line="83"><td class="lf-ln lf-ln-old">88</td><td class="lf-ln lf-ln-new">83</td><td class="lf-sign"> </td><td>        return Err(task_error(&quot;Directory must remain inside the Task worktree&quot;));</td></tr>
-<tr class="lf-ctx lf-code-row" data-old-line="89" data-line="84"><td class="lf-ln lf-ln-old">89</td><td class="lf-ln lf-ln-new">84</td><td class="lf-sign"> </td><td>    }</td></tr>
-<tr class="lf-add lf-code-row" data-line="85"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">85</td><td class="lf-sign">+</td><td>    let metadata = absolute.metadata()?;</td></tr>
-<tr class="lf-add lf-code-row" data-line="86"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">86</td><td class="lf-sign">+</td><td>    if metadata.is_file() {</td></tr>
-<tr class="lf-add lf-code-row" data-line="87"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">87</td><td class="lf-sign">+</td><td>        return Err(</td></tr>
-<tr class="lf-add lf-code-row" data-line="88"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">88</td><td class="lf-sign">+</td><td>            Error::new(ErrorCode::Invalid, &quot;Task directory read needs a folder.&quot;)</td></tr>
-<tr class="lf-add lf-code-row" data-line="89"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">89</td><td class="lf-sign">+</td><td>                .with(serde_json::json!({ &quot;reason&quot;: &quot;file&quot; }))</td></tr>
-<tr class="lf-add lf-code-row" data-line="90"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">90</td><td class="lf-sign">+</td><td>                .into(),</td></tr>
-<tr class="lf-add lf-code-row" data-line="91"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">91</td><td class="lf-sign">+</td><td>        );</td></tr>
-<tr class="lf-add lf-code-row" data-line="92"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">92</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add lf-code-row" data-line="93"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">93</td><td class="lf-sign">+</td><td>    if !metadata.is_dir() {</td></tr>
-<tr class="lf-add lf-code-row" data-line="94"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">94</td><td class="lf-sign">+</td><td>        return Err(task_error(&quot;Task directory read needs a folder&quot;));</td></tr>
-<tr class="lf-add lf-code-row" data-line="95"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">95</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add lf-code-row" data-line="96"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">96</td><td class="lf-sign">+</td><td>    if Path::new(&amp;directory)</td></tr>
-<tr class="lf-add lf-code-row" data-line="97"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">97</td><td class="lf-sign">+</td><td>        .components()</td></tr>
-<tr class="lf-add lf-code-row" data-line="98"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">98</td><td class="lf-sign">+</td><td>        .any(|part| part.as_os_str() == &quot;.git&quot;)</td></tr>
-<tr class="lf-add lf-code-row" data-line="99"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">99</td><td class="lf-sign">+</td><td>    {</td></tr>
-<tr class="lf-add lf-code-row" data-line="100"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">100</td><td class="lf-sign">+</td><td>        return Err(task_error(&quot;Git metadata is not a Task directory&quot;));</td></tr>
-<tr class="lf-add lf-code-row" data-line="101"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">101</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-ctx lf-code-row" data-old-line="90" data-line="102"><td class="lf-ln lf-ln-old">90</td><td class="lf-ln lf-ln-new">102</td><td class="lf-sign"> </td><td>    let mut entries = Vec::new();</td></tr>
-<tr class="lf-ctx lf-code-row" data-old-line="91" data-line="103"><td class="lf-ln lf-ln-old">91</td><td class="lf-ln lf-ln-new">103</td><td class="lf-sign"> </td><td>    for entry in std::fs::read_dir(&amp;absolute)? {</td></tr>
-<tr class="lf-ctx lf-code-row" data-old-line="92" data-line="104"><td class="lf-ln lf-ln-old">92</td><td class="lf-ln lf-ln-new">104</td><td class="lf-sign"> </td><td>        let entry = entry?;</td></tr>
-</tbody></table></div></div>
-
-<p>Meanwhile, <code>task.file</code> (<code>file_snapshot</code>) already exists on the exact same server, already canonicalizes and checks containment inside the Task worktree, already returns <code>TaskFileState::Missing</code> cleanly when the path does not exist, already handles read-only <code>.git/*</code> files, and is the very read <code>TaskFilesStore.loadFile()</code> immediately runs next:</p>
-
-<div class="lf-codeblock" data-path="rust/loopflow-execution/src/ops/task/snapshot.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-execution/src/ops/task/snapshot.rs:707-735</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
-<tr class="lf-code-row" data-line="707"><td class="lf-ln lf-ln-single">707</td><td>pub(super) fn file_snapshot(</td></tr>
-<tr class="lf-code-row" data-line="708"><td class="lf-ln lf-ln-single">708</td><td>    workspace: TaskWorkspace&lt;&#39;_&gt;,</td></tr>
-<tr class="lf-code-row" data-line="709"><td class="lf-ln lf-ln-single">709</td><td>    path: &amp;str,</td></tr>
-<tr class="lf-code-row" data-line="710"><td class="lf-ln lf-ln-single">710</td><td>) -&gt; OpsResult&lt;TaskFileSnapshot&gt; {</td></tr>
-<tr class="lf-code-row" data-line="711"><td class="lf-ln lf-ln-single">711</td><td>    let relative = validate_task_relative_path(path)?;</td></tr>
-<tr class="lf-code-row" data-line="712"><td class="lf-ln lf-ln-single">712</td><td>    let root = workspace</td></tr>
-<tr class="lf-code-row" data-line="713"><td class="lf-ln lf-ln-single">713</td><td>        .worktree</td></tr>
-<tr class="lf-code-row" data-line="714"><td class="lf-ln lf-ln-single">714</td><td>        .canonicalize()</td></tr>
-<tr class="lf-code-row" data-line="715"><td class="lf-ln lf-ln-single">715</td><td>        .map_err(|error| task_error(format!(&quot;cannot resolve Task worktree: {error}&quot;)))?;</td></tr>
-<tr class="lf-code-row" data-line="716"><td class="lf-ln lf-ln-single">716</td><td>    let mut snapshot = missing_snapshot(workspace, relative.clone());</td></tr>
-<tr class="lf-code-row" data-line="717"><td class="lf-ln lf-ln-single">717</td><td>    let absolute = match root.join(&amp;relative).canonicalize() {</td></tr>
-<tr class="lf-code-row" data-line="718"><td class="lf-ln lf-ln-single">718</td><td>        Ok(path) =&gt; path,</td></tr>
-<tr class="lf-code-row" data-line="719"><td class="lf-ln lf-ln-single">719</td><td>        Err(error) if error.kind() == std::io::ErrorKind::NotFound =&gt; return Ok(snapshot),</td></tr>
-<tr class="lf-code-row" data-line="720"><td class="lf-ln lf-ln-single">720</td><td>        Err(error) =&gt; {</td></tr>
-<tr class="lf-code-row" data-line="721"><td class="lf-ln lf-ln-single">721</td><td>            return Err(task_error(format!(</td></tr>
-<tr class="lf-code-row" data-line="722"><td class="lf-ln lf-ln-single">722</td><td>                &quot;cannot open Task file {relative:?}: {error}&quot;</td></tr>
-<tr class="lf-code-row" data-line="723"><td class="lf-ln lf-ln-single">723</td><td>            )))</td></tr>
-<tr class="lf-code-row" data-line="724"><td class="lf-ln lf-ln-single">724</td><td>        }</td></tr>
-<tr class="lf-code-row" data-line="725"><td class="lf-ln lf-ln-single">725</td><td>    };</td></tr>
-<tr class="lf-code-row" data-line="726"><td class="lf-ln lf-ln-single">726</td><td>    if !absolute.starts_with(&amp;root) || !absolute.is_file() {</td></tr>
-<tr class="lf-code-row" data-line="727"><td class="lf-ln lf-ln-single">727</td><td>        return Err(task_error(format!(</td></tr>
-<tr class="lf-code-row" data-line="728"><td class="lf-ln lf-ln-single">728</td><td>            &quot;Task file {relative:?} does not resolve to a file inside the Task worktree&quot;</td></tr>
-<tr class="lf-code-row" data-line="729"><td class="lf-ln lf-ln-single">729</td><td>        )));</td></tr>
-<tr class="lf-code-row" data-line="730"><td class="lf-ln lf-ln-single">730</td><td>    }</td></tr>
-<tr class="lf-code-row" data-line="731"><td class="lf-ln lf-ln-single">731</td><td>    let mut component_path = root.clone();</td></tr>
-<tr class="lf-code-row" data-line="732"><td class="lf-ln lf-ln-single">732</td><td>    for component in Path::new(&amp;relative).components() {</td></tr>
-<tr class="lf-code-row" data-line="733"><td class="lf-ln lf-ln-single">733</td><td>        component_path.push(component);</td></tr>
-<tr class="lf-code-row" data-line="734"><td class="lf-ln lf-ln-single">734</td><td>        if std::fs::symlink_metadata(&amp;component_path)?</td></tr>
-<tr class="lf-code-row" data-line="735"><td class="lf-ln lf-ln-single">735</td><td>            .file_type()</td></tr>
-</tbody></table></div></div>
-
-<div class="lf-before-after">
-  <div class="lf-before-after-pane">
-    <div class="lf-before-after-label">Before</div>
-    
-    <p><strong>Built today (probe via <code>task.files</code> directory listing)</strong></p>
-    <ol>
-      <li>Remote file click calls <code>task.files(directory: relative, showIgnored: true)</code>.</li>
-      <li>Server canonicalizes, stats, and fails with <code>Invalid { "reason": "file" }</code> — caught by Swift as success.</li>
-      <li><code>files.openPresentation</code> opens the tab and makes a <em>second</em> server call (<code>task.file</code>) to fetch the file.</li>
-      <li>Clicking a remote folder runs <code>read_dir</code>, sorts up to 500 entries, serializes them, sends them over SSH, and Swift discards the response to throw <code>remoteDirectory</code>.</li>
-      <li>Clicking a missing remote file throws raw <code>"io error: No such file or directory (os error 2)"</code>; an escaped symlink throws <code>"Directory must remain inside the Task worktree"</code>; an un-upgraded remote Machine fails every file click.</li>
-      <li><code>directory.rs</code> carries custom error-data plumbing and a reordered <code>.git</code> guard solely for terminal links.</li>
-    </ol>
-  
-  </div>
-  <div class="lf-before-after-pane">
-    <div class="lf-before-after-label">After</div>
-    
-    <p><strong>Recommended (read via <code>task.file</code> directly)</strong></p>
-    <ol>
-      <li>Revert the <code>directory.rs</code> changes completely — <code>task.files</code> stays a pure directory listing.</li>
-      <li>Remote file click calls <code>query.taskFile(issue: files.taskId, path: relative)</code>.</li>
-      <li>If <code>snapshot.state == .missing</code> → throw <code>OpenError.missing</code> (<code>"File is missing or unreadable."</code>, matching local panes).</li>
-      <li>If <code>snapshot</code> is a file (<code>.text</code>, <code>.binary</code>, <code>.truncated</code>, <code>.unsupportedEncoding</code>) → return <code>.checkout(path: relative, line: line, snapshot: snapshot)</code> and seed <code>TaskFilesStore</code> so <strong>Files</strong> renders in one round-trip with no second read.</li>
-      <li>In <code>snapshot.rs</code>, when <code>absolute.is_dir()</code>, return a clear directory refusal (and map <code>is_dir</code> → <code>OpenError.remoteDirectory</code>). Older remote servers still open every regular and missing file without breaking.</li>
-      <li>Keep the existing <code>place == activeFilesPlace</code> guard after <code>await</code> so a concurrent Task move still leaves Files closed.</li>
-    </ol>
-  
-  </div>
-</div>
-
-
-<h2>Counterexamples tested</h2>
-
-<ul>
-  <li><strong>Remote folder click (<code>file://mini.local/home/jack/wt/node_modules</code>):</strong> <code>file_snapshot</code> checks <code>absolute.is_dir()</code> in O(1) and refuses immediately — zero <code>read_dir</code>, zero 500-entry JSON payload over SSH.</li>
-  <li><strong>Remote missing file (<code>file://mini.local/home/jack/wt/deleted.rs</code>):</strong> <code>file_snapshot</code> returns <code>TaskFileSnapshot(state: .missing)</code>; Swift throws <code>OpenError.missing</code> so local and remote panes show the exact same <code>"File is missing or unreadable."</code> message and never open an empty tab.</li>
-  <li><strong>Large remote binary or multi-megabyte log file:</strong> <code>file_snapshot</code> already bounds text reads at 1 MB (sniffing a short prefix first) and binary reads at <code>MAX_BINARY_DATA_BYTES</code> — the exact same work <code>TaskFilesStore.loadFile</code> performs anyway when opening the file.</li>
-  <li><strong>Remote symlink pointing outside the checkout:</strong> <code>file_snapshot</code> checks <code>!absolute.starts_with(&amp;root)</code> before reading any bytes and refuses with a file-scoped message instead of saying <code>"Directory must remain inside the Task worktree"</code>.</li>
-  <li><strong>Remote <code>.git/config</code> vs <code>.git</code>:</strong> <code>file_snapshot</code> already marks <code>.git/config</code> read-only (<code>"Git metadata is read-only."</code>) and rejects <code>.git</code> as a directory — no special ordering needed in <code>directory.rs</code>.</li>
-  <li><strong>Mixed-version remote Machine (older <code>lf</code> on <code>mini</code>):</strong> <code>task.file</code> already returns <code>Ok(TaskFileSnapshot)</code> for regular files and <code>Missing</code> for missing files on older builds, whereas <code>task.files</code> with <code>{"reason": "file"}</code> fails every remote file click until <code>mini</code> is upgraded.</li>
-  <li><strong>Task moves during the remote read:</strong> <code>guard let place, place == activeFilesPlace</code> still runs after <code>await</code> before touching the browser pane or <code>TaskFilesStore</code>, so a move cancels the reveal cleanly.</li>
-</ul>
-
-<h2>Second mismatch: hover preview, cursor shape, and <code>allowsBarePath</code></h2>
-
-<div class="lf-codeblock" data-path="swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:286-299</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
-<tr class="lf-hunk"><td colspan="4">@@ -280,6 +283,20 @@ final class GhosttyManager: ObservableObject {</td></tr>
-<tr class="lf-add lf-code-row" data-line="286"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">286</td><td class="lf-sign">+</td><td>            case GHOSTTY_ACTION_OPEN_URL:</td></tr>
-<tr class="lf-add lf-code-row" data-line="287"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">287</td><td class="lf-sign">+</td><td>                let request = action.action.open_url</td></tr>
-<tr class="lf-add lf-code-row" data-line="288"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">288</td><td class="lf-sign">+</td><td>                let target = copyLinkTarget(request.url, count: Int(request.len))</td></tr>
-<tr class="lf-add lf-code-row" data-line="289"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">289</td><td class="lf-sign">+</td><td>                let link = TerminalLink(target: target, allowsBarePath: request.kind != GHOSTTY_ACTION_OPEN_URL_KIND_OSC8)</td></tr>
-<tr class="lf-add lf-code-row" data-line="290"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">290</td><td class="lf-sign">+</td><td>                Task { @MainActor [weak view] in await view?.openLink(link) }</td></tr>
-<tr class="lf-add lf-code-row" data-line="291"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">291</td><td class="lf-sign">+</td><td>                return true</td></tr>
-<tr class="lf-add lf-code-row" data-line="292"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">292</td><td class="lf-sign">+</td><td>            case GHOSTTY_ACTION_MOUSE_SHAPE:</td></tr>
-<tr class="lf-add lf-code-row" data-line="293"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">293</td><td class="lf-sign">+</td><td>                MainActor.assumeIsolated { view.setMouseShape(action.action.mouse_shape) }</td></tr>
-<tr class="lf-add lf-code-row" data-line="294"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">294</td><td class="lf-sign">+</td><td>                return true</td></tr>
-<tr class="lf-add lf-code-row" data-line="295"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">295</td><td class="lf-sign">+</td><td>            case GHOSTTY_ACTION_MOUSE_OVER_LINK:</td></tr>
-<tr class="lf-add lf-code-row" data-line="296"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">296</td><td class="lf-sign">+</td><td>                let request = action.action.mouse_over_link</td></tr>
-<tr class="lf-add lf-code-row" data-line="297"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">297</td><td class="lf-sign">+</td><td>                let target = copyLinkTarget(request.url, count: request.len)</td></tr>
-<tr class="lf-add lf-code-row" data-line="298"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">298</td><td class="lf-sign">+</td><td>                MainActor.assumeIsolated { view.showLinkTarget(TerminalLink.preview(target)) }</td></tr>
-<tr class="lf-add lf-code-row" data-line="299"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">299</td><td class="lf-sign">+</td><td>                return true</td></tr>
-</tbody></table></div></div>
-
-<div class="lf-codeblock" data-path="swift/LoopflowMac/Services/Ghostty/TerminalLink.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/Services/Ghostty/TerminalLink.swift:37-87</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
-<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,237 @@</td></tr>
-<tr class="lf-add lf-code-row" data-line="37"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">37</td><td class="lf-sign">+</td><td>    init(target: String?, allowsBarePath: Bool = false) {</td></tr>
-<tr class="lf-add lf-code-row" data-line="38"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">38</td><td class="lf-sign">+</td><td>        guard let target, !target.isEmpty, !Self.hasUnsafeCharacters(target) else {</td></tr>
-<tr class="lf-add lf-code-row" data-line="39"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">39</td><td class="lf-sign">+</td><td>            self = .refused(&quot;Invalid terminal link.&quot;)</td></tr>
-<tr class="lf-add lf-code-row" data-line="40"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">40</td><td class="lf-sign">+</td><td>            return</td></tr>
-<tr class="lf-add lf-code-row" data-line="41"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">41</td><td class="lf-sign">+</td><td>        }</td></tr>
-<tr class="lf-add lf-code-row" data-line="42"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">42</td><td class="lf-sign">+</td><td>        if allowsBarePath, target.hasPrefix(&quot;/&quot;), !target.hasPrefix(&quot;//&quot;) {</td></tr>
-<tr class="lf-add lf-code-row" data-line="43"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">43</td><td class="lf-sign">+</td><td>            let parts = target.split(separator: &quot;#&quot;, maxSplits: 1, omittingEmptySubsequences: false)</td></tr>
-<tr class="lf-add lf-code-row" data-line="44"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">44</td><td class="lf-sign">+</td><td>            self = Self.fileLink(path: String(parts[0]), host: nil, fragment: parts.dropFirst().first.map(String.init))</td></tr>
-<tr class="lf-add lf-code-row" data-line="45"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">45</td><td class="lf-sign">+</td><td>            return</td></tr>
-<tr class="lf-add lf-code-row" data-line="46"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">46</td><td class="lf-sign">+</td><td>        }</td></tr>
-<tr class="lf-add lf-code-row" data-line="47"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">47</td><td class="lf-sign">+</td><td>        guard let decoded = target.removingPercentEncoding, !Self.hasUnsafeCharacters(decoded),</td></tr>
-<tr class="lf-add lf-code-row" data-line="48"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">48</td><td class="lf-sign">+</td><td>              !target.contains(&quot;\\&quot;),</td></tr>
-<tr class="lf-add lf-code-row" data-line="49"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">49</td><td class="lf-sign">+</td><td>              let url = URL(string: target, encodingInvalidCharacters: false),</td></tr>
-<tr class="lf-add lf-code-row" data-line="50"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">50</td><td class="lf-sign">+</td><td>              let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),</td></tr>
-<tr class="lf-add lf-code-row" data-line="51"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">51</td><td class="lf-sign">+</td><td>              let scheme = parts.scheme?.lowercased() else {</td></tr>
-<tr class="lf-add lf-code-row" data-line="52"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">52</td><td class="lf-sign">+</td><td>            self = .refused(&quot;Invalid terminal link.&quot;)</td></tr>
-<tr class="lf-add lf-code-row" data-line="53"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">53</td><td class="lf-sign">+</td><td>            return</td></tr>
-<tr class="lf-add lf-code-row" data-line="54"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">54</td><td class="lf-sign">+</td><td>        }</td></tr>
-<tr class="lf-add lf-code-row" data-line="55"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">55</td><td class="lf-sign">+</td><td>        switch scheme {</td></tr>
-<tr class="lf-add lf-code-row" data-line="56"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">56</td><td class="lf-sign">+</td><td>        case &quot;http&quot;, &quot;https&quot;:</td></tr>
-<tr class="lf-add lf-code-row" data-line="57"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">57</td><td class="lf-sign">+</td><td>            guard let host = parts.host, !host.isEmpty, parts.user == nil, parts.password == nil else {</td></tr>
-<tr class="lf-add lf-code-row" data-line="58"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">58</td><td class="lf-sign">+</td><td>                self = .refused(&quot;Invalid web link.&quot;)</td></tr>
-<tr class="lf-add lf-code-row" data-line="59"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">59</td><td class="lf-sign">+</td><td>                return</td></tr>
-<tr class="lf-add lf-code-row" data-line="60"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">60</td><td class="lf-sign">+</td><td>            }</td></tr>
-<tr class="lf-add lf-code-row" data-line="61"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">61</td><td class="lf-sign">+</td><td>            self = .web(url)</td></tr>
-<tr class="lf-add lf-code-row" data-line="62"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">62</td><td class="lf-sign">+</td><td>        case &quot;mailto&quot;:</td></tr>
-<tr class="lf-add lf-code-row" data-line="63"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">63</td><td class="lf-sign">+</td><td>            self = parts.host == nil &amp;&amp; !parts.path.isEmpty ? .mail(url) : .refused(&quot;Invalid mail link.&quot;)</td></tr>
-<tr class="lf-add lf-code-row" data-line="64"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">64</td><td class="lf-sign">+</td><td>        case &quot;file&quot;:</td></tr>
-<tr class="lf-add lf-code-row" data-line="65"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">65</td><td class="lf-sign">+</td><td>            guard target.dropFirst(&quot;file:&quot;.count).hasPrefix(&quot;//&quot;), parts.user == nil,</td></tr>
-<tr class="lf-add lf-code-row" data-line="66"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">66</td><td class="lf-sign">+</td><td>                  parts.password == nil, parts.port == nil, parts.query == nil else {</td></tr>
-<tr class="lf-add lf-code-row" data-line="67"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">67</td><td class="lf-sign">+</td><td>                self = .refused(&quot;Invalid file link.&quot;)</td></tr>
-<tr class="lf-add lf-code-row" data-line="68"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">68</td><td class="lf-sign">+</td><td>                return</td></tr>
-<tr class="lf-add lf-code-row" data-line="69"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">69</td><td class="lf-sign">+</td><td>            }</td></tr>
-<tr class="lf-add lf-code-row" data-line="70"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">70</td><td class="lf-sign">+</td><td>            self = Self.fileLink(path: parts.path, host: parts.host, fragment: parts.fragment)</td></tr>
+<div class="lf-codeblock" data-path="swift/LoopflowMac/Services/Ghostty/TerminalHyperlink.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/Services/Ghostty/TerminalHyperlink.swift:71-125</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,234 @@</td></tr>
 <tr class="lf-add lf-code-row" data-line="71"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">71</td><td class="lf-sign">+</td><td>        case &quot;loopflow&quot;:</td></tr>
 <tr class="lf-add lf-code-row" data-line="72"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">72</td><td class="lf-sign">+</td><td>            guard Self.isWorkAddress(target) else {</td></tr>
 <tr class="lf-add lf-code-row" data-line="73"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">73</td><td class="lf-sign">+</td><td>                self = .refused(&quot;Terminal links can only open Work in Loopflow.&quot;)</td></tr>
@@ -1132,110 +951,321 @@ button.lf-btn-quiet[aria-pressed="true"] {
 <tr class="lf-add lf-code-row" data-line="79"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">79</td><td class="lf-sign">+</td><td>        }</td></tr>
 <tr class="lf-add lf-code-row" data-line="80"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">80</td><td class="lf-sign">+</td><td>    }</td></tr>
 <tr class="lf-add lf-code-row" data-line="81"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">81</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add lf-code-row" data-line="82"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">82</td><td class="lf-sign">+</td><td>    /// What ⌘-hover shows: the target a click would open, or why it won&#39;t.</td></tr>
-<tr class="lf-add lf-code-row" data-line="83"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">83</td><td class="lf-sign">+</td><td>    static func preview(_ target: String?) -&gt; String? {</td></tr>
-<tr class="lf-add lf-code-row" data-line="84"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">84</td><td class="lf-sign">+</td><td>        guard let target, !target.isEmpty else { return nil }</td></tr>
-<tr class="lf-add lf-code-row" data-line="85"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">85</td><td class="lf-sign">+</td><td>        if case .refused(let reason) = TerminalLink(target: target, allowsBarePath: true) { return reason }</td></tr>
-<tr class="lf-add lf-code-row" data-line="86"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">86</td><td class="lf-sign">+</td><td>        return target</td></tr>
-<tr class="lf-add lf-code-row" data-line="87"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">87</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add lf-code-row" data-line="82"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">82</td><td class="lf-sign">+</td><td>    var refusal: String? {</td></tr>
+<tr class="lf-add lf-code-row" data-line="83"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">83</td><td class="lf-sign">+</td><td>        if case .refused(let reason) = self { return reason }</td></tr>
+<tr class="lf-add lf-code-row" data-line="84"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">84</td><td class="lf-sign">+</td><td>        return nil</td></tr>
+<tr class="lf-add lf-code-row" data-line="85"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">85</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add lf-code-row" data-line="86"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">86</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="87"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">87</td><td class="lf-sign">+</td><td>    private static func hasUnsafeCharacters(_ text: String) -&gt; Bool {</td></tr>
+<tr class="lf-add lf-code-row" data-line="88"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">88</td><td class="lf-sign">+</td><td>        text.unicodeScalars.contains {</td></tr>
+<tr class="lf-add lf-code-row" data-line="89"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">89</td><td class="lf-sign">+</td><td>            CharacterSet.controlCharacters.contains($0)</td></tr>
+<tr class="lf-add lf-code-row" data-line="90"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">90</td><td class="lf-sign">+</td><td>                || $0.properties.isBidiControl</td></tr>
+<tr class="lf-add lf-code-row" data-line="91"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">91</td><td class="lf-sign">+</td><td>                || $0.value == 0x2028 || $0.value == 0x2029</td></tr>
+<tr class="lf-add lf-code-row" data-line="92"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">92</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add lf-code-row" data-line="93"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">93</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add lf-code-row" data-line="94"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">94</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="95"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">95</td><td class="lf-sign">+</td><td>    /// Check the address shape for hover feedback. The Work resolver validates</td></tr>
+<tr class="lf-add lf-code-row" data-line="96"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">96</td><td class="lf-sign">+</td><td>    /// identities and looks them up without dispatching app-control URLs.</td></tr>
+<tr class="lf-add lf-code-row" data-line="97"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">97</td><td class="lf-sign">+</td><td>    private static func isWorkAddress(_ target: String) -&gt; Bool {</td></tr>
+<tr class="lf-add lf-code-row" data-line="98"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">98</td><td class="lf-sign">+</td><td>        func component(_ raw: String) -&gt; Bool {</td></tr>
+<tr class="lf-add lf-code-row" data-line="99"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">99</td><td class="lf-sign">+</td><td>            guard let value = raw.removingPercentEncoding else { return false }</td></tr>
+<tr class="lf-add lf-code-row" data-line="100"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">100</td><td class="lf-sign">+</td><td>            return !value.isEmpty &amp;&amp; !value.contains(&quot;/&quot;) &amp;&amp; !value.contains(&quot;\\&quot;)</td></tr>
+<tr class="lf-add lf-code-row" data-line="101"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">101</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add lf-code-row" data-line="102"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">102</td><td class="lf-sign">+</td><td>        let prefix = &quot;loopflow://&quot;</td></tr>
+<tr class="lf-add lf-code-row" data-line="103"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">103</td><td class="lf-sign">+</td><td>        guard target.hasPrefix(prefix), !target.contains(&quot;#&quot;) else { return false }</td></tr>
+<tr class="lf-add lf-code-row" data-line="104"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">104</td><td class="lf-sign">+</td><td>        let address = target.dropFirst(prefix.count).split(separator: &quot;?&quot;, maxSplits: 1, omittingEmptySubsequences: false)</td></tr>
+<tr class="lf-add lf-code-row" data-line="105"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">105</td><td class="lf-sign">+</td><td>        guard let root = address.first else { return false }</td></tr>
+<tr class="lf-add lf-code-row" data-line="106"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">106</td><td class="lf-sign">+</td><td>        let location = root.split(separator: &quot;/&quot;, maxSplits: 1, omittingEmptySubsequences: false)</td></tr>
+<tr class="lf-add lf-code-row" data-line="107"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">107</td><td class="lf-sign">+</td><td>        guard let host = location.first, !host.contains(&quot;@&quot;), !host.contains(&quot;:&quot;), component(String(host)) else { return false }</td></tr>
+<tr class="lf-add lf-code-row" data-line="108"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">108</td><td class="lf-sign">+</td><td>        let path = location.dropFirst().first ?? &quot;&quot;</td></tr>
+<tr class="lf-add lf-code-row" data-line="109"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">109</td><td class="lf-sign">+</td><td>        let repository = path.isEmpty</td></tr>
+<tr class="lf-add lf-code-row" data-line="110"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">110</td><td class="lf-sign">+</td><td>        if !repository {</td></tr>
+<tr class="lf-add lf-code-row" data-line="111"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">111</td><td class="lf-sign">+</td><td>            let segments = path.split(separator: &quot;/&quot;, omittingEmptySubsequences: false)</td></tr>
+<tr class="lf-add lf-code-row" data-line="112"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">112</td><td class="lf-sign">+</td><td>            guard segments.count == 2, [&quot;task&quot;, &quot;wave&quot;].contains(segments[0]), component(String(segments[1])) else {</td></tr>
+<tr class="lf-add lf-code-row" data-line="113"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">113</td><td class="lf-sign">+</td><td>                return false</td></tr>
+<tr class="lf-add lf-code-row" data-line="114"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">114</td><td class="lf-sign">+</td><td>            }</td></tr>
+<tr class="lf-add lf-code-row" data-line="115"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">115</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add lf-code-row" data-line="116"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">116</td><td class="lf-sign">+</td><td>        var keys: Set&lt;String&gt; = []</td></tr>
+<tr class="lf-add lf-code-row" data-line="117"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">117</td><td class="lf-sign">+</td><td>        for pair in address.dropFirst().first?.split(separator: &quot;&amp;&quot;) ?? [] {</td></tr>
+<tr class="lf-add lf-code-row" data-line="118"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">118</td><td class="lf-sign">+</td><td>            let item = pair.split(separator: &quot;=&quot;, maxSplits: 1, omittingEmptySubsequences: false)</td></tr>
+<tr class="lf-add lf-code-row" data-line="119"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">119</td><td class="lf-sign">+</td><td>            let key = String(item[0])</td></tr>
+<tr class="lf-add lf-code-row" data-line="120"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">120</td><td class="lf-sign">+</td><td>            guard item.count == 2, [&quot;repository&quot;, &quot;session&quot;, &quot;machine&quot;].contains(key),</td></tr>
+<tr class="lf-add lf-code-row" data-line="121"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">121</td><td class="lf-sign">+</td><td>                  keys.insert(key).inserted, component(String(item[1])) else { return false }</td></tr>
+<tr class="lf-add lf-code-row" data-line="122"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">122</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add lf-code-row" data-line="123"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">123</td><td class="lf-sign">+</td><td>        return !keys.contains(&quot;machine&quot;) || (repository &amp;&amp; keys.contains(&quot;session&quot;))</td></tr>
+<tr class="lf-add lf-code-row" data-line="124"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">124</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add lf-code-row" data-line="125"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">125</td><td class="lf-sign">+</td><td></td></tr>
 </tbody></table></div></div>
 
-<p>Two contradictions live in those 30 lines:</p>
-<ol>
-  <li><strong>Pointing hand on refused links:</strong> <code>MOUSE_OVER_LINK</code> shows <code>"Invalid web link."</code> or <code>"Terminal links can only open Work in Loopflow."</code>, while <code>MOUSE_SHAPE</code> still puts up <code>.pointingHand</code>. Having <code>TerminalLink.preview</code> distinguish valid vs. refused (or letting <code>GhosttyMetalView</code> suppress <code>.pointingHand</code> while hovering a refused link) makes cursor and pill agree.</li>
-  <li><strong>OSC 8 bare paths preview as valid, then fail on click:</strong> <code>preview(_:)</code> calls <code>TerminalLink(target: target, allowsBarePath: true)</code> because Ghostty's <code>MOUSE_OVER_LINK</code> carries no link kind, whereas <code>OPEN_URL</code> passes <code>allowsBarePath: request.kind != GHOSTTY_ACTION_OPEN_URL_KIND_OSC8</code>. Both <code>/tmp/foo</code> and <code>file:///tmp/foo</code> produce the exact same <code>TerminalLink.File(path: "/tmp/foo", host: nil, line: nil)</code> and pass through the exact same containment and launcher checks; refusing bare paths only on OSC 8 adds no security boundary and creates the hover/click split noted in <code>scratch/questions.md</code>. Removing <code>allowsBarePath</code> lets hover and click share one classifier unconditionally.</li>
-</ol>
+<div class="lf-codeblock" data-path="rust/loopflow-execution/src/work/link.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-execution/src/work/link.rs:44-98</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-code-row" data-line="44"><td class="lf-ln lf-ln-single">44</td><td>    pub fn parse(text: &amp;str) -&gt; Result&lt;Self&gt; {</td></tr>
+<tr class="lf-code-row" data-line="45"><td class="lf-ln lf-ln-single">45</td><td>        let rest = text</td></tr>
+<tr class="lf-code-row" data-line="46"><td class="lf-ln lf-ln-single">46</td><td>            .strip_prefix(SCHEME)</td></tr>
+<tr class="lf-code-row" data-line="47"><td class="lf-ln lf-ln-single">47</td><td>            .and_then(|rest| rest.strip_prefix(&quot;://&quot;))</td></tr>
+<tr class="lf-code-row" data-line="48"><td class="lf-ln lf-ln-single">48</td><td>            .ok_or_else(|| anyhow::anyhow!(&quot;Work links start with loopflow://&quot;))?;</td></tr>
+<tr class="lf-code-row" data-line="49"><td class="lf-ln lf-ln-single">49</td><td>        ensure!(</td></tr>
+<tr class="lf-code-row" data-line="50"><td class="lf-ln lf-ln-single">50</td><td>            !rest.chars().any(|ch| ch.is_control() || ch.is_whitespace()),</td></tr>
+<tr class="lf-code-row" data-line="51"><td class="lf-ln lf-ln-single">51</td><td>            &quot;Work links cannot contain spaces or control characters; percent-encode them&quot;</td></tr>
+<tr class="lf-code-row" data-line="52"><td class="lf-ln lf-ln-single">52</td><td>        );</td></tr>
+<tr class="lf-code-row" data-line="53"><td class="lf-ln lf-ln-single">53</td><td>        ensure!(!rest.contains(&#39;#&#39;), &quot;Work links do not accept a fragment&quot;);</td></tr>
+<tr class="lf-code-row" data-line="54"><td class="lf-ln lf-ln-single">54</td><td>        let (location, query) = rest.split_once(&#39;?&#39;).unwrap_or((rest, &quot;&quot;));</td></tr>
+<tr class="lf-code-row" data-line="55"><td class="lf-ln lf-ln-single">55</td><td>        let (authority, path) = location</td></tr>
+<tr class="lf-code-row" data-line="56"><td class="lf-ln lf-ln-single">56</td><td>            .split_once(&#39;/&#39;)</td></tr>
+<tr class="lf-code-row" data-line="57"><td class="lf-ln lf-ln-single">57</td><td>            .map_or((location, &quot;&quot;), |(authority, path)| (authority, path));</td></tr>
+<tr class="lf-code-row" data-line="58"><td class="lf-ln lf-ln-single">58</td><td>        ensure!(</td></tr>
+<tr class="lf-code-row" data-line="59"><td class="lf-ln lf-ln-single">59</td><td>            !authority.contains(&#39;@&#39;) &amp;&amp; !authority.contains(&#39;:&#39;),</td></tr>
+<tr class="lf-code-row" data-line="60"><td class="lf-ln lf-ln-single">60</td><td>            &quot;Work links do not accept credentials or a port&quot;</td></tr>
+<tr class="lf-code-row" data-line="61"><td class="lf-ln lf-ln-single">61</td><td>        );</td></tr>
+<tr class="lf-code-row" data-line="62"><td class="lf-ln lf-ln-single">62</td><td>        let repository = component(authority, &quot;repository name&quot;)?;</td></tr>
+<tr class="lf-code-row" data-line="63"><td class="lf-ln lf-ln-single">63</td><td>        let segments: Vec&lt;&amp;str&gt; = if path.is_empty() {</td></tr>
+<tr class="lf-code-row" data-line="64"><td class="lf-ln lf-ln-single">64</td><td>            Vec::new()</td></tr>
+<tr class="lf-code-row" data-line="65"><td class="lf-ln lf-ln-single">65</td><td>        } else {</td></tr>
+<tr class="lf-code-row" data-line="66"><td class="lf-ln lf-ln-single">66</td><td>            path.split(&#39;/&#39;).collect()</td></tr>
+<tr class="lf-code-row" data-line="67"><td class="lf-ln lf-ln-single">67</td><td>        };</td></tr>
+<tr class="lf-code-row" data-line="68"><td class="lf-ln lf-ln-single">68</td><td>        let target = match segments.as_slice() {</td></tr>
+<tr class="lf-code-row" data-line="69"><td class="lf-ln lf-ln-single">69</td><td>            [] =&gt; WorkTarget::Repository,</td></tr>
+<tr class="lf-code-row" data-line="70"><td class="lf-ln lf-ln-single">70</td><td>            [&quot;task&quot;, id] =&gt; WorkTarget::Task(component(id, &quot;Task identifier&quot;)?),</td></tr>
+<tr class="lf-code-row" data-line="71"><td class="lf-ln lf-ln-single">71</td><td>            [&quot;wave&quot;, name] =&gt; WorkTarget::Wave(component(name, &quot;Wave name&quot;)?),</td></tr>
+<tr class="lf-code-row" data-line="72"><td class="lf-ln lf-ln-single">72</td><td>            _ =&gt; bail!(</td></tr>
+<tr class="lf-code-row" data-line="73"><td class="lf-ln lf-ln-single">73</td><td>                &quot;Work links name a repository, /task/&lt;identifier&gt; or /wave/&lt;name&gt;; got /{path}&quot;</td></tr>
+<tr class="lf-code-row" data-line="74"><td class="lf-ln lf-ln-single">74</td><td>            ),</td></tr>
+<tr class="lf-code-row" data-line="75"><td class="lf-ln lf-ln-single">75</td><td>        };</td></tr>
+<tr class="lf-code-row" data-line="76"><td class="lf-ln lf-ln-single">76</td><td>        let mut url = Self::new(repository, target);</td></tr>
+<tr class="lf-code-row" data-line="77"><td class="lf-ln lf-ln-single">77</td><td>        let mut seen = Vec::new();</td></tr>
+<tr class="lf-code-row" data-line="78"><td class="lf-ln lf-ln-single">78</td><td>        for pair in query.split(&#39;&amp;&#39;).filter(|pair| !pair.is_empty()) {</td></tr>
+<tr class="lf-code-row" data-line="79"><td class="lf-ln lf-ln-single">79</td><td>            let (name, value) = pair</td></tr>
+<tr class="lf-code-row" data-line="80"><td class="lf-ln lf-ln-single">80</td><td>                .split_once(&#39;=&#39;)</td></tr>
+<tr class="lf-code-row" data-line="81"><td class="lf-ln lf-ln-single">81</td><td>                .ok_or_else(|| anyhow::anyhow!(&quot;Work link query `{pair}` has no value&quot;))?;</td></tr>
+<tr class="lf-code-row" data-line="82"><td class="lf-ln lf-ln-single">82</td><td>            ensure!(!seen.contains(&amp;name), &quot;Work link query repeats `{name}`&quot;);</td></tr>
+<tr class="lf-code-row" data-line="83"><td class="lf-ln lf-ln-single">83</td><td>            seen.push(name);</td></tr>
+<tr class="lf-code-row" data-line="84"><td class="lf-ln lf-ln-single">84</td><td>            let value = component(value, name)?;</td></tr>
+<tr class="lf-code-row" data-line="85"><td class="lf-ln lf-ln-single">85</td><td>            match name {</td></tr>
+<tr class="lf-code-row" data-line="86"><td class="lf-ln lf-ln-single">86</td><td>                &quot;repository&quot; =&gt; url.qualifier = Some(RepositoryId::parse(&amp;value)?),</td></tr>
+<tr class="lf-code-row" data-line="87"><td class="lf-ln lf-ln-single">87</td><td>                &quot;session&quot; =&gt; url.session = Some(value),</td></tr>
+<tr class="lf-code-row" data-line="88"><td class="lf-ln lf-ln-single">88</td><td>                &quot;machine&quot; =&gt; url.machine = Some(MachineId::parse(&amp;value)?),</td></tr>
+<tr class="lf-code-row" data-line="89"><td class="lf-ln lf-ln-single">89</td><td>                _ =&gt; bail!(&quot;Unknown Work link query `{name}`&quot;),</td></tr>
+<tr class="lf-code-row" data-line="90"><td class="lf-ln lf-ln-single">90</td><td>            }</td></tr>
+<tr class="lf-code-row" data-line="91"><td class="lf-ln lf-ln-single">91</td><td>        }</td></tr>
+<tr class="lf-code-row" data-line="92"><td class="lf-ln lf-ln-single">92</td><td>        ensure!(</td></tr>
+<tr class="lf-code-row" data-line="93"><td class="lf-ln lf-ln-single">93</td><td>            url.machine.is_none()</td></tr>
+<tr class="lf-code-row" data-line="94"><td class="lf-ln lf-ln-single">94</td><td>                || (url.session.is_some() &amp;&amp; url.target == WorkTarget::Repository),</td></tr>
+<tr class="lf-code-row" data-line="95"><td class="lf-ln lf-ln-single">95</td><td>            &quot;A Machine link names an exact Session&quot;</td></tr>
+<tr class="lf-code-row" data-line="96"><td class="lf-ln lf-ln-single">96</td><td>        );</td></tr>
+<tr class="lf-code-row" data-line="97"><td class="lf-ln lf-ln-single">97</td><td>        Ok(url)</td></tr>
+<tr class="lf-code-row" data-line="98"><td class="lf-ln lf-ln-single">98</td><td>    }</td></tr>
+</tbody></table></div></div>
 
-<h2>Third mismatch: Dashboard tile zoom side-effect and <code>TerminalLink</code> name collision</h2>
+<p>Outside terminals, <code>TaskBriefView</code> (which renders Related Task <code>loopflow://</code> links and Task descriptions) and every <code>MarkdownBlocks</code> reader fall back to SwiftUI's <code>.systemAction</code> (macOS Launch Services), while <code>TaskHTMLView</code> lets <code>WKWebView</code> navigate non-web schemes:</p>
 
-<div class="lf-codeblock" data-path="swift/LoopflowMac/Views/WorkspacePanesView.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/Views/WorkspacePanesView.swift:1041-1063</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<div class="lf-codeblock" data-path="swift/LoopflowMac/Views/TaskBriefView.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/Views/TaskBriefView.swift:120-126</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-code-row" data-line="120"><td class="lf-ln lf-ln-single">120</td><td>            .onScrollGeometryChange(for: CGPoint.self, of: \.contentOffset) { _, offset in store.briefOffset = offset }</td></tr>
+<tr class="lf-code-row" data-line="121"><td class="lf-ln lf-ln-single">121</td><td>            .environment(\.openURL, OpenURLAction { url in</td></tr>
+<tr class="lf-code-row" data-line="122"><td class="lf-ln lf-ln-single">122</td><td>                guard url.scheme == TaskBrief.outlineScheme, let block = url.host.flatMap(Int.init) else { return .systemAction }</td></tr>
+<tr class="lf-code-row" data-line="123"><td class="lf-ln lf-ln-single">123</td><td>                withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(MarkdownBlocks.anchor(block), anchor: .top) }</td></tr>
+<tr class="lf-code-row" data-line="124"><td class="lf-ln lf-ln-single">124</td><td>                return .handled</td></tr>
+<tr class="lf-code-row" data-line="125"><td class="lf-ln lf-ln-single">125</td><td>            })</td></tr>
+<tr class="lf-code-row" data-line="126"><td class="lf-ln lf-ln-single">126</td><td>        }</td></tr>
+</tbody></table></div></div>
+
+<div class="lf-codeblock" data-path="swift/LoopflowMac/Views/TaskHTMLView.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/Views/TaskHTMLView.swift:302-311</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-code-row" data-line="302"><td class="lf-ln lf-ln-single">302</td><td>/// Links leave the page for the browser; everything else loads in place.</td></tr>
+<tr class="lf-code-row" data-line="303"><td class="lf-ln lf-ln-single">303</td><td>private struct TaskHTMLLinks: WebPage.NavigationDeciding {</td></tr>
+<tr class="lf-code-row" data-line="304"><td class="lf-ln lf-ln-single">304</td><td>    func decidePolicy(for action: WebPage.NavigationAction,</td></tr>
+<tr class="lf-code-row" data-line="305"><td class="lf-ln lf-ln-single">305</td><td>                      preferences: inout WebPage.NavigationPreferences) async -&gt; WKNavigationActionPolicy {</td></tr>
+<tr class="lf-code-row" data-line="306"><td class="lf-ln lf-ln-single">306</td><td>        guard action.navigationType == .linkActivated, let url = action.request.url,</td></tr>
+<tr class="lf-code-row" data-line="307"><td class="lf-ln lf-ln-single">307</td><td>              [&quot;http&quot;, &quot;https&quot;, &quot;mailto&quot;].contains(url.scheme?.lowercased() ?? &quot;&quot;) else { return .allow }</td></tr>
+<tr class="lf-code-row" data-line="308"><td class="lf-ln lf-ln-single">308</td><td>        NSWorkspace.shared.open(url)</td></tr>
+<tr class="lf-code-row" data-line="309"><td class="lf-ln lf-ln-single">309</td><td>        return .cancel</td></tr>
+<tr class="lf-code-row" data-line="310"><td class="lf-ln lf-ln-single">310</td><td>    }</td></tr>
+<tr class="lf-code-row" data-line="311"><td class="lf-ln lf-ln-single">311</td><td>}</td></tr>
+</tbody></table></div></div>
+
+<div class="lf-before-after">
+  <div class="lf-before-after-pane">
+    <div class="lf-before-after-label">Before</div>
+    
+    <p><strong>Today across Desktop (four routes, two Work parsers)</strong></p>
+    <ol>
+      <li><strong>Terminal panes:</strong> Swift's <code>isWorkAddress</code> parses <code>loopflow://</code> (rejecting syntax errors like <code>#frag</code> with a misleading "only Work" notice, while accepting invalid IDs like <code>?repository=bad</code> and control names like <code>loopflow://update</code>), then clicks go to <code>query.workLink</code> → <code>openResolvedWorkLink</code>.</li>
+      <li><strong>Task Brief &amp; Markdown readers</strong> (<code>TaskBriefView</code>, <code>TaskFilesView</code>, <code>WorkSurfaceView</code>, <code>TaskChangesView</code>, <code>TaskCommentsView</code>): <code>loopflow://</code> and <code>file://</code> go to <code>.systemAction</code> (Launch Services), which can wake the Release app from Dev, pop the <code>open-work</code> error window, dispatch app-control URLs like <code>loopflow://update</code>, and launch local files without executable checks.</li>
+      <li><strong>Review pages</strong> (<code>TaskHTMLView</code>): only <code>http</code>/<code>https</code>/<code>mailto</code> leave the page; <code>loopflow://</code> and <code>file://</code> return <code>.allow</code> and navigate inside the offline <code>WKWebView</code>.</li>
+      <li><strong>OS deep links</strong> (<code>LoopflowApp.handleDeepLink</code>): the only surface that legitimately handles app-control routes (<code>open</code>, <code>portfolio</code>, <code>sessions</code>, <code>update</code>) before falling back to <code>workLink</code>.</li>
+    </ol>
+  
+  </div>
+  <div class="lf-before-after-pane">
+    <div class="lf-before-after-label">After</div>
+    
+    <p><strong>Recommended (one Desktop link router; Rust owns Work grammar)</strong></p>
+    <ol>
+      <li><strong>One Desktop router</strong> handles in-app clicks from terminals, Task Brief, rendered Markdown, and review pages: web/mail → default app, <code>loopflow://</code> → <code>query.workLink</code> → <code>openResolvedWorkLink</code> (never <code>handleDeepLink</code>), <code>file://</code> → active Task <strong>Files</strong> or safe <code>localDocument()</code>, unknown schemes → confirmation sheet.</li>
+      <li><strong>One <code>WorkUrl</code> parser (Rust):</strong> because in-app clicks never enter <code>handleDeepLink</code>, Swift does not need a 28-line copy of <code>WorkUrl::parse</code> to stay safe. Either keep a minimal shape check in Swift for hover (rejecting only obvious app-control queries like <code>?repo=</code>/<code>?view=</code>, or letting <code>query.workLink</code> return Rust's exact syntax error on click) or expose one shared validator.</li>
+      <li><strong>OS deep links</strong> stay the sole entry point for Desktop control routes (<code>loopflow://update</code>, <code>loopflow://open?repo=…&amp;view=…</code>).</li>
+    </ol>
+  
+  </div>
+</div>
+
+
+<h2>Counterexamples tested</h2>
+
+<ul>
+  <li><strong><code>loopflow://update</code> or <code>loopflow://sessions</code> printed by an agent:</strong> Passes <code>isWorkAddress</code> today, goes to <code>query.workLink</code> (not <code>handleDeepLink</code>), and only opens if a registered repository is literally named <code>update</code> or <code>sessions</code>; otherwise reports not found in the pane notice. Never runs Sparkle or opens the sessions sheet.</li>
+  <li><strong><code>loopflow://loopflow/task/LOO-1#section</code> printed by an agent:</strong> With <code>isWorkAddress</code>, hover and click say <code>"Terminal links can only open Work in Loopflow."</code> instead of Rust's actual reason (<code>"Work links do not accept a fragment"</code>).</li>
+  <li><strong>Related Task link in <code>TaskBriefView</code> while running Loopflow Dev:</strong> <code>.systemAction</code> hands <code>loopflow://loopflow/task/LOO-99</code> to macOS Launch Services, which can focus the installed Release build instead of the Dev window.</li>
+  <li><strong>Remote file with unsaved edits in <strong>Files</strong>:</strong> If <code>openTerminalFile</code> seeds the fetched <code>TaskFileSnapshot</code> through <code>TaskFileDocument.reconcile(_:)</code>, dirty drafts run 3-way merge (<code>TaskTextEdit.merge</code>) and in-flight saves defer cleanly — the exact path <code>TaskFilesStore.loadFile()</code> already uses.</li>
+  <li><strong>Task moves during remote <code>task.file</code> lookup:</strong> <code>guard let place, place == activeFilesPlace</code> runs after <code>await</code> before touching Files or <code>onEnter</code>, so a concurrent move aborts cleanly with a pane notice.</li>
+  <li><strong>Package bundle inside a local checkout (e.g. <code>Fixture.app</code>):</strong> <code>kind.isRegularFile</code> is false and <code>kind.isDirectory</code> is true, so it falls through to <code>localDocument()</code>, which checks <code>info.isPackage != true</code> and refuses it as unsafe.</li>
+  <li><strong>Pointer rests on a link in an unfocused Session (Files focused) and user presses or releases ⌘:</strong> <code>mouseMoved</code> never fires without pointer movement, and AppKit sends <code>flagsChanged</code> only to Files, so the preview/cursor fails to appear on press or stays stuck after release.</li>
+</ul>
+
+<h2>Three smaller seams inside this branch's built code</h2>
+
+<h3>1. Remote checkout click reads the file body twice over SSH</h3>
+
+<div class="lf-codeblock" data-path="swift/LoopflowMac/Services/Ghostty/TerminalHyperlink.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/Services/Ghostty/TerminalHyperlink.swift:175-190</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,234 @@</td></tr>
+<tr class="lf-add lf-code-row" data-line="175"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">175</td><td class="lf-sign">+</td><td>            } else if pane.worktree.isEmpty || pane.worktree == files.cwd,</td></tr>
+<tr class="lf-add lf-code-row" data-line="176"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">176</td><td class="lf-sign">+</td><td>                      let relative = checkoutPath(in: files.cwd) {</td></tr>
+<tr class="lf-add lf-code-row" data-line="177"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">177</td><td class="lf-sign">+</td><td>                guard !relative.isEmpty else { throw OpenError.remoteDirectory }</td></tr>
+<tr class="lf-add lf-code-row" data-line="178"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">178</td><td class="lf-sign">+</td><td>                let snapshot: TaskFileSnapshot</td></tr>
+<tr class="lf-add lf-code-row" data-line="179"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">179</td><td class="lf-sign">+</td><td>                do {</td></tr>
+<tr class="lf-add lf-code-row" data-line="180"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">180</td><td class="lf-sign">+</td><td>                    snapshot = try await query.taskFile(issue: files.taskId, path: relative)</td></tr>
+<tr class="lf-add lf-code-row" data-line="181"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">181</td><td class="lf-sign">+</td><td>                } catch let error as ServerError where error.code == .invalid &amp;&amp; error.data == .object([&quot;reason&quot;: .string(&quot;directory&quot;)]) {</td></tr>
+<tr class="lf-add lf-code-row" data-line="182"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">182</td><td class="lf-sign">+</td><td>                    throw OpenError.remoteDirectory</td></tr>
+<tr class="lf-add lf-code-row" data-line="183"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">183</td><td class="lf-sign">+</td><td>                }</td></tr>
+<tr class="lf-add lf-code-row" data-line="184"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">184</td><td class="lf-sign">+</td><td>                guard snapshot.state != .missing else { throw OpenError.missing }</td></tr>
+<tr class="lf-add lf-code-row" data-line="185"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">185</td><td class="lf-sign">+</td><td>                return .checkout(path: snapshot.path, line: line)</td></tr>
+<tr class="lf-add lf-code-row" data-line="186"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">186</td><td class="lf-sign">+</td><td>            }</td></tr>
+<tr class="lf-add lf-code-row" data-line="187"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">187</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add lf-code-row" data-line="188"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">188</td><td class="lf-sign">+</td><td>        guard local else { throw OpenError.anotherMachine }</td></tr>
+<tr class="lf-add lf-code-row" data-line="189"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">189</td><td class="lf-sign">+</td><td>        return .document(try localDocument())</td></tr>
+<tr class="lf-add lf-code-row" data-line="190"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">190</td><td class="lf-sign">+</td><td>    }</td></tr>
+</tbody></table></div></div>
+
+<div class="lf-codeblock" data-path="swift/LoopflowMac/TaskFileDocument.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/TaskFileDocument.swift:73-100</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-code-row" data-line="73"><td class="lf-ln lf-ln-single">73</td><td>    func reconcile(_ next: TaskFileSnapshot) async {</td></tr>
+<tr class="lf-code-row" data-line="74"><td class="lf-ln lf-ln-single">74</td><td>        incomingGeneration += 1</td></tr>
+<tr class="lf-code-row" data-line="75"><td class="lf-ln lf-ln-single">75</td><td>        let generation = incomingGeneration</td></tr>
+<tr class="lf-code-row" data-line="76"><td class="lf-ln lf-ln-single">76</td><td>        updateAccess(next)</td></tr>
+<tr class="lf-code-row" data-line="77"><td class="lf-ln lf-ln-single">77</td><td>        // Content reads skip history; keep what the last Save disclosed.</td></tr>
+<tr class="lf-code-row" data-line="78"><td class="lf-ln lf-ln-single">78</td><td>        if !next.recoveries.isEmpty { recoveries = next.recoveries }</td></tr>
+<tr class="lf-code-row" data-line="79"><td class="lf-ln lf-ln-single">79</td><td>        guard !saving, !composing else {</td></tr>
+<tr class="lf-code-row" data-line="80"><td class="lf-ln lf-ln-single">80</td><td>            deferredSnapshot = next</td></tr>
+<tr class="lf-code-row" data-line="81"><td class="lf-ln lf-ln-single">81</td><td>            return</td></tr>
+<tr class="lf-code-row" data-line="82"><td class="lf-ln lf-ln-single">82</td><td>        }</td></tr>
+<tr class="lf-code-row" data-line="83"><td class="lf-ln lf-ln-single">83</td><td>        deferredSnapshot = nil</td></tr>
+<tr class="lf-code-row" data-line="84"><td class="lf-ln lf-ln-single">84</td><td>        guard let base = snapshot?.content, let incoming = next.content, next.state == .text else {</td></tr>
+<tr class="lf-code-row" data-line="85"><td class="lf-ln lf-ln-single">85</td><td>            loadSnapshot(next)</td></tr>
+<tr class="lf-code-row" data-line="86"><td class="lf-ln lf-ln-single">86</td><td>            onEdit?()</td></tr>
+<tr class="lf-code-row" data-line="87"><td class="lf-ln lf-ln-single">87</td><td>            return</td></tr>
+<tr class="lf-code-row" data-line="88"><td class="lf-ln lf-ln-single">88</td><td>        }</td></tr>
+<tr class="lf-code-row" data-line="89"><td class="lf-ln lf-ln-single">89</td><td>        if next.revision == snapshot?.revision {</td></tr>
+<tr class="lf-code-row" data-line="90"><td class="lf-ln lf-ln-single">90</td><td>            snapshot = next</td></tr>
+<tr class="lf-code-row" data-line="91"><td class="lf-ln lf-ln-single">91</td><td>            external = nil</td></tr>
+<tr class="lf-code-row" data-line="92"><td class="lf-ln lf-ln-single">92</td><td>            onEdit?()</td></tr>
+<tr class="lf-code-row" data-line="93"><td class="lf-ln lf-ln-single">93</td><td>            return</td></tr>
+<tr class="lf-code-row" data-line="94"><td class="lf-ln lf-ln-single">94</td><td>        }</td></tr>
+<tr class="lf-code-row" data-line="95"><td class="lf-ln lf-ln-single">95</td><td>        if !dirty, retainedEditor == nil {</td></tr>
+<tr class="lf-code-row" data-line="96"><td class="lf-ln lf-ln-single">96</td><td>            loadSnapshot(next)</td></tr>
+<tr class="lf-code-row" data-line="97"><td class="lf-ln lf-ln-single">97</td><td>            onEdit?()</td></tr>
+<tr class="lf-code-row" data-line="98"><td class="lf-ln lf-ln-single">98</td><td>            saveMessage = &quot;Updated from disk&quot;</td></tr>
+<tr class="lf-code-row" data-line="99"><td class="lf-ln lf-ln-single">99</td><td>            return</td></tr>
+<tr class="lf-code-row" data-line="100"><td class="lf-ln lf-ln-single">100</td><td>        }</td></tr>
+</tbody></table></div></div>
+
+<p><code>TerminalHyperlink.File.destination</code> fetches the complete <code>TaskFileSnapshot</code> (up to 1 MB) via <code>query.taskFile</code> and throws it away; <code>openPresentation</code> then mounts <code>TaskFilesView</code>, which runs <code>store.loadFile()</code> and transfers the exact same file a second time. Returning the snapshot on <code>.checkout</code> (or reconciling it via <code>files.document(path).reconcile(snapshot)</code> right before <code>openPresentation</code>) displays the remote file immediately in one round-trip while keeping <code>TaskFileDocument</code>'s draft-merge and save safety intact.</p>
+
+<h3>2. Zoomed terminal file clicks disagree between Task view and Dashboard tile</h3>
+
+<div class="lf-codeblock" data-path="swift/LoopflowMac/Views/WorkspacePanesView.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/Views/WorkspacePanesView.swift:1048-1063</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
 <tr class="lf-hunk"><td colspan="4">@@ -982,6 +1002,66 @@ struct SessionPaneView: View {</td></tr>
-<tr class="lf-add lf-code-row" data-line="1041"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1041</td><td class="lf-sign">+</td><td>    private func openTerminalFile(_ file: TerminalLink.File, at location: WorkspaceIdentity) async throws {</td></tr>
-<tr class="lf-add lf-code-row" data-line="1042"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1042</td><td class="lf-sign">+</td><td>        let place = activeFilesPlace</td></tr>
-<tr class="lf-add lf-code-row" data-line="1043"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1043</td><td class="lf-sign">+</td><td>        let destination = try await file.destination(from: location, localMachine: workspace.localMachineId,</td></tr>
-<tr class="lf-add lf-code-row" data-line="1044"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1044</td><td class="lf-sign">+</td><td>                                                     files: place, query: sessions.query)</td></tr>
-<tr class="lf-add lf-code-row" data-line="1045"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1045</td><td class="lf-sign">+</td><td>        switch destination {</td></tr>
-<tr class="lf-add lf-code-row" data-line="1046"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1046</td><td class="lf-sign">+</td><td>        case .document(let url):</td></tr>
-<tr class="lf-add lf-code-row" data-line="1047"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1047</td><td class="lf-sign">+</td><td>            guard NSWorkspace.shared.open(url) else { throw RegistryQueryError(&quot;No app could open the file.&quot;) }</td></tr>
 <tr class="lf-add lf-code-row" data-line="1048"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1048</td><td class="lf-sign">+</td><td>        case .checkout(let path, let line):</td></tr>
 <tr class="lf-add lf-code-row" data-line="1049"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1049</td><td class="lf-sign">+</td><td>            // A remote read can finish after the Task moves. Only reveal the</td></tr>
 <tr class="lf-add lf-code-row" data-line="1050"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1050</td><td class="lf-sign">+</td><td>            // file in the checkout the click addressed.</td></tr>
 <tr class="lf-add lf-code-row" data-line="1051"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1051</td><td class="lf-sign">+</td><td>            guard let place, place == activeFilesPlace else {</td></tr>
 <tr class="lf-add lf-code-row" data-line="1052"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1052</td><td class="lf-sign">+</td><td>                throw RegistryQueryError(&quot;The Task’s checkout moved before the file could open.&quot;)</td></tr>
 <tr class="lf-add lf-code-row" data-line="1053"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1053</td><td class="lf-sign">+</td><td>            }</td></tr>
-<tr class="lf-add lf-code-row" data-line="1054"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1054</td><td class="lf-sign">+</td><td>            guard let browser = store.showBrowser(.files, location: WorkspaceIdentity(machineId: location.machineId,</td></tr>
-<tr class="lf-add lf-code-row" data-line="1055"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1055</td><td class="lf-sign">+</td><td>                                                                                       worktree: place.cwd)) else {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1054"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1054</td><td class="lf-sign">+</td><td>            let filesLocation = WorkspaceIdentity(machineId: location.machineId, worktree: place.cwd)</td></tr>
+<tr class="lf-add lf-code-row" data-line="1055"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1055</td><td class="lf-sign">+</td><td>            guard let browser = store.showBrowser(.files, location: filesLocation, focus: onEnter == nil) else {</td></tr>
 <tr class="lf-add lf-code-row" data-line="1056"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1056</td><td class="lf-sign">+</td><td>                throw RegistryQueryError(&quot;The Files pane is unavailable.&quot;)</td></tr>
 <tr class="lf-add lf-code-row" data-line="1057"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1057</td><td class="lf-sign">+</td><td>            }</td></tr>
 <tr class="lf-add lf-code-row" data-line="1058"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1058</td><td class="lf-sign">+</td><td>            let task = model.task(id: workspace.key.id)?.task</td></tr>
 <tr class="lf-add lf-code-row" data-line="1059"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1059</td><td class="lf-sign">+</td><td>            let files = try workspace.files(for: browser.content, task: task, query: sessions.query)</td></tr>
 <tr class="lf-add lf-code-row" data-line="1060"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1060</td><td class="lf-sign">+</td><td>            files.openPresentation(.init(path: path, lines: line.map { $0...$0 }))</td></tr>
-<tr class="lf-add lf-code-row" data-line="1061"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1061</td><td class="lf-sign">+</td><td>            if inTile { store.setZoom(browser.id, enabled: true) }</td></tr>
+<tr class="lf-add lf-code-row" data-line="1061"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1061</td><td class="lf-sign">+</td><td>            onEnter?()</td></tr>
 <tr class="lf-add lf-code-row" data-line="1062"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1062</td><td class="lf-sign">+</td><td>        }</td></tr>
 <tr class="lf-add lf-code-row" data-line="1063"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1063</td><td class="lf-sign">+</td><td>    }</td></tr>
 <tr class="lf-hunk"><td colspan="4">@@ -1044,6 +1124,39 @@ struct SessionPaneView: View {</td></tr>
-<tr class="lf-ctx lf-code-row" data-old-line="1044" data-line="1124"><td class="lf-ln lf-ln-old">1044</td><td class="lf-ln lf-ln-new">1124</td><td class="lf-sign"> </td><td>    }</td></tr>
-<tr class="lf-ctx lf-code-row" data-old-line="1045" data-line="1125"><td class="lf-ln lf-ln-old">1045</td><td class="lf-ln lf-ln-new">1125</td><td class="lf-sign"> </td><td>}</td></tr>
-<tr class="lf-ctx lf-code-row" data-old-line="1046" data-line="1126"><td class="lf-ln lf-ln-old">1046</td><td class="lf-ln lf-ln-new">1126</td><td class="lf-sign"> </td><td></td></tr>
-<tr class="lf-ctx lf-code-row" data-old-line="1047" data-line="1160"><td class="lf-ln lf-ln-old">1047</td><td class="lf-ln lf-ln-new">1160</td><td class="lf-sign"> </td><td>/// Hover over a pane strip, tracked by an AppKit tracking area so it stays</td></tr>
 <tr class="lf-ctx lf-code-row" data-old-line="1048" data-line="1161"><td class="lf-ln lf-ln-old">1048</td><td class="lf-ln lf-ln-new">1161</td><td class="lf-sign"> </td><td>/// reliable beside a Metal-backed terminal. It never takes a click.</td></tr>
 <tr class="lf-ctx lf-code-row" data-old-line="1049" data-line="1162"><td class="lf-ln lf-ln-old">1049</td><td class="lf-ln lf-ln-new">1162</td><td class="lf-sign"> </td><td>struct PaneHoverRegion: NSViewRepresentable {</td></tr>
 </tbody></table></div></div>
 
-<div class="lf-codeblock" data-path="swift/LoopflowMac/Views/DashboardView.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/Views/DashboardView.swift:286-298</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
-<tr class="lf-code-row" data-line="286"><td class="lf-ln lf-ln-single">286</td><td>                if let task, content.states.contains(.backlog) {</td></tr>
-<tr class="lf-code-row" data-line="287"><td class="lf-ln lf-ln-single">287</td><td>                    TaskStartOffer(model: model, task: task.task)</td></tr>
-<tr class="lf-code-row" data-line="288"><td class="lf-ln lf-ln-single">288</td><td>                } else if let pane = entry.multiplexer.zoomedPaneId.flatMap({ entry.multiplexer.layout.pane(for: $0) })</td></tr>
-<tr class="lf-code-row" data-line="289"><td class="lf-ln lf-ln-single">289</td><td>                    ?? content.primarySession.flatMap({ entry.multiplexer.pane(forSessionId: $0) })</td></tr>
-<tr class="lf-code-row" data-line="290"><td class="lf-ln lf-ln-single">290</td><td>                    // A conversation attached in this tile shows before the plan names it primary.</td></tr>
-<tr class="lf-code-row" data-line="291"><td class="lf-ln lf-ln-single">291</td><td>                    ?? entry.multiplexer.layout.allPanes.first(where: { $0.sessionId != nil }) {</td></tr>
-<tr class="lf-code-row" data-line="292"><td class="lf-ln lf-ln-single">292</td><td>                    WorkspacePanesView(workspace: entry, isFocused: focused, sessions: sessions, model: model,</td></tr>
-<tr class="lf-code-row" data-line="293"><td class="lf-ln lf-ln-single">293</td><td>                        onFocus: { pane, _ in</td></tr>
-<tr class="lf-code-row" data-line="294"><td class="lf-ln lf-ln-single">294</td><td>                            if takesFocus { workspaces.focus(entry.key) }</td></tr>
-<tr class="lf-code-row" data-line="295"><td class="lf-ln lf-ln-single">295</td><td>                            entry.multiplexer.setFocusedPane(pane)</td></tr>
-<tr class="lf-code-row" data-line="296"><td class="lf-ln lf-ln-single">296</td><td>                        }, face: pane)</td></tr>
-<tr class="lf-code-row" data-line="297"><td class="lf-ln lf-ln-single">297</td><td>                        .equatable()</td></tr>
-<tr class="lf-code-row" data-line="298"><td class="lf-ln lf-ln-single">298</td><td>                } else {</td></tr>
+<div class="lf-codeblock" data-path="swift/LoopflowMac/MultiplexerStore.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/MultiplexerStore.swift:243-261</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-code-row" data-line="243"><td class="lf-ln lf-ln-single">243</td><td>    @discardableResult</td></tr>
+<tr class="lf-code-row" data-line="244"><td class="lf-ln lf-ln-single">244</td><td>    public func showBrowser(_ tab: BrowserTab, location: WorkspaceIdentity? = nil,</td></tr>
+<tr class="lf-code-row" data-line="245"><td class="lf-ln lf-ln-single">245</td><td>                            focus: Bool = true) -&gt; PaneState? {</td></tr>
+<tr class="lf-code-row" data-line="246"><td class="lf-ln lf-ln-single">246</td><td>        guard let pane = browserPane,</td></tr>
+<tr class="lf-code-row" data-line="247"><td class="lf-ln lf-ln-single">247</td><td>              case .browser(let taskId, var tabs, _, let place) = pane.content else { return nil }</td></tr>
+<tr class="lf-code-row" data-line="248"><td class="lf-ln lf-ln-single">248</td><td>        if !tabs.contains(where: { $0.id == tab.id }) { tabs.append(tab) }</td></tr>
+<tr class="lf-code-row" data-line="249"><td class="lf-ln lf-ln-single">249</td><td>        let content = PaneContent.browser(taskId: taskId, tabs: tabs, selected: tab.id,</td></tr>
+<tr class="lf-code-row" data-line="250"><td class="lf-ln lf-ln-single">250</td><td>            location: location ?? place)</td></tr>
+<tr class="lf-code-row" data-line="251"><td class="lf-ln lf-ln-single">251</td><td>        if content != pane.content {</td></tr>
+<tr class="lf-code-row" data-line="252"><td class="lf-ln lf-ln-single">252</td><td>            layout = layout.replacingBrowser(of: pane.id, with: content, retainingOccurrence: content.location == pane.content.location)</td></tr>
+<tr class="lf-code-row" data-line="253"><td class="lf-ln lf-ln-single">253</td><td>        }</td></tr>
+<tr class="lf-code-row" data-line="254"><td class="lf-ln lf-ln-single">254</td><td>        if focus {</td></tr>
+<tr class="lf-code-row" data-line="255"><td class="lf-ln lf-ln-single">255</td><td>            setFocusedPane(pane.id)</td></tr>
+<tr class="lf-code-row" data-line="256"><td class="lf-ln lf-ln-single">256</td><td>        } else {</td></tr>
+<tr class="lf-code-row" data-line="257"><td class="lf-ln lf-ln-single">257</td><td>            setCollapsed(paneId: pane.id, collapsed: false)</td></tr>
+<tr class="lf-code-row" data-line="258"><td class="lf-ln lf-ln-single">258</td><td>            if let zoomedPaneId, zoomedPaneId != pane.id { setZoom(zoomedPaneId, enabled: false) }</td></tr>
+<tr class="lf-code-row" data-line="259"><td class="lf-ln lf-ln-single">259</td><td>        }</td></tr>
+<tr class="lf-code-row" data-line="260"><td class="lf-ln lf-ln-single">260</td><td>        return layout.pane(for: pane.id)</td></tr>
+<tr class="lf-code-row" data-line="261"><td class="lf-ln lf-ln-single">261</td><td>    }</td></tr>
 </tbody></table></div></div>
 
-<p>In a Dashboard tile (<code>inTile == true</code>), clicking a checkout file calls <code>store.setZoom(browser.id, enabled: true)</code>. Because <code>DashboardView</code> renders <code>entry.multiplexer.zoomedPaneId</code> as the tile's face, that flips the tile to <strong>Files</strong> — but it also saves Files as zoomed on the Task's workspace layout, so entering the Task later hides the Session behind zoomed Files. See Q1 below.</p>
+<p><code>openTerminalFile</code> passes <code>focus: onEnter == nil</code> to <code>MultiplexerStore.showBrowser</code>. Because <code>showBrowser</code> clears <code>zoomedPaneId</code> when <code>focus == false</code> and switches <code>zoomedPaneId</code> to Files when <code>focus == true</code>, clicking a checkout file from a zoomed Task's Dashboard tile unzooms into Session + Files side-by-side (focus on Session), whereas clicking the exact same link inside that zoomed Task view hides the Session behind zoomed Files (focus on Files). Making the layout intent explicit (unzooming to show Files beside the Session in both places, or separating <code>unzoom</code> from <code>focus</code> on <code>showBrowser</code>) removes the hidden overload.</p>
 
-<p>Separately, the Mac hyperlink enum shares a name with iOS's live terminal connection class:</p>
+<h3>3. ⌘-hover on an unfocused terminal pane misses modifier changes</h3>
 
-<div class="lf-codeblock" data-path="swift/LoopflowiOS/TerminalLink.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowiOS/TerminalLink.swift:21-38</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
-<tr class="lf-code-row" data-line="21"><td class="lf-ln lf-ln-single">21</td><td>/// The phone&#39;s hold on one terminal of a Task, a Session or its shell.</td></tr>
-<tr class="lf-code-row" data-line="22"><td class="lf-ln lf-ln-single">22</td><td>///</td></tr>
-<tr class="lf-code-row" data-line="23"><td class="lf-ln lf-ln-single">23</td><td>/// Every device viewing the terminal may type; the one touched last sizes</td></tr>
-<tr class="lf-code-row" data-line="24"><td class="lf-ln lf-ln-single">24</td><td>/// it. Opening fits it to the phone. When another device takes the size,</td></tr>
-<tr class="lf-code-row" data-line="25"><td class="lf-ln lf-ln-single">25</td><td>/// this one stops drawing and waits for **Continue here**. Nothing typed is</td></tr>
-<tr class="lf-code-row" data-line="26"><td class="lf-ln lf-ln-single">26</td><td>/// ever sent twice.</td></tr>
-<tr class="lf-code-row" data-line="27"><td class="lf-ln lf-ln-single">27</td><td>///</td></tr>
-<tr class="lf-code-row" data-line="28"><td class="lf-ln lf-ln-single">28</td><td>/// The shell starts on first open. Once it has ended, or the Task moved to a</td></tr>
-<tr class="lf-code-row" data-line="29"><td class="lf-ln lf-ln-single">29</td><td>/// Machine that never started it, it waits for **New shell**.</td></tr>
-<tr class="lf-code-row" data-line="30"><td class="lf-ln lf-ln-single">30</td><td>@MainActor</td></tr>
-<tr class="lf-code-row" data-line="31"><td class="lf-ln lf-ln-single">31</td><td>@Observable</td></tr>
-<tr class="lf-code-row" data-line="32"><td class="lf-ln lf-ln-single">32</td><td>final class TerminalLink {</td></tr>
-<tr class="lf-code-row" data-line="33"><td class="lf-ln lf-ln-single">33</td><td>    enum State: Equatable {</td></tr>
-<tr class="lf-code-row" data-line="34"><td class="lf-ln lf-ln-single">34</td><td>        case opening, live, elsewhere, ended, notRunning, notStarted</td></tr>
-<tr class="lf-code-row" data-line="35"><td class="lf-ln lf-ln-single">35</td><td>        case disconnected(String), unavailable(String)</td></tr>
-<tr class="lf-code-row" data-line="36"><td class="lf-ln lf-ln-single">36</td><td>    }</td></tr>
-<tr class="lf-code-row" data-line="37"><td class="lf-ln lf-ln-single">37</td><td></td></tr>
-<tr class="lf-code-row" data-line="38"><td class="lf-ln lf-ln-single">38</td><td>    let task: MobileTask</td></tr>
+<div class="lf-codeblock" data-path="swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift:1160-1169</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-hunk"><td colspan="4">@@ -1119,7 +1160,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1119" data-line="1160"><td class="lf-ln lf-ln-old">1119</td><td class="lf-ln lf-ln-new">1160</td><td class="lf-sign"> </td><td>    private func setupTrackingArea() {</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1120" data-line="1161"><td class="lf-ln lf-ln-old">1120</td><td class="lf-ln lf-ln-new">1161</td><td class="lf-sign"> </td><td>        let area = NSTrackingArea(</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1121" data-line="1162"><td class="lf-ln lf-ln-old">1121</td><td class="lf-ln lf-ln-new">1162</td><td class="lf-sign"> </td><td>            rect: bounds,</td></tr>
+<tr class="lf-add lf-code-row" data-line="1163"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1163</td><td class="lf-sign">+</td><td>            options: [.activeInKeyWindow, .mouseMoved, .mouseEnteredAndExited, .cursorUpdate, .inVisibleRect],</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1123" data-line="1164"><td class="lf-ln lf-ln-old">1123</td><td class="lf-ln lf-ln-new">1164</td><td class="lf-sign"> </td><td>            owner: self,</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1124" data-line="1165"><td class="lf-ln lf-ln-old">1124</td><td class="lf-ln lf-ln-new">1165</td><td class="lf-sign"> </td><td>            userInfo: nil</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1125" data-line="1166"><td class="lf-ln lf-ln-old">1125</td><td class="lf-ln lf-ln-new">1166</td><td class="lf-sign"> </td><td>        )</td></tr>
 </tbody></table></div></div>
 
-<p>Renaming the Mac hyperlink enum to <code>TerminalHyperlink</code> (before or when sharing it across macOS and iOS) removes "one name for two ideas" in the same Swift package.</p>
+<div class="lf-codeblock" data-path="swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift"><div class="lf-codeblock-header"><span class="lf-codeblock-path">swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift:1392-1402</span></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
+<tr class="lf-hunk"><td colspan="4">@@ -1349,12 +1390,14 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1351" data-line="1392"><td class="lf-ln lf-ln-old">1351</td><td class="lf-ln lf-ln-new">1392</td><td class="lf-sign"> </td><td>    override func flagsChanged(with event: NSEvent) {</td></tr>
+<tr class="lf-add lf-code-row" data-line="1393"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1393</td><td class="lf-sign">+</td><td>        guard !hasMarkedText() else { return }</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1353" data-line="1394"><td class="lf-ln lf-ln-old">1353</td><td class="lf-ln lf-ln-new">1394</td><td class="lf-sign"> </td><td>        guard let surface else {</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1354" data-line="1395"><td class="lf-ln lf-ln-old">1354</td><td class="lf-ln lf-ln-new">1395</td><td class="lf-sign"> </td><td>            super.flagsChanged(with: event)</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1355" data-line="1396"><td class="lf-ln lf-ln-old">1355</td><td class="lf-ln lf-ln-new">1396</td><td class="lf-sign"> </td><td>            return</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1356" data-line="1397"><td class="lf-ln lf-ln-old">1356</td><td class="lf-ln lf-ln-new">1397</td><td class="lf-sign"> </td><td>        }</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1357" data-line="1398"><td class="lf-ln lf-ln-old">1357</td><td class="lf-ln lf-ln-new">1398</td><td class="lf-sign"> </td><td></td></tr>
+<tr class="lf-add lf-code-row" data-line="1399"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1399</td><td class="lf-sign">+</td><td>        // The relay sets Ghostty read-only when input pauses. Ghostty still</td></tr>
+<tr class="lf-add lf-code-row" data-line="1400"><td class="lf-ln lf-ln-old"></td><td class="lf-ln lf-ln-new">1400</td><td class="lf-sign">+</td><td>        // uses these events for link hover and suppresses the PTY write.</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1358" data-line="1401"><td class="lf-ln lf-ln-old">1358</td><td class="lf-ln lf-ln-new">1401</td><td class="lf-sign"> </td><td>        if let key = event.ghosttyModifierKey { ghostty_surface_key(surface, key) }</td></tr>
+<tr class="lf-ctx lf-code-row" data-old-line="1359" data-line="1402"><td class="lf-ln lf-ln-old">1359</td><td class="lf-ln lf-ln-new">1402</td><td class="lf-sign"> </td><td>    }</td></tr>
+</tbody></table></div></div>
+
+<p>Tracking areas use <code>.activeInKeyWindow</code>, so moving the mouse while holding ⌘ previews links even when another pane (like Files or a neighboring Dashboard tile) is first responder. Because <code>flagsChanged</code> only reaches the first responder, pressing or releasing ⌘ without moving the pointer fails to update the unfocused terminal — leaving the preview pill and hand cursor stuck after ⌘ is released until the mouse moves. Forwarding window <code>flagsChanged</code> to the hovered terminal view (or clearing hover when ⌘ is no longer held) keeps cursor and pill accurate across split panes and tiles.</p>
 
 <h2>Findings</h2>
 
 <div class="lf-decision" data-decision-id="f1">
   <div class="lf-decision-head">
-    <span class="lf-decision-title">Replace the remote task.files error-probe with task.file and revert directory.rs</span>
+    <span class="lf-decision-title">Pass the fetched remote TaskFileSnapshot into TaskFilesStore instead of reading twice</span>
     <span class="lf-decision-rec">Recommended: Fix here</span>
   </div>
   <div class="lf-decision-body">
-  <p><strong>This work.</strong> Delete the bespoke <code>{"reason": "file"}</code> refusal and <code>.git</code> reordering in <code>rust/loopflow-execution/src/ops/task/directory.rs</code>. Have remote checkout routing in <code>TerminalLink.File.destination</code> call <code>query.taskFile(issue:path:)</code> (optionally seeding <code>TaskFilesStore</code> with the returned snapshot), mapping <code>.missing</code> to <code>OpenError.missing</code> and adding a clean directory refusal in <code>snapshot.rs</code>. Cuts remote opens from 2 round-trips to 1, stops reading 500 directory entries on folder clicks, fixes raw OS / "Directory" error text, and keeps regular remote files working on older servers. <em>Passed over:</em> keeping <code>task.files</code> as a probe, which leaves all four defects in place.</p>
+  <p><strong>This work.</strong> Carry the already-fetched <code>TaskFileSnapshot</code> from <code>TerminalHyperlink.File.destination</code> into <code>openTerminalFile</code> and reconcile it via <code>await files.document(path).reconcile(snapshot)</code> before <code>openPresentation</code> (letting <code>loadFile()</code> skip a redundant immediate fetch or revalidate quietly). Cuts remote clicks from two full file transfers over SSH to one, removes the loading flash on remote file links, and reuses <code>TaskFileDocument</code>'s existing 3-way draft merge and concurrent-save guard. <em>Passed over:</em> discarding the lookup snapshot and re-reading on mount, which pays double SSH bandwidth and latency on every remote file link.</p>
 </div>
-  <div data-choice="f1" data-label="Replace the remote task.files error-probe with task.file and revert directory.rs">
+  <div data-choice="f1" data-label="Pass the fetched remote TaskFileSnapshot into TaskFilesStore instead of reading twice">
     <button type="button" data-value="Fix here">Fix here</button>
     <button type="button" data-value="File Task">File Task</button>
     <button type="button" data-value="Drop">Drop</button>
@@ -1245,13 +1275,13 @@ button.lf-btn-quiet[aria-pressed="true"] {
 
 <div class="lf-decision" data-decision-id="f2">
   <div class="lf-decision-head">
-    <span class="lf-decision-title">Make hover cursor, hover preview, and click validation use one TerminalLink result</span>
+    <span class="lf-decision-title">Make zoomed-terminal file clicks behave consistently and separate unzoom from focus in showBrowser</span>
     <span class="lf-decision-rec">Recommended: Fix here</span>
   </div>
   <div class="lf-decision-body">
-  <p><strong>This work.</strong> Drop the <code>allowsBarePath</code> split between <code>MOUSE_OVER_LINK</code> and <code>OPEN_URL</code> (both already funnel through <code>fileLink</code> and <code>destination</code>/<code>localDocument</code>), and have <code>GhosttyMetalView</code> avoid showing <code>.pointingHand</code> when the hovered target classifies as <code>.refused</code>. Removes the hover/click contradiction recorded in <code>scratch/questions.md</code>.</p>
+  <p><strong>This work (depends on Q1).</strong> Stop overloading <code>MultiplexerStore.showBrowser(..., focus: Bool)</code> so <code>focus: false</code> secretly means "also unzoom". When a person ⌘-clicks a checkout file in a zoomed terminal — whether inside the Task view or from a Dashboard tile — unzooming so <strong>Files</strong> opens beside the Session makes one gesture do one predictable thing everywhere. <em>Passed over:</em> keeping <code>focus: onEnter == nil</code>, which splits zoomed Task clicks (full-screen Files hiding Session) from zoomed tile clicks (Session + Files side-by-side).</p>
 </div>
-  <div data-choice="f2" data-label="Make hover cursor, hover preview, and click validation use one TerminalLink result">
+  <div data-choice="f2" data-label="Make zoomed-terminal file clicks behave consistently and separate unzoom from focus in showBrowser">
     <button type="button" data-value="Fix here">Fix here</button>
     <button type="button" data-value="File Task">File Task</button>
     <button type="button" data-value="Drop">Drop</button>
@@ -1261,13 +1291,13 @@ button.lf-btn-quiet[aria-pressed="true"] {
 
 <div class="lf-decision" data-decision-id="f3">
   <div class="lf-decision-head">
-    <span class="lf-decision-title">Decide Dashboard tile behavior for checkout file links without leaking saved zoom</span>
+    <span class="lf-decision-title">Forward flagsChanged to hovered unfocused terminal panes so ⌘-hover never sticks</span>
     <span class="lf-decision-rec">Recommended: Fix here</span>
   </div>
   <div class="lf-decision-body">
-  <p><strong>This work (depends on Q1).</strong> Right now <code>if inTile { store.setZoom(browser.id, enabled: true) }</code> mutates the Task workspace's persisted zoom state so entering the Task opens Files full-screen. Either enter the full Task view on tile file clicks (showing Session + Files side by side) or track a tile-only face override instead of writing <code>zoomedPaneId</code>.</p>
+  <p><strong>This work.</strong> Observe <code>flagsChanged</code> in the key window (like <code>WorkPalette</code> already does with a local event monitor) while the pointer is inside a <code>GhosttyMetalView</code> that is not first responder, so pressing ⌘ previews links immediately over unfocused panes/tiles and releasing ⌘ always clears the pill and cursor. <em>Passed over:</em> relying only on <code>NSResponder.flagsChanged</code>, which leaves unfocused panes stale until the mouse moves.</p>
 </div>
-  <div data-choice="f3" data-label="Decide Dashboard tile behavior for checkout file links without leaking saved zoom">
+  <div data-choice="f3" data-label="Forward flagsChanged to hovered unfocused terminal panes so ⌘-hover never sticks">
     <button type="button" data-value="Fix here">Fix here</button>
     <button type="button" data-value="File Task">File Task</button>
     <button type="button" data-value="Drop">Drop</button>
@@ -1277,13 +1307,13 @@ button.lf-btn-quiet[aria-pressed="true"] {
 
 <div class="lf-decision" data-decision-id="f4">
   <div class="lf-decision-head">
-    <span class="lf-decision-title">Rename macOS TerminalLink to TerminalHyperlink to avoid colliding with LoopflowiOS.TerminalLink</span>
+    <span class="lf-decision-title">Drop or simplify Swift&#39;s WorkUrl::parse duplicate (isWorkAddress) in TerminalHyperlink</span>
     <span class="lf-decision-rec">Recommended: Fix here</span>
   </div>
   <div class="lf-decision-body">
-  <p><strong>This work (small cleanup).</strong> <code>LoopflowiOS/TerminalLink.swift</code> already owns the name <code>TerminalLink</code> for the phone's live terminal connection. Renaming the new hyperlink enum now keeps one name per concept across the Swift package and prepares for sharing it with iOS.</p>
+  <p><strong>This work (small cleanup).</strong> <code>openTerminalLink</code> already sends every <code>.work</code> link exclusively to <code>query.workLink</code> (never <code>handleDeepLink</code>), so <code>isWorkAddress</code> is not a security boundary — it only pre-screens hover feedback while diverging from Rust's <code>WorkUrl::parse</code> on error text and ID validation. Either keep a minimal hover check (scheme + non-empty host + reject known control-query keys, letting Rust report syntax errors cleanly) or document it as a temporary hover heuristic until the shared router lands.</p>
 </div>
-  <div data-choice="f4" data-label="Rename macOS TerminalLink to TerminalHyperlink to avoid colliding with LoopflowiOS.TerminalLink">
+  <div data-choice="f4" data-label="Drop or simplify Swift&#39;s WorkUrl::parse duplicate (isWorkAddress) in TerminalHyperlink">
     <button type="button" data-value="Fix here">Fix here</button>
     <button type="button" data-value="File Task">File Task</button>
     <button type="button" data-value="Drop">Drop</button>
@@ -1293,13 +1323,13 @@ button.lf-btn-quiet[aria-pressed="true"] {
 
 <div class="lf-decision" data-decision-id="f5">
   <div class="lf-decision-head">
-    <span class="lf-decision-title">Share one Work-link router across Terminal, TaskBriefView, and TaskHTMLView</span>
+    <span class="lf-decision-title">Share one Desktop link router across Terminal, TaskBriefView, MarkdownBlocks, and TaskHTMLView</span>
     <span class="lf-decision-rec">Recommended: File Task</span>
   </div>
   <div class="lf-decision-body">
-  <p><strong>Separate outcome.</strong> <code>TaskBriefView</code> still sends Related Task <code>loopflow://</code> links through Launch Services (<code>.systemAction</code>, which can wake the wrong installed Loopflow app and pop the <code>open-work</code> error window), and <code>TaskHTMLView.TaskHTMLLinks</code> lets non-web schemes fall into WKWebView navigation. Unifying all Desktop surfaces onto <code>openResolvedWorkLink</code> (and deciding whether <code>TerminalLink.isWorkAddress</code> can shrink once the resolver owns validation) is a clean follow-up Task (~100 lines of Swift + tests).</p>
+  <p><strong>Separate outcome.</strong> Route <code>loopflow://</code> and <code>file://</code> links from <code>TaskBriefView</code> (Related Tasks and descriptions), <code>MarkdownBlocks</code> (Files Markdown reader, PR descriptions, comments), and <code>TaskHTMLView</code> (review pages) through the same in-app Work resolver and safe file router that terminals now use, leaving <code>LoopflowApp.handleDeepLink</code> strictly for OS deep links. Needs ~120 lines of Swift + unit tests across Brief, Markdown, and HTML views.</p>
 </div>
-  <div data-choice="f5" data-label="Share one Work-link router across Terminal, TaskBriefView, and TaskHTMLView">
+  <div data-choice="f5" data-label="Share one Desktop link router across Terminal, TaskBriefView, MarkdownBlocks, and TaskHTMLView">
     <button type="button" data-value="Fix here">Fix here</button>
     <button type="button" data-value="File Task">File Task</button>
     <button type="button" data-value="Drop">Drop</button>
@@ -1313,7 +1343,7 @@ button.lf-btn-quiet[aria-pressed="true"] {
     <span class="lf-decision-rec">Recommended: File Task</span>
   </div>
   <div class="lf-decision-body">
-  <p><strong>Separate outcome.</strong> <code>TaskFilesStore</code>, <code>MultiplexerStore</code>, and server <code>task.file</code> are Task-only. Adding Files to Repository and Wave workspaces needs repository file endpoints and layout work; until then, safe local default-app fallback handles those panes.</p>
+  <p><strong>Separate outcome.</strong> <code>TaskFilesStore</code>, <code>MultiplexerStore</code>, and server <code>task.file</code> are Task-only. Adding Files to Repository and Wave workspaces needs repository file endpoints on the server and workspace layout changes; until then, safe local default-app fallback handles those panes.</p>
 </div>
   <div data-choice="f6" data-label="Files pane for Repository and Wave workspaces">
     <button type="button" data-value="Fix here">Fix here</button>
@@ -1329,7 +1359,7 @@ button.lf-btn-quiet[aria-pressed="true"] {
     <span class="lf-decision-rec">Recommended: File Task</span>
   </div>
   <div class="lf-decision-body">
-  <p><strong>Separate outcome.</strong> <code>swift/LoopflowiOS/GhosttySurface.swift</code> ignores <code>OPEN_URL</code> and touch has no ⌘-click gesture; needs a touch gesture design plus sharing the renamed hyperlink classifier in <code>Loopflow</code>.</p>
+  <p><strong>Separate outcome.</strong> <code>swift/LoopflowiOS/GhosttySurface.swift</code> ignores <code>OPEN_URL</code> and touch has no ⌘-click gesture; needs a touch interaction design plus moving <code>TerminalHyperlink</code> into the shared <code>Loopflow</code> package.</p>
 </div>
   <div data-choice="f7" data-label="Clickable links in iPhone Sessions">
     <button type="button" data-value="Fix here">Fix here</button>
@@ -1341,22 +1371,24 @@ button.lf-btn-quiet[aria-pressed="true"] {
 
 <h2>Questions</h2>
 
-<div data-choice="q1" data-label="1. Clicking a file link inside a Dashboard tile">
-  <p><strong>1. When you are on the Working Tasks Dashboard and ⌘-click a checkout file inside a Task tile, what should happen?</strong></p>
-  <p>Today the tile replaces its Session terminal with <strong>Files</strong> by setting zoom on that Task's layout — which also means clicking into the Task later opens Files zoomed full-screen instead of the Session + Files split. Entering the Task shows Session and Files side by side immediately without changing the tile; keeping the file inside the tile lets you stay on the Dashboard.</p>
-  <button type="button" data-value="1a">1a — Enter the Task view and open the file in Files beside the Session, leaving the tile on the Session (Recommended)</button>
-  <button type="button" data-value="1b">1b — Flip only that Dashboard tile to Files without changing the Task's saved zoom state</button>
-  <button type="button" data-value="1c">1c — Keep current behavior (flip the tile via the Task's layout zoom)</button>
+<p>None of these choices lock in an irreversible data format; all can be adjusted later in Desktop or server code.</p>
+
+<div data-choice="q1" data-label="1. Clicking a file link when the Session is zoomed (Task view and Dashboard tiles)">
+  <p><strong>1. When your Session is zoomed full-screen (or you click from a Dashboard tile) and you ⌘-click a checkout file link, how should Desktop show the file?</strong></p>
+  <p>Built today: clicking from a Dashboard tile enters the Task and unzooms so Session and <strong>Files</strong> appear side-by-side (keeping keyboard focus in the Session), while clicking the same link inside a zoomed Task view replaces the zoomed Session with full-screen <strong>Files</strong> (moving focus to Files).</p>
+  <button type="button" data-value="1a">1a — Always show Session and Files side-by-side (clear terminal zoom in both Task view and Dashboard tiles) (Recommended)</button>
+  <button type="button" data-value="1b">1b — Keep current split: unzoom when entering from a Dashboard tile, replace zoom with full-screen Files inside a zoomed Task view</button>
+  <button type="button" data-value="1c">1c — In a Dashboard tile, flip only that tile to Files without entering the Task or changing saved zoom</button>
 </div>
 
 <div data-choice="q2" data-label="2. Checkout files: Files pane + safe fallback vs. default app (built as 2a)">
   <p><strong>2. Built today: ⌘-clicking a file inside a Task's active checkout opens it in Desktop's Files pane at <code>#L&lt;n&gt;</code> (locally or remotely), while Repository/Wave Sessions and old pre-move local shells open safe local documents and folders in the macOS default app (still blocking scripts and executables). Keep this?</strong></p>
-  <p>Opening Task files in <strong>Files</strong> preserves line numbers, safely reads scripts like <code>scripts/test.py</code>, and works on remote Machines. Opening all local files in the default app matches Rex, but drops line numbers, must refuse scripts, and cannot open remote files.</p>
+  <p>Opening Task files in <strong>Files</strong> keeps line numbers, safely reads scripts like <code>scripts/test.py</code>, and works on remote Machines. Opening all local files in the default app matches Rex, but drops line numbers, must refuse scripts, and cannot open remote files.</p>
   <button type="button" data-value="2a">2a — Keep built behavior: Files pane for active Task checkouts, safe default-app fallback elsewhere (Recommended)</button>
   <button type="button" data-value="2b">2b — Open all local files in the macOS default app, matching Rex</button>
 </div>
 
-<div data-choice="q3" data-label="3. Held terminal identity: always ghostty vs. keep rex (built as 3a)">
+<div data-choice="q3" data-label="3. Held terminal identity: always ghostty vs. keep caller TERM_PROGRAM (built as 3a)">
   <p><strong>3. Built today: every held terminal reports <code>TERM_PROGRAM=ghostty</code> (and clears <code>TERM_PROGRAM_VERSION</code>), even when started from Rex, Apple Terminal, or <code>tmux</code>. Keep always setting <code>ghostty</code>?</strong></p>
   <p>Always advertising <code>ghostty</code> makes clickable links work consistently no matter where the Session started, and Loopflow's Rex host detection uses <code>REX_SESSION</code>/<code>REX_BLOCK</code> rather than <code>TERM_PROGRAM</code>. Preserving caller <code>TERM_PROGRAM</code> keeps <code>rex</code> when launched from Rex, but leaves Sessions started from Apple Terminal or <code>tmux</code> without clickable links.</p>
   <button type="button" data-value="3a">3a — Keep built behavior: always set TERM_PROGRAM=ghostty on held terminals (Recommended)</button>
@@ -1369,8 +1401,14 @@ button.lf-btn-quiet[aria-pressed="true"] {
   <button type="button" data-value="4a">4a — Keep built behavior: open matching remote checkout paths in Files regardless of file:// hostname (Recommended)</button>
   <button type="button" data-value="4b">4b — Require empty or localhost hostnames remotely (ls --hyperlink and rg links won't open remotely)</button>
 </div>
+
+<div data-choice="q5" data-label="5. Scope for non-terminal Desktop links (Brief, Markdown, Review pages)">
+  <p><strong>5. Task Briefs, rendered Markdown files, and HTML review pages still handle <code>loopflow://</code> and <code>file://</code> links differently from terminals (sending Brief/Markdown links to macOS Launch Services and letting review pages navigate non-web schemes). Ship terminal links first and unify the rest in a follow-up Task?</strong></p>
+  <button type="button" data-value="5a">5a — Ship LOO-1126 for terminals and file a dedicated follow-up Task to unify Brief, Markdown, and review-page links (Recommended)</button>
+  <button type="button" data-value="5b">5b — Pull the shared Desktop link router into LOO-1126 before shipping</button>
+</div>
 </main>
-<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1126"},"directory":"/Users/jack/src/loopflow.7b50cc-links-in-agent","base":"fd8dce986d7a7a8afb3e804f386847ff468c5596","head":"ec8ae076ce","path":"scratch/concept-review.html","build_id":"89f4e5f8aa5e39ea","protocol":{"revision":11,"min_revision":10}}</script>
+<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1126"},"directory":"/Users/jack/src/loopflow.7b50cc-links-in-agent","base":"fd8dce986d7a7a8afb3e804f386847ff468c5596","head":"bba5ff2138","path":"scratch/concept-review.html","build_id":"2d7a855d91c9f5b1","protocol":{"revision":11,"min_revision":10}}</script>
 <script>
 (function () {
   "use strict";

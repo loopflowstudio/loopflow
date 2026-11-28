@@ -152,7 +152,7 @@ outer loop, then runs `compress` and `qa` once after the design settles.
         - implement        # decides: another planned pass (iterate) or ready for review (advance)
     - concept-review       # read-only: writes scratch/concept-review.html
     - realign              # decides: take review into plan and loop back, or move on
-- compress                 # simplify what the branch touched
+- compress                 # simplify the change as a whole
 - qa                       # exercise the real change end to end
 - pr-publish
 ```
@@ -187,6 +187,16 @@ It keeps iterating past 5 when real work is left, and returns `blocked` when
 passes shrink into small increments that no longer converge. `lf task status`
 shows the reason the decider gave. If the step succeeds and the Graph then
 fails, status shows the Graph error.
+
+Once the loop settles, `compress` reads the whole branch against its base as
+one change—simplifying the change and the area around it, merging seams
+between passes, and dropping dead or superseded additions. It checks and
+commits each cut on its own with what it removed and why, so any single cut
+can be reverted cleanly. Cuts that would change visible behavior, data people
+rely on, or a measured target stay untouched and go under
+`## Deferred findings` in `scratch/plan.md` (with open questions in
+`scratch/questions.md`) for `ship-review`; run standalone (`lf compress`)
+without those files, it reports them in its reply.
 
 ### Docs-first (`write-docs`) and QA playbooks (`.lf/qa/`)
 

@@ -170,9 +170,11 @@ reducing, say so and stop.
   "and `## Deferred findings` written by `realign`." becomes "and
   `## Deferred findings`." (realign and compress both write it;
   `realign.md:67` keeps the section intact across refreshes).
-- `docs/orchestration.md:155`: the `build` listing's comment "simplify what
-  the branch touched" becomes "simplify the change as a whole".
-  Line 13 ("`compress` simplifies") and line 145 already fit.
+- `docs/orchestration.md`: updated in place (`write-docs`) — line 155 comment
+  changed to "simplify the change as a whole" and a paragraph added under
+  `### Loops` covering whole-branch scope, per-cut commits, and deferred
+  findings / standalone `lf compress`. Line 13 ("`compress` simplifies") and
+  line 145 already fit.
 - `build.yaml` and `optimize.yaml`: unchanged. Their descriptions and
   comments already say compress runs once.
 - Repositories with a `.lf/skills/compress.md` that `extends: lf:compress`
@@ -213,12 +215,16 @@ reducing, say so and stop.
 - *A bolder cut in `optimize` loses the speedup.* The skill keeps the
   measured number; the Graph's recovery when it slips is deferred below.
 
+## Docs written
+
+- `docs/orchestration.md`
+
 ## Pass
 
-One pass, prose only. Nothing is built yet.
+One pass, prose only. Nothing is built yet (`docs/orchestration.md` is updated).
 
-1. Replace `compress.md` with the draft; edit the `ship-review.md` line and
-   the `docs/orchestration.md:155` comment.
+1. Replace `compress.md` with the draft and edit the `ship-review.md` line
+   (reading `docs/orchestration.md` for any edits made since).
 2. Check: `cargo build -p loopflow` then `target/debug/lf help compress`
    prints the new text (the builtin is `include_str!`'d). No test run.
 

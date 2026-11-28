@@ -540,7 +540,7 @@
       "oneOf": [
         {
           "const": "extends",
-          "description": "`extends: builtin`: the builtin's text with the file's appended.",
+          "description": "Extends the builtin of the same name (`extends: lf:<name>`, `extends: <name>`, or `extends: builtin`).",
           "type": "string"
         },
         {
@@ -621,6 +621,25 @@
           "type": "object"
         }
       ]
+    },
+    "ChangedLines": {
+      "properties": {
+        "added": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "removed": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "added",
+        "removed"
+      ],
+      "type": "object"
     },
     "Check": {
       "properties": {
@@ -753,6 +772,26 @@
         {
           "const": "abandoned",
           "description": "It was not merged and was canceled with its parent.",
+          "type": "string"
+        },
+        {
+          "const": "rehomed",
+          "description": "It stays open, moved up to its parent's nearest open ancestor.",
+          "type": "string"
+        }
+      ]
+    },
+    "ChildPolicy": {
+      "description": "What completing a parent does with its open children. A parent with open\nchildren completes only once someone picks one.",
+      "oneOf": [
+        {
+          "const": "rehome",
+          "description": "Direct open children move up to the nearest open ancestor, or become\ntop-level, and stay open.",
+          "type": "string"
+        },
+        {
+          "const": "abandon",
+          "description": "Open descendants whose PR merged are done; the rest are abandoned.",
           "type": "string"
         }
       ]
@@ -2449,6 +2488,13 @@
         "description": {
           "type": "string"
         },
+        "extends": {
+          "description": "Parent skill named by `extends:` (`lf:<name>` for a builtin, or `<name>`),\nwhen the skill extends another.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "invocation": {
           "type": "string"
         },
@@ -2468,7 +2514,8 @@
         "source",
         "description",
         "invocation",
-        "builtin"
+        "builtin",
+        "extends"
       ],
       "type": "object"
     },
@@ -4361,12 +4408,6 @@
               "query": {
                 "kind": "machine.self"
               }
-            },
-            {
-              "kind": "performance.read",
-              "query": {
-                "kind": "machine.self"
-              }
             }
           ],
           "properties": {
@@ -5017,6 +5058,19 @@
           "type": "string"
         }
       ]
+    },
+    "PageUrl": {
+      "additionalProperties": false,
+      "description": "What `page.url` answers.",
+      "properties": {
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
     },
     "PlacementStrategy": {
       "enum": [
@@ -6541,6 +6595,104 @@
         },
         {
           "additionalProperties": false,
+          "description": "Find declarations of a name in the Task checkout.",
+          "properties": {
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.files.symbols",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "issue",
+            "name",
+            "path"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/TaskSymbols"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Search the Task checkout for literal text.",
+          "properties": {
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.files.grep",
+              "type": "string"
+            },
+            "query": {
+              "type": "string"
+            },
+            "whole_word": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "issue",
+            "query",
+            "whole_word"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/TaskGrepResults"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf task find <issue> [query]`: matching paths across the Task checkout.",
+          "properties": {
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.files.find",
+              "type": "string"
+            },
+            "limit": {
+              "format": "uint",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "query": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "issue",
+            "query",
+            "limit"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/TaskFileInventory"
+          }
+        },
+        {
+          "additionalProperties": false,
           "description": "`lf task files <issue> <path> [--cursor <cursor>] [--show-ignored]`:\none page of a Task checkout directory's immediate entries.",
           "properties": {
             "cursor": {
@@ -7547,6 +7699,7 @@
             {
               "builtin": null,
               "description": "Find why the code misbehaves, fix the cause, and verify the original workflow.",
+              "extends": null,
               "invocation": "lf debug [message]",
               "kind": "skill",
               "name": "debug",
@@ -7555,6 +7708,7 @@
             {
               "builtin": "extends",
               "description": "Use the change the way the people it is for will use it, and fix what breaks.",
+              "extends": "lf:qa",
               "invocation": "lf qa [message]",
               "kind": "skill",
               "name": "qa",
@@ -7562,7 +7716,17 @@
             },
             {
               "builtin": null,
-              "description": "design, implement, gate, land",
+              "description": "Turn the next slice of the plan into working code.",
+              "extends": "implement",
+              "invocation": "lf card-implement [message]",
+              "kind": "skill",
+              "name": "card-implement",
+              "source": ".lf/skills/card-implement.md"
+            },
+            {
+              "builtin": null,
+              "description": "design, implement, land",
+              "extends": null,
               "invocation": "lf code [message]",
               "kind": "graph",
               "name": "code",
@@ -8317,6 +8481,16 @@
         },
         "task": {
           "$ref": "#/$defs/TaskSummary"
+        },
+        "working_group": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkingGroup"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -8335,6 +8509,7 @@
         "run_control",
         "pr",
         "section",
+        "working_group",
         "owned_by_you",
         "runs_on"
       ],
@@ -8775,6 +8950,7 @@
             "idle",
             "active",
             "moving",
+            "paused",
             "working",
             "done"
           ],
@@ -8825,6 +9001,43 @@
         "repository",
         "selection",
         "secrets"
+      ],
+      "type": "object"
+    },
+    "ServerDiagnostics": {
+      "additionalProperties": false,
+      "description": "What `server.diagnostics` answers: live counters for the serving process.",
+      "properties": {
+        "held_facts": {
+          "description": "External facts currently held by open subscriptions.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "spawns": {
+          "description": "Cumulative subprocesses spawned by the server.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "store_opens": {
+          "description": "Cumulative SQLite connections opened since this server started.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "threads": {
+          "description": "Live OS threads in the server process.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "threads",
+        "store_opens",
+        "spawns",
+        "held_facts"
       ],
       "type": "object"
     },
@@ -9640,6 +9853,27 @@
         },
         {
           "additionalProperties": false,
+          "description": "A capability URL for a local review page served over loopback; same-user\nlocal socket only.",
+          "properties": {
+            "kind": {
+              "const": "page.url",
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/PageUrl"
+          }
+        },
+        {
+          "additionalProperties": false,
           "description": "A ticket for a connection that carries one request of `bytes` bytes,\nlarger than `limits.max_message`; answers `{ticket}`. The uploaded\nrequest is answered here under its own id.",
           "examples": [
             {
@@ -9841,6 +10075,34 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/PlanChanges"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Live runtime counters for the serving process: OS threads, cumulative\nSQLite opens, spawned subprocesses, and held observation facts.",
+          "examples": [
+            {
+              "kind": "server.diagnostics"
+            }
+          ],
+          "properties": {
+            "kind": {
+              "const": "server.diagnostics",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/ServerDiagnostics"
+          },
+          "x-result-example": {
+            "held_facts": 11,
+            "spawns": 2,
+            "store_opens": 4,
+            "threads": 16
           }
         }
       ]
@@ -12155,6 +12417,17 @@
         "committed": {
           "type": "boolean"
         },
+        "lines": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChangedLines"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Text lines in the patch; absent for an untracked file beyond the reader's size limit."
+        },
         "old_path": {
           "type": [
             "string",
@@ -12181,7 +12454,8 @@
         "staged",
         "unstaged",
         "untracked",
-        "changes"
+        "changes",
+        "lines"
       ],
       "type": "object"
     },
@@ -13257,6 +13531,19 @@
           "type": "object"
         },
         {
+          "description": "Hold Graph execution at its current step.",
+          "properties": {
+            "kind": {
+              "const": "paused",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
           "properties": {
             "base_commit": {
               "type": "string"
@@ -13374,7 +13661,7 @@
           "type": "object"
         },
         {
-          "description": "A person asked to complete the Task, so settling it settles its\nchildren too. A Graph reaching `end` writes `CompletionRequested`,\nwhich waits while a child is open. The request can pend until the\nTask's PR merges, and a child can be filed, reopened or moved under\nthe Task meanwhile, so who asked is kept with the request.",
+          "description": "History only: an earlier `lf task complete` that would settle the\nTask's children once it ran. Completion now settles children at once,\nby the policy given, and nothing writes this.",
           "properties": {
             "kind": {
               "const": "family_completion_requested",
@@ -13522,6 +13809,38 @@
       ],
       "type": "object"
     },
+    "TaskFileInventory": {
+      "properties": {
+        "latest_scratch_page": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "scratch": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "paths",
+        "scratch",
+        "latest_scratch_page",
+        "truncated"
+      ],
+      "type": "object"
+    },
     "TaskFileKind": {
       "enum": [
         "file",
@@ -13644,7 +13963,7 @@
       "type": "string"
     },
     "TaskFilesRevision": {
-      "description": "A Task's file invalidation on this Machine. `checkout` and `revision` are\nnull until the Task has a checkout here; readers rescan on a new revision,\nincluding when multiple changes coalesce while their connection is busy.",
+      "description": "A Task's file invalidation on this Machine. `checkout` and `revision` are\nnull until the Task has a checkout here; `revision` moves only on working-tree\nor Git metadata changes, while `scratch_pages` tracks ignored `scratch/`\nMarkdown/HTML writes independently so remote readers skip `git diff`.",
       "properties": {
         "checkout": {
           "type": [
@@ -13667,6 +13986,12 @@
             "null"
           ]
         },
+        "scratch_pages": {
+          "items": {
+            "$ref": "#/$defs/TaskScratchPage"
+          },
+          "type": "array"
+        },
         "task_id": {
           "type": "string"
         }
@@ -13676,7 +14001,8 @@
         "machine_id",
         "machine_label",
         "checkout",
-        "revision"
+        "revision",
+        "scratch_pages"
       ],
       "type": "object"
     },
@@ -13704,6 +14030,9 @@
     "TaskGraph": {
       "description": "One Task's Graph as `lf task status --json` carries it.",
       "properties": {
+        "control": {
+          "$ref": "#/$defs/WorkflowControl"
+        },
         "current_step": {
           "description": "The index in `steps` of the step the Task stands in; null at `start`\nand at `end`.",
           "format": "uint32",
@@ -13738,6 +14067,7 @@
         }
       },
       "required": [
+        "control",
         "name",
         "interactive_steps",
         "position",
@@ -13796,6 +14126,69 @@
           "type": "object"
         }
       ]
+    },
+    "TaskGrepHit": {
+      "properties": {
+        "end": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "excerpt": {
+          "type": "string"
+        },
+        "excerpt_start": {
+          "description": "Byte offset of the excerpt in the same source line.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "line": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "start": {
+          "description": "Half-open UTF-8 byte offsets in the source line at this revision.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "start",
+        "end",
+        "revision",
+        "excerpt_start",
+        "excerpt"
+      ],
+      "type": "object"
+    },
+    "TaskGrepResults": {
+      "properties": {
+        "hits": {
+          "items": {
+            "$ref": "#/$defs/TaskGrepHit"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hits",
+        "truncated"
+      ],
+      "type": "object"
     },
     "TaskOverview": {
       "description": "Workspace facts without the Task's full history.",
@@ -14466,7 +14859,7 @@
               ]
             },
             "merges": {
-              "description": "The run may merge the PR: auto is on, or no interactive step is\nleft ahead, and nobody turned auto off.",
+              "description": "The run can reach a merging step before stopping, and nobody turned\nauto off.",
               "type": "boolean"
             },
             "run": {
@@ -14532,6 +14925,10 @@
     },
     "TaskRunControl": {
       "properties": {
+        "pausing": {
+          "description": "A pause is still stopping work. Unpause must wait.",
+          "type": "boolean"
+        },
         "unavailable": {
           "type": [
             "string",
@@ -14540,7 +14937,8 @@
         }
       },
       "required": [
-        "unavailable"
+        "unavailable",
+        "pausing"
       ],
       "type": "object"
     },
@@ -14614,6 +15012,22 @@
       ],
       "type": "object"
     },
+    "TaskScratchPage": {
+      "description": "One eligible Markdown or HTML page under `scratch/` with a metadata stamp\nderived from modification time and byte length.",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "stamp": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "stamp"
+      ],
+      "type": "object"
+    },
     "TaskSection": {
       "description": "Where a Task sits on the Wave board. The one bucketing rule: the board, the\nsidebar's Working Tasks, Wave counts and `lf wave show` all read it.",
       "oneOf": [
@@ -14631,7 +15045,7 @@
         },
         {
           "const": "working",
-          "description": "Someone's idle, active or moving Task, or a Task owned on another Machine.",
+          "description": "Someone's idle, active, moving or paused Task, or a Task owned on another Machine.",
           "type": "string"
         }
       ]
@@ -14929,6 +15343,11 @@
           "type": "string"
         },
         {
+          "const": "paused",
+          "description": "Execution is held until explicitly unpaused.",
+          "type": "string"
+        },
+        {
           "const": "done",
           "description": "Completed independently of Graph position.",
           "type": "string"
@@ -15053,6 +15472,56 @@
         "completed_at",
         "due_date",
         "assignee"
+      ],
+      "type": "object"
+    },
+    "TaskSymbol": {
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "line": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "name",
+        "kind",
+        "line",
+        "container"
+      ],
+      "type": "object"
+    },
+    "TaskSymbols": {
+      "properties": {
+        "hits": {
+          "items": {
+            "$ref": "#/$defs/TaskSymbol"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hits",
+        "truncated"
       ],
       "type": "object"
     },
@@ -15422,6 +15891,15 @@
             }
           ]
         },
+        "open_children": {
+          "description": "How many direct children of a Task are open, so a client can ask what\nhappens to them before completing it; `None` for anything but a Task.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "primary_session": {
           "type": [
             "string",
@@ -15446,9 +15924,20 @@
         },
         "work": {
           "$ref": "#/$defs/WorkWorkspaceKey"
+        },
+        "working_group": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkingGroup"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
+        "working_group",
         "work",
         "title",
         "states",
@@ -15457,7 +15946,8 @@
         "primary_session",
         "location",
         "argv",
-        "unavailable"
+        "unavailable",
+        "open_children"
       ],
       "type": "object"
     },
@@ -16413,6 +16903,34 @@
       ],
       "type": "string"
     },
+    "WorkflowAction": {
+      "enum": [
+        "run",
+        "pause",
+        "pausing",
+        "unpause",
+        "resume",
+        "wait",
+        "done"
+      ],
+      "type": "string"
+    },
+    "WorkflowControl": {
+      "description": "The workflow track's primary action and current-step chip label.",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/WorkflowAction"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "label"
+      ],
+      "type": "object"
+    },
     "WorkflowOutline": {
       "description": "A Graph as the workflow line shows it before any Task stands on it.",
       "properties": {
@@ -16424,8 +16942,11 @@
           "type": "array"
         },
         "sentence": {
-          "description": "\"You take part at explore, ship-review and verify.\" or \"Runs on its own.\"",
+          "description": "\"You take part at explore and ship-review.\" or \"Runs on its own.\"",
           "type": "string"
+        },
+        "start": {
+          "$ref": "#/$defs/WorkflowControl"
         },
         "steps": {
           "description": "The Graph's top-level steps in order, as `TaskGraph.steps` carries them.",
@@ -16436,6 +16957,7 @@
         }
       },
       "required": [
+        "start",
         "steps",
         "interactive_steps",
         "sentence"
@@ -16458,6 +16980,15 @@
         "interactive"
       ],
       "type": "object"
+    },
+    "WorkingGroup": {
+      "description": "The groups inside Working, in sidebar order.",
+      "enum": [
+        "active",
+        "shipping",
+        "paused"
+      ],
+      "type": "string"
     },
     "Write": {
       "description": "A typed mutation with the same defaults and effects as its CLI spelling.\nOn the wire each write is a resource-named `kind` (`task.complete`);\n`desktop.*` writes are Desktop's own arrangement state.",
@@ -16562,8 +17093,19 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf task complete <issue>`.",
+          "description": "`lf task complete <issue> [--children rehome|abandon]`.",
           "properties": {
+            "children": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ChildPolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What happens to open children; `null` refuses while any are open."
+            },
             "directory": {
               "type": "string"
             },
@@ -16578,7 +17120,8 @@
           "required": [
             "kind",
             "directory",
-            "issue"
+            "issue",
+            "children"
           ],
           "type": "object",
           "x-result": {
@@ -17023,6 +17566,82 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/TaskComments"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Stop work and hold the Task on its execution Machine. Returns the pause receipt.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "issue": "LOO-1",
+              "kind": "task.pause"
+            }
+          ],
+          "properties": {
+            "directory": {
+              "type": "string"
+            },
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.pause",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "issue"
+          ],
+          "type": "object",
+          "x-result": {
+            "type": "string"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Lift the hold. With run, resume automatic work. Return the run or null when the Task stays at its step.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "issue": "LOO-1",
+              "kind": "task.unpause",
+              "run": true
+            }
+          ],
+          "properties": {
+            "directory": {
+              "type": "string"
+            },
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.unpause",
+              "type": "string"
+            },
+            "run": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "issue",
+            "run"
+          ],
+          "type": "object",
+          "x-result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         {
@@ -19172,7 +19791,7 @@
   ],
   "title": "Loopflow server protocol",
   "x-min-revision": 10,
-  "x-revision": 10,
+  "x-revision": 11,
   "x-terminal-close": {
     "payload": {
       "$ref": "#/$defs/Close"

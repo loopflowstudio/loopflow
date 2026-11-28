@@ -25,8 +25,11 @@ fixed head published and armed.
    code; an old failure may already be fixed. Continue from an earlier
    attempt's changes if you were handed one.
 
-3. **Fix the cause.** Reproduce each failure locally and make the smallest
-   correct fix, with a focused check.
+3. **Fix the cause.** Reproduce only the single failing test or target locally
+   — never the whole CI job or a release build when a focused debug check
+   reproduces it — and make the smallest correct fix, with a focused check.
+   When the CI log already pinpoints an obvious lint, format, import or type
+   fix, skip heavy local rebuilds and let CI verify after pushing.
    - A failed test is never repaired by a rerun, an empty commit, a retry, a
      longer timeout or a wider tolerance. A test that fails on a timeout, hang
      or race is flaky even when this branch didn't touch it: make it

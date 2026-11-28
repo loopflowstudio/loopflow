@@ -15,7 +15,7 @@ impl SqliteStore {
         limit: usize,
     ) -> StoreResult<Vec<TaskEvent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT id,task_id,kind_json,created_at FROM task_events WHERE task_id=?1 AND id>?2 ORDER BY id LIMIT ?3")?;
+        let mut query = conn.prepare_cached("SELECT id,task_id,kind_json,created_at FROM task_events WHERE task_id=?1 AND id>?2 ORDER BY id LIMIT ?3")?;
         let events = query
             .query_map(
                 params![task.as_str(), after, limit as i64 + 1],

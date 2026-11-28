@@ -525,7 +525,8 @@ fn task_snapshot_reads_its_current_parent_project() {
         ))
         .unwrap();
 
-    let snapshot = task_snapshot(&task.task).expect("snapshot Task");
+    let snapshot =
+        task_snapshot(&task.task, crate::lf::navigation::command_merges).expect("snapshot Task");
 
     assert_eq!(snapshot.project.as_deref(), Some("current-project"));
     assert_eq!(snapshot.external_project_id, Some(project_id));
@@ -601,88 +602,6 @@ fn publish_makes_no_presentation_attempt() {
         presentation_attempts(&marker),
         0,
         "publication must not open any review surface"
-    );
-}
-
-#[test]
-fn gate_artifacts_never_reach_the_published_head() {
-    let gh_script = write_gh_script("[]", None);
-    let marker_dir = tempfile::TempDir::new().expect("marker dir");
-    let agent_marker = marker_dir.path().join("agent-called");
-    let codex = format!(
-        "#!/bin/sh\nprintf called > '{}'\nexit 1\n",
-        agent_marker.display()
-    );
-    let home = tempfile::TempDir::new().expect("temp home");
-    let _env = EnvGuard::with_home(
-        &[("gh", gh_script.as_str()), ("codex", codex.as_str())],
-        Some(home.path()),
-    );
-    let repo = TestRepo::new();
-    create_changed_branch(&repo, "feature");
-    let scratch = repo.path().join("scratch");
-    fs::create_dir_all(&scratch).expect("create scratch");
-    fs::write(
-        scratch.join("security-review.md"),
-        "independent audit evidence",
-    )
-    .expect("write independent review");
-    repo.stage_all();
-    repo.commit("preserve independent audit evidence");
-    push_branch(&repo, "feature");
-    let implementation_head = repo.head_sha();
-
-    fs::write(scratch.join(".pr-copy-ref"), &implementation_head).expect("write copy ref");
-    fs::write(scratch.join("pr-title.txt"), "cached gate title").expect("write title");
-    fs::write(scratch.join("pr-body.md"), "cached gate body").expect("write body");
-
-    create_or_update_pr(
-        repo.path(),
-        &PrOptions {
-            draft: false,
-            title: None,
-            body: None,
-            agent: Some("codex".to_string()),
-        },
-        &NullProgress,
-    )
-    .expect("publish cached gate output");
-
-    assert_eq!(
-        repo.head_sha(),
-        implementation_head,
-        "gate handoff must not manufacture an artifact-only prepare commit"
-    );
-    let remote_head = Command::new("git")
-        .arg("--git-dir")
-        .arg(repo.bare_path())
-        .args(["rev-parse", "refs/heads/feature"])
-        .output()
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .expect("read remote feature");
-    assert_eq!(remote_head, implementation_head);
-    for artifact in [".pr-copy-ref", "pr-title.txt", "pr-body.md"] {
-        assert!(
-            !scratch.join(artifact).exists(),
-            "gate artifact survived publication: {artifact}"
-        );
-    }
-    assert_eq!(
-        fs::read_to_string(scratch.join("security-review.md")).unwrap(),
-        "independent audit evidence"
-    );
-    assert!(
-        !agent_marker.exists(),
-        "valid gate copy must be consumed without launching another provider"
-    );
-    let status = Command::new("git")
-        .args(["status", "--porcelain"])
-        .current_dir(repo.path())
-        .output()
-        .expect("read worktree status");
-    assert!(
-        status.stdout.is_empty(),
-        "publication must leave a clean tree"
     );
 }
 
@@ -1008,10 +927,14 @@ fn manual_merge_observation_preserves_the_task_and_sole_pr() {
 
     let report = loopflow_execution::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
     assert!(report.errors.is_empty(), "{:?}", report.errors);
-    let persisted_task = task_status(repo.path(), Some("INF-123"))
-        .expect("reconcile Task PR")
-        .execution
-        .expect("execution");
+    let persisted_task = task_status(
+        repo.path(),
+        Some("INF-123"),
+        crate::lf::navigation::command_merges,
+    )
+    .expect("reconcile Task PR")
+    .execution
+    .expect("execution");
     assert!(!persisted_task.status.is_terminal());
     assert!(
         matches!(
@@ -1020,10 +943,14 @@ fn manual_merge_observation_preserves_the_task_and_sole_pr() {
         ),
         "status must not repeat merge reconciliation: {persisted_task:?}"
     );
-    let cached_task = task_status(repo.path(), Some("INF-123"))
-        .expect("reuse partial merge-time observation")
-        .execution
-        .expect("execution");
+    let cached_task = task_status(
+        repo.path(),
+        Some("INF-123"),
+        crate::lf::navigation::command_merges,
+    )
+    .expect("reuse partial merge-time observation")
+    .execution
+    .expect("execution");
     assert!(
         matches!(
             cached_task.observation,
@@ -1088,10 +1015,14 @@ fn changed_head_revokes_auto_merge_and_clears_the_stale_request() {
 
     let report = loopflow_execution::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
     assert!(report.errors.is_empty(), "{:?}", report.errors);
-    task_status(repo.path(), Some("INF-123"))
-        .expect("reconcile changed head")
-        .execution
-        .expect("execution");
+    task_status(
+        repo.path(),
+        Some("INF-123"),
+        crate::lf::navigation::command_merges,
+    )
+    .expect("reconcile changed head")
+    .execution
+    .expect("execution");
 
     let persisted = runtime
         .block_on(task.store.active_task_pr(&task.task.id))
@@ -1213,10 +1144,14 @@ fn observed_merge_does_not_complete_a_task_from_status() {
 
     let report = loopflow_execution::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
     assert!(report.errors.is_empty(), "{:?}", report.errors);
-    let persisted_task = task_status(repo.path(), Some("INF-123"))
-        .expect("reconcile completing PR")
-        .execution
-        .expect("execution");
+    let persisted_task = task_status(
+        repo.path(),
+        Some("INF-123"),
+        crate::lf::navigation::command_merges,
+    )
+    .expect("reconcile completing PR")
+    .execution
+    .expect("execution");
     assert!(
         matches!(
             persisted_task.observation,
@@ -1266,10 +1201,14 @@ fn observed_auto_merge_waits_for_an_explicit_completion_request() {
 
     let report = loopflow_execution::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
     assert!(report.errors.is_empty(), "{:?}", report.errors);
-    let persisted_task = task_status(repo.path(), Some("INF-123"))
-        .expect("reconcile watched PR merge")
-        .execution
-        .expect("execution");
+    let persisted_task = task_status(
+        repo.path(),
+        Some("INF-123"),
+        crate::lf::navigation::command_merges,
+    )
+    .expect("reconcile watched PR merge")
+    .execution
+    .expect("execution");
     assert!(!persisted_task.status.is_terminal());
     let prs = runtime
         .block_on(task.store.task_prs(&task.task.id))
@@ -1309,10 +1248,14 @@ fn repeated_status_of_merged_task_never_completes_work() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as completing");
 
-    let first = task_status(repo.path(), Some("INF-123"))
-        .expect("first merged-PR status")
-        .execution
-        .expect("execution");
+    let first = task_status(
+        repo.path(),
+        Some("INF-123"),
+        crate::lf::navigation::command_merges,
+    )
+    .expect("first merged-PR status")
+    .execution
+    .expect("execution");
     assert!(!first.status.is_terminal());
     let first_events = runtime
         .block_on(task.store.task_events_after(&task.task.id, 0))
@@ -1328,10 +1271,14 @@ fn repeated_status_of_merged_task_never_completes_work() {
         .ok()
     };
     let first_moves = moves();
-    let second = task_status(repo.path(), Some("INF-123"))
-        .expect("repeated merged-PR status")
-        .execution
-        .expect("execution");
+    let second = task_status(
+        repo.path(),
+        Some("INF-123"),
+        crate::lf::navigation::command_merges,
+    )
+    .expect("repeated merged-PR status")
+    .execution
+    .expect("execution");
     let second_moves = moves();
     let second_events = runtime
         .block_on(task.store.task_events_after(&task.task.id, 0))
@@ -1386,7 +1333,7 @@ fn end_is_refused_while_a_published_pr_is_unmerged() {
     });
     runtime.block_on(task.store.update_task_pr(&pr)).unwrap();
 
-    let message = task_complete(repo.path(), "INF-123", Some("done"))
+    let message = task_complete(repo.path(), "INF-123", Some("done"), None)
         .expect_err("an unmerged published PR must block completion")
         .to_string();
     assert!(

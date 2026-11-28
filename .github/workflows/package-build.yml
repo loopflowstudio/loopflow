@@ -21,12 +21,12 @@ jobs:
     timeout-minutes: 15
     steps:
       # build.rs orders migrations by origin/main's first-parent history.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.revision }}
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Exercise revoked-token recovery
         run: >-
           cargo test -p loopflow --test agent_tests
@@ -49,14 +49,14 @@ jobs:
     timeout-minutes: 40
     steps:
       # build.rs orders migrations by origin/main's first-parent history.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.revision }}
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: packages-${{ matrix.target }}
       - name: Build package binaries
@@ -89,7 +89,7 @@ jobs:
             LF_HOME="$RUNNER_TEMP/release-preflight-${{ matrix.target }}" \
               package-smoke/lf install preflight --json
           fi
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: lf-${{ matrix.target }}
           path: lf-${{ matrix.target }}.tar.gz

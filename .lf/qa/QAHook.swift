@@ -1,5 +1,6 @@
 // Copy into swift/LoopflowMac/ for a local QA build; never commit it there. See desktop.md, "Driving the app with the screen locked".
 import AppKit
+import WebKit
 
 @MainActor
 enum QAHook {
@@ -76,7 +77,8 @@ enum QAHook {
             let pieces = arg.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
             guard pieces.count == 2 else { return "usage: field placeholder|text" }
             func search(_ view: NSView) -> NSTextField? {
-                if let field = view as? NSTextField, field.placeholderString == pieces[0] { return field }
+                if let field = view as? NSTextField, field.isEditable,
+                   (field.placeholderString ?? field.placeholderAttributedString?.string) == pieces[0] { return field }
                 for child in view.subviews { if let found = search(child) { return found } }
                 return nil
             }
@@ -121,6 +123,48 @@ enum QAHook {
             if let up = event(.leftMouseUp) { NSApp.postEvent(up, atStart: false) }
             if let down = event(.leftMouseDown) { window.sendEvent(down) }
             return "clicked \(window.title) \(point)"
+        case "tap":
+            // `tap <window> <x> <y> [m|s|c|o…]`: down and up both through the event queue, so local
+            // event monitors (the code reader's word clicks) see them in a window that isn't key.
+            let n = arg.split(separator: " ").map(String.init)
+            guard n.count >= 3, let index = Int(n[0]), windows.indices.contains(index),
+                  let x = Double(n[1]), let y = Double(n[2]) else { return "usage: tap window x y [mods]" }
+            let window = windows[index]
+            let height = window.contentView?.frame.height ?? window.frame.height
+            var flags = NSEvent.ModifierFlags()
+            for letter in n.count > 3 ? n[3] : "" {
+                switch letter {
+                case "s": flags.insert(.shift)
+                case "c": flags.insert(.control)
+                case "o": flags.insert(.option)
+                case "m": flags.insert(.command)
+                default: break
+                }
+            }
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                guard let event = NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: height - y), modifierFlags: flags,
+                                                     timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                                     context: nil, eventNumber: 0, clickCount: 1, pressure: 1) else { return "no event" }
+                NSApp.postEvent(event, atStart: false)
+            }
+            return "tapped \(window.title) \(x),\(y) flags \(flags.rawValue)"
+        case "web":
+            // `web <png path>`: WebKit's own snapshot of the first web view, plus its body text and scroll offset.
+            // `snap` reads WebKit content reliably only right after a load.
+            guard let web = windows.lazy.compactMap({ webView($0.contentView) }).first else { return "no web view" }
+            web.takeSnapshot(with: nil) { image, _ in
+                guard let tiff = image?.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return }
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: arg))
+            }
+            web.evaluateJavaScript("document.body.innerText.slice(0, 120) + ' | scrollY=' + scrollY") { value, error in
+                try? String(describing: value ?? error ?? "nil").write(toFile: arg + ".txt", atomically: true, encoding: .utf8)
+            }
+            return "web \(arg)"
+        case "webscroll":
+            // `webscroll <y>`: scrolls the first web view as a wheel would, for scroll-restoration checks.
+            guard let web = windows.lazy.compactMap({ webView($0.contentView) }).first else { return "no web view" }
+            web.evaluateJavaScript("scrollTo(0, \(Int(arg) ?? 0))")
+            return "scrolled"
         case "drag":
             // A SwiftUI DragGesture: down, a few moves, up, each sent straight to the window.
             let n = arg.split(separator: " ").compactMap { Double($0) }
@@ -139,6 +183,44 @@ enum QAHook {
             }
             event(.leftMouseUp, n[3], n[4]).map(window.sendEvent)
             return "dragged \(window.title)"
+        case "mousedown":
+            // `mousedown <window> <x> <y> [<x2> <y2>] [m|s…]`: queues the drag and release, then calls the hit view's
+            // own mouseDown. A window that isn't key otherwise eats the first press of an AppKit view that
+            // doesn't accept first mouse (the code reader's text and gutter).
+            var n = arg.split(separator: " ").map(String.init)
+            var flags = NSEvent.ModifierFlags()
+            if let last = n.last, Double(last) == nil {
+                for letter in last {
+                    switch letter {
+                    case "s": flags.insert(.shift)
+                    case "m": flags.insert(.command)
+                    default: break
+                    }
+                }
+                n.removeLast()
+            }
+            let v = n.compactMap(Double.init)
+            guard v.count == 3 || v.count == 5, windows.indices.contains(Int(v[0])) else { return "usage: mousedown window x y [x2 y2] [mods]" }
+            let window = windows[Int(v[0])]
+            let height = window.contentView?.frame.height ?? window.frame.height
+            let (x2, y2) = v.count == 5 ? (v[3], v[4]) : (v[1], v[2])
+            func event(_ type: NSEvent.EventType, _ x: Double, _ y: Double) -> NSEvent? {
+                NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: height - y), modifierFlags: flags,
+                                   timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                   context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+            }
+            if v.count == 5 {
+                for step in 1...12 {
+                    let t = Double(step) / 12
+                    event(.leftMouseDragged, v[1] + (x2 - v[1]) * t, v[2] + (y2 - v[2]) * t).map { NSApp.postEvent($0, atStart: false) }
+                }
+            }
+            event(.leftMouseUp, x2, y2).map { NSApp.postEvent($0, atStart: false) }
+            guard let down = event(.leftMouseDown, v[1], v[2]),
+                  let frame = window.contentView?.superview ?? window.contentView,
+                  let hit = frame.hitTest(frame.convert(down.locationInWindow, from: nil)) else { return "no view" }
+            hit.mouseDown(with: down)
+            return "mousedown \(type(of: hit))"
         case "size":
             let n = arg.split(separator: " ").compactMap { Double($0) }
             guard n.count == 3, windows.indices.contains(Int(n[0])) else { return "usage: size window w h" }
@@ -184,6 +266,39 @@ enum QAHook {
                 }
             }
             return "typed"
+        case "windowkey":
+            // `windowkey <window> <mods> <chars|return|escape|up|down>`: a key event sent straight to that window's first responder.
+            let pieces = arg.split(separator: " ").map(String.init)
+            guard pieces.count == 3, let index = Int(pieces[0]), windows.indices.contains(index) else { return "usage: windowkey window mods chars" }
+            let window = windows[index]
+            var flags: NSEvent.ModifierFlags = []
+            if pieces[1].contains("cmd") { flags.insert(.command) }
+            if pieces[1].contains("shift") { flags.insert(.shift) }
+            if pieces[1].contains("ctrl") { flags.insert(.control) }
+            if pieces[1].contains("opt") { flags.insert(.option) }
+            let named: [String: (String, UInt16)] = ["return": ("\r", 36), "escape": ("\u{1b}", 53), "up": (String(UnicodeScalar(NSUpArrowFunctionKey)!), 126),
+                                                    "down": (String(UnicodeScalar(NSDownArrowFunctionKey)!), 125), "space": (" ", 49)]
+            let (chars, code) = named[pieces[2]] ?? (pieces[2], 0)
+            for type in [NSEvent.EventType.keyDown, .keyUp] {
+                if let event = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+                                                windowNumber: window.windowNumber, context: nil, characters: chars,
+                                                charactersIgnoringModifiers: chars, isARepeat: false, keyCode: code) {
+                    if type == .keyDown, !window.performKeyEquivalent(with: event) { window.firstResponder?.keyDown(with: event) }
+                }
+            }
+            return "windowkey \(String(describing: window.firstResponder.map { type(of: $0) }))"
+        case "scrolls":
+            var lines: [String] = []
+            func visit(_ view: NSView) {
+                if let scroll = view as? NSScrollView, let doc = scroll.documentView {
+                    lines.append("\(type(of: scroll)) visible=\(scroll.contentView.bounds) doc=\(doc.frame.size) at=\(scroll.convert(scroll.bounds, to: nil))")
+                }
+                view.subviews.forEach(visit)
+            }
+            windows.forEach { $0.contentView.map(visit) }
+            return lines.joined(separator: "\n")
+        case "responder":
+            return windows.map { "\($0.title): \(String(describing: $0.firstResponder.map { type(of: $0) }))" }.joined(separator: "\n")
         case "equivalents":
             // Lists main-menu items with a key equivalent: title, characters (hex), modifier mask, enabled, hidden.
             func list(_ menu: NSMenu) -> [String] {
@@ -248,6 +363,12 @@ enum QAHook {
         default:
             return "unknown: \(line)"
         }
+    }
+
+    private static func webView(_ view: NSView?) -> WKWebView? {
+        guard let view else { return nil }
+        if let web = view as? WKWebView { return web }
+        return view.subviews.lazy.compactMap(webView).first
     }
 
     private static func terminalView(_ view: NSView?) -> GhosttyMetalView? {

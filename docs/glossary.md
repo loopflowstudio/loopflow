@@ -20,7 +20,7 @@ Every term the docs use, in one plain sentence.
 | **Memory** | `MEMORY.md`, where a Wave keeps decisions and context across Tasks. |
 | **Session** (**LfSession**) | A continuable agent conversation (interactive or headless) with identity, steers, and native provider history. |
 | **Work session** | A Task, Wave, or repository conversation running in a held terminal; survives window close and `lf install`, and wakes on steers. |
-| **Worker** | A headless step of a Task Graph (or Discord Wave reply) whose turns are reported to the server. |
+| **Worker** | A headless step of a Task Graph whose turns are reported to the server. |
 | **Chat** | A direct terminal conversation (`lf`, `lf <skill>`) that runs straight in your terminal and ends with it. |
 | **Batch** | A direct headless run (`lf -b <skill>`) that prints its answer and exits. |
 | **Available** | A conversation ready for your next turn (its last turn ended or it asked for input). |

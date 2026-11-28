@@ -118,7 +118,9 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         case .shell:
             .taskShellStart(issue: task, shellID: Self.shellID(task: task), rows: size.rows, cols: size.columns)
         }
-        _ = try decode(Started.self, await self.request(operation))
+        // Starting a terminal can spawn its holder over SSH; wait for the server
+        // rather than cancelling at the read deadline and leaving the outcome unknown.
+        _ = try decode(Started.self, await connection().request(operation))
     }
 
     /// The phone's one shell in a Task, named the same on every Machine.

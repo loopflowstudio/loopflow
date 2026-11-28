@@ -299,11 +299,10 @@ pub fn remove(
     preview: bool,
     delete_backlog: bool,
 ) -> OpsResult<WaveRemoval> {
-    let runtime = tokio::runtime::Runtime::new().map_err(lifecycle_error)?;
     let main = crate::repository::discover(repo).map_err(lifecycle_error)?;
     let repo_key = main.to_string();
     let main = main.as_path().to_path_buf();
-    let store = runtime.block_on(super::planning_sync::planning_store())?;
+    let store = crate::runtime::block_on(super::planning_sync::planning_store())?;
     let _lifecycle = recovery::lock(&main)?;
     let operations = store
         .sqlite
@@ -493,7 +492,7 @@ pub fn remove(
             .sqlite
             .retire_waves(&ids, "removed")
             .map_err(lifecycle_error)?;
-        runtime.block_on(super::planning_sync::sync_after_save(
+        crate::runtime::block_on(super::planning_sync::sync_after_save(
             &store, &repo_key, None,
         ));
     }

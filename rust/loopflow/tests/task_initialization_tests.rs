@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow_execution::ops::task::task_status;
+use loopflow_execution::ops::task::{self, task_status};
 use loopflow_execution::ops::task_actions::TaskAction;
 use loopflow_execution::work::task::{GithubPr, PrPublication, TaskEventKind};
 use loopflow_test_support::TestRepo;
@@ -389,10 +389,14 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         .as_str()
         .expect("roadmap condition reason")
         .contains("is initializing worktree"));
-    let projected = task_status(repo.path(), Some("INF-123"))
-        .expect("read Task")
-        .execution
-        .expect("execution");
+    let projected = task_status(
+        repo.path(),
+        Some("INF-123"),
+        loopflow::lf::navigation::command_merges,
+    )
+    .expect("read Task")
+    .execution
+    .expect("execution");
     assert_eq!(projected.actions.recommended, Some(TaskAction::NoAction));
 
     rusqlite::Connection::open(home.path().join("loopflow.db"))
@@ -456,10 +460,14 @@ fn missing_worktree_status_is_actionable_and_read_only() {
         .block_on(task.store.task_prs(&task.task.id))
         .expect("read PRs before status");
 
-    let snapshot = task_status(&missing_path, Some("INF-123"))
-        .expect("status survives the absent worktree")
-        .execution
-        .expect("execution");
+    let snapshot = task_status(
+        &missing_path,
+        Some("INF-123"),
+        loopflow::lf::navigation::command_merges,
+    )
+    .expect("status survives the absent worktree")
+    .execution
+    .expect("execution");
 
     assert_eq!(snapshot.actions.recommended, Some(TaskAction::NoAction));
     assert!(snapshot
@@ -485,6 +493,256 @@ fn missing_worktree_status_is_actionable_and_read_only() {
             .expect("reread PRs after status"),
         before_prs
     );
+}
+
+fn close_fixture_pr(fixture: &support::RegisteredTask, checkout: &Path) {
+    let database = rusqlite::Connection::open(&fixture.database).unwrap();
+    database
+        .execute(
+            "UPDATE task_checkouts SET worktree=?2 WHERE task_id=?1",
+            rusqlite::params![fixture.task.id.as_str(), checkout.to_str()],
+        )
+        .unwrap();
+    database
+        .execute(
+            "UPDATE task_prs SET publication_requested_at=1,github_number=7,
+         github_url='https://example.test/pr/7',abandoned_at=2 WHERE id=?1",
+            [fixture.pr.id.as_str()],
+        )
+        .unwrap();
+}
+
+fn abandon_fixture(fixture: &support::RegisteredTask) {
+    let work = loopflow_model::durable::WorkRef::Task(fixture.task.id.clone());
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(fixture.store.abandon(&work, "Stopped"))
+        .unwrap();
+}
+
+#[test]
+fn reopen_archives_the_closed_pr_and_checks_out_from_current_main() {
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[("gh", "#!/bin/sh\nexit 1\n")], home.path());
+    let repo = TestRepo::new();
+    let fixture =
+        register_task_with_pr(home.path(), repo.path(), "test/abandoned", &repo.head_sha());
+    close_fixture_pr(&fixture, &home.path().join("deleted-checkout"));
+    abandon_fixture(&fixture);
+    let read = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .args(args)
+            .current_dir(repo.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+
+    let reopened = read(&["task", "reopen", "INF-123", "--json"]);
+    assert_eq!(reopened["state"], "started");
+    assert!(reopened["worktree"].is_null());
+    let status = task_status(
+        repo.path(),
+        Some("INF-123"),
+        loopflow::lf::navigation::command_merges,
+    )
+    .unwrap()
+    .execution
+    .unwrap();
+    assert!(status.pr.is_none());
+    assert_eq!(
+        status.actions.recommended,
+        Some(TaskAction::Run),
+        "{:?}",
+        status.actions
+    );
+    let plan = read(&["desktop", "plan", "--task", "INF-123", "--json"]);
+    let row = &plan["tasks"]["items"][0];
+    assert_eq!(row["task"]["identifier"], "INF-123");
+    assert_eq!(row["actions"]["recommended"], "run");
+    assert_eq!(
+        row["run_control"],
+        serde_json::json!({"pausing": false, "unavailable": null})
+    );
+
+    repo.create_file("after-abandon.txt", "main moved");
+    repo.stage_all();
+    repo.commit("Advance main");
+    repo.push();
+    let placed = task::task_checkout(repo.path(), "INF-123", Default::default()).unwrap();
+    let checkout = placed.worktree().unwrap();
+    assert_eq!(
+        loopflow_execution::git::rev_parse(checkout, "HEAD").unwrap(),
+        repo.head_sha()
+    );
+    assert_eq!(placed.base_commit, repo.head_sha());
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let event = runtime
+        .block_on(fixture.store.latest_task_event(&placed.id))
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(event.kind, TaskEventKind::CheckoutReady { base_commit, .. } if base_commit == placed.base_commit)
+    );
+
+    let context = task::task_pr_context(checkout).unwrap().unwrap();
+    let body = format!(
+        "> **Task:** [{} · {}]({})",
+        context.title,
+        context.identifier,
+        context.url.unwrap()
+    );
+    assert!(task::request_task_pr_publication(checkout, "Second attempt", &body).unwrap());
+    let history = runtime
+        .block_on(fixture.store.task_prs(&placed.id))
+        .unwrap();
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].github().unwrap().number, 7);
+    assert!(history[0].abandoned_at.is_some());
+    assert_eq!(history[1].sequence, 2);
+    assert_eq!(
+        runtime
+            .block_on(fixture.store.active_task_pr(&placed.id))
+            .unwrap(),
+        Some(history[1].clone())
+    );
+    assert!(Command::new("git")
+        .current_dir(repo.path())
+        .args(["worktree", "remove"])
+        .arg(checkout)
+        .status()
+        .unwrap()
+        .success());
+}
+
+#[test]
+fn reopened_checkout_adopts_a_newly_published_remote_branch() {
+    let home = tempfile::tempdir().unwrap();
+    let gh = r#"#!/bin/sh
+case "$1 $2" in
+    "--version ") echo 'gh version fixture' ;;
+    "pr list") echo '[{"number":8,"url":"https://example.test/pr/8","state":"OPEN","isDraft":false,"baseRefName":"main"}]' ;;
+    *) exit 1 ;;
+esac
+"#;
+    let _env = EnvGuard::with_lf_home(&[("gh", gh)], home.path());
+    let repo = TestRepo::new();
+    let branch = "test/restored";
+    let fixture = register_task_with_pr(home.path(), repo.path(), branch, &repo.head_sha());
+    close_fixture_pr(&fixture, &home.path().join("deleted-checkout"));
+    abandon_fixture(&fixture);
+    assert!(task::task_reopen("INF-123", None)
+        .unwrap()
+        .worktree
+        .is_none());
+    // A collaborator publishes the branch again before this Machine checks it out.
+    repo.create_branch(branch);
+    repo.create_file("collaborator.txt", "published");
+    repo.stage_all();
+    repo.commit("Restore remote branch");
+    repo.push_new_branch(branch);
+    repo.checkout("main");
+    assert!(Command::new("git")
+        .current_dir(repo.path())
+        .args(["branch", "-D", branch])
+        .status()
+        .unwrap()
+        .success());
+    let placed = task::task_checkout(repo.path(), "INF-123", Default::default()).unwrap();
+    let checkout = placed.worktree().unwrap();
+    assert!(checkout.join("collaborator.txt").exists());
+    let pr = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(fixture.store.active_task_pr(&placed.id))
+        .unwrap()
+        .unwrap();
+    assert_eq!((pr.sequence, pr.github().unwrap().number), (2, 8));
+    assert!(Command::new("git")
+        .current_dir(repo.path())
+        .args(["worktree", "remove"])
+        .arg(checkout)
+        .status()
+        .unwrap()
+        .success());
+}
+
+#[test]
+fn reopen_keeps_surviving_checkout_or_branch_and_allows_completion() {
+    for keep_checkout in [true, false] {
+        let repo = TestRepo::new();
+        let machine = tempfile::tempdir().unwrap();
+        let _env = EnvGuard::with_lf_home(&[], machine.path());
+        let branch = "test/retained";
+        let base = repo.head_sha();
+        repo.create_branch(branch);
+        repo.create_file("retained.txt", "local work");
+        repo.stage_all();
+        repo.commit("Retain this commit");
+        let retained = repo.head_sha();
+        repo.checkout("main");
+        let checkout = machine.path().join("checkout");
+        let fixture = register_task_with_pr(machine.path(), repo.path(), branch, &base);
+        if keep_checkout {
+            // Even a surviving directory whose branch has gone can hold local edits.
+            fs::create_dir(&checkout).unwrap();
+            fs::write(checkout.join("draft.txt"), "draft").unwrap();
+            assert!(Command::new("git")
+                .current_dir(repo.path())
+                .args(["branch", "-D", branch])
+                .status()
+                .unwrap()
+                .success());
+        }
+        close_fixture_pr(&fixture, &checkout);
+        if keep_checkout {
+            // A PR closed externally stays current while the Task itself is open.
+            let status = task_status(
+                repo.path(),
+                Some("INF-123"),
+                loopflow::lf::navigation::command_merges,
+            )
+            .unwrap()
+            .execution
+            .unwrap();
+            assert_eq!(status.actions.recommended, Some(TaskAction::NoAction));
+            assert!(
+                status.actions.reason.contains("PR closed without merge"),
+                "{:?}",
+                status.actions
+            );
+        }
+        abandon_fixture(&fixture);
+        let reopened = task::task_reopen("INF-123", None).unwrap();
+        assert_eq!(reopened.worktree().unwrap(), &checkout);
+        if keep_checkout {
+            assert_eq!(
+                fs::read_to_string(checkout.join("draft.txt")).unwrap(),
+                "draft"
+            );
+        } else {
+            task::task_checkout(repo.path(), "INF-123", Default::default()).unwrap();
+            assert_eq!(
+                loopflow_execution::git::rev_parse(&checkout, "HEAD").unwrap(),
+                retained
+            );
+        }
+        task::task_complete(repo.path(), "INF-123", None, None).unwrap();
+        let status = task_status(
+            repo.path(),
+            Some("INF-123"),
+            loopflow::lf::navigation::command_merges,
+        )
+        .unwrap()
+        .execution
+        .unwrap();
+        assert_eq!(status.status, loopflow_execution::durable::TaskState::Done);
+        assert!(status.pr.is_none());
+    }
 }
 
 #[test]
@@ -533,7 +791,11 @@ fn research_checkout_restores_and_reads_files_without_a_pull_request() {
         .files
         .iter()
         .any(|file| file.path == "draft.md" && file.untracked));
-    let snapshot = loopflow_execution::ops::task::task_snapshot(&restored).unwrap();
+    let snapshot = loopflow_execution::ops::task::task_snapshot(
+        &restored,
+        loopflow::lf::navigation::command_merges,
+    )
+    .unwrap();
     assert!(snapshot.pr.is_none());
     assert_eq!(snapshot.branch.as_deref(), Some("research"));
     assert!(runtime

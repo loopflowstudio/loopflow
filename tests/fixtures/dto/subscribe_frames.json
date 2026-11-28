@@ -192,13 +192,15 @@
               ],
               "identifier": "LOO-1",
               "graph_step": "review",
+              "working_group": null,
               "primary_session": null,
               "location": null,
               "argv": null,
               "unavailable": [
                 "No primary Session is recorded",
                 "Recorded execution location is unavailable"
-              ]
+              ],
+              "open_children": 0
             }
           ],
           "name": null,

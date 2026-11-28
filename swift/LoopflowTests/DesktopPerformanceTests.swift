@@ -565,9 +565,9 @@ struct DesktopPerformanceTests {
             try await sample("file_edit_refresh", population, attempt, journal, window, action: {
                 files.page = .files
                 multiplexer.showBrowser(.files, location: workspace.location)
-                try await wait(window) { files.changes?.files.first?.path == "notes.txt" }
-                files.navigator = .dropdown
-                try await wait(window) { files.treeRows.contains { $0.entry?.path == "notes.txt" } }
+                try await wait(window) { files.workingChanges?.files.first?.path == "notes.txt" }
+                files.browser.showsRail = true
+                try await wait(window) { files.tree.rows().contains { $0.entry?.path == "notes.txt" } }
                 try pressElement("notes.txt", in: window, property: "Label")
                 files.mode = .edit
                 try await wait(window) { files.selectedDocument?.snapshot != nil }
@@ -1035,7 +1035,9 @@ struct DesktopPerformanceTests {
             case "task" where args.dropFirst().first == "show":
                 return #"{"overview":\#(workJSON),"graph_processes":[],"comments":\#(commentsJSON),"execution":null,"row":null}"#
             case "task" where args.dropFirst().first == "changes":
-                return #"{"issue_identifier":"PERF-0","task_id":"perf-task-0","base_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","commits":[],"files":[{"path":"notes.txt","old_path":null,"committed":true,"staged":false,"unstaged":false,"untracked":false,"changes":1}],"scratch":[],"scratch_truncated":false,"recovery_directory":null}"#
+                return #"{"issue_identifier":"PERF-0","task_id":"perf-task-0","base_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","commits":[],"files":[{"path":"notes.txt","old_path":null,"committed":true,"staged":false,"unstaged":false,"untracked":false,"lines":{"added":2,"removed":1},"changes":1}],"scratch":[],"scratch_truncated":false,"recovery_directory":null}"#
+            case "task" where args.dropFirst().first == "find":
+                return #"{"paths":["notes.txt"],"scratch":[],"latest_scratch_page":null,"truncated":false}"#
             case "task" where args.dropFirst().first == "files":
                 return #"{"path":"","entries":[{"path":"notes.txt","kind":"file"}],"next_cursor":null}"#
             case "task" where args.dropFirst().first == "file":
@@ -1091,7 +1093,7 @@ struct DesktopPerformanceFixtureTests {
         await store.refresh()
         await store.loadFile()
         #expect(document.text == "Preserved draft")
-        #expect(store.changes?.files.map(\.path) == ["notes.txt"])
+        #expect(store.diffReview.changes?.files.map(\.path) == ["notes.txt"])
         await #expect(throws: RegistryQueryError.self) {
             try await query.updateTaskDirective(id: "PERF-0", text: "denied", cwd: "/src/loopflow")
         }
@@ -1546,7 +1548,7 @@ private func snapshotRead(binary: String, home: String, args: [String], cwd: Str
     // Copied launch authority is never exercised. This transport permits only local
     // reads; no network, Session connection, watcher, worker or provider can start.
     let verb = args.prefix(2).joined(separator: " ")
-    guard ["plan list", "task show", "task detail", "task changes", "task file", "wave show", "wave list", "wave status", "session list", "session card", "session history", "machine self", "task status", "task files", "task diff", "graph list"].contains(verb) else {
+    guard ["plan list", "task show", "task detail", "task changes", "task file", "wave show", "wave list", "wave status", "session list", "session card", "session history", "machine self", "task status", "task find", "task files", "task diff", "graph list"].contains(verb) else {
         throw RegistryQueryError("Snapshot does not execute \(verb)")
     }
     let process = Process()

@@ -32,9 +32,8 @@ The four `LaunchKind` variants match the [glossary's launch names](../../../../d
 Work sessions and workers report turns to the Machine server. Chats and
 batches read their steers directly and report no turn boundaries.
 Transport selects `LaunchKind` once before `delegate` carries it out. Workers run
-`lf task run` steps, the `ci-fix` run landing starts, and Discord answers for a
-Wave. In-process callers such as commit messages, PR text and replay are
-batches. Task attribution never changes this choice. Resume reads the
+`lf task run` steps and the `ci-fix` run landing starts. In-process callers
+such as commit messages, PR text and replay are batches. Task attribution never changes this choice. Resume reads the
 Session's binding and primary scope before delegation: a chat reopens as a
 chat; a bound or primary conversation reopens as a work session.
 `admit` creates the capture and claims its attachment before a native launch;
@@ -64,7 +63,9 @@ harness::launcher(kind)   // &dyn Launcher: the above, plus launching and anythi
 Core launch and transcript code reads capabilities or asks the harness for policy.
 That policy includes input recency, live process ownership and saved-turn detail.
 A harness whose server may host other conversations validates it before the
-shared AgentProcess close path signals the recorded process group.
+shared AgentProcess close path signals its jobs. A headless Task worker leads
+its own OS session, so job-control groups still belong to that worker after
+the shell that launched them exits.
 
 An interactive client may `exec` into a held terminal.
 

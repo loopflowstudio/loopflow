@@ -1308,7 +1308,7 @@ fn opening_an_admitted_holder_of_unknown_liveness_takes_it_over() {
         .await;
         let message = opened.unwrap_err().to_string();
         assert!(
-            message.contains("resume was not started"),
+            message.contains("cannot stop AgentProcess with unknown identity"),
             "opening resumed beside a holder it could not stop: {message}"
         );
         assert_eq!(

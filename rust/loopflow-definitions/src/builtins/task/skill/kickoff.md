@@ -11,7 +11,7 @@ discovery or swap in something technically convenient.
 **Continue; don't re-derive.** Build on the design that exists. If the plan
 is already good enough, keep it.
 
-**Choose.** An open product choice gets asked when someone is here. With
+**Choose.** An open design choice gets asked when someone is here. With
 nobody here, make the bold choice and mark it in the plan as made for review,
 with what you passed over.
 
@@ -23,11 +23,11 @@ with what you passed over.
 
 2. **De-risk.** Find what could sink the approach and answer it: read the docs,
    call the API, run the probe. Start with risks already flagged, then look for
-   the ones nobody named. Come back with answers, not a worry list: "Linear's
-   API has no conditional assignment, so we read-then-assign with conflict
-   detection", not "there might be API limitations". When two explanations
-   fit, run the smallest probe that tells them apart. Keep the finding even
-   when it kills the attractive approach.
+   the ones nobody named. Come back with answers, not a worry list: "the
+   tracker's API has no conditional assignment, so we read-then-assign with
+   conflict detection", not "there might be API limitations". When two
+   explanations fit, run the smallest probe that tells them apart. Keep the
+   finding even when it kills the attractive approach.
 
 3. **Compare mechanisms.** Where it's uncertain, weigh approaches that differ
    by mechanism, not presentation. A route is blocked when what it still needs
@@ -51,7 +51,7 @@ with what you passed over.
 Cover these where they matter and skip the rest:
 
 - **User-visible outcome** — whose behavior changes and what they see.
-- **Acceptance check at gate** — one scenario through the source of truth and
+- **Acceptance check** — one scenario through the source of truth and
   every affected consumer, as a headless command and its expected result.
 - **Source of truth** — the record, model or API everything else derives from.
 - **Affected surfaces and consumers** — every CLI, wire type, app or reader
@@ -60,6 +60,10 @@ Cover these where they matter and skip the rest:
   at each consumer.
 - **Operational boundary** — latency, scale, network or recovery limits the
   code must hold.
+- **Security and privacy** — when the change touches auth, credentials or
+  secrets, telemetry or outbound data, untrusted input, or deployment, state
+  what must stay protected and note whether `lf security-review` should run
+  before delivery.
 - **Exclusions** — nearby behavior left out.
 - **What goes** — the files, symbols, tests and fixtures this change removes,
   and the behavior and data that must survive. Never plan repairs to them.

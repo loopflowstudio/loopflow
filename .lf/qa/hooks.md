@@ -31,8 +31,9 @@ with `lf task create`, then run `lf checkout <id>` to start its work session.
 Driver scripts that delete their marker directory
 must do it before waiting on it, or a stale `provider.jsonl` releases a turn
 too early. A managed launch
-with the server down registers it before the agent starts: check
-`launchctl list | grep <label>` after launch, not only the hooks' output. Real OpenCode
+with the server down starts a detached `lf server run` for the private home
+before the agent starts: check `lf server status` after launch, not only the
+hooks' output. Real OpenCode
 answers with no login (its free `opencode/big-pickle` model), so
 `lf -i --task <id> -a opencode : '<message>'` in a PTY drives the real plugin;
 its turns land in `$HOME/.local/share/opencode/opencode.db` (`session_message`).
@@ -66,10 +67,10 @@ closes: stop providers whose cwd is the private Task's checkout, with their
 descendants, after every run. Freeze the private server by the PID its `nohup` recorded, never by
 `pgrep -f 'lf server run'`, which matches other worktrees' servers.
 
-A Task launch with no server runs `lf install server`, which registers
-`com.loopflow.server.<hash>` for the private home; boot it out with the label in
-`$LF_HOME/server.plist` to stop the server, and again when finished. SIGSTOP the
-server's PID for the slow-server case. Gap lines are in `$LF_HOME/logs/lf.log` for hooks,
+A Task launch with no server runs `lf install server`, which starts a detached
+`lf server run` for the private home (never a launchd job); it exits when idle
+or when `$LF_HOME` is removed, or stop it by PID (`lsof -t $LF_HOME/loopflow.db`).
+SIGSTOP the server's PID for the slow-server case. Gap lines are in `$LF_HOME/logs/lf.log` for hooks,
 `$LF_HOME/logs/pi-extension.log` for Pi and
 `$LF_HOME/runs/<xx>/<run>/opencode.stderr.log` for OpenCode;
 delivery evidence is `lf session steers <id> --json`; a recovered gap shows as a

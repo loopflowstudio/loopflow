@@ -225,6 +225,8 @@ pub(crate) fn promote_task(
     }
 }
 
+pub(crate) type TaskRoute = fn(&SqliteStore, &TaskId) -> StoreResult<TaskExecutionRoute>;
+
 pub fn task_execution_route(store: &SqliteStore, task: &TaskId) -> StoreResult<TaskExecutionRoute> {
     loop {
         let scope = store.task_scope(task)?;
@@ -244,6 +246,16 @@ pub fn task_execution_route(store: &SqliteStore, task: &TaskId) -> StoreResult<T
             });
         }
     }
+}
+
+/// A move can still carry a pause from its source until the payload is sent.
+pub fn task_pause_route(store: &SqliteStore, task: &TaskId) -> StoreResult<TaskExecutionRoute> {
+    let mut route = task_execution_route(store, task)?;
+    let here = super::machines::local_machine(store)?.id;
+    if route.machine_id != here && store.task_is_leaving(task)? {
+        route.machine_id = here;
+    }
+    Ok(route)
 }
 
 pub(crate) fn held_planning(
@@ -306,8 +318,30 @@ pub fn task_ownership(
 pub fn task_detail_facts(
     store: &SqliteStore,
     tasks: &[&Task],
+    merges: fn(&[String]) -> bool,
 ) -> StoreResult<loopflow_storage::sqlite::TaskDetailFacts> {
-    let (local, mut facts) = store.saved_task_detail_facts(tasks)?;
+    use loopflow_storage::sqlite::{GraphDetail, GraphDetailInput};
+    let mut cached = crate::task_graph::cached_merges(merges);
+    let mut graph_detail = |input: GraphDetailInput<'_>| -> StoreResult<GraphDetail> {
+        let graph: crate::task_graph::CapturedGraph = serde_json::from_str(input.graph)?;
+        let cursor = input.cursor.map(serde_json::from_str).transpose()?;
+        if input.paused {
+            Ok(GraphDetail::ResumesOnUnpause(graph.resumes_on_unpause(
+                input.step,
+                cursor.as_ref(),
+                input.auto,
+                &mut cached,
+            )))
+        } else {
+            Ok(GraphDetail::Ships(graph.ships_before_review(
+                input.step,
+                cursor.as_ref(),
+                input.auto,
+                &mut cached,
+            )))
+        }
+    };
+    let (local, mut facts) = store.saved_task_detail_facts(tasks, &mut graph_detail)?;
     let mut names = machine_names(store)?;
     names.insert(local, local_label());
     for ownership in facts.ownership.values_mut() {

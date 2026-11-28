@@ -28,14 +28,14 @@ struct DashboardWorkspaceTests {
 
     @Test("A tile's workflow sentence yields only to what a program asks")
     func tileKeepsItsWorkflowSentenceUnlessAProgramAsks() throws {
-        let graph = TaskGraph(name: "code", interactiveSteps: [], position: .at(step: "demo"),
+        let graph = TaskGraph(name: "code", control: .init(action: .run, label: "Run: implement"), interactiveSteps: [], position: .at(step: "demo"),
                               steps: [.init(name: "build", interactive: false), .init(name: "demo", interactive: true)],
                               currentStep: 1, sentence: "You are next needed at demo.")
         // No program reporting, whatever the row's own line says: the sentence shows.
-        #expect(DashboardTile.workflow(graph, status: .unknown, auto: false, setup: nil)?.sentence == "You are next needed at demo.")
+        #expect(DashboardTile.workflow(graph, status: .unknown, setup: nil)?.sentence == "You are next needed at demo.")
         let asking = try programStatus(reporting: .blocked, msg: "Approve the plan?")
         #expect(asking.ask == "Approve the plan?")
-        #expect(DashboardTile.workflow(graph, status: asking, auto: false, setup: nil) == nil)
+        #expect(DashboardTile.workflow(graph, status: asking, setup: nil) == nil)
     }
 
     /// Rust's `SlotLayout::golden`, as every built-in plan reports it.
@@ -102,28 +102,22 @@ struct DashboardWorkspaceTests {
 
     @Test func aRefusedMoveReturnsTheRowAndSaysWhy() async throws {
         let ids = ["task_a", "task_b"]
-        var json = try #require(JSONSerialization.jsonObject(with: loadFixtureData("view_plan.json")) as? [String: Any])
-        json["dashboard_id"] = NSNull()
-        json["saved_revision"] = NSNull()
-        json["selection"] = ["id": "repository-default", "expression": ["kind": "repository"]]
-        var resolution = try #require(json["resolution"] as? [String: Any])
-        resolution["members"] = ids.map { ["source": ["repository-default"], "work": ["repository": "repo_11111111111111111111111111111111", "kind": "task", "id": $0]] }
-        json["resolution"] = resolution
-        let plan = String(decoding: try JSONSerialization.data(withJSONObject: json), as: UTF8.self)
+        let plan = fixtureWorkingPlan(ids)
+        let saved = String(decoding: try JSONEncoder().encode(plan), as: UTF8.self)
         let reason = "FIX-2 and FIX-1 are in different repositories; nothing changed."
         let query = RegistryQuery { args, _ in
             switch args {
-            case ["desktop", "dashboard", "move", "working-tasks/task:task_b", "--destination", "task:task_a"]: throw RegistryQueryError(reason)
-            case ["desktop", "view", "show", "--json"]: return plan
+            case ["desktop", "dashboard", "move", "working-tasks/task:task_b", "--destination", "task:task_a", "--side", "before"]: throw RegistryQueryError(reason)
+            case ["desktop", "view", "show", "--json"]: return saved
             default: throw RegistryQueryError("Unexpected command \(args)")
             }
         }
         let model = WorkModel(query: query, repoPath: "/repo")
-        model.applySelectionPlans([try JSONDecoder().decode(WorkViewPlan.self, from: Data(plan.utf8))], reason: "")
-        let source = WorkWorkspaceKey(repository: "repo_11111111111111111111111111111111", kind: .task, id: "task_b")
-        await model.reorderWorkingTask(source, to: "task_a", side: nil).value
+        model.applySelectionPlans([plan], reason: "")
+        let source = try #require(plan.contents.last?.work)
+        await model.reorderWorkingTask(source, to: "task_a", side: .before).value
         #expect(model.workingTaskIDs == ids)
-        #expect(model.navigation.notices.current?.text == "task_b couldn't be reordered: " + reason)
+        #expect(model.navigation.notices.current?.text == "task_b couldn't be reordered: \(reason)")
     }
 
     @Test func workingTasksOpensOnlyTheTasksItsGridShows() throws {
@@ -140,7 +134,7 @@ struct DashboardWorkspaceTests {
         resolution["members"] = members
         json["resolution"] = resolution
         json["projection"] = ["visible": members, "suppressed": []]
-        json["contents"] = members.map { ["work": $0["work"]!, "title": "t", "states": [], "identifier": NSNull(), "graph_step": NSNull(), "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": []] }
+        json["contents"] = members.map { ["work": $0["work"]!, "title": "t", "states": [], "identifier": NSNull(), "working_group": NSNull(), "graph_step": NSNull(), "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": [], "open_children": NSNull()] }
         let plan = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: json))
         let model = WorkModel(query: RegistryQuery { args, _ in throw RegistryQueryError("Unexpected command \(args)") }, repoPath: "/repo")
         let registry = SessionsWorkspaceRegistry(localMachineId: "local")

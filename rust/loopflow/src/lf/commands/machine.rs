@@ -24,7 +24,7 @@ pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         MachineCommand::Prune { json } => return prune(*json),
         _ => {}
     }
-    tokio::runtime::Runtime::new()?.block_on(run_async(cmd, batch))
+    loopflow_execution::runtime::block_on(run_async(cmd, batch))
 }
 
 /// `lf machine prune`: store retention, as the Machine server runs it hourly.

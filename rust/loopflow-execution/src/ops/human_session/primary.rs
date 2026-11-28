@@ -49,12 +49,15 @@ pub async fn ensure(
 /// else its sole unfinished interactive one, else the most recently used.
 /// Only a Task with none gets a new one, in its checkout; `true` then. The
 /// others stay open. `request` is what a person typed to start the Task; a
-/// new conversation takes it as its first turn.
+/// new conversation takes it as its first turn. When `person_starting` is
+/// true, a newly created primary holds off the server's recovery pass while
+/// the caller's own start comes up.
 pub(crate) async fn ensure_task(
     store: &SharedStore,
     repo: &Path,
     task: &str,
     request: Option<String>,
+    person_starting: bool,
 ) -> Result<(SessionRecord, bool)> {
     let selected = crate::ops::run::select_work(
         store,
@@ -93,6 +96,7 @@ pub(crate) async fn ensure_task(
         &task,
         selected.wave.as_ref().map(|w| w.slug()),
         request,
+        person_starting,
     )
     .await?;
     Ok((prepare(store, &session.id).await?, started))
@@ -104,6 +108,7 @@ async fn record_task_primary(
     task: &loopflow_storage::work::task::Task,
     wave: Option<&str>,
     request: Option<String>,
+    person_starting: bool,
 ) -> Result<(LfSession, bool)> {
     if let Some(session) = task_conversation(store, &task.id).await? {
         return Ok((
@@ -119,7 +124,18 @@ async fn record_task_primary(
         ..conversation(cwd, "task/session", task.title.clone(), wave)?
     };
     let scope = PrimaryScope::Task(task.id.clone());
-    Ok((store.ensure_primary_session(&scope, candidate).await?, true))
+    let session = if person_starting {
+        store
+            .ensure_primary_session_for_person(
+                &scope,
+                candidate,
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            )
+            .await?
+    } else {
+        store.ensure_primary_session(&scope, candidate).await?
+    };
+    Ok((session, true))
 }
 
 /// Start a new Task's recorded conversation in a held terminal, where it
@@ -549,6 +565,96 @@ mod tests {
             assert_eq!(admitted.title, previous.title);
             assert_eq!(admitted.artifact_key, previous.artifact_key);
             assert_ne!(admitted.cwd, previous.cwd);
+        });
+    }
+
+    #[test]
+    fn person_started_task_primary_holds_off_immediate_recovery() {
+        let _lock = crate::journal::test_env_lock();
+        let home = SessionHome::new();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let store = home.store().await;
+            let make_task = |title: &str| {
+                let repo = loopflow_test_support::TestRepo::new();
+                let checkout = repo.path().canonicalize().unwrap();
+                let repository_id = crate::repository::location::ensure_repository(
+                    &store.sqlite,
+                    &checkout.to_string_lossy(),
+                )
+                .unwrap();
+                let id = loopflow_model::durable::TaskId::new();
+                store
+                    .sqlite
+                    .create_task(&loopflow_storage::work::task::NewTask {
+                        parent_task_id: None,
+                        repository_id,
+                        id: id.clone(),
+                        project_id: None,
+                        title: title.into(),
+                        description: String::new(),
+                        due_date: None,
+                    })
+                    .unwrap();
+                crate::store::ownership::claim_task(&store.sqlite, &id)
+                    .unwrap()
+                    .unwrap();
+                store
+                    .sqlite
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .execute(
+                        "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+                        rusqlite::params![id.as_str(), checkout.to_str().unwrap()],
+                    )
+                    .unwrap();
+                (repo, checkout, id)
+            };
+            let (_opened_repo, opened_checkout, opened) = make_task("Opened by person");
+            let (_prepared_repo, prepared_checkout, prepared) = make_task("Prepared without start");
+
+            let opened_session = crate::ops::human_session::select_connection(
+                &store,
+                &opened_checkout,
+                crate::ops::human_session::SessionTarget::Task(opened.as_str()),
+                true,
+            )
+            .await
+            .unwrap();
+            assert!(opened_session.started);
+            let prepared_session = crate::ops::human_session::select_connection(
+                &store,
+                &prepared_checkout,
+                crate::ops::human_session::SessionTarget::Task(prepared.as_str()),
+                false,
+            )
+            .await
+            .unwrap();
+            assert!(prepared_session.started);
+
+            let now = time::OffsetDateTime::now_utc().unix_timestamp();
+            let due = crate::ops::recovery::due_task_conversations(&store.sqlite, now).unwrap();
+            assert_eq!(
+                due.now
+                    .iter()
+                    .map(|row| row.session.as_str())
+                    .collect::<Vec<_>>(),
+                vec![prepared_session.id.as_str()],
+                "preparing without launch is immediately due, while a person's start holds recovery off"
+            );
+            assert!(
+                due.next_at.is_some_and(|at| at > now),
+                "the person's started primary still wakes recovery after the initial backoff"
+            );
+            let later =
+                crate::ops::recovery::due_task_conversations(&store.sqlite, now + 60).unwrap();
+            assert!(
+                later
+                    .now
+                    .iter()
+                    .any(|row| row.session.as_str() == opened_session.id.as_str()),
+                "if the caller never starts it, recovery starts it after the backoff"
+            );
         });
     }
 }

@@ -8,15 +8,32 @@ use crate::name::portable_name;
 /// Launcher guidance every launch carries: how to work, Tasks and notes.
 pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
 
-/// Headless preamble — the only surface that needs one (no user is present).
-pub const SURFACE_HEADLESS: &str = include_str!("builtins/surfaces/headless.md");
+/// What a headless launch is told: nobody is in the conversation.
+pub const MODE_HEADLESS: &str = include_str!("builtins/modes/headless.md");
 
-/// Shared contract for every surface with someone participating in the current conversation.
-pub const SURFACE_HUMAN_PRESENT: &str = include_str!("builtins/surfaces/human-present.md");
+/// What an interactive launch is told: someone is in the conversation.
+pub const MODE_INTERACTIVE: &str = include_str!("builtins/modes/interactive.md");
 
-/// Live chat channel (e.g. Discord): a person is reading, so the reply is a
-/// plain, deliberate, addressed message — never a working transcript.
-pub const SURFACE_CHAT: &str = include_str!("builtins/surfaces/chat.md");
+/// Review page kit: shared interactive runtime, base stylesheet, default theme,
+/// and built-in `<lf-component>` templates.
+pub const PAGE_RUNTIME_JS: &str = include_str!("builtins/page/runtime.js");
+pub const PAGE_BASE_CSS: &str = include_str!("builtins/page/base.css");
+pub const PAGE_DEFAULT_THEME_CSS: &str = include_str!("builtins/page/theme.css");
+
+/// Built-in `<lf-component>` template HTML (and optional stylesheet) by name.
+pub fn get_builtin_page_component(name: &str) -> Option<(&'static str, Option<&'static str>)> {
+    match name {
+        "decision" => Some((
+            include_str!("builtins/page/components/decision/template.html"),
+            None,
+        )),
+        "before-after" => Some((
+            include_str!("builtins/page/components/before-after/template.html"),
+            None,
+        )),
+        _ => None,
+    }
+}
 
 /// Returns the content of a built-in skill, if it exists.
 pub fn get_builtin_skill(name: &str) -> Option<&'static str> {
@@ -277,12 +294,12 @@ mod tests {
             "reduce",
             "polish",
             "concept-review",
+            "security-review",
             "ship-review",
             "explore",
             "research",
             "qa",
             "triage",
-            "gate",
             "demo",
             "measure",
             "optimize-plan",
@@ -322,7 +339,7 @@ mod tests {
 
     #[test]
     fn generic_execution_skills_never_infer_a_wave_or_require_pm() {
-        for name in ["implement", "gate", "research", "sync-conflicts"] {
+        for name in ["implement", "research", "sync-conflicts"] {
             let skill = get_builtin_skill(name).expect("generic skill");
             assert!(!skill.contains("matches this work"), "{name}");
             assert!(!skill.contains("lf pm show"), "{name}");
@@ -351,6 +368,7 @@ mod tests {
             "record-learnings",
             "wave-report",
             "testing-audit",
+            "verify",
         ] {
             assert!(get_builtin_skill(name).is_none(), "{name}");
         }
@@ -369,5 +387,20 @@ mod tests {
         }
         assert!(super::get_builtin_doc("reference").is_none());
         assert!(super::get_builtin_doc("missing-topic").is_none());
+    }
+
+    #[test]
+    fn review_page_skills_build_and_open_with_lf_page() {
+        for name in ["explore", "concept-review", "qa", "demo", "ship-review"] {
+            let skill = get_builtin_skill(name).unwrap_or_else(|| panic!("missing skill {name}"));
+            assert!(
+                skill.contains(&format!("lf page build scratch/{name}.page.html")),
+                "{name} must compile `scratch/{name}.page.html`"
+            );
+            assert!(
+                skill.contains(&format!("lf page open scratch/{name}.html")),
+                "{name} must open `scratch/{name}.html` with `lf page open`"
+            );
+        }
     }
 }

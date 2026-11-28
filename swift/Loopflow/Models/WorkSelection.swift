@@ -79,7 +79,7 @@ public struct WorkSelection: Codable, Equatable, Sendable {
 }
 
 public enum WorkSelectionState: String, CaseIterable, Codable, Sendable, Hashable {
-    case open, available, busy, blocked, error, unstarted, idle, active, moving, backlog, working, done
+    case open, available, busy, blocked, error, unstarted, idle, active, moving, paused, backlog, working, done
     /// An open Task whose auto setting is on.
     case auto
 }
@@ -178,14 +178,19 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
         public var states: [WorkSelectionState]
         /// A Task's short name, as people say it: `LOO-809`.
         public let identifier: String?
+        public var workingGroup: WorkingGroup?
         public let graphStep: String?
         public let primarySession: String?
         public let location: Location?
         public let argv: [String]?
         public let unavailable: [String]
+        /// How many direct children of a Task are open; nil for anything but a Task.
+        public let openChildren: Int?
         enum CodingKeys: String, CodingKey {
             case work, title, states, identifier, location, argv, unavailable
+            case workingGroup = "working_group"
             case graphStep = "graph_step", primarySession = "primary_session"
+            case openChildren = "open_children"
         }
     }
     public let dashboardID: String?
@@ -227,11 +232,13 @@ extension WorkViewPlan.Content {
                   title: try c.decode(String.self, forKey: .title),
                   states: try c.decode([WorkSelectionState].self, forKey: .states),
                   identifier: try c.decode(String?.self, forKey: .identifier),
+                  workingGroup: try c.decode(WorkingGroup?.self, forKey: .workingGroup),
                   graphStep: try c.decodeIfPresent(String.self, forKey: .graphStep),
                   primarySession: try c.decode(String?.self, forKey: .primarySession),
                   location: try c.decode(WorkViewPlan.Location?.self, forKey: .location),
                   argv: try c.decode([String]?.self, forKey: .argv),
-                  unavailable: try c.decode([String].self, forKey: .unavailable))
+                  unavailable: try c.decode([String].self, forKey: .unavailable),
+                  openChildren: try c.decode(Int?.self, forKey: .openChildren))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -240,11 +247,13 @@ extension WorkViewPlan.Content {
         try c.encode(title, forKey: .title)
         try c.encode(states, forKey: .states)
         try c.encode(identifier, forKey: .identifier)
+        try c.encode(workingGroup, forKey: .workingGroup)
         try c.encode(graphStep, forKey: .graphStep)
         try c.encode(primarySession, forKey: .primarySession)
         try c.encode(location, forKey: .location)
         try c.encode(argv, forKey: .argv)
         try c.encode(unavailable, forKey: .unavailable)
+        try c.encode(openChildren, forKey: .openChildren)
     }
 }
 

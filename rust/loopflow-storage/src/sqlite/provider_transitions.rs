@@ -40,12 +40,9 @@ pub(crate) fn latest_in(
     conn: &Connection,
     session: &str,
 ) -> StoreResult<Option<ProviderTransition>> {
-    let transition: Option<String> = conn
-        .query_row(
-            "SELECT transition FROM agent_sessions WHERE id=?1",
-            [session],
-            |row| row.get(0),
-        )
+    let mut query = conn.prepare_cached("SELECT transition FROM agent_sessions WHERE id=?1")?;
+    let transition: Option<String> = query
+        .query_row([session], |row| row.get(0))
         .optional()?
         .flatten();
     Ok(transition
@@ -204,7 +201,7 @@ impl SqliteStore {
     /// Every transition `session` made, oldest first, from its history.
     pub fn provider_transitions(&self, session: &str) -> StoreResult<Vec<ProviderTransition>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
+        let mut statement = conn.prepare_cached(
             "SELECT payload,observed_at FROM history.session_history
              WHERE session_id=?1 AND kind='transition' ORDER BY seq",
         )?;

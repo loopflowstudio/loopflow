@@ -36,7 +36,7 @@ pub(crate) fn answer(
 ) -> Result<TaskCreated> {
     let _creation = tracing::info_span!(target: loopflow_execution::journal::START_TIMING_TARGET, "task_creation", request_id = id).entered();
     creation::step("row", || {
-        tokio::runtime::Runtime::new()?.block_on(async {
+        loopflow_execution::runtime::block_on(async {
             let store = loopflow_execution::store::read_existing_registry()?
                 .map(std::sync::Arc::new)
                 .context("no Loopflow store exists on this Machine")?;

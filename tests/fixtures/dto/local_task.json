@@ -55,6 +55,7 @@
       "workspace": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "runtime": {
@@ -96,6 +97,7 @@
     "graph_name": "code",
     "graph_source": "builtin",
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "unstarted",
       "backlog"

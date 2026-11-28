@@ -1100,6 +1100,86 @@ fn screen_reads_are_compact_passive_and_match_cli() {
 }
 
 #[test]
+fn find_reaches_beyond_the_initial_page_on_the_checkout_machine() {
+    use loopflow::lf::commands::read::Read;
+    use std::os::unix::fs::symlink;
+
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+    let repo = TestRepo::new();
+    repo.create_file("ignored/tracked", "");
+    repo.create_file("deleted", "");
+    repo.stage_all();
+    repo.commit("Tracked before ignore rules");
+    support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    repo.create_file(".gitignore", "scratch/\nignored/\n");
+    repo.create_file("ignored/build", "");
+    repo.create_file("scratch/notes.md", "");
+    repo.create_file("scratch/page.HTML", "");
+    let stamp = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(123);
+    for name in ["scratch/notes.md", "scratch/page.HTML"] {
+        fs::File::open(repo.path().join(name))
+            .unwrap()
+            .set_modified(stamp)
+            .unwrap();
+    }
+    repo.create_file("z/nested/Reader.swift", "struct Reader {}");
+    fs::remove_file(repo.path().join("deleted")).unwrap();
+    fs::write(home.path().join("outside.txt"), "outside checkout").unwrap();
+    symlink(home.path().join("outside.txt"), repo.path().join("outside")).unwrap();
+    symlink("z/nested/Reader.swift", repo.path().join("linked")).unwrap();
+
+    let cli = |query: &[&str]| -> Value {
+        let mut args = vec!["task", "find", "INF-123", "--json"];
+        args.extend_from_slice(query);
+        serde_json::from_str(&read(repo.path(), home.path(), &args, None)).unwrap()
+    };
+    let inventory = cli(&[]);
+    assert_eq!(inventory["truncated"], false);
+    assert_eq!(inventory["latest_scratch_page"], "scratch/notes.md");
+    assert_eq!(
+        inventory["scratch"],
+        serde_json::json!(["scratch/notes.md", "scratch/page.HTML"])
+    );
+    let paths = inventory["paths"].as_array().unwrap();
+    for path in [
+        "z/nested/Reader.swift",
+        "ignored/tracked",
+        "linked",
+        "scratch/notes.md",
+    ] {
+        assert!(paths.contains(&Value::from(path)));
+    }
+    for path in ["deleted", "outside", "ignored/build"] {
+        assert!(!paths.contains(&Value::from(path)));
+    }
+    fs::File::open(repo.path().join("scratch/page.HTML"))
+        .unwrap()
+        .set_modified(stamp + Duration::from_secs(1))
+        .unwrap();
+    for i in 0..2_100 {
+        repo.create_file(&format!("src/file-{i:04}"), "");
+    }
+    let page = cli(&[]);
+    assert_eq!(page["paths"].as_array().unwrap().len(), 2_000);
+    assert_eq!(page["truncated"], true);
+    assert_eq!(page["latest_scratch_page"], "scratch/page.HTML");
+    let _server = Server::start(repo.path(), home.path());
+    let found = server_read(Read::TaskFind {
+        issue: "INF-123".into(),
+        query: Some("nstrdr".into()),
+        limit: None,
+    });
+    assert_eq!(found, cli(&["--", "nstrdr"]));
+    assert_eq!(found["paths"], serde_json::json!(["z/nested/Reader.swift"]));
+    assert_eq!(found["truncated"], false);
+    let limited = cli(&["--limit", "3", "file"]);
+    assert_eq!(limited["paths"].as_array().unwrap().len(), 3);
+    assert_eq!(limited["truncated"], true);
+}
+
+#[test]
 fn server_operations_match_their_lf_commands() {
     use loopflow::lf::commands::activity::HistoryWindow;
     use loopflow::lf::commands::read::Read;
@@ -1154,12 +1234,20 @@ fn server_operations_match_their_lf_commands() {
         None,
     ))
     .unwrap();
-    // One recorded capture, so its history reads the same both ways.
+    // One recorded capture, so its history reads the same both ways. Mark the
+    // conversation quit so the server's recovery pass leaves it alone while
+    // reads and writes are compared.
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     loopflow_storage::sqlite::sessions::test_capture(
-        &rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap(),
+        &conn,
         session["id"].as_str().unwrap(),
         &loopflow_storage::session_record::new_artifact_key(),
     );
+    conn.execute(
+        "UPDATE agent_sessions SET agent_exit_code = 0 WHERE id = ?1",
+        [session["id"].as_str().unwrap()],
+    )
+    .unwrap();
     // Unpublished, so it can complete: `lf task complete` waits on a PR's merge.
     let unpublished: Value = serde_json::from_str::<serde_json::Value>(&read(
         repo.path(),
@@ -1243,6 +1331,9 @@ fn server_operations_match_their_lf_commands() {
         | Read::TaskChanges { .. }
         | Read::TaskDiff { .. }
         | Read::TaskFile { .. }
+        | Read::TaskFind { .. }
+        | Read::TaskGrep { .. }
+        | Read::TaskSymbols { .. }
         | Read::TaskFiles { .. }
         | Read::TaskFilesWatch { .. }
         | Read::WaveList
@@ -1317,6 +1408,21 @@ fn server_operations_match_their_lf_commands() {
                     issue: "INF-123".into(),
                     path: "edit.txt".into(),
                     at: Some("parent".into()),
+                },
+                Read::TaskSymbols {
+                    issue: "INF-123".into(),
+                    name: "edit".into(),
+                    path: Some("edit.txt".into()),
+                },
+                Read::TaskGrep {
+                    issue: "INF-123".into(),
+                    query: "edit".into(),
+                    whole_word: true,
+                },
+                Read::TaskFind {
+                    issue: "INF-123".into(),
+                    query: Some("edt".into()),
+                    limit: None,
                 },
                 Read::TaskFiles {
                     issue: "INF-123".into(),
@@ -1621,6 +1727,8 @@ fn server_operations_match_their_lf_commands() {
         | Write::TaskAutoOn { .. }
         | Write::TaskSteer { .. }
         | Write::TaskReport { .. }
+        | Write::TaskPause { .. }
+        | Write::TaskUnpause { .. }
         | Write::TaskInterrupt { .. }
         | Write::TaskSave { .. }
         | Write::SessionSteer { .. }
@@ -1738,6 +1846,7 @@ fn server_operations_match_their_lf_commands() {
                 Write::TaskComplete {
                     directory: directory.clone(),
                     issue: unpublished.clone(),
+                    children: None,
                 },
                 Write::TaskReopen {
                     directory: directory.clone(),
@@ -2451,10 +2560,25 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             }
             (path(directory), args)
         }
-        Write::TaskComplete { directory, issue } => (
-            path(directory),
-            words(&["task", "complete", issue, "--json"]),
-        ),
+        Write::TaskComplete {
+            directory,
+            issue,
+            children,
+        } => {
+            let mut args = words(&["task", "complete", issue]);
+            if let Some(children) = children {
+                args.push("--children".into());
+                args.push(
+                    serde_json::to_value(children)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .into(),
+                );
+            }
+            args.push("--json".into());
+            (path(directory), args)
+        }
         Write::TaskReopen { directory, issue } => {
             (path(directory), words(&["task", "reopen", issue, "--json"]))
         }
@@ -2563,6 +2687,20 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["task", "report", issue, message, "--json"]),
         ),
+        Write::TaskPause { directory, issue } => {
+            (path(directory), words(&["task", "pause", issue, "--json"]))
+        }
+        Write::TaskUnpause {
+            directory,
+            issue,
+            run,
+        } => {
+            let mut args = words(&["task", "unpause", issue, "--json"]);
+            if *run {
+                args.push("--run".into());
+            }
+            (path(directory), args)
+        }
         Write::TaskInterrupt { directory, issue } => (
             path(directory),
             words(&["task", "interrupt", issue, "--json"]),

@@ -5,7 +5,7 @@ import SwiftUI
 extension TaskList {
     var title: String {
         switch self {
-        case .started: "Started"
+        case .started: "Working"
         case .available: "Ready for you"
         case .busy: "Working now"
         case .backlog: "Backlog"
@@ -67,25 +67,51 @@ final class TaskFeed {
         guard !pendingChanges.changes.isEmpty else { return repositories }
         return repositories.map { entry in
             RepositoryTasks(repository: entry.repository, path: entry.path,
-                            tasks: pendingChanges.apply(to: entry.tasks, readAt: tasks.readAt, wave: wave))
+                            tasks: pendingChanges.apply(to: entry.tasks, readAt: tasks.readAt, wave: wave)
+                                .filter { $0.states.contains(filter.state) })
         }
     }
 
-    /// The row leaves the list in the swipe; a refusal brings it back and the Notice
-    /// says why, its Show running `show` to open the Task.
-    func complete(_ task: WorkViewPlan.Content, show: @escaping @MainActor () -> Void) {
+    /// The parent a swipe is asking about: what happens to its open children.
+    var completing: WorkViewPlan.Content?
+
+    /// The row leaves the list at once and the Notice offers Undo; a refusal brings
+    /// it back and says why, its Show running `show` to open the Task. A swipe on a
+    /// parent sends no `children`: the row stays and `completing` asks what happens to them.
+    func complete(_ task: WorkViewPlan.Content, children: TaskChildPolicy? = nil, show: @escaping @MainActor () -> Void) {
+        completing = nil
+        if children == nil, (task.openChildren ?? 0) > 0 {
+            completing = task
+            return
+        }
         guard let directory = directory(of: task) else { return }
-        let issue = task.identifier ?? task.work.id
+        complete(issue: task.identifier ?? task.work.id, directory: directory, children: children, show: Notice.Action("Show", perform: show))
+    }
+
+    func complete(issue: String, directory: String, children: TaskChildPolicy? = nil, show: Notice.Action? = nil) {
+        if children == nil, let parent = content(for: issue), (parent.openChildren ?? 0) > 0 {
+            completing = parent
+            return
+        }
+        notices.post(Notice("\(issue) completed", key: "complete-\(issue)", action: Notice.Action("Undo") { [weak self] in
+            self?.change(.reopen(task: issue), issue: issue, verb: "reopened",
+                         write: .taskReopen(directory: directory, issue: issue))
+        }))
         pendingChanges.make(.complete(task: issue), subject: issue, verb: "completed",
-                            write: .taskComplete(directory: directory, issue: issue), notices: notices,
-                            show: Notice.Action("Show", perform: show)) { [weak self] in
+                            write: .taskComplete(directory: directory, issue: issue, children: children), notices: notices,
+                            show: show) { [weak self] in
             try? await self?.observation?.refresh()
         }
     }
 
-    /// Start, Run, Auto-Ship and Stop Auto-Ship: the Notice says the change was requested.
-    func request(_ name: String, issue: String, write: ServedWrite) {
-        pendingChanges.request(name, subject: issue, write: write, notices: notices) { [weak self] in
+    private func content(for issue: String) -> WorkViewPlan.Content? {
+        repositories.lazy.flatMap(\.tasks).first { $0.identifier == issue || $0.work.id == issue }
+    }
+
+    /// Show `command` on the Task now and send `write`; a refusal undoes it and
+    /// the Notice says "LOO-4 couldn't be `verb`: …".
+    func change(_ command: PendingCommand, issue: String, verb: String, write: ServedWrite) {
+        pendingChanges.make(command, subject: issue, verb: verb, write: write, notices: notices, show: nil) { [weak self] in
             try? await self?.observation?.refresh()
         }
     }
@@ -219,17 +245,29 @@ struct TaskListView: View {
         _feed = State(initialValue: TaskFeed(client: client, notices: notices))
     }
 
-    /// Repositories with matching Tasks, each split into Tasks with a conversation and those without.
-    private var sections: [(repository: String, open: [WorkViewPlan.Content], quiet: [WorkViewPlan.Content])] {
+    private struct TaskSectionRows: Identifiable {
+        let repository: String
+        let group: WorkingGroup?
+        let tasks: [WorkViewPlan.Content]
+        var id: String { repository + "/" + (group?.rawValue ?? "") }
+    }
+
+    private var sections: [TaskSectionRows] {
         feed.project()
         let term = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        return feed.shownRepositories.compactMap { entry in
-            guard shown.isEmpty || entry.repository == shown else { return nil }
+        return feed.shownRepositories.flatMap { entry -> [TaskSectionRows] in
+            guard shown.isEmpty || entry.repository == shown else { return [] }
             let tasks = term.isEmpty ? entry.tasks : entry.tasks.filter {
                 $0.title.localizedStandardContains(term) || $0.location?.cwd.localizedStandardContains(term) == true
             }
-            guard !tasks.isEmpty else { return nil }
-            return (entry.repository, tasks.filter { $0.primarySession != nil }, tasks.filter { $0.primarySession == nil })
+            guard !tasks.isEmpty else { return [] }
+            guard feed.filter == .started else {
+                return [TaskSectionRows(repository: entry.repository, group: nil, tasks: tasks)]
+            }
+            let groups = Dictionary(grouping: tasks, by: \.workingGroup)
+            return WorkingGroup.allCases.compactMap { group in
+                groups[group].map { TaskSectionRows(repository: entry.repository, group: group, tasks: $0) }
+            }
         }
     }
 
@@ -255,21 +293,24 @@ struct TaskListView: View {
     var body: some View {
         NavigationStack {
             List {
-                ForEach(sections, id: \.repository) { section in
+                ForEach(sections) { section in
+                    let quiet = section.tasks.filter { $0.primarySession == nil }
                     Section {
-                        ForEach(section.open, id: \.work) { link($0) }
-                        if !section.quiet.isEmpty {
+                        ForEach(section.tasks.filter { $0.primarySession != nil }, id: \.work) { link($0) }
+                        if !quiet.isEmpty {
                             // Started Tasks nobody has opened a conversation for stay one tap away.
-                            DisclosureGroup("\(section.quiet.count) without a conversation") {
-                                ForEach(section.quiet, id: \.work) { link($0) }
+                            DisclosureGroup("\(quiet.count) without a conversation") {
+                                ForEach(quiet, id: \.work) { link($0) }
                             }
                             .font(Typography.meta)
                             .foregroundStyle(theme.palette.textSecondary)
                             .listRowBackground(theme.palette.background)
                         }
                     } header: {
-                        if shown.isEmpty {
-                            Text(name(section.repository))
+                        let title = [shown.isEmpty ? name(section.repository) : nil, section.group?.title]
+                            .compactMap { $0 }.joined(separator: " · ")
+                        if !title.isEmpty {
+                            Text(title)
                                 .font(Typography.meta)
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .textCase(nil)
@@ -366,6 +407,21 @@ struct TaskListView: View {
                         .accessibilityLabel("Machine")
                 }
             }
+        }
+        .confirmationDialog(
+            feed.completing.map { TaskChildPolicy.question(issue: $0.identifier ?? $0.work.id, openChildren: $0.openChildren ?? 0) }
+                ?? "Complete Task?",
+            isPresented: Binding(get: { feed.completing != nil }, set: { if !$0 { feed.completing = nil } }),
+            titleVisibility: .visible,
+            presenting: feed.completing
+        ) { task in
+            Button("Move Children Up") { feed.complete(task, children: .rehome) { selectedTask = MobileTask(task) } }
+            Button("Abandon Children", role: .destructive) {
+                feed.complete(task, children: .abandon) { selectedTask = MobileTask(task) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Move children up to keep them open, or abandon open children (merged ones are marked done).")
         }
         .alert("Visual timing unavailable", isPresented: Binding(get: { captureError != nil }, set: { if !$0 { captureError = nil } })) {
             Button("OK") { captureError = nil }

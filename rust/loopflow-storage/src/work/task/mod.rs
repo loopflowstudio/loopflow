@@ -644,6 +644,8 @@ pub enum TaskEventKind {
     /// direction immediately. A live run acts on interrupts issued after it
     /// launched; there is nothing to interrupt otherwise. Not a report out.
     Interrupt,
+    /// Hold Graph execution at its current step.
+    Paused,
     PrStarted {
         pr_id: TaskPrId,
         sequence: u32,
@@ -666,11 +668,9 @@ pub enum TaskEventKind {
     CompletionRequested {
         reason: Option<String>,
     },
-    /// A person asked to complete the Task, so settling it settles its
-    /// children too. A Graph reaching `end` writes `CompletionRequested`,
-    /// which waits while a child is open. The request can pend until the
-    /// Task's PR merges, and a child can be filed, reopened or moved under
-    /// the Task meanwhile, so who asked is kept with the request.
+    /// History only: an earlier `lf task complete` that would settle the
+    /// Task's children once it ran. Completion now settles children at once,
+    /// by the policy given, and nothing writes this.
     FamilyCompletionRequested {
         reason: Option<String>,
     },
@@ -697,6 +697,7 @@ impl TaskEventKind {
                 | Self::GraphFinished { .. }
                 | Self::Steer { .. }
                 | Self::Interrupt
+                | Self::Paused
         )
     }
 }

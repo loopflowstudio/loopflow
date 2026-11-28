@@ -27,23 +27,23 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       # --filter and --skip use this same expression, so every test runs once.
-      SWIFT_TRANSPORT_TESTS: 'AppAppearanceTests|ThemeTests|ThemeWorkflowTests|LocalWaveAgentLauncherTests|ServerClientTests|WorkCLISubscriptionTests|WorkOpeningCLITests|PortfolioServiceTests|WorkObservationTransportTests'
+      SWIFT_TRANSPORT_TESTS: 'AppAppearanceTests|ThemeTests|ThemeWorkflowTests|LocalWaveAgentLauncherTests|ServerClientTests|TaskFileBrowserJourneyTests|WorkCLISubscriptionTests|WorkOpeningCLITests|PortfolioServiceTests|WorkObservationTransportTests'
       # Two real servers joined by a stand-in ssh: about ninety seconds on a fast runner.
       SWIFT_MACHINE_TESTS: 'RemoteTaskWorkspaceTests'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
       # Claims name their person by Git user.email; repository-local test identities win.
       - name: Give tests a fallback Git identity
         run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
-      - uses: astral-sh/setup-uv@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
       - name: Fingerprint workspace build profiles
         id: rust-profiles
         run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         id: rust-cache
         with:
           key: swift-cli-${{ steps.rust-profiles.outputs.key }}
@@ -53,7 +53,7 @@ jobs:
         run: uv run python scripts/swift_cache.py key >> "$GITHUB_OUTPUT"
       - name: Restore SwiftPM build
         id: swift-cache
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             swift/.build
@@ -115,7 +115,7 @@ jobs:
           done
       - name: Preserve Swift failure evidence
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: swift-tests-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/swift-tests
@@ -133,7 +133,7 @@ jobs:
         run: uv run python scripts/swift_cache.py save
       - name: Save SwiftPM build
         if: github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             swift/.build
@@ -151,7 +151,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
@@ -160,12 +160,12 @@ jobs:
       # Claims name their person by Git user.email; repository-local test identities win.
       - name: Give tests a fallback Git identity
         run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: astral-sh/setup-uv@v7
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: Fingerprint workspace build profiles
         id: rust-profiles
         run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         id: rust-cache
         with:
           key: macos-process-${{ matrix.os }}-${{ steps.rust-profiles.outputs.key }}
@@ -189,7 +189,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
@@ -198,12 +198,12 @@ jobs:
       # Claims name their person by Git user.email; repository-local test identities win.
       - name: Give tests a fallback Git identity
         run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: astral-sh/setup-uv@v7
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: Fingerprint workspace build profiles
         id: rust-profiles
         run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         id: rust-cache
         with:
           key: loopflow-ui-test-${{ steps.rust-profiles.outputs.key }}
@@ -218,7 +218,7 @@ jobs:
         run: uv run python scripts/swift_cache.py key --build-system xcode >> "$GITHUB_OUTPUT"
       - name: Restore Xcode build
         id: xcode-cache
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: swift/.build/xcode-derived-data
           # Only identical source and toolchain inputs may reuse signed build
@@ -252,7 +252,7 @@ jobs:
         timeout-minutes: 20
       - name: Preserve iOS failure results
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ios-tests-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ios-tests.xcresult
@@ -260,7 +260,7 @@ jobs:
           retention-days: 7
       - name: Save Xcode build
         if: github.ref == 'refs/heads/main' && steps.xcode-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: swift/.build/xcode-derived-data
           key: ${{ steps.xcode-inputs.outputs.key }}

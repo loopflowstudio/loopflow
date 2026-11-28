@@ -14,6 +14,14 @@ public enum PendingCommand: Equatable, Sendable {
     /// `owner` is the repository reading's `viewer`: who the Machine names. Working
     /// if it was started; with no viewer, the section moves only.
     case claim(task: String, owner: TaskOwner?)
+    case pause(task: String)
+    case unpause(task: String)
+    /// The switch shows `on`; a Working row with auto on is Shipping.
+    case auto(task: String, on: Bool)
+    /// The workflow control says the run is starting or the step is stopping;
+    /// rows wait for the Machine.
+    case run(task: String)
+    case interrupt(task: String)
     /// Backlog.
     case unassign(task: String)
     /// Leaves every list filtered to another Wave; nil leaves it in none.
@@ -26,7 +34,8 @@ public enum PendingCommand: Equatable, Sendable {
     public var task: String? {
         switch self {
         case .complete(let task), .abandon(let task), .reopen(let task), .claim(let task, _), .unassign(let task),
-             .move(let task, _): task
+             .move(let task, _), .pause(let task), .unpause(let task), .auto(let task, _), .run(let task),
+             .interrupt(let task): task
         case .renameSession, .reorder: nil
         }
     }
@@ -91,6 +100,47 @@ public final class PendingChanges {
 
     // MARK: Making changes
 
+    public static let pausing = "Pausing…"
+    public static let unpausing = "Unpausing…"
+    public static let starting = "Starting…"
+    public static let interrupting = "Interrupting…"
+
+    /// The workflow control's change the Machine is settling, or answered with
+    /// no reading showing it yet. A second click waits for that reading.
+    public func controlRequest(for issue: String) -> String? {
+        for change in changes.reversed() where change.command.task == issue {
+            switch change.command {
+            case .pause: return Self.pausing
+            case .unpause: return Self.unpausing
+            case .run: return Self.starting
+            case .interrupt: return Self.interrupting
+            default: continue
+            }
+        }
+        return nil
+    }
+
+    /// The auto setting the switch shows until a reading covers its change.
+    public func autoRequest(for issue: String) -> Bool? {
+        for change in changes.reversed() {
+            if case .auto(issue, let on) = change.command { return on }
+        }
+        return nil
+    }
+
+    public func setPause(_ action: TaskActions.Pause, issue: String, directory: String, notices: NoticeCenter,
+                         show: Notice.Action?, answered: @escaping @MainActor () async -> Void) {
+        let change: (command: PendingCommand, write: ServedWrite, verb: String) = switch action {
+        case .pause:
+            (.pause(task: issue), .taskPause(directory: directory, issue: issue), "paused")
+        case .unpause:
+            // The Machine reads the saved step: a run resumes, a human step keeps waiting.
+            (.unpause(task: issue), .taskUnpause(directory: directory, issue: issue, run: true), "unpaused")
+        }
+        make(change.command, subject: issue, verb: change.verb, write: change.write,
+             notices: notices, show: show, answered: answered)
+    }
+
     /// Show `command` on every list now and send `write` under its request ID,
     /// again while the link is lost. The change stays until a reading covers what
     /// the answer advanced. A refusal says "LOO-4 couldn't be completed: … · Show",
@@ -99,7 +149,8 @@ public final class PendingChanges {
     @discardableResult
     public func make(_ command: PendingCommand, subject: String, verb: String, write: ServedWrite, notices: NoticeCenter,
                      show: Notice.Action?,
-                     answered: @escaping @MainActor () async throws -> Void = {}) -> Task<Void, Never> {
+                     answered: @escaping @MainActor () async throws -> Void = {},
+                     refused: @escaping @MainActor () -> Void = {}) -> Task<Void, Never> {
         let requestID = UUID().uuidString
         changes.append(Change(requestID: requestID, command: command, answer: nil))
         let order = command.workingOrder
@@ -115,6 +166,7 @@ public final class PendingChanges {
             } catch {
                 let notice = Notice("\(subject) couldn't be \(verb): \(message(for: error))", key: requestID, action: show)
                 notices.post(notice)
+                refused()
                 let failure = error as? ServerError
                 if order != nil {
                     // Order edits commit atomically. Revisions on a definite refusal came from another write.
@@ -136,21 +188,19 @@ public final class PendingChanges {
         return task
     }
 
-    /// Start, Run and the two Auto-Ship requests change nothing on screen: the
-    /// Notice says "LOO-5 Auto-Ship requested" in the click and the Machine's readings
-    /// show the rest. A refusal posts over it.
+    /// A request with nothing to show on a row, such as answering a tracker: the
+    /// Notice says "LOO-5 Keep theirs requested" in the click and the Machine's
+    /// readings show the rest. A refusal posts over it.
     public func request(_ name: String, subject: String, write: ServedWrite, notices: NoticeCenter,
-                        undo: Notice.Action? = nil, answered: @escaping @MainActor () async -> Void = {},
-                        refused: @escaping @MainActor () -> Void = {}) {
+                        answered: @escaping @MainActor () async -> Void = {}) {
         let requestID = UUID().uuidString
-        notices.post(Notice("\(subject) \(name) requested", key: requestID, action: undo))
+        notices.post(Notice("\(subject) \(name) requested", key: requestID))
         Task {
             do {
                 _ = try await deliver(write, requestID: requestID)
                 await answered()
             } catch {
                 notices.post(Notice("\(subject) \(name) couldn't be requested: \(message(for: error))", key: requestID))
-                refused()
             }
         }
     }
@@ -299,15 +349,27 @@ public final class PendingChanges {
                 if let wave, wave != target { gone.formUnion(matches) }
             case .reopen:
                 contents.updateStates(of: matches) { states in
-                    states.subtracting([.done]).union([.open, Self.started(states) ? .working : .backlog])
+                    states.inSection(Self.started(states) ? .working : .backlog).union([.open])
                 }
+            case .pause:
+                contents.updateStates(of: matches) { $0.pausing() }
+            case .unpause:
+                contents.updateStates(of: matches) { $0.unpausing() }
             case .claim:
                 contents.updateStates(of: matches) { states in
-                    Self.started(states) ? states.subtracting([.backlog]).union([.working]) : states
+                    Self.started(states) ? states.inSection(.working) : states
                 }
             case .unassign:
-                contents.updateStates(of: matches) { $0.subtracting([.working]).union([.backlog]) }
-            case .renameSession, .reorder:
+                contents.updateStates(of: matches) { states in
+                    states.unpausing().inSection(.backlog)
+                }
+            case .auto(_, let on):
+                contents.updateStates(of: matches) { on ? $0.union([.auto]) : $0.subtracting([.auto]) }
+                for index in contents.indices where matches.contains(contents[index].work) && on
+                    && contents[index].workingGroup == .active {
+                    contents[index].workingGroup = .shipping
+                }
+            case .run, .interrupt, .renameSession, .reorder:
                 break
             }
             contents.removeAll { gone.contains($0.work) }
@@ -331,9 +393,9 @@ public final class PendingChanges {
                 tasks.append(moved)
             }
             guard let index = tasks.firstIndex(where: { $0.task.identifier == issue }) else { continue }
-            let started = tasks[index].lifecycle != .unstarted
             switch change.command {
             case .complete:
+                tasks[index].workingGroup = nil
                 tasks[index].lifecycle = .done
                 tasks[index].section = .done
             case .abandon:
@@ -343,16 +405,35 @@ public final class PendingChanges {
                 let checkedOut = tasks[index].reference.workspace != nil
                 tasks[index].lifecycle = checkedOut ? .idle : .unstarted
                 tasks[index].section = checkedOut && tasks[index].runtime?.owner != nil ? .working : .backlog
+            case .pause:
+                tasks[index].lifecycle = .paused
+                tasks[index].selectionStates = tasks[index].selectionStates.pausing()
+                if tasks[index].section == .working { tasks[index].workingGroup = .paused }
+            case .unpause:
+                guard tasks[index].lifecycle == .paused else { continue }
+                tasks[index].selectionStates = tasks[index].selectionStates.unpausing()
+                tasks[index].lifecycle = .idle
             case .claim(_, let owner):
                 if let owner { tasks[index].runtime?.owner = owner }
-                if started { tasks[index].section = .working }
+                if tasks[index].lifecycle.isWorking {
+                    tasks[index].section = .working
+                    if tasks[index].lifecycle == .paused { tasks[index].workingGroup = .paused }
+                }
             case .unassign:
+                if tasks[index].lifecycle == .paused {
+                    tasks[index].lifecycle = .idle
+                    tasks[index].selectionStates = tasks[index].selectionStates.unpausing()
+                }
+                tasks[index].workingGroup = nil
                 tasks[index].runtime?.owner = nil
                 tasks[index].section = .backlog
             case .move(_, let target):
                 tasks[index].task.waveId = target
                 if let wave, wave != target { tasks.remove(at: index) }
-            case .renameSession, .reorder:
+            case .auto(_, let on):
+                if on { tasks[index].selectionStates.insert(.auto) } else { tasks[index].selectionStates.remove(.auto) }
+                if on, tasks[index].workingGroup == .active { tasks[index].workingGroup = .shipping }
+            case .run, .interrupt, .renameSession, .reorder:
                 break
             }
         }
@@ -376,7 +457,7 @@ public final class PendingChanges {
     }
 
     private static func started(_ states: Set<WorkSelectionState>) -> Bool {
-        !states.isDisjoint(with: [.idle, .active, .moving])
+        !states.isDisjoint(with: [.idle, .active, .moving, .paused])
     }
 
     private func prune() {
@@ -392,18 +473,31 @@ private struct WeakNoticeCenter {
     weak var center: NoticeCenter?
 }
 
-extension [WorkViewPlan.Content] {
-    /// The section a change moves a Task to replaces its old one; a covering
-    /// reading's own states replace these.
-    fileprivate mutating func updateStates(of members: Set<WorkWorkspaceKey>,
-                                           _ update: (Set<WorkSelectionState>) -> Set<WorkSelectionState>) {
-        let sections: Set<WorkSelectionState> = [.backlog, .working, .done]
+private extension Set<WorkSelectionState> {
+    func pausing() -> Self {
+        subtracting([.moving, .active, .idle]).union([.paused])
+    }
+
+    func unpausing() -> Self {
+        contains(.paused) ? subtracting([.paused]).union([.idle]) : self
+    }
+
+    func inSection(_ section: WorkSelectionState) -> Self {
+        subtracting([.backlog, .working, .done]).union([section])
+    }
+}
+
+private extension [WorkViewPlan.Content] {
+    mutating func updateStates(of members: Set<WorkWorkspaceKey>,
+                               _ update: (Set<WorkSelectionState>) -> Set<WorkSelectionState>) {
         for index in indices where members.contains(self[index].work) {
-            let current = Set(self[index].states)
-            let next = update(current)
-            let section = next.subtracting(current).intersection(sections)
-            let kept = section.isEmpty ? next : next.subtracting(sections.subtracting(section))
-            self[index].states = WorkSelectionState.allCases.filter(kept.contains)
+            let next = update(Set(self[index].states))
+            if !next.contains(.working) { self[index].workingGroup = nil }
+            else if next.contains(.paused) { self[index].workingGroup = .paused }
+            else if self[index].workingGroup == nil {
+                self[index].workingGroup = next.contains(.auto) ? .shipping : .active
+            }
+            self[index].states = WorkSelectionState.allCases.filter(next.contains)
         }
     }
 }

@@ -27,17 +27,14 @@ and spends the time on its open question.
 
 ## Make them tangible
 
-**Show the thing, not a description of it.** Build one page,
-`scratch/explore.html`, with a panel per vision. For anything people see or
-touch: real-looking content and the key interaction working. For other work,
-the form that shows the difference: CLI transcripts, data-model sketches, a
-day in the life of the system, the failure each one avoids.
-
-**Make the page good; it is what gets reviewed.** One self-contained file, no
-network, readable in light and dark and at narrow widths. Lead with the
-decision needed and mark proposed apart from existing. One reading column, no
-dashboard chrome. End with numbered questions so "2b" is a complete answer.
-Say its path, and regenerate the same file each round.
+**Show the thing, not a description of it.** Write `scratch/explore.page.html`
+following `lf help page`, compile it with `lf page build scratch/explore.page.html`,
+and present it with `lf page open scratch/explore.html`. Lead with the decision
+needed and include a panel per vision: for anything people see or touch,
+real-looking content and the key interaction; for other work, CLI transcripts,
+data-model sketches, a day in the life of the system, or the failure each
+avoids. Add `data-choice` / `data-question` controls for the real forks and
+numbered questions at the end. Rebuild the same file each round.
 
 ## Follow their lead
 

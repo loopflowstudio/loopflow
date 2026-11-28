@@ -1,11 +1,10 @@
 //! Task creation's receipt is shared by CLI and served callers.
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -58,14 +57,8 @@ pub fn identity(
 pub fn lock(id: &str) -> Result<File> {
     let root = crate::store::lf_home_dir().join("creation-locks");
     std::fs::create_dir_all(&root)?;
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(root.join(hex::encode(Sha256::digest(id.as_bytes()))))?;
-    file.lock_exclusive()?;
-    Ok(file)
+    let path = root.join(hex::encode(Sha256::digest(id.as_bytes())));
+    Ok(loopflow_storage::lock_file::lock_exclusive_verified(&path)?)
 }
 
 pub fn lookup(id: &str) -> Result<Option<CreationReceipt>> {
@@ -102,17 +95,13 @@ pub struct Created {
     pub after: Option<After>,
 }
 
-fn answered(
-    store: &crate::store::SharedStore,
-    runtime: &tokio::runtime::Runtime,
-    receipt: TaskCreateReceipt,
-) -> Result<Created> {
+fn answered(store: &crate::store::SharedStore, receipt: TaskCreateReceipt) -> Result<Created> {
     let session = step("read_session", || {
         receipt
             .session_id
             .as_ref()
             .map(|id| {
-                runtime.block_on(crate::ops::human_session::primary::admitted_record(
+                crate::runtime::block_on(crate::ops::human_session::primary::admitted_record(
                     store,
                     id.as_str(),
                 ))
@@ -152,11 +141,10 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
     })?;
     let identity = identity("task.create", id, &input, input.run)?;
     let _lock = step("creation_lock", || lock(id))?;
-    let runtime = tokio::runtime::Runtime::new()?;
     let store = step("open_store", || -> Result<_> {
-        Ok(Arc::new(
-            runtime.block_on(open_store(&storage_config_from_env()?))?,
-        ))
+        Ok(Arc::new(crate::runtime::block_on(open_store(
+            &storage_config_from_env()?,
+        ))?))
     })?;
     step("check_receipt", || store.sqlite.check_creation(&identity)).map_err(
         |error| match error {
@@ -220,9 +208,9 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
     match recorded.disposition {
         RecoveryDisposition::Inspect => return Err(unknown(&recorded).into()),
         RecoveryDisposition::Complete if filed && admits => {
-            return start_conversation(id, &input, &store, &runtime, receipt)
+            return start_conversation(id, &input, &store, receipt)
         }
-        RecoveryDisposition::Complete => return answered(&store, &runtime, receipt),
+        RecoveryDisposition::Complete => return answered(&store, receipt),
         RecoveryDisposition::Continue if !admits => {}
         _ => return Err(unknown(&recorded).into()),
     }
@@ -254,7 +242,7 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
             .advance_creation(id, &receipt.milestone, Some(&receipt.stored_result()?))?;
         Ok(())
     })?;
-    answered(&store, &runtime, receipt)
+    answered(&store, receipt)
 }
 
 /// Start the admitted conversation held and answer. The conversation makes
@@ -263,7 +251,6 @@ fn start_conversation(
     id: &str,
     input: &TaskCreation,
     store: &crate::store::SharedStore,
-    runtime: &tokio::runtime::Runtime,
     receipt: TaskCreateReceipt,
 ) -> Result<Created> {
     let task = receipt.task.clone();
@@ -277,7 +264,7 @@ fn start_conversation(
         .context("admitted conversation is missing")?;
     // A conversation that does not start here starts, and sets up, when opened.
     step("hold_conversation", || {
-        match runtime.block_on(crate::ops::human_session::primary::hold_task_conversation(
+        match crate::runtime::block_on(crate::ops::human_session::primary::hold_task_conversation(
             store,
             &task,
             &session,
@@ -291,7 +278,7 @@ fn start_conversation(
             }
         }
     });
-    let mut created = answered(store, runtime, receipt)?;
+    let mut created = answered(store, receipt)?;
     let main = crate::git::worktrees::main_repo_root(&input.directory)?;
     let span = tracing::Span::current();
     let sync = move || {

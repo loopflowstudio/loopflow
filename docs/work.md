@@ -54,7 +54,9 @@ context without changing its Graph position or completion state.
 ```bash
 lf steer LOO-12 "keep the retry budget at 3"   # delivered at the next step or turn
 lf task status LOO-12 --json                   # thread: your steers, teammates' comments, agent reports
-lf task interrupt LOO-12                       # stop its running Graph
+lf task interrupt LOO-12                       # stop its running Graph; stay in Working
+lf task pause LOO-12                           # hold the Graph and keep the conversation open
+lf task unpause LOO-12 --run                   # lift pause and continue from the interrupted step
 lf task unassign LOO-12                        # release ownership; stops CI repair
 ```
 
@@ -82,6 +84,48 @@ itself is in `lf task status LOO-12 --json`.
 claims and runs. To jump into the conversation directly, run
 `lf resume --task LOO-12` ([Sessions](sessions.md)).
 
+### Pause a Task
+
+Pause an open, started Task to keep its checkout, claim, and Graph step for later.
+
+```text
+$ lf task pause LOO-12
+LOO-12 paused
+
+$ lf task status LOO-12
+LOO-12  paused
+  Graph code: Paused in build at implement. `lf task unpause --run` resumes it.
+```
+
+The worker and any subprocesses in its OS session stop. Other Tasks keep running.
+Codex tool shells can create their own OS sessions, and processes in those
+sessions can survive pause. A Graph command already in progress, such as `lf land`,
+finishes at its current step. The pause receipt names the finishing run.
+If cleanup was interrupted, repeat `lf task pause LOO-12` before unpausing.
+
+The primary conversation stays open. You can talk to it, send steers, or
+attach with `lf resume --task LOO-12`. The Task keeps its branch, dirty files,
+PR, and auto setting. New Graph runs, Auto-Ship, and worker retries wait for
+unpause, including after a Machine restart.
+
+An owned Task stays in **Working**, under **Paused** on Mac and iPhone.
+The Working rows in `lf task list --json` carry `working_group`.
+Find held Tasks with `lf task list --state paused`. Plain `lf task unpause LOO-12`
+lifts the hold. An interrupted step stays idle and ready for Run. If a step
+failed before pause, its failure stays in the execution history and shows
+in the Task’s condition again on unpause.
+Use `lf task unpause LOO-12 --run` to resume interrupted work or start a Graph that has yet to run.
+At a human step, at a landing step with auto off, or at the end, the command lifts
+the hold and leaves the Task there. Unpause on Mac and iPhone follows the same
+rule. Turn on Auto to continue from the landing stop.
+
+Unassign clears the hold once cleanup settles. Complete, abandon, and reopen
+also clear it. A move carries the hold to the destination, including a pause
+issued while the source is pushing the checkout. A pause issued after the
+payload was sent can need a retry when the checkout arrives.
+
+Use `lf task interrupt LOO-12` to stop the current run and allow another to start.
+
 ## See where everything stands
 
 ```bash
@@ -101,8 +145,8 @@ lf task list --closed --wave infra --since 7d  # closed in the last week
 lf task list --subscribe --json                # stream a JSON line on every change
 ```
 
-`lf task status` says where the Task stands on its Graph in one sentence, the
-same words Desktop's workflow bar shows:
+`lf task status` says where the Task stands on its Graph in one sentence, also
+available in Desktop’s workflow tooltip:
 
 ```text
 LOO-12  moving
@@ -110,11 +154,13 @@ LOO-12  moving
 ```
 
 With auto on, the second clause names auto: "Auto stands in next at
-ship-review." A stopped Graph reads "Stopped at build. `lf task run` starts it
-again." `--json` carries the parts: `graph.steps` (each top-level step's
+ship-review." A stopped Graph reads "Stopped in build at implement. `lf task run` starts it
+again." During cleanup the Task reads "Pausing at …". A paused run reads
+"Paused in build at implement. `lf task unpause --run` resumes it." At an interactive step,
+it reads "Paused at ship-review. `lf task unpause` lifts the hold." `--json` carries the parts: `graph.steps` (each top-level step's
 `name` and `interactive`, true when a person takes part anywhere inside the
 step), `graph.current_step` (its index, null before the start and at the end)
-and `graph.sentence`. Before a Task starts, Desktop draws the same steps from
+and `graph.sentence`. Both apps use `graph.control` for the button’s label and action. Before a Task starts, Desktop draws the same steps from
 [`lf graph list --json`](orchestration.md#describe-a-graph).
 
 Every read queries this machine's local store, so it answers instantly and
@@ -231,14 +277,15 @@ at ship-review. lf task status LOO-15
 A merge is news once Loopflow has seen it: `lf land` and auto mode see their
 own, and a PR merged by hand on GitHub shows at the next `lf pr reconcile`.
 
-`lf wave show` lists a child under its parent. Once the parent is
-done or abandoned, a child still open is listed on its own; its link stays.
+`lf wave show` lists a child under its parent. Any open child whose parent is
+done or abandoned is listed on its own; its link stays.
 
 ## Finish
 
 ```bash
 lf --task LOO-12 land --wait-and-fix   # merge its PR, repairing CI until it lands
-lf task complete LOO-12                # mark the Task done
+lf task complete LOO-12                # mark a leaf Task done
+lf task reopen LOO-15                  # reopen a done or abandoned Task
 ```
 
 A Task whose Graph reaches `end` requests completion automatically (waiting
@@ -251,21 +298,63 @@ A Task with open children stays open after its PR merges. It reads
 leaves it open, so its conversation is still there to conduct them. A Task
 with no PR whose graph reached `end` stands the same way and reads
 `Finished · 1 child open`; once nothing under it is open it reads
-`Finished; complete the Task`. Complete it when the follow-ups are settled:
+`Finished; complete the Task`.
+
+Running bare `lf task complete` on a parent with open children refuses, writes
+nothing, and lists the open descendant tree so grandchildren are not hidden:
 
 ```text
 $ lf task complete LOO-12
+Error: LOO-12 has 3 open children; say what happens to them:
+  LOO-14    Retry budget per host  #1980 merged
+    LOO-17  Retry metrics          unstarted
+  LOO-15    Log each retry         #1981 open, at ship-review
+  LOO-16    Document the budget    unstarted
+  lf task complete LOO-12 --children rehome    # direct children move up to LOO-10 and stay open
+  lf task complete LOO-12 --children abandon   # merged descendants done, the rest abandoned
+```
+
+Pass `--children rehome` to move direct open children up to the nearest open
+ancestor in the visible tree. When a deleted ancestor ends the chain or no
+ancestor is open, the children become top-level Tasks. Each child keeps its
+subtree. Closed children stay linked to the completed parent.
+
+```text
+$ lf task complete LOO-12 --children rehome
+LOO-12 done
+  LOO-14 moved up to LOO-10
+  LOO-15 moved up to LOO-10
+  LOO-16 moved up to LOO-10
+```
+
+Pass `--children abandon` to settle every open descendant: descendants whose PR
+merged are marked `done`, and the rest (unstarted or unmerged) are `abandoned`
+(closing their PRs and deleting their branches):
+
+```text
+$ lf task complete LOO-12 --children abandon
 LOO-12 done
   LOO-14 done: #1980 merged
     LOO-17 abandoned: no merged PR
-  LOO-16 abandoned: no merged PR
   LOO-15 abandoned: #1981 open, at ship-review
+  LOO-16 abandoned: no merged PR
 ```
 
-Completing a parent Task settles every open descendant: children whose PR
-merged are marked `done`, and all other open children (unstarted or unmerged)
-are `abandoned` (closing their PRs and deleting their branches). Abandoned
-Tasks cannot be reopened.
+If any descendant that `--children abandon` would abandon has live work — a
+running Graph, headless run, or active turn — the command refuses without
+writing, names each blocker, and suggests `lf task interrupt <child>` or
+`--children rehome`. Idle Task conversations waiting at an interactive step are closed
+cleanly and do not block.
+
+In Loopflow Desktop and on iOS, completing a parent with open children opens a
+confirmation dialog with the same choices ([Surfaces](surfaces.md#changes-show-at-once)).
+
+`lf task reopen` works on both done and abandoned Tasks. It restores the Task
+to `started` (or `unstarted` if it never ran) and turns auto off. The abandoned
+attempt's closed PR stays in the Task's history. If its checkout
+and local branch were deleted, the next `lf task run` starts a fresh checkout
+from main. Any surviving checkout or local branch keeps its work. The next
+publish opens a new PR linked to the same issue.
 
 A done Task's conversation is still yours. `lf resume LOO-12` reopens it
 after the checkout is gone, in the repository's main checkout, and it goes on
@@ -289,11 +378,21 @@ laptop$ lf task create 'plan smoke'
 plan smoke · 3e1c9a
 laptop$ lf repo tracker
 Plan: Git origin.
+
+mini$ lf task create 'from mini'
+from mini · 8b4d2e
+mini$ lf task list
+3e1c9a · — · plan smoke
+8b4d2e · — · from mini
 ```
 
-The Task is on the remote in seconds and `lf task list` on the mini shows it
-within a minute; the
-first `lf task list` in a fresh clone reads the remote before it answers. A
+The Task is on the remote in seconds. In a fresh clone, the first command that
+reads the plan (`lf task list`, `lf wave list`, `lf wave show`, `lf wave status`,
+`lf wave plan`, `lf plan list`, `lf plan board`, or `lf repo tracker`) reads the
+remote before it answers, even if you already ran `lf task create` there first.
+Later reads answer from this Machine's local store without fetching. If that
+first read fails or takes more than five seconds, the command still answers from
+the local store and waits a minute before trying again on a later read. A
 teammate who clones the repository sees the same plan, and their Tasks appear
 in yours: no account and no server, only push access to the repository.
 
@@ -307,7 +406,8 @@ Every command saves on this Machine first, so nothing waits on the network.
 Each Machine pushes its plan to a ref of its own on the remote
 (`refs/loopflow/plan/<machine id>`) as part of the save, for five seconds at
 most. Its server fetches the others’ refs about every 30 seconds while it owns
-open Tasks in the repository and once a minute otherwise. A running Graph step
+open Tasks in the repository, and once a minute while the repository has open
+Tasks or Waves here. A running Graph step
 keeps checking its repository if the server exits. `lf task sync <issue>` does
 both now. The refs stay out of
 `git branch`, `git status` and a plain clone. A repository with no remote reads
@@ -389,7 +489,15 @@ loses nothing; `lf machine list` marks the hub.
 A repository with no remote can still use a hub. With no ref to tell its
 clones they are the same repository, say so once: `lf config repo` prints the
 repository id on the first Machine and `lf config repo --bind <id>` sets it in
-each other clone, the hub's included.
+each other clone, the hub's included. The first plan read after binding pulls
+the plan from the hub before it answers:
+
+```text
+mini$ lf config repo --bind 6f9a2c40-…
+6f9a2c40-…
+mini$ lf task list
+3e1c9a · — · plan smoke
+```
 
 A Machine still running an earlier `lf` keeps reading the old
 `refs/loopflow/planning/*` and sees none of these changes until it updates. A
@@ -516,10 +624,11 @@ crosses storage, auth, or public APIs.
 ```
 
 `MEMORY.md` beside it holds what later Tasks need: decisions, dead ends and facts.
-Agents update it as work ships, and `realign` keeps
-plan, code, and memory in sync. Both files are ordinary Markdown in Git,
-reviewed in PRs. Check each file's context footprint with
-`lf context --wave billing`.
+The Wave's conversation (`wave-session`, opened with `lf resume --wave billing`)
+curates it—promoting lessons from child Waves, replacing stale guidance, and
+retiring the largest stale sections when `lf context --wave billing` exceeds its
+limit. Both `GOAL.md` and `MEMORY.md` are ordinary Markdown in Git, reviewed in
+PRs.
 
 ### Defaults per Wave
 
@@ -555,8 +664,8 @@ lf wave status billing                            # the Wave's Project, Tasks an
 ```
 
 `wave-operate` reviews every started Task you own (leaving running Graphs alone
-and continuing stopped ones), lists unstarted backlog for you to pick, and
-leaves teammates' Tasks untouched. Run it on a schedule with your OS scheduler:
+and continuing stopped ones), skips paused Tasks, lists unstarted backlog for
+you to pick, and leaves teammates' Tasks untouched. Run it on a schedule with your OS scheduler:
 
 ```bash
 # Linux crontab (or a macOS LaunchAgent when Keychain access is needed):
@@ -622,25 +731,6 @@ Removal retires the Wave and its children, folds a child's `MEMORY.md` into its
 parent, and keeps completed history readable via `lf wave show payments`.
 You can then connect another Wave to the same Linear Project.
 
-### Talk to it from Discord
-
-Talk to a Wave from a Discord channel:
-
-```yaml
-# .lf/wave/billing/config.yaml
-chat:
-  provider: discord
-  guild_id: "123456789012345678"
-  channel_id: "234567890123456789"
-```
-
-```bash
-doppler run -- lf discord serve billing
-```
-
-Each new message becomes a Wave-attributed conversation and posts its final
-answer back to the channel.
-
 ## Reference
 
 **Task identifiers.** Ticket aliases (`LOO-12`, case-insensitive), full IDs, or
@@ -671,15 +761,20 @@ once a PR merges on a Task that stays open (conducting children, or after
 `lf task reopen`), `lf task run <ID> --from <step>` (or `lf pr submit`) starts
 the next pass and opens the next PR linked to the same issue.
 
-`lf task complete` updates status only on a leaf Task; on a parent it also
-finishes children with merged PRs and abandons all other open children
-(closing their PRs and deleting their branches), recursing through open
-descendants. `lf task complete --json` carries `children`: each child's row,
-its `outcome` (`done` or `abandoned`) and its own `children`, `[]` when there
-were none. `lf task reopen` keeps the same PR and restores started Tasks to
-`started` (or `unstarted` if never started); abandoned Tasks cannot be
-reopened.
-`lf task abandon` cancels the Task, closes its PRs, and deletes its branches.
+`lf task complete` updates status only on a leaf Task (or queues completion if
+the leaf's PR is still open). On a parent with open children, bare
+`lf task complete` refuses and writes nothing; pass `--children rehome` to move
+direct open children up to the nearest open ancestor (or top level) or
+`--children abandon` to mark merged descendants `done` and abandon the rest
+(refusing without writing if any descendant it would abandon has a running
+Graph, headless run, or active turn, or if the parent's own PR is unmerged).
+`lf task complete --json` carries `children`: each affected child's row, its
+`outcome` (`done`, `abandoned`, or `rehomed`), and its own `children` (`[]`
+when none or when `rehomed`). `lf task reopen` works on both done and abandoned
+Tasks, restoring started Tasks to `started` (or `unstarted` if never started)
+and turning auto off; closed PRs and deleted branches are not restored.
+`lf task abandon` cancels the Task, closes its PRs, and deletes its branches,
+leaving any open children linked and open.
 
 **Idempotent creation (`--request-id`).** Scripts and Desktop can pass
 `--request-id <id>` to `lf task create` so a lost reply never creates a

@@ -42,7 +42,9 @@ pub struct PlanCarrier {
     pub peer: String,
     /// How far into this Machine's `plan_changes` the carrier has taken.
     pub sent_seq: i64,
-    /// The hub's own change watermark read to; `None` before the first read.
+    /// Whether this Machine has read the peer: the hub's own change watermark
+    /// read to, or `0` for Git once a fetch was read (Git keeps per-Machine
+    /// tips in `plan_refs`); `None` before the first read.
     pub seen_seq: Option<i64>,
     pub error: Option<String>,
     /// When the carrier stopped working, while it still doesn't.
@@ -50,6 +52,13 @@ pub struct PlanCarrier {
     /// What its last read brought that could not be written here; `None`
     /// when it took everything.
     pub not_taken: Option<NotTaken>,
+}
+
+impl PlanCarrier {
+    /// Whether this Machine has read this carrier's peer at least once.
+    pub fn has_read(&self) -> bool {
+        self.seen_seq.is_some()
+    }
 }
 
 /// A record a carrier brought that this Machine could not write.
@@ -304,6 +313,19 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// `carrier` has fetched and read `repo`'s plan at least once. Only
+    /// writes when `seen_seq` is still `NULL`, so repeated exchanges do not
+    /// advance the row's revision.
+    pub fn plan_read(&self, repo: &str, carrier: Carrier) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE plan_carriers SET seen_seq=0
+             WHERE repo=?1 AND carrier=?2 AND seen_seq IS NULL",
+            params![repo, carrier.as_str()],
+        )?;
+        Ok(())
+    }
+
     /// The carrier worked (`None`) or did not, and why.
     pub fn record_carrier_exchange(
         &self,
@@ -379,7 +401,7 @@ impl SqliteStore {
     ) -> StoreResult<PlanPage> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
-        let mut query = snapshot.prepare(
+        let mut query = snapshot.prepare_cached(
             "SELECT seq,owner_table,owner_id FROM plan_changes WHERE repo=?1 AND seq>?2 ORDER BY seq",
         )?;
         let mut rows = query.query(params![repo, since])?;
@@ -1037,5 +1059,31 @@ mod tests {
         );
         let back: Vec<crate::work::edit::StampedRecord> = serde_json::from_str(&wire).unwrap();
         assert_eq!(back, page.records);
+    }
+
+    #[test]
+    fn plan_read_marks_seen_seq_once_and_resets_when_the_peer_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = machine(&dir, "laptop");
+        let initial = store.select_carrier(REPO, Carrier::Git, "origin").unwrap();
+        assert!(!initial.has_read());
+        assert_eq!(initial.seen_seq, None);
+
+        store.plan_read(REPO, Carrier::Git).unwrap();
+        let marked = store.plan_carrier(REPO, Carrier::Git).unwrap().unwrap();
+        assert!(marked.has_read());
+        assert_eq!(marked.seen_seq, Some(0));
+
+        // A second mark on an already-read carrier is a no-op and advances no revision.
+        let revisions = store.revisions().unwrap();
+        store.plan_read(REPO, Carrier::Git).unwrap();
+        assert_eq!(store.revisions().unwrap(), revisions);
+
+        // Switching the peer resets the read mark so the new peer is read once.
+        let switched = store
+            .select_carrier(REPO, Carrier::Git, "upstream")
+            .unwrap();
+        assert!(!switched.has_read());
+        assert_eq!(switched.seen_seq, None);
     }
 }

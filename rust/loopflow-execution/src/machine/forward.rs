@@ -162,7 +162,7 @@ fn transfer(
         }
         FileDelivery::Replace => {
             // Verify the registered identity on the connection that replaces the login.
-            script.push(crate::machine::ssh::remote_path());
+            script.push(crate::machine::ssh::lf_remote_path());
             script.push(format!(
                 "{}={} lf machine self </dev/null >/dev/null",
                 crate::machine::ssh::EXPECTED_MACHINE_ID_ENV,

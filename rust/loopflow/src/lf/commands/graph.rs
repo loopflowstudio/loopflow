@@ -3,6 +3,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use clap::Parser;
 use loopflow_execution::config::environment::EnvVarGuard;
+use loopflow_execution::engine::task::TaskRun;
 use loopflow_execution::graph::compile_graph;
 use loopflow_execution::graph::output::GraphOutput;
 use loopflow_execution::graph::return_target;
@@ -18,6 +19,7 @@ use loopflow_execution::graph::ConcreteStep;
 use loopflow_execution::graph::ConcreteXor;
 use loopflow_execution::graph::GraphDefinition;
 use loopflow_execution::journal::{self, LfEventFields, LfEventType, LfNode};
+use loopflow_execution::ops::task::{TaskRunMode, TaskRunStart};
 use loopflow_execution::ops::WorkBinding;
 use loopflow_execution::ops::{graph_process, tracker_events};
 use loopflow_execution::output::Colors;
@@ -218,15 +220,15 @@ impl TaskRunStopped {
 /// started again.
 /// `run` names the graph and where the run set out, for messages.
 ///
-/// With `release`, a bare run inside its execution owner lets its launcher go
-/// once the first attempt has registered, and carries on with its output in
-/// that attempt's log. `announce` hears the first registered Graph process
-/// and that log, before the launcher goes.
+/// A bare run inside its execution owner lets its launcher go once the first
+/// attempt has registered, and carries on with its output in that attempt's
+/// log. `announce` hears the first registered Graph process and that log,
+/// before the launcher goes.
 pub fn run_task_graph_for(
     cli: &Cli,
     task: &Task,
     run: &str,
-    release: bool,
+    cursor: i64,
     announce: &mut dyn FnMut(&LfProcessId, Option<&Path>) -> Result<()>,
 ) -> Result<()> {
     let checkout = task.worktree()?;
@@ -235,8 +237,7 @@ pub fn run_task_graph_for(
     let store = &store.sqlite;
     let process =
         journal::current_lf_process_id().context("a Task run requires a registered Process")?;
-    let cursor = store.latest_interrupt_id(&task.id)?;
-    let letting_go = release && lets_launcher_go(cli);
+    let letting_go = lets_launcher_go(cli);
     let mut released = false;
     let mut attempt = 1;
     // The error every failed attempt so far shared, if they all shared one.
@@ -273,7 +274,7 @@ pub fn run_task_graph_for(
         if status.success() {
             return Ok(());
         }
-        if store.latest_interrupt_id(&task.id)? > cursor {
+        if store.task_graph_stopped_since(&task.id, cursor)? {
             eprintln!("Task run interrupted; not starting it again.");
             return Err(loopflow_execution::process::CommandExit(130).into());
         }
@@ -380,22 +381,41 @@ pub fn carry_task_run(
     options: loopflow_execution::ops::task::TaskProcessOptions,
     json: bool,
 ) -> Result<()> {
-    use loopflow_execution::engine::task::TaskRun;
-    use loopflow_execution::ops::task::{TaskRunMode, TaskRunStart};
-    let mode = if cli.interactive {
+    let (task, start) = loopflow_execution::ops::task::task_place(
+        repo,
+        issue,
+        options,
+        task_run_mode(cli),
+        crate::lf::navigation::command_merges,
+    )?;
+    carry_placed_task(cli, task, start, json)
+}
+
+pub fn carry_unpaused_task(cli: &Cli, repo: &Path, issue: &str) -> Result<()> {
+    let placed = loopflow_execution::ops::task::unpause_task_run(
+        repo,
+        issue,
+        task_run_mode(cli),
+        crate::lf::navigation::command_merges,
+    )?;
+    let Some((task, start)) = placed else {
+        loopflow_execution::engine::launch::report(Ok(&None::<TaskRun>));
+        return Ok(());
+    };
+    carry_placed_task(cli, task, start, true)
+}
+
+fn task_run_mode(cli: &Cli) -> TaskRunMode {
+    if cli.interactive {
         TaskRunMode::InPlace
     } else if cli.batch {
         TaskRunMode::Headless
     } else {
         TaskRunMode::Stop
-    };
-    let (task, start) = loopflow_execution::ops::task::task_place(
-        repo,
-        issue,
-        options,
-        mode,
-        crate::lf::navigation::command_merges,
-    )?;
+    }
+}
+
+fn carry_placed_task(cli: &Cli, task: Task, start: TaskRunStart, json: bool) -> Result<()> {
     if !cli.interactive {
         loopflow_execution::ops::task::prepare_conversation_beside(&task);
     }
@@ -409,25 +429,30 @@ pub fn carry_task_run(
         }
         Ok(())
     };
-    let (step, merges) = match start {
+    let (step, merges, cursor) = match start {
         TaskRunStart::Run {
             step,
             merges,
             stands_in,
+            interrupt_cursor,
         } => {
             if let Some(step) = stands_in {
                 eprintln!("{issue}: standing in at {step}");
             }
-            (step, merges)
+            (step, merges, interrupt_cursor)
         }
-        TaskRunStart::Live { run, graph_process } => {
+        TaskRunStart::Live {
+            run,
+            merges,
+            graph_process,
+        } => {
             return announce(&TaskRun::Running {
                 log: Some(loopflow_execution::process::launch_log::graph_log_path(
                     graph_process.as_str(),
                 )),
                 issue,
                 run,
-                merges: true,
+                merges,
                 graph_process,
             })
         }
@@ -436,7 +461,7 @@ pub fn carry_task_run(
     };
     // This process carries the run; its Graph process writes where the
     // Task stopped. A run that never arrives leaves the Task to start it again.
-    run_task_graph_for(cli, &task, &step, true, &mut |graph, log| {
+    run_task_graph_for(cli, &task, &step, cursor, &mut |graph, log| {
         announce(&TaskRun::Running {
             issue: issue.clone(),
             run: step.clone(),
@@ -685,15 +710,15 @@ async fn interrupt_cursor(
     {
         return Ok(cursor);
     }
-    Ok(store.latest_interrupt_id(task).await?)
+    Ok(store
+        .latest_task_event(task)
+        .await?
+        .map_or(0, |event| event.id))
 }
 
 /// Run `future` to completion from this synchronous command.
 fn block_on<T>(future: impl std::future::Future<Output = Result<T>>) -> Result<T> {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?
-        .block_on(future)
+    loopflow_execution::runtime::block_on(future)
 }
 
 async fn open_graph_store() -> Result<SharedStore> {
@@ -965,8 +990,8 @@ impl RunningGraph<'_> {
         let (Some(task), Some(cursor)) = (&self.task, self.interrupt) else {
             return false;
         };
-        match self.store.sqlite.latest_interrupt_id(task) {
-            Ok(latest) => latest > cursor,
+        match self.store.sqlite.task_graph_stopped_since(task, cursor) {
+            Ok(stopped) => stopped,
             Err(error) => {
                 tracing::warn!(%error, "failed to read Task interrupts");
                 false
@@ -1017,6 +1042,17 @@ impl RunningGraph<'_> {
         if let Some(step) = &step {
             self.reserve_step(step)?;
         }
+        let configured_jobs = loopflow_execution::config::load_config_or_default(Some(self.cwd))
+            .machine
+            .jobs;
+        let running_steps = self
+            .store
+            .sqlite
+            .running_graph_step_count()
+            .unwrap_or(1)
+            .max(1);
+        let jobs = compute_step_jobs(available_cores(), running_steps, configured_jobs);
+        apply_step_resource_budget(&mut command, jobs);
         // Once reserved, the step ends with whatever stopped it from starting.
         let spawned = (|| -> Result<_> {
             let admission = loopflow_execution::store::admission::lock_task_checkouts(
@@ -1101,8 +1137,9 @@ impl RunningGraph<'_> {
                 )
             })?;
         let status = status.context("could not execute Graph step")?;
-        // An interrupt during an operation takes effect once it has finished.
-        if signalled || self.interrupted() {
+        // An interrupted agent ends at once; a draining operation finishes and
+        // records its own exit so the runner advances past it before stopping.
+        if signalled || (kind == StepKind::Agent && self.interrupted()) {
             eprintln!("Graph {} interrupted at {label}.", self.graph);
             // Someone stopped it: a wait it was in no longer starts it again.
             if let Some(step) = &step {
@@ -1187,6 +1224,65 @@ fn answer_value(text: &str) -> Result<serde_json::Value, String> {
     })
 }
 
+#[cfg(test)]
+static TEST_AVAILABLE_CORES: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+fn available_cores() -> usize {
+    #[cfg(test)]
+    {
+        let override_cores = TEST_AVAILABLE_CORES.load(std::sync::atomic::Ordering::Relaxed);
+        if override_cores > 0 {
+            return override_cores;
+        }
+    }
+    std::thread::available_parallelism()
+        .map(std::num::NonZeroUsize::get)
+        .unwrap_or(1)
+}
+
+fn compute_step_jobs(cores: usize, running_steps: usize, configured_jobs: Option<usize>) -> usize {
+    if let Some(cap) = configured_jobs {
+        return cap.max(1);
+    }
+    (cores / running_steps.max(1)).max(2)
+}
+
+fn apply_step_resource_budget(command: &mut tokio::process::Command, jobs: usize) {
+    let jobs_text = jobs.to_string();
+    for (key, value) in [
+        ("CARGO_BUILD_JOBS", jobs_text.as_str()),
+        ("NEXTEST_TEST_THREADS", jobs_text.as_str()),
+        ("LF_JOBS", jobs_text.as_str()),
+    ] {
+        if std::env::var_os(key).is_none() {
+            command.env(key, value);
+        }
+    }
+    if std::env::var_os("MAKEFLAGS").is_none() {
+        command.env("MAKEFLAGS", format!("-j{jobs}"));
+    }
+    #[cfg(unix)]
+    {
+        // SAFETY: getpriority and setpriority are async-signal-safe syscalls.
+        unsafe {
+            command.pre_exec(|| {
+                const TARGET_NICE: libc::c_int = 5;
+                #[cfg(target_os = "macos")]
+                let errno_ptr = libc::__error();
+                #[cfg(target_os = "linux")]
+                let errno_ptr = libc::__errno_location();
+                *errno_ptr = 0;
+                let current = libc::getpriority(libc::PRIO_PROCESS, 0);
+                if *errno_ptr != 0 || current < TARGET_NICE {
+                    let _ = libc::setpriority(libc::PRIO_PROCESS, 0, TARGET_NICE);
+                }
+                Ok(())
+            });
+        }
+    }
+}
+
 impl RunningGraph<'_> {
     /// Every skill step's edits become one commit, written and pushed by a
     /// child `lf commit --step` (which also pushes commits the skill made
@@ -1243,6 +1339,13 @@ impl SkillExecutor for &RunningGraph<'_> {
         };
         if let Some(step) = self.stopped_landing()? {
             return Ok(SkillOutcome::StopsAt(step));
+        }
+        if self.interrupted() {
+            eprintln!(
+                "Graph {} interrupted before {}.",
+                self.graph, skill.skill.name
+            );
+            return Ok(SkillOutcome::Interrupted);
         }
         loopflow_execution::ops::tracker_events::sync_repository(
             &self.store,
@@ -1348,15 +1451,19 @@ impl SkillExecutor for &RunningGraph<'_> {
         ops: &loopflow_execution::graph::ConcreteCommand,
         _ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
+        let label = ops.item.display_name();
         if let Some(step) = self.stopped_landing()? {
             return Ok(SkillOutcome::StopsAt(step));
+        }
+        if self.interrupted() {
+            eprintln!("Graph {} interrupted before {label}.", self.graph);
+            return Ok(SkillOutcome::Interrupted);
         }
         loopflow_execution::ops::tracker_events::sync_repository(
             &self.store,
             &self.cwd.to_string_lossy(),
         )
         .await;
-        let label = ops.item.display_name();
         eprintln!("op: {label}");
         let argv = ops.item.argv();
         let parsed = crate::lf::navigation::normalize_args(argv.clone())
@@ -1579,7 +1686,7 @@ mod tests {
                 task_run: None,
                 interrupt: Some(
                     runtime
-                        .block_on(fixture.store.latest_interrupt_id(&task.id))
+                        .block_on(super::interrupt_cursor(&fixture.store, &task.id))
                         .unwrap(),
                 ),
             };
@@ -1599,6 +1706,90 @@ mod tests {
             assert_eq!(outcome, GraphOutcome::Interrupted);
             assert!(begun.elapsed() < std::time::Duration::from_secs(10));
             assert_eq!(fs::read_to_string(&started).unwrap().lines().count(), 1);
+        });
+    }
+
+    #[test]
+    fn a_draining_command_preserves_failure_and_advances_when_it_exits_zero() {
+        use crate::lf::Cli;
+        use clap::Parser;
+        use loopflow_execution::graph::runner::{ExecutionCursor, GraphOutcome, GraphRunner};
+        use loopflow_execution::graph::{Command, ConcreteCommand};
+        use loopflow_execution::test_support::planning_tasks::with_planning_task;
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::Mutex;
+
+        with_planning_task(|runtime, fixture, repo, task, _| {
+            let _env = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
+            let cli = Cli::try_parse_from(["lf", "--batch"]).unwrap();
+            let op = |name: &str| {
+                ConcreteStep::Command(ConcreteCommand {
+                    item: Command {
+                        command: name.into(),
+                        args: Vec::new(),
+                    },
+                    sources: Vec::new(),
+                })
+            };
+            let run_draining = |tag: &str, exit_code: i32, steps: &[ConcreteStep]| {
+                let started = fixture.directory.path().join(format!("started-{tag}"));
+                let release = fixture.directory.path().join(format!("release-{tag}"));
+                let child = fixture.directory.path().join(format!("lf-{tag}"));
+                fs::write(
+                    &child,
+                    format!(
+                        "#!/bin/sh\n: > '{}'\nwhile [ ! -f '{}' ]; do sleep 0.02; done\nexit {exit_code}\n",
+                        started.display(),
+                        release.display()
+                    ),
+                )
+                .unwrap();
+                fs::set_permissions(&child, fs::Permissions::from_mode(0o755)).unwrap();
+                std::env::set_var("LF_BIN", &child);
+                let running = super::RunningGraph {
+                    store: fixture.store.clone(),
+                    process: loopflow_model::id::LfProcessId::new(),
+                    graph: tag,
+                    steps,
+                    message: None,
+                    cwd: repo,
+                    launcher: &cli,
+                    position: Mutex::new(ExecutionCursor::default()),
+                    task: Some(task.id.clone()),
+                    task_run: None,
+                    interrupt: Some(
+                        runtime
+                            .block_on(super::interrupt_cursor(&fixture.store, &task.id))
+                            .unwrap(),
+                    ),
+                };
+                record_run(&running);
+                let result = runtime.block_on(async {
+                    let interrupt = async {
+                        while !started.exists() {
+                            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                        }
+                        fixture.store.append_interrupt(&task.id).await.unwrap();
+                        fs::write(&release, "").unwrap();
+                    };
+                    let runner = GraphRunner::new(&running);
+                    let (result, ()) = tokio::join!(runner.run(steps, 0), interrupt);
+                    result
+                });
+                (result, running.position.into_inner().unwrap())
+            };
+
+            // A draining command that exits non-zero fails instead of reading Interrupted.
+            let (failed, _) = run_draining("drain-fail", 1, &[op("first"), op("second")]);
+            assert!(
+                failed.is_err(),
+                "a non-zero draining command must fail, not read Interrupted: {failed:?}"
+            );
+
+            // A draining final command that exits 0 completes the Graph.
+            let (completed, cursor) = run_draining("drain-last", 0, &[op("final")]);
+            assert_eq!(completed.unwrap(), GraphOutcome::Completed);
+            assert_eq!(cursor.index, 1);
         });
     }
 
@@ -1643,7 +1834,7 @@ mod tests {
     #[test]
     fn builtin_task_graphs_compile_and_name_their_interactive_steps() {
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        for name in ["task-design", "pursue", "queue", "deliver"] {
+        for name in ["task-design", "pursue", "deliver", "quick"] {
             let graph = loopflow_execution::graph::load_graph(name, &repo).unwrap();
             let items = loopflow_execution::graph::compile_graph(&graph, &repo).unwrap();
             assert!(
@@ -1698,5 +1889,169 @@ mod tests {
         assert_eq!(mode(&["lf", "task", "run", "INF-1"]), (false, false));
         assert_eq!(mode(&["lf", "-b", "task", "run", "INF-1"]), (true, false));
         assert_eq!(mode(&["lf", "-i", "task", "run", "INF-1"]), (false, true));
+    }
+
+    #[test]
+    fn graph_steps_share_cores_and_run_niced_while_keeping_preset_env() {
+        use crate::lf::Cli;
+        use clap::Parser;
+        use loopflow_execution::graph::runner::ExecutionCursor;
+        use loopflow_execution::graph::{ConcreteSkill, Skill};
+        use loopflow_execution::test_support::planning_tasks::with_planning_task;
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::atomic::Ordering;
+        use std::sync::Mutex;
+
+        struct CoresGuard;
+        impl Drop for CoresGuard {
+            fn drop(&mut self) {
+                super::TEST_AVAILABLE_CORES.store(0, Ordering::Relaxed);
+            }
+        }
+
+        with_planning_task(|runtime, fixture, repo, _, _| {
+            let _env = crate::test_ambient::EnvGuard::clear(&[
+                "LF_BIN",
+                "CARGO_BUILD_JOBS",
+                "NEXTEST_TEST_THREADS",
+                "MAKEFLAGS",
+                "LF_JOBS",
+            ]);
+            super::TEST_AVAILABLE_CORES.store(16, Ordering::Relaxed);
+            let _cores = CoresGuard;
+
+            let report_path = fixture.directory.path().join("step-env.json");
+            let hold_gate = fixture.directory.path().join("release-holder");
+            let holder_ready = fixture.directory.path().join("holder-ready");
+            let child = fixture.directory.path().join("lf-step-probe");
+            fs::write(
+                &child,
+                format!(
+                    concat!(
+                        "#!/usr/bin/env python3\n",
+                        "import json, os, sys, time\n",
+                        "if 'hold' in sys.argv:\n",
+                        "    open({ready}, 'w').write('ok')\n",
+                        "    while not os.path.exists({gate}):\n",
+                        "        time.sleep(0.02)\n",
+                        "data = {{\n",
+                        "    'CARGO_BUILD_JOBS': os.environ.get('CARGO_BUILD_JOBS'),\n",
+                        "    'NEXTEST_TEST_THREADS': os.environ.get('NEXTEST_TEST_THREADS'),\n",
+                        "    'MAKEFLAGS': os.environ.get('MAKEFLAGS'),\n",
+                        "    'LF_JOBS': os.environ.get('LF_JOBS'),\n",
+                        "    'nice': os.nice(0),\n",
+                        "}}\n",
+                        "out = sys.argv[-1]\n",
+                        "open(out, 'w').write(json.dumps(data))\n",
+                    ),
+                    ready = serde_json::to_string(&holder_ready).unwrap(),
+                    gate = serde_json::to_string(&hold_gate).unwrap(),
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&child, fs::Permissions::from_mode(0o755)).unwrap();
+            std::env::set_var("LF_BIN", &child);
+
+            let cli = Cli::try_parse_from(["lf", "--batch"]).unwrap();
+            let skill = ConcreteStep::Skill(ConcreteSkill {
+                skill: Skill::named("probe"),
+                id: None,
+                interactive: false,
+                interactive_name: None,
+                returns: None,
+                sources: Vec::new(),
+            });
+            let steps = [skill];
+            let graph_a = super::RunningGraph {
+                store: fixture.store.clone(),
+                process: loopflow_model::id::LfProcessId::new(),
+                graph: "probe-a",
+                steps: &steps,
+                message: None,
+                cwd: repo,
+                launcher: &cli,
+                position: Mutex::new(ExecutionCursor::default()),
+                task: None,
+                task_run: None,
+                interrupt: None,
+            };
+            let graph_b = super::RunningGraph {
+                store: fixture.store.clone(),
+                process: loopflow_model::id::LfProcessId::new(),
+                graph: "probe-b",
+                steps: &steps,
+                message: None,
+                cwd: repo,
+                launcher: &cli,
+                position: Mutex::new(ExecutionCursor::default()),
+                task: None,
+                task_run: None,
+                interrupt: None,
+            };
+            record_run(&graph_a);
+            record_run(&graph_b);
+
+            runtime.block_on(async {
+                let report_a = fixture.directory.path().join("report-a.json");
+                let report_b = fixture.directory.path().join("report-b.json");
+                let hold_args = vec!["hold".into(), report_a.display().to_string()];
+                let probe_b_args = vec![report_b.display().to_string()];
+
+                // Start graph_a's holding step, then spawn graph_b's step beside it so
+                // two steps are active on the 16-core fixture.
+                let run_a = graph_a.spawn("probe-a", super::StepKind::Agent, &hold_args);
+                let run_b = async {
+                    while !holder_ready.exists() {
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                    }
+                    let res = graph_b
+                        .spawn("probe-b", super::StepKind::Agent, &probe_b_args)
+                        .await
+                        .unwrap();
+                    fs::write(&hold_gate, "go").unwrap();
+                    res
+                };
+                let (res_a, _) = tokio::join!(run_a, run_b);
+                res_a.unwrap();
+
+                let b: serde_json::Value =
+                    serde_json::from_str(&fs::read_to_string(&report_b).unwrap()).unwrap();
+                assert_eq!(b["CARGO_BUILD_JOBS"], "8");
+                assert_eq!(b["NEXTEST_TEST_THREADS"], "8");
+                assert_eq!(b["MAKEFLAGS"], "-j8");
+                assert_eq!(b["LF_JOBS"], "8");
+                assert!(b["nice"].as_i64().unwrap() >= 5, "expected nice >= 5: {b}");
+
+                // Preset environment variables are left alone.
+                std::env::set_var("CARGO_BUILD_JOBS", "3");
+                let preset_args = vec![report_path.display().to_string()];
+                graph_a
+                    .spawn("preset", super::StepKind::Agent, &preset_args)
+                    .await
+                    .unwrap();
+                std::env::remove_var("CARGO_BUILD_JOBS");
+                let preset: serde_json::Value =
+                    serde_json::from_str(&fs::read_to_string(&report_path).unwrap()).unwrap();
+                assert_eq!(preset["CARGO_BUILD_JOBS"], "3");
+                assert_eq!(preset["NEXTEST_TEST_THREADS"], "16");
+                assert_eq!(preset["MAKEFLAGS"], "-j16");
+                assert_eq!(preset["LF_JOBS"], "16");
+                assert!(preset["nice"].as_i64().unwrap() >= 5);
+
+                // machine.jobs in ~/.lf/config.yaml overrides automatic sharing.
+                let config_path = loopflow_execution::store::lf_home_dir().join("config.yaml");
+                fs::write(&config_path, "machine:\n  jobs: 4\n").unwrap();
+                graph_a
+                    .spawn("override", super::StepKind::Agent, &preset_args)
+                    .await
+                    .unwrap();
+                let overridden: serde_json::Value =
+                    serde_json::from_str(&fs::read_to_string(&report_path).unwrap()).unwrap();
+                assert_eq!(overridden["CARGO_BUILD_JOBS"], "4");
+                assert_eq!(overridden["NEXTEST_TEST_THREADS"], "4");
+                assert_eq!(overridden["MAKEFLAGS"], "-j4");
+                assert_eq!(overridden["LF_JOBS"], "4");
+            });
+        });
     }
 }

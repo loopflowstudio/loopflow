@@ -4,6 +4,7 @@ use crate::durable::TaskState;
 use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::ops::pr_landing::{reconcile_pr_landing, wait_with_io, LandingIo, LandingObservation};
 use crate::store::{SharedStore, StorageConfig};
+use crate::task_graph::tests::test_merges;
 use crate::test_linear_input::SeedLinear;
 use crate::work::wave::Wave;
 use loopflow_model::durable::{WorkRef, WorkStatus};
@@ -540,14 +541,19 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
             .block_on(super::snapshot::read_task_snapshot(
                 &fixture.store,
                 fixture.task.clone(),
+                |_| false,
             ))
             .unwrap();
         assert_eq!(snapshot.execution.state, state);
         assert_eq!(snapshot.status, TaskState::Moving);
         assert_eq!(
-            crate::store::ownership::task_detail_facts(&fixture.store.sqlite, &[&fixture.task])
-                .unwrap()
-                .states[&fixture.task.id],
+            crate::store::ownership::task_detail_facts(
+                &fixture.store.sqlite,
+                &[&fixture.task],
+                test_merges
+            )
+            .unwrap()
+            .states[&fixture.task.id],
             TaskState::Moving
         );
         assert_eq!(
@@ -591,6 +597,7 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
         .block_on(super::snapshot::read_task_snapshot(
             &fixture.store,
             fixture.task.clone(),
+            |_| false,
         ))
         .unwrap();
     assert_eq!(
@@ -857,7 +864,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
         )
         .unwrap();
     assert_eq!(
-        crate::store::task_work::task_work(&fixture.store.sqlite, &fixture.task.id)
+        crate::store::task_work::task_work(&fixture.store.sqlite, &fixture.task.id, |_| false)
             .unwrap()
             .sessions
             .len(),
@@ -874,7 +881,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
             graphql_url: "http://127.0.0.1:1".into(),
         },
         || {
-            let snapshot = super::task_snapshot(&fixture.task).unwrap();
+            let snapshot = super::task_snapshot(&fixture.task, |_| false).unwrap();
             assert_eq!(snapshot.machine_id, Some(local.clone()));
             assert_eq!(snapshot.task_id, fixture.task.id.as_str());
             assert_eq!(snapshot.pr.as_ref().map(|pr| &pr.id), Some(&pr.id));
@@ -1008,7 +1015,10 @@ fn task_without_a_local_checkout_never_reads_a_local_path() {
                 .unwrap_err()
                 .to_string()
                 .contains(expected));
-            let work = crate::store::task_work::task_work(&fixture.store.sqlite, &fixture.task.id)
+            let work =
+                crate::store::task_work::task_work(&fixture.store.sqlite, &fixture.task.id, |_| {
+                    false
+                })
                 .unwrap();
             assert_eq!(
                 work.sessions
@@ -1169,19 +1179,35 @@ fn task_changes_count_each_files_stops_before_any_patch_is_read() {
         .map(|(path, count)| (path.to_string(), *count))
         .collect::<std::collections::BTreeMap<_, _>>();
     assert_eq!(
-        super::snapshot::count_changes(diff.patch.as_bytes()),
+        super::snapshot::count_changes(diff.patch.as_bytes())
+            .into_iter()
+            .map(|(p, c)| (p, c.stops))
+            .collect::<std::collections::BTreeMap<_, _>>(),
         nonzero
     );
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/fixtures/review/change_counts.patch");
     assert_eq!(
-        super::snapshot::count_changes(&std::fs::read(fixture).unwrap()),
+        super::snapshot::count_changes(&std::fs::read(fixture).unwrap())
+            .into_iter()
+            .map(|(p, c)| (p, c.stops))
+            .collect::<std::collections::BTreeMap<_, _>>(),
         nonzero
     );
     let adjacent =
         b"diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n+new\n-old\n+again\n-more\n";
     // A removal right after additions starts a new stop, as the Diff reads it.
-    assert_eq!(super::snapshot::count_changes(adjacent)["x"], 3);
+    let count = super::snapshot::count_changes(adjacent)["x"];
+    let quoted = b"diff --git a/x b/x\n--- \"a/na\\303\\257ve\"\n+++ \"b/na\\303\\257ve\"\n@@ -1 +1 @@\n-old\n+new\n";
+    assert_eq!(super::snapshot::count_changes(quoted)["naïve"].stops, 1);
+    assert_eq!(count.stops, 3);
+    assert_eq!(
+        count.lines,
+        Some(super::ChangedLines {
+            added: 2,
+            removed: 2
+        })
+    );
 }
 
 #[test]
@@ -1924,8 +1950,7 @@ async fn watched_landing_completes_task_only_from_merged_pr_evidence() {
 
     let current = store.active_task_pr(&task.id).await.unwrap().unwrap();
     let task = store.get_task(&task.id).await.unwrap().unwrap();
-    let mut next = super::delivery::task_pr_for_publication(&task);
-    next.sequence = current.sequence + 1;
+    let mut next = super::delivery::next_task_pr(&store, &task).unwrap();
     next.branch = "wrong-placement".into();
     assert!(store.insert_task_pr(&next).await.is_err());
     assert_eq!(store.active_task_pr(&task.id).await.unwrap(), Some(current));
@@ -1937,7 +1962,7 @@ async fn watched_landing_completes_task_only_from_merged_pr_evidence() {
     assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Done);
     store
         .sqlite
-        .reopen_task(&task.id, Some("New delivery"))
+        .reopen_task(&task.id, Some("New delivery"), false)
         .unwrap();
     store
         .sqlite
@@ -1986,16 +2011,16 @@ fn deleted_task_status_requires_explicit_history_lookup() {
             },
             || {
                 let repo = std::env::current_dir().unwrap();
-                let error = super::task_status(&repo, None).unwrap_err();
+                let error = super::task_status(&repo, None, |_| false).unwrap_err();
                 assert!(error.to_string().contains("Task was deleted"), "{error}");
-                let status = super::task_status(&repo, Some("HISTORY-1")).unwrap();
+                let status = super::task_status(&repo, Some("HISTORY-1"), |_| false).unwrap();
                 let snapshot = status.execution.as_ref().unwrap();
                 assert_eq!(
-                    super::task_status(&repo, Some(&snapshot.task_id)).unwrap(),
+                    super::task_status(&repo, Some(&snapshot.task_id), |_| false).unwrap(),
                     status
                 );
                 assert_eq!(
-                    super::task_status(&repo, Some(&snapshot.task_id)).unwrap(),
+                    super::task_status(&repo, Some(&snapshot.task_id), |_| false).unwrap(),
                     status
                 );
                 assert_eq!(snapshot.status, TaskState::Done);
@@ -3061,4 +3086,187 @@ fn pr_mutation_lock_refuses_a_concurrent_writer() {
     let _first = lock_task_pr_mutation(repo.path()).expect("first mutation lock");
     let error = lock_task_pr_mutation(repo.path()).expect_err("second writer must be refused");
     assert!(error.to_string().contains("already running"));
+}
+
+#[test]
+fn abandoning_children_waits_for_live_work_but_not_an_idle_conversation() {
+    let ledger = crate::journal::TestLedgerGuard::new();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    let fixture = runtime.block_on(task_fixture_at("WORK-2", repo.path().to_owned()));
+    std::env::set_var("LF_HOME", fixture._database.path());
+    ledger.set_db_path(fixture.database_path.clone());
+    let store = &fixture.store;
+    let mut parent = fixture.task.clone();
+    parent.id = TaskId::new();
+    parent.identifier = "WORK-1".into();
+    parent.tracker_id = None;
+    store.sqlite.seed_unplaced_task(&parent);
+    let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
+    conn.execute(
+        "UPDATE tasks SET parent_task_id=?1 WHERE id=?2",
+        [parent.id.as_str(), fixture.task.id.as_str()],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE task_prs SET publication_requested_at=1,github_number=101,
+            github_url='https://example.test/pr/101' WHERE task_id=?1",
+        [fixture.task.id.as_str()],
+    )
+    .unwrap();
+    let complete = |policy| super::task_complete(repo.path(), "WORK-1", None, policy);
+    let abandon = Some(loopflow_storage::sqlite::children::ChildPolicy::Abandon);
+    let refusal = |policy| {
+        let error = crate::engine::Error::written(&complete(policy).unwrap_err().into());
+        assert_eq!(error.code, crate::engine::ErrorCode::Conflict);
+        assert_eq!(store.sqlite.open_task_child_count(&parent.id).unwrap(), 1);
+        assert!(store
+            .sqlite
+            .task_completion_pending(&parent.id)
+            .unwrap()
+            .is_none());
+        error.message
+    };
+    let worktree = fixture.task.worktree.as_ref().unwrap().to_string_lossy();
+    let live = store
+        .sqlite
+        .test_graph("code", &worktree, &[("implement", None)], None);
+    assert!(refusal(None).contains("#101 open, running"));
+    let blocked = refusal(abandon);
+    assert!(
+        blocked.contains("lf task interrupt WORK-2") && blocked.contains(live.as_str()),
+        "{blocked}"
+    );
+    conn.execute(
+        "UPDATE graph_processes SET ended_at=started_at,exit_code=0 WHERE ended_at IS NULL",
+        [],
+    )
+    .unwrap();
+
+    // A live conversation held in its terminal, with no turn running.
+    let terminal = loopflow_model::id::TerminalId::new();
+    conn.execute(
+        "INSERT INTO held_terminals(id,holder_build,created_at) VALUES(?1,'fixture',1)",
+        [&terminal],
+    )
+    .unwrap();
+    store
+        .sqlite
+        .test_session("conversation", &crate::session_record::new_artifact_key());
+    let attachment = store
+        .sqlite
+        .attach_session(
+            "conversation",
+            None,
+            &store.sqlite.test_lf_process(),
+            None,
+            &loopflow_storage::sqlite::SessionCaller {
+                agent: None,
+                capture_key: None,
+            },
+        )
+        .unwrap();
+    let me = crate::process::OsProcess::read(std::process::id())
+        .unwrap()
+        .unwrap();
+    store
+        .sqlite
+        .record_agent_process_identity("conversation", &attachment, me.pid, me.started_at)
+        .unwrap();
+    conn.execute(
+        "UPDATE agent_sessions SET task_id=?1,held_terminal_id=?2,
+            wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1)
+         WHERE id='conversation'",
+        rusqlite::params![fixture.task.id.as_str(), terminal],
+    )
+    .unwrap();
+    assert_eq!(
+        store.sqlite.task_open_work(&fixture.task.id).unwrap().len(),
+        1,
+        "the conversation is open work"
+    );
+
+    let mut activity = loopflow_storage::session::SessionActivity {
+        preview: None,
+        observed_at: 1,
+        open_tools: 1,
+        pending_input: 0,
+        yielded: false,
+    };
+    store
+        .sqlite
+        .record_session_activity("conversation", &attachment, &activity)
+        .unwrap();
+    assert!(refusal(abandon).contains("Session conversation"));
+    activity.open_tools = 0;
+    activity.yielded = true;
+    store
+        .sqlite
+        .record_session_activity("conversation", &attachment, &activity)
+        .unwrap();
+
+    // Run headless in the same terminal, it is live work.
+    conn.execute(
+        "UPDATE agent_sessions SET interactive=0 WHERE id='conversation'",
+        [],
+    )
+    .unwrap();
+    assert!(refusal(abandon).contains("Session conversation"));
+    conn.execute(
+        "UPDATE agent_sessions SET interactive=1 WHERE id='conversation'",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,'ship-review',1)",
+        rusqlite::params![
+            fixture.task.id.as_str(),
+            serde_json::json!({"name":"code","steps":[]}).to_string()
+        ],
+    )
+    .unwrap();
+    let settled = complete(abandon).unwrap();
+    assert_eq!(settled.children.len(), 1);
+    assert_eq!(
+        settled.children[0].outcome,
+        loopflow_storage::sqlite::children::ChildOutcome::Abandoned
+    );
+    assert_eq!(settled.children[0].step.as_deref(), Some("ship-review"));
+}
+
+#[tokio::test]
+async fn a_completion_refused_inside_the_transaction_is_a_conflict() {
+    let fixture = task_fixture("RACE-1").await;
+    let complete = || {
+        fixture
+            .store
+            .sqlite
+            .complete_task_now(&fixture.task, None, None)
+            .map_err(super::completion_error)
+            .unwrap_err()
+    };
+    // The preflight read a leaf. Its PR or a new child can now prevent completion.
+    let conflict = |error| crate::engine::Error::written(&anyhow::Error::from(error));
+    let pr = conflict(complete());
+    assert_eq!(pr.code, crate::engine::ErrorCode::Conflict);
+    assert!(pr.message.contains("verified merge"));
+    let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
+    conn.execute(
+        "DELETE FROM task_prs WHERE task_id=?1",
+        [fixture.task.id.as_str()],
+    )
+    .unwrap();
+    let mut child = fixture.task.clone();
+    child.id = TaskId::new();
+    child.identifier = "RACE-2".into();
+    child.tracker_id = None;
+    child.parent_task_id = Some(fixture.task.id.clone());
+    fixture.store.sqlite.seed_unplaced_task(&child);
+    let refused = conflict(complete());
+    assert_eq!(refused.code, crate::engine::ErrorCode::Conflict);
+    assert!(refused.message.contains("open children"));
+    assert_eq!(
+        fixture.store.work_status(&fixture.work).await.unwrap(),
+        WorkStatus::Ready
+    );
 }

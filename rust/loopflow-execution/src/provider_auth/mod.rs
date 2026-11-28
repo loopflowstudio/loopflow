@@ -2418,17 +2418,7 @@ pub(crate) fn apply_provider_env_to_command(
     let worker = match std::thread::Builder::new()
         .name("lf-provider-env".to_string())
         .spawn(move || {
-            let runtime = match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(runtime) => runtime,
-                Err(error) => {
-                    warn!(%error, "could not start stored provider credential lookup");
-                    return Vec::new();
-                }
-            };
-            runtime.block_on(async {
+            crate::runtime::block_on(async {
                 let store = match crate::store::open_existing_store().await {
                     Ok(Some(store)) => store,
                     Ok(None) => return Vec::new(),

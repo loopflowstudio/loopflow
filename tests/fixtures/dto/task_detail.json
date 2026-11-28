@@ -67,6 +67,10 @@
   "conversation": "session_5e55105e000040008000000000000002",
   "graph": {
     "name": "feature",
+    "control": {
+      "action": "run",
+      "label": "demo · next: end"
+    },
     "interactive_steps": [
       {
         "name": "explore",

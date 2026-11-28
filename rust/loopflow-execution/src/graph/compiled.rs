@@ -366,10 +366,10 @@ mod tests {
         // Its only stop is inside an XOR path.
         std::fs::write(
             graphs.join("conditional.yaml"),
-            "- implement\n- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - interactive: demo\n      skip:\n        description: Nothing to review\n- gate\n",
+            "- implement\n- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - interactive: demo\n      skip:\n        description: Nothing to review\n- qa\n",
         )
         .unwrap();
-        std::fs::write(graphs.join("alone.yaml"), "- implement\n- gate\n").unwrap();
+        std::fs::write(graphs.join("alone.yaml"), "- implement\n- qa\n").unwrap();
         std::fs::write(graphs.join("broken.yaml"), "- graph: no-such-graph\n").unwrap();
         let catalog = graph_catalog(repo.path()).unwrap();
         let outline = |name: &str| {
@@ -392,13 +392,12 @@ mod tests {
                 ("build", false),
                 ("ship-review", true),
                 ("deliver", false),
-                ("verify", true)
             ]
         );
-        assert_eq!(code.sentence, "You take part at ship-review and verify.");
+        assert_eq!(code.sentence, "You take part at ship-review.");
         assert_eq!(
             outline("feature").unwrap().sentence,
-            "You take part at explore, ship-review and verify."
+            "You take part at explore and ship-review."
         );
 
         let conditional = outline("conditional").unwrap();
@@ -417,7 +416,7 @@ mod tests {
         // A Task that takes the Graph up reads the same steps and stops.
         for name in ["code", "conditional"] {
             let captured = CapturedGraph::load(name, repo.path()).unwrap().unwrap();
-            let task = TaskGraph::read(&captured, "start".into(), None, None);
+            let task = TaskGraph::read(&captured, "start".into(), None, None, None, |_| false);
             let outline = outline(name).unwrap();
             assert_eq!(task.steps, outline.steps, "{name}");
             assert_eq!(task.interactive_steps, outline.interactive_steps, "{name}");
@@ -586,50 +585,50 @@ mod tests {
         assert!(serde_json::from_str::<super::GraphNode>(missing).is_err());
     }
 
+    fn compile_builtin(repo: &std::path::Path, name: &str) -> super::CompiledGraph {
+        let graph = load_graph(name, repo).unwrap();
+        crate::graph::compiled::compile(&graph.name, &compile_graph(&graph, repo).unwrap())
+    }
+
     #[test]
-    fn builtin_graphs_keep_their_delivery_boundaries_without_review_steps() {
+    fn builtin_graphs_compile_expected_steps_and_loops_without_stops() {
+        type Case<'a> = (&'a str, &'a [&'a str], &'a [(usize, usize)]);
         let repo = tempfile::tempdir().unwrap();
-        let cases: &[(&str, &[&str], &[usize], usize)] = &[
-            ("queue", &["compress", "sync", "realign", "gate"], &[], 0),
-            ("refresh", &["sync", "realign"], &[], 0),
-            ("task-design", &["kickoff"], &[], 0),
+        let cases: &[Case<'_>] = &[
+            ("refresh", &["sync", "realign"], &[]),
+            ("task-design", &["kickoff"], &[]),
             (
                 "incident",
                 &["unbreak", "debug", "5whys", "launch-plan"],
                 &[],
-                0,
             ),
             (
                 "pursue",
                 &[
                     "kickoff",
                     "concept-review",
+                    "realign",
                     "write-docs",
-                    "implement",
                     "sync",
+                    "implement",
+                    "concept-review",
                     "realign",
                     "compress",
                     "qa",
-                    "concept-review",
                     "pr-publish",
                 ],
-                &[],
-                2,
+                &[(5, 4), (7, 4)],
             ),
             (
-                "deliver",
-                &["reflect", "gate", "land --wait-and-fix"],
-                &[],
-                0,
+                "quick",
+                &["sync", "implement", "qa", "land --wait-and-fix"],
+                &[(1, 0)],
             ),
-            ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[], 0),
+            ("deliver", &["reflect", "land --wait-and-fix"], &[]),
+            ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[]),
         ];
-        for (name, labels, interactive, returns) in cases {
-            let graph = load_graph(name, repo.path()).unwrap();
-            let compiled = crate::graph::compiled::compile(
-                *name,
-                &compile_graph(&graph, repo.path()).unwrap(),
-            );
+        for (name, labels, returns) in cases {
+            let compiled = compile_builtin(repo.path(), name);
             assert_eq!(
                 compiled
                     .steps
@@ -639,89 +638,36 @@ mod tests {
                 *labels,
                 "{name}"
             );
-            assert_eq!(
-                compiled
-                    .steps
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, s)| s.interactive.then_some(i))
-                    .collect::<Vec<_>>(),
-                *interactive,
-                "{name}"
+            assert!(
+                compiled.steps.iter().all(|s| !s.interactive),
+                "{name} should have no interactive stops"
             );
-            assert_eq!(
-                compiled
-                    .steps
-                    .iter()
-                    .filter(|s| s.returns_to.is_some())
-                    .count(),
-                *returns,
-                "{name}"
-            );
+            let actual_returns: Vec<_> = compiled
+                .steps
+                .iter()
+                .filter_map(|s| s.returns_to.map(|to| (s.key, to)))
+                .collect();
+            let expected_returns: Vec<_> = returns
+                .iter()
+                .map(|&(from, to)| (compiled.steps[from].key, compiled.steps[to].key))
+                .collect();
+            assert_eq!(actual_returns, expected_returns, "{name}");
         }
     }
 
     #[test]
     fn refresh_integrates_upstream_before_realigning() {
         let repo = tempfile::tempdir().unwrap();
-        let graph = load_graph("refresh", repo.path()).unwrap();
-        let compiled = crate::graph::compiled::compile(
-            &graph.name,
-            &compile_graph(&graph, repo.path()).unwrap(),
-        );
-        let labels: Vec<_> = compiled
-            .steps
-            .iter()
-            .map(|node| node.label.as_str())
-            .collect();
-        assert_eq!(labels, ["sync", "realign"]);
+        let compiled = compile_builtin(repo.path(), "refresh");
         assert_eq!(compiled.steps[0].kind, GraphNodeKind::Op);
         assert_eq!(compiled.steps[1].kind, GraphNodeKind::Skill);
     }
 
     #[test]
-    fn pursue_loops_to_a_published_pr() {
+    fn pursue_runs_no_landing_ops_and_tracks_included_sources() {
         let repo = tempfile::tempdir().unwrap();
-        let graph = load_graph("pursue", repo.path()).unwrap();
-        let compiled = crate::graph::compiled::compile(
-            &graph.name,
-            &compile_graph(&graph, repo.path()).unwrap(),
-        );
-        let labels: Vec<_> = compiled
-            .steps
-            .iter()
-            .map(|node| node.label.as_str())
-            .collect();
-        assert_eq!(
-            labels,
-            [
-                "kickoff",
-                "concept-review",
-                "write-docs",
-                "implement",
-                "sync",
-                "realign",
-                "compress",
-                "qa",
-                "concept-review",
-                "pr-publish",
-            ]
-        );
-        let implement = compiled.steps[3].key;
-        let returns: Vec<_> = compiled
-            .steps
-            .iter()
-            .filter_map(|node| node.returns_to.as_ref().map(|to| (node.key, to)))
-            .collect();
-        assert_eq!(
-            returns,
-            [
-                (compiled.steps[5].key, &implement),
-                (compiled.steps[8].key, &implement)
-            ]
-        );
+        let compiled = compile_builtin(repo.path(), "pursue");
         // Review and landing are the conversation's to launch, not this Graph's.
-        assert!(compiled.steps.iter().all(|node| !node.interactive));
         assert!(compiled
             .steps
             .iter()

@@ -4,56 +4,35 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use notify::{RecursiveMode, Watcher};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::file_store;
 use loopflow_model::durable::{MachineId, TaskId};
 use loopflow_storage::sqlite::SqliteStore;
 
-fn watch_checkout(
-    checkout: &Path,
-    mut changed: impl FnMut(notify::Result<Vec<String>>) + Send + 'static,
-) -> Result<notify::RecommendedWatcher> {
-    let metadata = crate::git::absolute_git_dir(checkout)?;
-    // Watchers report either the watched spelling or the resolved one.
-    let roots = EventRoots {
-        checkout: [checkout.to_path_buf(), checkout.canonicalize()?],
-        metadata: [metadata.clone(), metadata.canonicalize()?],
-    };
-    let mut watcher =
-        notify::recommended_watcher(move |event: notify::Result<notify::Event>| match event {
-            Ok(event) if event.kind.is_access() => {}
-            Ok(event) if event.need_rescan() => changed(Ok(vec![String::new()])),
-            Ok(event) => {
-                let paths: Vec<_> = event
-                    .paths
-                    .iter()
-                    .filter_map(|path| roots.relative(path))
-                    .collect();
-                if !paths.is_empty() {
-                    changed(Ok(paths));
-                }
-            }
-            Err(error) => changed(Err(error)),
-        })?;
-    watcher.watch(checkout, RecursiveMode::Recursive)?;
-    if !metadata.starts_with(checkout) {
-        watcher.watch(&metadata, RecursiveMode::Recursive)?;
-    }
-    Ok(watcher)
+/// One eligible Markdown or HTML page under `scratch/` with a metadata stamp
+/// derived from modification time and byte length.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TaskScratchPage {
+    pub path: String,
+    pub stamp: String,
 }
 
 /// A Task's file invalidation on this Machine. `checkout` and `revision` are
-/// null until the Task has a checkout here; readers rescan on a new revision,
-/// including when multiple changes coalesce while their connection is busy.
-#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
+/// null until the Task has a checkout here; `revision` moves only on working-tree
+/// or Git metadata changes, while `scratch_pages` tracks ignored `scratch/`
+/// Markdown/HTML writes independently so remote readers skip `git diff`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskFilesRevision {
     pub task_id: TaskId,
     pub machine_id: MachineId,
+    #[serde(deserialize_with = "Option::deserialize")]
     pub machine_label: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
     pub checkout: Option<PathBuf>,
+    #[serde(deserialize_with = "Option::deserialize")]
     pub revision: Option<String>,
+    pub scratch_pages: Vec<TaskScratchPage>,
 }
 
 /// Follows one Task's recorded checkout: it opens a directory watcher when the
@@ -75,7 +54,7 @@ impl std::fmt::Debug for TaskFilesWatch {
 
 #[derive(Debug)]
 struct CheckoutWatch {
-    _watcher: notify::RecommendedWatcher,
+    _watcher: crate::observe::CheckoutWatchGuard,
     pending: Arc<Mutex<PendingPaths>>,
     ignore_failed: bool,
 }
@@ -109,6 +88,7 @@ impl TaskFilesWatch {
                 machine_label: machine.label,
                 checkout: None,
                 revision: None,
+                scratch_pages: Vec::new(),
             },
         })
     }
@@ -124,8 +104,17 @@ impl TaskFilesWatch {
             return Err(error.into());
         }
         let checkout = self.current.checkout.as_deref().expect("watched checkout");
-        if invalidates_tree(checkout, &batch.paths, &mut watching.ignore_failed) {
+        let changes = classify_changes(checkout, &batch.paths, &mut watching.ignore_failed);
+        if changes.tree {
             self.current.revision = Some(uuid::Uuid::new_v4().to_string());
+        }
+        if changes.scratch {
+            match scan_scratch_pages(checkout) {
+                Ok(pages) => self.current.scratch_pages = pages,
+                Err(error) => {
+                    tracing::warn!("scratch page scan kept prior state: {error}");
+                }
+            }
         }
         Ok(&self.current)
     }
@@ -146,6 +135,10 @@ impl TaskFilesWatch {
             .map(|path| self.watch(path))
             .transpose()?;
         self.current.revision = checkout.as_ref().map(|_| uuid::Uuid::new_v4().to_string());
+        self.current.scratch_pages = checkout
+            .as_deref()
+            .and_then(|path| scan_scratch_pages(path).ok())
+            .unwrap_or_default();
         self.current.checkout = checkout;
         Ok(())
     }
@@ -154,7 +147,7 @@ impl TaskFilesWatch {
         let pending = Arc::new(Mutex::new(PendingPaths::default()));
         let changes = pending.clone();
         let wake = self.wake.clone();
-        let watcher = watch_checkout(checkout, move |event| {
+        let watcher = crate::observe::watch_checkout_paths(checkout, move |event| {
             let mut batch = changes.lock().expect("file watch paths");
             match event {
                 Err(error) => batch.error = Some(error),
@@ -178,65 +171,87 @@ impl TaskFilesWatch {
     }
 }
 
-struct EventRoots {
-    checkout: [PathBuf; 2],
-    metadata: [PathBuf; 2],
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ChangeKind {
+    tree: bool,
+    scratch: bool,
 }
 
-impl EventRoots {
-    /// Report metadata as if it sat inside the checkout, as a main checkout's does.
-    fn relative(&self, path: &Path) -> Option<String> {
-        if let Some(inside) = self
-            .metadata
-            .iter()
-            .find_map(|root| path.strip_prefix(root).ok())
-        {
-            return Some(
-                Path::new(".git")
-                    .join(inside)
-                    .to_string_lossy()
-                    .into_owned(),
-            );
-        }
-        let inside = self
-            .checkout
-            .iter()
-            .find_map(|root| path.strip_prefix(root).ok())?;
-        Some(inside.to_string_lossy().into_owned())
-    }
-}
-
-/// Rescans and Git metadata always invalidate the tree. Other changes matter
-/// only if at least one path is visible, or Git cannot tell.
-fn invalidates_tree(root: &Path, paths: &BTreeSet<String>, ignore_failed: &mut bool) -> bool {
+/// Separate working-tree / Git changes (which bump `revision`) from `scratch/`
+/// changes (which refresh `scratch_pages`). Ignored build output bumps neither;
+/// an ignored scratch page refreshes `scratch_pages` without bumping `revision`.
+fn classify_changes(root: &Path, paths: &BTreeSet<String>, ignore_failed: &mut bool) -> ChangeKind {
     if paths.is_empty() {
-        return false;
+        return ChangeKind {
+            tree: false,
+            scratch: false,
+        };
     }
-    if paths
+    if paths.contains("") {
+        return ChangeKind {
+            tree: true,
+            scratch: true,
+        };
+    }
+    let scratch = paths
         .iter()
-        .any(|p| p.is_empty() || p == ".git" || p.starts_with(".git/"))
-    {
-        return true;
+        .any(|p| p == "scratch" || p.starts_with("scratch/"));
+    if paths.iter().any(|p| p == ".git" || p.starts_with(".git/")) {
+        return ChangeKind {
+            tree: true,
+            scratch,
+        };
     }
     match crate::git::ignored_paths(root, paths.iter().map(String::as_str)) {
-        Ok(ignored) => paths.iter().any(|path| !ignored.contains(path)),
+        Ok(ignored) => ChangeKind {
+            tree: paths.iter().any(|path| !ignored.contains(path)),
+            scratch,
+        },
         Err(error) => {
             if !std::mem::replace(ignore_failed, true) {
                 tracing::warn!("file observation keeps ignored paths: {error}");
             }
-            true
+            ChangeKind {
+                tree: true,
+                scratch: true,
+            }
         }
     }
+}
+
+fn scan_scratch_pages(root: &Path) -> std::io::Result<Vec<TaskScratchPage>> {
+    let (paths, _) = super::snapshot::scratch_paths(root)?;
+    Ok(paths
+        .into_iter()
+        .filter(|path| super::find::is_scratch_page(Path::new(path)))
+        .filter_map(|path| {
+            let metadata = std::fs::symlink_metadata(root.join(&path)).ok()?;
+            if !metadata.is_file() {
+                return None;
+            }
+            let modified = metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or((0, 0), |duration| {
+                    (duration.as_secs(), duration.subsec_nanos())
+                });
+            Some(TaskScratchPage {
+                path,
+                stamp: format!("{}.{}:{}", modified.0, modified.1, metadata.len()),
+            })
+        })
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::invalidates_tree;
+    use super::{classify_changes, scan_scratch_pages, ChangeKind};
 
     #[test]
-    fn ignored_build_output_never_invalidates_the_tree() {
+    fn ignored_scratch_pages_refresh_scratch_state_without_bumping_tree_revision() {
         let repo = tempfile::tempdir().unwrap();
         let git = |args: &[&str]| {
             assert!(std::process::Command::new("git")
@@ -247,15 +262,71 @@ mod tests {
                 .success())
         };
         git(&["init", "-q"]);
-        std::fs::write(repo.path().join(".gitignore"), "target/\n").unwrap();
-        let changed = |paths: &[&str]| {
+        std::fs::write(repo.path().join(".gitignore"), "target/\nscratch/\n").unwrap();
+        let classify = |paths: &[&str]| {
             let paths: BTreeSet<_> = paths.iter().map(|p| p.to_string()).collect();
-            invalidates_tree(repo.path(), &paths, &mut false)
+            classify_changes(repo.path(), &paths, &mut false)
         };
-        assert!(!changed(&[]));
-        assert!(!changed(&["target/out"]));
-        assert!(changed(&["target/out", "note.txt"]));
-        assert!(changed(&["target/out", ".git/index"]));
-        assert!(changed(&["target/out", ""]));
+        assert_eq!(
+            classify(&[]),
+            ChangeKind {
+                tree: false,
+                scratch: false
+            }
+        );
+        assert_eq!(
+            classify(&["target/out"]),
+            ChangeKind {
+                tree: false,
+                scratch: false
+            }
+        );
+        assert_eq!(
+            classify(&["scratch/.!4312!page.tmp"]),
+            ChangeKind {
+                tree: false,
+                scratch: true
+            }
+        );
+        assert_eq!(
+            classify(&["scratch/page.html"]),
+            ChangeKind {
+                tree: false,
+                scratch: true
+            }
+        );
+        assert_eq!(
+            classify(&["target/out", "note.txt"]),
+            ChangeKind {
+                tree: true,
+                scratch: false
+            }
+        );
+        assert_eq!(
+            classify(&["target/out", ".git/index"]),
+            ChangeKind {
+                tree: true,
+                scratch: false
+            }
+        );
+        assert_eq!(
+            classify(&["target/out", ""]),
+            ChangeKind {
+                tree: true,
+                scratch: true
+            }
+        );
+
+        std::fs::create_dir_all(repo.path().join("scratch")).unwrap();
+        std::fs::write(repo.path().join("scratch/page.html"), "<p>v1</p>").unwrap();
+        std::fs::write(repo.path().join("scratch/notes.tmp"), "ignore").unwrap();
+        let first = scan_scratch_pages(repo.path()).unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].path, "scratch/page.html");
+
+        std::fs::write(repo.path().join("scratch/page.html"), "<p>v2 longer</p>").unwrap();
+        let second = scan_scratch_pages(repo.path()).unwrap();
+        assert_eq!(second.len(), 1);
+        assert_ne!(first[0].stamp, second[0].stamp);
     }
 }

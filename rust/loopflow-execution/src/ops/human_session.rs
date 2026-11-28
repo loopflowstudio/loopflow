@@ -9,12 +9,11 @@ mod workspace;
 pub use workspace::SessionWorkspace;
 
 use std::collections::BTreeMap;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
-use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -273,10 +272,13 @@ pub async fn existing_connection(
 }
 
 /// The conversation `lf resume` selects, created when its scope has none.
+/// When `person_starting` is true, a newly created Task primary holds the
+/// server's recovery pass off while the caller's own launch comes up.
 pub async fn select_connection(
     store: &SharedStore,
     cwd: &Path,
     target: SessionTarget<'_>,
+    person_starting: bool,
 ) -> Result<Selected> {
     use crate::session::PrimaryScope;
     let target = resolve_target(store, target).await?;
@@ -293,7 +295,9 @@ pub async fn select_connection(
     let (session, started) = match scope {
         PrimaryScope::Repository(repo) => primary::ensure(store, repo.as_path(), None).await?,
         PrimaryScope::Wave(wave) => primary::ensure(store, cwd, Some(wave.as_str())).await?,
-        PrimaryScope::Task(task) => primary::ensure_task(store, cwd, task.as_str(), None).await?,
+        PrimaryScope::Task(task) => {
+            primary::ensure_task(store, cwd, task.as_str(), None, person_starting).await?
+        }
         _ => anyhow::bail!("Unsupported conversation scope: {scope:?}"),
     };
     Ok(Selected {
@@ -2112,27 +2116,19 @@ pub fn lock_session_process(id: &str) -> Result<File> {
     fs::create_dir_all(&directory).context("create Session directory")?;
     let name = hex::encode(&Sha256::digest(id.as_bytes())[..16]);
     let path = directory.join(format!(".{name}.launch.lock"));
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(path)
-        .context("open Session launch lock")?;
-    let deadline = std::time::Instant::now() + SESSION_START_TIMEOUT;
-    loop {
-        match FileExt::try_lock_exclusive(&file) {
-            Ok(()) => break,
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                if std::time::Instant::now() >= deadline {
-                    bail!("Session launch is still busy; retry after its current launch settles");
-                }
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            Err(error) => return Err(error).context("lock Session launch"),
+    loopflow_storage::lock_file::lock_with_timeout_verified(
+        &path,
+        true,
+        SESSION_START_TIMEOUT,
+        Duration::from_millis(20),
+    )
+    .map_err(|error| {
+        if error.kind() == std::io::ErrorKind::WouldBlock {
+            anyhow!("Session launch is still busy; retry after its current launch settles")
+        } else {
+            anyhow::Error::new(error).context("lock Session launch")
         }
-    }
-    Ok(file)
+    })
 }
 
 /// One Program Status reading from the terminal showing a Session. `stream`

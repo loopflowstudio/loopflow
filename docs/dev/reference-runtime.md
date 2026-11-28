@@ -252,8 +252,7 @@ Task row ----> managed worktree ----> commits
    incident once; a moved head requires fresh evidence. A blocked landing still
    observes merge, and explicit arm or land resumes it.
 6. Verified merge alone leaves an open Task available for optional new Task creation.
-   No follow-up disposition is required. `ship` runs gate and `land --wait-and-fix`;
-   reaching `end` requests completion. A stopped Graph leaves the operator
+   No follow-up disposition is required. Reaching `end` requests completion. A stopped Graph leaves the operator
    to inspect live work and retry completion alone when the outcome is satisfied.
 7. `task complete` changes status without moving the Task's graph. Reaching end
    atomically requests completion; a failure retains arrival and retries only

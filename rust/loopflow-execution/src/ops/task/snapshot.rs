@@ -4,8 +4,8 @@ use super::{
     block_on_task, comparison_context, completion_pending, completion_refusal, file_context,
     file_save, file_store, owning_wave, repository_for_task, resolve_task_agent,
     task_configuration_refusal, task_error, task_event_process_refusal, task_store,
-    task_worktree_blocker, TaskChangedFile, TaskChangesSnapshot, TaskCommit, TaskComparison,
-    TaskDiffSnapshot, TaskFileSnapshot, TaskFileState, TaskSnapshot, TaskWorkspace,
+    task_worktree_blocker, ChangedLines, TaskChangedFile, TaskChangesSnapshot, TaskCommit,
+    TaskComparison, TaskDiffSnapshot, TaskFileSnapshot, TaskFileState, TaskSnapshot, TaskWorkspace,
 };
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
@@ -16,20 +16,20 @@ use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActi
 use crate::store::SharedStore;
 use base64::Engine as _;
 use loopflow_model::durable::MachineId;
-use loopflow_storage::child::ChildRef;
 use loopflow_storage::work::task::{PrPhase, Task, TaskPr};
 use sha2::{Digest, Sha256};
 
-pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
+pub fn task_snapshot(task: &Task, merges: fn(&[String]) -> bool) -> OpsResult<TaskSnapshot> {
     block_on_task(async {
         let store = task_store().await?;
-        read_task_snapshot(&store, task.clone()).await
+        read_task_snapshot(&store, task.clone(), merges).await
     })
 }
 
 pub(super) async fn read_task_snapshot(
     store: &SharedStore,
     mut task: Task,
+    merges: fn(&[String]) -> bool,
 ) -> OpsResult<TaskSnapshot> {
     let (local, ownership) = store
         .sqlite
@@ -38,13 +38,14 @@ pub(super) async fn read_task_snapshot(
     if ownership.owner_elsewhere(&local).is_some() {
         task.worktree = None;
     }
-    snapshot_here(store, task, local).await
+    snapshot_here(store, task, local, merges).await
 }
 
 pub(super) async fn snapshot_here(
     store: &SharedStore,
     task: Task,
     local: MachineId,
+    merges: fn(&[String]) -> bool,
 ) -> OpsResult<TaskSnapshot> {
     let wave = owning_wave(store, &task).await?;
     let repo = repository_for_task(store, &task)?;
@@ -58,37 +59,42 @@ pub(super) async fn snapshot_here(
         ),
         None => None,
     };
-    let work = store
-        .work_for_child(&ChildRef::Task(task.id.clone()))
-        .await
-        .map_err(|error| task_error(format!("failed to resolve Task Work: {error}")))?;
     let latest_event = store
         .latest_task_event(&task.id)
         .await
         .map_err(|error| task_error(format!("failed to read latest task event: {error}")))?;
     let pr = store.active_task_pr(&task.id).await.map_err(task_error)?;
     let active = pr.as_ref().filter(|pr| pr.is_active());
-    let work_status = store
-        .work_status(&work)
-        .await
-        .map_err(|error| task_error(format!("failed to derive Task Work status: {error}")))?;
-    let mut execution = crate::ops::task_execution::task_execution(store, &task)
-        .await
+    let status = store.task_state(&task.id).await.map_err(task_error)?;
+    let latest_graph = store
+        .sqlite
+        .latest_task_graph(&task.id)
         .map_err(task_error)?;
+    let mut execution = crate::ops::task_execution::task_execution(
+        &store.sqlite,
+        &task,
+        status,
+        latest_graph.as_ref(),
+    )
+    .map_err(task_error)?;
     let work_set =
-        crate::store::task_work::task_work(&store.sqlite, &task.id).map_err(task_error)?;
+        crate::store::task_work::task_work(&store.sqlite, &task.id, merges).map_err(task_error)?;
     let auto = store.sqlite.task_auto(&task.id).map_err(task_error)?;
     if execution.state == crate::ops::task_execution::TaskExecutionState::Idle {
-        if let Some(wait) = work_set
+        if let Some((step, off)) = work_set
             .graph
             .as_ref()
-            .and_then(|graph| graph.waiting_to_land(auto.as_ref(), &task.identifier))
+            .and_then(|graph| graph.landing_stop(auto.as_ref()))
         {
-            execution.state = crate::ops::task_execution::TaskExecutionState::Waiting;
-            execution.reason = wait;
+            if status == crate::durable::TaskState::Paused {
+                execution.reason = format!("Waiting at {step} while the Task is paused");
+            } else {
+                execution.state = crate::ops::task_execution::TaskExecutionState::Waiting;
+                execution.reason =
+                    crate::ops::task::auto::landing_wait(step, off, &task.identifier);
+            }
         }
     }
-    let status = store.task_state(&task.id).await.map_err(task_error)?;
     let parent_pr = match task.parent_pr_id.as_ref() {
         Some(parent_id) => store
             .get_task_pr(parent_id)
@@ -127,7 +133,7 @@ pub(super) async fn snapshot_here(
                 .or_else(|| task_event_process_refusal(latest_event.as_ref()).map(str::to_string))
         };
         let action_evidence = TaskActionEvidence {
-            status: work_status.clone(),
+            status,
             execution: Some(&execution),
             latest_pr_phase: pr.as_ref().map(TaskPr::phase),
             latest_pr_merge_request: pr.as_ref().and_then(TaskPr::merge_request),
@@ -170,10 +176,8 @@ pub(super) async fn snapshot_here(
     let starter = |session: Option<&loopflow_model::id::LfSessionId>| {
         super::auto::starter(&store.sqlite, &repo, session).map_err(task_error)
     };
-    let started_by = store
-        .sqlite
-        .latest_task_graph(&task.id)
-        .map_err(task_error)?
+    let started_by = latest_graph
+        .as_ref()
         .map(|graph| starter(graph.caller_session.as_ref()))
         .transpose()?;
     Ok(TaskSnapshot {
@@ -295,11 +299,13 @@ pub(super) fn changes_snapshot(workspace: TaskComparison<'_>) -> OpsResult<TaskC
     let counts = change_counts(workspace)?;
     files.retain(|path, file| {
         file.old_path = net.get(path).cloned().flatten();
-        file.changes = match counts.get(path) {
+        let counts = match counts.get(path) {
             Some(count) => *count,
             None if file.untracked => untracked_changes(&workspace.checkout.worktree.join(path)),
-            None => 0,
+            None => PatchCount::empty(),
         };
+        file.changes = counts.stops;
+        file.lines = counts.lines;
         net.contains_key(path) || file.untracked
     });
     let (scratch, scratch_truncated) = if workspace.head_commit.is_none() {
@@ -323,10 +329,28 @@ pub(super) fn changes_snapshot(workspace: TaskComparison<'_>) -> OpsResult<TaskC
     })
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(super) struct PatchCount {
+    pub(super) stops: u64,
+    pub(super) lines: Option<ChangedLines>,
+}
+
+impl PatchCount {
+    fn empty() -> Self {
+        Self {
+            stops: 0,
+            lines: Some(ChangedLines {
+                added: 0,
+                removed: 0,
+            }),
+        }
+    }
+}
+
 /// Each tracked file's runs of changed lines, from the patch the Diff reads:
 /// with its usual context, since Git aligns some changes differently without.
 /// A file with no hunks (binary, a pure rename) is absent.
-fn change_counts(workspace: TaskComparison<'_>) -> OpsResult<BTreeMap<String, u64>> {
+fn change_counts(workspace: TaskComparison<'_>) -> OpsResult<BTreeMap<String, PatchCount>> {
     Ok(count_changes(&git_output_bytes(
         workspace.checkout.worktree,
         &comparison_diff_args(workspace),
@@ -354,13 +378,14 @@ fn comparison_diff_args<'a>(workspace: TaskComparison<'a>) -> Vec<&'a str> {
     args
 }
 
-pub(super) fn count_changes(patch: &[u8]) -> BTreeMap<String, u64> {
+pub(super) fn count_changes(patch: &[u8]) -> BTreeMap<String, PatchCount> {
     let mut counts = BTreeMap::new();
     let mut old_path = None::<String>;
     let mut path = None::<String>;
     // Lines left in the current hunk, old and new side.
     let (mut old, mut new) = (0u64, 0u64);
     let mut previous = b' ';
+    let mut count = PatchCount::empty();
     for line in patch.split(|byte| *byte == b'\n') {
         if old > 0 || new > 0 {
             match line.first() {
@@ -374,28 +399,35 @@ pub(super) fn count_changes(patch: &[u8]) -> BTreeMap<String, u64> {
             }
             let kind = line[0];
             let starts = kind != b' ' && (previous == b' ' || (kind == b'-' && previous == b'+'));
-            if starts {
-                if let Some(path) = path.as_ref().or(old_path.as_ref()) {
-                    *counts.entry(path.clone()).or_insert(0) += 1;
+            if kind != b' ' {
+                count.stops += u64::from(starts);
+                if let Some(lines) = &mut count.lines {
+                    lines.added += u64::from(kind == b'+');
+                    lines.removed += u64::from(kind == b'-');
                 }
             }
             previous = kind;
         } else if line.starts_with(b"diff --git ") {
-            old_path = None;
-            path = None;
-        } else if let Some(name) = line.strip_prefix(b"--- a/") {
-            old_path = Some(patch_path(name));
-        } else if let Some(name) = line.strip_prefix(b"+++ b/") {
-            path = Some(patch_path(name));
+            if let Some(name) = path.take().or(old_path.take()) {
+                counts.insert(name, count);
+            }
+            count = PatchCount::empty();
+        } else if let Some(name) = line.strip_prefix(b"--- ") {
+            old_path = patch_path(name).strip_prefix("a/").map(str::to_owned);
+        } else if let Some(name) = line.strip_prefix(b"+++ ") {
+            path = patch_path(name).strip_prefix("b/").map(str::to_owned);
         } else if line.starts_with(b"@@ ") {
             (old, new) = hunk_lengths(line);
             previous = b' ';
         }
     }
+    if let Some(name) = path.or(old_path) {
+        counts.insert(name, count);
+    }
     counts
 }
 
-/// A path as Git writes it after `a/` or `b/`: C-quoted when it holds
+/// A path as Git writes it: C-quoted when it holds
 /// unusual bytes, followed by a tab when it holds a space.
 fn patch_path(name: &[u8]) -> String {
     let name = name.strip_suffix(b"\t").unwrap_or(name);
@@ -446,16 +478,41 @@ fn hunk_lengths(header: &[u8]) -> (u64, u64) {
 
 /// An untracked file reads as one addition, unless it is empty or binary (a
 /// NUL in Git's first 8,000 bytes), when there is nothing to step to.
-fn untracked_changes(path: &Path) -> u64 {
+fn untracked_changes(path: &Path) -> PatchCount {
     use std::io::Read;
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => return 1,
-        Ok(metadata) if metadata.is_file() => {}
-        _ => return 0,
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return PatchCount {
+                stops: 1,
+                lines: Some(ChangedLines {
+                    added: 1,
+                    removed: 0,
+                }),
+            }
+        }
+        Ok(metadata) if metadata.is_file() => metadata,
+        _ => return PatchCount::empty(),
+    };
+    let limit = if metadata.len() > MAX_FILE_BYTES as u64 {
+        8_000
+    } else {
+        MAX_FILE_BYTES + 1
+    };
+    let mut bytes = Vec::new();
+    let read =
+        std::fs::File::open(path).and_then(|file| file.take(limit as u64).read_to_end(&mut bytes));
+    if read.is_err() || bytes.is_empty() || bytes.iter().take(8_000).any(|b| *b == 0) {
+        return PatchCount::empty();
     }
-    let mut head = Vec::with_capacity(8_000);
-    let read = std::fs::File::open(path).and_then(|file| file.take(8_000).read_to_end(&mut head));
-    u64::from(read.is_ok() && !head.is_empty() && !head.contains(&0))
+    let lines =
+        (metadata.len() <= MAX_FILE_BYTES as u64 && bytes.len() <= MAX_FILE_BYTES).then(|| {
+            ChangedLines {
+                added: bytes.iter().filter(|b| **b == b'\n').count() as u64
+                    + u64::from(!bytes.ends_with(b"\n")),
+                removed: 0,
+            }
+        });
+    PatchCount { stops: 1, lines }
 }
 
 pub fn task_diff(
@@ -487,6 +544,26 @@ pub fn task_diff(
         ),
         None => diff_snapshot(workspace, path),
     }
+}
+
+/// Diff one checkout-relative file path against `base_commit`, reusing
+/// Loopflow's rename detection and untracked-file `--no-index` logic.
+pub fn checkout_file_diff(
+    worktree: &Path,
+    base_commit: &str,
+    path: &str,
+) -> OpsResult<TaskDiffSnapshot> {
+    let task_id = loopflow_storage::work::task::TaskId::new();
+    let workspace = TaskComparison {
+        checkout: TaskWorkspace {
+            issue_identifier: "",
+            task_id: &task_id,
+            worktree,
+        },
+        base_commit,
+        head_commit: None,
+    };
+    diff_snapshot(workspace, Some(path))
 }
 
 pub(super) fn diff_snapshot(
@@ -588,6 +665,8 @@ pub fn task_workspace_context(task: &Task) -> OpsResult<String> {
 
 /// Largest binary file whose bytes a read carries, base64, in `data`.
 pub const MAX_BINARY_DATA_BYTES: usize = 16 * 1024 * 1024;
+/// Prefix sniffed for NUL bytes before reading an oversize (>1 MB) file into `observe::Cache`.
+const BINARY_SNIFF_BYTES: usize = 8_192;
 
 /// One file of a Task: the working tree, or the version at `at` (`parent`,
 /// `head` or a resolved commit SHA), which is read-only and has no recoveries.
@@ -671,9 +750,24 @@ pub(super) fn file_snapshot(
         crate::observe::file_bytes(&absolute, limit)
             .map_err(|error| task_error(format!("cannot read Task file {relative:?}: {error}")))
     };
-    let (size, bytes) = read(MAX_FILE_BYTES + 1)?;
+    // Sniff only a short prefix for >1 MB files so oversize text never buffers 1 MB in observe::Cache.
+    let (size, bytes) = if std::fs::metadata(&absolute)
+        .is_ok_and(|metadata| metadata.len() > MAX_FILE_BYTES as u64)
+    {
+        let (size, prefix) = read(BINARY_SNIFF_BYTES)?;
+        if size > MAX_FILE_BYTES as u64 {
+            (size, prefix)
+        } else {
+            read(MAX_FILE_BYTES + 1)?
+        }
+    } else {
+        read(MAX_FILE_BYTES + 1)?
+    };
     snapshot.size_bytes = size;
-    read_contents(&mut snapshot, bytes, || Ok(read(MAX_BINARY_DATA_BYTES)?.1))?;
+    read_contents(&mut snapshot, bytes, || {
+        let (full_size, full_bytes) = read(MAX_BINARY_DATA_BYTES + 1)?;
+        Ok((full_size, full_bytes))
+    })?;
     Ok(snapshot)
 }
 
@@ -708,31 +802,46 @@ pub(super) fn committed_file_snapshot(
     snapshot.size_bytes = size
         .parse()
         .map_err(|_| task_error(format!("Git listed no size for {relative:?}")))?;
-    let bytes = git_blob_prefix(workspace.worktree, object, MAX_FILE_BYTES + 1)?;
+    let limit = if snapshot.size_bytes > MAX_FILE_BYTES as u64 {
+        BINARY_SNIFF_BYTES
+    } else {
+        MAX_FILE_BYTES + 1
+    };
+    let bytes = git_blob_prefix(workspace.worktree, object, limit)?;
+    let committed_size = snapshot.size_bytes;
     read_contents(&mut snapshot, bytes, || {
-        git_output_bytes(workspace.worktree, &["cat-file", "blob", object])
+        Ok((
+            committed_size,
+            git_output_bytes(workspace.worktree, &["cat-file", "blob", object])?,
+        ))
     })?;
     Ok(snapshot)
 }
 
-/// Classifies a file from its first bytes (at most `MAX_FILE_BYTES + 1`).
-/// `whole` reads the rest of a binary file small enough to carry in `data`.
+/// Classifies a file from its prefix (`BINARY_SNIFF_BYTES` when `size_bytes > MAX_FILE_BYTES`,
+/// else at most `MAX_FILE_BYTES + 1`). `whole` reads a binary file small enough to carry in `data`.
 fn read_contents(
     snapshot: &mut TaskFileSnapshot,
     bytes: Vec<u8>,
-    whole: impl FnOnce() -> OpsResult<Vec<u8>>,
+    whole: impl FnOnce() -> OpsResult<(u64, Vec<u8>)>,
 ) -> OpsResult<()> {
     if bytes.contains(&0) {
         snapshot.state = TaskFileState::Binary;
         if snapshot.size_bytes <= MAX_BINARY_DATA_BYTES as u64 {
             let bytes = if bytes.len() as u64 >= snapshot.size_bytes {
-                bytes
+                Some(bytes)
             } else {
-                whole()?
+                let (full_size, full_bytes) = whole()?;
+                snapshot.size_bytes = full_size;
+                (full_size <= MAX_BINARY_DATA_BYTES as u64
+                    && full_bytes.len() <= MAX_BINARY_DATA_BYTES)
+                    .then_some(full_bytes)
             };
-            snapshot.data = Some(base64::engine::general_purpose::STANDARD.encode(bytes));
+            if let Some(bytes) = bytes {
+                snapshot.data = Some(base64::engine::general_purpose::STANDARD.encode(bytes));
+            }
         }
-    } else if bytes.len() > MAX_FILE_BYTES {
+    } else if snapshot.size_bytes > MAX_FILE_BYTES as u64 || bytes.len() > MAX_FILE_BYTES {
         snapshot.state = TaskFileState::Truncated;
     } else if let Ok(content) = String::from_utf8(bytes) {
         snapshot.revision = Some(hex::encode(Sha256::digest(content.as_bytes())));
@@ -761,8 +870,16 @@ fn git_blob_prefix(worktree: &Path, object: &str, limit: usize) -> OpsResult<Vec
         .take(limit as u64)
         .read_to_end(&mut bytes)?;
     // A blob longer than the limit leaves git blocked on a full pipe.
-    let _ = child.kill();
-    child.wait()?;
+    let truncated = bytes.len() >= limit;
+    if truncated {
+        let _ = child.kill();
+    }
+    let status = child.wait()?;
+    if !truncated && !status.success() {
+        return Err(task_error(format!(
+            "git cat-file blob {object} exited with {status}"
+        )));
+    }
     Ok(bytes)
 }
 
@@ -820,7 +937,7 @@ fn net_changed_paths(workspace: TaskComparison<'_>) -> OpsResult<BTreeMap<String
     Ok(paths)
 }
 
-pub(super) fn scratch_paths(root: &Path) -> OpsResult<(Vec<String>, bool)> {
+pub(super) fn scratch_paths(root: &Path) -> std::io::Result<(Vec<String>, bool)> {
     // Bound traversal as well as returned files. Never descend into symlinks.
     let mut pending = vec![root.join("scratch")];
     let mut paths = Vec::new();
@@ -830,16 +947,32 @@ pub(super) fn scratch_paths(root: &Path) -> OpsResult<(Vec<String>, bool)> {
             Ok(metadata) if metadata.is_dir() => {}
             Ok(_) => continue,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error.into()),
+            Err(error) => return Err(error),
         }
-        for entry in std::fs::read_dir(directory)? {
-            let entry = entry?;
+        let entries = match std::fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error),
+            };
             visited += 1;
             if visited > 2_000 {
                 paths.sort();
                 return Ok((paths, true));
             }
-            let kind = entry.file_type()?;
+            if entry.file_name() == ".git" {
+                continue;
+            }
+            let kind = match entry.file_type() {
+                Ok(kind) => kind,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error),
+            };
             if kind.is_dir() {
                 pending.push(entry.path());
             } else if kind.is_file() {
@@ -977,6 +1110,7 @@ fn record_changed_paths(
                 unstaged: false,
                 untracked: false,
                 changes: 0,
+                lines: None,
             });
         mark(file);
     }
@@ -1013,4 +1147,39 @@ pub(super) fn git_output_bytes(worktree: &Path, args: &[&str]) -> OpsResult<Vec<
         )));
     }
     Ok(output.stdout)
+}
+
+#[cfg(test)]
+mod tests {
+    use loopflow_model::durable::TaskId;
+
+    use super::{file_snapshot, TaskFileState, TaskWorkspace, MAX_FILE_BYTES};
+
+    #[test]
+    fn oversize_files_classify_from_prefix_without_buffering_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let task_id = TaskId::new();
+        let workspace = TaskWorkspace {
+            issue_identifier: "TEST-1",
+            task_id: &task_id,
+            worktree: dir.path(),
+        };
+
+        let large_text = dir.path().join("large.log");
+        std::fs::write(&large_text, vec![b'a'; MAX_FILE_BYTES + 10_000]).unwrap();
+        let text_snap = file_snapshot(workspace, "large.log").unwrap();
+        assert_eq!(text_snap.state, TaskFileState::Truncated);
+        assert_eq!(text_snap.size_bytes, (MAX_FILE_BYTES + 10_000) as u64);
+        assert!(text_snap.content.is_none());
+        assert!(text_snap.data.is_none());
+
+        let mut binary = vec![b'x'; MAX_FILE_BYTES + 10_000];
+        binary[16] = 0;
+        let large_bin = dir.path().join("large.bin");
+        std::fs::write(&large_bin, &binary).unwrap();
+        let bin_snap = file_snapshot(workspace, "large.bin").unwrap();
+        assert_eq!(bin_snap.state, TaskFileState::Binary);
+        assert_eq!(bin_snap.size_bytes, binary.len() as u64);
+        assert!(bin_snap.data.is_some());
+    }
 }

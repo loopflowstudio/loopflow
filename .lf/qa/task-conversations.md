@@ -96,7 +96,7 @@ has no `lf session serve`. Its launcher and agent pids are unfinished
 `agent_pid` on `agent_sessions`. Write the stand-in's transcript line, then resume with the branch.
 SIGSTOP the owner first to check the "still running under an earlier lf"
 refusal (SIGCONT afterwards; the pending TERM ends it). The installed
-`lf desktop shell <task> --checkout <path> --id <id> --create` in a PTY makes an
+`lf desktop shell <task> --id <id> --create [-- <command>]` in a PTY makes an
 earlier-build Desktop shell; its Task needs a checkout (`lf wt create` then
 `lf task create --worktree`). Running `open_argv` from
 `lf session resume --prepare --json` with `LF_SERVER_STATUS` set to any path

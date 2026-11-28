@@ -18,6 +18,7 @@ use loopflow_execution::engine::{Error, ErrorCode};
 use loopflow_execution::machine::{client, wire::Sender};
 use loopflow_execution::read_stream::Subscription;
 use loopflow_model::durable::Machine;
+use loopflow_storage::sqlite::StoreRevisions;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Key {
@@ -30,7 +31,7 @@ struct Key {
 #[derive(Debug, Default)]
 pub(super) struct Subscriptions {
     demands: Mutex<HashMap<Key, Arc<Demand>>>,
-    planning: Mutex<Weak<watch::Receiver<Option<i64>>>>,
+    revisions: Mutex<Weak<watch::Receiver<Option<StoreRevisions>>>>,
 }
 
 #[derive(Debug, Default)]
@@ -134,7 +135,7 @@ impl Subscriptions {
                     .run(
                         query,
                         select,
-                        follow.then(|| self.planning(&key.database)),
+                        follow.then(|| self.revisions(&key.database)),
                     ),
                 );
                 Arc::new(Demand {
@@ -179,37 +180,18 @@ impl Subscriptions {
         ))
     }
 
-    // Ownership entries and Task moves advance the planning revision. One
-    // watcher serves every routed demand, including while its peer is quiet.
-    fn planning(&self, database: &std::path::Path) -> Arc<watch::Receiver<Option<i64>>> {
-        let mut shared = lock(&self.planning);
+    // Ownership entries and Task moves advance the planning revision. Reuses
+    // `read_stream`'s shared store observer without spawning a separate thread.
+    fn revisions(
+        &self,
+        database: &std::path::Path,
+    ) -> Arc<watch::Receiver<Option<StoreRevisions>>> {
+        let mut shared = lock(&self.revisions);
         if let Some(revisions) = shared.upgrade() {
             return revisions;
         }
-        let database = database.to_owned();
-        let (send, receive) = watch::channel(None);
-        let revisions = Arc::new(receive);
+        let revisions = Arc::new(loopflow_execution::read_stream::watch_revisions(database));
         *shared = Arc::downgrade(&revisions);
-        std::thread::spawn(move || {
-            let mut changes = loopflow_storage::changes::StoreChanges::watch(&database);
-            let mut store = None;
-            while !send.is_closed() {
-                if store.is_none() {
-                    store = loopflow_execution::store::read_existing_registry()
-                        .ok()
-                        .flatten();
-                }
-                let revision = store
-                    .as_ref()
-                    .and_then(|store| store.sqlite.revisions().ok());
-                if revision.is_none() {
-                    store = None;
-                }
-                let next = revision.map(|revision| revision.planning);
-                send.send_if_modified(|value| std::mem::replace(value, next) != next);
-                changes.wait(Duration::from_secs(1));
-            }
-        });
         revisions
     }
 
@@ -432,6 +414,20 @@ impl Drop for Release {
     }
 }
 
+async fn wait_planning_change(
+    revisions: &mut watch::Receiver<Option<StoreRevisions>>,
+    last_planning: &mut Option<i64>,
+) -> Result<(), watch::error::RecvError> {
+    loop {
+        revisions.changed().await?;
+        let next = revisions.borrow_and_update().map(|rev| rev.planning);
+        if next != *last_planning {
+            *last_planning = next;
+            return Ok(());
+        }
+    }
+}
+
 #[derive(Debug)]
 struct Producer {
     registry: Weak<Subscriptions>,
@@ -449,9 +445,9 @@ impl Producer {
         self,
         query: Read,
         select: Option<Vec<String>>,
-        planning: Option<Arc<watch::Receiver<Option<i64>>>>,
+        revisions: Option<Arc<watch::Receiver<Option<StoreRevisions>>>>,
     ) {
-        let result = match planning {
+        let result = match revisions {
             Some(revisions) => self.follow(query, select, revisions.as_ref().clone()).await,
             None => self.here(query, select).await,
         };
@@ -490,13 +486,13 @@ impl Producer {
         &self,
         query: Read,
         select: Option<Vec<String>>,
-        mut planning: watch::Receiver<Option<i64>>,
+        mut revisions: watch::Receiver<Option<StoreRevisions>>,
     ) -> Result<()> {
         let resolve = || {
             let mut query = query.clone();
             tokio::task::spawn_blocking(move || query.peer_route())
         };
-        planning.borrow_and_update();
+        let mut last_planning = revisions.borrow_and_update().map(|rev| rev.planning);
         let mut route = resolve().await??;
         loop {
             let generation = lock(&self.requested).generation;
@@ -522,7 +518,7 @@ impl Producer {
             let next = loop {
                 tokio::select! {
                     biased;
-                    changed = planning.changed() => {
+                    changed = wait_planning_change(&mut revisions, &mut last_planning) => {
                         changed?;
                         let next = resolve().await??;
                         if next != route { break next; }
@@ -536,7 +532,7 @@ impl Producer {
                         };
                         self.peer_unavailable(failure, generation).await?;
                         tokio::select! {
-                            changed = planning.changed() => changed?,
+                            changed = wait_planning_change(&mut revisions, &mut last_planning) => changed?,
                             _ = tokio::time::sleep(Duration::from_secs(5)) => {}
                         }
                         break resolve().await??;
@@ -619,11 +615,11 @@ impl Producer {
     // revision, which a recorded checkout advances; the same ID then goes live.
     async fn files(&self, issue: String, select: Option<Vec<String>>) -> Result<()> {
         let wake = self.wake.clone();
-        let mut planning = match self.registry.upgrade() {
-            Some(registry) => registry.planning(&self.key.database).as_ref().clone(),
+        let mut revisions = match self.registry.upgrade() {
+            Some(registry) => registry.revisions(&self.key.database).as_ref().clone(),
             None => return Ok(()),
         };
-        planning.borrow_and_update();
+        let mut last_planning = revisions.borrow_and_update().map(|rev| rev.planning);
         let mut files = tokio::task::spawn_blocking(move || {
             loopflow_execution::ops::task::TaskFilesWatch::open(&issue, move || wake.notify_one())
         })
@@ -650,7 +646,7 @@ impl Producer {
             )?;
             tokio::select! {
                 _ = self.wake.notified() => {}
-                changed = planning.changed() => changed?,
+                changed = wait_planning_change(&mut revisions, &mut last_planning) => changed?,
             }
         }
     }
@@ -942,8 +938,8 @@ mod tests {
         drop(runtime);
         let work = meter::snapshot().since(before);
         meter::ENABLED.store(false, Ordering::Relaxed);
-        assert_eq!(stage(&work, "runtime_build"), stage(&work, "runtime_drop"));
-        assert_eq!(work.opens, work.closes);
+        assert_eq!(stage(&work, "runtime_build"), 0);
+        assert_eq!(stage(&work, "reader_setup"), stage(&work, "reader_drop"));
     }
 
     fn stage(work: &meter::Snapshot, name: &str) -> u64 {
@@ -1307,7 +1303,8 @@ mod tests {
                 second.initial().await;
                 quiet.initial().await;
                 let work = meter::snapshot().since(before);
-                assert_eq!(stage(&work, "runtime_build"), 1);
+                assert_eq!(stage(&work, "runtime_build"), 0);
+                assert_eq!(stage(&work, "reader_setup"), 1);
                 assert_eq!(stage(&work, "projection"), 1);
 
                 let before = meter::snapshot();
@@ -1410,9 +1407,9 @@ mod tests {
                 drop(held);
                 drop(entered);
                 let work = meter::snapshot().since(before);
-                assert_eq!(stage(&work, "runtime_build"), 1);
-                assert_eq!(stage(&work, "runtime_drop"), 1);
-                assert_eq!(work.opens, work.closes);
+                assert_eq!(stage(&work, "runtime_build"), 0);
+                assert_eq!(stage(&work, "reader_setup"), 1);
+                assert_eq!(stage(&work, "reader_drop"), 1);
             })
         });
     }
@@ -1448,7 +1445,9 @@ mod tests {
                 ] {
                     consumer.initial().await;
                 }
-                assert_eq!(stage(&meter::snapshot().since(before), "runtime_build"), 4);
+                let work = meter::snapshot().since(before);
+                assert_eq!(stage(&work, "runtime_build"), 0);
+                assert_eq!(stage(&work, "reader_setup"), 4);
                 drop(first);
                 drop(different_arguments);
                 drop(different_select);
@@ -1540,6 +1539,11 @@ mod tests {
                 );
                 assert!(first.initial().await["unavailable"].is_string());
                 let repo = loopflow_test_support::TestRepo::new();
+                // Hold the reader before creating the Task so it cannot deliver
+                // an unsolicited reading between creation and completion.
+                let held = pause("terminal", "pull");
+                assert!(first.member.checkpoint(8));
+                held.entered.await.unwrap();
                 store
                     .create_task(&loopflow_storage::work::task::NewTask {
                         parent_task_id: None,
@@ -1564,9 +1568,6 @@ mod tests {
                         [id.as_str()],
                     )
                     .unwrap();
-                let held = pause("terminal", "pull");
-                first.member.checkpoint(8);
-                held.entered.await.unwrap();
                 // Join and another checkpoint while a terminal read is in flight.
                 let mut joined = Consumer::new(
                     &registry,
@@ -1574,7 +1575,7 @@ mod tests {
                     read.clone(),
                     Some(vec!["task.title".into()]),
                 );
-                first.member.checkpoint(0);
+                assert!(first.member.checkpoint(0));
                 held.release.send(()).unwrap();
                 let recovered = first.reading().await;
                 assert!(recovered["unavailable"].is_null(), "{recovered}");

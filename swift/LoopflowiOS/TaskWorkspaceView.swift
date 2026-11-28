@@ -9,9 +9,15 @@ struct TaskWorkspaceView: View {
     let feed: TaskFeed
     let task: MobileTask
     @Environment(\.theme) private var theme
+    @Environment(\.dismiss) private var dismiss
     @Binding var draft: String
     /// The pane chosen here; until then the Session, or Changes before there is one.
     @State private var chosen: Pane?
+    @State private var confirmingAbandon = false
+    @State private var selectedSession: String?
+    @State private var sessionDrafts: [String: String] = [:]
+    @State private var outline: WorkflowOutline?
+    @State private var shellDraft = ""
     /// The Task as the Machine last read it.
     @State private var reading = Loaded<Reading>.loading
     /// The conversation the Machine running the Task names, when the list's row named none.
@@ -32,7 +38,8 @@ struct TaskWorkspaceView: View {
         var id: Self { self }
     }
 
-    private var session: String? { task.primarySession ?? begun }
+    private var primarySession: String? { task.primarySession ?? begun }
+    private var session: String? { selectedSession ?? primarySession }
     private var pane: Pane { chosen ?? (session == nil ? .changes : .session) }
 
     var body: some View {
@@ -50,7 +57,11 @@ struct TaskWorkspaceView: View {
         .navigationTitle(task.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { actions.disabled(!feed.pendingChanges.acceptsChanges) }
+            if let (reading, row) = patchedReading {
+                ToolbarItem(placement: .topBarTrailing) {
+                    metadata(row, sessions: reading.work.sessions)
+                }
+            }
         }
         .overlay { NoticeView(center: feed.notices) }
         .task(id: scenePhase == .active) {
@@ -61,37 +72,39 @@ struct TaskWorkspaceView: View {
         }
     }
 
-    /// The workflow sentence, and the Machine when it is not the paired one.
-    /// While the Machine is away the sentence would be an old one.
+    private var patchedReading: (reading: Reading, row: RoadmapTask)? {
+        guard case .value(let reading) = reading, let rawRow = reading.row else { return nil }
+        let row = feed.pendingChanges.apply(to: [rawRow], readAt: reading.readAt).first ?? rawRow
+        return (reading, row)
+    }
+
     @ViewBuilder private var header: some View {
-        if case .value(let reading) = reading, feed.pendingChanges.acceptsChanges {
-            let refusal = reading.actions?.refusal
-            let machine = reading.machine(pairedWith: client.savedMachine.machineID)
-            if reading.work.graph != nil || refusal != nil || machine != nil {
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    if let graph = reading.work.graph {
-                        WorkflowLine(graph: graph, auto: reading.actions?.auto == .on)
-                    }
-                    if let machine {
-                        Label("On \(machine)", systemImage: "desktopcomputer")
-                            .font(Typography.meta)
-                            .foregroundStyle(theme.palette.textSecondary)
-                            .accessibilityIdentifier("task-machine")
-                    }
-                    // A menu item holds two lines; Rust's reason says what to restore, so it is set in full.
-                    if let refusal {
-                        Text(refusal)
-                            .font(Typography.meta)
-                            .foregroundStyle(theme.palette.warning)
-                            .accessibilityIdentifier("task-actions-refusal")
-                    }
+        if let (reading, row) = patchedReading, feed.pendingChanges.acceptsChanges {
+            let actions = reading.actions(for: row, outline: outline,
+                                          autoPending: feed.pendingChanges.autoRequest(for: row.task.identifier))
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                if let machine = reading.machine(pairedWith: client.savedMachine.machineID) {
+                    Label("On \(machine)", systemImage: "desktopcomputer")
+                        .font(Typography.meta)
+                        .foregroundStyle(theme.palette.textSecondary)
+                        .accessibilityIdentifier("task-machine")
                 }
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Spacing.lg)
-                .padding(.vertical, Spacing.sm)
-                .background(theme.palette.background)
-                .overlay(alignment: .bottom) { Rectangle().fill(theme.palette.border).frame(height: 1) }
+                controls(row, actions)
+                if let reason = actions.primaryRefusal ?? (row.lifecycle == .paused ? nil : actions.autoRefusal) {
+                    Text(reason).font(Typography.meta).foregroundStyle(theme.palette.warning)
+                        .accessibilityIdentifier("task-actions-refusal")
+                }
+            }
+            .font(Typography.text)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
+            .overlay(alignment: .bottom) { Rectangle().fill(theme.palette.border).frame(height: 1) }
+            .task(id: reading.work.graph == nil ? row.graphName : nil) {
+                outline = nil
+                if reading.work.graph == nil, let name = row.graphName {
+                    let catalog = try? await client.query.graphCatalog(cwd: row.task.repo)
+                    if !Task.isCancelled { outline = catalog?.first { $0.name == name }?.workflow }
+                }
             }
         }
     }
@@ -102,10 +115,11 @@ struct TaskWorkspaceView: View {
         let work: TaskOverview
         let row: RoadmapTask?
         let execution: TaskExecution?
+        let readAt: Revisions?
 
-        var actions: TaskActions? { row.map { TaskActions(work: work, row: $0, execution: execution) } }
-        /// Nil until the Task starts.
-        var checkout: String? { row?.reference.workspace?.worktree }
+        func actions(for row: RoadmapTask, outline: WorkflowOutline? = nil, autoPending: Bool? = nil) -> TaskActions {
+            TaskActions(work: work, row: row, execution: execution, outline: outline, autoPending: autoPending)
+        }
 
         /// The Machine whose checkout this is, by name, when it is not `paired`.
         func machine(pairedWith paired: String) -> String? {
@@ -121,10 +135,18 @@ struct TaskWorkspaceView: View {
     private func watchTask() async {
         guard scenePhase == .active else { return }
         let watch = client.observeTask(issue: task.id)
-        defer { watch.cancel() }
+        let key = "task-\(task.id)"
+        defer {
+            watch.cancel()
+            feed.pendingChanges.ended(key)
+        }
         do {
             for try await frame in watch.updates {
-                reading = Self.reading(in: frame, task: task.id)
+                let next = Self.reading(in: frame, task: task.id)
+                reading = next
+                if case .value(let value) = next {
+                    feed.pendingChanges.read(key, Loopflow.Reading.available(value.work, readAt: value.readAt))
+                }
                 await openConversation()
             }
         } catch is CancellationError {
@@ -164,39 +186,88 @@ struct TaskWorkspaceView: View {
             guard case .task(let part?) = frame.content else {
                 return .failed(frame.unavailable ?? "Task reading is unavailable")
             }
-            return .value(Reading(work: part.work, row: part.row, execution: part.execution))
+            return .value(Reading(work: part.work, row: part.row, execution: part.execution, readAt: frame.readAt))
         } catch {
             return .failed(error.localizedDescription)
         }
     }
 
-    /// "Task actions": what `TaskActions` offers, each sending its write from
-    /// the Task's repository. A refused action is disabled; the reason is under the sentence.
-    @ViewBuilder private var actions: some View {
-        if case .value(let reading) = reading, let row = reading.row, let actions = reading.actions,
-           actions.run != nil || actions.auto != nil {
-            let (issue, directory) = (row.task.identifier, row.task.repo)
-            Menu("Task actions", systemImage: "ellipsis.circle") {
-                if let run = actions.run {
-                    item(run.label, symbol: "play.fill", disabled: actions.runRefusal != nil, issue: issue,
-                         write: .taskRun(directory: directory, issue: issue, graph: nil, from: nil, agent: nil, approve: false))
+    private func controls(_ row: RoadmapTask, _ actions: TaskActions) -> some View {
+        let (issue, directory) = (row.task.identifier, row.task.repo)
+        func change(_ command: PendingCommand, _ verb: String, _ write: ServedWrite) {
+            feed.change(command, issue: issue, verb: verb, write: write)
+        }
+        return TaskWorkflowControls(task: row, actions: actions, pending: feed.pendingChanges.controlRequest(for: issue),
+            run: { step in
+                change(.run(task: issue), "started",
+                       .taskRun(directory: directory, issue: issue, graph: nil, from: step, agent: nil, approve: false))
+            }, pause: { action in
+                feed.pendingChanges.setPause(action, issue: issue, directory: directory, notices: feed.notices, show: nil) {
+                    await feed.refresh()
                 }
-                if let auto = actions.auto {
-                    item(auto.offer, symbol: auto == .on ? "pause.circle" : "paperplane", disabled: actions.autoRefusal != nil, issue: issue,
-                         write: auto == .on ? .taskAutoOff(directory: directory, issue: issue)
-                             : .taskAutoOn(directory: directory, issue: issue))
+            }, interrupt: { change(.interrupt(task: issue), "interrupted", .taskInterrupt(directory: directory, issue: issue)) },
+            toggleAuto: {
+                guard let auto = actions.auto else { return }
+                if auto == .on {
+                    change(.auto(task: issue, on: false), "taken off auto", .taskAutoOff(directory: directory, issue: issue))
+                } else {
+                    change(.auto(task: issue, on: true), "put on auto", .taskAutoOn(directory: directory, issue: issue))
+                }
+            }, complete: { feed.complete(issue: issue, directory: directory) }) {
+                if row.isCompleted {
+                    Button("Reopen Task") { change(.reopen(task: issue), "reopened", .taskReopen(directory: directory, issue: issue)) }
+                } else {
+                    if row.isUnassigned {
+                        Button("Claim Task") { change(.claim(task: issue, owner: nil), "claimed", .taskClaim(directory: directory, issue: issue)) }
+                    } else {
+                        Button("Unassign Task") { change(.unassign(task: issue), "unassigned", .taskUnassign(directory: directory, issue: issue)) }
+                    }
+                    Button("Abandon…", role: .destructive) { confirmingAbandon = true }
                 }
             }
-        }
+            .confirmationDialog("Abandon \(issue)?", isPresented: $confirmingAbandon) {
+                Button("Abandon Task", role: .destructive) { change(.abandon(task: issue), "abandoned", .taskAbandon(directory: directory, issue: issue)) }
+            } message: {
+                Text("Cancels the Task, closes its PRs and deletes its branches.")
+            }
     }
 
-    private func item(_ name: String, symbol: String, disabled: Bool, issue: String, write: ServedWrite) -> some View {
-        Button {
-            feed.request(name, issue: issue, write: write)
+    private func metadata(_ row: RoadmapTask, sessions: [TaskSession]) -> some View {
+        Menu {
+            Menu("Move to Wave") {
+                Button("No Wave") { move(row, to: nil) }.disabled(row.task.waveId == nil)
+                ForEach(feed.waves.filter { $0.repo == row.task.repo }) { wave in
+                    Button(wave.displayName) { move(row, to: wave.id) }.disabled(wave.id == row.task.waveId)
+                }
+            }
+            if let wave = row.task.waveId {
+                Button("Open owning Wave") { feed.wave = wave; dismiss() }
+            }
+            Button("Copy Task ID") { UIPasteboard.general.string = row.task.identifier }
+            if let link = row.reference.issueUrl {
+                Button("Copy Task link") { UIPasteboard.general.url = link }
+            }
+            if let branch = row.reference.workspace?.branch {
+                Button("Copy branch") { UIPasteboard.general.string = branch }
+            }
+            if let pr = row.pr?.publication?.github { Link("Open PR #\(pr.number)", destination: pr.url) }
+            ForEach(sessions.filter(\.interactive)) { session in
+                Button("Open \(session.title)") {
+                    selectedSession = session.id == primarySession ? nil : session.id
+                    chosen = .session
+                }
+            }
         } label: {
-            Label(name, systemImage: symbol)
+            Image(systemName: "ellipsis")
         }
-        .disabled(disabled)
+        .accessibilityLabel("Task actions")
+        .accessibilityIdentifier("task-metadata-menu")
+    }
+
+    private func move(_ row: RoadmapTask, to wave: String?) {
+        let issue = row.task.identifier
+        feed.change(.move(task: issue, wave: wave), issue: issue, verb: "moved",
+                    write: .taskMove(directory: row.task.repo, issue: issue, wave: wave, machine: nil))
     }
 
     /// The Machine of the latest reading: Changes reads again when it moves.
@@ -209,7 +280,9 @@ struct TaskWorkspaceView: View {
         switch pane {
         case .session:
             if let session {
-                TerminalView(client: client, task: task, target: .session(session), draft: $draft) { chosen = .changes }
+                let sessionDraft = session == primarySession ? $draft : Binding(
+                    get: { sessionDrafts[session] ?? "" }, set: { sessionDrafts[session] = $0 })
+                TerminalView(client: client, task: task, target: .session(session), draft: sessionDraft) { chosen = .changes }
                     .id(session)
             } else {
                 StateView("No conversation yet", sentence: "Run the Task to start one.")
@@ -219,7 +292,7 @@ struct TaskWorkspaceView: View {
         case .changes:
             TaskChangesView(client: client, task: task, machine: machine)
         case .shell:
-            TerminalView(client: client, task: task, target: .shell, draft: $draft) { chosen = .changes }
+            TerminalView(client: client, task: task, target: .shell, draft: $shellDraft) { chosen = .changes }
         }
     }
 }

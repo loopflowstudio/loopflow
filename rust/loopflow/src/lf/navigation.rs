@@ -1,6 +1,7 @@
 //! Command ownership, shorthand, and read-only inspection share Clap metadata.
 use loopflow_execution::skills::listing::{definition_source, format_written_steps};
 use std::path::Path;
+use std::sync::LazyLock;
 
 use anyhow::Result;
 use clap::{Command, CommandFactory, Parser};
@@ -8,10 +9,14 @@ use clap::{Command, CommandFactory, Parser};
 use crate::lf::{Cli, Commands, GraphCommand, SkillCommand};
 use loopflow_execution::definition::{resolve_definition, DefinitionKind, Target};
 
-pub fn command_tree() -> Command {
+static COMMAND_TREE: LazyLock<Command> = LazyLock::new(|| {
     let mut command = Cli::command();
     command.build();
     command
+});
+
+pub fn command_tree() -> Command {
+    COMMAND_TREE.clone()
 }
 
 fn descendants(
@@ -135,8 +140,8 @@ fn takes_separate_value(tree: &Command, current: &Command, value: &str, boundary
 
 /// Remove only transport options; the target owns command parsing and placement.
 pub fn machine_invocation(args: &[String]) -> Result<Option<(Cli, Vec<String>)>, clap::Error> {
-    let tree = command_tree();
-    let mut current = &tree;
+    let tree = &*COMMAND_TREE;
+    let mut current = tree;
     let mut path = Vec::new();
     let mut boundary = false;
     let mut transport = vec!["lf".to_string()];
@@ -154,7 +159,7 @@ pub fn machine_invocation(args: &[String]) -> Result<Option<(Cli, Vec<String>)>,
             let is_transport = matches!(name, "--machine" | "--forward-agent")
                 && (path.is_empty() || flag(current, name).is_none());
             let start = index;
-            if takes_separate_value(&tree, current, value, boundary) && index + 1 < args.len() {
+            if takes_separate_value(tree, current, value, boundary) && index + 1 < args.len() {
                 index += 1;
             }
             let tokens = &args[start..=index];
@@ -197,8 +202,8 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
     if args.len() < 2 {
         return Ok(args);
     }
-    let tree = command_tree();
-    let mut current = &tree;
+    let tree = &*COMMAND_TREE;
+    let mut current = tree;
     let mut path = Vec::new();
     let mut output = vec![args[0].clone()];
     // Where each word of `path` sits in `output`.
@@ -234,7 +239,7 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
             let selects_location = matches!(value.split('=').next(), Some("--task" | "--wt"))
                 && (path.is_empty() || flag(current, value).is_none());
             output.push(value.clone());
-            if takes_separate_value(&tree, current, value, boundary) && index + 1 < args.len() {
+            if takes_separate_value(tree, current, value, boundary) && index + 1 < args.len() {
                 index += 1;
                 output.push(args[index].clone());
             }
@@ -664,14 +669,20 @@ fn definition_help(
 /// Whether the actual argv names a command that can merge a PR.
 pub fn command_merges(argv: &[String]) -> bool {
     normalize_args(argv.to_vec())
-        .and_then(Cli::try_parse_from)
-        .is_ok_and(|cli| cli.merges())
+        .and_then(|args| COMMAND_TREE.clone().try_get_matches_from(args))
+        .is_ok_and(|matches| {
+            matches!(
+                matches.subcommand(),
+                Some(("pr", sub)) if matches!(sub.subcommand_name(), Some("land" | "arm"))
+            )
+        })
 }
 
 #[cfg(test)]
 mod landing_tests {
     use super::command_merges;
     use loopflow_execution::task_graph::CapturedGraph;
+    use loopflow_storage::sqlite::AutoState;
 
     fn write(repo: &std::path::Path, path: &str, content: &str) {
         let path = repo.join(path);
@@ -699,6 +710,83 @@ mod landing_tests {
         assert!(deliver
             .landing_step("land --wait-and-fix", command_merges)
             .is_some());
+    }
+
+    #[test]
+    fn shipping_checks_the_selected_path_up_to_its_landing() {
+        let repo = tempfile::tempdir().unwrap();
+        write(repo.path(), ".lf/graphs/ship.yaml",
+            "- xor:\n    paths:\n      direct:\n        description: Land now\n        graph: deliver\n      review:\n        description: Review first\n        steps:\n          - interactive: demo\n- interactive: research\n");
+        let graph = CapturedGraph::load("ship", repo.path()).unwrap().unwrap();
+        assert!(!graph.ships_before_review("start", None, None, command_merges));
+        for (step, expected) in [("reflect", true), ("demo", false), ("research", false)] {
+            let cursor = graph.find(step).unwrap().cursor();
+            assert_eq!(
+                graph.ships_before_review("start", Some(&cursor), None, command_merges),
+                expected,
+                "{step}"
+            );
+        }
+    }
+
+    #[test]
+    fn turning_auto_off_keeps_a_running_task_active_until_it_passes_land() {
+        let repo = tempfile::tempdir().unwrap();
+        write(
+            repo.path(),
+            ".lf/graphs/post-land.yaml",
+            "- reflect\n- cmd: land --wait-and-fix\n- qa\n",
+        );
+        let graph = CapturedGraph::load("post-land", repo.path())
+            .unwrap()
+            .unwrap();
+        let off = Some(AutoState::Off);
+        for (step, ships) in [
+            ("reflect", false),
+            ("land --wait-and-fix", false),
+            ("qa", true),
+        ] {
+            let cursor = graph.find(step).unwrap().cursor();
+            assert_eq!(
+                graph.ships_before_review("start", Some(&cursor), off, command_merges),
+                ships,
+                "{step}"
+            );
+        }
+        assert!(!graph.ships_before_review("land --wait-and-fix", None, off, command_merges));
+        assert!(graph.ships_before_review("end", None, off, command_merges));
+    }
+
+    #[test]
+    fn only_graphs_that_land_ship_after_the_last_review() {
+        let repo = tempfile::tempdir().unwrap();
+        for (name, expected) in [
+            ("code", true),
+            ("feature", true),
+            ("research", false),
+            ("pursue", false),
+        ] {
+            let graph = CapturedGraph::load(name, repo.path()).unwrap().unwrap();
+            assert_eq!(
+                graph.ships_before_review("end", None, None, command_merges),
+                expected,
+                "{name}"
+            );
+            if expected {
+                for step in ["deliver", "land --wait-and-fix"] {
+                    let cursor = graph.find(step).unwrap().cursor();
+                    assert!(
+                        graph.ships_before_review("start", Some(&cursor), None, command_merges),
+                        "{name}: {step}"
+                    );
+                }
+            } else {
+                assert!(
+                    !graph.ships_before_review("start", None, None, command_merges),
+                    "{name}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -24,5 +24,5 @@ lf sync --abort           # give up and go back
 A merge started outside Loopflow continues with `lf sync --continue --adopt`.
 
 When the sync completes, run the smallest test that exercises the combined
-behavior, once. Suites belong to gate and CI. Don't push; the waiting `lf sync`
+behavior, once. Suites belong to CI. Don't push; the waiting `lf sync`
 does the one push.

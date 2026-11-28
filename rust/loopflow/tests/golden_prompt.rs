@@ -3,11 +3,11 @@ mod support;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use loopflow_execution::harness::Mode;
 use loopflow_execution::prompt::format_prompt;
 use loopflow_execution::prompt::gather_context;
 use loopflow_execution::prompt::ClipboardContext;
 use loopflow_execution::prompt::GatherContextOpts;
-use loopflow_execution::prompt::Surface;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -15,7 +15,6 @@ struct GoldenCase {
     name: String,
     repo: String,
     skill: Option<String>,
-    surface: Option<Surface>,
     docs: Vec<String>,
     diff_files: bool,
     diff: bool,
@@ -90,7 +89,7 @@ fn golden_prompts_match() {
             skill: case.skill.clone(),
             message: None,
             operate: !case.no_loopflow,
-            surface: case.surface.unwrap_or_default(),
+            mode: Mode::Headless,
             docs: case.docs.clone(),
             files: Vec::new(),
             include_diff: case.diff,

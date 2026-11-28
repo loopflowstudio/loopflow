@@ -251,7 +251,12 @@ public final class MultiplexerStore {
         if content != pane.content {
             layout = layout.replacingBrowser(of: pane.id, with: content, retainingOccurrence: content.location == pane.content.location)
         }
-        if focus { setFocusedPane(pane.id) } else { setCollapsed(paneId: pane.id, collapsed: false) }
+        if focus {
+            setFocusedPane(pane.id)
+        } else {
+            setCollapsed(paneId: pane.id, collapsed: false)
+            if let zoomedPaneId, zoomedPaneId != pane.id { setZoom(zoomedPaneId, enabled: false) }
+        }
         return layout.pane(for: pane.id)
     }
 

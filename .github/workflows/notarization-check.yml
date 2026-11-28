@@ -18,6 +18,10 @@ jobs:
   notarytool:
     runs-on: macos-26
     timeout-minutes: 10
+    # Only main can use this environment: .github/CI.md, "Signing secrets".
+    environment:
+      name: signing
+      deployment: false
     steps:
       - name: Ask Apple for notarization history
         env:

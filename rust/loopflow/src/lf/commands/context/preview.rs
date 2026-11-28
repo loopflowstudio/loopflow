@@ -21,8 +21,7 @@ pub fn assemble(
     message: Option<&str>,
     cli: &Cli,
 ) -> Result<ContextPreview> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    let mut binding = runtime.block_on(async {
+    let mut binding = loopflow_execution::runtime::block_on(async {
         let Some(store) = loopflow_execution::store::read_existing_registry()? else {
             anyhow::ensure!(
                 cli.task.is_none() && cli.wave.is_none(),

@@ -399,6 +399,8 @@ pub(crate) fn attach_empty(conn: &Connection) {
 /// rows check; a read-only attachment never takes its lock.
 pub(crate) fn open_writer(store: &Path) -> StoreResult<Connection> {
     let conn = Connection::open(history_path(store))?;
+    conn.set_prepared_statement_cache_capacity(crate::pool::STATEMENT_CACHE_CAPACITY);
+    crate::instrumentation::record_connection_open();
     crate::instrumentation::observe_sqlite(&conn);
     conn.busy_timeout(BUSY)?;
     let mode: String =

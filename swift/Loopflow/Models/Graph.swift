@@ -167,6 +167,7 @@ public struct GraphStepGroup: Identifiable, Sendable {
 }
 
 public struct TaskRunControl: Codable, Sendable, Hashable {
+    public let pausing: Bool
     public let unavailable: String?
 }
 
@@ -256,15 +257,16 @@ public enum GraphSubject: String, Decodable, Sendable, Hashable {
 
 /// A Graph as the workflow line shows it before any Task stands on it.
 public struct WorkflowOutline: Decodable, Sendable, Hashable {
+    public let start: WorkflowControl
     /// The Graph's top-level steps in order, as `TaskGraph.steps` carries them.
     public let steps: [TaskGraph.Step]
     /// Every step where a person takes part, XOR paths included.
     public let interactiveSteps: [TaskGraph.InteractiveStep]
-    /// "You take part at explore, ship-review and verify." or "Runs on its own."
+    /// "You take part at explore and ship-review." or "Runs on its own."
     public let sentence: String
 
     enum CodingKeys: String, CodingKey {
-        case steps, sentence
+        case start, steps, sentence
         case interactiveSteps = "interactive_steps"
     }
 }

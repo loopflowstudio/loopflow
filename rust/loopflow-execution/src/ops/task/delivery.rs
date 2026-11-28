@@ -92,11 +92,15 @@ pub(super) async fn resolve_managed_task(repo: &Path) -> OpsResult<ManagedTask> 
     }
 }
 
-pub(super) fn task_pr_for_publication(task: &Task) -> TaskPr {
-    TaskPr {
+/// An unpublished PR record for the Task's placement, after its last one.
+pub(super) fn next_task_pr(store: &SharedStore, task: &Task) -> OpsResult<TaskPr> {
+    Ok(TaskPr {
         id: TaskPrId::new(),
         task_id: task.id.clone(),
-        sequence: 1,
+        sequence: store
+            .sqlite
+            .next_task_pr_sequence(&task.id)
+            .map_err(task_error)?,
         slug: task.workspace_slug.clone(),
         branch: task.branch.clone(),
         base_commit: task.base_commit.clone(),
@@ -111,22 +115,7 @@ pub(super) fn task_pr_for_publication(task: &Task) -> TaskPr {
         linear_link_error: None,
         created_at: time::OffsetDateTime::now_utc(),
         updated_at: time::OffsetDateTime::now_utc(),
-    }
-}
-
-/// An unpublished PR record for the Task's placement, after its last one.
-pub(super) async fn next_task_pr(store: &SharedStore, task: &Task) -> OpsResult<TaskPr> {
-    let mut pr = task_pr_for_publication(task);
-    pr.sequence = store
-        .task_prs(&task.id)
-        .await
-        .map_err(task_error)?
-        .iter()
-        .map(|pr| pr.sequence)
-        .max()
-        .unwrap_or(0)
-        + 1;
-    Ok(pr)
+    })
 }
 
 pub fn request_task_pr_publication(repo: &Path, title: &str, body: &str) -> OpsResult<bool> {
@@ -148,7 +137,7 @@ pub fn request_task_pr_publication(repo: &Path, title: &str, body: &str) -> OpsR
         let creating = existing.is_none();
         let mut pr = match existing {
             Some(pr) => pr,
-            None => next_task_pr(&store, &task).await?,
+            None => next_task_pr(&store, &task)?,
         };
         let branch = crate::git::current_branch(repo)?
             .ok_or_else(|| task_error("Task worktree is not on a branch"))?;
@@ -376,11 +365,13 @@ pub fn matching_task_pr_merge_request(
         }
         let branch = current_branch(repo)?;
         let head = rev_parse(repo, "HEAD")?;
-        let pr = store
+        let Some(pr) = store
             .active_task_pr(&task.id)
             .await
             .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
-            .ok_or_else(|| task_error(format!("Task {} has no active PR", task.identifier)))?;
+        else {
+            return Ok(None);
+        };
         if pr.is_settled() || branch.as_deref() != Some(pr.branch.as_str()) {
             return Ok(None);
         }
@@ -728,13 +719,26 @@ async fn resolve_task_pr_upstream(
     default_branch: &str,
 ) -> OpsResult<(String, String)> {
     if let Some(parent_id) = task.parent_pr_id.as_ref() {
-        let parent = store
-            .get_task_pr(parent_id)
-            .await
-            .map_err(|error| task_error(format!("failed to read stack parent: {error}")))?
-            .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))?;
-        let parent_live = parent.merge_commit.is_none() && parent.abandoned_at.is_none();
-        if parent_live {
+        let read_parent = || async {
+            store
+                .get_task_pr(parent_id)
+                .await
+                .map_err(|error| task_error(format!("failed to read stack parent: {error}")))?
+                .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))
+        };
+        let live = |parent: &TaskPr| parent.merge_commit.is_none() && parent.abandoned_at.is_none();
+        let mut parent = read_parent().await?;
+        if live(&parent) {
+            // A parent that merged since the last observation has a deleted
+            // branch; ask GitHub before fetching it, as `task_stack` does.
+            if let Some(mut parent_task) =
+                store.get_task(&parent.task_id).await.map_err(task_error)?
+            {
+                reconcile_task_pr(store, &mut parent_task).await?;
+                parent = read_parent().await?;
+            }
+        }
+        if live(&parent) {
             return resolve_upstream_base(repo, &parent.branch);
         }
     }

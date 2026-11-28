@@ -330,7 +330,8 @@ fn a_worktree_inside_a_tasks_checkout_becomes_its_own_tasks_checkout() {
     assert_eq!(delivers(&outer_root), Some(outer.id.clone()));
     // Bare `lf task status` says the nested worktree has no Task, while any
     // directory of the outer checkout's own worktree is the outer Task's.
-    let status = |cwd: &Path| super::super::task_status(cwd, None).map(|status| status.task);
+    let status =
+        |cwd: &Path| super::super::task_status(cwd, None, |_| false).map(|status| status.task);
     let error = status(&nested_root).unwrap_err().to_string();
     assert!(error.contains("this checkout has no Task"), "{error}");
     std::fs::create_dir_all(outer_root.join("src")).unwrap();
@@ -667,7 +668,8 @@ fn binding_a_done_task_keeps_it_done() {
         let created = table
             .create("Finished work", None, destination.as_deref())
             .unwrap();
-        crate::ops::task::task_complete(table.repo.path(), created.id.as_str(), None).unwrap();
+        crate::ops::task::task_complete(table.repo.path(), created.id.as_str(), None, None)
+            .unwrap();
         let completed = table.task(&created.id);
         assert!(completed.completed_at.is_some());
         std::fs::write(origin.join("draft.txt"), "untracked draft\n").unwrap();

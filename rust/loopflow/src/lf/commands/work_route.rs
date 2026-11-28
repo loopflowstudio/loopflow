@@ -100,8 +100,7 @@ pub fn repository_identity(
 )> {
     let repo = loopflow_execution::repository::containing(directory)?
         .ok_or_else(|| anyhow!("run `lf repo` in a repository"))?;
-    let runtime = tokio::runtime::Runtime::new()?;
-    let identity = runtime.block_on(async {
+    let identity = loopflow_execution::runtime::block_on(async {
         let store = loopflow_execution::store::open_store(
             &loopflow_execution::store::storage_config_from_env()?,
         )
@@ -203,7 +202,7 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
 
 fn launch_task(cli: &Cli) -> Option<&str> {
     match &cli.command {
-        Some(Commands::Desktop { .. } | Commands::Open(_))
+        Some(Commands::Desktop { .. } | Commands::Open(_) | Commands::Page { .. })
         | Some(Commands::Task {
             cmd: TaskCommand::Location { .. },
         }) => None,
@@ -215,13 +214,23 @@ fn launch_task(cli: &Cli) -> Option<&str> {
         Some(Commands::Session {
             cmd: SessionCommand::Resume { connection, .. },
         }) if connection.task.is_some() => connection.task.as_deref(),
+        Some(Commands::Task {
+            cmd:
+                TaskCommand::Find { issue, .. }
+                | TaskCommand::Grep { issue, .. }
+                | TaskCommand::Symbols { issue, .. },
+        }) => Some(issue),
         Some(Commands::Steer {
             target: Some(target),
             ..
         }) if cli.task.as_ref() == Some(target) => None,
         // Ownership is written only on the Task's writer.
         Some(Commands::Task {
-            cmd: TaskCommand::Claim { issue, .. } | TaskCommand::Unassign { issue, .. },
+            cmd:
+                TaskCommand::Claim { issue, .. }
+                | TaskCommand::Unassign { issue, .. }
+                | TaskCommand::Pause { issue, .. }
+                | TaskCommand::Unpause { issue, .. },
         }) => Some(issue.as_str()),
         _ => cli.task.as_deref(),
     }
@@ -632,7 +641,7 @@ fn context_scope(
     let Some(repo) = repo else {
         return Ok(None);
     };
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         use loopflow_execution::ops::human_session::{connection_scope, SessionTarget};
         use loopflow_execution::session::PrimaryScope;
         Ok(
@@ -685,8 +694,14 @@ fn resolve_task(
         };
     resolve_task_id(store, selector, repo.as_deref())?
         .map(|task| {
-            loopflow_execution::store::ownership::task_execution_route(store, &task)
-                .map_err(Into::into)
+            use loopflow_execution::store::ownership::{task_execution_route, task_pause_route};
+            match cli.command {
+                Some(Commands::Task {
+                    cmd: TaskCommand::Pause { .. },
+                }) => task_pause_route(store, &task),
+                _ => task_execution_route(store, &task),
+            }
+            .map_err(Into::into)
         })
         .transpose()
 }
@@ -730,15 +745,14 @@ pub fn location(
     let request = request
         .map(str::to_string)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let readings = tokio::runtime::Runtime::new()?.block_on(
-        loopflow_execution::ops::task_location::observe(
+    let readings =
+        loopflow_execution::runtime::block_on(loopflow_execution::ops::task_location::observe(
             &store,
             &repository,
             &task,
             peers,
             &request,
-        ),
-    )?;
+        ))?;
     if json {
         println!("{}", serde_json::to_string_pretty(&readings)?);
     } else {

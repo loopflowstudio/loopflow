@@ -263,7 +263,7 @@ This checks configuration and identity, not a mounted provider or native usabili
 
 Provider fixtures must read the launch's actual context channel. When a final
 sync adds fixtures that inspect a changed transport, run those focused tests
-before arming; the earlier gate did not cover the newly combined behavior.
+before arming; earlier checks did not cover the newly combined behavior.
 Context-hook changes also run `session_cli_tests`: resume callbacks supply the
 native Session identity and event payload, just like startup. Provider fixture
 scripts must fail when a callback fails, rather than report a successful turn
@@ -437,7 +437,7 @@ An existing checkout fixture must settle initialization before testing delivery.
 Prompt fixtures nested in the source tree must fence Git discovery so the enclosing
 checkout cannot become their stored Wave owner. Verify them inside a Git checkout;
 a source archive alone does not exercise that boundary.
-Include the shared DTO fixtures and Desktop planning states in the affected gate.
+Include the shared DTO fixtures and Desktop planning states in the affected checks.
 Repository-wide Linear fixtures must return comments only for their owning issue;
 exercise acquisition in a different order from Task creation. Process-sensitive
 cleanup fixtures must observe child readiness before inspecting live executables.
@@ -550,7 +550,7 @@ within the ordinary CI test deadline without dropping assertions.
 After editing embedded skills, directions, surfaces, or prompt assembly, run
 the Rust golden prompt check even for Markdown-only changes. If the mismatch
 reflects the intended prompt change, regenerate the snapshots, review their
-diff, and rerun the check before gate.
+diff, and rerun the check before landing.
 Terminology-only replacements count as prompt changes; include the golden
 check in their focused verification even when no prompt assembly code changed.
 Skill/Graph naming changes also update architecture command examples: check both
@@ -569,7 +569,7 @@ uv run python tests/goldens/update_goldens.py   # refresh prompt goldens after p
 For document gathering or deduplication changes, run the complete context suite
 alongside the delivery checks; a test-name filter alone misses ancestor coverage.
 Rendering gathered documents must include the production deduplication step.
-Keep the library `context_delivery` filter in the gate plan: it covers direct
+Keep the library `context_delivery` filter in the test plan: it covers direct
 and Wave launches in `ops::run`, outside the prompt modules. Check ambient and
 explicit selections across both the refreshed block and submitted turn.
 
@@ -583,7 +583,7 @@ Run the launch checks after syncing CLI changes; they parse the current flags
 before verifying delivery to the provider.
 
 Changes to builtin `LOOPFLOW.md` affect every prompt golden. Regenerate and
-review them before gate. The `skill_launch` checks above cover terminal launches.
+review them before landing. The `skill_launch` checks above cover terminal launches.
 Keep prose contracts in builtin tests; launch tests should prove that the
 canonical document is included.
 For migration regressions, inspect historical fields at their migration boundary

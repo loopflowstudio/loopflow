@@ -77,83 +77,29 @@ struct TaskWorkflowHeader: View {
     }
 }
 
-/// Auto-Ship at the right of the Workflow bar: an ordinary button. Off, it is
-/// `lf task auto on`, which also runs the Task: its run takes the interactive
-/// steps and lands it. On, it is `lf task auto off`. Rust decides whether auto
-/// can start. Sidebar rows and menus carry no auto control.
-struct TaskAutoControl: View {
-    let model: WorkModel
-    let task: RoadmapTask
-
-    var body: some View {
-        let actions = TaskActions(work: model.taskWork[task.id].value, row: task,
-                                  execution: model.taskExecution[task.id].value)
-        if let auto = actions.auto {
-            let refusal = model.changeRefusal ?? actions.autoRefusal
-            Button(auto.offer) {
-                if auto == .on { model.turnAutoOff(task) } else { model.turnAutoOn(task) }
-            }
-            .buttonStyle(LoopflowButtonStyle())
-            .fixedSize()
-            .disabled(refusal != nil)
-            .help(refusal ?? auto.help(issue: task.task.identifier))
-            .accessibilityIdentifier("task-auto")
-        }
-    }
-}
-
-/// The selected Task's Workflow under the jump bar: the workflow line, the one
-/// step that moves it from here, Auto-Ship, then "…" with every other Task
-/// action. Rust owns the graph, the position, the sentence and whether a run
-/// can start; this only arranges them.
+/// The selected Task's Graph and the controls for its saved position.
 struct TaskWorkflowBar: View {
     let model: WorkModel
     let task: RoadmapTask
     /// The Task part of the workspace stream, as last read.
     let work: Reading<TaskOverview>
-    var newConversation: (() -> Void)?
-    var openSession: ((SessionRecord) -> Void)?
     @Environment(\.palette) private var palette
 
     var body: some View {
-        let actions = TaskActions(work: work.value, row: task, execution: model.taskExecution[task.id].value)
-        HStack(spacing: Spacing.md) {
-            if let workflow = work.value?.graph {
-                // One line in a 34 pt bar: a sentence that does not fit is cut, with the whole of it in the tooltip.
-                let line = WorkflowLine(graph: workflow, auto: actions.auto == .on, setup: task.setupPosition)
-                line.lineLimit(1).truncationMode(.tail).help(line.sentence ?? workflow.sentence)
-            } else if work.value == nil {
-                Text(work.isLoading ? task.setupPosition ?? "Reading workflow…" : "")
-                    .lineLimit(1).truncationMode(.tail)
-                    .foregroundStyle(palette.textSecondary)
-                    .accessibilityIdentifier("task-workflow-bar-live")
-            } else if let name = task.graphName {
-                // Not started: the workflow its first run takes up, as the catalog outlines it.
-                WorkflowLine(name: name, outline: model.workflowOutline(name))
+        let actions = TaskActions(work: work.value, row: task, execution: model.taskExecution[task.id].value,
+                                  outline: model.workflowOutline(task.graphName),
+                                  autoPending: model.pendingChanges.autoRequest(for: task.task.identifier))
+        TaskWorkflowControls(task: task, actions: actions, pending: model.pendingChanges.controlRequest(for: task.task.identifier),
+                             run: { model.startTaskFromInput(nil, from: $0, task: task) },
+                             pause: { model.setPause($0, task: task) }, interrupt: { model.interruptStep(task) },
+                             toggleAuto: { if actions.auto == .on { model.turnAutoOff(task) } else { model.turnAutoOn(task) } },
+                             complete: { model.beginComplete(task) }) {
+            TaskLifecycleItems(model: model, task: task)
+            if let overview = work.value, overview.graph == nil, !task.isCompleted {
+                TaskStartGraphMenu(model: model, task: task)
             }
-            Spacer(minLength: 0)
-            if let run = actions.run {
-                let refusal = model.changeRefusal ?? actions.runRefusal
-                Button(run.label) { model.startTaskFromInput(nil, task: task) }
-                    .buttonStyle(LoopflowButtonStyle())
-                    .fixedSize()
-                    .disabled(refusal != nil)
-                    .help(refusal ?? run.help)
-                    .accessibilityIdentifier(work.value?.graph == nil ? "task-workflow-start" : "task-workflow-run")
-            }
-            TaskAutoControl(model: model, task: task)
-            Menu {
-                TaskActionItems(model: model, task: task, wave: model.task(id: task.id)?.wave?.wave,
-                                work: work.value, newConversation: newConversation, openSession: openSession)
-            } label: {
-                Image(systemName: "ellipsis").font(Typography.text)
-            }
-            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
-            .fixedSize()
-            .help("Task actions")
-            .accessibilityLabel("Task actions")
-            .accessibilityIdentifier("task-actions")
         }
+        .disabled(model.changeRefusal != nil)
         .padding(.horizontal, Spacing.md)
         .frame(height: 34)
         .font(Typography.text)
@@ -165,6 +111,19 @@ struct TaskWorkflowBar: View {
         .task(id: work.value != nil && work.value?.graph == nil) {
             if work.value != nil, work.value?.graph == nil { await model.loadGraphCatalog() }
         }
+    }
+}
+
+private struct TaskStartGraphMenu: View {
+    let model: WorkModel
+    let task: RoadmapTask
+
+    var body: some View {
+        Menu("Start with…") {
+            StartFlowItems(model: model, chosen: task.graphName) { model.startTaskFromInput($0, task: task) }
+        }
+        .disabled(model.runRefusal(task) != nil)
+        .accessibilityIdentifier("task-workflow-choose")
     }
 }
 
@@ -207,8 +166,7 @@ struct TaskStartOffer: View {
     }
 }
 
-/// Every Task action: the workflow bar's "…", sidebar context menus,
-/// Dashboard tiles and ⌘/ list the same items.
+/// The complete action list for sidebar rows, Dashboard tiles and ⌘/.
 struct TaskActionItems: View {
     let model: WorkModel
     let task: RoadmapTask
@@ -217,29 +175,53 @@ struct TaskActionItems: View {
     let work: TaskOverview?
     var newConversation: (() -> Void)?
     var openSession: ((SessionRecord) -> Void)?
-    @State private var copied: String?
-
-    private var unavailable: Bool { model.changeRefusal != nil }
-
     var body: some View {
-        if let workflow = work?.graph {
-            // Start the next run at a step: back, ahead, or waiting at an interactive step.
+        let actions = TaskActions(work: work, row: task, execution: model.taskExecution[task.id].value)
+        if work?.graph != nil {
             Menu("Start from…") {
-                ForEach([TaskGraph.start] + workflow.interactiveSteps.map(\.name), id: \.self) { step in
+                ForEach(actions.steps, id: \.self) { step in
                     Button(step) { model.startTaskFromInput(nil, from: step, task: task) }
                         .accessibilityIdentifier("task-workflow-move-\(step)")
                 }
             }
-            .disabled(model.runRefusal(task) != nil)
-            .help(model.runRefusal(task) ?? "lf task run \(task.task.identifier) --from <step>")
+            .disabled(model.runRefusal(task) != nil || actions.control?.action == .pause || actions.control?.action == .pausing)
             .accessibilityIdentifier("task-workflow-move")
         } else if work != nil, !task.isCompleted {
-            Menu("Start with…") {
-                StartFlowItems(model: model, chosen: task.graphName) { model.startTaskFromInput($0, task: task) }
-            }
-            .disabled(model.runRefusal(task) != nil)
-            .accessibilityIdentifier("task-workflow-choose")
+            TaskStartGraphMenu(model: model, task: task)
         }
+        if let action = actions.pause {
+            Button(action == .pause ? "Pause" : "Unpause") {
+                model.setPause(action, task: task)
+            }
+            .disabled(model.changeRefusal != nil || model.pendingChanges.controlRequest(for: task.task.identifier) != nil
+                      || task.runControl.pausing || actions.control?.action == .pausing)
+        }
+        TaskLifecycleItems(model: model, task: task)
+        if !task.isCompleted {
+            let hasOpenChildren = model.hasOpenChildren(task)
+            Button(hasOpenChildren ? "Complete Task…" : "Complete Task") {
+                model.beginComplete(task)
+            }
+            .disabled(model.changeRefusal != nil)
+            .help(hasOpenChildren
+                ? "Mark this Task done and choose whether its open children move up or are abandoned"
+                : "Mark this Task done")
+            .accessibilityIdentifier("task-complete")
+        }
+        TaskMetadataItems(model: model, task: task, wave: wave, newConversation: newConversation, openSession: openSession)
+    }
+}
+
+private struct TaskMetadataItems: View {
+    let model: WorkModel
+    let task: RoadmapTask
+    let wave: WaveSnapshot?
+    var newConversation: (() -> Void)?
+    var openSession: ((SessionRecord) -> Void)?
+    @State private var copied: String?
+    private var unavailable: Bool { model.changeRefusal != nil }
+
+    var body: some View {
         Button("New conversation") { newConversation?() }.disabled(newConversation == nil || unavailable)
         Menu("Move to Wave") {
             Button("No Wave") { model.moveTask(task, toWave: nil) }
@@ -250,27 +232,6 @@ struct TaskActionItems: View {
                 }.disabled(destination.wave.id == task.task.waveId)
             }
         }.disabled(unavailable).accessibilityIdentifier("task-move-wave")
-        if task.isCompleted {
-            Button("Reopen Task") { model.reopenTask(task) }.disabled(unavailable)
-                .accessibilityIdentifier("task-reopen")
-        } else {
-            let hasOpenChildren = model.hasOpenChildren(task)
-            Button(hasOpenChildren ? "Complete Task & Settle Children…" : "Complete Task") {
-                model.beginComplete(task)
-            }
-            .disabled(unavailable)
-            .help(hasOpenChildren
-                ? "Completing this Task marks merged children done and abandons all other open children"
-                : "Mark this Task done")
-            .accessibilityIdentifier("task-complete")
-            Button(task.runtime?.owner == nil ? "Claim Task" : "Unassign Task") {
-                model.assignTask(task, claimed: task.runtime?.owner == nil)
-            }
-            .disabled(unavailable)
-            .help(task.runtime?.owner == nil ? "lf task claim: you own it on this Machine"
-                : "lf task unassign: nobody owns it, so nothing moves it; its checkout, PR and history stay")
-            .accessibilityIdentifier("task-claim-unassign")
-        }
         if let wave { Button("Open owning Wave") { model.select(.wave(id: wave.id)) } }
         Divider()
         Button(copied == "id" ? "Copied Task ID" : "Copy Task ID") { copy(task.task.identifier, key: "id") }
@@ -292,12 +253,6 @@ struct TaskActionItems: View {
                 Button("Make \(session.title) primary…") { model.beginSessionBinding(session) }
             }
         }
-        if !task.isCompleted {
-            Divider()
-            Button("Abandon…", role: .destructive) { model.beginAbandon(task) }
-                .disabled(unavailable)
-                .accessibilityIdentifier("task-abandon")
-        }
     }
 
     private func copy(_ value: String, key: String) {
@@ -306,6 +261,30 @@ struct TaskActionItems: View {
     }
 }
 
+private struct TaskLifecycleItems: View {
+    let model: WorkModel
+    let task: RoadmapTask
+    private var unavailable: Bool { model.changeRefusal != nil }
+
+    var body: some View {
+        if task.isCompleted {
+            Button("Reopen Task") { model.reopenTask(task) }.disabled(unavailable)
+                .accessibilityIdentifier("task-reopen")
+        } else {
+            Button(task.runtime?.owner == nil ? "Claim Task" : "Unassign Task") {
+                model.assignTask(task, claimed: task.runtime?.owner == nil)
+            }
+            .disabled(unavailable)
+            .help(task.runtime?.owner == nil ? "lf task claim: you own it on this Machine"
+                : "lf task unassign: nobody owns it, so nothing moves it; its checkout, PR and history stay")
+            .accessibilityIdentifier("task-claim-unassign")
+            Divider()
+            Button("Abandon…", role: .destructive) { model.beginAbandon(task) }
+                .disabled(unavailable)
+                .accessibilityIdentifier("task-abandon")
+        }
+    }
+}
 
 /// The window's one Abandon… confirmation, whichever menu asked for it.
 struct TaskAbandonConfirmation: ViewModifier {
@@ -327,7 +306,8 @@ struct TaskAbandonConfirmation: ViewModifier {
     }
 }
 
-/// The window's one Complete… confirmation when completing a parent will settle open children.
+/// The window's one Complete… sheet for a parent with open children:
+/// choose whether to move them up or settle them with the parent, then confirm.
 struct TaskCompleteConfirmation: ViewModifier {
     let model: WorkModel
 
@@ -335,51 +315,245 @@ struct TaskCompleteConfirmation: ViewModifier {
         model.navigation.completing.flatMap { model.task(id: $0)?.task }
     }
 
-    private func summary(for descendants: [RoadmapTask]) -> (done: [RoadmapTask], abandoned: [RoadmapTask]) {
-        let done = descendants.filter { $0.pr?.phase == .merged }
-        let abandoned = descendants.filter { $0.pr?.phase != .merged }
-        return (done, abandoned)
+    static func defaultPolicy(descendants: [RoadmapTask]) -> TaskChildPolicy {
+        descendants.allSatisfy { $0.pr?.phase == .merged } ? .abandon : .rehome
     }
 
-    private func message(for descendants: [RoadmapTask]) -> String {
-        let (done, abandoned) = summary(for: descendants)
-        var lines: [String] = []
+    static func moveTitle(to destination: RoadmapTask?) -> String {
+        destination.map { "Move children to \($0.task.identifier)" }
+            ?? "Move children to top level"
+    }
+
+    static func moveDetail(to destination: RoadmapTask?) -> String {
+        let place = destination.map { "under \($0.task.identifier)" } ?? "at the top level"
+        return "Direct children stay open \(place); PRs and checkouts stay intact."
+    }
+
+    static func settleTitle(allMerged: Bool) -> String {
+        allMerged ? "Finish merged children" : "Abandon unmerged children"
+    }
+
+    static func settleDetail(descendants: [RoadmapTask]) -> String {
+        let done = descendants.filter { $0.pr?.phase == .merged }.map(\.task.identifier)
+        let abandoned = descendants.filter { $0.pr?.phase != .merged }.map(\.task.identifier)
+        var parts: [String] = []
         if !done.isEmpty {
-            let names = done.map(\.task.identifier).joined(separator: ", ")
-            lines.append("Marked done (PR merged): \(names).")
+            parts.append("Marks \(done.joined(separator: ", ")) done.")
         }
         if !abandoned.isEmpty {
-            let names = abandoned.map(\.task.identifier).joined(separator: ", ")
-            lines.append("Abandoned (PRs closed, branches deleted, cannot be reopened): \(names).")
+            parts.append("Closes PRs and deletes branches for \(abandoned.joined(separator: ", ")); each can be reopened later.")
         }
-        return lines.joined(separator: "\n")
+        return parts.joined(separator: " ")
+    }
+
+    static func confirmLabel(policy: TaskChildPolicy, allMerged: Bool) -> String {
+        switch policy {
+        case .rehome: "Complete & Move"
+        case .abandon: allMerged ? "Complete & Finish" : "Complete & Abandon"
+        }
+    }
+
+    static func confirmRole(policy: TaskChildPolicy, allMerged: Bool) -> LoopflowButtonStyle.Role {
+        policy == .abandon && !allMerged ? .destructive : .success
     }
 
     func body(content: Content) -> some View {
-        let descendants = completing.map { model.openDescendants(of: $0) } ?? []
-        let (_, abandoned) = summary(for: descendants)
-        let title: String = if let task = completing {
-            descendants.count == 1
-                ? "Complete \(task.task.identifier) and settle 1 open child?"
-                : "Complete \(task.task.identifier) and settle \(descendants.count) open children?"
-        } else {
-            "Complete Task?"
-        }
-        content.confirmationDialog(
-            title,
-            isPresented: Binding(get: { completing != nil }, set: { if !$0 { model.navigation.completing = nil } }),
-            presenting: completing
-        ) { task in
-            Button(
-                abandoned.isEmpty ? "Complete & Finish Children" : "Complete & Settle Children",
-                role: abandoned.isEmpty ? nil : .destructive
-            ) {
-                model.navigation.completing = nil
-                model.completeTaskFromInput(task)
+        content.background {
+            // Own view node so this sheet does not collide with sibling `.sheet` modifiers on SessionsView.
+            Color.clear.sheet(item: Binding(
+                get: { completing },
+                set: { if $0 == nil { model.navigation.completing = nil } }
+            )) { task in
+                let tree = model.openDescendantTree(of: task)
+                TaskCompleteSheet(
+                    task: task,
+                    openChildCount: model.openChildCount(task),
+                    descendants: tree,
+                    destination: model.rehomeDestination(of: task),
+                    onConfirm: { policy in
+                        model.navigation.completing = nil
+                        model.completeTaskFromInput(task, children: policy)
+                    },
+                    onCancel: { model.navigation.completing = nil }
+                )
             }
-        } message: { _ in
-            Text(message(for: descendants))
         }
+    }
+}
+
+private struct TaskCompleteSheet: View {
+    let task: RoadmapTask
+    let openChildCount: Int
+    let descendants: [(task: RoadmapTask, depth: Int)]
+    let destination: RoadmapTask?
+    let onConfirm: (TaskChildPolicy) -> Void
+    let onCancel: () -> Void
+    @State private var policy: TaskChildPolicy
+    @Environment(\.palette) private var palette
+
+    init(
+        task: RoadmapTask,
+        openChildCount: Int,
+        descendants: [(task: RoadmapTask, depth: Int)],
+        destination: RoadmapTask?,
+        onConfirm: @escaping (TaskChildPolicy) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.task = task
+        self.openChildCount = openChildCount
+        self.descendants = descendants
+        self.destination = destination
+        self.onConfirm = onConfirm
+        self.onCancel = onCancel
+        _policy = State(initialValue: TaskCompleteConfirmation.defaultPolicy(descendants: descendants.map(\.task)))
+    }
+
+    private var flatDescendants: [RoadmapTask] { descendants.map(\.task) }
+    private var allMerged: Bool { flatDescendants.allSatisfy { $0.pr?.phase == .merged } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Text(TaskChildPolicy.question(issue: task.task.identifier, openChildren: openChildCount))
+                    .font(Typography.lede)
+                    .foregroundStyle(palette.text)
+                Text(openChildCount == 1
+                     ? "Choose what happens to its open child:"
+                     : "Choose what happens to its open children:")
+                    .font(Typography.text)
+                    .foregroundStyle(palette.textSecondary)
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(descendants, id: \.task.id) { entry in
+                        childRow(entry.task, depth: entry.depth)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(Spacing.sm)
+            }
+            .frame(maxHeight: 160)
+            .background(
+                RoundedRectangle(cornerRadius: CornerRadius.row)
+                    .fill(palette.background)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: CornerRadius.row)
+                    .strokeBorder(palette.border, lineWidth: 1)
+            )
+
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                // The first choice is the one that keeps work.
+                ForEach(allMerged ? [TaskChildPolicy.abandon, .rehome] : [.rehome, .abandon], id: \.self) {
+                    optionRow($0)
+                }
+            }
+
+            HStack(spacing: Spacing.sm) {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(LoopflowButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier("task-complete-cancel")
+                Button(
+                    TaskCompleteConfirmation.confirmLabel(policy: policy, allMerged: allMerged),
+                    role: policy == .abandon && !allMerged ? .destructive : nil
+                ) {
+                    onConfirm(policy)
+                }
+                .buttonStyle(LoopflowButtonStyle(TaskCompleteConfirmation.confirmRole(policy: policy, allMerged: allMerged)))
+                .keyboardShortcut(.defaultAction)
+                .accessibilityIdentifier("task-complete-confirm")
+            }
+        }
+        .padding(Spacing.xl)
+        .frame(width: 440)
+    }
+
+    private func childRow(_ child: RoadmapTask, depth: Int) -> some View {
+        let badge = childBadge(child)
+        return HStack(spacing: Spacing.sm) {
+            Text(child.task.identifier)
+                .font(Typography.mono)
+                .foregroundStyle(palette.textSecondary)
+            Text(child.task.name)
+                .font(Typography.text)
+                .foregroundStyle(palette.text)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: Spacing.xs)
+            Text(badge.label)
+                .font(Typography.meta)
+                .foregroundStyle(badge.ink)
+                .padding(.horizontal, Spacing.xs)
+                .padding(.vertical, Spacing.xxs)
+                .background(
+                    RoundedRectangle(cornerRadius: CornerRadius.control)
+                        .fill(badge.fill)
+                )
+        }
+        .padding(.leading, CGFloat(depth) * Spacing.lg)
+    }
+
+    private func childBadge(_ child: RoadmapTask) -> (label: String, ink: Color, fill: Color) {
+        if let pr = child.pr {
+            let number = pr.publication?.github.map { "#\($0.number) " } ?? ""
+            if pr.phase == .merged {
+                return ("\(number)merged", palette.successTone.ink, palette.successTone.fill)
+            }
+            if child.lifecycle == .moving {
+                return ("\(number)open, running", palette.workingTone.ink, palette.workingTone.fill)
+            }
+            return ("\(number)open", palette.warningTone.ink, palette.warningTone.fill)
+        }
+        if child.lifecycle == .moving {
+            return ("running", palette.workingTone.ink, palette.workingTone.fill)
+        }
+        return (child.lifecycle.rawValue, palette.textSecondary, palette.surfaceMuted)
+    }
+
+    private func optionRow(_ choice: TaskChildPolicy) -> some View {
+        let selected = policy == choice
+        let title = choice == .rehome
+            ? TaskCompleteConfirmation.moveTitle(to: destination)
+            : TaskCompleteConfirmation.settleTitle(allMerged: allMerged)
+        let detail = choice == .rehome
+            ? TaskCompleteConfirmation.moveDetail(to: destination)
+            : TaskCompleteConfirmation.settleDetail(descendants: flatDescendants)
+        return Button {
+            policy = choice
+        } label: {
+            HStack(alignment: .top, spacing: Spacing.sm) {
+                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                    .font(Typography.text)
+                    .foregroundStyle(selected ? palette.success : palette.textTertiary)
+                    .padding(.top, Spacing.xxs)
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(title)
+                        .font(Typography.textStrong)
+                        .foregroundStyle(palette.text)
+                    Text(detail)
+                        .font(Typography.meta)
+                        .foregroundStyle(palette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(Spacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: CornerRadius.row)
+                    .fill(selected ? palette.surfaceMuted : palette.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: CornerRadius.row)
+                    .strokeBorder(selected ? palette.borderStrong : palette.border, lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: CornerRadius.row))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("task-complete-\(choice.rawValue)")
     }
 }
 

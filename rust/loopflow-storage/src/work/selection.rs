@@ -116,6 +116,7 @@ pub enum SelectionState {
     Idle,
     Active,
     Moving,
+    Paused,
     /// Board axis: the Task's `TaskSection`.
     Backlog,
     Working,
@@ -763,6 +764,8 @@ pub struct ViewPlan {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ViewContent {
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub working_group: Option<crate::execution::WorkingGroup>,
     pub work: WorkWorkspaceKey,
     pub title: String,
     pub states: BTreeSet<SelectionState>,
@@ -776,6 +779,10 @@ pub struct ViewContent {
     /// An explicit connect command, never a fallback shell or provider launch argv.
     pub argv: Option<Vec<String>>,
     pub unavailable: Vec<String>,
+    /// How many direct children of a Task are open, so a client can ask what
+    /// happens to them before completing it; `None` for anything but a Task.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub open_children: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

@@ -33,6 +33,10 @@ found it, as someone who will maintain it.
 breaks isn't worth keeping, and a flaky test is a broken test. The test:
 break the feature in your head; does this fail?
 
+**Spend compute deliberately.** Compute is either shared with other agents or
+metered: run the smallest check that answers your question, leave broad suites
+to CI, and clean up what you start.
+
 **Protect the person's flow.** Don't ask permission for work that can be
 undone. Say what's needed, then stop.
 
@@ -79,6 +83,10 @@ comes from `lf wt create <name>` beside this one (`--stack` when its piece
 builds on this branch), never from the harness's own worktree tools, which
 nest one inside this checkout where it belongs to no Task. You answer for
 what it returns; check it before you use it.
+
+Present a compiled review page with `lf page open <path>`; present a source file
+beside the conversation with `lf desktop files <path>` (exit 4 means Desktop is
+unattached; give the path and continue).
 
 ## Notes
 
@@ -140,9 +148,9 @@ the cause behind it and replace it with the real fix.
 3. **Fix the cause,** within the scope asked. Add a diagnostic or regression
    test when it makes this failure easier to read or stops it coming back.
    Asked only for a diagnosis, explain the cause and the fix without editing.
-4. **Rerun the same command** and nearby regressions. Follow any newly
-   exposed failure until the workflow succeeds. One green check is not enough
-   while other counterexamples exist.
+4. **Rerun the same command** and its immediate test; defer broad suites and
+   release builds to CI. Follow any newly exposed failure until the workflow
+   succeeds. One green check is not enough while other counterexamples exist.
 
 Report the cause, the change, and the same command failing before and passing
 after, with the output of both. If the cause is

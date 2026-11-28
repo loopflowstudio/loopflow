@@ -137,6 +137,11 @@ impl Error {
         if let Some(named) = Self::named(error) {
             return named.clone();
         }
+        if let Some(crate::ops::OpsError::TaskNotFound(issue)) =
+            error.downcast_ref::<crate::ops::OpsError>()
+        {
+            return task::missing(issue);
+        }
         let code = error.chain().find_map(|cause| {
             if let Some(store) = cause.downcast_ref::<StoreError>() {
                 return match store {
@@ -162,5 +167,20 @@ impl Error {
             ErrorCode::OutcomeUnknown,
             format!("{error:#}; inspect the affected work before retrying"),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Error, ErrorCode};
+    use crate::ops::OpsError;
+
+    #[test]
+    fn a_refused_write_keeps_its_code_and_words() {
+        let refusal = OpsError::Refused(Error::conflict("LOO-12 has 1 open child"));
+        let written = Error::written(&anyhow::Error::from(refusal).context("task.complete"));
+        assert_eq!(written, Error::conflict("LOO-12 has 1 open child"));
+        let failed = Error::written(&OpsError::Message("disk full".into()).into());
+        assert_eq!(failed.code, ErrorCode::OutcomeUnknown);
     }
 }

@@ -14,6 +14,7 @@ pub mod history;
 pub mod instrumentation;
 #[cfg(test)]
 mod leaving_guard;
+pub mod lock_file;
 pub mod machine_records;
 #[cfg(test)]
 pub mod migration_build;
@@ -23,6 +24,7 @@ pub mod migration_schema;
 pub mod people;
 pub mod planning;
 pub mod planning_sync;
+pub(crate) mod pool;
 pub mod pr_landing;
 pub mod process;
 pub mod profile;

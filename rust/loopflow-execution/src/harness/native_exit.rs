@@ -153,17 +153,23 @@ pub fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
             .lines
             .first()
             .filter(|_| !matches!(settled.code, 0 | 130));
-        let recorded = store
-            .record_agent_exit_code(&attachment.agent_process_id, i32::from(settled.code))
-            .and_then(|()| {
-                store.finish_run(
-                    loopflow_storage::graph_process::RunOwner::GraphStep,
-                    &attachment.launcher_lf_process_id,
-                    time::OffsetDateTime::now_utc().unix_timestamp(),
-                    Some(i32::from(settled.code)),
-                    error.map(String::as_str),
-                )
-            });
+        let recorded = (|| {
+            // A departure succeeded for the launcher. Its zero does not mean
+            // the person quit the provider that moved.
+            if !settled.moved {
+                store.record_agent_exit_code(
+                    &attachment.agent_process_id,
+                    i32::from(settled.code),
+                )?;
+            }
+            store.finish_run(
+                loopflow_storage::graph_process::RunOwner::GraphStep,
+                &attachment.launcher_lf_process_id,
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+                Some(i32::from(settled.code)),
+                error.map(String::as_str),
+            )
+        })();
         if let Err(error) = recorded {
             tracing::warn!(%error, session = %exit.session, "cannot record the launcher's exit");
         }

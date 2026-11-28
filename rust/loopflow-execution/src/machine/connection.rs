@@ -1,4 +1,4 @@
-use crate::machine::ssh::remote_path;
+use crate::machine::ssh::lf_remote_path;
 use crate::store::Store;
 use anyhow::{anyhow, Context};
 use loopflow_model::durable::{Machine, MachineId};
@@ -115,7 +115,7 @@ pub async fn probe(target: &str, forward_agent: bool) -> anyhow::Result<Probe> {
     }
     let command = format!(
         "{}; command -v lf >/dev/null 2>&1 || {{ echo lf-not-installed; exit 127; }}; lf --version && lf machine id",
-        remote_path()
+        lf_remote_path()
     );
     let mut child = tokio::process::Command::new("ssh");
     child

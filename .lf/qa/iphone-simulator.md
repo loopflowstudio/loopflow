@@ -101,3 +101,17 @@ Clean up: type `/exit` and Return into each conversation through a PTY
 delete the clone, its `.<task>` checkouts and `.ready`, then `xcrun simctl
 shutdown` and `delete` the Simulator by UDID. Done Tasks cannot be abandoned
 and stay in the store as Done.
+
+## A branch server on a private Machine, step by step
+
+`lf server mobile` needs `tailscale` on `PATH` (`~/.local/bin` here); with it
+the private home gets its own port on the Mac's tailnet name. The phone lists
+only repositories in the portfolio, `$HOME/src` of the private `HOME`: clone
+the fake origin there (`git clone …/origin.git $HOME/src/<name>`, then the
+`insteadOf` rewrite) and create Tasks in that clone, or the list stays empty.
+Backlog is under the filter button (tap 38,42, then `--label Backlog`); Tasks
+without a conversation sit under "N without a conversation", collapsed. The
+expanded Notice's "Show" opens the Task; `--label Show` also matches the
+filter button, so tap the Notice's action by coordinates. Restarting the
+private server leaves the app "away" until `simctl terminate` and `launch`.
+`lf server mobile --off` in the private home when done.

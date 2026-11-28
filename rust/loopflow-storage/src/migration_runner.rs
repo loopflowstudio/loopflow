@@ -618,6 +618,18 @@ pub fn migration_backups(path: &Path) -> Vec<PathBuf> {
     backups.into_iter().map(|(_, path)| path).collect()
 }
 
+/// The Unix timestamp of the most recent schema migration applied to `conn`.
+pub fn latest_migration_applied_at(conn: &rusqlite::Connection) -> StoreResult<Option<i64>> {
+    if !has_table(conn, "schema_migrations")? {
+        return Ok(None);
+    }
+    Ok(
+        conn.query_row("SELECT MAX(applied_at) FROM schema_migrations", [], |row| {
+            row.get(0)
+        })?,
+    )
+}
+
 /// Each release that migrates clones the store first. Once a migration commits
 /// only the generation it made stays (`kept` 1); once its install settles with no
 /// process left on an older build, none does (`kept` 0). A failed removal is

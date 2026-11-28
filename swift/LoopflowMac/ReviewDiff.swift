@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import Observation
 import Loopflow
 
 /// A Task's whole comparison read as one review: every file, its hunks, and the
@@ -237,6 +238,50 @@ struct ReviewFile: Equatable, Sendable, Identifiable {
         self.deletions = deletions
         self.rows = rows
         fingerprint = hasher.finalize()
+    }
+
+    /// An insertion marks its new lines. A pure deletion marks the surviving line above it.
+    var gutterMarks: [Int: ReviewLine.Kind] {
+        var result: [Int: ReviewLine.Kind] = [:]
+        var preceding = 0
+        for block in blocks {
+            switch block {
+            case .hunk(let header):
+                let span = ReviewDiff.hunkSpan(header)
+                preceding = span.new - (span.newCount == 0 ? 0 : 1)
+            case .context(let line):
+                if let number = line.new { preceding = number }
+            case .change(let change):
+                if change.added.isEmpty { result[max(1, preceding)] = .removed }
+                for number in change.added.compactMap(\.new) {
+                    result[number] = .added
+                    preceding = number
+                }
+            case .moved(let move):
+                if move.end == .source { result[max(1, preceding)] = .removed }
+                for number in move.lines.compactMap(\.new) {
+                    result[number] = .added
+                    preceding = number
+                }
+            }
+        }
+        return result
+    }
+
+    /// The rendered block containing a working-file line.
+    func row(containing number: Int) -> String? {
+        for block in blocks {
+            switch block {
+            case .context(let line) where line.new == number: return block.id(in: path)
+            case .change(let change):
+                if let offset = change.added.firstIndex(where: { $0.new == number }) {
+                    return status == .added ? change.rowID(offset) : change.id
+                }
+            case .moved(let move) where move.lines.contains(where: { $0.new == number }): return move.id
+            default: continue
+            }
+        }
+        return nil
     }
 
     /// The id of the file's first row under its header.
@@ -651,110 +696,273 @@ enum LongestCommon {
     }
 }
 
-/// Lines you picked in the review, on one side of one file.
+/// A line range keeps the source it was picked from, even after switching comparisons.
 struct ReviewSelection: Equatable, Sendable {
     enum Side: String, Sendable { case old = "before", new = "after" }
+    enum Source: Equatable, Sendable {
+        case file(draft: Bool)
+        case diff(side: Side, revision: String)
+
+        var label: String {
+            switch self {
+            case .file(let draft): draft ? "unsaved draft" : "working file"
+            case .diff(let side, let revision): "\(side.rawValue), \(revision)"
+            }
+        }
+
+        var isFile: Bool { if case .file = self { true } else { false } }
+        var revision: String? { if case .diff(_, let revision) = self { revision } else { nil } }
+    }
     let path: String
-    let side: Side
+    let source: Source
     let first: Int
     let last: Int
 
-    func extended(to line: Int) -> ReviewSelection {
-        ReviewSelection(path: path, side: side, first: min(first, line), last: max(last, line))
-    }
-
-    /// The line's number on this side; nil when the line is not on it.
-    func number(of line: ReviewLine) -> Int? { side == .old ? line.old : line.new }
-
-    func contains(_ line: ReviewLine, path: String) -> Bool {
-        guard path == self.path, let number = number(of: line) else { return false }
-        return (first...last).contains(number)
+    func extended(to line: Int) -> Self {
+        Self(path: path, source: source, first: min(first, line), last: max(last, line))
     }
 
     var range: String { first == last ? "L\(first)" : "L\(first)-\(last)" }
 
-    /// One line for the conversation's unsent input. Desktop types literal text
-    /// only, and a newline there would send, so the code stays in the file and
-    /// the line names exactly where: file, side, lines and the revision compared.
-    func reference(revision: String) -> String {
-        "`\(path):\(range)` (\(side.rawValue), \(revision)) "
-    }
+    var reference: String { "`\(path):\(range)` (\(source.label)) " }
 
-    /// The selected lines as plain text, without patch markers or line numbers.
-    func text(in file: ReviewFile) -> String {
-        let lines = numbered(in: file)
-        return (first...last).compactMap { lines[$0] }.joined(separator: "\n")
-    }
-
-    /// Every line on one side of a file, in order: the new code, or what was removed.
-    static func side(_ side: Side, of file: ReviewFile) -> String {
-        file.lines.filter { side == .new ? $0.kind != .removed : $0.kind == .removed }.map(\.text).joined(separator: "\n")
-    }
-
-    /// This side's lines of a file by number.
     func numbered(in file: ReviewFile) -> [Int: String] {
+        guard case .diff(let side, _) = source else { return [:] }
         var lines: [Int: String] = [:]
         for line in file.lines {
-            if let number = number(of: line) { lines[number] = line.text }
+            if let number = side == .old ? line.old : line.new { lines[number] = line.text }
         }
         return lines
     }
-}
 
-/// A comment you left on lines of the Diff. It waits under its lines until you
-/// send every comment to the conversation as one message.
-struct ReviewComment: Equatable, Sendable, Identifiable {
-    let id: UUID
-    var selection: ReviewSelection
-    let text: String
-    /// The commented lines as they read when you wrote it, to find them again.
-    let anchor: [String]
-    /// The lines are no longer in the Diff as they were; the comment keeps its
-    /// last place and is still sent.
-    var detached = false
-
-    init(id: UUID = UUID(), selection: ReviewSelection, text: String, in file: ReviewFile) {
-        self.id = id
-        self.selection = selection
-        self.text = text
-        let lines = selection.numbered(in: file)
-        anchor = (selection.first...selection.last).map { lines[$0] ?? "" }
+    func excerpt(in file: ReviewFile) -> [String] {
+        let lines = numbered(in: file)
+        return (first...last).compactMap { lines[$0] }
     }
 
-    /// The comment after the file changed: on the nearest lines that still read
-    /// as they did, or detached when none do. Nil is a file that left the Diff.
-    func anchored(in file: ReviewFile?) -> ReviewComment {
+    static func side(_ side: Side, of file: ReviewFile) -> String {
+        file.lines.filter { side == .new ? $0.kind != .removed : $0.kind == .removed }.map(\.text).joined(separator: "\n")
+    }
+}
+
+struct ReviewComment: Equatable, Sendable, Identifiable {
+    enum Anchor: Equatable, Sendable {
+        case lines(ReviewSelection)
+        case page(path: String, reference: String)
+    }
+
+    let id = UUID()
+    let target: Anchor
+    let text: String
+    /// Original line text for `.lines` comments, used to re-anchor across edits; empty for `.page`.
+    let anchor: [String]
+    private var start: Int?
+
+    var detached: Bool {
+        guard case .lines = target else { return false }
+        return start == nil
+    }
+
+    var path: String {
+        switch target {
+        case .lines(let selection): selection.path
+        case .page(let path, _): path
+        }
+    }
+
+    func isPage(_ path: String) -> Bool {
+        if case .page(let itemPath, _) = target { itemPath == path } else { false }
+    }
+
+    /// The original line selection for a `.lines` comment; nil for `.page`.
+    var original: ReviewSelection? {
+        guard case .lines(let selection) = target else { return nil }
+        return selection
+    }
+
+    /// The current (possibly re-anchored) line selection for a `.lines` comment; nil for `.page`.
+    var selection: ReviewSelection? {
+        guard case .lines(let original) = target else { return nil }
+        guard let start else { return original }
+        return ReviewSelection(path: original.path, source: original.source,
+                               first: start, last: start + original.last - original.first)
+    }
+
+    init(selection: ReviewSelection, text: String, anchor: [String]) {
+        target = .lines(selection)
+        self.text = text
+        self.anchor = anchor
+        start = selection.first
+    }
+
+    init(pagePath: String, reference: String) {
+        target = .page(path: pagePath, reference: reference)
+        text = ""
+        anchor = []
+        start = nil
+    }
+
+    func anchored(in lines: [Int: String]) -> Self {
+        guard case .lines(let original) = target else { return self }
         var next = self
-        guard let file else { next.detached = true; return next }
-        let lines = selection.numbered(in: file)
-        let starts = lines.keys.filter { start in
-            anchor.enumerated().allSatisfy { lines[start + $0.offset] == $0.element }
+        next.start = nil
+        guard let first = anchor.first, anchor.count == original.last - original.first + 1 else { return next }
+        for (number, text) in lines where text == first {
+            if anchor.enumerated().allSatisfy({ lines[number + $0.offset] == $0.element }) {
+                guard next.start == nil else { next.start = nil; return next }
+                next.start = number
+            }
         }
-        guard let start = starts.min(by: { (abs($0 - selection.first), $0) < (abs($1 - selection.first), $1) }) else {
-            next.detached = true
-            return next
-        }
-        next.detached = false
-        next.selection = ReviewSelection(path: selection.path, side: selection.side,
-                                         first: start, last: start + selection.last - selection.first)
         return next
     }
 
-    /// Every comment as one line for the conversation's unsent input, each
-    /// naming its file, lines and side.
-    static func message(_ comments: [ReviewComment], revision: String) -> String {
-        func words(_ comment: ReviewComment) -> String {
-            comment.text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    static func oneLine(_ text: String) -> String {
+        let space = UnicodeScalar(" ")
+        let cleaned = String(String.UnicodeScalarView(text.unicodeScalars.map { scalar in
+            (scalar.value < 0x20 || scalar.value == 0x7f) ? space : scalar
+        }))
+        return cleaned.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    static func message(_ comments: [ReviewComment], receipts: [String] = []) -> String {
+        let body = comments.enumerated().map { index, comment in
+            let prefix = comments.count > 1 ? "(\(index + 1)) " : ""
+            switch comment.target {
+            case .lines:
+                let changed = comment.detached ? "· lines since changed " : ""
+                let words = oneLine(comment.text)
+                let reference = comment.selection?.reference ?? ""
+                return prefix + reference + changed + words
+            case .page(_, let reference):
+                return prefix + oneLine(reference)
+            }
+        }.joined(separator: " ")
+        let suffix = receipts.isEmpty ? "" : " [already ran: \(receipts.map(oneLine).joined(separator: "; "))]"
+        return body + suffix + " "
+    }
+}
+
+@MainActor @Observable
+final class ReviewComments {
+    struct PageKey: Hashable, Sendable {
+        let path: String
+        let buildID: String
+    }
+
+    var items: [ReviewComment] = []
+    var selection: ReviewSelection? { didSet { if oldValue != selection { draft = "" } } }
+    var draft = ""
+    /// Saved opaque runtime state per rendered review page build. Swift owns this
+    /// so Desktop pages never touch `localStorage` and cannot resurrect sent notes.
+    private var pageStates: [PageKey: JSONValue] = [:]
+    /// Incremented after `insert(into:)` succeeds so a mounted `TaskHTMLView` clears itself.
+    private(set) var pageClearGeneration = 0
+
+    func select(path: String, source: ReviewSelection.Source, line: Int, extend: Bool) {
+        if extend, let current = selection, current.path == path, current.source == source {
+            selection = current.extended(to: line)
+        } else {
+            selection = ReviewSelection(path: path, source: source, first: line, last: line)
         }
-        func place(_ comment: ReviewComment) -> String {
-            let selection = comment.selection
-            return "`\(selection.path):\(selection.range)` (\(selection.side.rawValue)\(comment.detached ? ", lines since changed" : ""))"
+    }
+
+    func add(anchor: [String]) {
+        guard let selection, !draft.allSatisfy(\.isWhitespace) else { return }
+        items.append(ReviewComment(selection: selection, text: draft, anchor: anchor))
+        self.selection = nil
+    }
+
+    /// Answer a review page's `ready` handshake. Returns saved state for `(path, buildID)`,
+    /// or `nil` when absent, cleared after send, or rebuilt with a new `buildID` (clearing
+    /// any stale state and items left over from an earlier build of `path`).
+    func pageReady(path: String, buildID: String) -> JSONValue? {
+        if let saved = pageStates[PageKey(path: path, buildID: buildID)] { return saved }
+        if removeStalePageStates(for: path, keeping: buildID) {
+            items.removeAll { $0.isPage(path) }
         }
-        if comments.count == 1, let comment = comments.first {
-            return "\(place(comment)): \(words(comment)) (\(revision)) "
+        return nil
+    }
+
+    /// Store `state` for `(path, buildID)` and replace `path`'s `.page` entries in `items`.
+    func syncPage(path: String, buildID: String, state: JSONValue, items references: [String]) {
+        _ = removeStalePageStates(for: path, keeping: buildID)
+        pageStates[PageKey(path: path, buildID: buildID)] = state
+        let firstIndex = items.firstIndex { $0.isPage(path) }
+        items.removeAll { $0.isPage(path) }
+        let replacements = references.map { ReviewComment(pagePath: path, reference: $0) }
+        if let firstIndex, firstIndex <= items.count {
+            items.insert(contentsOf: replacements, at: firstIndex)
+        } else {
+            items.append(contentsOf: replacements)
         }
-        let parts = comments.enumerated().map { "(\($0.offset + 1)) \(place($0.element)): \(words($0.element))" }
-        return "\(comments.count) comments on the diff (\(revision)): \(parts.joined(separator: " ")) "
+    }
+
+    @discardableResult
+    private func removeStalePageStates(for path: String, keeping buildID: String) -> Bool {
+        let staleKeys = pageStates.keys.filter { $0.path == path && $0.buildID != buildID }
+        for stale in staleKeys { pageStates.removeValue(forKey: stale) }
+        return !staleKeys.isEmpty
+    }
+
+    func reconcile(_ document: TaskFileDocument) {
+        let indices = items.indices.filter {
+            guard let original = items[$0].original else { return false }
+            return original.path == document.path && original.source.isFile
+        }
+        guard !indices.isEmpty else { return }
+        let lines = document.text.utf8.split(separator: 10, omittingEmptySubsequences: false).enumerated().map {
+            ($0.offset + 1, String(decoding: $0.element.dropLast($0.element.last == 13 ? 1 : 0), as: UTF8.self))
+        }
+        let numbered = Dictionary(uniqueKeysWithValues: lines)
+        for index in indices { items[index] = items[index].anchored(in: numbered) }
+    }
+
+    func reconcile(path: String, revision: String, file: ReviewFile?) {
+        for index in items.indices {
+            guard let selection = items[index].original,
+                  selection.path == path, selection.source.revision == revision else { continue }
+            items[index] = items[index].anchored(in: file.map { selection.numbered(in: $0) } ?? [:])
+        }
+    }
+
+    func insert(into conversation: (String) -> Bool) {
+        guard !items.isEmpty else { return }
+        guard conversation(ReviewComment.message(items, receipts: pageReceipts())) else { return }
+        items.removeAll()
+        pageStates = pageStates.compactMapValues(Self.sentPageState)
+        pageClearGeneration += 1
+    }
+
+    /// What a page keeps once its items are sent: its receipts, marked reported, so a
+    /// remounted page still shows "Filed …" in place of the button.
+    private static func sentPageState(_ state: JSONValue) -> JSONValue? {
+        guard case .object(let fields) = state, case .array(let receipts) = fields["receipts"],
+              !receipts.isEmpty else { return nil }
+        let reported = receipts.map { entry -> JSONValue in
+            guard case .object(var receipt) = entry else { return entry }
+            receipt["reported"] = .bool(true)
+            return .object(receipt)
+        }
+        return .object(["receipts": .array(reported)])
+    }
+
+    private func pageReceipts() -> [String] {
+        var ran: [String] = []
+        for key in pageStates.keys.sorted(by: { $0.path < $1.path }) {
+            guard case .object(let fields) = pageStates[key],
+                  case .array(let receipts) = fields["receipts"] else { continue }
+            for entry in receipts {
+                guard case .object(let receipt) = entry,
+                      case .string(let kind) = receipt["kind"],
+                      receipt["reported"] != .bool(true) else { continue }
+                if case .string(let summary) = receipt["summary"], !summary.isEmpty {
+                    ran.append("\(kind) → \(summary)")
+                } else {
+                    ran.append(kind)
+                }
+            }
+        }
+        return ran
     }
 }
 #endif

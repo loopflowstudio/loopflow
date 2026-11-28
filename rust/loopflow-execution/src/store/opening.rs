@@ -15,6 +15,27 @@ pub fn open_sqlite(path: &Path) -> StoreResult<SqliteStore> {
     )
 }
 
+/// Open for reading only with the same frontier checks as [`open_sqlite`].
+pub fn open_read_only_validated(path: &Path) -> StoreResult<SqliteStore> {
+    let home = super::machine_home_dir();
+    let may_apply =
+        super::may_apply_migrations(path, &home, FrontierAdvance::Forbidden).map_err(|error| {
+            StoreError::InvalidData(format!("resolve migration authority: {error}"))
+        })?;
+    let shared =
+        super::same_database_file(path, &home.join(".lf/loopflow.db")).map_err(|error| {
+            StoreError::InvalidData(format!("resolve shared store identity: {error}"))
+        })?;
+    SqliteStore::open_read_only_validated(
+        path,
+        shared,
+        may_apply,
+        &super::migrations::build(),
+        &super::migrations::observers(),
+        crate::store::token_key::encryption_key,
+    )
+}
+
 /// Apply pending migrations while the install caller holds the promotion lock.
 pub fn open_for_promotion(path: &Path) -> StoreResult<SqliteStore> {
     open_with(

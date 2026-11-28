@@ -2,17 +2,64 @@
 //! inline; only a bounded reading scope retains answers and dependencies.
 use std::any::Any;
 use std::cell::RefCell;
+#[cfg(target_os = "macos")]
+use std::collections::HashSet;
 use std::collections::{BTreeMap, HashMap};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::{Arc, LazyLock, Mutex, Weak};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, LazyLock, Mutex, OnceLock, Weak};
 use std::time::{Duration, SystemTime};
 
+use notify::{RecursiveMode, Watcher};
+
+use crate::ops::task::TaskFileInventory;
 use crate::process::OsProcess;
+
+static SPAWNS: AtomicU64 = AtomicU64::new(0);
+static NEXT_READING: AtomicU64 = AtomicU64::new(1);
+
+fn next_reading_id() -> u64 {
+    NEXT_READING.fetch_add(1, Ordering::Relaxed)
+}
+
+#[cfg(test)]
+thread_local! {
+    static THREAD_SPAWNS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Record a subprocess spawned by the server or observation layer.
+pub fn record_spawn() {
+    SPAWNS.fetch_add(1, Ordering::Relaxed);
+    #[cfg(test)]
+    THREAD_SPAWNS.with(|count| count.set(count.get() + 1));
+}
+
+/// Cumulative subprocesses recorded in this process.
+pub fn spawns() -> u64 {
+    SPAWNS.load(Ordering::Relaxed)
+}
+
+/// Cumulative subprocesses recorded on the calling thread (for race-free unit tests).
+#[cfg(test)]
+pub(crate) fn thread_spawns() -> u64 {
+    THREAD_SPAWNS.with(std::cell::Cell::get)
+}
+
+/// Number of observation facts currently held by active subscriptions.
+pub fn current_held_facts() -> u64 {
+    PROCESS_CACHE.held_facts()
+}
+
+/// A subscriber woken whenever a held observation fact's revision advances.
+pub(crate) trait FactWatcher: Send + Sync {
+    fn wake(&self);
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Fact {
+    CheckoutFiles(PathBuf),
     Git(PathBuf, Vec<String>),
     Github(PathBuf, Vec<String>),
     File(PathBuf),
@@ -49,6 +96,7 @@ struct FileMetadata {
 
 #[derive(Debug, Clone)]
 enum Answer {
+    CheckoutFiles(Result<Arc<TaskFileInventory>, Failure>),
     Output(Result<Output, Failure>),
     File(Result<String, Failure>),
     Directory(Result<Vec<PathBuf>, Failure>),
@@ -68,6 +116,7 @@ impl PartialEq for Answer {
                 a.status == b.status && a.stdout == b.stdout && a.stderr == b.stderr
             }
             (Self::Output(Err(a)), Self::Output(Err(b))) => a == b,
+            (Self::CheckoutFiles(a), Self::CheckoutFiles(b)) => a == b,
             (Self::File(a), Self::File(b)) => a == b,
             (Self::Directory(a), Self::Directory(b)) => a == b,
             (Self::Bytes(a), Self::Bytes(b)) => a == b,
@@ -82,25 +131,81 @@ impl PartialEq for Answer {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Source {
-    Local,
-    Git,
-    Github,
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StatStamp {
+    Present {
+        mtime: Option<SystemTime>,
+        ctime: (i64, i64),
+        size: u64,
+        dev: u64,
+        ino: u64,
+        symlink_mtime: Option<SystemTime>,
+        symlink_ino: u64,
+    },
+    Missing(io::ErrorKind),
+}
+
+fn stat_metadata(meta: &std::fs::Metadata) -> (Option<SystemTime>, (i64, i64), u64, u64, u64) {
+    #[cfg(unix)]
+    let (ctime, dev, ino) = {
+        use std::os::unix::fs::MetadataExt;
+        ((meta.ctime(), meta.ctime_nsec()), meta.dev(), meta.ino())
+    };
+    #[cfg(not(unix))]
+    let (ctime, dev, ino) = ((0, 0), 0, 0);
+    (meta.modified().ok(), ctime, meta.len(), dev, ino)
+}
+
+fn stat_stamp(path: &Path, include_symlink: bool) -> StatStamp {
+    match std::fs::metadata(path) {
+        Ok(meta) => {
+            let (mtime, ctime, size, dev, ino) = stat_metadata(&meta);
+            let (symlink_mtime, symlink_ino) = if include_symlink {
+                std::fs::symlink_metadata(path)
+                    .map(|s| {
+                        let (sm, _, _, _, si) = stat_metadata(&s);
+                        (sm, si)
+                    })
+                    .unwrap_or((None, 0))
+            } else {
+                (None, 0)
+            };
+            StatStamp::Present {
+                mtime,
+                ctime,
+                size,
+                dev,
+                ino,
+                symlink_mtime,
+                symlink_ino,
+            }
+        }
+        Err(err) => StatStamp::Missing(err.kind()),
+    }
 }
 
 impl Fact {
-    fn source(&self) -> Source {
+    fn stat_stamp(&self) -> Option<StatStamp> {
         match self {
-            Self::Git(..) => Source::Git,
-            Self::Github(..) => Source::Github,
-            _ => Source::Local,
+            Self::File(path) | Self::Bytes(path, _) | Self::Directory(path) => {
+                Some(stat_stamp(path, false))
+            }
+            Self::Metadata(path) => Some(stat_stamp(path, true)),
+            _ => None,
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn checkout_root(&self) -> Option<&Path> {
+        match self {
+            Self::Git(path, _) | Self::CheckoutFiles(path) => Some(path.as_path()),
+            _ => None,
         }
     }
 
     fn interval(&self) -> Duration {
         Duration::from_secs(match self {
-            Self::Git(..) => 3,
+            Self::Git(..) | Self::CheckoutFiles(..) => 3,
             Self::Github(..) | Self::Clock => 60,
             // Transcript watches say when to look sooner; these bound a missed event.
             Self::Turn(..) => TURN_RECONCILE.as_secs(),
@@ -111,7 +216,11 @@ impl Fact {
 
     fn observe(&self) -> Answer {
         match self {
+            Self::CheckoutFiles(path) => {
+                Answer::CheckoutFiles(retained(TaskFileInventory::scan(path).map(Arc::new)))
+            }
             Self::Git(path, args) | Self::Github(path, args) => {
+                record_spawn();
                 let mut command = Command::new(if matches!(self, Self::Git(..)) {
                     "git"
                 } else {
@@ -158,31 +267,152 @@ impl Fact {
 }
 
 /// How often a watched transcript is read again with no event.
-const TURN_RECONCILE: Duration = Duration::from_secs(30);
+pub(crate) const TURN_RECONCILE: Duration = Duration::from_secs(30);
 /// A transcript growing steadily is read again at most this often.
-const TURN_HINTED: Duration = Duration::from_secs(1);
+pub(crate) const TURN_HINTED: Duration = Duration::from_secs(1);
+/// How long an unheld observation entry stays cached before eviction.
+const UNHELD_TTL: Duration = Duration::from_secs(300);
 
 #[derive(Debug)]
 struct Entry {
     answer: Option<Answer>,
+    stat: Option<StatStamp>,
     revision: u64,
     checked: SystemTime,
     used: SystemTime,
+    hinted_due: Option<SystemTime>,
+    dirty: bool,
+    observed_by_reading: u64,
 }
 
 impl Entry {
-    fn update(&mut self, answer: Answer) -> bool {
+    fn new(answer: Option<Answer>, now: SystemTime) -> Self {
+        Self {
+            answer,
+            stat: None,
+            revision: 0,
+            checked: now,
+            used: now,
+            hinted_due: None,
+            dirty: false,
+            observed_by_reading: 0,
+        }
+    }
+
+    fn update(&mut self, answer: Answer, stat: Option<StatStamp>, now: SystemTime) -> bool {
         let changed = self.answer.as_ref() != Some(&answer);
         if changed {
             self.answer = Some(answer);
             self.revision += 1;
         }
-        self.checked = SystemTime::now();
+        self.stat = stat;
+        self.checked = now;
         changed
     }
 }
 
-type SharedEntry = Arc<Mutex<Entry>>;
+fn min_time<T: Ord>(slot: &mut Option<T>, candidate: T) {
+    *slot = Some(match slot.take() {
+        Some(prev) => prev.min(candidate),
+        None => candidate,
+    });
+}
+
+struct FactSlot {
+    fact: Fact,
+    entry: Mutex<Entry>,
+    holders: AtomicUsize,
+    watchers: Mutex<Vec<Weak<dyn FactWatcher>>>,
+}
+
+impl std::fmt::Debug for FactSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FactSlot")
+            .field("fact", &self.fact)
+            .field("holders", &self.holders.load(Ordering::Relaxed))
+            .finish_non_exhaustive()
+    }
+}
+
+impl FactSlot {
+    fn new(fact: Fact, entry: Entry) -> Arc<Self> {
+        Arc::new(Self {
+            fact,
+            entry: Mutex::new(entry),
+            holders: AtomicUsize::new(0),
+            watchers: Mutex::new(Vec::new()),
+        })
+    }
+
+    fn is_held(&self) -> bool {
+        self.holders.load(Ordering::Acquire) > 0
+    }
+
+    fn add_watcher(&self, watcher: Weak<dyn FactWatcher>) {
+        let mut watchers = self.watchers.lock().expect("fact watchers");
+        watchers.retain(|existing| existing.strong_count() > 0);
+        if !watchers
+            .iter()
+            .any(|existing| Weak::ptr_eq(existing, &watcher))
+        {
+            watchers.push(watcher);
+        }
+    }
+
+    fn notify_watchers(&self) {
+        let targets: Vec<Arc<dyn FactWatcher>> = {
+            let mut watchers = self.watchers.lock().expect("fact watchers");
+            let mut live = Vec::new();
+            watchers.retain(|weak| match weak.upgrade() {
+                Some(watcher) => {
+                    live.push(watcher);
+                    true
+                }
+                None => false,
+            });
+            live
+        };
+        for watcher in targets {
+            watcher.wake();
+        }
+    }
+}
+
+type SharedSlot = Arc<FactSlot>;
+
+/// RAII hold that keeps observed facts refreshing while a `Dependencies` lives,
+/// and releases checkout filesystem watches when dropped.
+struct Hold {
+    #[cfg(target_os = "macos")]
+    cache: Weak<Cache>,
+    slots: Vec<SharedSlot>,
+    #[cfg(target_os = "macos")]
+    checkouts: Vec<PathBuf>,
+}
+
+impl std::fmt::Debug for Hold {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Hold")
+            .field("slots", &self.slots.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Drop for Hold {
+    fn drop(&mut self) {
+        for slot in &self.slots {
+            slot.holders.fetch_sub(1, Ordering::AcqRel);
+        }
+        #[cfg(target_os = "macos")]
+        if !self.checkouts.is_empty() {
+            if let Some(cache) = self.cache.upgrade() {
+                for checkout in &self.checkouts {
+                    cache.release_checkout_watch(checkout);
+                }
+            }
+        }
+    }
+}
 
 /// A value computed from observed facts. Each variant is the whole identity
 /// of one computation: everything it reads that is not an observed fact.
@@ -215,6 +445,9 @@ pub enum Derived {
         claude: Option<PathBuf>,
         codex: Option<PathBuf>,
     },
+    /// The remote a repository's plan travels by, which changes only with
+    /// its Git config.
+    GitRemote { repo: PathBuf },
 }
 
 /// The entries and revisions read by one invocation, including bounded workers.
@@ -225,8 +458,9 @@ pub struct Dependencies(Arc<Mutex<Observed>>);
 /// one entry here, whatever its computation read.
 #[derive(Debug, Default)]
 struct Observed {
-    facts: HashMap<Fact, (SharedEntry, u64)>,
+    facts: HashMap<Fact, (SharedSlot, u64)>,
     derived: HashMap<Derived, Dependencies>,
+    hold: Option<Hold>,
 }
 
 impl Dependencies {
@@ -235,8 +469,56 @@ impl Dependencies {
         observed
             .facts
             .values()
-            .any(|(entry, revision)| entry.lock().expect("observed fact").revision != *revision)
+            .any(|(slot, revision)| slot.entry.lock().expect("observed fact").revision != *revision)
             || observed.derived.values().any(Dependencies::changed)
+    }
+
+    /// Check whether any observed fact moved, validating stat-guarded file,
+    /// bytes, directory, and metadata dependencies inline (~3–5 µs) when
+    /// `check_held` is true (bare/background reads) or the fact is unheld
+    /// (one-shot served reads).
+    fn changed_or_stat_stale(&self, check_held: bool) -> bool {
+        let observed = self.0.lock().expect("observed dependencies");
+        let now = SystemTime::now();
+        for (fact, (slot, revision)) in &observed.facts {
+            let mut guard = slot.entry.lock().expect("observed fact");
+            if guard.revision != *revision {
+                return true;
+            }
+            if check_held || !slot.is_held() {
+                if let Some(current_stat) = fact.stat_stamp() {
+                    if guard.stat.as_ref() != Some(&current_stat) {
+                        let answer = fact.observe();
+                        let changed = guard.update(answer, Some(current_stat), now);
+                        let moved = changed || guard.revision != *revision;
+                        drop(guard);
+                        if changed {
+                            slot.notify_watchers();
+                        }
+                        if moved {
+                            return true;
+                        }
+                        continue;
+                    }
+                }
+            }
+        }
+        observed
+            .derived
+            .values()
+            .any(|dep| dep.changed_or_stat_stale(check_held))
+    }
+
+    fn collect_slots(&self, out: &mut HashMap<Fact, SharedSlot>) {
+        let observed = self.0.lock().expect("observed dependencies");
+        for (fact, (slot, _)) in &observed.facts {
+            out.entry(fact.clone()).or_insert_with(|| slot.clone());
+        }
+        let nested: Vec<Dependencies> = observed.derived.values().cloned().collect();
+        drop(observed);
+        for dep in nested {
+            dep.collect_slots(out);
+        }
     }
 }
 
@@ -251,183 +533,536 @@ struct Computed {
     used: SystemTime,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Cache {
-    entries: Mutex<HashMap<Fact, SharedEntry>>,
+    entries: Mutex<HashMap<Fact, SharedSlot>>,
     derived: Mutex<HashMap<Derived, Slot>>,
+    wake: (Mutex<u64>, Condvar),
+    use_fs_watcher: bool,
+    fs_watcher: OnceLock<Option<Mutex<FsWatcher>>>,
     #[cfg(test)]
     computations: Mutex<Vec<Derived>>,
 }
 
-static SHARED: LazyLock<Mutex<Weak<Cache>>> = LazyLock::new(Mutex::default);
+impl Default for Cache {
+    fn default() -> Self {
+        Self::new(false)
+    }
+}
+
+static PROCESS_CACHE: LazyLock<Arc<Cache>> = LazyLock::new(|| Arc::new(Cache::new(true)));
+static REFRESH_STARTED: AtomicBool = AtomicBool::new(false);
 
 impl Cache {
-    pub fn shared() -> Arc<Self> {
-        let mut shared = SHARED.lock().expect("observation cache");
-        if let Some(cache) = shared.upgrade() {
-            return cache;
+    fn new(use_fs_watcher: bool) -> Self {
+        Self {
+            entries: Mutex::new(HashMap::new()),
+            derived: Mutex::new(HashMap::new()),
+            wake: (Mutex::new(0), Condvar::new()),
+            use_fs_watcher,
+            fs_watcher: OnceLock::new(),
+            #[cfg(test)]
+            computations: Mutex::new(Vec::new()),
         }
-        let cache = Arc::new(Self::default());
-        *shared = Arc::downgrade(&cache);
-        // Slow GitHub requests cannot postpone local files or process exits.
-        for source in [Source::Local, Source::Git, Source::Github] {
-            let weak = Arc::downgrade(&cache);
-            std::thread::spawn(move || loop {
-                std::thread::sleep(Duration::from_millis(250));
-                let Some(cache) = weak.upgrade() else { break };
-                cache.refresh(source);
-            });
+    }
+
+    #[cfg(all(test, target_os = "macos"))]
+    pub(crate) fn with_fs_watcher() -> Arc<Self> {
+        Arc::new(Self::new(true))
+    }
+
+    pub fn shared() -> Arc<Self> {
+        let cache = PROCESS_CACHE.clone();
+        if !REFRESH_STARTED.swap(true, Ordering::AcqRel) {
+            let bg = cache.clone();
+            let _ = std::thread::Builder::new()
+                .name("observe-refresh".into())
+                .spawn(move || bg.refresh_loop());
         }
         cache
     }
 
-    fn refresh(&self, source: Source) {
-        // A value leaves like a fact: nothing holds it and nothing asked lately.
-        // A slot only this map holds is unlocked; one a panic emptied goes too.
-        self.derived
-            .lock()
-            .expect("derived values")
-            .retain(|_, slot| {
-                Arc::strong_count(slot) > 1
-                    || slot.lock().is_ok_and(|computed| {
-                        computed.as_ref().is_some_and(|computed| {
-                            Arc::strong_count(&computed.dependencies.0) > 1
-                                || computed.used.elapsed().unwrap_or_default()
-                                    < Duration::from_secs(300)
-                        })
-                    })
-            });
-        let entries = {
-            let mut entries = self.entries.lock().expect("observation cache");
-            entries.retain(|_, entry| {
-                Arc::strong_count(entry) > 1
-                    || entry.try_lock().map_or(true, |entry| {
-                        entry.used.elapsed().unwrap_or_default() < Duration::from_secs(300)
-                    })
-            });
-            entries
-                .iter()
-                .filter(|(fact, _)| fact.source() == source)
-                .map(|(fact, entry)| (fact.clone(), entry.clone()))
-                .collect::<Vec<_>>()
-        };
-        for (fact, entry) in entries {
-            let Some(checked) = entry.try_lock().ok().and_then(|entry| {
-                (entry.answer.is_some()
-                    && entry.checked.elapsed().unwrap_or_default() >= fact.interval())
-                .then_some(entry.checked)
-            }) else {
+    fn notify_refresh(&self) {
+        let (lock, cv) = &self.wake;
+        let mut generation = lock.lock().expect("observe wake lock");
+        *generation = generation.wrapping_add(1);
+        cv.notify_all();
+    }
+
+    fn refresh_loop(&self) {
+        let (lock, cv) = &self.wake;
+        loop {
+            let before_gen = *lock.lock().expect("observe wake lock");
+            let wait = self.refresh_due_at(SystemTime::now());
+            let guard = lock.lock().expect("observe wake lock");
+            if *guard != before_gen {
                 continue;
-            };
-            let answer = fact.observe();
-            let mut entry = entry.lock().expect("observed fact");
-            // A write can publish a newer observation while this poll is in flight.
-            if entry.checked == checked {
-                entry.update(answer);
+            }
+            match wait {
+                Some(duration) if duration.is_zero() => {}
+                Some(duration) => {
+                    drop(
+                        cv.wait_timeout_while(guard, duration, |g| *g == before_gen)
+                            .expect("observe wake condvar"),
+                    );
+                }
+                None => {
+                    drop(
+                        cv.wait_while(guard, |g| *g == before_gen)
+                            .expect("observe wake condvar"),
+                    );
+                }
             }
         }
     }
 
-    /// A transcript at `path` changed: read its turn again within a second.
+    fn held_due_at(&self, fact: &Fact, entry: &Entry) -> Option<SystemTime> {
+        entry.answer.as_ref()?;
+        match fact {
+            Fact::Deadline(at) => {
+                if matches!(entry.answer, Some(Answer::Bool(true))) {
+                    return None;
+                }
+                Some(SystemTime::UNIX_EPOCH + Duration::from_secs((*at).max(0) as u64))
+            }
+            Fact::Git(checkout, _) | Fact::CheckoutFiles(checkout)
+                if cfg!(target_os = "macos")
+                    && self.use_fs_watcher
+                    && self.is_checkout_watched(checkout) =>
+            {
+                if !entry.dirty {
+                    return None;
+                }
+                Some(entry.checked + fact.interval())
+            }
+            Fact::Turn(..) | Fact::RawConversations => {
+                let regular = entry.checked + fact.interval();
+                Some(match entry.hinted_due {
+                    Some(hinted) => regular.min(hinted),
+                    None => regular,
+                })
+            }
+            _ => Some(entry.checked + fact.interval()),
+        }
+    }
+
+    /// Refresh every held fact due at `now`, evict stale unheld entries, and
+    /// return how long until the next wake (`None` when completely idle).
+    pub(crate) fn refresh_due_at(&self, now: SystemTime) -> Option<Duration> {
+        // Evict unheld derived values past UNHELD_TTL.
+        let mut has_unheld = false;
+        {
+            let mut derived = self.derived.lock().expect("derived values");
+            derived.retain(|_, slot| {
+                let keep = Arc::strong_count(slot) > 1
+                    || slot.lock().is_ok_and(|computed| {
+                        computed.as_ref().is_some_and(|computed| {
+                            Arc::strong_count(&computed.dependencies.0) > 1
+                                || now.duration_since(computed.used).unwrap_or_default()
+                                    < UNHELD_TTL
+                        })
+                    });
+                if keep && Arc::strong_count(slot) == 1 {
+                    has_unheld = true;
+                }
+                keep
+            });
+        }
+        let held_slots: Vec<SharedSlot> = {
+            let mut entries = self.entries.lock().expect("observation cache");
+            entries.retain(|_, slot| {
+                let keep = slot.is_held()
+                    || slot.entry.try_lock().map_or(true, |entry| {
+                        now.duration_since(entry.used).unwrap_or_default() < UNHELD_TTL
+                    });
+                if keep && !slot.is_held() {
+                    has_unheld = true;
+                }
+                keep
+            });
+            trim_idle_checkouts(&mut entries);
+            entries
+                .values()
+                .filter(|slot| slot.is_held())
+                .cloned()
+                .collect()
+        };
+
+        let mut earliest_future: Option<SystemTime> = None;
+        let mut due_now = Vec::new();
+        for slot in held_slots {
+            let Ok(entry) = slot.entry.try_lock() else {
+                continue;
+            };
+            let Some(due_at) = self.held_due_at(&slot.fact, &entry) else {
+                continue;
+            };
+            if due_at <= now {
+                due_now.push((slot.clone(), entry.checked, entry.stat.clone()));
+            } else {
+                min_time(&mut earliest_future, due_at);
+            }
+        }
+
+        for (slot, checked, prior_stat) in due_now {
+            if !slot.is_held() {
+                continue;
+            }
+            let current_stat = slot.fact.stat_stamp();
+            if current_stat.is_some() && current_stat == prior_stat {
+                let mut entry = slot.entry.lock().expect("observed fact");
+                if entry.checked == checked {
+                    entry.checked = now;
+                }
+                if let Some(next) = self.held_due_at(&slot.fact, &entry) {
+                    min_time(&mut earliest_future, next);
+                }
+                continue;
+            }
+            // Clear dirty/hint before observing so events arriving during the
+            // observation schedule another pass.
+            {
+                let mut entry = slot.entry.lock().expect("observed fact");
+                if entry.checked != checked {
+                    continue;
+                }
+                entry.dirty = false;
+                entry.hinted_due = None;
+            }
+            let answer = slot.fact.observe();
+            let (changed, next) = {
+                let mut entry = slot.entry.lock().expect("observed fact");
+                let changed = if entry.checked == checked {
+                    entry.update(answer, current_stat, now)
+                } else {
+                    false
+                };
+                let next = self.held_due_at(&slot.fact, &entry);
+                (changed, next)
+            };
+            if changed {
+                slot.notify_watchers();
+            }
+            if let Some(next) = next {
+                min_time(&mut earliest_future, next);
+            }
+        }
+
+        if let Some(next) = earliest_future {
+            Some(next.duration_since(now).unwrap_or(Duration::ZERO))
+        } else if has_unheld {
+            Some(UNHELD_TTL)
+        } else {
+            None
+        }
+    }
+
+    /// A transcript at `path` changed: read its turn again after [`TURN_HINTED`].
     /// `created` also looks again for raw conversations; `None` means events
     /// were lost and every transcript is due.
     pub(crate) fn hint_transcript(&self, path: Option<&Path>, created: bool) {
-        let due = SystemTime::now() - (TURN_RECONCILE - TURN_HINTED);
+        let now = SystemTime::now();
+        let target = now + TURN_HINTED;
+        let mut any = false;
         let entries = self.entries.lock().expect("observation cache");
-        for (fact, entry) in entries.iter() {
+        for (fact, slot) in entries.iter() {
+            if !slot.is_held() {
+                continue;
+            }
             let hinted = match fact {
                 Fact::Turn(_, watched) => path.is_none_or(|path| watched.path() == path),
                 Fact::RawConversations => created || path.is_none(),
                 _ => false,
             };
             if hinted {
-                let mut entry = entry.lock().expect("observed fact");
-                entry.checked = entry.checked.min(due);
+                let mut entry = slot.entry.lock().expect("observed fact");
+                let due = (entry.checked + TURN_HINTED).max(target);
+                min_time(&mut entry.hinted_due, due);
+                any = true;
             }
         }
+        drop(entries);
+        if any {
+            self.notify_refresh();
+        }
     }
 
-    /// Run one refresh of local facts now, as the background thread does.
+    /// Mark held `Git` and `CheckoutFiles` facts under `checkout` (or all
+    /// checkouts when `None`) dirty after a filesystem event.
+    #[cfg(target_os = "macos")]
+    fn mark_checkout_dirty(&self, checkout: Option<&Path>) {
+        let mut any = false;
+        let entries = self.entries.lock().expect("observation cache");
+        for (fact, slot) in entries.iter() {
+            if !slot.is_held() {
+                continue;
+            }
+            let matches = match (fact.checkout_root(), checkout) {
+                (Some(root), Some(target)) => root == target,
+                (Some(_), None) => true,
+                _ => false,
+            };
+            if matches {
+                let mut entry = slot.entry.lock().expect("observed fact");
+                entry.dirty = true;
+                any = true;
+            }
+        }
+        drop(entries);
+        if any {
+            self.notify_refresh();
+        }
+    }
+
+    fn fs_watcher(&self) -> Option<&Mutex<FsWatcher>> {
+        self.fs_watcher
+            .get_or_init(|| FsWatcher::new().ok().map(Mutex::new))
+            .as_ref()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn is_checkout_watched(&self, checkout: &Path) -> bool {
+        let Some(watcher) = self.fs_watcher.get().and_then(Option::as_ref) else {
+            return false;
+        };
+        watcher
+            .lock()
+            .expect("fs watcher")
+            .is_checkout_watched(checkout)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn is_checkout_watched(&self, _checkout: &Path) -> bool {
+        false
+    }
+
+    #[cfg(target_os = "macos")]
+    fn acquire_checkout_watch(self: &Arc<Self>, checkout: &Path) {
+        if let Some(watcher) = self.fs_watcher() {
+            watcher
+                .lock()
+                .expect("fs watcher")
+                .acquire_checkout(checkout, Arc::downgrade(self));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn release_checkout_watch(&self, checkout: &Path) {
+        if let Some(watcher) = self.fs_watcher.get().and_then(Option::as_ref) {
+            watcher
+                .lock()
+                .expect("fs watcher")
+                .release_checkout(checkout);
+        }
+    }
+
+    /// Watch all existing harness transcript roots through this cache's single
+    /// shared filesystem watcher until the returned guard drops.
+    pub(crate) fn watch_transcripts(self: &Arc<Self>) -> TranscriptWatchGuard {
+        let mut ids = Vec::new();
+        if let Some(watcher) = self.fs_watcher() {
+            let mut guard = watcher.lock().expect("fs watcher");
+            for kind in loopflow_harness::HarnessKind::ALL {
+                let harness = kind.harness();
+                let home = harness.transcript_home();
+                let root = harness.transcript_root(&home).0;
+                let store = harness.transcript_watch_store(&home);
+                if !root.is_dir() {
+                    continue;
+                }
+                match guard.add_transcript_root(&root, store, Arc::downgrade(self)) {
+                    Ok(id) => {
+                        loopflow_harness::transcript::register_watched_root(root);
+                        ids.push(id);
+                    }
+                    Err(error) => {
+                        tracing::warn!(root = %root.display(), %error, "Could not watch transcripts");
+                    }
+                }
+            }
+        }
+        TranscriptWatchGuard {
+            cache: Arc::downgrade(self),
+            ids,
+        }
+    }
+
+    /// Run one refresh of held facts due now.
     #[cfg(any(test, feature = "test-support"))]
     pub fn refresh_local(&self) {
-        self.refresh(Source::Local);
+        self.refresh_due_at(SystemTime::now());
     }
 
-    /// Observe every fact again now, whatever its interval.
+    /// Observe every held fact again now, whatever its interval.
     #[cfg(test)]
     pub(crate) fn refresh_all(&self) {
-        for entry in self.entries.lock().unwrap().values() {
-            entry.lock().unwrap().checked = SystemTime::now() - Duration::from_secs(61);
+        let now = SystemTime::now();
+        let past = now - Duration::from_secs(61);
+        for slot in self.entries.lock().unwrap().values() {
+            if slot.is_held() {
+                let mut entry = slot.entry.lock().unwrap();
+                entry.checked = past;
+                entry.dirty = true;
+            }
         }
-        for source in [Source::Local, Source::Git, Source::Github] {
-            self.refresh(source);
-        }
+        self.refresh_due_at(now);
     }
 
     #[cfg(any(test, feature = "test-support"))]
     pub fn with_raw_conversations(raw: Vec<crate::transcript::raw::RawDirectory>) -> Arc<Self> {
-        Arc::new(Self {
-            entries: Mutex::new(HashMap::from([(
+        let cache = Self::default();
+        cache.entries.lock().unwrap().insert(
+            Fact::RawConversations,
+            FactSlot::new(
                 Fact::RawConversations,
-                Arc::new(Mutex::new(Entry {
-                    answer: Some(Answer::Raw(raw)),
-                    revision: 0,
-                    checked: SystemTime::now(),
-                    used: SystemTime::now(),
-                })),
-            )])),
-            ..Self::default()
-        })
+                Entry::new(Some(Answer::Raw(raw)), SystemTime::now()),
+            ),
+        );
+        Arc::new(cache)
+    }
+
+    /// Run `read` with shared caching without holding its facts after it
+    /// returns. Used by one-shot served reads so they never keep background
+    /// refreshes or checkout watches alive.
+    pub fn read_once<T>(self: &Arc<Self>, read: impl FnOnce() -> T) -> T {
+        scope(
+            Some(Reading {
+                cache: self.clone(),
+                dependencies: None,
+                id: next_reading_id(),
+            }),
+            read,
+        )
     }
 
     pub fn capture<T>(self: &Arc<Self>, read: impl FnOnce() -> T) -> (T, Dependencies) {
+        self.capture_inner(None, read)
+    }
+
+    pub(crate) fn capture_for<T>(
+        self: &Arc<Self>,
+        watcher: Weak<dyn FactWatcher>,
+        read: impl FnOnce() -> T,
+    ) -> (T, Dependencies) {
+        self.capture_inner(Some(watcher), read)
+    }
+
+    fn capture_inner<T>(
+        self: &Arc<Self>,
+        watcher: Option<Weak<dyn FactWatcher>>,
+        read: impl FnOnce() -> T,
+    ) -> (T, Dependencies) {
         let dependencies = Dependencies::default();
         let result = scope(
             Some(Reading {
                 cache: self.clone(),
-                dependencies: dependencies.clone(),
+                dependencies: Some(dependencies.clone()),
+                id: next_reading_id(),
             }),
             read,
         );
+        let mut collected = HashMap::new();
+        dependencies.collect_slots(&mut collected);
+        let mut slots = Vec::with_capacity(collected.len());
+        #[cfg(target_os = "macos")]
+        let mut checkout_set = HashSet::new();
+        for (fact, slot) in collected {
+            slot.holders.fetch_add(1, Ordering::AcqRel);
+            if let Some(ref w) = watcher {
+                slot.add_watcher(w.clone());
+            }
+            #[cfg(target_os = "macos")]
+            if self.use_fs_watcher {
+                if let Some(root) = fact.checkout_root() {
+                    checkout_set.insert(root.to_path_buf());
+                }
+            }
+            let _ = fact;
+            slots.push(slot);
+        }
+        #[cfg(target_os = "macos")]
+        let checkouts: Vec<PathBuf> = checkout_set.into_iter().collect();
+        #[cfg(target_os = "macos")]
+        for checkout in &checkouts {
+            self.acquire_checkout_watch(checkout);
+        }
+        dependencies.0.lock().expect("observed dependencies").hold = Some(Hold {
+            #[cfg(target_os = "macos")]
+            cache: Arc::downgrade(self),
+            slots,
+            #[cfg(target_os = "macos")]
+            checkouts,
+        });
+        self.notify_refresh();
         (result, dependencies)
     }
 
-    fn read(&self, fact: Fact, dependencies: &Dependencies) -> Answer {
-        let entry = self
+    fn read(&self, fact: Fact, reading_id: u64, dependencies: Option<&Dependencies>) -> Answer {
+        let now = SystemTime::now();
+        let slot = self
             .entries
             .lock()
             .expect("observation cache")
             .entry(fact.clone())
-            .or_insert_with(|| {
-                Arc::new(Mutex::new(Entry {
-                    answer: None,
-                    revision: 0,
-                    checked: SystemTime::now(),
-                    used: SystemTime::now(),
-                }))
-            })
+            .or_insert_with(|| FactSlot::new(fact.clone(), Entry::new(None, now)))
             .clone();
-        let mut observed = entry.lock().expect("observed fact");
-        if observed.answer.is_none() {
-            observed.answer = Some(fact.observe());
-            observed.checked = SystemTime::now();
+        let mut observed = slot.entry.lock().expect("observed fact");
+        let (must_observe, stat) = if observed.answer.is_none() {
+            (true, fact.stat_stamp())
+        } else if !slot.is_held() {
+            match fact.stat_stamp() {
+                Some(current) if observed.stat.as_ref() == Some(&current) => {
+                    observed.checked = now;
+                    (false, None)
+                }
+                Some(current) => (true, Some(current)),
+                // Unheld Git facts are not background-refreshed or FS-watched;
+                // observe fresh once per reading so explicit diffs/changes
+                // never return a stale answer after a file write.
+                None if matches!(fact, Fact::Git(..)) => {
+                    (observed.observed_by_reading != reading_id, None)
+                }
+                None => (
+                    now.duration_since(observed.checked).unwrap_or_default() >= fact.interval(),
+                    None,
+                ),
+            }
+        } else {
+            (false, None)
+        };
+        if must_observe {
+            let answer = fact.observe();
+            observed.update(answer, stat, now);
+            observed.observed_by_reading = reading_id;
         }
-        observed.used = SystemTime::now();
+        observed.used = now;
         let revision = observed.revision;
         let answer = observed
             .answer
             .clone()
             .expect("fact observed before reading");
         drop(observed);
-        // Keep the first revision so a change during the reading stays visible.
-        dependencies
-            .0
-            .lock()
-            .expect("observed dependencies")
-            .facts
-            .entry(fact)
-            .or_insert((entry, revision));
+        if let Some(dependencies) = dependencies {
+            // Keep the first revision so a change during the reading stays visible.
+            dependencies
+                .0
+                .lock()
+                .expect("observed dependencies")
+                .facts
+                .entry(fact)
+                .or_insert((slot, revision));
+        }
         answer
+    }
+
+    /// Number of entries currently held by at least one live `Dependencies`.
+    pub fn held_facts(&self) -> u64 {
+        self.entries
+            .lock()
+            .expect("observation cache")
+            .values()
+            .filter(|slot| slot.is_held())
+            .count() as u64
     }
 
     /// How many times values matching `key` were computed.
@@ -438,10 +1073,507 @@ impl Cache {
     }
 }
 
+/// Keep the most recently searched inventories. Live readings own their entries
+/// until they finish, including a checkout larger than the idle cache.
+fn trim_idle_checkouts(entries: &mut HashMap<Fact, SharedSlot>) {
+    let mut idle: Vec<_> = entries
+        .iter()
+        .filter_map(|(fact, slot)| {
+            if !matches!(fact, Fact::CheckoutFiles(_)) || slot.is_held() {
+                return None;
+            }
+            let entry = slot.entry.try_lock().ok()?;
+            let Some(Answer::CheckoutFiles(Ok(files))) = &entry.answer else {
+                return None;
+            };
+            Some((
+                entry.used,
+                files.paths.len() + files.scratch.len(),
+                fact.clone(),
+            ))
+        })
+        .collect();
+    idle.sort_unstable_by_key(|(used, _, _)| std::cmp::Reverse(*used));
+    let mut remaining = 100_000usize;
+    for (_, paths, fact) in idle {
+        if paths > remaining {
+            entries.remove(&fact);
+        } else {
+            remaining -= paths;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shared process-wide filesystem watcher
+// ---------------------------------------------------------------------------
+
+/// Guard that unregisters transcript roots from the shared watcher on drop.
+#[derive(Debug)]
+pub struct TranscriptWatchGuard {
+    cache: Weak<Cache>,
+    ids: Vec<u64>,
+}
+
+impl Drop for TranscriptWatchGuard {
+    fn drop(&mut self) {
+        if self.ids.is_empty() {
+            return;
+        }
+        if let Some(cache) = self.cache.upgrade() {
+            if let Some(watcher) = cache.fs_watcher.get().and_then(Option::as_ref) {
+                let mut guard = watcher.lock().expect("fs watcher");
+                for id in &self.ids {
+                    guard.remove_transcript_root(*id);
+                }
+            }
+        }
+    }
+}
+
+/// Guard that unregisters a `TaskFilesWatch` listener from the shared watcher on drop.
+#[derive(Debug)]
+pub(crate) struct CheckoutWatchGuard {
+    cache: Weak<Cache>,
+    id: u64,
+}
+
+impl Drop for CheckoutWatchGuard {
+    fn drop(&mut self) {
+        if let Some(cache) = self.cache.upgrade() {
+            if let Some(watcher) = cache.fs_watcher.get().and_then(Option::as_ref) {
+                watcher
+                    .lock()
+                    .expect("fs watcher")
+                    .remove_path_listener(self.id);
+            }
+        }
+    }
+}
+
+/// Subscribe a `TaskFilesWatch` callback to the process's single shared
+/// filesystem watcher for `checkout` (and its Git metadata directory when
+/// outside `checkout`).
+pub(crate) fn watch_checkout_paths(
+    checkout: &Path,
+    changed: impl FnMut(notify::Result<Vec<String>>) + Send + 'static,
+) -> anyhow::Result<CheckoutWatchGuard> {
+    let cache = Cache::shared();
+    let watcher = cache
+        .fs_watcher()
+        .ok_or_else(|| anyhow::anyhow!("shared filesystem watcher could not start"))?;
+    let id = watcher
+        .lock()
+        .expect("fs watcher")
+        .add_path_listener(checkout, Box::new(changed))?;
+    Ok(CheckoutWatchGuard {
+        cache: Arc::downgrade(&cache),
+        id,
+    })
+}
+
+struct FsWatcher {
+    watcher: notify::RecommendedWatcher,
+    watched_paths: HashMap<PathBuf, usize>,
+    routes: Arc<Mutex<FsWatchRoutes>>,
+    next_id: u64,
+}
+
+impl std::fmt::Debug for FsWatcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FsWatcher")
+            .field("watched_paths", &self.watched_paths.len())
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Default)]
+struct FsWatchRoutes {
+    transcripts: Vec<TranscriptRoute>,
+    #[cfg(target_os = "macos")]
+    checkouts: HashMap<PathBuf, CheckoutRoute>,
+    path_listeners: Vec<PathListener>,
+}
+
+struct TranscriptRoute {
+    id: u64,
+    watched_path: PathBuf,
+    roots: [PathBuf; 2],
+    store: Option<PathBuf>,
+    cache: Weak<Cache>,
+}
+
+#[cfg(target_os = "macos")]
+struct CheckoutRoute {
+    refcount: usize,
+    watched_paths: Vec<PathBuf>,
+    prefixes: Vec<PathBuf>,
+    cache: Weak<Cache>,
+}
+
+struct PathListener {
+    id: u64,
+    watched_paths: Vec<PathBuf>,
+    checkout: [PathBuf; 2],
+    metadata: [PathBuf; 2],
+    callback: Box<dyn FnMut(notify::Result<Vec<String>>) + Send>,
+}
+
+impl PathListener {
+    fn relative(&self, path: &Path) -> Option<String> {
+        if let Some(inside) = self
+            .metadata
+            .iter()
+            .find_map(|root| path.strip_prefix(root).ok())
+        {
+            return Some(
+                Path::new(".git")
+                    .join(inside)
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
+        let inside = self
+            .checkout
+            .iter()
+            .find_map(|root| path.strip_prefix(root).ok())?;
+        Some(inside.to_string_lossy().into_owned())
+    }
+}
+
+impl FsWatcher {
+    fn new() -> notify::Result<Self> {
+        let routes = Arc::new(Mutex::new(FsWatchRoutes::default()));
+        let dispatch_routes = routes.clone();
+        let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+            dispatch_fs_event(&dispatch_routes, event);
+        })?;
+        Ok(Self {
+            watcher,
+            watched_paths: HashMap::new(),
+            routes,
+            next_id: 1,
+        })
+    }
+
+    fn watch_path(&mut self, path: &Path) -> notify::Result<()> {
+        let entry = self.watched_paths.entry(path.to_path_buf()).or_insert(0);
+        if *entry == 0 {
+            if let Err(error) = self.watcher.watch(path, RecursiveMode::Recursive) {
+                self.watched_paths.remove(path);
+                return Err(error);
+            }
+        }
+        *entry += 1;
+        Ok(())
+    }
+
+    fn unwatch_path(&mut self, path: &Path) {
+        let Some(count) = self.watched_paths.get_mut(path) else {
+            return;
+        };
+        if *count <= 1 {
+            self.watched_paths.remove(path);
+            let _ = self.watcher.unwatch(path);
+        } else {
+            *count -= 1;
+        }
+    }
+
+    fn add_transcript_root(
+        &mut self,
+        root: &Path,
+        store: Option<PathBuf>,
+        cache: Weak<Cache>,
+    ) -> notify::Result<u64> {
+        self.watch_path(root)?;
+        let id = self.next_id;
+        self.next_id += 1;
+        let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        self.routes
+            .lock()
+            .expect("fs routes")
+            .transcripts
+            .push(TranscriptRoute {
+                id,
+                watched_path: root.to_path_buf(),
+                roots: [root.to_path_buf(), canonical],
+                store,
+                cache,
+            });
+        Ok(id)
+    }
+
+    fn remove_transcript_root(&mut self, id: u64) {
+        let removed = {
+            let mut routes = self.routes.lock().expect("fs routes");
+            routes
+                .transcripts
+                .iter()
+                .position(|r| r.id == id)
+                .map(|idx| routes.transcripts.remove(idx).watched_path)
+        };
+        if let Some(path) = removed {
+            self.unwatch_path(&path);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn is_checkout_watched(&self, checkout: &Path) -> bool {
+        self.routes
+            .lock()
+            .expect("fs routes")
+            .checkouts
+            .contains_key(checkout)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn acquire_checkout(&mut self, checkout: &Path, cache: Weak<Cache>) {
+        {
+            let mut routes = self.routes.lock().expect("fs routes");
+            if let Some(existing) = routes.checkouts.get_mut(checkout) {
+                existing.refcount += 1;
+                return;
+            }
+        }
+        if !checkout.is_dir() {
+            return;
+        }
+        let mut watched_paths = Vec::new();
+        let mut prefixes = vec![checkout.to_path_buf()];
+        if let Ok(canonical) = checkout.canonicalize() {
+            if canonical != checkout {
+                prefixes.push(canonical);
+            }
+        }
+        if self.watch_path(checkout).is_err() {
+            return;
+        }
+        watched_paths.push(checkout.to_path_buf());
+        if let Ok(metadata) = crate::git::absolute_git_dir(checkout) {
+            if !metadata.starts_with(checkout)
+                && metadata.is_dir()
+                && self.watch_path(&metadata).is_ok()
+            {
+                watched_paths.push(metadata.clone());
+                if let Ok(canonical) = metadata.canonicalize() {
+                    if canonical != metadata {
+                        prefixes.push(canonical);
+                    }
+                }
+                prefixes.push(metadata);
+            }
+        }
+        self.routes.lock().expect("fs routes").checkouts.insert(
+            checkout.to_path_buf(),
+            CheckoutRoute {
+                refcount: 1,
+                watched_paths,
+                prefixes,
+                cache,
+            },
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    fn release_checkout(&mut self, checkout: &Path) {
+        let to_unwatch = {
+            let mut routes = self.routes.lock().expect("fs routes");
+            match routes.checkouts.get_mut(checkout) {
+                Some(entry) if entry.refcount > 1 => {
+                    entry.refcount -= 1;
+                    None
+                }
+                Some(_) => routes
+                    .checkouts
+                    .remove(checkout)
+                    .map(|entry| entry.watched_paths),
+                None => None,
+            }
+        };
+        if let Some(paths) = to_unwatch {
+            for path in paths {
+                self.unwatch_path(&path);
+            }
+        }
+    }
+
+    fn add_path_listener(
+        &mut self,
+        checkout: &Path,
+        callback: Box<dyn FnMut(notify::Result<Vec<String>>) + Send>,
+    ) -> anyhow::Result<u64> {
+        let metadata = crate::git::absolute_git_dir(checkout)?;
+        let checkout_roots = [checkout.to_path_buf(), checkout.canonicalize()?];
+        let metadata_roots = [metadata.clone(), metadata.canonicalize()?];
+        self.watch_path(checkout)?;
+        let mut watched_paths = vec![checkout.to_path_buf()];
+        if !metadata.starts_with(checkout) {
+            if let Err(error) = self.watch_path(&metadata) {
+                self.unwatch_path(checkout);
+                return Err(error.into());
+            }
+            watched_paths.push(metadata);
+        }
+        let id = self.next_id;
+        self.next_id += 1;
+        self.routes
+            .lock()
+            .expect("fs routes")
+            .path_listeners
+            .push(PathListener {
+                id,
+                watched_paths,
+                checkout: checkout_roots,
+                metadata: metadata_roots,
+                callback,
+            });
+        Ok(id)
+    }
+
+    fn remove_path_listener(&mut self, id: u64) {
+        let removed = {
+            let mut routes = self.routes.lock().expect("fs routes");
+            routes
+                .path_listeners
+                .iter()
+                .position(|l| l.id == id)
+                .map(|idx| routes.path_listeners.remove(idx).watched_paths)
+        };
+        if let Some(paths) = removed {
+            for path in paths {
+                self.unwatch_path(&path);
+            }
+        }
+    }
+}
+
+fn dispatch_fs_event(routes: &Mutex<FsWatchRoutes>, event: notify::Result<notify::Event>) {
+    enum TranscriptAction {
+        Rescan(Weak<Cache>),
+        Paths {
+            cache: Weak<Cache>,
+            store: Option<PathBuf>,
+            created: bool,
+            paths: Vec<PathBuf>,
+        },
+    }
+    #[cfg(target_os = "macos")]
+    let mut dirty_checkouts: Vec<(Weak<Cache>, Option<PathBuf>)> = Vec::new();
+    let mut transcript_actions: Vec<TranscriptAction> = Vec::new();
+
+    {
+        let mut routes = routes.lock().expect("fs routes");
+        let mut queue_rescan = |routes: &FsWatchRoutes| {
+            for tr in &routes.transcripts {
+                transcript_actions.push(TranscriptAction::Rescan(tr.cache.clone()));
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let mut seen_caches = HashSet::new();
+                for route in routes.checkouts.values() {
+                    if seen_caches.insert(route.cache.as_ptr() as usize) {
+                        dirty_checkouts.push((route.cache.clone(), None));
+                    }
+                }
+            }
+        };
+        match event {
+            Ok(ref ev) if ev.kind.is_access() => return,
+            Ok(ref ev) if ev.need_rescan() => {
+                for listener in &mut routes.path_listeners {
+                    (listener.callback)(Ok(vec![String::new()]));
+                }
+                queue_rescan(&routes);
+            }
+            Err(err) => {
+                let message = err.to_string();
+                for listener in &mut routes.path_listeners {
+                    (listener.callback)(Err(notify::Error::generic(&message)));
+                }
+                queue_rescan(&routes);
+            }
+            Ok(ev) => {
+                for listener in &mut routes.path_listeners {
+                    let paths: Vec<_> = ev
+                        .paths
+                        .iter()
+                        .filter_map(|path| listener.relative(path))
+                        .collect();
+                    if !paths.is_empty() {
+                        (listener.callback)(Ok(paths));
+                    }
+                }
+                for tr in &routes.transcripts {
+                    let matched: Vec<PathBuf> = ev
+                        .paths
+                        .iter()
+                        .filter(|path| tr.roots.iter().any(|root| path.starts_with(root)))
+                        .cloned()
+                        .collect();
+                    if !matched.is_empty() {
+                        transcript_actions.push(TranscriptAction::Paths {
+                            cache: tr.cache.clone(),
+                            store: tr.store.clone(),
+                            created: ev.kind.is_create() && tr.store.is_none(),
+                            paths: matched,
+                        });
+                    }
+                }
+                #[cfg(target_os = "macos")]
+                for (checkout, route) in &routes.checkouts {
+                    if ev
+                        .paths
+                        .iter()
+                        .any(|path| route.prefixes.iter().any(|prefix| path.starts_with(prefix)))
+                    {
+                        dirty_checkouts.push((route.cache.clone(), Some(checkout.clone())));
+                    }
+                }
+            }
+        }
+    }
+
+    for action in transcript_actions {
+        match action {
+            TranscriptAction::Rescan(cache) => {
+                loopflow_harness::transcript::invalidate_misses(None);
+                if let Some(cache) = cache.upgrade() {
+                    cache.hint_transcript(None, true);
+                }
+            }
+            TranscriptAction::Paths {
+                cache,
+                store,
+                created,
+                paths,
+            } => {
+                if created {
+                    for path in &paths {
+                        loopflow_harness::transcript::invalidate_misses(Some(path));
+                    }
+                }
+                if let Some(cache) = cache.upgrade() {
+                    for path in crate::transcript::watch::transcripts(&paths, store.as_deref()) {
+                        cache.hint_transcript(Some(&path), created);
+                    }
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    for (cache, checkout) in dirty_checkouts {
+        if let Some(cache) = cache.upgrade() {
+            cache.mark_checkout_dirty(checkout.as_deref());
+        }
+    }
+}
+
 #[derive(Clone)]
 struct Reading {
     cache: Arc<Cache>,
-    dependencies: Dependencies,
+    dependencies: Option<Dependencies>,
+    id: u64,
 }
 thread_local! {
     static READING: RefCell<Option<Reading>> = const { RefCell::new(None) };
@@ -460,8 +1592,7 @@ fn scope<T>(reading: Option<Reading>, read: impl FnOnce() -> T) -> T {
 
 /// Publish a file change to existing served reads before returning to the writer.
 pub(crate) fn invalidate_path(path: &Path) {
-    let cache = SHARED.lock().expect("observation cache").upgrade();
-    let Some(cache) = cache else { return };
+    let cache = &*PROCESS_CACHE;
     let path = absolute(path);
     let facts = [
         Some(Fact::File(path.clone())),
@@ -469,21 +1600,24 @@ pub(crate) fn invalidate_path(path: &Path) {
         path.parent()
             .map(|parent| Fact::Directory(parent.to_owned())),
     ];
-    let mut changed = false;
+    let now = SystemTime::now();
     for fact in facts.into_iter().flatten() {
-        let entry = cache
+        let slot = cache
             .entries
             .lock()
             .expect("observation cache")
             .get(&fact)
             .cloned();
-        if let Some(entry) = entry {
-            let mut entry = entry.lock().expect("observed fact");
-            changed |= entry.update(fact.observe());
+        if let Some(slot) = slot {
+            let stat = fact.stat_stamp();
+            let changed = {
+                let mut entry = slot.entry.lock().expect("observed fact");
+                entry.update(fact.observe(), stat, now)
+            };
+            if changed {
+                slot.notify_watchers();
+            }
         }
-    }
-    if changed {
-        crate::read_stream::wake_file_readers();
     }
 }
 
@@ -495,18 +1629,15 @@ pub fn active() -> bool {
 /// the draft in the serving Machine's observation cache.
 pub(crate) fn preview_files<T>(files: &BTreeMap<PathBuf, String>, read: impl FnOnce() -> T) -> T {
     let cache = Cache::default();
+    let now = SystemTime::now();
     for (path, text) in files {
+        let fact = Fact::File(absolute(path));
         cache.entries.lock().expect("private preview cache").insert(
-            Fact::File(absolute(path)),
-            Arc::new(Mutex::new(Entry {
-                answer: Some(Answer::File(Ok(text.clone()))),
-                revision: 0,
-                used: SystemTime::now(),
-                checked: SystemTime::now(),
-            })),
+            fact.clone(),
+            FactSlot::new(fact, Entry::new(Some(Answer::File(Ok(text.clone()))), now)),
         );
     }
-    Arc::new(cache).capture(read).0
+    Arc::new(cache).read_once(read)
 }
 
 /// Run `read` as one reading: the served reading already active, else one
@@ -516,7 +1647,7 @@ pub fn reading<T>(read: impl FnOnce() -> T) -> T {
     if active() {
         read()
     } else {
-        Arc::new(Cache::default()).capture(read).0
+        Arc::new(Cache::default()).read_once(read)
     }
 }
 
@@ -525,8 +1656,10 @@ pub fn inherit<T>(read: impl FnOnce() -> T) -> impl FnOnce() -> T {
     loopflow_storage::instrumentation::inherit(move || scope(reading, read))
 }
 
-/// `compute`'s result, shared by served readings until a fact it observed
-/// changes. With no reading active it is computed inline and nothing is kept.
+/// `compute`'s result, shared across the process until a fact it observed
+/// changes. Works both inside a served `READING` and in background loops or
+/// bare commands (validating file/directory/metadata dependencies inline via
+/// `stat` so external edits are seen immediately).
 ///
 /// `compute` reads observed facts and `key`, nothing else: an input from the
 /// environment, a thread-local or the store that is missing from `key` leaves
@@ -536,11 +1669,12 @@ pub fn inherit<T>(read: impl FnOnce() -> T) -> impl FnOnce() -> T {
 ///
 /// When two computations of different types share one `key`.
 pub fn derived<T: Send + Sync + 'static>(key: Derived, compute: impl FnOnce() -> T) -> Arc<T> {
-    let Some(reading) = READING.with(|reading| reading.borrow().clone()) else {
-        return Arc::new(compute());
+    let reading = READING.with(|reading| reading.borrow().clone());
+    let cache = match &reading {
+        Some(reading) => reading.cache.clone(),
+        None => PROCESS_CACHE.clone(),
     };
-    let slot = reading
-        .cache
+    let slot = cache
         .derived
         .lock()
         .expect("derived values")
@@ -552,20 +1686,24 @@ pub fn derived<T: Send + Sync + 'static>(key: Derived, compute: impl FnOnce() ->
         slot.clear_poison();
         poisoned.into_inner()
     });
-    if computed
-        .as_ref()
-        .is_none_or(|computed| computed.dependencies.changed())
-    {
+    let stale = match computed.as_ref() {
+        None => true,
+        Some(computed) => computed
+            .dependencies
+            .changed_or_stat_stale(reading.is_none()),
+    };
+    if stale {
         let dependencies = Dependencies::default();
         let value = scope(
             Some(Reading {
-                cache: reading.cache.clone(),
-                dependencies: dependencies.clone(),
+                cache: cache.clone(),
+                dependencies: Some(dependencies.clone()),
+                id: reading.as_ref().map_or_else(next_reading_id, |r| r.id),
             }),
             compute,
         );
         #[cfg(test)]
-        reading.cache.computations.lock().unwrap().push(key.clone());
+        cache.computations.lock().unwrap().push(key.clone());
         *computed = Some(Computed {
             value: Arc::new(value),
             dependencies,
@@ -576,14 +1714,15 @@ pub fn derived<T: Send + Sync + 'static>(key: Derived, compute: impl FnOnce() ->
     computed.used = SystemTime::now();
     // Keep the first dependencies so a value computed again during the
     // reading stays visible as a change.
-    reading
-        .dependencies
-        .0
-        .lock()
-        .expect("observed dependencies")
-        .derived
-        .entry(key)
-        .or_insert_with(|| computed.dependencies.clone());
+    if let Some(dependencies) = reading.as_ref().and_then(|r| r.dependencies.as_ref()) {
+        dependencies
+            .0
+            .lock()
+            .expect("observed dependencies")
+            .derived
+            .entry(key)
+            .or_insert_with(|| computed.dependencies.clone());
+    }
     computed
         .value
         .clone()
@@ -594,13 +1733,22 @@ pub fn derived<T: Send + Sync + 'static>(key: Derived, compute: impl FnOnce() ->
 fn read(fact: Fact) -> Answer {
     let reading = READING.with(|reading| reading.borrow().clone());
     match reading {
-        Some(reading) => reading.cache.read(fact, &reading.dependencies),
+        Some(reading) => reading
+            .cache
+            .read(fact, reading.id, reading.dependencies.as_ref()),
         None => fact.observe(),
     }
 }
 
 fn absolute(path: &Path) -> PathBuf {
     std::path::absolute(path).unwrap_or_else(|_| path.to_owned())
+}
+
+pub(crate) fn checkout_files(path: &Path) -> io::Result<Arc<TaskFileInventory>> {
+    let Answer::CheckoutFiles(answer) = read(Fact::CheckoutFiles(absolute(path))) else {
+        unreachable!("checkout files returns an inventory")
+    };
+    restored(answer)
 }
 
 pub fn git(path: &Path, args: &[&str]) -> io::Result<Output> {
@@ -764,6 +1912,32 @@ mod tests {
         // A new server starts with no retained observations.
         let replacement = Arc::new(Cache::default());
         assert_eq!(replacement.capture(status).0, second);
+    }
+
+    #[test]
+    fn checkout_inventory_observes_ignore_membership_and_scratch_changes() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let cache = Arc::new(Cache::default());
+        let inventory = || super::checkout_files(repo.path()).unwrap();
+        let (first, dependencies) = cache.capture(inventory);
+        assert!(first.latest_scratch_page.is_none());
+        repo.create_file(".gitignore", "scratch/\nwork/\n");
+        repo.create_file("work/ignored", "");
+        repo.create_file("scratch/live.md", "");
+        cache.refresh_all();
+        let updated = cache.capture(inventory).0;
+        assert!(dependencies.changed());
+        assert_eq!(
+            updated.latest_scratch_page.as_deref(),
+            Some("scratch/live.md")
+        );
+        assert!(!updated.paths.iter().any(|path| path == "work/ignored"));
+        repo.create_file(".gitignore", "scratch/\n");
+        std::fs::remove_file(repo.path().join("scratch/live.md")).unwrap();
+        cache.refresh_all();
+        let updated = cache.capture(inventory).0;
+        assert!(updated.latest_scratch_page.is_none());
+        assert!(updated.paths.iter().any(|path| path == "work/ignored"));
     }
 
     #[test]
@@ -1157,9 +2331,9 @@ mod tests {
         assert!(before.1.members.is_empty());
         // Advance the observed deadline deterministically, without advancing SQL.
         let mut advanced = false;
-        for (fact, entry) in cache.entries.lock().unwrap().iter() {
+        for (fact, slot) in cache.entries.lock().unwrap().iter() {
             if matches!(fact, super::Fact::Deadline(_)) {
-                let mut entry = entry.lock().unwrap();
+                let mut entry = slot.entry.lock().unwrap();
                 entry.answer = Some(super::Answer::Bool(true));
                 entry.revision += 1;
                 advanced = true;
@@ -1226,5 +2400,166 @@ mod tests {
         assert!(after.1.members.is_empty());
         assert!(after.1.unavailable.is_empty(), "proven death is known");
         assert_eq!(store.revisions().unwrap(), revision);
+    }
+
+    #[test]
+    fn unheld_derived_caches_without_reading_and_sees_external_edit_immediately() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _guard =
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let config_path = home.path().join("config.yaml");
+        std::fs::write(&config_path, "agent: claude\n").unwrap();
+
+        let outside = crate::config::settings::outside().unwrap();
+        let key = Derived::GlobalSettings { outside };
+        let before_count = super::PROCESS_CACHE.computations(|k| k == &key);
+
+        let first = derived(key.clone(), || {
+            read_to_string(&config_path).unwrap_or_default()
+        });
+        assert_eq!(first.as_str(), "agent: claude\n");
+        assert_eq!(
+            super::PROCESS_CACHE.computations(|k| k == &key),
+            before_count + 1
+        );
+
+        // Second call without a READING reuses the cached Arc without recomputing.
+        let second = derived(key.clone(), || {
+            read_to_string(&config_path).unwrap_or_default()
+        });
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(
+            super::PROCESS_CACHE.computations(|k| k == &key),
+            before_count + 1
+        );
+
+        // An external write 1 ms later is detected immediately via inline stat.
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        std::fs::write(&config_path, "agent: codex\n").unwrap();
+        let third = derived(key.clone(), || {
+            read_to_string(&config_path).unwrap_or_default()
+        });
+        assert_eq!(third.as_str(), "agent: codex\n");
+        assert_eq!(
+            super::PROCESS_CACHE.computations(|k| k == &key),
+            before_count + 2
+        );
+    }
+
+    #[test]
+    fn unheld_git_fact_is_not_rerun_after_its_interval() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let cache = Arc::new(Cache::default());
+        let status = || git(repo.path(), &["status", "--porcelain"]).unwrap().stdout;
+        let spawns_before = super::thread_spawns();
+        let (first, repeated) = cache.read_once(|| (status(), status()));
+        assert!(first.is_empty());
+        assert_eq!(repeated, first);
+        assert_eq!(
+            super::thread_spawns() - spawns_before,
+            1,
+            "one read_once deduplicates repeated unheld Git calls"
+        );
+        assert_eq!(cache.held_facts(), 0);
+        let revision_before = cache
+            .entries
+            .lock()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap()
+            .entry
+            .lock()
+            .unwrap()
+            .revision;
+
+        // Write a file so a re-run of git status would observe a change.
+        std::fs::write(repo.path().join("unheld.txt"), "text").unwrap();
+        // Advance past the 3 s Git interval: unheld facts are never background-polled.
+        cache.refresh_due_at(std::time::SystemTime::now() + std::time::Duration::from_secs(10));
+        let revision_after = cache
+            .entries
+            .lock()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap()
+            .entry
+            .lock()
+            .unwrap()
+            .revision;
+        assert_eq!(
+            revision_after, revision_before,
+            "unheld Git fact must not re-run in background refresh"
+        );
+        // The next one-shot read observes the fresh Git state immediately without
+        // waiting out the 3 s held throttle.
+        let fresh = cache.read_once(status);
+        assert!(String::from_utf8_lossy(&fresh).contains("unheld.txt"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn held_git_fact_reruns_after_checkout_write_and_not_before() {
+        use std::time::{Duration, Instant, SystemTime};
+        let repo = loopflow_test_support::TestRepo::new();
+        let cache = Cache::with_fs_watcher();
+        let status = || git(repo.path(), &["status", "--porcelain"]).unwrap().stdout;
+        let (first, dependencies) = cache.capture(status);
+        assert!(first.is_empty());
+        assert_eq!(cache.held_facts(), 1);
+        let checked_before = cache
+            .entries
+            .lock()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap()
+            .entry
+            .lock()
+            .unwrap()
+            .checked;
+
+        // Nothing written under the checkout: advancing the clock past the 3 s
+        // throttle must NOT re-run git.
+        let next = cache.refresh_due_at(SystemTime::now() + Duration::from_secs(10));
+        let checked_after = cache
+            .entries
+            .lock()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap()
+            .entry
+            .lock()
+            .unwrap()
+            .checked;
+        assert_eq!(
+            checked_after, checked_before,
+            "quiet held Git checkout must not re-run git"
+        );
+        assert!(
+            next.is_none(),
+            "quiet held Git checkout parks refresh thread: {next:?}"
+        );
+        assert!(!dependencies.changed());
+
+        // Write a file under the checkout; FSEvents marks the checkout dirty.
+        std::fs::write(repo.path().join("edited.txt"), "hello").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            cache.refresh_due_at(SystemTime::now() + Duration::from_secs(4));
+            if dependencies.changed() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(
+            dependencies.changed(),
+            "held Git fact must refresh after a write under its checkout"
+        );
+        let updated = cache.capture(status).0;
+        assert!(String::from_utf8_lossy(&updated).contains("edited.txt"));
     }
 }

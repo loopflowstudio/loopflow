@@ -562,9 +562,7 @@ fn prepare_work_binding(
     selector: &str,
     repo: &Path,
 ) -> anyhow::Result<loopflow_execution::ops::WorkBinding> {
-    let runtime = tokio::runtime::Runtime::new()
-        .map_err(|error| anyhow::anyhow!("cannot resolve {selector}: {error}"))?;
-    runtime.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = loopflow_execution::store::open_existing_store()
             .await
             .map_err(|error| anyhow::anyhow!("cannot resolve {selector}: {error}"))?
@@ -657,7 +655,10 @@ fn format_task_pr_line(
 }
 
 fn print_task(task: &loopflow_execution::work::task::Task, json: bool) -> anyhow::Result<()> {
-    let snapshot = loopflow_execution::ops::task::task_snapshot(task)?;
+    let snapshot = loopflow_execution::ops::task::task_snapshot(
+        task,
+        loopflow::lf::navigation::command_merges,
+    )?;
     print_task_snapshot(&snapshot, json)
 }
 
@@ -833,7 +834,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     match command {
         WaveCommand::Graph { cmd } => {
             use loopflow::lf::WaveGraphCommand;
-            tokio::runtime::Runtime::new()?.block_on(async {
+            loopflow_execution::runtime::block_on(async {
                 match cmd {
                     WaveGraphCommand::Show {
                         wave,
@@ -926,7 +927,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             repo: target,
             json,
         } => {
-            let renamed = tokio::runtime::Runtime::new()?.block_on(
+            let renamed = loopflow_execution::runtime::block_on(
                 loopflow_execution::ops::wave_lifecycle::rename(
                     repo,
                     wave,
@@ -997,9 +998,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             use loopflow::lf::commands::waves::{
                 list_closed_tasks, list_tasks, subscribe_tasks, TaskListArgs,
             };
-            tokio::runtime::Runtime::new()?.block_on(
-                loopflow_execution::ops::plan_carriers::before_first_read(repo),
-            );
             let args = TaskListArgs {
                 query: query.clone(),
                 wave: wave.clone(),
@@ -1075,7 +1073,11 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             subscribe,
             ..
         } => {
-            let status = loopflow_execution::ops::task::task_status(repo, issue.as_deref())?;
+            let status = loopflow_execution::ops::task::task_status(
+                repo,
+                issue.as_deref(),
+                loopflow::lf::navigation::command_merges,
+            )?;
             // A Task another Machine runs is read where it runs.
             let mut remote_line = None;
             if let Some(task) = &status.task {
@@ -1281,6 +1283,74 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 *difftool,
             )
         }
+        TaskCommand::Symbols {
+            issue,
+            name,
+            path,
+            json,
+        } => {
+            let result =
+                loopflow_execution::ops::task::task_symbols(issue, name, path.as_deref(), &|| {
+                    false
+                })?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                for hit in result.hits {
+                    let enclosing = hit
+                        .container
+                        .map(|name| format!(" ({name})"))
+                        .unwrap_or_default();
+                    println!(
+                        "{}:{}:{} {}{}",
+                        hit.path, hit.line, hit.kind, hit.name, enclosing
+                    );
+                }
+                if result.truncated {
+                    eprintln!("Search results truncated.");
+                }
+            }
+            Ok(())
+        }
+        TaskCommand::Grep {
+            issue,
+            query,
+            whole_word,
+            json,
+        } => {
+            let result =
+                loopflow_execution::ops::task::task_grep(issue, query, *whole_word, &|| false)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                for hit in result.hits {
+                    println!("{}:{}:{}", hit.path, hit.line, hit.excerpt);
+                }
+                if result.truncated {
+                    eprintln!("Search results truncated.");
+                }
+            }
+            Ok(())
+        }
+        TaskCommand::Find {
+            issue,
+            query,
+            limit,
+            json,
+        } => {
+            let result = loopflow_execution::ops::task::task_find(issue, query.as_deref(), *limit)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                for path in result.paths {
+                    println!("{path}");
+                }
+                if result.truncated {
+                    eprintln!("File list truncated.");
+                }
+            }
+            Ok(())
+        }
         TaskCommand::Files {
             issue,
             directory,
@@ -1360,6 +1430,50 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             &loopflow_execution::engine::task::report(repo, issue, wave.as_deref(), message)?,
             *json,
         ),
+        TaskCommand::Pause { issue, json } => {
+            let receipt = loopflow_execution::ops::task::pause::pause(issue)?;
+            if *json {
+                println!("{}", serde_json::to_string(&receipt)?);
+            } else {
+                println!("{receipt}");
+            }
+            Ok(())
+        }
+        TaskCommand::Unpause {
+            issue, run: true, ..
+        } if loopflow_execution::engine::launch::expected() => {
+            loopflow::lf::commands::graph::carry_unpaused_task(cli, repo, issue)
+        }
+        TaskCommand::Unpause { issue, run, json } => {
+            let receipt = loopflow_execution::engine::task::unpause(
+                repo,
+                issue,
+                *run,
+                cli.agent.as_deref(),
+                cli.batch,
+                &[],
+                loopflow::lf::navigation::command_merges,
+            )?;
+            if *json {
+                println!("{}", serde_json::to_string(&receipt)?);
+            } else {
+                println!("{issue} unpaused");
+                match receipt {
+                    Some(started) => {
+                        if let Some(text) = started.render() {
+                            println!("{text}");
+                        }
+                    }
+                    None if *run => {
+                        if let Some(text) = loopflow_execution::ops::task::pause::parked(issue)? {
+                            println!("{text}");
+                        }
+                    }
+                    None => {}
+                }
+            }
+            Ok(())
+        }
         TaskCommand::Interrupt { issue, json } => {
             let result = loopflow_execution::engine::task::interrupt(issue)?;
             print_task_control(&result, *json)
@@ -1379,7 +1493,12 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             } else {
                 loopflow_execution::ops::task::TaskWaitUntil::Terminal
             };
-            let waited = loopflow_execution::engine::task::wait(issue, until, timeout)?;
+            let waited = loopflow_execution::engine::task::wait(
+                issue,
+                until,
+                timeout,
+                loopflow::lf::navigation::command_merges,
+            )?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&waited)?);
                 Ok(())
@@ -1483,6 +1602,22 @@ fn init_tracing(verbose: bool) {
         .with_writer(|| loopflow_execution::diagnostic_log::DiagnosticLog)
         .event_format(loopflow_execution::diagnostic_log::IdentifiedLines)
         .init();
+}
+
+fn reads_task_checkout(cli: &Cli) -> bool {
+    matches!(
+        cli.command,
+        Some(Commands::Task {
+            cmd: TaskCommand::Location { .. }
+                | TaskCommand::Find { .. }
+                | TaskCommand::Grep { .. }
+                | TaskCommand::Symbols { .. }
+                | TaskCommand::File {
+                    recoveries: false,
+                    ..
+                }
+        })
+    )
 }
 
 fn desktop_intent_read(cli: &Cli) -> bool {
@@ -1740,12 +1875,7 @@ fn run() -> anyhow::Result<()> {
             let preview = desktop_intent_read(&cli)
                 || cli.context
                 || cli.explain
-                || matches!(
-                    cli.command,
-                    Some(Commands::Task {
-                        cmd: TaskCommand::Location { .. }
-                    })
-                );
+                || reads_task_checkout(&cli);
             // The target owns command flags, including --verbose; RUST_LOG controls transport logs.
             init_tracing(false);
             if !preview {
@@ -1833,12 +1963,6 @@ fn run() -> anyhow::Result<()> {
                 }
         })
     );
-    let location_read = matches!(
-        cli.command,
-        Some(Commands::Task {
-            cmd: TaskCommand::Location { .. }
-        })
-    );
     let desktop_read = desktop_intent_read(&cli);
     init_tracing(cli.verbose);
     // A turn or tool boundary binds no Work. A managed launch reports to
@@ -1897,7 +2021,7 @@ fn run() -> anyhow::Result<()> {
         && !cli.context
         && !cli.explain
         && !planning_read
-        && !location_read
+        && !reads_task_checkout(&cli)
         && !desktop_read
         && !matches!(
             cli.command,
@@ -2567,7 +2691,7 @@ fn dispatch_here(
         || matches!(
             cli.command,
             Some(Commands::Task {
-                cmd: TaskCommand::Run { .. }
+                cmd: TaskCommand::Run { .. } | TaskCommand::Unpause { run: true, .. }
             }) | Some(Commands::Sync(_))
                 | Some(Commands::Pr {
                     cmd: Some(loopflow::lf::PrCommand::Land { .. })
@@ -2644,6 +2768,14 @@ fn dispatch_here(
             .map(|name| CwdGuard::enter(&loopflow::lf::commands::ops::resolve_worktree(name)?))
             .transpose()?;
         return loopflow::lf::commands::open::run(&cli, open);
+    }
+    if let Some(Commands::Page { cmd }) = &cli.command {
+        let _cwd = cli
+            .wt
+            .as_deref()
+            .map(|name| CwdGuard::enter(&loopflow::lf::commands::ops::resolve_worktree(name)?))
+            .transpose()?;
+        return loopflow::lf::commands::page::run(&cli, cmd);
     }
 
     let _worktree_cwd = cli
@@ -3027,8 +3159,8 @@ fn execute_command(
 ) -> anyhow::Result<()> {
     match &cli.command {
         Some(Commands::Inline { .. }) => unreachable!("inline prompts dispatch as launches"),
-        Some(Commands::Desktop { .. } | Commands::Open(_)) => {
-            unreachable!("Desktop and opening dispatch precede Work preparation")
+        Some(Commands::Desktop { .. } | Commands::Open(_) | Commands::Page { .. }) => {
+            unreachable!("Desktop, opening, and page dispatch precede Work preparation")
         }
         Some(Commands::Config { cmd }) => match cmd {
             loopflow::lf::ConfigCommand::Import {
@@ -3313,6 +3445,9 @@ fn execute_command(
                 | TaskCommand::Context { .. }
                 | TaskCommand::Runs { .. }
                 | TaskCommand::File { .. }
+                | TaskCommand::Find { .. }
+                | TaskCommand::Grep { .. }
+                | TaskCommand::Symbols { .. }
                 | TaskCommand::Files { .. }
                 | TaskCommand::Save { .. }),
         }) => run_task_command(cli, &std::env::current_dir()?, cmd),
@@ -3327,11 +3462,6 @@ fn execute_command(
         Some(Commands::List { .. } | Commands::Help { .. } | Commands::Docs { .. }) => {
             unreachable!("inspection returned before execution")
         }
-        Some(Commands::Discord {
-            cmd: loopflow::lf::DiscordCommand::Serve { wave },
-        }) => in_repo_runtime(args, |repo| {
-            loopflow::lf::commands::discord::serve(repo, wave)
-        }),
         Some(Commands::Self_ {
             cmd: loopflow::lf::SelfCommand::Install { .. },
         }) => {
@@ -3371,8 +3501,11 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
                     | loopflow_execution::error::LoadError::GraphNotFound(_)
             )
         ) {
-            let error =
-                clap::Error::raw(clap::error::ErrorKind::InvalidSubcommand, error.to_string());
+            // Clap prints a raw message verbatim, so it carries its own newline.
+            let error = clap::Error::raw(
+                clap::error::ErrorKind::InvalidSubcommand,
+                format!("{error}\n"),
+            );
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
             let _ = error.print();
             return Err(loopflow_execution::process::CommandExit(code).into());

@@ -115,13 +115,28 @@ struct ReviewDiffTests {
         #expect(!file.blocks.contains { if case .moved = $0 { true } else { false } })
     }
 
+    @Test func readGutterMarksInsertionsAndTheSurvivingEdgeOfADeletion() {
+        let patch = """
+        diff --git a/code b/code
+        @@ -1,2 +1 @@
+        -gone
+         kept
+        @@ -7 +6,0 @@
+        -gone too
+        @@ -9 +8,2 @@
+         same
+        +added
+        """
+        #expect(ReviewDiff.parse(patch).files.first?.gutterMarks == [1: .removed, 6: .removed, 9: .added])
+    }
+
     @Test func selectionNamesFileSideRangeAndRevisionOnOneLine() throws {
         let review = ReviewDiff.parse(Self.patch)
-        let selection = ReviewSelection(path: "a.swift", side: .new, first: 6, last: 6).extended(to: 4)
-        let reference = selection.reference(revision: "working tree on abc1234")
+        let selection = ReviewSelection(path: "a.swift", source: .diff(side: .new, revision: "working tree on abc1234"), first: 6, last: 6).extended(to: 4)
+        let reference = selection.reference
         #expect(reference == "`a.swift:L4-6` (after, working tree on abc1234) ")
         #expect(!reference.contains("\n"))
-        #expect(selection.text(in: try #require(review.file("a.swift"))) == "func first() {\n    let value = compute(2)\n    return value")
+        #expect(selection.excerpt(in: try #require(review.file("a.swift"))).joined(separator: "\n") == "func first() {\n    let value = compute(2)\n    return value")
     }
 
     @Test func hunkHeadersReadAsSkippedLinesAndTheirDeclaration() {
@@ -175,10 +190,13 @@ struct ReviewDiffTests {
 
     @Test func commentsFollowTheirLinesAndGoToTheConversationAsOneLine() throws {
         let file = ReviewDiff.parse(Self.gapped).files[0]
-        let kept = ReviewComment(selection: ReviewSelection(path: "a.swift", side: .new, first: 8, last: 9),
-                                 text: "why Spanish?\nsay so", in: file)
-        let gone = ReviewComment(selection: ReviewSelection(path: "a.swift", side: .old, first: 8, last: 8),
-                                 text: "keep this", in: file)
+        func comment(_ side: ReviewSelection.Side, _ first: Int, _ last: Int, _ text: String) -> ReviewComment {
+            let selection = ReviewSelection(path: file.path, source: .diff(side: side, revision: "working tree on abc1234"),
+                                            first: first, last: last)
+            return ReviewComment(selection: selection, text: text, anchor: selection.excerpt(in: file))
+        }
+        let kept = comment(.new, 8, 9, "why Spanish?\nsay so")
+        let gone = comment(.old, 8, 8, "keep this")
         #expect(kept.anchor == ["eight", "nueve"] && gone.anchor == ["nine"])
         // The worker adds three lines above and stops removing `nine`.
         let edited = ReviewDiff.parse("""
@@ -197,18 +215,27 @@ struct ReviewDiffTests {
         +nueve
 
         """).files[0]
-        let moved = kept.anchored(in: edited)
-        #expect(moved.selection.range == "L11-12" && !moved.detached)
-        let detached = gone.anchored(in: edited)
-        #expect(detached.detached && detached.selection.range == "L8")
+        let moved = kept.anchored(in: try #require(kept.selection).numbered(in: edited))
+        #expect(moved.selection?.range == "L11-12" && !moved.detached)
+        let detached = gone.anchored(in: try #require(gone.selection).numbered(in: edited))
+        #expect(detached.detached && detached.selection?.range == "L8")
         // A file that left the comparison detaches its comments; none is dropped.
-        #expect(kept.anchored(in: nil).detached)
-        let message = ReviewComment.message([moved, detached], revision: "Compared with main at abc1234. Includes uncommitted changes")
-        #expect(message == "2 comments on the diff (Compared with main at abc1234. Includes uncommitted changes): "
-            + "(1) `a.swift:L11-12` (after): why Spanish? say so "
-            + "(2) `a.swift:L8` (before, lines since changed): keep this ")
+        #expect(kept.anchored(in: [:]).detached)
+        let message = ReviewComment.message([moved, detached])
+        #expect(message == "(1) `a.swift:L11-12` (after, working tree on abc1234) why Spanish? say so "
+            + "(2) `a.swift:L8` (before, working tree on abc1234) · lines since changed keep this ")
         #expect(!message.unicodeScalars.contains { $0.value < 0x20 })
-        #expect(ReviewComment.message([moved], revision: "abc") == "`a.swift:L11-12` (after): why Spanish? say so (abc) ")
+        #expect(kept.anchored(in: [1: "eight", 2: "nueve", 3: "eight", 4: "nueve"]).detached)
+
+        // Page comments skip line re-anchoring and format onto the same single line with zero control characters.
+        let pageNote = ReviewComment(pagePath: "scratch/ship-review.html",
+                                     reference: "`scratch/ship-review.html` § Flow › \"drag\tto note\"\ncheck\u{0007}this")
+        #expect(pageNote.selection == nil && pageNote.original == nil && !pageNote.detached)
+        #expect(pageNote.anchored(in: [:]) == pageNote)
+        let combined = ReviewComment.message([moved, pageNote], receipts: ["task.create → LOO-1200"])
+        #expect(combined == "(1) `a.swift:L11-12` (after, working tree on abc1234) why Spanish? say so "
+            + "(2) `scratch/ship-review.html` § Flow › \"drag to note\" check this [already ran: task.create → LOO-1200] ")
+        #expect(!combined.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7f })
     }
 
     @Test func aTourPutsItsFilesFirstAndTheRestByGroup() throws {

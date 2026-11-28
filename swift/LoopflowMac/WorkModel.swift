@@ -398,6 +398,7 @@ final class WorkModel {
     }
 
     @ObservationIgnored var openRepository: ((String, LinkedWork?) -> Void)?
+    @ObservationIgnored var openResolvedWorkLink: ((WorkLink) async throws -> Void)?
 
     private(set) var taskLink: TaskLink?
     private(set) var taskLinkReading: Reading<RoadmapSnapshot> = .loading {

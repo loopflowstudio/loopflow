@@ -42,7 +42,7 @@ struct WorkspacePanesView: View {
         MultiplexerNodeView(node: layout,
             focusedPaneId: isFocused ? workspace.multiplexer.focusedPaneId : "",
             sessions: sessions, workspace: workspace, model: model,
-            onFocus: onFocus)
+            onFocus: onFocus, inTile: face != nil)
             .padding(PaneGeometry.spacing)
             .background(palette.surfaceMuted)
             .accessibilityIdentifier("sessions-multiplexer")
@@ -192,6 +192,7 @@ private struct MultiplexerNodeView: View {
     let workspace: SessionsWorkspace
     let model: WorkModel
     let onFocus: (String, String?) -> Void
+    let inTile: Bool
 
     private var store: MultiplexerStore { workspace.multiplexer }
 
@@ -203,7 +204,7 @@ private struct MultiplexerNodeView: View {
                 pane: pane,
                 isFocused: pane.id == focusedPaneId,
                 sessions: sessions,
-                workspace: workspace, model: model, onFocus: onFocus
+                workspace: workspace, model: model, onFocus: onFocus, inTile: inTile
             )
             .id(pane.id)
         case .split(let axis, let first, let second, let ratio):
@@ -238,7 +239,7 @@ private struct MultiplexerNodeView: View {
             node: child,
             focusedPaneId: focusedPaneId,
             sessions: sessions,
-            workspace: workspace, model: model, onFocus: onFocus
+            workspace: workspace, model: model, onFocus: onFocus, inTile: inTile
         )
     }
 }
@@ -343,13 +344,14 @@ struct SessionPaneView: View {
     let workspace: SessionsWorkspace
     let model: WorkModel
     let onFocus: (String, String?) -> Void
+    var inTile = false
 
     private var store: MultiplexerStore { workspace.multiplexer }
     private var hover: HoverFlag { workspace.stripHover(pane.id) }
     @State private var bellRinging = false
     @State private var terminalTitle: String?
     @State private var copyConfirmation: String?
-    @State private var externalLink: URL?
+    @State private var externalLink: (url: URL, notice: TerminalLinkNotice)?
 
     private var item: SessionItem? {
         guard case .session(let id?, _) = pane.content else { return nil }
@@ -411,10 +413,10 @@ struct SessionPaneView: View {
                 set: { if !$0 { externalLink = nil } }
             )) {
                 if let externalLink {
-                    TerminalExternalLinkSheet(url: externalLink, cancel: { self.externalLink = nil }, open: {
+                    TerminalExternalLinkSheet(url: externalLink.url, cancel: { self.externalLink = nil }, open: {
                         self.externalLink = nil
-                        if !NSWorkspace.shared.open(externalLink) {
-                            paneFailed(RegistryQueryError("No app could open the link."))
+                        if !NSWorkspace.shared.open(externalLink.url) {
+                            externalLink.notice("No app could open the link.")
                         }
                     })
                 }
@@ -851,7 +853,7 @@ struct SessionPaneView: View {
                             surfacePool: sessions.surfaces,
                             isFocused: isFocused,
                             onFocus: focusPane,
-                            onOpenLink: { openTerminalLink($0, at: location) }
+                            onOpenLink: { await openTerminalLink($0, at: location, notice: $1) }
                         )
                         .id(tab.id)
                     } else {
@@ -992,7 +994,7 @@ struct SessionPaneView: View {
                     sessions.recordPaneFailure(item, reason: reason)
                 },
                 onFocus: focusPane,
-                onOpenLink: { openTerminalLink($0, at: location) }
+                onOpenLink: { await openTerminalLink($0, at: location, notice: $1) }
             )
             .id(item.launchId)
         } else {
@@ -1000,30 +1002,63 @@ struct SessionPaneView: View {
         }
     }
 
-    private func openTerminalLink(_ link: TerminalLink, at location: WorkspaceIdentity) -> String? {
-        switch link {
-        case .web(let url), .mail(let url):
-            return NSWorkspace.shared.open(url) ? nil : "No app could open the link."
-        case .externalScheme(let url):
-            externalLink = url
-            return nil
-        case .work:
-            return "Work links are unavailable in this pane."
-        case .file(let file):
-            guard location.machineId == workspace.localMachineId, file.isLocal() else {
-                return "File is on another Machine."
+    func openTerminalLink(_ link: TerminalLink, at location: WorkspaceIdentity,
+                          notice: @escaping TerminalLinkNotice) async {
+        do {
+            switch link {
+            case .web(let url), .mail(let url):
+                if !NSWorkspace.shared.open(url) { notice("No app could open the link.") }
+            case .externalScheme(let url):
+                externalLink = (url, notice)
+            case .work(let url):
+                guard let open = model.openResolvedWorkLink else {
+                    throw RegistryQueryError("This window cannot open Work links.")
+                }
+                let resolved = try await sessions.query.workLink(url)
+                try await open(resolved)
+            case .file(let file):
+                try await openTerminalFile(file, at: location)
+            case .refused(let reason):
+                notice(reason)
             }
-            guard file.checkoutPath(in: location.worktree) == nil else {
-                return "Checkout links are unavailable in this pane."
+        } catch is CancellationError {
+            return
+        } catch {
+            notice(error.localizedDescription)
+        }
+    }
+
+    private var activeFilesPlace: SessionsWorkspace.FilesPlace? {
+        guard workspace.key.kind == .task,
+              case .browser(let taskId, _, _, let location)? = store.browserPane?.content else { return nil }
+        let task = model.task(id: workspace.key.id)?.task
+        guard let place = try? workspace.filesPlace(taskId: taskId, task: task, location: workspace.location ?? location),
+              let machine = place.machine ?? workspace.localMachineId else { return nil }
+        if let owner = task?.ownerMachineId ?? workspace.owner, owner != machine { return nil }
+        return place
+    }
+
+    private func openTerminalFile(_ file: TerminalLink.File, at location: WorkspaceIdentity) async throws {
+        let place = activeFilesPlace
+        let destination = try await file.destination(from: location, localMachine: workspace.localMachineId,
+                                                     files: place, query: sessions.query)
+        switch destination {
+        case .document(let url):
+            guard NSWorkspace.shared.open(url) else { throw RegistryQueryError("No app could open the file.") }
+        case .checkout(let path, let line):
+            // A remote read can finish after the Task moves. Only reveal the
+            // file in the checkout the click addressed.
+            guard let place, place == activeFilesPlace else {
+                throw RegistryQueryError("The Task’s checkout moved before the file could open.")
             }
-            do {
-                let url = try file.localDocument()
-                return NSWorkspace.shared.open(url) ? nil : "No app could open the file."
-            } catch {
-                return error.localizedDescription
+            guard let browser = store.showBrowser(.files, location: WorkspaceIdentity(machineId: location.machineId,
+                                                                                       worktree: place.cwd)) else {
+                throw RegistryQueryError("The Files pane is unavailable.")
             }
-        case .refused(let reason):
-            return reason
+            let task = model.task(id: workspace.key.id)?.task
+            let files = try workspace.files(for: browser.content, task: task, query: sessions.query)
+            files.openPresentation(.init(path: path, lines: line.map { $0...$0 }))
+            if inTile { store.setZoom(browser.id, enabled: true) }
         }
     }
 

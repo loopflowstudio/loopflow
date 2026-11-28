@@ -24,7 +24,8 @@ struct RepoView: View {
         taskLinks: WorkLinkRouter? = nil,
         repository: String? = nil,
         openingRequests: Set<UUID> = [],
-        openRepository: ((String, LinkedWork?) -> Void)? = nil
+        openRepository: ((String, LinkedWork?) -> Void)? = nil,
+        openResolvedWorkLink: ((WorkLink) async throws -> Void)? = nil
     ) {
         self.portfolioService = portfolioService
         self.sessionWorkspaces = sessionWorkspaces
@@ -37,6 +38,7 @@ struct RepoView: View {
             ? loadLoopflowState()?.selectedRepoPath : nil
         let model = WorkModel.window(query: query, launchCandidates: [initialRepoPath, restored].compactMap { $0 })
         model.openRepository = openRepository
+        model.openResolvedWorkLink = openResolvedWorkLink
         _model = State(initialValue: model)
     }
 

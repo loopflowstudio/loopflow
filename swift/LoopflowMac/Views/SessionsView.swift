@@ -410,6 +410,10 @@ final class SessionsWorkspace {
         guard case .browser(let taskId, _, _, let location) = content else {
             throw RegistryQueryError("The addressed pane is not the browser.")
         }
+        return try filesPlace(taskId: taskId, task: task, location: location)
+    }
+
+    func filesPlace(taskId: String, task: RoadmapTask?, location: WorkspaceIdentity?) throws -> FilesPlace {
         // This Mac's plan names another owner without its checkout; the
         // served watch reads that checkout from the owner.
         let reading = task?.reference.workspace?.identity

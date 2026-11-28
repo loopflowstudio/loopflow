@@ -198,18 +198,23 @@ screen during a reconnect or after its relay ends. **⌘-click** opens it:
 | Link | Opens in |
 |---|---|
 | `https://…`, `http://…`, `mailto:…` | Default browser or mail app |
-| `loopflow://<repo>`, `…/task/<ID>`, `…/wave/<name>` | This Desktop window, with no alert |
-| File inside the pane's checkout (e.g. `file:///…/scripts/test.py#L42`) | **Files** at that line (read-only, including scripts), on this Mac or a remote Machine |
-| Local regular file or folder outside the checkout | Default app on this Mac |
+| `loopflow://<repo>`, `…/task/<ID>`, `…/wave/<name>` | The repository's Desktop window, with no alert |
+| File inside the Task's active checkout (e.g. `file:///…/scripts/test.py#L42`) | **Files** at that line in Read mode, on this Mac or a remote Machine |
+| Local folder, or a local document with no matching Files pane | Default app on this Mac |
 | Other URL schemes (e.g. `slack://…`) | A confirmation sheet names the target before opening it |
 
-Terminal output is untrusted, so Desktop refuses app-control `loopflow://`
-routes (`open`, `update`, `portfolio`, `sessions`), local app bundles, scripts
-and executables outside the checkout, malformed or relative targets, and
-control or bidirectional text characters. File links also need an existing
-target, a path without parent-directory segments, and, if present, a line
-fragment in the form `#L<n>`. A file outside the checkout on a remote
-Machine is refused. Refused clicks say why in the bottom-corner notice.
+Repository and Wave Sessions, and local shells left behind after a Task moves,
+open local documents and folders in the default app. Remote files open in
+**Files** when the pane shares the Task's current checkout. The file URL can
+carry the remote hostname.
+
+Desktop resolves `loopflow://` links as Work addresses. File links need an
+existing absolute path without parent-directory segments and can carry a line
+fragment in the form `#L<n>`. Outside Files, Desktop refuses to launch app
+bundles, scripts and executables. Desktop also refuses remote folders, files
+outside the active remote checkout, malformed links, and links with control
+or bidirectional text characters. Failed clicks say why in the bottom-corner
+notice.
 
 Every held terminal identifies itself as `TERM_PROGRAM=ghostty` (dropping any
 inherited `TERM_PROGRAM_VERSION`), so agents and CLIs emit clickable hyperlinks

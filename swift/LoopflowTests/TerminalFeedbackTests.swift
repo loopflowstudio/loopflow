@@ -61,7 +61,7 @@ struct TerminalFeedbackTests {
         #expect(view.linkFeedback.isHidden)
 
         var opened: TerminalLink?
-        view.onOpenLink = { opened = $0; return nil }
+        view.onOpenLink = { link, _ in opened = link }
         view.mouseDown(with: try mouse(.leftMouseDown, command))
         view.mouseUp(with: try mouse(.leftMouseUp, command))
         let clickDeadline = ContinuousClock.now + .seconds(2)

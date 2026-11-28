@@ -100,7 +100,8 @@ struct LoopflowApp: App {
                     RepositoryWorkspaceView(workspace: workspace, portfolioService: portfolioService,
                                             workspaces: workspaces,
                                             query: registryQuery, router: taskLinks,
-                                            openRepository: requestRepository)
+                                            openRepository: requestRepository,
+                                            openResolvedWorkLink: { try await openResolvedWorkLink($0) })
                         .task { openCaptureViewIfNeeded() }
                 } else if AppTestMode.shouldBypassRegistry {
                     RepoView(portfolioService: portfolioService,
@@ -266,15 +267,19 @@ struct LoopflowApp: App {
         default:
             taskLinks.receiveAddress { isLatest in
                 do {
-                    let query = RegistryQueryLocal.shared
-                    let resolved = try await query.workLink(url)
-                    let link = LinkedWork(resolved)
-                    var path = resolved.target.repositoryPath
-                    if case .task(let task) = link, let repo = task.repo { path = repo }
-                    try await openRepository(path, link: link, address: resolved.url, raises: isLatest)
+                    let resolved = try await RegistryQueryLocal.shared.workLink(url)
+                    try await openResolvedWorkLink(resolved, raises: isLatest)
                 } catch { reportOpeningError(error) }
             }
         }
+    }
+
+    @MainActor
+    private func openResolvedWorkLink(_ resolved: WorkLink, raises: @MainActor () -> Bool = { true }) async throws {
+        let link = LinkedWork(resolved)
+        var path = resolved.target.repositoryPath
+        if case .task(let task) = link, let repo = task.repo { path = repo }
+        try await openRepository(path, link: link, address: resolved.url, raises: raises)
     }
 
     private func viewItems(_ url: URL) -> (repo: String, expression: String)? {

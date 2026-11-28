@@ -8,6 +8,9 @@ import QuartzCore
 import Observation
 import Loopflow
 
+typealias TerminalLinkNotice = @MainActor (String) -> Void
+typealias TerminalLinkAction = @MainActor (TerminalLink, @escaping TerminalLinkNotice) async -> Void
+
 #if GHOSTTY_ENABLED
 import GhosttyKit
 
@@ -63,7 +66,7 @@ struct GhosttyTerminalView: View {
     let onSurfaceCreated: () -> Void
     let onSurfaceFailed: (String) -> Void
     let onFocus: () -> Void
-    let onOpenLink: (TerminalLink) -> String?
+    let onOpenLink: TerminalLinkAction
     @ObservedObject var manager: GhosttyManager
 
     init(
@@ -77,7 +80,7 @@ struct GhosttyTerminalView: View {
         onSurfaceCreated: @escaping () -> Void = {},
         onSurfaceFailed: @escaping (String) -> Void = { _ in },
         onFocus: @escaping () -> Void = {},
-        onOpenLink: @escaping (TerminalLink) -> String? = { _ in nil },
+        onOpenLink: @escaping TerminalLinkAction = { _, _ in },
         manager: GhosttyManager = .shared
     ) {
         self.repository = repository
@@ -132,7 +135,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
     let onSurfaceCreated: () -> Void
     let onSurfaceFailed: (String) -> Void
     let onFocus: () -> Void
-    let onOpenLink: (TerminalLink) -> String?
+    let onOpenLink: TerminalLinkAction
     let size: CGSize
     @ObservedObject var manager: GhosttyManager
 
@@ -569,7 +572,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     var onSurfaceCreated: () -> Void = {}
     var onSurfaceFailed: (String) -> Void = { _ in }
     var onFocus: () -> Void = {}
-    var onOpenLink: (TerminalLink) -> String? = { _ in nil }
+    var onOpenLink: TerminalLinkAction = { _, _ in }
     private var linkTarget: String?
     private var linkNotice: String?
     private var linkNoticeDismissal: Task<Void, Never>?
@@ -1484,9 +1487,13 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     // MARK: - Mouse Input
 
-    func openLink(_ link: TerminalLink) {
+    func openLink(_ link: TerminalLink) async {
         guard window != nil, surface != nil else { return }
-        let notice = onOpenLink(link)
+        showLinkNotice(nil)
+        await onOpenLink(link) { [weak self] in self?.showLinkNotice($0) }
+    }
+
+    func showLinkNotice(_ notice: String?) {
         linkNoticeDismissal?.cancel()
         linkNotice = notice
         updateLinkFeedback()
@@ -1966,7 +1973,7 @@ struct GhosttyTerminalView: View {
         onSurfaceCreated: @escaping () -> Void = {},
         onSurfaceFailed: @escaping (String) -> Void = { _ in },
         onFocus: @escaping () -> Void = {},
-        onOpenLink: @escaping (TerminalLink) -> String? = { _ in nil },
+        onOpenLink: @escaping TerminalLinkAction = { _, _ in },
         manager: GhosttyManager = .shared
     ) {
         self.repository = repository

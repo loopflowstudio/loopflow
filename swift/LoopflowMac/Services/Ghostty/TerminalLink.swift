@@ -1,4 +1,5 @@
 import Foundation
+import Loopflow
 import UniformTypeIdentifiers
 
 enum TerminalLink: Equatable {
@@ -14,13 +15,15 @@ enum TerminalLink: Equatable {
         }
 
         func checkoutPath(in checkout: String) -> String? {
+            Self.relativePath(path, in: checkout)
+        }
+
+        private static func relativePath(_ path: String, in checkout: String) -> String? {
             guard checkout.hasPrefix("/") else { return nil }
-            // Compare the pane's paths without touching this Mac's filesystem.
             let root = checkout.split(separator: "/").filter { $0 != "." }
             let target = path.split(separator: "/").filter { $0 != "." }
             guard target.starts(with: root) else { return nil }
-            let relative = target.dropFirst(root.count).joined(separator: "/")
-            return relative.isEmpty ? "." : relative
+            return target.dropFirst(root.count).joined(separator: "/")
         }
     }
 
@@ -66,9 +69,7 @@ enum TerminalLink: Equatable {
             }
             self = Self.fileLink(path: parts.path, host: parts.host, fragment: parts.fragment)
         case "loopflow":
-            guard let host = parts.host, !host.isEmpty, parts.user == nil,
-                  parts.password == nil, parts.port == nil, parts.fragment == nil,
-                  !["open", "update", "portfolio", "sessions"].contains(host.lowercased()) else {
+            guard Self.isWorkAddress(target) else {
                 self = .refused("Terminal links can only open Work in Loopflow.")
                 return
             }
@@ -93,6 +94,37 @@ enum TerminalLink: Equatable {
         }
     }
 
+    /// Check the address shape for hover feedback. The Work resolver validates
+    /// identities and looks them up without dispatching app-control URLs.
+    private static func isWorkAddress(_ target: String) -> Bool {
+        func component(_ raw: String) -> Bool {
+            guard let value = raw.removingPercentEncoding else { return false }
+            return !value.isEmpty && !value.contains("/") && !value.contains("\\")
+        }
+        let prefix = "loopflow://"
+        guard target.hasPrefix(prefix), !target.contains("#") else { return false }
+        let address = target.dropFirst(prefix.count).split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let root = address.first else { return false }
+        let location = root.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let host = location.first, !host.contains("@"), !host.contains(":"), component(String(host)) else { return false }
+        let path = location.dropFirst().first ?? ""
+        let repository = path.isEmpty
+        if !repository {
+            let segments = path.split(separator: "/", omittingEmptySubsequences: false)
+            guard segments.count == 2, ["task", "wave"].contains(segments[0]), component(String(segments[1])) else {
+                return false
+            }
+        }
+        var keys: Set<String> = []
+        for pair in address.dropFirst().first?.split(separator: "&") ?? [] {
+            let item = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            let key = String(item[0])
+            guard item.count == 2, ["repository", "session", "machine"].contains(key),
+                  keys.insert(key).inserted, component(String(item[1])) else { return false }
+        }
+        return !keys.contains("machine") || (repository && keys.contains("session"))
+    }
+
     private static func fileLink(path: String, host: String?, fragment: String?) -> Self {
         guard path.hasPrefix("/"), !path.hasPrefix("//") else {
             return .refused("File links need an absolute path.")
@@ -103,9 +135,10 @@ enum TerminalLink: Equatable {
         var line: Int?
         if let fragment {
             let digits = fragment.utf8.dropFirst()
+            // The source reader highlights the line in a Foundation IndexSet.
             guard fragment.hasPrefix("L"), digits.allSatisfy({ (48...57).contains($0) }),
-                  let number = Int(fragment.dropFirst()), number > 0 else {
-                return .refused("Use #L followed by a line number in a file link.")
+                  let number = Int(fragment.dropFirst()), (1..<NSNotFound).contains(number) else {
+                return .refused("Use #L followed by a valid line number in a file link.")
             }
             line = number
         }
@@ -114,12 +147,61 @@ enum TerminalLink: Equatable {
 }
 
 extension TerminalLink.File {
+    enum Destination: Equatable {
+        case document(URL)
+        case checkout(path: String, line: Int?)
+    }
+
+    @MainActor
+    func destination(from pane: WorkspaceIdentity, localMachine: String?, files: SessionsWorkspace.FilesPlace?,
+                     query: RegistryQuery) async throws -> Destination {
+        let local = pane.machineId == localMachine
+        if local, !isLocal() { throw OpenError.anotherMachine }
+
+        if let files, !files.cwd.isEmpty, let machine = files.machine ?? localMachine, pane.machineId == machine {
+            if local {
+                let checkout = URL(fileURLWithPath: files.cwd).resolvingSymlinksInPath().path
+                let target = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+                let paneCwd = pane.worktree.isEmpty ? checkout
+                    : URL(fileURLWithPath: pane.worktree).resolvingSymlinksInPath().path
+                if paneCwd == checkout,
+                   let relative = Self.relativePath(target, in: checkout), !relative.isEmpty {
+                    guard let kind = try? URL(fileURLWithPath: target).resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey]) else {
+                        throw OpenError.missing
+                    }
+                    if kind.isRegularFile == true {
+                        return .checkout(path: relative, line: line)
+                    }
+                    guard kind.isDirectory == true else { throw OpenError.unsafe }
+                }
+            } else if pane.worktree.isEmpty || pane.worktree == files.cwd,
+                      let relative = checkoutPath(in: files.cwd) {
+                guard !relative.isEmpty else { throw OpenError.remoteDirectory }
+                // A directory read is resolved on the owning Machine, including
+                // symlinked directories. Its non-directory response lets Files
+                // perform the regular file read and its own containment check.
+                do {
+                    _ = try await query.taskFiles(issue: files.taskId, directory: relative, showIgnored: true)
+                } catch let error as ServerError where error.code == .invalid && error.data == .object(["reason": .string("file")]) {
+                    return .checkout(path: relative, line: line)
+                }
+                throw OpenError.remoteDirectory
+            }
+        }
+        guard local else { throw OpenError.anotherMachine }
+        return .document(try localDocument())
+    }
+
     enum OpenError: LocalizedError {
+        case anotherMachine
+        case remoteDirectory
         case missing
         case unsafe
 
         var errorDescription: String? {
             switch self {
+            case .anotherMachine: "File is on another Machine."
+            case .remoteDirectory: "Folders on another Machine cannot open from a terminal link."
             case .missing: "File is missing or unreadable."
             case .unsafe: "Terminal links cannot open apps, scripts, or executable files."
             }

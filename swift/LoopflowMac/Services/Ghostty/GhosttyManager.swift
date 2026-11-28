@@ -287,7 +287,7 @@ final class GhosttyManager: ObservableObject {
                 let request = action.action.open_url
                 let target = copyLinkTarget(request.url, count: Int(request.len))
                 let link = TerminalLink(target: target, allowsBarePath: request.kind != GHOSTTY_ACTION_OPEN_URL_KIND_OSC8)
-                Task { @MainActor [weak view] in view?.openLink(link) }
+                Task { @MainActor [weak view] in await view?.openLink(link) }
                 return true
             case GHOSTTY_ACTION_MOUSE_SHAPE:
                 MainActor.assumeIsolated { view.setMouseShape(action.action.mouse_shape) }

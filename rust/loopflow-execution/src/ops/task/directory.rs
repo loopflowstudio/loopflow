@@ -3,6 +3,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use super::{file_context, file_store, task_error, validate_task_relative_path};
+use crate::engine::{Error, ErrorCode};
 use crate::ops::error::OpsResult;
 
 const PAGE_SIZE: usize = 500;
@@ -62,12 +63,6 @@ fn directory_snapshot(
     } else {
         validate_task_relative_path(directory)?
     };
-    if Path::new(&directory)
-        .components()
-        .any(|part| part.as_os_str() == ".git")
-    {
-        return Err(task_error("Git metadata is not a Task directory"));
-    }
     let cursor: Option<Cursor> = cursor
         .map(|value| {
             let bytes = hex::decode(value).map_err(|_| task_error("Invalid directory cursor"))?;
@@ -84,8 +79,25 @@ fn directory_snapshot(
     }
     let root = worktree.canonicalize()?;
     let absolute = root.join(&directory).canonicalize()?;
-    if !absolute.starts_with(&root) || !absolute.is_dir() {
+    if !absolute.starts_with(&root) {
         return Err(task_error("Directory must remain inside the Task worktree"));
+    }
+    let metadata = absolute.metadata()?;
+    if metadata.is_file() {
+        return Err(
+            Error::new(ErrorCode::Invalid, "Task directory read needs a folder.")
+                .with(serde_json::json!({ "reason": "file" }))
+                .into(),
+        );
+    }
+    if !metadata.is_dir() {
+        return Err(task_error("Task directory read needs a folder"));
+    }
+    if Path::new(&directory)
+        .components()
+        .any(|part| part.as_os_str() == ".git")
+    {
+        return Err(task_error("Git metadata is not a Task directory"));
     }
     let mut entries = Vec::new();
     for entry in std::fs::read_dir(&absolute)? {
@@ -148,6 +160,34 @@ fn directory_snapshot(
 #[cfg(test)]
 mod tests {
     use super::{directory_snapshot, TaskFileKind};
+    use crate::engine::{Error, ErrorCode};
+    use crate::ops::error::OpsError;
+
+    #[test]
+    fn a_directory_read_identifies_files_inside_the_checkout() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let root = repo.path();
+        std::fs::write(root.join("file"), "").unwrap();
+        std::os::unix::fs::symlink("file", root.join("file-link")).unwrap();
+        std::fs::create_dir(root.join("folder")).unwrap();
+        std::os::unix::fs::symlink("folder", root.join("folder-link")).unwrap();
+        std::os::unix::fs::symlink(root.parent().unwrap(), root.join("outside")).unwrap();
+
+        for path in ["file", "file-link"] {
+            let error = directory_snapshot(root, path, None, true).unwrap_err();
+            assert!(
+                matches!(error, OpsError::Refused(Error { code: ErrorCode::Invalid, data: Some(data), .. })
+                if data == serde_json::json!({ "reason": "file" }))
+            );
+        }
+        assert!(directory_snapshot(root, "folder-link", None, true).is_ok());
+        for path in ["outside", "missing"] {
+            assert!(!matches!(
+                directory_snapshot(root, path, None, true),
+                Err(OpsError::Refused(_))
+            ));
+        }
+    }
 
     #[test]
     fn task_files_pages_include_unchanged_untracked_and_bounded_links() {

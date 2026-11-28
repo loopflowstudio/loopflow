@@ -1809,10 +1809,8 @@ printf '%s' "$line" > "{pasted}"
         assert_eq!(content.matches("Compare scratch/explore.html").count(), 1);
     }
 
-    /// Breakpoint delivery across the five harnesses (Claude, Codex, OpenCode,
-    /// Pi idle wake; Antigravity next-turn and held-start, with immediate idle
-    /// wake deferred to LOO-1098), plus busy delivery, restart before delivery,
-    /// and a failed held start keeping the arrival unread.
+    /// Breakpoint delivery through provider inboxes and at an Antigravity turn
+    /// boundary, including a busy primary and a failed held start after restart.
     #[test]
     fn breakpoint_delivery_covers_five_harnesses_busy_restart_and_failed_start() {
         // 1. Open-idle Claude + busy turn delivery.
@@ -1829,14 +1827,14 @@ printf '%s' "$line" > "{pasted}"
             .record_native_turn(&claude.adapter, "native", false, None)
             .unwrap();
         park_breakpoint(&claude, "after-explore", "Compare scratch/explore.html");
-        wake_idle(&claude.store, None);
+        wake_idle(&claude.store, None, None);
         assert_eq!(
             listener.accept().unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock,
             "busy primary is not woken mid-turn"
         );
         claude.stop(&claude.store, &inbox);
-        after_turn(&claude.store, "brk-claude");
+        after_turn(&claude.store, "brk-claude", None);
         listener.set_nonblocking(false).unwrap();
         let content = received(&listener)[1]["message"]["content"].to_string();
         assert!(content.contains("Breakpoint review "), "{content}");
@@ -1866,7 +1864,7 @@ printf '%s' "$line" > "{pasted}"
             .unwrap();
         park_breakpoint(&codex, "after-explore", "Codex review artifact");
         let server = codex_app_server(&endpoint);
-        wake_idle(&codex.store, Some("brk-codex"));
+        wake_idle(&codex.store, Some("brk-codex"), None);
         let start = server.join().unwrap();
         let output = start["params"]["toolOutput"]["output"].to_string();
         assert!(output.contains("Codex review artifact"), "{output}");
@@ -1877,10 +1875,10 @@ printf '%s' "$line" > "{pasted}"
             let fx = fixture(&session);
             fx.store.choose_task_primary(&fx.task, &session).unwrap();
             let socket = fx.home.path().join("ext.sock");
-            let messages = extension(&socket, "started\n");
+            let messages = extension(&socket, "started\n", 1);
             fx.settle(provider, &socket);
             park_breakpoint(&fx, "after-explore", &format!("{provider} review"));
-            wake_idle(&fx.store, Some(&session));
+            wake_idle(&fx.store, Some(&session), None);
             let text = messages.try_recv().expect(provider)["text"].to_string();
             assert!(text.contains(&format!("{provider} review")), "{text}");
         }

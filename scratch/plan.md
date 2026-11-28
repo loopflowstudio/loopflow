@@ -18,10 +18,10 @@ Those options, from the page:
 ## Outcome
 
 In a `build` run, code that `concept-review` flagged is changed by `implement`
-and reviewed again before the Graph reaches `compress`. `scratch/concept-review.html`
-at `ship-review` describes the code that ships. Today `realign` patches "small,
-clear mismatches" itself and returns `advance`, so those edits are never
-reviewed and the page still shows "No" rows for code already fixed (runs
+and reviewed again before the Graph reaches `compress`. The page that
+`ship-review` opens reflects these fixes. Previously `realign` patched "small,
+clear mismatches" itself and returned `advance`, so those edits skipped review
+and the page still showed "No" rows for code already fixed (runs
 `310ac1`, `6db832`, `MTG-497`, from the Task brief).
 
 ## The rule
@@ -228,8 +228,7 @@ rewrites the page, pass 2 returns `advance`.
 ## Done when
 
 - A `build` run whose review finds a small code mismatch goes around the loop
-  once more, and the page `ship-review` opens was written after the last code
-  change.
+  once more and refreshes the review page after `implement` makes the fix.
 - A review with nothing in scope to change in code advances with no extra pass.
 - `lf realign` run alone, or inside `refresh`, leaves code and test files
   untouched.

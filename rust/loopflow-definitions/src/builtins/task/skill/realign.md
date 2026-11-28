@@ -1,9 +1,9 @@
 ---
 requires: intended outcome and work to reconcile
-produces: plan and implementation that agree, with a short account of progress
+produces: current plan with any remaining implementation work
 action_style: procedural
 ---
-Bring the plan and the code back into agreement with what the work has taught.
+Update the plan with what the work has taught and what still needs to change.
 
 After a slice, a review, or upstream changes, answer three questions in order.
 Before anything is built, the review is what was learned.
@@ -25,11 +25,12 @@ may change the approach, but missing behavior never weakens acceptance. A
 change that needs a design decision is written as the exact open choice.
 Nothing goes into the plan as settled unless someone said so; quote them.
 
-Read the work once as a reviewer, one look at the shape and not a full
-review: is there a concept, type or path it added that the design could do
-without, or a simpler form of what it built? Write what you find into the
-plan as remaining work. Correct small, clear mismatches in code, tests and
-docs yourself; leave a substantial code change as remaining work.
+When reconciling a fresh concept review, triage its findings below. Otherwise,
+look once for a concept, type or path the design could do without, or a simpler
+form of what it built. Put any in-scope code or test fix in the plan, however
+small. Fix clear mismatches in user docs under `docs/` or in `README.md` files
+here. Send changes to skills, goldens, agent guides, QA playbooks and source
+comments through implementation.
 
 **What is next?** Regroup what remains into end-to-end passes, aiming for
 five or fewer across the Task. Name what the next pass will deliver and
@@ -50,8 +51,9 @@ work needs.
 When `scratch/concept-review.html` has findings the plan has not answered, give
 each one a place:
 
-- **Small, clear mismatch:** fix it here, in plan, code, tests or docs.
-- **Conceptual rework in the area this work touches, or missing promised
+- **Plan or user-docs mismatch:** fix it here. Record any docs fix in the plan
+  so `ship-review` can account for the review row.
+- **In-scope code or test fix, conceptual rework, or missing promised
   behavior:** write it into the plan as the next pass.
 - **Separate outcome:** list it in the plan under `## Deferred findings` (which
   `ship-review` reads), with what it would take. Don't build it.
@@ -68,11 +70,16 @@ notes while keeping `## Deferred findings` intact.
 
 ## Deciding a loop
 
-When this step is deciding a loop: return `iterate` only when the plan now
-holds a pass of rework or missing promised behavior, naming that pass in the
-summary; return `advance` when what was found is fixed here or deferred; return
-`blocked` with the question on a design choice that can't be undone once
-shipped.
+When deciding a loop:
+
+- Return `iterate` when the plan holds any in-scope implementation fix, even
+  one small change. Name the next pass so `implement` makes the fix and
+  `concept-review` reviews the result.
+- Return `advance` when no implementation work remains. Plan and user-docs
+  fixes made here, deferred work and findings already answered in the plan do
+  not need another pass.
+- Return `blocked` with the question on a design choice that can't be undone
+  once shipped.
 
 Outside a loop (`plan`, `refresh`, or standalone), there is no `blocked`
 verdict: record any open irreversible choice in `scratch/questions.md` and
@@ -90,6 +97,6 @@ When the Wave's memory is this step's to write, curate it as
 `lf help wave-session` describes.
 
 Finish briefly: what changed, what remains, any decision needed. Edit the plan
-rather than adding a report. If everything already agrees, say so. Realign
-changes the plan to match what was learned. It never adds behavior the plan
-didn't have: that goes in `scratch/questions.md`.
+rather than adding a report. If everything already agrees, say so. Leave
+implementation files untouched. Put ideas for new behavior in
+`scratch/questions.md`.

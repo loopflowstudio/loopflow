@@ -170,17 +170,15 @@ names the next pass; if a counterexample breaks the plan, it notes what broke
 and advances so review can replan.
 
 Once planned passes are built, `concept-review` reviews the whole change
-read-only (`scratch/concept-review.html`) and `realign` reconciles those
-findings into `scratch/plan.md`. `realign` never edits code or tests—whether in
-`build`, the `refresh` Graph, or standalone `lf realign`: it updates the plan,
-fixes user-documentation mismatches (`docs/`, `README.md`) inline, and lists
-separate outcomes under `## Deferred findings`. For any in-scope code or test
-change, however small, `realign` writes it into `scratch/plan.md` as the next
-pass and returns `iterate`, sending the loop back through `sync`, `implement`,
-and `concept-review` so the final review page reflects the code that ships. When
-no code or test work remains, `realign` advances to `compress`. Aim for one diff a
-person can review in a sitting. Around 2,000 lines of non-test change is a soft
-ceiling.
+read-only (`scratch/concept-review.html`). In `build`, `refresh`, and standalone
+runs, `realign` updates `scratch/plan.md`, fixes clear mismatches in user docs
+(`docs/`, `README.md`), and lists separate outcomes under `## Deferred findings`.
+Any in-scope code or test fix, however small, becomes the next implementation
+pass in the plan. In `build`, that returns `iterate` and sends the loop back
+through `sync`, `implement`, and `concept-review` so the review page covers the
+fix before `compress`. When no implementation work remains, `realign` advances
+to `compress`. Aim for one diff a person can review in a sitting. Around 2,000
+lines of non-test change is a soft ceiling.
 
 The deciding step sees which pass it is on and how many steps the loop
 repeats, including the decision itself.
@@ -190,11 +188,10 @@ Decision pass 3. Iterating repeats 2 steps, back to sync.
 ```
 
 When a Skill defines its own loop rules, those take precedence over the default
-criteria—for example, `realign` iterates on any in-scope code or test fix rather
-than waiting for a substantial pass. Otherwise, a decider keeps iterating past 5
-when real work is left, and returns `blocked` when passes repeat without
-converging. `lf task status` shows the reason the decider gave. If the step
-succeeds and the Graph then fails, status shows the Graph error.
+criteria. By default, a decider looks for a substantial next pass, keeps
+iterating past 5 when real work is left, and returns `blocked` when passes
+repeat without converging. `lf task status` shows the reason the decider gave.
+If the step succeeds and the Graph then fails, status shows the Graph error.
 
 ### Docs-first (`write-docs`) and QA playbooks (`.lf/qa/`)
 

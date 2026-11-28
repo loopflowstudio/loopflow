@@ -283,7 +283,7 @@ does; one good example beats three; no preamble; write for users; update when
 user-facing behavior changes.
 
 **`scratch/`:** what's left to build, not what's done. `lf realign` updates the
-plan and code and keeps open findings with the work.
+plan and keeps open findings with the work.
 
 **SQLite schema:**
 - Shallow checkouts lack first-parent migration history. For local builds set
@@ -407,7 +407,7 @@ def open_warp(path: Path) -> None:
 ```
 
 Start features with a design doc under `scratch/`; after implementation,
-`lf realign` reconciles plan and code.
+`lf realign` updates the plan with what implementation taught.
 
 User docs use the shortest command that resolves (`lf land`, `lf wt create`);
 keep canonical paths in command references. `documented_commands` checks
@@ -450,7 +450,7 @@ function pointer.
 ## When to run what
 
 - **implement / compress:** build the changed code and run its focused test. Skip builds for prose-only edits.
-- **realign:** reconcile the plan; test only a repair or a real doubt.
+- **realign:** reconcile the plan; test only to settle a real doubt.
 - **lint:** formatting and static analysis.
 - **rebase:** no tests when conflict-free; one focused test after conflicts.
 - **land:** clears scratch and pushes once; CI runs the suites, `ci-fix` repairs.

@@ -15,3 +15,6 @@
 - Loops have no pass cap. If `realign` iterating on every in-scope code finding
   makes `build` spin in practice, the fix is a cap or explore's Vision C guard;
   both are outside this Task.
+- `compress` and `qa` can edit code after `concept-review`. Read the freshness
+  requirement as covering the fixes queued by `realign`, matching the choice
+  to leave the Graph order and review-page format alone.

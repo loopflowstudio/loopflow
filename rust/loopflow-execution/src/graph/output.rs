@@ -6,15 +6,15 @@ use crate::graph::runner::SkillOutcome;
 use crate::graph::transitions::{GraphDecision, GraphVerdict};
 use crate::graph::ConcreteStep;
 
-/// What every loop decision means, so a skill placed on a loop edge needs no
-/// loop instructions of its own.
+/// Fallback criteria for steps whose skills give no loop decision rules.
 const DECISION_CRITERIA: &str = "
 
 This step also decides a loop. Do the step's work first, then judge from its results.
+If the skill gives its own loop decision rules, follow those. Otherwise use these defaults.
 
 - advance when what this step requires is done. Later obligations belong to later steps.
 - iterate when the last pass made progress and you can name a substantial next pass within scope and the result it should produce. Aim to finish within five passes. Continue past five when the work warrants it.
-- blocked when passes shrink into small increments that no longer converge, the last pass made no progress, a failure repeats with nothing learned, or you need input you can't supply. The Graph stops here. Give the reason.
+- blocked when passes repeat without converging, the last pass made no progress, a failure repeats with nothing learned, or you need input you can't supply. The Graph stops here. Give the reason.
 
 Leave checks that can't run here to CI or review. Report them as deferred. Carry the next action and the paths it needs in the summary.";
 
@@ -131,7 +131,31 @@ mod tests {
     use super::GraphOutput;
     use crate::graph::runner::SkillOutcome;
     use crate::graph::transitions::GraphDecision;
+    use crate::graph::{compile_graph, load_graph, ConcreteStep};
     use serde_json::json;
+
+    #[test]
+    fn build_realign_uses_its_own_loop_rule() {
+        let repo = tempfile::tempdir().unwrap();
+        let graph = load_graph("build", repo.path()).unwrap();
+        let steps = compile_graph(&graph, repo.path()).unwrap();
+        let step = steps
+            .iter()
+            .find(
+                |step| matches!(step, ConcreteStep::Skill(skill) if skill.skill.name == "realign"),
+            )
+            .expect("build includes realign");
+
+        let mut message = String::new();
+        assert_eq!(
+            GraphOutput::append_step_instructions(step, &mut message),
+            Some(GraphOutput::Decision)
+        );
+        let (_, defaults) = message
+            .split_once("If the skill gives its own loop decision rules, follow those. Otherwise use these defaults.")
+            .expect("the runner defers to realign's rule to iterate on small fixes");
+        assert!(defaults.contains("substantial next pass"));
+    }
 
     #[test]
     fn provider_schemas_use_required_fields_without_root_unions() {

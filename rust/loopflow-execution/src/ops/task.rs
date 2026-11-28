@@ -1007,10 +1007,10 @@ pub fn select_task_run(
             load_graph(&name, &format!("{} default ", source.as_str()), &repo)?
         }
     };
+    let step = row.as_ref().map_or(START, |row| row.step.as_str());
     let parked = row.as_ref().and_then(|row| row.breakpoint.as_ref());
     if let Some(expected) = &options.at_arrival {
         if parked.is_none_or(|arrival| arrival.id != *expected) {
-            let step = row.as_ref().map_or(START, |row| &row.step);
             return Err(task_error(format!(
                 "Task {issue} is now at {step} in {}; that review has ended",
                 graph.name
@@ -1025,8 +1025,8 @@ pub fn select_task_run(
     if let Some((_, carrier)) = row.as_ref().and_then(|row| row.run.as_ref()) {
         if crate::store::task_work::carrier_may_run(carrier) {
             return Err(task_error(format!(
-                "Task {issue} is running graph {} from {}; read `lf task status {issue}`, or `lf task interrupt {issue}` to stop it",
-                graph.name, row.as_ref().expect("a run belongs to a row").step
+                "Task {issue} is running graph {} from {step}; read `lf task status {issue}`, or `lf task interrupt {issue}` to stop it",
+                graph.name
             )));
         }
     }
@@ -1037,28 +1037,22 @@ pub fn select_task_run(
     {
         return Err(task_error(execution.reason));
     }
-    let step = row.as_ref().map_or(START, |row| row.step.as_str());
     let reason = options
         .reason
         .as_deref()
         .filter(|text| !text.trim().is_empty());
-    let (mut start, iterated) = match (from, row.as_ref().and_then(|row| row.run.as_ref()), parked)
-    {
-        (Some(name), _, _) => (
-            Some(
-                graph
-                    .find(name)
-                    .ok_or_else(|| {
-                        task_error(format!(
-                            "graph {} has no step {name:?}. Steps: {}",
-                            graph.name,
-                            graph.describe_steps()
-                        ))
-                    })?
-                    .into(),
-            ),
-            false,
-        ),
+    let start = match (from, row.as_ref().and_then(|row| row.run.as_ref()), parked) {
+        (Some(name), _, _) => {
+            let place = graph.find(name).ok_or_else(|| task_error(format!(
+                "graph {} has no step {name:?}. Steps: {}",
+                graph.name, graph.describe_steps()
+            )))?;
+            let mut start = RunStart::from(place);
+            if parked.is_some() && !options.auto_on {
+                start.cursor.leaf_mut().progress.handoff = reason.map(str::to_owned);
+            }
+            Some(start)
+        }
         // A run that stopped starts again at the step it stopped at, with the
         // passes and routes it had: the steps before it are done.
         (None, Some((cursor, _)), _) => {
@@ -1067,15 +1061,14 @@ pub fn select_task_run(
             if cursor.child.is_some() && graph.place_of(&cursor).is_none() {
                 cursor.finish(&graph.steps).map_err(task_error)?;
             }
-            let start = match graph.place_of(&cursor) {
+            match graph.place_of(&cursor) {
                 Some(place) => Some(RunStart { place, cursor }),
                 None if cursor.index == graph.steps.len() && cursor.child.is_none() => None,
                 None => return Err(task_error("saved cursor is outside its captured graph")),
-            };
-            (start, false)
+            }
         }
         (None, None, Some(arrival)) => continue_from_breakpoint(&graph, arrival, options, reason)?,
-        (None, None, None) if step == START => (graph.find(START).map(RunStart::from), false),
+        (None, None, None) if step == START => graph.find(START).map(RunStart::from),
         (None, None, None) if step == END => {
             return Err(task_error(format!(
                 "Task {issue} is at the end of graph {}; `lf task run {issue} --from <step>` runs part of it again, `lf task run {issue} <graph>` takes up another. Steps: {}",
@@ -1089,14 +1082,9 @@ pub fn select_task_run(
                     "Task {issue} is at {step:?}, which graph {} no longer names; `lf task run {issue} --from <step>` chooses where to go on. Steps: {}",
                     graph.name, graph.describe_steps()
                 )))?;
-            (Some(place.into()), false)
+            Some(place.into())
         }
     };
-    if let (Some(_), Some(start), Some(reason)) = (parked, &mut start, reason) {
-        if !options.auto_on && !iterated {
-            start.cursor.leaf_mut().progress.handoff = Some(reason.to_owned());
-        }
-    }
     Ok(TaskRunSelection {
         previous: row,
         converted,
@@ -1111,7 +1099,7 @@ fn continue_from_breakpoint(
     arrival: &crate::store::task_work::BreakpointArrival,
     options: &TaskProcessOptions,
     reason: Option<&str>,
-) -> OpsResult<(Option<RunStart>, bool)> {
+) -> OpsResult<Option<RunStart>> {
     use crate::graph::transitions::{GraphDecision, GraphVerdict};
     let mut cursor = arrival.cursor.clone();
     if let Some(decision) = options.decision {
@@ -1119,47 +1107,43 @@ fn continue_from_breakpoint(
         if crate::graph::return_target(body, leaf.index).is_none() {
             return Err(task_error("this breakpoint has no loop decision"));
         }
-        let progress = &mut cursor.leaf_mut().progress;
-        match progress.verdict.as_mut() {
-            Some(verdict) => {
-                verdict.decision = decision;
-                if let Some(reason) = reason {
-                    verdict.summary = reason.to_owned();
-                }
-            }
-            None => {
-                let summary = match reason {
-                    Some(reason) => reason.to_owned(),
-                    None if decision == GraphDecision::Iterate => {
-                        return Err(task_error(
-                            "iterating at this breakpoint requires `--reason <direction>`",
-                        ));
-                    }
-                    None => "continue".to_owned(),
-                };
-                progress.verdict = Some(GraphVerdict { decision, summary });
-            }
+        let verdict = &mut cursor.leaf_mut().progress.verdict;
+        let summary = reason.or_else(|| verdict.as_ref().map(|saved| saved.summary.as_str()));
+        if decision == GraphDecision::Iterate && summary.is_none() {
+            return Err(task_error(
+                "iterating at this breakpoint requires `--reason <direction>`",
+            ));
         }
-    } else if let Some(reason) = reason.filter(|_| !options.auto_on) {
-        if let Some(verdict) = cursor.leaf_mut().progress.verdict.as_mut() {
-            if verdict.decision == GraphDecision::Iterate {
-                verdict.summary = reason.to_owned();
-            }
-        }
+        *verdict = Some(GraphVerdict {
+            decision,
+            summary: summary.unwrap_or("continue").to_owned(),
+        });
     }
-    let iterated = cursor
-        .leaf()
+    let reply = reason.filter(|_| !options.auto_on);
+    // An iterate verdict carries the reply through the whole pass. Other
+    // replies go to the first step after the review, even across an XOR exit.
+    let iteration = cursor
+        .leaf_mut()
         .progress
         .verdict
-        .as_ref()
-        .is_some_and(|verdict| verdict.decision == GraphDecision::Iterate);
+        .as_mut()
+        .filter(|verdict| verdict.decision == GraphDecision::Iterate);
+    let handoff = match iteration {
+        Some(verdict) => {
+            if let Some(reply) = reply {
+                verdict.summary = reply.to_owned();
+            }
+            None
+        }
+        None => reply,
+    };
     cursor.finish(&graph.steps).map_err(task_error)?;
-    Ok((
-        graph
-            .place_of(&cursor)
-            .map(|place| RunStart { place, cursor }),
-        iterated,
-    ))
+    if let Some(reply) = handoff {
+        cursor.leaf_mut().progress.handoff = Some(reply.to_owned());
+    }
+    Ok(graph
+        .place_of(&cursor)
+        .map(|place| RunStart { place, cursor }))
 }
 
 /// Put the Task where `lf task run` sets out: on a run carried by this
@@ -1191,9 +1175,13 @@ async fn try_start_task_run(
     let requested = options.graph.as_deref();
     let from = options.from.as_deref();
     let auto_on = options.auto_on;
-    let standing = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
-        .map_err(task_error)?
-        .filter(|row| auto_on && requested.is_none_or(|name| name == row.graph.name));
+    let standing = if auto_on {
+        crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
+            .map_err(task_error)?
+            .filter(|row| requested.is_none_or(|name| name == row.graph.name))
+    } else {
+        None
+    };
     match standing.as_ref().map(|row| (row, &row.run)) {
         // A live run reads auto at each breakpoint. The mark is written before
         // the wait for its Graph, so a slow registration cannot lose it.
@@ -1320,13 +1308,12 @@ async fn try_start_task_run(
         }
     }
     // A continued breakpoint sets out from inside its loop, not the start.
-    let label = match arrival.and(graph.step_name_of(&start.cursor)) {
-        Some(step) => format!("{} from {step}", graph.name),
-        None if start.place == crate::task_graph::Place::default() => {
-            format!("{} from start", graph.name)
-        }
-        None => format!("{} from {}", graph.name, graph.step_name(&start.place)),
+    let from = if arrival.is_none() && start.place == crate::task_graph::Place::default() {
+        "start".to_owned()
+    } else {
+        graph.step_name(&start.place)
     };
+    let label = format!("{} from {from}", graph.name);
     if !crate::store::task_work::start_task_graph_run(
         &store.sqlite,
         &task.id,

@@ -203,6 +203,7 @@ pub enum TaskConditionState {
 }
 
 use loopflow_execution::durable::GraphProcessDetail;
+use loopflow_execution::ops::task_actions::BreakpointActionEvidence;
 pub use loopflow_execution::ops::task_actions::{
     ci_failure_reason, derive_task_actions, TaskAction, TaskActionEvidence, TaskActionModel,
 };
@@ -2353,32 +2354,27 @@ async fn snapshot_task_detail(
     let lifecycle = status.lifecycle(task.state.as_deref());
     let observed = lifecycle.observed_here(runs_on.is_some());
     let elsewhere = runs_on.as_ref().filter(|_| observed.is_none());
-    let breakpoint = if elsewhere.is_none()
-        && observed == Some(TaskState::Active)
-        && matches!(
-            execution.state,
-            TaskExecutionState::Idle | TaskExecutionState::Blocked
-        ) {
-        facts
-            .breakpoints
-            .get(&task.id)
-            .map(|(step, raw)| {
-                let arrival: loopflow_execution::store::task_work::BreakpointArrival =
-                    serde_json::from_str(raw)?;
-                let blocked = arrival.blocked_reason().is_some();
-                let sentence = loopflow_execution::task_graph::breakpoint_sentence(step, &arrival);
-                Ok::<_, serde_json::Error>((arrival.id, blocked, sentence))
-            })
-            .transpose()?
-            .filter(|(_, blocked, sentence)| {
-                loopflow_execution::ops::task_actions::BreakpointActionEvidence {
-                    blocked: *blocked,
-                    sentence,
-                }
+    let sentence;
+    let breakpoint = match facts.breakpoints.get(&task.id) {
+        Some((step, raw))
+            if observed == Some(TaskState::Active)
+                && matches!(
+                    execution.state,
+                    TaskExecutionState::Idle | TaskExecutionState::Blocked
+                ) =>
+        {
+            let arrival: loopflow_execution::store::task_work::BreakpointArrival =
+                serde_json::from_str(raw)?;
+            sentence = loopflow_execution::task_graph::breakpoint_sentence(step, &arrival);
+            let review = BreakpointActionEvidence {
+                blocked: arrival.blocked_reason().is_some(),
+                sentence: &sentence,
+            };
+            review
                 .owns_execution(execution.state)
-            })
-    } else {
-        None
+                .then_some((arrival.id, review))
+        }
+        _ => None,
     };
     let finished = loopflow_execution::ops::task_actions::Finished::of(
         status,
@@ -2434,10 +2430,10 @@ async fn snapshot_task_detail(
             owner: NextMoveOwner::User,
             reason: "Unassigned; nothing moves it until `lf task claim` or `lf task run`".into(),
         }
-    } else if let Some((_, _, sentence)) = &breakpoint {
+    } else if let Some((_, review)) = &breakpoint {
         NextMove {
             owner: NextMoveOwner::User,
-            reason: sentence.clone(),
+            reason: review.sentence.to_owned(),
         }
     } else if execution.state != TaskExecutionState::Idle && !runtime.status.is_terminal() {
         NextMove {
@@ -2498,12 +2494,7 @@ async fn snapshot_task_detail(
             .filter(|pr| pr.phase() == PrPhase::Open)
             .map(|pr| pr.presentation().is_some()),
         at_end,
-        breakpoint: breakpoint.as_ref().map(|(_, blocked, sentence)| {
-            loopflow_execution::ops::task_actions::BreakpointActionEvidence {
-                blocked: *blocked,
-                sentence: sentence.as_str(),
-            }
-        }),
+        breakpoint: breakpoint.as_ref().map(|(_, review)| *review),
         open_children,
         completion_refusal: completion_refusal.as_deref(),
         run_refusal: run_refusal.as_deref(),
@@ -2587,7 +2578,7 @@ async fn snapshot_task_detail(
         }),
         execution: Some(execution),
         run_control,
-        breakpoint_arrival: breakpoint.map(|(arrival, _, _)| arrival),
+        breakpoint_arrival: breakpoint.map(|(arrival, _)| arrival),
         pr: pr.as_ref().map(|pr| {
             let empty = (probe_pr_empty && pr.is_active())
                 .then(|| task_pr_empty(task, pr))
@@ -2744,7 +2735,6 @@ fn derive_task_condition(
         && local_progress.recovery_required == Some(false)
         && local_progress.authored_commits == Some(true)
         && matches!(active_pr_phase, Some(PrPhase::Open | PrPhase::Publishing));
-    let execution = action_evidence.and_then(|evidence| evidence.execution);
     let breakpoint = action_evidence.and_then(|evidence| evidence.breakpoint);
     // Settled work keeps its retained history without asking anyone to act.
     let settled = runtime
@@ -2758,10 +2748,8 @@ fn derive_task_condition(
             _ => "Task is complete",
         };
         (TaskConditionState::Clear, reason.to_string())
-    } else if let Some(execution) = execution.filter(|execution| {
-        execution.state != TaskExecutionState::Idle
-            && !breakpoint.is_some_and(|breakpoint| breakpoint.owns_execution(execution.state))
-    }) {
+    } else if let Some(execution) = action_evidence.and_then(TaskActionEvidence::pending_execution)
+    {
         let state = match execution.state {
             TaskExecutionState::Starting
             | TaskExecutionState::Running

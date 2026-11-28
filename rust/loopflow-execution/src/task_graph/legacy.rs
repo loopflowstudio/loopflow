@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashSet};
 use crate::graph::runner::{ExecutionCursor, NestedCursor};
 use crate::graph::{breakpoint_name, Breakpoint, ConcreteStep};
 
-use super::{names, walk, CapturedGraph};
+use super::{find_place, names, visit_steps, CapturedGraph};
 
 /// Entry and exit boundaries of each old step in one body, including its end.
 /// A worker keeps its entry, and its loop decision moves to its final node.
@@ -16,24 +16,20 @@ struct Body {
 
 impl Body {
     fn expand(steps: &mut Vec<ConcreteStep>, used: &mut HashSet<String>) -> Self {
-        let mut starts = vec![0];
-        for step in steps.iter() {
-            let review = matches!(step, ConcreteStep::Skill(skill) if skill.interactive);
-            starts.push(starts.last().copied().unwrap_or(0) + 1 + usize::from(review));
-        }
+        let mut starts = Vec::with_capacity(steps.len() + 1);
         let mut paths = BTreeMap::new();
         for (i, mut step) in std::mem::take(steps).into_iter().enumerate() {
-            let distance = |back: usize| {
-                i.checked_sub(back)
-                    .map(|target| starts[i + 1] - 1 - starts[target])
-            };
+            let entry = steps.len();
+            starts.push(entry);
+            let distance = |back: usize| i.checked_sub(back).map(|target| entry - starts[target]);
             match &mut step {
                 ConcreteStep::Skill(skill) if skill.interactive => {
                     let name =
                         breakpoint_name(Some(skill.id.as_ref().unwrap_or(&skill.skill.name)), used);
                     let stop = Breakpoint {
                         name,
-                        returns: skill.returns.take().and_then(distance),
+                        // The return now leaves the marker one step after the worker.
+                        returns: skill.returns.take().and_then(distance).map(|back| back + 1),
                         sources: skill.sources.clone(),
                     };
                     skill.interactive = false;
@@ -53,6 +49,7 @@ impl Body {
             }
             steps.push(step);
         }
+        starts.push(steps.len());
         Self { starts, paths }
     }
 
@@ -104,11 +101,16 @@ impl CapturedGraph {
         &mut self,
         cursors: impl IntoIterator<Item = &'a mut ExecutionCursor>,
     ) -> bool {
-        if self.interactive_steps().is_empty() {
+        if find_place(
+            &self.steps,
+            &mut |step| matches!(step, ConcreteStep::Skill(skill) if skill.interactive),
+        )
+        .is_none()
+        {
             return false;
         }
         let mut used = HashSet::from(["start".into(), "end".into()]);
-        walk(&self.steps, &[], &mut |_, step| {
+        visit_steps(&self.steps, &mut |step| {
             used.extend(names(step).into_iter().map(str::to_owned));
             if let ConcreteStep::Command(command) = step {
                 used.insert(command.item.display_name());

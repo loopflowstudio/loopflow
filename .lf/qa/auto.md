@@ -138,7 +138,8 @@ first read; copy the home first to repeat the check. The released lf has no
 A Task left waiting there ships after the upgrade (the captured Graph carries
 its skill). The same goes for a step the branch deleted: a 0.16.0 Task on
 `code` waiting at `verify` reads "Waiting for you at verify" under a build
-without that skill, and `lf task run` steps past it to `end` and `done`. To
+without that skill. On `lf task run` the captured worker runs and the Task
+parks at its breakpoint. Continue once more to reach `end`. To
 switch binaries on one home, kill the server by PID and start the other's
 `lf server run`; each binary's wrapper sets its own `LF_BIN`. A released `lf task hold` on a Task that never took a Graph comes through as
 `auto: off by <person>`; with no checkout, `lf task status` shows it on the

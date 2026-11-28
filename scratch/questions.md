@@ -8,3 +8,4 @@
 - QA, LOO-1096: builtin `build` names `qa` bare, so a repository Graph named `qa` replaces that step (research already uses `step: research`). Should builtin Graphs spell skills as `step:`? Left as is.
 - QA, LOO-1096: Esc during a Claude tool call fires no Stop hook, so a parked handoff waits for the next typed prompt rather than waking the conversation. This predates the change and is left as is.
 - Pass 6 uses the shared workflow bar from main. A standalone marker gets the person icon and an accessible name. Blocked reviews also show the worker’s reason beside the track.
+- Keep linked scratch artifacts in the fallback listing. The directory walker skips cycles so a link back to scratch cannot repeat a file.

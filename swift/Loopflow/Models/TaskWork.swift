@@ -233,20 +233,6 @@ public struct TaskGraph: Codable, Sendable, Equatable {
         case .run: return nil
         }
     }
-
-    /// `start` plus top-level runnable work steps (excluding standalone breakpoints),
-    /// in Graph order without duplicates.
-    public var startFromSteps: [String] {
-        let stops = Set(breakpoints)
-        var seen: Set<String> = [Self.start]
-        var result = [Self.start]
-        for step in steps where !stops.contains(step.name) {
-            if seen.insert(step.name).inserted {
-                result.append(step.name)
-            }
-        }
-        return result
-    }
 }
 
 extension TaskGraph {

@@ -62,6 +62,7 @@ struct TaskActionsTests {
         let row = try row(lifecycle: "moving")
         let actions = TaskActions(work: work, row: row, execution: nil)
         #expect(actions.track.map(\.name) == ["plan", "review-design", "build", "demo"] && actions.chip == 2)
+        #expect(actions.steps == ["start", "plan", "build"])
         var jumped: [String?] = []
         let bar = try TaskWorkflowControls(task: row, actions: actions, pending: nil, run: { jumped.append($0) },
             pause: { _ in }, interrupt: {}, toggleAuto: {}, complete: {}) { EmptyView() }.inspect()
@@ -137,6 +138,7 @@ struct TaskActionsTests {
         let catalog = try JSONDecoder().decode([GraphCatalogEntry].self, from: loadFixtureData("graph_catalog.json"))
         let unstarted = try row(lifecycle: "unstarted")
         let actions = TaskActions(work: try work(nil), row: unstarted, execution: nil, outline: catalog[0].workflow)
+        #expect(actions.steps == ["start", "design", "pursue", "xor-route", "queue"])
         #expect(actions.control?.label == "Run: design")
         #expect(actions.pause == nil)
         let held = TaskActions(work: try work(nil), row: try row(lifecycle: "paused"), execution: nil, outline: catalog[0].workflow)
@@ -181,29 +183,5 @@ struct TaskActionsTests {
                 #expect(try !bar.find(viewWithAccessibilityIdentifier: "task-workflow-primary").isDisabled())
             }
         }
-    }
-
-    @Test("Start from… lists start and top-level runnable stages, excluding standalone breakpoints")
-    func startFromSteps() throws {
-        let graph = TaskGraph(
-            name: "feature",
-            control: .init(action: .run, label: "Run: explore"),
-            breakpoints: ["after-explore", "after-ship-review", "after-verify"],
-            position: .at(step: "start"),
-            steps: [
-                .init(name: "explore", breakpoint: false),
-                .init(name: "after-explore", breakpoint: true),
-                .init(name: "plan", breakpoint: false),
-                .init(name: "build", breakpoint: false),
-                .init(name: "ship-review", breakpoint: false),
-                .init(name: "after-ship-review", breakpoint: true),
-                .init(name: "deliver", breakpoint: false),
-                .init(name: "verify", breakpoint: false),
-                .init(name: "after-verify", breakpoint: true),
-            ],
-            currentStep: nil,
-            sentence: "Not started."
-        )
-        #expect(graph.startFromSteps == ["start", "explore", "plan", "build", "ship-review", "deliver", "verify"])
     }
 }

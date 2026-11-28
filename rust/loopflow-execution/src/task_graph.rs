@@ -8,9 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::LoadError;
 use crate::graph::runner::{ExecutionCursor, NestedCursor};
-use crate::graph::{
-    compile_graph, load_authored_graph, return_target, ConcreteSkill, ConcreteStep,
-};
+use crate::graph::{compile_graph, load_authored_graph, return_target, ConcreteStep};
 use loopflow_storage::sqlite::task_work::PauseStage;
 use loopflow_storage::sqlite::{Auto, AutoState};
 
@@ -110,28 +108,39 @@ pub fn landing_name(
     }
 }
 
-/// Visit every place in order, descending into XOR paths by name.
-fn walk<'a>(
-    steps: &'a [ConcreteStep],
-    path: &[(usize, String)],
-    visit: &mut impl FnMut(Place, &'a ConcreteStep),
-) {
-    for (index, step) in steps.iter().enumerate() {
-        visit(
-            Place {
-                path: path.to_vec(),
-                index,
-            },
-            step,
-        );
+/// Visit each occurrence in execution order, including alternatives in name order.
+fn visit_steps<'a>(steps: &'a [ConcreteStep], visit: &mut impl FnMut(&'a ConcreteStep)) {
+    for step in steps {
+        visit(step);
         if let ConcreteStep::Xor(branch) = step {
-            for (name, alternative) in &branch.paths {
-                let mut path = path.to_vec();
-                path.push((index, name.clone()));
-                walk(&alternative.steps, &path, visit);
+            for path in branch.paths.values() {
+                visit_steps(&path.steps, visit);
             }
         }
     }
+}
+
+fn find_place(
+    steps: &[ConcreteStep],
+    matches: &mut impl FnMut(&ConcreteStep) -> bool,
+) -> Option<Place> {
+    for (index, step) in steps.iter().enumerate() {
+        if matches(step) {
+            return Some(Place {
+                index,
+                path: Vec::new(),
+            });
+        }
+        if let ConcreteStep::Xor(branch) = step {
+            for (name, path) in &branch.paths {
+                if let Some(mut place) = find_place(&path.steps, matches) {
+                    place.path.insert(0, (index, name.clone()));
+                    return Some(place);
+                }
+            }
+        }
+    }
+    None
 }
 
 impl CapturedGraph {
@@ -149,52 +158,31 @@ impl CapturedGraph {
         }))
     }
 
-    /// LOO-1100: interactive skills retained on an unconverted released capture.
-    pub(crate) fn interactive_steps(&self) -> Vec<(Place, &ConcreteSkill)> {
-        interactive_steps(&self.steps)
-    }
-
-    /// Breakpoints in order (including composed Graphs and XOR paths), each once.
-    pub fn breakpoints(&self) -> Vec<String> {
-        breakpoints(&self.steps)
-    }
-
     /// The first step answering to `name`; `start` is the first step.
     pub fn find(&self, name: &str) -> Option<Place> {
         if name == START {
-            return (!self.steps.is_empty()).then(|| Place {
-                path: Vec::new(),
-                index: 0,
-            });
+            return (!self.steps.is_empty()).then(Place::default);
         }
-        let mut found = None;
-        walk(&self.steps, &[], &mut |place, step| {
+        find_place(&self.steps, &mut |step| {
             // A Graph records an operation under its display name.
-            let recorded = matches!(step, ConcreteStep::Command(command) if command.item.display_name() == name);
-            if found.is_none() && (recorded || names(step).contains(&name)) {
-                found = Some(place);
-            }
-        });
-        found
+            matches!(step, ConcreteStep::Command(command) if command.item.display_name() == name)
+                || names(step).contains(&name)
+        })
     }
 
     /// LOO-1100: the unconverted interactive step named `step` on a released capture.
     pub(crate) fn interactive_step(&self, step: &str) -> Option<Place> {
-        self.interactive_steps()
-            .into_iter()
-            .find(|(_, skill)| skill.interactive_step() == Some(step))
-            .map(|(place, _)| place)
+        find_place(
+            &self.steps,
+            &mut |node| matches!(node, ConcreteStep::Skill(skill) if skill.interactive_step() == Some(step)),
+        )
     }
 
     /// The step that merges named `step`, where a Task someone turned auto off waits.
     pub fn landing_step(&self, step: &str, merges: fn(&[String]) -> bool) -> Option<Place> {
-        let mut found = None;
-        walk(&self.steps, &[], &mut |place, concrete| {
-            if found.is_none() && landing_name(concrete, merges).as_deref() == Some(step) {
-                found = Some(place);
-            }
-        });
-        found
+        find_place(&self.steps, &mut |node| {
+            landing_name(node, merges).as_deref() == Some(step)
+        })
     }
 
     /// The place after `place` in its body, or in the body that XOR belongs
@@ -426,27 +414,24 @@ impl CapturedGraph {
     /// The place `cursor` stands at, if the graph has it.
     pub fn place_of(&self, cursor: &ExecutionCursor) -> Option<Place> {
         let mut path = Vec::new();
+        let mut body = self.steps.as_slice();
         let mut cursor = cursor;
         while let Some(NestedCursor::Xor {
             selected,
             cursor: child,
         }) = cursor.child.as_deref()
         {
+            let ConcreteStep::Xor(branch) = body.get(cursor.index)? else {
+                return None;
+            };
+            body = &branch.paths.get(selected)?.steps;
             path.push((cursor.index, selected.clone()));
             cursor = child;
         }
-        let place = Place {
+        (cursor.index < body.len()).then_some(Place {
             path,
             index: cursor.index,
-        };
-        let mut body: &[ConcreteStep] = &self.steps;
-        for (index, selected) in &place.path {
-            match body.get(*index) {
-                Some(ConcreteStep::Xor(branch)) => body = &branch.paths.get(selected)?.steps,
-                _ => return None,
-            }
-        }
-        (place.index < body.len()).then_some(place)
+        })
     }
 
     pub fn landing_at(
@@ -476,7 +461,7 @@ impl CapturedGraph {
     /// Steps a person would name for `--from`, for messages.
     pub fn describe_steps(&self) -> String {
         let mut seen: Vec<&str> = Vec::new();
-        walk(&self.steps, &[], &mut |_, step| {
+        visit_steps(&self.steps, &mut |step| {
             let name = names(step)[0];
             if !seen.contains(&name) {
                 seen.push(name);
@@ -490,19 +475,6 @@ impl CapturedGraph {
     }
 }
 
-/// LOO-1100: interactive skills retained on an unconverted released capture.
-fn interactive_steps(steps: &[ConcreteStep]) -> Vec<(Place, &ConcreteSkill)> {
-    let mut out = Vec::new();
-    walk(steps, &[], &mut |place, step| {
-        if let ConcreteStep::Skill(skill) = step {
-            if skill.interactive {
-                out.push((place, skill));
-            }
-        }
-    });
-    out
-}
-
 /// Breakpoint name for `step`, or the unconverted released interactive stop name (LOO-1100).
 fn stop_name(step: &ConcreteStep) -> Option<&str> {
     match step {
@@ -510,19 +482,6 @@ fn stop_name(step: &ConcreteStep) -> Option<&str> {
         ConcreteStep::Skill(skill) => skill.interactive_step(),
         _ => None,
     }
-}
-
-/// Every breakpoint name in order (including composed Graphs and XOR paths),
-/// each once. Unconverted released captures still project their interactive
-/// skills as stops until claimed (LOO-1100).
-fn breakpoints(steps: &[ConcreteStep]) -> Vec<String> {
-    let mut out = Vec::new();
-    walk(steps, &[], &mut |_, step| {
-        if let Some(name) = stop_name(step).filter(|name| !out.iter().any(|seen| seen == name)) {
-            out.push(name.to_owned());
-        }
-    });
-    out
 }
 
 /// The one sentence every surface prints when a Task is parked at a breakpoint.
@@ -540,7 +499,14 @@ pub fn breakpoint_sentence(
 /// with the index in them of each top-level place. A composed step reads as
 /// the graph it came from, and `breakpoint` marks a breakpoint or a step that
 /// contains one (including composed Graphs and XOR paths).
-fn workflow(steps: &[ConcreteStep]) -> (Vec<WorkflowStep>, Vec<u32>) {
+struct WorkflowTrack {
+    steps: Vec<WorkflowStep>,
+    indices: Vec<u32>,
+    breakpoints: Vec<String>,
+}
+
+fn workflow(steps: &[ConcreteStep]) -> WorkflowTrack {
+    let mut breakpoints = Vec::new();
     let mut line: Vec<WorkflowStep> = Vec::new();
     let mut indices = Vec::with_capacity(steps.len());
     for step in steps {
@@ -552,8 +518,13 @@ fn workflow(steps: &[ConcreteStep]) -> (Vec<WorkflowStep>, Vec<u32>) {
         };
         let name = sources.get(1).cloned().unwrap_or_else(|| step_name(step));
         let mut breakpoint = false;
-        walk(std::slice::from_ref(step), &[], &mut |_, node| {
-            breakpoint |= stop_name(node).is_some();
+        visit_steps(std::slice::from_ref(step), &mut |node| {
+            if let Some(name) = stop_name(node) {
+                breakpoint = true;
+                if !breakpoints.iter().any(|seen| seen == name) {
+                    breakpoints.push(name.to_owned());
+                }
+            }
         });
         match line.last_mut() {
             Some(last) if last.name == name => last.breakpoint |= breakpoint,
@@ -561,7 +532,11 @@ fn workflow(steps: &[ConcreteStep]) -> (Vec<WorkflowStep>, Vec<u32>) {
         }
         indices.push(u32::try_from(line.len() - 1).expect("a graph has few steps"));
     }
-    (line, indices)
+    WorkflowTrack {
+        steps: line,
+        indices,
+        breakpoints,
+    }
 }
 
 /// What a person calls `step`; an operation by the display name its Graph
@@ -639,13 +614,14 @@ pub struct WorkflowOutline {
 
 impl WorkflowOutline {
     pub fn of(steps: &[ConcreteStep]) -> Self {
-        let breakpoints = breakpoints(steps);
+        let WorkflowTrack {
+            steps, breakpoints, ..
+        } = workflow(steps);
         let sentence = match breakpoints.as_slice() {
             [] => "Runs on its own.".to_owned(),
             [only] => format!("You take part at {only}."),
             [rest @ .., last] => format!("You take part at {} and {last}.", rest.join(", ")),
         };
-        let steps = workflow(steps).0;
         Self {
             start: WorkflowControl::start(&steps),
             steps,
@@ -736,7 +712,11 @@ impl TaskGraph {
         pause: Option<PauseStage>,
         merges: impl FnMut(&[String]) -> bool,
     ) -> Self {
-        let (steps, indices) = workflow(&graph.steps);
+        let WorkflowTrack {
+            steps,
+            indices,
+            breakpoints,
+        } = workflow(&graph.steps);
         let top = |place: &Place| {
             let index = place.path.first().map_or(place.index, |(index, _)| *index);
             indices[index]
@@ -946,7 +926,7 @@ impl TaskGraph {
         Self {
             control,
             name: graph.name.clone(),
-            breakpoints: breakpoints(&graph.steps),
+            breakpoints,
             position,
             steps,
             current_step,
@@ -1038,15 +1018,28 @@ pub(crate) mod tests {
     #[test]
     fn builtin_graphs_name_their_breakpoints() {
         let repo = tempfile::tempdir().unwrap();
-        let feature = CapturedGraph::load("feature", repo.path())
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            feature.breakpoints(),
-            ["after-explore", "after-ship-review"]
-        );
-        let pursue = CapturedGraph::load("pursue", repo.path()).unwrap().unwrap();
-        assert!(pursue.breakpoints().is_empty());
+        for (name, stops) in [
+            ("feature", &["after-explore", "after-ship-review"][..]),
+            ("code", &["after-ship-review"]),
+            ("research", &["after-research"]),
+            ("redesign", &["after-design"]),
+            ("task-design", &[]),
+            ("pursue", &[]),
+            ("quick", &[]),
+            ("deliver", &[]),
+        ] {
+            let graph = CapturedGraph::load(name, repo.path()).unwrap().unwrap();
+            assert_eq!(
+                super::WorkflowOutline::of(&graph.steps).breakpoints,
+                stops,
+                "{name}"
+            );
+            assert_eq!(
+                graph.next_breakpoint(&super::Place::default()),
+                stops.first().copied(),
+                "{name}"
+            );
+        }
         assert!(CapturedGraph::load("no-such-graph", repo.path())
             .unwrap()
             .is_none());
@@ -1397,21 +1390,23 @@ pub(crate) mod tests {
     fn a_step_two_parts_share_is_placed_by_the_cursor_not_its_name() {
         let repo = tempfile::tempdir().unwrap();
         let graph = CapturedGraph::load("code", repo.path()).unwrap().unwrap();
-        let mut seen = Vec::new();
-        super::walk(&graph.steps, &[], &mut |place, _| {
-            if graph.step_name(&place) == "concept-review" {
-                seen.push(place.cursor());
-            }
-        });
-        let labels: Vec<_> = seen
+        let labels: Vec<_> = graph
+            .steps
             .iter()
-            .map(|cursor| {
+            .enumerate()
+            .filter(|(_, step)| super::step_name(step) == "concept-review")
+            .map(|(index, _)| {
+                let cursor = super::Place {
+                    index,
+                    path: Vec::new(),
+                }
+                .cursor();
                 let line = TaskGraph::read(
                     &graph,
                     "plan".into(),
                     None,
                     Some(TaskGraphRun {
-                        cursor,
+                        cursor: &cursor,
                         lf_process_id: "lfp_1".into(),
                         running: true,
                     }),
@@ -1455,7 +1450,7 @@ pub(crate) mod tests {
             .unwrap();
         assert!(feature.reaches_landing(&after_review, false, test_merges));
 
-        // Builtin quick: no interactive steps, lands immediately.
+        // Quick reaches landing without stopping.
         let quick = load("quick");
         assert!(quick.reaches_landing(&quick.find("start").unwrap(), false, test_merges));
 
@@ -1532,7 +1527,7 @@ pub(crate) mod tests {
             test_merges
         ));
 
-        // Loop back-edge: starting at an interactive step that iterates back to a landing step.
+        // A loop breakpoint can return to a landing step.
         write(
             repo.path(),
             ".lf/graphs/loop-back.yaml",

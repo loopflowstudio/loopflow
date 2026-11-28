@@ -1191,8 +1191,9 @@ impl RunningGraph<'_> {
             None
         };
         if let Some(body) = body {
-            lines.push(body.clone());
-            lines.extend(resolve_artifact_links(self.cwd, &body));
+            let artifacts = resolve_artifact_links(self.cwd, &body);
+            lines.push(body);
+            lines.extend(artifacts);
         }
         let mut next = cursor.clone();
         lines.push(match next.finish(self.steps) {
@@ -1264,12 +1265,12 @@ fn resolve_artifact_links(cwd: &Path, text: &str) -> Vec<String> {
         return Vec::new();
     }
     let root = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+    let link = |rel: &str| format!("- {rel} ({})", root.join(rel).display());
     let mut existing = Vec::new();
     let mut missing = Vec::new();
     for rel in referenced {
-        let full = root.join(&rel);
-        if full.is_file() {
-            existing.push(format!("- {rel} ({})", full.display()));
+        if root.join(&rel).is_file() {
+            existing.push(link(&rel));
         } else {
             missing.push(rel);
         }
@@ -1286,7 +1287,7 @@ fn resolve_artifact_links(cwd: &Path, text: &str) -> Vec<String> {
         } else {
             let listing = available
                 .into_iter()
-                .map(|(rel, full)| format!("- {rel} ({})", full.display()))
+                .map(|rel| link(&rel))
                 .collect::<Vec<_>>()
                 .join("\n");
             sections.push(format!("Available in scratch/:\n{listing}"));
@@ -1320,35 +1321,22 @@ fn extract_scratch_paths(text: &str) -> Vec<String> {
     paths
 }
 
-fn available_scratch_artifacts(root: &Path, limit: usize) -> Vec<(String, std::path::PathBuf)> {
-    let scratch = root.join("scratch");
-    if !scratch.is_dir() {
-        return Vec::new();
-    }
-    let mut stack = vec![scratch];
-    let mut found = Vec::new();
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-                continue;
-            };
-            if name.starts_with('.') {
-                continue;
-            }
-            if path.is_dir() {
-                stack.push(path);
-            } else if path.is_file() {
-                if let Ok(rel) = path.strip_prefix(root) {
-                    found.push((rel.to_string_lossy().into_owned(), path));
-                }
-            }
-        }
-    }
-    found.sort_by(|a, b| a.0.cmp(&b.0));
+fn available_scratch_artifacts(root: &Path, limit: usize) -> Vec<String> {
+    // Scratch is normally gitignored. Follow artifact links while the walker skips cycles.
+    let mut found: Vec<_> = ignore::WalkBuilder::new(root.join("scratch"))
+        .standard_filters(false)
+        .hidden(true)
+        .follow_links(true)
+        .build()
+        .skip(1)
+        .flatten()
+        .filter(|entry| entry.file_type().is_some_and(|kind| kind.is_file()))
+        .filter_map(|entry| {
+            let relative = entry.path().strip_prefix(root).ok()?;
+            relative.to_str().map(str::to_owned)
+        })
+        .collect();
+    found.sort();
     found.truncate(limit);
     found
 }
@@ -1995,30 +1983,6 @@ mod tests {
     }
 
     #[test]
-    fn builtin_task_graphs_compile_and_name_their_breakpoints() {
-        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        for (name, first_review) in [
-            ("task-design", None),
-            ("pursue", None),
-            ("queue", None),
-            ("deliver", None),
-            ("feature", Some("after-explore")),
-            ("code", Some("after-ship-review")),
-            ("research", Some("after-research")),
-            ("redesign", Some("after-design")),
-        ] {
-            let graph = loopflow_execution::task_graph::CapturedGraph::load(name, &repo)
-                .unwrap()
-                .unwrap_or_else(|| panic!("{name} is a builtin graph"));
-            assert_eq!(
-                graph.next_breakpoint(&Default::default()),
-                first_review,
-                "{name}"
-            );
-        }
-    }
-
-    #[test]
     fn pipeline_lines_mark_breakpoints_in_xor_paths() {
         let repo = tempdir().unwrap();
         let graphs = repo.path().join(".lf/graphs");
@@ -2172,6 +2136,9 @@ mod tests {
         fs::create_dir_all(repo.path().join("scratch")).unwrap();
         fs::write(repo.path().join("scratch/explore.html"), "<h1>Visions</h1>").unwrap();
         fs::write(repo.path().join("scratch/notes.md"), "notes").unwrap();
+        fs::write(repo.path().join("scratch/.draft"), "draft").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(".", repo.path().join("scratch/again")).unwrap();
         let resolved_explore = repo
             .path()
             .canonicalize()
@@ -2205,6 +2172,9 @@ mod tests {
             )),
             "{review}"
         );
+
+        assert!(!review.contains("scratch/.draft"));
+        assert!(!review.contains("scratch/again"));
 
         // 4. Missing provider transcript falls back to retained answer, and absent retained
         //    answer reports cleanly instead of failing the review.

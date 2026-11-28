@@ -1153,7 +1153,7 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
                 ".lf/graphs/findings.yaml",
                 "- graph: proof\n- break: findings\n",
             ),
-            // Merged work is checked at a last interactive step before `end`.
+            // Merged work is checked at a final breakpoint before `end`.
             (
                 ".lf/graphs/verified.yaml",
                 "- graph: proof\n- break: review\n- graph: land-proof\n- break: check\n",
@@ -3470,7 +3470,7 @@ fn a_graph_that_fails_with_retained_edits_is_not_started_again() {
 fn completion_is_independent_of_graph_position() {
     let task = GraphTask::new();
     assert_eq!(task.state(), "idle");
-    // At an interactive step, then a stopped run: both between start and end.
+    // At a breakpoint, then a stopped run: both between start and end.
     task.task_run_ok(&["task", "run", "INF-123", "gated"]);
     assert!(at_breakpoint(&task.graph()["position"], "review"));
     assert_eq!(task.state(), "active");

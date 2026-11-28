@@ -1856,7 +1856,7 @@ fn waited_task_landing(destination: &str, failed_startup: bool) {
     }
     repo.create_branch("waited-repair");
     let worktree = repo.path().canonicalize().unwrap();
-    // The graph lands, then reaches an interactive step or its end.
+    // The graph lands, then reaches a breakpoint or its end.
     let mut graph = "- cmd: graph show deliver\n- cmd: pr land --wait-and-fix --strict --title waited-repair --body Repair-without-Desktop\n".to_string();
     if destination != "end" {
         graph.push_str("- break: review\n");
@@ -2006,9 +2006,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
     }
     let out = home.path().join("run.stdout");
     let err = home.path().join("run.stderr");
-    // `-b` runs interactive steps headless too, so a run that must stop at
-    // review is bare: it may return once its Graph registers and carry on in
-    // that Graph's log.
+    // A bare run parks at review. Batch crosses the breakpoint and waits for end.
     let mut args = vec!["task", "run", "INF-123", "delivery-proof"];
     if destination == "end" {
         args.insert(0, "-b");
@@ -2144,7 +2142,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
         )
         .unwrap();
     assert_eq!(step, destination);
-    // Short of `end` the Task waits at an interactive step with nothing running.
+    // Short of `end` the Task waits at the review breakpoint.
     let expected_state = if destination == "end" {
         "done"
     } else {

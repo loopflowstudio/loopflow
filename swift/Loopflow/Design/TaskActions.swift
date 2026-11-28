@@ -80,16 +80,11 @@ public struct TaskActions: Equatable {
             sentence = outline?.sentence
         }
 
-        if let graph {
-            steps = graph.startFromSteps
-        } else if let outline {
-            var seen: Set<String> = [TaskGraph.start]
-            let stops = Set(outline.breakpoints)
-            steps = [TaskGraph.start] + outline.steps.map(\.name).filter {
-                !stops.contains($0) && seen.insert($0).inserted
-            }
-        } else {
-            steps = []
+        // The same track supplies Start from before and after Graph take-up.
+        var excluded = breakpoints
+        excluded.insert(TaskGraph.start)
+        steps = graph == nil && outline == nil ? [] : [TaskGraph.start] + track.map(\.name).filter {
+            excluded.insert($0).inserted
         }
     }
 

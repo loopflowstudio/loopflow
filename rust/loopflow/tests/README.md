@@ -110,8 +110,8 @@ resume per harness:
 The rest of `session_launch_contract` covers native authentication, provider switches,
 OpenCode diagnostics and Machine dispatch.
 
-Task Graph run and its previews (`task_graph_launch_tests` in the library,
-`global_commands`), one Graph run to an interactive step and one with auto on:
+The `task_graph_launch_tests` and `global_commands` fixtures cover Task Graph
+launch, review, and preview.
 
 | Test | Wiring it proves |
 |---|---|
@@ -666,8 +666,9 @@ Agent-selection and Task launch-mode changes also require the container-only
 `declared_agent_can_start_another_tasks_graph` proof: saved Task defaults remain
 local, while explicit `-a` overrides child Tasks too. Ordinary Rust suites skip
 this installation-boundary proof.
-Fixtures that stop at an interactive step use bare `task run` and wait for the
-recorded Graph outcome; `-b` executes that step headlessly and needs a provider.
+To assert on a parked Task, use bare `task run` and wait for the recorded Graph
+outcome. A command followed by `- break` exercises parking without a provider.
+Use `-b` to cross the breakpoint on the recommended path.
 Every ordinary installation run first upgrades populated released planning and
 Task/PR fixtures through every later migration. Those checks retain zero/one/multiple
 historical PRs, pending completion delivery, a running Process and its Workflow,

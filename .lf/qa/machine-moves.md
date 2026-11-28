@@ -7,7 +7,7 @@ disposable bare origin. Commit `planning: {provider: git, personal: true}`
 and the QA graph before the first Start. Give each clone a Git identity.
 On the owner, run `lf server run`, give it a temporary public name with
 `lf machine public sandbox-b`, and create a Task with `--run --json`.
-Wait for the Graph to reach its interactive step. The two callers' first
+Wait for the Graph to reach its breakpoint. The two callers' first
 `lf task list` discovers the Task and its claim. Run `lf set --global
 default_agent claude` in each home first: with a stand-in `claude` on PATH,
 `lf task create --run` otherwise stops at "No agent selected". A caller with no

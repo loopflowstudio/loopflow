@@ -158,8 +158,7 @@ personal: true}`, `lf set --global default_agent claude`, a stand-in `claude`
 on `PATH`) running the branch `lf server run`. A repository Graph whose
 `cmd: help graph` step an `LF_BIN` wrapper turns into
 `while [ ! -f <dir>/go ]; do sleep 1; done; exit 0` holds the Task "running"
-at that step; `touch <dir>/go` moves it to the next interactive step
-("Waiting for you at …"). Killing a held step fails it, and `lf task run`
+at that step. `touch <dir>/go` moves it to the next breakpoint ("At breakpoint …"). Killing a held step fails it, and `lf task run`
 starts it again. Put the held step in a sub-Graph (`- graph: make`, with
 `.lf/graphs/make.yaml`) so the bar's top-level step differs from the running
 concrete step. Run the wrapper and `lf` through a script that does

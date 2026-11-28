@@ -392,8 +392,9 @@ lf wave status product
 ```
 
 `task run` places the Task and starts a fresh Graph process from its saved
-position, returning once the process registers. It stops at the next interactive
-step for review in the Task conversation. `-b` waits and runs those steps headless;
+position, returning once the process registers. At the next breakpoint the Task
+conversation presents the finished work. Continuing takes the worker’s recommendation
+or carries a reply to the next worker. `-b` waits and takes the recommended path.
 `lf task auto on` approves continuation through delivery. A stopped process stays history.
 A direct `lf --task ISSUE graph GRAPH` uses the same runner without moving the
 Task's graph position. Replanning keeps existing Task identity and execution.

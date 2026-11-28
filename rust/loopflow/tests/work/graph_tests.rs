@@ -1596,8 +1596,7 @@ fn bound_graphs_keep_task_context_and_leave_other_graphs_and_shared_edits_alone(
             1
         );
     }
-    // `--batch` runs an interactive step headless too, standing in for the
-    // person, then the steps after it.
+    // Batch runs the worker and crosses the breakpoint from the released spelling.
     write_graph(
         repo.path(),
         "review-contribution",

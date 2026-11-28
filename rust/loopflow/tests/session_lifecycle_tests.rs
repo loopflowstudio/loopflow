@@ -212,7 +212,7 @@ impl Fixture {
         {
             assert!(
                 Instant::now() < deadline,
-                "Graph did not stop at its interactive step"
+                "Graph did not reach its breakpoint"
             );
             std::thread::sleep(Duration::from_millis(20));
         }

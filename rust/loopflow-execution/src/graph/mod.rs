@@ -580,38 +580,7 @@ fn resolve_graph_with_catalog(
 // Assign addresses in execution order, including composed groups. Branch bodies
 // have their own predecessor; navigation names are unique across the capture.
 fn name_breakpoints(items: &mut [ResolvedGraphItem]) -> Result<(), LoadError> {
-    fn visit(
-        items: &mut [ResolvedGraphItem],
-        previous: &mut Option<String>,
-        name: &mut impl FnMut(&mut Breakpoint, Option<&str>) -> Result<(), LoadError>,
-    ) -> Result<(), LoadError> {
-        for item in items {
-            let label = match item {
-                ResolvedGraphItem::Group { items, .. } => {
-                    visit(items, previous, name)?;
-                    continue;
-                }
-                ResolvedGraphItem::Breakpoint(stop) => {
-                    name(stop, previous.as_deref())?;
-                    stop.name.clone()
-                }
-                ResolvedGraphItem::Skill(skill) => {
-                    skill.id.as_ref().unwrap_or(&skill.skill.name).clone()
-                }
-                ResolvedGraphItem::Command(op) => op.item.display_name(),
-                ResolvedGraphItem::Xor { paths, router, .. } => {
-                    for path in paths.values_mut() {
-                        visit(&mut path.items, &mut None, name)?;
-                    }
-                    router.name.clone()
-                }
-            };
-            *previous = Some(label);
-        }
-        Ok(())
-    }
-    let mut used = HashSet::from(["start".to_owned(), "end".to_owned()]);
-    fn reserve(items: &[ResolvedGraphItem], used: &mut HashSet<String>) {
+    fn reserve(items: &[ResolvedGraphItem], used: &mut HashSet<String>, named: &mut Vec<String>) {
         for item in items {
             match item {
                 ResolvedGraphItem::Skill(skill) => {
@@ -624,34 +593,67 @@ fn name_breakpoints(items: &mut [ResolvedGraphItem]) -> Result<(), LoadError> {
                 }
                 ResolvedGraphItem::Group { name, items } => {
                     used.insert(name.clone());
-                    reserve(items, used);
+                    reserve(items, used, named);
                 }
                 ResolvedGraphItem::Xor { router, paths, .. } => {
                     used.insert(router.name.clone());
                     for path in paths.values() {
-                        reserve(&path.items, used);
+                        reserve(&path.items, used, named);
                     }
                 }
-                ResolvedGraphItem::Breakpoint(_) => {}
+                ResolvedGraphItem::Breakpoint(stop) => {
+                    if !stop.name.is_empty() {
+                        named.push(stop.name.clone());
+                    }
+                }
             }
         }
     }
-    reserve(items, &mut used);
-    visit(items, &mut None, &mut |stop, _| {
-        if !stop.name.is_empty() && !used.insert(stop.name.clone()) {
+    fn assign(
+        items: &mut [ResolvedGraphItem],
+        previous: &mut Option<String>,
+        used: &mut HashSet<String>,
+    ) {
+        for item in items {
+            let label = match item {
+                ResolvedGraphItem::Group { items, .. } => {
+                    assign(items, previous, used);
+                    continue;
+                }
+                ResolvedGraphItem::Breakpoint(stop) => {
+                    if stop.name.is_empty() {
+                        stop.name = breakpoint_name(previous.as_deref(), used);
+                    }
+                    stop.name.clone()
+                }
+                ResolvedGraphItem::Skill(skill) => {
+                    skill.id.as_ref().unwrap_or(&skill.skill.name).clone()
+                }
+                ResolvedGraphItem::Command(op) => op.item.display_name(),
+                ResolvedGraphItem::Xor { paths, router, .. } => {
+                    for path in paths.values_mut() {
+                        assign(&mut path.items, &mut None, used);
+                    }
+                    router.name.clone()
+                }
+            };
+            *previous = Some(label);
+        }
+    }
+    // Reserve all authored names before a generated name can take one.
+    let mut used = HashSet::from(["start".to_owned(), "end".to_owned()]);
+    let mut named = Vec::new();
+    reserve(items, &mut used, &mut named);
+    for name in named {
+        if used.contains(&name) {
             return Err(LoadError::InvalidGraph(format!(
-                "ambiguous breakpoint name {:?}",
-                stop.name
+                "ambiguous breakpoint name {name:?}"
             )));
         }
-        Ok(())
-    })?;
-    visit(items, &mut None, &mut |stop, previous| {
-        if stop.name.is_empty() {
-            stop.name = breakpoint_name(previous, &mut used);
-        }
-        Ok(())
-    })
+        used.insert(name);
+    }
+    assign(items, &mut None, &mut used);
+    Ok(())
 }
 
 pub(crate) fn breakpoint_name(previous: Option<&str>, used: &mut HashSet<String>) -> String {
@@ -929,7 +931,8 @@ fn parse_graph_mapping(
         return parse_xor_value(xor_value, loader);
     }
     Err(LoadError::InvalidGraph(
-        "graph item mapping must include step, interactive, loop, cmd, graph, or xor".to_string(),
+        "graph item mapping must include step, break, loop, cmd, graph, xor, or interactive"
+            .to_string(),
     ))
 }
 
@@ -1720,6 +1723,32 @@ mod tests {
     }
 
     #[test]
+    fn unnamed_breaks_leave_later_authored_names_available() {
+        let tmp = TempDir::new().unwrap();
+        let graphs = tmp.path().join(".lf/graphs");
+        fs::create_dir_all(&graphs).unwrap();
+        let compile = |body| {
+            fs::write(graphs.join("review.yaml"), body).unwrap();
+            let graph = load_graph("review", tmp.path())?;
+            compile_graph(&graph, tmp.path())
+        };
+        let steps = compile("- explore\n- break\n- break: after-explore\n").unwrap();
+        assert_eq!(
+            crate::task_graph::WorkflowOutline::of(&steps).breakpoints,
+            ["after-explore#2", "after-explore"]
+        );
+        for body in [
+            "- break: explore\n- explore\n",
+            "- break: ready\n- break: ready\n",
+        ] {
+            assert!(compile(body)
+                .unwrap_err()
+                .to_string()
+                .contains("ambiguous breakpoint name"));
+        }
+    }
+
+    #[test]
     fn compiled_occurrence_ids_are_unique_and_skill_only() {
         let tmp = TempDir::new().unwrap();
         let graphs = tmp.path().join(".lf/graphs");
@@ -2053,7 +2082,7 @@ Design the feature.
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let error = parse_graph_items(&value).expect_err("and steps are retired");
         assert!(error.to_string().contains(
-            "graph item mapping must include step, interactive, loop, cmd, graph, or xor"
+            "graph item mapping must include step, break, loop, cmd, graph, xor, or interactive"
         ));
     }
 
@@ -2069,7 +2098,7 @@ Design the feature.
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let error = parse_graph_items(&value).expect_err("or steps are not supported");
         assert!(error.to_string().contains(
-            "graph item mapping must include step, interactive, loop, cmd, graph, or xor"
+            "graph item mapping must include step, break, loop, cmd, graph, xor, or interactive"
         ));
     }
 

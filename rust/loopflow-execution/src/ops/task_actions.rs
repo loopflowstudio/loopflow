@@ -64,6 +64,18 @@ pub struct TaskActionEvidence<'a> {
     pub launch_refusal: Option<&'a str>,
 }
 
+impl<'a> TaskActionEvidence<'a> {
+    /// Execution that still determines the next action after a Graph run parks.
+    pub fn pending_execution(&self) -> Option<&'a TaskExecutionSnapshot> {
+        self.execution.filter(|execution| {
+            execution.state != TaskExecutionState::Idle
+                && !self
+                    .breakpoint
+                    .is_some_and(|stop| stop.owns_execution(execution.state))
+        })
+    }
+}
+
 pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
     if evidence.status == TaskState::Paused {
         return action(TaskAction::NoAction, "Task is paused");
@@ -84,12 +96,7 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
         evidence.breakpoint.is_some(),
     );
     if finished.is_none() {
-        if let Some(execution) = evidence.execution.filter(|execution| {
-            execution.state != TaskExecutionState::Idle
-                && !evidence
-                    .breakpoint
-                    .is_some_and(|breakpoint| breakpoint.owns_execution(execution.state))
-        }) {
+        if let Some(execution) = evidence.pending_execution() {
             return action(TaskAction::NoAction, &execution.reason);
         }
         if let Some(refusal) = evidence.launch_refusal {

@@ -1,0 +1,173 @@
+<h1>Concept review: a more ambitious <code>compress</code> (LOO-1127)</h1>
+
+<p><strong>Area taken:</strong> Post-implementation simplification and handoff across the builtin Task Graphs (<code>build</code>, <code>optimize</code>), the simplification skill family (<code>compress</code>, <code>realign</code>, <code>concept-review</code>, <code>deep-clean</code>, <code>reduce</code>), and the records they share (<code>scratch/plan.md</code>, <code>scratch/questions.md</code>, <code>scratch/tour.yaml</code>, and per-step commits). <strong>Why:</strong> <code>build.yaml</code> now runs <code>compress</code> once after review settles, so raising <code>compress</code>'s ambition shifts its boundaries with <code>realign</code>, <code>ship-review</code>, <code>optimize</code>, and standalone <code>lf compress</code>.</p>
+
+<p><strong>Status at <code>HEAD</code>:</strong> Plan-stage review before implementation. Only <code>scratch/plan.md</code> and <code>scratch/questions.md</code> exist on this branch; no skill or doc files have been edited yet. Every choice below is prose-only and reversible.</p>
+
+<h2>Do domain and skill concepts line up?</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Domain concept (what people expect and do)</th>
+      <th>Planned / existing skill &amp; Graph concept</th>
+      <th>Lines up?</th>
+      <th>What is wrong</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Whole-branch simplification as one reusable operation.</strong> Simplify the whole branch against its base — merging cross-pass seams, auditing branch additions, taking multi-file reshapes — whether run inside <code>build</code>, inside <code>optimize</code>, or directly with <code>lf compress</code>.</td>
+      <td><code>compress.md</code> (planned draft, lines 109–111 of <code>scratch/plan.md</code>) opens by declaring: <em>"This runs once, after the design has settled and before anyone uses the change. Nothing will be built on top of it later…"</em></td>
+      <td><strong>No</strong></td>
+      <td>Bakes one Graph's position (<code>build.yaml</code>) into a reusable Skill, contradicting <code>prompt.md</code> ("one useful operation, not a stage of one Graph"). False when <code>ship-review</code> iterates back to <code>build</code>, false in <code>optimize</code> (where <code>refresh</code>/<code>realign</code> runs after), and false in standalone <code>lf compress</code>.</td>
+    </tr>
+    <tr>
+      <td><strong>Untaken cuts that change behavior or need a person's answer.</strong> When a big simplification would change what people see, stored data, or a measured metric — or turns on something only a person knows — leave it untouched and surface it where a reviewer will decide.</td>
+      <td>Planned <code>compress.md</code> writes <em>both</em> kinds into <code>## Deferred findings</code> in <code>scratch/plan.md</code>. Meanwhile <code>ship-review.md:14</code> states <code>## Deferred findings</code> is <em>"written by <code>realign</code>"</em>, and <code>scratch/questions.md</code> already holds open questions.</td>
+      <td><strong>No</strong></td>
+      <td>Two writers on one record with a single claimed owner, conflating out-of-scope work (<code>## Deferred findings</code>) with open questions (<code>scratch/questions.md</code>), and broken when no <code>scratch/plan.md</code> exists (standalone <code>lf compress</code>) or no <code>ship-review</code> runs (<code>optimize</code>, <code>pursue</code>).</td>
+    </tr>
+    <tr>
+      <td><strong>Each cut is a reversible commit.</strong> Make bold reshapes safe by landing each substantial cut as its own verified commit that can be reverted independently.</td>
+      <td>Planned <code>compress.md</code> places step 6 (<em>Commit each cut on its own</em>) <em>before</em> step 7 (<em>Check</em>), and after all editing steps 2–5. <code>commit_step</code> pushes self-made commits and commits leftovers at step end.</td>
+      <td><strong>No</strong></td>
+      <td>Inverted edit/check/commit order. Following steps 2→5→6→7 either batches all edits before splitting commits or commits broken cuts before checking, producing fixup commits that defeat independent revert.</td>
+    </tr>
+    <tr>
+      <td><strong>Reasonable audit of everything the branch added vs. <code>deep-clean</code>.</strong> Question every new type, function, field, parameter, flag, config key, and test once without turning into a multi-pass repo-wide cleanup.</td>
+      <td>Planned step 3 borrows <code>deep-clean</code>'s deletion flags as an in-run working method without persisting a <code>scratch/</code> worklist; <code>deep-clean</code> keeps a persistent worklist across a loop over an area.</td>
+      <td><strong>Yes</strong></td>
+      <td>Clean separation: one branch + its landing area in one pass vs. multi-pass area-wide deletion.</td>
+    </tr>
+    <tr>
+      <td><strong>Brief durable account of what changed.</strong> Reviewers and <code>ship-review</code> see what <code>compress</code> removed and why without noise.</td>
+      <td>Planned draft adds a closing reply listing <em>"what went, what you kept and why, and the change's size against the base before and after."</em></td>
+      <td><strong>No</strong></td>
+      <td>Output with no reader in headless <code>build</code>. <code>ship-review</code> reads <code>git log</code>, not <code>compress</code>'s session transcript; line counts are recoverable from <code>git diff --stat</code>; and "what you kept and why" is ceremony from <code>deep-clean</code>'s multi-pass worklist.</td>
+    </tr>
+    <tr>
+      <td><strong>Preserve the metric in <code>optimize</code>.</strong> Simplifying an optimization branch must not silently trade away the speedup the branch was built for.</td>
+      <td><code>optimize.yaml</code> runs <code>compress</code> → <code>refresh</code> → <code>measure (final)</code>. Planned draft adds one clause: <em>"and so does a number the branch was built to move."</em></td>
+      <td><strong>Partial</strong></td>
+      <td>The skill-level clause is right, but on the failure path <code>measure (final)</code> reverts to the last kept commit — discarding <em>all</em> <code>compress</code> cuts and <code>refresh</code> together with no retry. Separate outcome for <code>optimize.yaml</code>, not this Task.</td>
+    </tr>
+    <tr>
+      <td><strong>Stay outside the build loop.</strong> <code>compress</code> simplifies settled work; it does not send design rework back to <code>implement</code>.</td>
+      <td><code>build.yaml</code> runs <code>concept-review</code> + <code>realign</code> in a loop first, then <code>compress</code> once outside the loop. Plan keeps this unchanged.</td>
+      <td><strong>Yes</strong></td>
+      <td>Matches <code>6d617de686</code> (#2047): running <code>compress</code> inside the loop wasted 73.7% of its spend before later <code>implement</code> passes.</td>
+    </tr>
+    <tr>
+      <td><strong>Keep reading order current when one exists.</strong></td>
+      <td>Step 8 rewrites <code>scratch/tour.yaml</code> only when it already exists; <code>ship-review</code> writes or refreshes it when missing or behind.</td>
+      <td><strong>Yes</strong></td>
+      <td>Harmless when absent in <code>build</code> (where <code>qa</code> runs next and may stale it anyway) and helpful in standalone runs after <code>lf tour</code>.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Biggest mismatch: Graph position and scratch ownership baked into a reusable Skill</h2>
+
+<p>Two closely tied problems turn a clean improvement to <code>compress</code> into a brittle stage of <code>build.yaml</code>:</p>
+
+<ol>
+  <li><strong>It explains its ambition through <code>build.yaml</code>'s schedule instead of the job itself.</strong> The Task brief says <em>"now that it only runs once per task rather than once per slice"</em> — that is why raising the bar pays off, not a fact the Skill can assert. <code>ship-review</code> loops back into <code>build</code> (running <code>compress</code> again with more work built on top), <code>optimize</code> runs <code>compress</code> before <code>refresh</code>/<code>realign</code>, and people run <code>lf compress</code> directly mid-branch.</li>
+  <li><strong>It quietly becomes a second writer to <code>## Deferred findings</code> in <code>scratch/plan.md</code></strong> while mixing in open questions that belong in <code>scratch/questions.md</code>, leaving <code>ship-review.md</code> contradicting it and leaving standalone runs with no <code>scratch/plan.md</code> unspecified.</li>
+</ol>
+
+<lf-component name="before-after">
+  <div slot="before">
+    <p><strong>Planned draft (in <code>scratch/plan.md</code>)</strong></p>
+    <ul>
+      <li><code>requires: the finished change against its base, and the plan</code></li>
+      <li><em>"This runs once, after the design has settled and before anyone uses the change. Nothing will be built on top of it later, so take the cut that moves several files as readily as the one that renames a variable."</em></li>
+      <li>Step 6 commits each cut; step 7 checks afterward.</li>
+      <li>Writes both behavior/data cuts and open questions into <code>## Deferred findings</code> in <code>scratch/plan.md</code>, while <code>ship-review.md</code> still says <em>"written by <code>realign</code>"</em>.</li>
+      <li>Closes with a <code>deep-clean</code>-style report of kept items and before/after line counts that nobody reads in headless <code>build</code>.</li>
+    </ul>
+  </div>
+  <div slot="after">
+    <p><strong>Recommended shape</strong></p>
+    <ul>
+      <li><code>requires: branch changes against the base, and the plan if one exists</code></li>
+      <li><em>"Treat the branch as one change against its base, not a sequence of edits. Take a reshape that moves several files as readily as one that renames a variable."</em> (True in <code>build</code>, <code>optimize</code>, loop-backs, and standalone <code>lf compress</code>.)</li>
+      <li>One check-then-commit step: verify each substantial cut with the narrowest changed target or focused test, then commit it with what it removed and why.</li>
+      <li>Split untaken cuts cleanly: behavior/data/metric cuts go under <code>## Deferred findings</code> when <code>scratch/plan.md</code> exists (and <code>ship-review.md:14</code> drops <em>"written by <code>realign</code>"</em>); questions only a person can answer go in <code>scratch/questions.md</code>; standalone runs report both in the reply.</li>
+      <li>Drop the unconsumed kept-list and line-count report; commit messages and code comments carry the rationale.</li>
+    </ul>
+  </div>
+</lf-component>
+
+<h3>Real excerpts behind the mismatch</h3>
+
+<lf-diff path="scratch/plan.md" lines="101-163">
+  <lf-note line="109">Assumes <code>build.yaml</code>'s one-shot schedule inside a reusable Skill; false on <code>ship-review</code> loop-back, <code>optimize</code>, and standalone <code>lf compress</code>.</lf-note>
+  <lf-note line="145">Step 6 commits each cut before step 7 runs its focused check.</lf-note>
+  <lf-note line="156">Writes both behavior-changing cuts and open questions into <code>## Deferred findings</code> in <code>scratch/plan.md</code> without guarding on whether a plan exists or updating <code>ship-review.md</code>.</lf-note>
+  <lf-note line="160">Asks for kept-with-reason and before/after line counts in the closing reply, which headless <code>build</code> logs without feeding to <code>ship-review</code>.</lf-note>
+</lf-diff>
+
+<lf-file path="rust/loopflow-definitions/src/builtins/task/skill/prompt.md" lines="46-51">
+  <lf-note line="46">Loopflow's own skill rule: one useful operation that works alone, mid-work, and when run twice.</lf-note>
+</lf-file>
+
+<lf-file path="rust/loopflow-definitions/src/builtins/task/skill/ship-review.md" lines="11-19">
+  <lf-note line="14">Claims <code>## Deferred findings</code> is written by <code>realign</code> alone, and does not read <code>compress</code>'s closing reply.</lf-note>
+  <lf-note line="18"><code>scratch/questions.md</code> is already the shared home for open questions.</lf-note>
+</lf-file>
+
+<lf-file path="rust/loopflow-definitions/src/builtins/task/graph/optimize.yaml" lines="1-11">
+  <lf-note line="9">In <code>optimize</code>, <code>refresh</code> (<code>sync</code> + <code>realign</code>) and <code>measure (final)</code> run after <code>compress</code>, and there is no <code>ship-review</code>.</lf-note>
+</lf-file>
+
+<h2>Walking normal, failure, and recovery paths</h2>
+
+<ul>
+  <li><strong>Normal path (<code>build</code> → <code>ship-review</code>):</strong> <code>implement</code> finishes passes; <code>concept-review</code> + <code>realign</code> settle design; <code>compress</code> reads the whole diff against base, audits every branch addition, checks and commits each substantial cut on its own, and leaves leftovers for <code>commit_step</code> to push. <code>qa</code> runs the real thing; <code>ship-review</code> reads <code>git log</code> (seeing each cut's commit), <code>## Deferred findings</code> (from both <code>realign</code> and <code>compress</code>), and <code>scratch/questions.md</code>.</li>
+  <li><strong>Failure path 1 (a bold cut breaks behavior):</strong> With check-before-commit, the focused test fails before the cut is committed; the agent fixes or drops the cut cleanly. If a subtle regression escapes the focused check, <code>qa</code> catches it on the real thing or a reviewer reverts that single commit via <code>git revert</code> without losing the other cuts.</li>
+  <li><strong>Failure path 2 (<code>ship-review</code> iterates back to <code>build</code>):</strong> The person requests another pass. Because <code>compress</code> didn't assume nothing will ever be built on top, and because <code>realign.md:67</code> keeps <code>## Deferred findings</code> intact when refreshing review notes, earlier deferred cuts survive and the second <code>compress</code> run stays idempotent on already-clean code.</li>
+  <li><strong>Failure path 3 (standalone <code>lf compress</code> with no <code>scratch/plan.md</code>):</strong> With the plan guard, <code>compress</code> simplifies the branch without manufacturing an empty <code>scratch/plan.md</code>; any cut it held back appears in its direct reply (and in <code>scratch/questions.md</code> if <code>scratch/</code> is in use).</li>
+  <li><strong>Failure path 4 (<code>optimize</code> regression after <code>compress</code>):</strong> If a cut slows down the measured workload, <code>measure (final)</code> compares against the last kept commit (<code>measure.md:41</code>) and reverts the tree — discarding all <code>compress</code> cuts and <code>refresh</code> together. Keeping the metric clause in <code>compress.md</code> guards against obvious hot-path regressions; finer recovery belongs to a separate <code>optimize</code> Task if this actually bites in practice.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<lf-component name="decision" id="f1" title="This work: Frame compress as a whole-branch operation, not a build-Graph stage" recommendation="Fix here">
+  <p>Replace the draft's opening claim (<em>"This runs once, after the design has settled… Nothing will be built on top of it later"</em>) with what the operation itself does: treat the branch as one change against its base and take multi-file reshapes as readily as local renames. Update <code>requires:</code> to make the plan optional (<code>branch changes against the base, and the plan if one exists</code>).</p>
+  <p><strong>Passed over:</strong> Keeping the <code>build.yaml</code> framing in <code>compress.md</code>. It breaks <code>prompt.md</code>'s standalone rule and misleads the agent on <code>ship-review</code> loop-backs, <code>optimize</code>, and standalone runs.</p>
+</lf-component>
+
+<lf-component name="decision" id="f2" title="This work: Align untaken cuts with scratch/plan.md, scratch/questions.md, and ship-review.md" recommendation="Fix here">
+  <p>Update <code>ship-review.md:14</code> from <code>and `## Deferred findings` written by `realign`</code> to <code>and `## Deferred findings`</code>. In <code>compress.md</code>, send behavior/data/metric-changing cuts to <code>## Deferred findings</code> <em>when <code>scratch/plan.md</code> exists</em> (otherwise in the reply), and send questions only a person can answer to <code>scratch/questions.md</code>.</p>
+  <p><strong>Passed over:</strong> Keeping <code>compress</code> completely out of <code>scratch/plan.md</code> (writing only to <code>scratch/questions.md</code>). That keeps <code>realign</code> as sole writer of <code>scratch/plan.md</code>, but demotes concrete out-of-scope simplification proposals out of <code>ship-review</code>'s <code>Fix here / File Task / Drop</code> decision cards. Reversible either way (see Question 1).</p>
+</lf-component>
+
+<lf-component name="decision" id="f3" title="This work: Check each cut before committing it" recommendation="Fix here">
+  <p>Combine draft steps 6 (Commit) and 7 (Check) into one per-cut loop: check the narrowest changed target or focused test when behavior changed, then commit each substantial cut on its own with what it removed and why. Skip checks when nothing changed or no behavior changed, and leave suites to CI.</p>
+  <p><strong>Passed over:</strong> Keeping step 6 (Commit) before step 7 (Check), which risks committing broken cuts and adding fixup commits that undermine single-commit reverts.</p>
+</lf-component>
+
+<lf-component name="decision" id="f4" title="This work: Drop the unconsumed closing report (kept list and line counts)" recommendation="Fix here">
+  <p>Remove <em>"Finish with what went, what you kept and why, and the change's size against the base before and after."</em> In headless <code>build</code> nobody reads <code>compress</code>'s reply — <code>ship-review</code> reads <code>git log</code> — and line counts against the base are recoverable from <code>git diff --stat</code>. Keep the brief closing line: put non-obvious reasons beside the code and in commit messages, and stop plainly if nothing needs reducing.</p>
+  <p><strong>Passed over:</strong> Keeping the <code>deep-clean</code>-style report for standalone interactive runs. Even interactively, enumerating every kept item and chasing line counts clashes with <em>"Clarity beats line count"</em>.</p>
+</lf-component>
+
+<lf-component name="decision" id="f5" title="Separate outcome: Granular rollback if compress regresses an optimize metric" recommendation="Drop">
+  <p>In <code>optimize.yaml</code>, <code>measure (final)</code> runs after <code>compress</code> and <code>refresh</code> and rolls back to the last kept commit on regression, discarding every <code>compress</code> cut at once. Fixing that would mean reordering <code>optimize.yaml</code> (measuring right after <code>compress</code> before <code>refresh</code>) or adding a hot-path check rule when <code>scratch/measure.html</code> exists.</p>
+  <p><strong>What it would take:</strong> One small Task touching <code>optimize.yaml</code> and <code>measure.md</code> — only worth filing if <code>optimize</code> actually hits post-compress regressions in practice.</p>
+</lf-component>
+
+<h2>Questions</h2>
+
+<div data-choice="q1" data-label="1. Where untaken simplification cuts go">
+  <p><strong>1.</strong> When <code>compress</code> spots a simplification it shouldn't take on its own (for example, deleting a legacy flag that changes CLI output), how should it surface at <code>ship-review</code>?</p>
+  <button type="button" data-value="1a">1a. As a Fix here / File Task / Drop finding card via ## Deferred findings in scratch/plan.md when a plan exists, with open questions in scratch/questions.md, and drop "written by realign" from ship-review.md (Recommended)</button>
+  <button type="button" data-value="1b">1b. Keep compress strictly out of scratch/plan.md: put untaken cuts and questions in scratch/questions.md only</button>
+</div>
+
+<div data-choice="q2" data-label="2. Keep compress outside the build loop">
+  <p><strong>2.</strong> Confirming the open question from <code>scratch/questions.md</code>: if <code>compress</code> spots a deeper design flaw, should it stay outside the <code>build</code> loop and defer it, rather than sending the Task back to <code>implement</code>?</p>
+  <button type="button" data-value="2a">2a. Yes — stay outside the loop and defer; concept-review + realign already loop right before compress (Recommended)</button>
+  <button type="button" data-value="2b">2b. Let compress loop back to build when it finds a design-level problem</button>
+</div>

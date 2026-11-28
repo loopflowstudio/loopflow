@@ -1,9 +1,9 @@
-at: e283e9925f164d3431443b468ed070536a1a1786
+at: 6c14d9f7f0b1797925b28121208dec2a0c980dff
 first:
   - path: docs/orchestration.md
-    why: Shows when compress runs and what it defers.
+    why: Shows how two passes can share one parser.
   - path: rust/loopflow-definitions/src/builtins/task/skill/compress.md
-    why: Audits the whole change and commits each simplification.
+    why: Defines which cuts to take, check and commit.
   - path: rust/loopflow-definitions/src/builtins/task/skill/ship-review.md
-    why: Reads deferred findings from the plan.
+    why: Collects deferred findings for review.
 hide: []

@@ -114,7 +114,9 @@ else repeats or snapshots it.
 
 ## What changes
 
-One pass.
+Implemented in `7d0554d112`. The prompt golden, focused Graph tests, documented
+commands, eval scorer and branch CLI previews passed. The two-pass provider
+run remains for QA in `.lf/qa/skills.md`.
 
 1. `rust/loopflow-definitions/src/builtins/task/skill/realign.md`
    - Frontmatter `produces:` no longer promises an implementation that agrees:

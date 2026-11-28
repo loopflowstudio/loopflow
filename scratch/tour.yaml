@@ -1,0 +1,13 @@
+at: 7d0554d112f5c899304b08efef9a35661cc3421a
+first:
+  - path: docs/orchestration.md
+    why: How a code finding sends build around again.
+  - path: rust/loopflow-definitions/src/builtins/task/skill/realign.md
+    why: Which findings realign fixes, queues, or defers.
+  - path: rust/loopflow-execution/src/graph/output.rs
+    why: How the runner honors the skill's decision rule.
+  - path: .lf/qa/skills.md
+    why: How to verify the two-pass run.
+hide:
+  - path: tests/goldens/builtin_realign.md
+    why: Regenerated copy of the standalone realign prompt.

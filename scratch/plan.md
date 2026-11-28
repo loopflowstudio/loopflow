@@ -48,10 +48,11 @@ started it.
 
 ## Design decisions made for review
 
-Two headless concept reviews asked these questions; nobody answered them.
+Three headless concept reviews asked these questions; nobody answered them.
 Each recommended direction is adopted and marked for `ship-review` to raise.
-Numbers refer to the second review (`scratch/concept-review.html`, after
-Pass 1).
+Numbers refer to the second review (after Pass 1); the third review
+(`scratch/concept-review.html`) re-asks Q2–Q4 and adds the tile question
+under Pass 4.
 
 - **Checkout files (Q2 → 2a).** A file inside the Task's active checkout opens
   in the Files pane at `#L<n>`. Passed over: the default app for every file,
@@ -133,7 +134,10 @@ passes on, can carry one. These must hold:
 
 - **One Desktop link router for every surface.** `TaskBriefView` hands
   `loopflow://` to Launch Services; `TaskHTMLView.TaskHTMLLinks` lets
-  non-web schemes fall into WKWebView navigation. Both can use the Work resolver and Desktop window opener. File during ship-review.
+  non-web schemes fall into WKWebView navigation. Both can use the Work
+  resolver and Desktop window opener, and the terminal's Swift
+  `isWorkAddress` copy of `WorkUrl::parse` may shrink to a scheme check.
+  File during ship-review.
 - **Files pane for Repository and Wave workspaces.** `TaskFilesStore`,
   `MultiplexerStore` and server `task.file` are Task-only. Needs repository
   file reads on the server and a workspace layout change. Its own Task; until
@@ -142,15 +146,52 @@ passes on, can carry one. These must hold:
   `OPEN_URL`, Ghostty's iOS opener is unimplemented, and a tap carries no ⌘.
   Needs a touch gesture designed, then `TerminalLink` shared. Its own Task.
 
-## Second concept review: where each finding went
+## Next: Pass 4, review rework
 
-- Route files by the Task's active Files place, with fallbacks → Pass 2.
-- Remote `file://` hostnames inside the remote checkout → Pass 2 (Q3 → 3a).
-- `loopflow://` grammar matching `WorkUrl`, in-app Work links → Pass 2.
-- One feedback path for link errors → Pass 2. Hover matching click
-  validation → fixed in realign (`TerminalLink.preview`).
-- `TERM_PROGRAM=ghostty` on held terminals → Pass 3.
-- Shared router, Repository/Wave Files, iPhone → Deferred findings.
+From the third concept review (`scratch/concept-review.html`, at
+`ec8ae076ce`). Delivers one round-trip remote file opens, a hover that agrees
+with the click, and tile clicks that leave the Task's layout alone. Teaches
+whether `task.file` alone is enough to route remote clicks.
+
+- **Remote files read with `task.file`.** `TerminalLink.File.destination`
+  calls `query.taskFile(issue:path:)` instead of probing `query.taskFiles`
+  for `{"reason": "file"}`. `.missing` → `OpenError.missing` (the local
+  message); a folder → `OpenError.remoteDirectory`, from a clear directory
+  refusal added to `file_snapshot` (`ops/task/snapshot.rs`). Seed
+  `TaskFilesStore` with the returned snapshot if that is simple; otherwise
+  the second read stays. Revert this branch's `directory.rs` changes (error
+  data, reordered `.git` guard) and their tests. Keep the
+  `place == activeFilesPlace` check after the await.
+- **One classification for hover, cursor and click.** Drop `allowsBarePath`:
+  OSC 8 and regex bare paths both go through `fileLink`. The pointing hand
+  shows only when the hovered target does not classify as `.refused`.
+  Delete the questions.md note on the split.
+- **Dashboard tile file clicks (third review Q1 → 1a, made for review).**
+  A checkout file ⌘-clicked in a tile enters the Task view and opens Files
+  beside the Session; the tile stays on the Session. Remove
+  `if inTile { store.setZoom(...) }`, which saved Files as the Task's zoomed
+  pane. Passed over: a tile-only face override (1b), which adds tile state
+  for a view that is one click from the real one; keeping the zoom (1c).
+- **Rename the Mac enum `TerminalLink` → `TerminalHyperlink`** (file, tests,
+  docs). `LoopflowiOS/TerminalLink.swift` already names the phone's terminal
+  connection.
+
+Check: `swift test --package-path swift --filter 'TerminalLinkTests|TerminalFeedbackTests'`
+(after rename, the renamed suite) and the focused `ops::task::` Rust tests
+for `file_snapshot`'s directory refusal.
+
+## Third concept review: where each finding went
+
+- Remote probe via `task.files` → Pass 4.
+- Hover/cursor/click split → Pass 4.
+- Dashboard tile zoom leak → Pass 4 (Q1 → 1a).
+- `TerminalLink` name clash with iOS → Pass 4.
+- Shared Work-link router, Repository/Wave Files, iPhone links → Deferred
+  findings (unchanged). The router finding adds: decide whether
+  `isWorkAddress` (a Swift copy of `WorkUrl::parse`) can shrink once the
+  resolver owns validation.
+- Q2 (Files for Task checkouts), Q3 (always `ghostty`), Q4 (remote hostnames)
+  re-ask the adopted 2a / 4a / 3a choices; unchanged, still for `ship-review`.
 
 ## Done when
 
@@ -161,5 +202,5 @@ from any terminal prints clickable links.
 ## Docs
 
 - `docs/surfaces.md` (`### Links in terminal panes`) describes the end state;
-  recheck it after Pass 2 for the Repository/Wave and moved-shell fallbacks.
+  recheck it after Pass 4 for the Dashboard tile behavior.
 - `swift/README.md` points to it.

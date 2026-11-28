@@ -13,7 +13,8 @@ Still open:
   absolute after a local existence check. Confirm the configured matches
   before promising relative links in remote panes.
 - Hover has no link kind, so `TerminalLink.preview` classifies with bare
-  paths allowed; an OSC 8 bare path previews but a click refuses it.
+  paths allowed; an OSC 8 bare path previews but a click refuses it. Pass 4
+  removes the split by accepting bare paths from OSC 8 too.
 
 Pass 1 choices:
 - Keep web fragments such as GitHub discussion anchors. The `#L<n>` rule

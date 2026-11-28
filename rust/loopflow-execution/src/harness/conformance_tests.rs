@@ -7,6 +7,7 @@ use loopflow_harness::claude_decode::ClaudeDecoder;
 use loopflow_harness::codex_decode::{rpc_error, CodexDecoder};
 use loopflow_harness::fact::{self, Decoded, ProviderFact, ProviderTurn};
 use loopflow_harness::opencode_decode::Turn;
+use loopflow_harness::HarnessKind;
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use loopflow_model::id::AgentSessionId;
 
@@ -420,64 +421,49 @@ fn opencode_run_preserves_output_and_tools_and_leaves_usage_to_the_transcript() 
 fn each_harness_classifies_its_own_refusals() {
     use super::HarnessKind::{Antigravity, Claude, Codex, OpenCode, Pi};
     use crate::agent::AgentFailure::{CredentialInvalidated, ModelUnavailable, UsageLimit};
-    for (harness, code, message, failure) in [
-        // `~/.lf/runs/6c/6c7c…/opencode.stderr.log`.
-        (
-            OpenCode,
-            "opencode_error",
-            "Insufficient balance. This request is pay-as-you-go, billed to OpenCode Models credits. Top up at https://opencode.ai/console/billing?credits=1.",
-            UsageLimit,
-        ),
-        // `opencode run -m opencode/no-such-model-xyz`, 2.0.32.
-        (
-            OpenCode,
-            "opencode_error",
-            "Model unavailable: opencode/no-such-model-xyz",
-            ModelUnavailable,
-        ),
-        (Pi, "pi_error", "Your refresh token was revoked", CredentialInvalidated),
-        // `agy` 1.5.13, signed out and with an unknown `--model`.
-        (
-            Antigravity,
-            "agy_error",
-            "authentication failed or timed out",
-            CredentialInvalidated,
-        ),
-        (
-            Antigravity,
-            "agy_error",
-            "Error: authentication required. Run 'agy' to log in, then retry.",
-            CredentialInvalidated,
-        ),
-        (
-            Antigravity,
-            "agy_error",
-            "invalid model selection (--model \"no-such-model-xyz\" --effort \"\"): model no-such-model-xyz is not recognized as a known model or custom model in settings",
-            ModelUnavailable,
-        ),
-        // From the binary's strings; no quota refusal has been seen live.
-        (
-            Antigravity,
-            "agy_error",
-            "You have exhausted your quota on this model.",
-            UsageLimit,
-        ),
-        (Antigravity, "agy_error", "RESOURCE_EXHAUSTED", UsageLimit),
-        (Claude, "provider_rate_limited", "rejected: seven_day", UsageLimit),
-        (Codex, "provider_model_unavailable", "", ModelUnavailable),
-    ] {
-        assert_eq!(
-            super::launcher(harness).classify_failure(code, message),
-            Some(failure),
-            "{harness:?}: {message}"
-        );
+    for harness in HarnessKind::ALL {
+        let cases: &[(&str, &str, crate::agent::AgentFailure)] = match harness {
+            Claude | Codex => &[
+                ("provider_rate_limited", "rejected: seven_day", UsageLimit),
+                ("provider_credential_invalidated", "", CredentialInvalidated),
+                ("provider_model_unavailable", "", ModelUnavailable),
+            ],
+            OpenCode => &[
+                ("opencode_error", "Insufficient balance. This request is pay-as-you-go, billed to OpenCode Models credits. Top up at https://opencode.ai/console/billing?credits=1.", UsageLimit),
+                ("opencode_error", "Model unavailable: opencode/no-such-model-xyz", ModelUnavailable),
+                ("opencode_error", "Your refresh token was revoked", CredentialInvalidated),
+            ],
+            Pi => &[
+                ("pi_error", "Your refresh token was revoked", CredentialInvalidated),
+                ("pi_error", "Usage limit reached", UsageLimit),
+                ("pi_error", "Model is not available", ModelUnavailable),
+            ],
+            // agy 1.5.13 signed out and with an unknown model. The quota
+            // wording is from its binary's strings.
+            Antigravity => &[
+                ("agy_error", "authentication failed or timed out", CredentialInvalidated),
+                ("agy_error", "Error: authentication required. Run 'agy' to log in, then retry.", CredentialInvalidated),
+                ("agy_error", "invalid model selection (--model \"no-such-model-xyz\" --effort \"\"): model no-such-model-xyz is not recognized as a known model or custom model in settings", ModelUnavailable),
+                ("agy_error", "You have exhausted your quota on this model.", UsageLimit),
+                ("agy_error", "RESOURCE_EXHAUSTED", UsageLimit),
+            ],
+        };
+        for expected in [UsageLimit, CredentialInvalidated, ModelUnavailable] {
+            assert!(
+                cases.iter().any(|(_, _, failure)| *failure == expected),
+                "{harness:?}: missing {expected:?} refusal case"
+            );
+        }
+        for &(code, message, failure) in cases {
+            let classified = super::launcher(harness).classify_failure(code, message);
+            assert_eq!(classified, Some(failure), "{harness:?}: {code}: {message}");
+        }
     }
 }
 
 /// Claude and Codex leave a transient failure to lf; the others retry their own.
 #[test]
 fn a_transient_failure_is_lfs_to_retry_only_where_the_provider_does_not() {
-    use loopflow_harness::HarnessKind;
     for harness in HarnessKind::ALL {
         let retried = super::launcher(harness)
             .classify_failure("fixture_error", "connection reset")
@@ -497,7 +483,6 @@ fn a_transient_failure_is_lfs_to_retry_only_where_the_provider_does_not() {
 fn every_harness_reads_a_synced_skill() {
     use crate::skills::{sync_skills, SkillSyncOptions};
     use loopflow_definitions::text::split_frontmatter;
-    use loopflow_harness::HarnessKind;
     use std::fs;
 
     let home = tempfile::TempDir::new().unwrap();

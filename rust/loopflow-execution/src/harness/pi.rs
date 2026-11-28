@@ -20,6 +20,7 @@ use super::Recording;
 use super::{Driver as StreamDriver, HarnessError};
 use crate::agent::AgentConfig;
 use crate::steer::NativeBoundary;
+use crate::steer::{IdleEndpoints, IdleReach, Inbox};
 use loopflow_harness::fact::{Decoded, ProviderFact, ProviderTurn};
 use loopflow_harness::pi_decode::{self, Turn};
 use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
@@ -637,6 +638,13 @@ impl super::Launcher for loopflow_harness::Pi {
         // Pi retries a transient failure itself.
         crate::agent::routing_failure(code, message)
     }
+    fn idle_reach(&self, endpoints: &IdleEndpoints) -> Option<IdleReach> {
+        endpoints
+            .socket
+            .clone()
+            .map(|path| IdleReach::Inbox(Inbox::Socket(path)))
+    }
+
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
             thread: super::ThreadNaming {
@@ -644,6 +652,7 @@ impl super::Launcher for loopflow_harness::Pi {
                 managed: super::ThreadName::Reported,
             },
             initial_prompt_on_resume: false,
+            reopen_steers: super::ReopenSteers::ServerBoundary,
             native_skills: None,
             installed_skills: super::InstalledSkills {
                 global: ".agents/skills",

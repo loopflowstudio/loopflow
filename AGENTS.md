@@ -318,6 +318,10 @@ Session history as a `store-gap` observation when the store answers again.
 Codex clients reach their private app-server directly; lf only observes beside
 them.
 
+Make each user-facing harness behavior a requirement of the harness interface.
+Test the visible outcome for every member of `HarnessKind::ALL`. The test
+must fail if a new harness omits the behavior.
+
 A harness's permission and sandbox choices are settled in this order: the
 agent is not handcuffed, then the simplest, then what the other harnesses do.
 Make the choice; don't leave it as a question.
@@ -375,14 +379,15 @@ Make the choice; don't leave it as a question.
 - Claude's stand-in endpoints (`LF_TEST_CLAUDE_*`) exist only in execution's `cfg(test)`: a real `lf` calls the provider. A detached child that must reach them is the test binary re-executed behind an `LF_BIN` script; its ctor drops `CLAUDE_CONFIG_DIR`, so pass the home in a fixture variable.
 - With `LF_HOME` unset, `lf_home_dir` finds the account's real `~/.lf` even under an isolated `HOME`, so a fixture changing `LF_HOME` holds the env lock.
 - A fixture that launches an agent for a Task or a Wave holds a `loopflow_test_support::MachineServer` for its `LF_HOME`. Without one the launch runs `lf install server`, which registers a launchd or systemd job for the temporary home.
+  Use `MachineServer::start_with_path` for provider stand-ins. A held `resume --task` finds its provider on the server's PATH.
+  `lf` restores system tool directories on startup. The missing-CLI Graph fixture uses `scripts/test_network.py` to hide installed providers from its processes.
 - To test a peer outage, disconnect the fixture's SSH before stopping its server. A reconnecting `lf server connect` starts the service again.
 - A fixture expecting turn hooks or `LF_PROVIDER_CONTEXT` launches a Task Graph
   worker or resumes a work session, with a `MachineServer` for its home.
   Direct `lf <skill>` and `lf graph <name>` launches are chats or batches, including with
   `--task` or `LF_AS`: context hooks, `LF_BARE_STEER` reads the store, no turn
   reports or required server. The [four launch names](docs/glossary.md#loopflows-words)
-  are work session, worker, chat and batch. The launch matrix covers all four
-  harnesses in each cell.
+  are work session, worker, chat and batch.
 - Claims name their person by the repository's Git `user.email`; fixtures set a repository-local identity (`TestRepo` does).
 - Fixtures that change process environment share `loopflow_test_support::env_lock`.
 - macOS SMAppService fixtures register temporary bundles with LaunchServices and launch bundle-owned update code through it. An external test runner writing a registered app can fail App Management; it does not model an app update. Cleanup unregisters the unique service job and LaunchServices entry.

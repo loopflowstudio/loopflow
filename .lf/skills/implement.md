@@ -4,6 +4,10 @@ docs: scripts/testing.md
 ---
 ## In this repository
 
+When an approach fails, keep the Task's original demo as the acceptance check.
+Try the next viable route against that demo. If none works, report what
+blocks it and keep the outcome in this Task unless someone changes its scope.
+
 **App writes go through `PendingChanges.make`.** Flip the control in the click
 and revert on refusal; use `PendingChanges.request` only for writes with no
 visible state, never Task actions or `"… requested"` waits.

@@ -12,14 +12,28 @@ impl Harness for Antigravity {
     fn kind(&self) -> HarnessKind {
         HarnessKind::Antigravity
     }
-    fn sign_in_advice(&self) -> &'static str {
-        "run `agy` and sign in"
-    }
     fn recognizes_driver(&self, command: &str) -> bool {
         (command_program(command, "agy") || command_program(command, "antigravity"))
             && command
                 .split_whitespace()
                 .any(|arg| arg == "--output-format")
+    }
+    fn caller_session_env(&self) -> &'static [&'static str] {
+        &[
+            "ANTIGRAVITY_AGENT",
+            "ANTIGRAVITY_AGENTAPI_EXE",
+            "ANTIGRAVITY_APP_DATA_DIR",
+            "ANTIGRAVITY_CONVERSATION_ID",
+            "ANTIGRAVITY_CSRF_TOKEN",
+            "ANTIGRAVITY_LS_ADDRESS",
+            "ANTIGRAVITY_LS_VERSION",
+            "ANTIGRAVITY_PROJECT_ID",
+            "ANTIGRAVITY_SOURCE_METADATA",
+            "ANTIGRAVITY_TRAJECTORY_ID",
+        ]
+    }
+    fn sign_in_advice(&self) -> &'static str {
+        "run `agy` and sign in"
     }
     fn transcript_home(&self) -> PathBuf {
         dirs::home_dir()

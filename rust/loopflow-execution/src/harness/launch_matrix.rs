@@ -21,7 +21,8 @@ const CALLER: &str = "caller";
 fn providers(home: &Path) {
     let bin = home.join("bin");
     std::fs::create_dir(&bin).unwrap();
-    let caller_session = serde_json::to_string(crate::agent::CALLER_SESSION_ENV).unwrap();
+    let caller_session =
+        serde_json::to_string(&crate::agent::caller_session_env().collect::<Vec<_>>()).unwrap();
     let record = format!(
         r#"
 import json, os, sys, uuid
@@ -111,9 +112,7 @@ fn every_harness_runs_all_four_launch_kinds() {
     // From here the test runs as if inside a Claude Code or Codex shell: their
     // markers must not reach a provider, while a person's own setting does.
     // lf's markers stay unset: this process is lf and reads them itself.
-    let provider_markers: Vec<&str> = crate::agent::CALLER_SESSION_ENV
-        .iter()
-        .copied()
+    let provider_markers: Vec<&str> = crate::agent::caller_session_env()
         .filter(|name| !name.starts_with("LF_"))
         .collect();
     let _caller = crate::test_ambient::EnvGuard::clear(&provider_markers);
@@ -242,31 +241,63 @@ fn every_harness_runs_all_four_launch_kinds() {
                     );
                     // `yolo: false` keeps the vendor's prompts only when someone
                     // is there to answer them.
-                    let skips = yolo || mode == Mode::Headless;
-                    anyhow::ensure!(
-                        flag("--dangerously-skip-permissions")
-                            == (skips
-                                && matches!(harness, HarnessKind::Claude | HarnessKind::Antigravity)),
-                        "{row}: yolo setting"
-                    );
-                    if harness == HarnessKind::Codex && kind == LaunchKind::Chat {
+                    if !matches!(harness, HarnessKind::Claude | HarnessKind::Antigravity) {
                         anyhow::ensure!(
-                            flag("danger-full-access") == skips && flag("never") == skips,
-                            "{row}: Codex sandbox and approvals"
+                            !flag("--dangerously-skip-permissions"),
+                            "{row}: unexpected permission flag"
+                        );
+                    }
+                    let skips = match harness {
+                        HarnessKind::Claude | HarnessKind::Antigravity => {
+                            Some(flag("--dangerously-skip-permissions"))
+                        }
+                        HarnessKind::Codex if kind == LaunchKind::Chat => {
+                            anyhow::ensure!(
+                                flag("danger-full-access") == flag("never"),
+                                "{row}: Codex sandbox and approvals"
+                            );
+                            Some(flag("never"))
+                        }
+                        HarnessKind::Codex => {
+                            let config_path = home.join("native-config.json");
+                            let params: serde_json::Value =
+                                serde_json::from_slice(&std::fs::read(&config_path)?)?;
+                            let _ = std::fs::remove_file(&config_path);
+                            let full_access = params["sandbox"] == "danger-full-access";
+                            let never_ask = params["approvalPolicy"] == "never";
+                            anyhow::ensure!(
+                                full_access == never_ask,
+                                "{row}: Codex sandbox and approvals"
+                            );
+                            Some(never_ask)
+                        }
+                        HarnessKind::OpenCode => {
+                            let settings = commands
+                                .iter()
+                                .find_map(|c| c["opencode"].as_str())
+                                .ok_or_else(|| anyhow::anyhow!("{row}: no OpenCode settings"))?;
+                            let settings: serde_json::Value = serde_json::from_str(settings)?;
+                            Some(
+                                settings["permissions"]
+                                    == serde_json::json!([{"action":"*", "resource":"*", "effect":"allow"}]),
+                            )
+                        }
+                        // Pi has no permission mode; a headless launch drives its RPC client.
+                        HarnessKind::Pi => {
+                            anyhow::ensure!(
+                                flag("rpc") == (mode == Mode::Headless),
+                                "{row}: Pi RPC ownership"
+                            );
+                            None
+                        }
+                    };
+                    if let Some(skips) = skips {
+                        anyhow::ensure!(
+                            skips == (yolo || mode == Mode::Headless),
+                            "{row}: permission mode"
                         );
                     }
                     if harness == HarnessKind::OpenCode {
-                        let settings = commands
-                            .iter()
-                            .find_map(|command| command["opencode"].as_str())
-                            .ok_or_else(|| anyhow::anyhow!("{row}: no server settings"))?;
-                        let settings: serde_json::Value = serde_json::from_str(settings)?;
-                        anyhow::ensure!(
-                            (settings["permissions"]
-                                == serde_json::json!([{"action":"*", "resource":"*", "effect":"allow"}]))
-                                == skips,
-                            "{row}: OpenCode yolo setting"
-                        );
                         // A conversation is OpenCode itself; a headless turn is one run.
                         anyhow::ensure!(
                             commands.len() == 1 && flag("--standalone") && flag("--session"),

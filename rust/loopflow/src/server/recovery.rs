@@ -32,11 +32,14 @@ const ENDING: Duration = Duration::from_secs(1);
 
 /// Start the Machine's single store-watching thread for recovery and steer/Task
 /// update wakes. It runs as long as the server.
-pub(super) fn start(terminals: Option<Arc<Registry>>) {
+pub(super) fn start(terminals: Option<Arc<Registry>>) -> super::wake::Waker {
+    let path = loopflow_execution::store::default_db_path();
+    let changes = loopflow_storage::changes::StoreChanges::watch(&path);
+    let (wake, waker) = super::wake::Watcher::new(terminals.clone(), changes.waker());
     let spawned = std::thread::Builder::new()
         .name("recovery-wake".into())
         .spawn(move || {
-            loopflow_execution::journal::request::isolate(|| watch(terminals));
+            loopflow_execution::journal::request::isolate(|| watch(path, changes, terminals, wake));
         });
     if let Err(error) = spawned {
         tracing::warn!(
@@ -44,13 +47,16 @@ pub(super) fn start(terminals: Option<Arc<Registry>>) {
             "Task conversations that die stay down until resumed and Task updates wait for the next turn"
         );
     }
+    waker
 }
 
-fn watch(terminals: Option<Arc<Registry>>) {
-    let path = loopflow_execution::store::default_db_path();
-    let mut changes = loopflow_storage::changes::StoreChanges::watch(&path);
+fn watch(
+    path: std::path::PathBuf,
+    mut changes: loopflow_storage::changes::StoreChanges,
+    terminals: Option<Arc<Registry>>,
+    mut wake: super::wake::Watcher,
+) {
     let mut recovery = Watcher::default();
-    let mut wake = super::wake::Watcher::new(terminals.clone());
     loop {
         if path.exists() {
             match loopflow_execution::store::open_sqlite(&path) {
@@ -65,13 +71,10 @@ fn watch(terminals: Option<Arc<Registry>>) {
                 }
             }
         }
-        let wait = if terminals.is_some() {
-            recovery
-                .wait(SystemTime::now())
-                .min(super::wake::UNSIGNALLED)
-        } else {
-            super::wake::UNSIGNALLED
-        };
+        let mut wait = wake.wait_timeout();
+        if terminals.is_some() {
+            wait = wait.min(recovery.wait(SystemTime::now()));
+        }
         changes.wait(wait);
     }
 }

@@ -352,7 +352,7 @@ pub fn emit_block(
     };
     let news = match (&adapter, input["session_id"].as_str()) {
         (Some(adapter), Some(thread)) => {
-            read_news(&delivery, adapter, thread, &input, !answered)
+            read_news(&delivery, adapter, thread, &input, !answered, prompt)
         }
         _ => Ok(News::default()),
     }
@@ -407,6 +407,7 @@ fn read_news(
     thread: &str,
     input: &serde_json::Value,
     unrecorded: bool,
+    prompt: bool,
 ) -> Result<News> {
     use loopflow_execution::steer::NativeBoundary;
     let path = loopflow_execution::store::default_db_path();
@@ -433,17 +434,16 @@ fn read_news(
         tracing::warn!(session = adapter.session, %error, "Task updates unwritten at this boundary");
     }
     // A start the server recorded on a conversation it can wake leaves the
-    // waiting steers to that wake, which runs them as a turn. A chat or a
-    // worker reads them here; the next boundary claims what the wake could
-    // not deliver.
-    if !unrecorded && matches!(boundary, NativeBoundary::Select { .. }) {
-        let wakes = store
-            .idle_conversation_candidates(Some(&adapter.session))?
-            .iter()
-            .any(|idle| idle.conversation.adapter.agent_process_id == adapter.agent_process_id);
-        if wakes {
-            return Ok(News::default());
-        }
+    // waiting steers to that wake, which runs them as a turn. A start that is
+    // already the opening prompt (`prompt == true`, e.g. Antigravity's
+    // PreInvocation), a chat, or a worker reads them here; the next boundary
+    // claims what the wake could not deliver.
+    if !unrecorded
+        && !prompt
+        && matches!(boundary, NativeBoundary::Select { .. })
+        && loopflow_execution::steer::is_idle_reachable(&store, adapter)?
+    {
+        return Ok(News::default());
     }
     let steers =
         loopflow_execution::steer::claim(&store, &delivery.repo, adapter, thread, boundary)?;
@@ -771,6 +771,15 @@ mod tests {
             "session",
             &loopflow_execution::session_record::new_artifact_key(),
         );
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET provider='opencode' WHERE id='session'",
+                [],
+            )
+            .unwrap();
         let process = store.test_lf_process();
         let claim =
             attachment::claim_session_attachment(&store, "session", None, &process).unwrap();
@@ -807,9 +816,14 @@ mod tests {
             references: Vec::new(),
         };
         let start = serde_json::json!({"session_id":"native","hook_event_name":"SessionStart","source":"resume"});
-        let recorded = read_news(&delivery, &adapter, "native", &start, false).unwrap();
+        let recorded = read_news(&delivery, &adapter, "native", &start, false, false).unwrap();
         assert!(recorded.steers.is_none());
-        let chat = read_news(&delivery, &adapter, "native", &start, true).unwrap();
-        assert!(chat.steers.unwrap().1.text.contains("WAITING"));
+        let opening_prompt = read_news(&delivery, &adapter, "native", &start, false, true).unwrap();
+        assert!(opening_prompt.steers.unwrap().1.text.contains("WAITING"));
+        store
+            .save_session_steer("session", "Fixture author", "FOR_CHAT")
+            .unwrap();
+        let chat = read_news(&delivery, &adapter, "native", &start, true, false).unwrap();
+        assert!(chat.steers.unwrap().1.text.contains("FOR_CHAT"));
     }
 }

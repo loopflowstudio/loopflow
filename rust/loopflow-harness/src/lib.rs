@@ -106,18 +106,16 @@ fn command_program(command: &str, program: &str) -> bool {
 pub trait Harness: Sync + std::fmt::Debug {
     fn kind(&self) -> HarnessKind;
     /// Whether `command` is this client serving a headless conversation.
-    fn recognizes_driver(&self, command: &str) -> bool {
-        command_program(command, self.kind().as_str())
-    }
+    fn recognizes_driver(&self, command: &str) -> bool;
+    /// Markers a new conversation must clear from a parent provider's shell.
+    fn caller_session_env(&self) -> &'static [&'static str];
     fn title_args(&self, _name: &str) -> Vec<String> {
         Vec::new()
     }
     fn model_rungs(&self) -> &'static [&'static str] {
         &[]
     }
-    fn sign_in_advice(&self) -> &'static str {
-        "sign in with its own client"
-    }
+    fn sign_in_advice(&self) -> &'static str;
     fn provider_env(&self) -> &'static [&'static str] {
         &[]
     }

@@ -31,6 +31,17 @@ impl Harness for OpenCode {
     fn recognizes_driver(&self, command: &str) -> bool {
         command_program(command, "opencode") && command.split_whitespace().any(|arg| arg == "run")
     }
+    fn caller_session_env(&self) -> &'static [&'static str] {
+        &[
+            "OPENCODE",
+            "OPENCODE_SESSION_ID",
+            "OPENCODE_TERMINAL",
+            "OPENCODE_CONFIG_CONTENT",
+        ]
+    }
+    fn sign_in_advice(&self) -> &'static str {
+        "run `opencode auth login`"
+    }
     fn provider_env(&self) -> &'static [&'static str] {
         &["OPENCODE_API_KEY"]
     }

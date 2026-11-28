@@ -279,6 +279,9 @@ if [ -f "$LF_HOME/tool_turn.py" ]; then
     hooks=$(printf '%s' "$thread_start" | python3 -c 'import json, sys; print(json.dumps(json.load(sys.stdin)["params"]["config"]["hooks"]))')
     python3 "$LF_HOME/tool_turn.py" "$thread" "$hooks" || exit 1
 fi
+if [ -f "$LF_HOME/ask-question" ]; then
+    echo '{"id":40,"method":"item/tool/requestUserInput","params":{"threadId":"'"$thread"'","turnId":"'"$turn"'","itemId":"question","questions":[{"id":"fixture","header":"Fixture","question":"Use the fixture?","options":null,"isOther":false,"isSecret":false}]}}'
+fi
 # A fixture that left `hold-turn` holds the turn open until it is removed.
 if [ -f "$LF_HOME/hold-turn" ]; then
     printf '%s' "$thread" > "$LF_HOME/holding"
